@@ -14,6 +14,7 @@ const H = vi.hoisted(() => ({
   brandSection: vi.fn(),
   savedPayload: null as Record<string, unknown> | null,
   optionLoadFailed: false,
+  created: null as { parent: Record<string, unknown>; size: Record<string, unknown> } | null,
 }));
 
 function baseProduct(overrides: Partial<Product> = {}): Product {
@@ -68,7 +69,8 @@ function baseProduct(overrides: Partial<Product> = {}): Product {
 
 // The Vendors section has its own tests; these page tests do not mock its reads.
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
-vi.mock('../lib/db', () => {
+vi.mock('../lib/db', async () => {
+  const { hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   function chainable(resolveWith: unknown) {
     const builder: Record<string, unknown> = {};
     let resolved = resolveWith;
@@ -116,8 +118,23 @@ vi.mock('../lib/db', () => {
       return data;
     },
     checkMutationResult: vi.fn(),
+    hasRpcCode,
+    RpcErrorCodes,
+    sanitizeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   };
 });
+
+// PAR-1: a new product is created through the parent RPC; these products have no parent.
+vi.mock('../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productParents')>()),
+  getParentOfProduct: async () => null,
+  addProductSize: vi.fn(),
+  createProductWithParent: async (parent: Record<string, unknown>, size: Record<string, unknown>) => {
+    H.created = { parent, size };
+    H.product = baseProduct({ ...size, category: parent.category, use_timings: parent.use_timings, id: 'product-1' } as Partial<Product>);
+    return { parent_id: 'parent-1', parent_version: 1, product_id: 'product-1', event_id: 1 };
+  },
+}));
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: H.toast }),
@@ -149,6 +166,8 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({
     getKey: () => 'epa-draft-key',
+    getKeyFor: () => 'create-key',
+    resetKeyFor: vi.fn(),
     resetKey: H.resetDraftKey,
   }),
 }));
@@ -193,12 +212,16 @@ vi.mock('../components/products/ProductBrandsSection', () => ({
 
 import ProductDetail from './ProductDetail';
 
+/** The category stays read-only until the page knows the product has no parent. */
+const parentChecked = () => waitFor(() => expect(screen.getByLabelText('Category')).toBeEnabled());
+
 describe('ProductDetail brands section', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     H.routeId = 'product-1';
     H.product = baseProduct();
     H.savedPayload = null;
+    H.created = null;
     H.optionLoadFailed = false;
   });
 
@@ -220,6 +243,7 @@ describe('ProductDetail brands section', () => {
   it('saves two timing codes and shows both after reload', async () => {
     const first = render(<ProductDetail />);
     const group = await screen.findByRole('group', { name: 'Use Timing' });
+    await parentChecked();
     expect(within(group).queryByRole('checkbox', { name: 'Foliar' })).toBeNull();
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Post-Emerge Soybeans' }));
@@ -247,6 +271,7 @@ describe('ProductDetail brands section', () => {
     });
     render(<ProductDetail />);
     const group = await screen.findByRole('group', { name: 'Use Timing' });
+    await parentChecked();
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
     fireEvent.click(screen.getAllByRole('button', { name: /^Save/ })[0]);
     await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn']));
@@ -289,25 +314,29 @@ describe('ProductDetail brands section', () => {
     H.routeId = 'new';
     render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
     fireEvent.click(screen.getAllByRole('button', { name: /^(Save|Create)/ })[0]);
-    await waitFor(() => expect(H.savedPayload?.vendor).toBe('New Vendor'));
+    await waitFor(() => expect(H.created?.size.vendor).toBe('New Vendor'));
+    expect(H.created?.parent.category).toBe('Herbicide');
   });
 
   it('creates a product with two timings and reloads both', async () => {
     H.routeId = 'new';
     const created = render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
     const group = await screen.findByRole('group', { name: 'Use Timing' });
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Pre-Emerge Corn' }));
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Post-Emerge Soybeans' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create Product' }));
-    await waitFor(() => expect(H.savedPayload?.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
-    expect(H.savedPayload).not.toHaveProperty('use_timing');
+    await waitFor(() => expect(H.created?.parent.use_timings).toEqual(['pre_emerge_corn', 'post_emerge_soybeans']));
+    expect(H.created?.size).not.toHaveProperty('use_timings');
+    expect(H.created?.parent).not.toHaveProperty('use_timing');
     created.unmount();
     H.routeId = 'product-1';
     render(<ProductDetail />);
@@ -329,6 +358,7 @@ describe('ProductDetail brands section', () => {
     H.product = baseProduct({ use_timings: ['pre_emerge_corn'] });
     render(<ProductDetail />);
     const category = await screen.findByRole('combobox', { name: 'Category' });
+    await parentChecked();
     fireEvent.change(category, { target: { value: 'Insecticide' } });
     expect(screen.getByText('This product has use timings. Changing the category clears them.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

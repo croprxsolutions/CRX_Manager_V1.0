@@ -10,6 +10,17 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
+
+**Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.
+**Why:** in the DM-1 plan, Sol found new HIGHs from the merge alias three rounds running (a decision race, an undo that broke its own rule, a CAS moved by the merge). Duplicates will be rare: a typed CAS number already reuses the existing entry (D-AA-1). Removing the link deletes the whole class of bugs, at the cost of a few more clicks per duplicate.
+**What this forbids/implies:** this refines D-AA (2026-08-27). D-AA-1 now means "a CAS match reuses the entry", and a CAS that already belongs to another entry is refused rather than joined. D-AA-2's side-by-side approval is the possible-duplicates list, which Mason resolves by correction. Plan: `docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md`.
+
+## 2026-11-06 — A Deliveries export may miss a delivery cancelled or reactivated while it runs
+
+**Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").
+**Why:** each page of 500 is its own database call, so no snapshot spans the read; three review rounds in a row found a new HIGH in the same multi-page mechanism (PR #1549). The alternatives were a re-check that asks the user to export again, or lifting the 500-row cap Sol required.
+**What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; changing it (one snapshot across pages, a lock, or a re-check that refuses or retries the export) needs a new decision from Mason.
 ## 2026-11-06 — Cross-checking: whole-branch final Luna round, tests for screen bugs, no Terra; gate-file protection parked
 
 **Decision (Mason, 2026-11-06: "i agree with the plan build it", then "Ship rules, park guards"):** (1) the Luna round that clears a change reads the whole branch at the head to be pushed, not just the newest fix commit; (2) a confirmed BLOCKER/HIGH in a screen that saves, uploads or imports is fixed only with a failing-then-passing test or observed behavior, and disputes are settled by a test or Sol, not Mason; (3) Terra is not added as a second reviewer; (4) Sol stays as it is; (5) putting the gate files themselves back under Sol is parked.

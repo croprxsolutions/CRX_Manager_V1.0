@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { logActivity } from '../lib/activityLogger';
 import { assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
+import { sanitizeError } from '../lib/errorSanitizer';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import {
   buildFindingsForRegistration,
@@ -37,6 +38,7 @@ import {
   EPA_REQUEST_INTERVAL_MS,
   waitForEpaRequestSlot,
 } from '../lib/epaRequestThrottle';
+import { getProductParents } from '../lib/productParents';
 import { Sentry } from '../lib/sentry';
 import type { EpaLookupResult, LabelCoverageReport } from '../types';
 
@@ -375,6 +377,8 @@ export default function LabelDataQuality() {
   const [batchSignalFailures, setBatchSignalFailures] = useState<string[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [editors, setEditors] = useState<Record<string, EditorState>>({});
+  // Grouped size id -> parent name (PAR-1): its EPA number is set on the parent, not here.
+  const [parentNames, setParentNames] = useState<ReadonlyMap<string, string>>(new Map());
   const cancelRequestedRef = useRef(false);
   const runSequenceRef = useRef(0);
 
@@ -456,6 +460,22 @@ export default function LabelDataQuality() {
       setCoverageLoading(false);
     }
   }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // A failed load keeps the editor open; the database still refuses a grouped size's EPA number.
+    getProductParents(null)
+      .then((parents) => {
+        if (cancelled) return;
+        setParentNames(new Map(parents.flatMap((parent) => parent.sizes.map((size) => [size.product_id, parent.name] as const))));
+      })
+      .catch((error: unknown) => {
+        Sentry.captureException(error instanceof Error ? error : new Error(errorMessage(error)), {
+          tags: { page: 'label_data_quality', action: 'load_product_parents' },
+        });
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     void loadProducts();
@@ -792,6 +812,11 @@ export default function LabelDataQuality() {
       && typeof verifiedResult.productname === 'string'
       && verifiedResult.eparegno?.trim() === registrationNumber;
     if (!canSave || editor.saving || running) return;
+    const parentName = parentNames.get(row.product.id);
+    if (parentName) {
+      updateEditor(row.id, { error: `Set on parent ${parentName}. Correcting a grouped product's EPA number isn't available yet.` });
+      return;
+    }
     if (!profile?.id) {
       toast('error', 'Your user profile is not available. Refresh the page before saving.');
       return;
@@ -853,11 +878,11 @@ export default function LabelDataQuality() {
         tags: { page: 'label_data_quality', action: 'save_registration' },
         extra: { productId: row.id },
       });
-      updateEditor(row.id, { error: `Save failed: ${errorMessage(error)}` });
+      updateEditor(row.id, { error: `Save failed: ${sanitizeError(error)}` });
     } finally {
       updateEditor(row.id, { saving: false });
     }
-  }, [editors, lastChecked, profile?.id, running, toast, updateEditor]);
+  }, [editors, lastChecked, parentNames, profile?.id, running, toast, updateEditor]);
 
   const filteredRows = useMemo(() => (
     filter === 'ALL' ? allRows : allRows.filter((row) => findingTypes(row).includes(filter))
@@ -916,6 +941,10 @@ export default function LabelDataQuality() {
       render: (row) => {
         if (!isFixable(row)) {
           return <span className="text-xs text-secondary">No registration correction needed</span>;
+        }
+        const parentName = parentNames.get(row.product.id);
+        if (parentName) {
+          return <span className="text-xs text-secondary">Set on parent {parentName}. Correcting a grouped product's EPA number isn't available yet.</span>;
         }
         const editor = editors[row.id] ?? EMPTY_EDITOR;
         const normalizedInput = editor.input.trim();

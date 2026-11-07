@@ -60,11 +60,12 @@ BEGIN
 
   -- Three invented products, two sizes each, one EPA number each; no price, rate or brand.
   FOR v_i IN 1..3 LOOP
-    INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active)
+    INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active,
+                                 container_size, container_unit)
     VALUES (v_ids[2 * v_i - 1], '[SMOKE] Partwo ' || v_word[v_i] || ' ' || v_tag || ' 2.5 gal', 'SMOKE-P2-' || v_i || 'a-' || v_tag,
-            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true),
+            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true, 2.5, 'Gal'),
            (v_ids[2 * v_i], '[SMOKE] Partwo ' || v_word[v_i] || ' ' || v_tag || ' 1 gal', 'SMOKE-P2-' || v_i || 'b-' || v_tag,
-            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true);
+            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true, 1, 'Gal');
   END LOOP;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);

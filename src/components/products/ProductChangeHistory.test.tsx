@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), captureException: vi.fn() }));
-vi.mock('../../lib/db', () => ({ supabase: { from: mocks.from } }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), untypedFrom: vi.fn(), captureException: vi.fn() }));
+vi.mock('../../lib/db', () => ({ supabase: { from: mocks.from }, supabaseUntyped: { from: mocks.untypedFrom } }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
 
 import ProductChangeHistory from './ProductChangeHistory';
@@ -26,7 +26,7 @@ function returnRows(data: unknown, error: { message: string; code: string } | nu
 }
 
 describe('ProductChangeHistory', () => {
-  beforeEach(() => { mocks.from.mockReset(); mocks.captureException.mockReset(); });
+  beforeEach(() => { mocks.from.mockReset(); mocks.untypedFrom.mockReset(); mocks.captureException.mockReset(); });
 
   it('shows the field label, before and after values, actor and date', async () => {
     const query = returnRows([changed]);
@@ -35,7 +35,7 @@ describe('ProductChangeHistory', () => {
     expect(within(item).getByText('Test Admin')).toBeInTheDocument();
     expect(within(item).getByText('Signal word').parentElement).toHaveTextContent('Signal word: Caution → Warning');
     expect(within(item).getByText(/11\/2\/2026/)).toBeInTheDocument();
-    expect(query.select).toHaveBeenCalledWith('id, product_id, change_type, field_name, old_value, new_value, changed_by, changed_by_name, changed_at');
+    expect(query.select).toHaveBeenCalledWith('id, product_id, change_type, parent_event_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at');
     expect(query.limit).toHaveBeenCalledWith(50);
     expect(query.order).toHaveBeenCalledWith('changed_at', { ascending: false });
     expect(query.order).toHaveBeenCalledWith('id', { ascending: false });
@@ -96,5 +96,41 @@ describe('ProductChangeHistory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.getByRole('listitem')).toHaveTextContent('Signal word: Caution → Warning'));
     expect(mocks.from).toHaveBeenCalledTimes(2);
+  });
+
+  function returnParentEvents(data: unknown, error: { message: string; code: string } | null = null) {
+    const query = { select: vi.fn(), in: vi.fn() };
+    query.select.mockReturnValue(query);
+    query.in.mockResolvedValue({ data, error });
+    mocks.untypedFrom.mockReturnValue(query);
+    return query;
+  }
+  const parentCopy = { ...changed, id: 3, change_type: 'parent_copy', parent_event_id: 41, field_name: 'rate_per_acre', old_value: '13', new_value: '14' };
+
+  it('names the parent on a parent copy, with one read of the parent events', async () => {
+    returnRows([parentCopy, changed]);
+    const events = returnParentEvents([{ id: 41, product_parents: { name: 'Atrazine 4L' } }]);
+    render(<ProductChangeHistory productId="p1" />);
+    const items = await screen.findAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('Changed on parent Atrazine 4L: Rate per acre: 13 → 14');
+    expect(items[1]).toHaveTextContent('Signal word: Caution → Warning');
+    expect(items[1]).not.toHaveTextContent('Changed on parent');
+    expect(mocks.untypedFrom).toHaveBeenCalledWith('product_parent_events');
+    expect(events.in).toHaveBeenCalledWith('id', [41]);
+  });
+
+  it('shows a parent copy without the name when the parent read fails', async () => {
+    returnRows([parentCopy]);
+    returnParentEvents(null, { message: 'denied', code: '42501' });
+    render(<ProductChangeHistory productId="p1" />);
+    expect(await screen.findByRole('listitem')).toHaveTextContent('Changed on parent: Rate per acre: 13 → 14');
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+  });
+
+  it('does not read parent events when no row is a parent copy', async () => {
+    returnRows([changed]);
+    render(<ProductChangeHistory productId="p1" />);
+    await screen.findByRole('listitem');
+    expect(mocks.untypedFrom).not.toHaveBeenCalled();
   });
 });

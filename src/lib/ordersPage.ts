@@ -1,9 +1,10 @@
 import { assertRpcResult, supabase } from './db';
 import { fetchAllRows, PAGE_RETURNED_NO_LIST } from './pagedRead';
 import type { Order } from '../types';
+import type { Json } from '../types/supabase';
 import type { SortDir } from './tableSearchSort';
 
-/** One Orders list row as get_orders_page returns it (migration 20261116120000). */
+/** One Orders list row as get_orders_keyset_page returns it (migrations 20261116120000, 20261125100000). */
 export interface OrderListRow extends Order {
   fulfillment_pct: number;
   invoiced_pct: number;
@@ -51,6 +52,13 @@ export interface OrdersPage {
   total_count: number;
   /** The matching orders' totals, each rounded to whole cents, summed. */
   total_price_cents: number;
+  /** The bookmark after this page's last row, to read the next page from; null on the last page. */
+  next_cursor: Json | null;
+}
+
+/** The bookmark no longer fits the query (the sort changed) or is malformed: read again from page one. */
+export function isBookmarkRefused(message: string | undefined): boolean {
+  return /ORDERS_PAGE_(STALE|BAD)_CURSOR/.test(message ?? '');
 }
 
 type PageRead = { data: OrdersPage | null; error: { message: string } | null };
@@ -59,10 +67,13 @@ type PageRead = { data: OrdersPage | null; error: { message: string } | null };
  * One page of the Orders list. The database applies the search, filters and sort and counts every match
  * in the same statement. Anything but a whole answer is an error: a screen must never show a missing
  * list as "no orders" or a missing total as $0.
+ *
+ * With `after` (the previous page's next_cursor) the page starts right after that row, so orders that
+ * left the list in between never push one past the screen (offset must then be 0).
  */
-export async function fetchOrdersPage(query: OrdersQuery, limit: number, offset: number): Promise<PageRead> {
+export async function fetchOrdersPage(query: OrdersQuery, limit: number, offset: number, after: Json | null = null): Promise<PageRead> {
   // "No filter" is sent as an omitted argument, which the function reads as NULL (never '' or false).
-  const { data, error } = await supabase.rpc('get_orders_page', {
+  const { data, error } = await supabase.rpc('get_orders_keyset_page', {
     p_from: query.p_from,
     p_to: query.p_to,
     p_search: query.p_search ?? undefined,
@@ -74,15 +85,17 @@ export async function fetchOrdersPage(query: OrdersQuery, limit: number, offset:
     p_sort_dir: query.p_sort_dir,
     p_limit: limit,
     p_offset: offset,
+    p_after: after ?? undefined,
   });
   if (error) return { data: null, error };
   let page: OrdersPage;
   try {
-    page = assertRpcResult<OrdersPage>(data, 'get_orders_page');
+    page = assertRpcResult<OrdersPage>(data, 'get_orders_keyset_page');
   } catch (err) {
     return { data: null, error: { message: err instanceof Error ? err.message : PAGE_RETURNED_NO_LIST } };
   }
-  if (!Array.isArray(page.rows) || typeof page.total_count !== 'number' || typeof page.total_price_cents !== 'number') {
+  if (!Array.isArray(page.rows) || typeof page.total_count !== 'number' || typeof page.total_price_cents !== 'number'
+    || (page.next_cursor !== null && (typeof page.next_cursor !== 'object' || Array.isArray(page.next_cursor)))) {
     return { data: null, error: { message: PAGE_RETURNED_NO_LIST } };
   }
   return { data: page, error: null };

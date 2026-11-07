@@ -18,7 +18,9 @@
  *     for every sort key both ways, with nulls in the sort column, for a rep, and in pages of 37;
  *   - an order deleted (or edited out of the filter) between two pages, including the bookmark row itself,
  *     makes offset paging skip a row and keyset paging skip none; stale and malformed bookmarks are refused;
- *   - the live smoke chains pass; applying the candidate a second time is refused.
+ *   - the live smoke chains pass; applying the candidate a second time is refused;
+ *   - with 60,000 more orders (rolled back) a rep's first page, a deep page, an export page, a sort, a search, bookmark pages
+ *     and an admin's first page each stay under 8 s and under 3x a rep's plain read of the same rows.
  *
  * Run: node scripts/smoke/prove-orders-list-page-real-schema.mjs   (needs Docker; never touches live)
  * Reuse a built database: UNDO_PATHS_CONTAINER=<name> ORDERS_PAGE_PROOF_REUSE=1 (left running).
@@ -92,7 +94,7 @@ if (process.argv[2] === '--print-seed') {
   process.exit(0);
 }
 
-const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT, NAME, docker } = await import('./undo-paths/harness.mjs');
+const { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUser, signIn, USERS, ROOT, NAME, docker } = await import('./undo-paths/harness.mjs');
 const { applyTableSearchSort } = await import(pathToFileURL(path.join(ROOT, 'src', 'lib', 'tableSearchSort.ts')).href);
 
 const FIRST = '20261116120000_orders_list_page.sql';
@@ -408,6 +410,65 @@ try {
   // 12. Cost-exposure sweep keys for both functions (SECURITY INVOKER: expected none).
   const costSql = readFileSync(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'cost-exposure-review.sql'), 'utf8').replace(/;\s*$/, '');
   console.log('[orders-page] cost-exposure keys:', scalar(`SELECT string_agg(violation_key, ' ; ') FROM (${costSql}) s WHERE violation_key LIKE 'get_orders_page(%' OR violation_key LIKE 'get_orders_keyset_page(%';`) || '<none>');
+
+  // 13. Speed at 60,000 more orders (the Deliveries lesson, 2026-11-06: a rep's first page took ~9 s at 60,000 rows,
+  // over the 8 s statement timeout for `authenticated`, and nobody had timed it before review). Seeded in one
+  // rolled-back transaction. Each read is also held under 3x a rep's plain read of the same orders, lines, invoices
+  // and deliveries (the same row level security cost), so the check means the same on a slow or a fast PC.
+  const ms = (label, stmt) => `f0 := clock_timestamp(); ${asUser(stmt)} t := concat_ws(',', t, '${label}=' || round(extract(epoch FROM clock_timestamp() - f0::timestamptz) * 1000));`;
+  const rpc = (o = {}) => `r := public.get_orders_page(p_from => '${FROM}', p_to => '${TO}'${Object.entries(o).map(([k, v]) => `, p_${k} => ${q(v)}`).join('')});`;
+  const keyset = (o, after) => `r := public.get_orders_keyset_page(p_from => '${FROM}', p_to => '${TO}'${Object.entries(o).map(([k, v]) => `, p_${k} => ${q(v)}`).join('')}, p_after => ${after});`;
+  const plain = 'n := (SELECT count(*) FROM public.orders) + (SELECT count(*) FROM public.order_items) + (SELECT count(*) FROM public.invoices) + (SELECT count(*) FROM public.deliveries);';
+  const timed = attempt(USERS.rep, `
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.orders (id, order_number, customer_id, status, total_price, order_date, is_planned, pricing_status, needs_split_billing)
+    SELECT md5('g4v-order-' || g)::uuid, 'G4V-' || lpad(g::text, 6, '0'), md5('g4o-cust-' || (1 + g % 60))::uuid,
+           (ARRAY['confirmed','partially_fulfilled','fulfilled','cancelled','voided'])[1 + g % 5],
+           round(((g * 7919) % 250000) / 100.0 + 0.01, 2), date '${FROM}' + (g % 365), g % 7 = 0,
+           CASE WHEN g % 6 = 0 THEN 'needs_pricing' ELSE 'priced' END, g % 11 = 0
+      FROM generate_series(1, 60000) g;
+    INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, total_units_needed, quantity_delivered, total_price, sort_order)
+    SELECT md5('g4v-order-' || g)::uuid, md5('g4o-prod-' || (1 + (g + k) % 40))::uuid, '[G4O] Product ' || (1 + (g + k) % 40),
+           round(((g * k * 31) % 5000) / 100.0 + 1, 2), (g % 50) + k, (g % 3) * k, 0, k
+      FROM generate_series(1, 60000) g CROSS JOIN generate_series(1, 4) k WHERE k <= 1 + g % 4;
+    INSERT INTO public.invoices (invoice_number, order_id, customer_id, invoice_type, status, total_amount_cents, salesman_id, created_by)
+    SELECT 'G4V-INV-' || g, md5('g4v-order-' || g)::uuid, md5('g4o-cust-' || (1 + g % 60))::uuid, 'chemical_sale', 'unposted',
+           ((g * 7919) % 250000) / 2, CASE WHEN g % 4 = 0 THEN '${USERS.rep}'::uuid END, '${USERS.admin}'::uuid
+      FROM generate_series(1, 60000) g WHERE g % 2 = 0;
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status, scheduled_date)
+    SELECT 'G4V-D-' || g, md5('g4v-order-' || g)::uuid, md5('g4o-cust-' || (1 + g % 60))::uuid, '${USERS.admin}'::uuid,
+           (ARRAY['scheduled','in_progress','completed'])[1 + g % 3], date '${FROM}' + (g % 365)
+      FROM generate_series(1, 60000) g WHERE g % 3 = 0;
+    SET LOCAL session_replication_role = origin;
+    ANALYZE public.orders; ANALYZE public.order_items; ANALYZE public.invoices; ANALYZE public.deliveries; ANALYZE public.customers;
+    ${ms('warm', plain)}
+    ${ms('base', plain)}
+    ${ms('rep_first', rpc({ limit: 50 }))} t := t || ',rep_first_seen=' || (r->>'total_count') || ',rep_first_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_deep_page', rpc({ limit: 50, offset: 30000 }))} t := t || ',rep_deep_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_export', rpc({ limit: 1000, offset: 30000 }))} t := t || ',rep_export_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_sort', rpc({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }))} t := t || ',rep_sort_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_search', rpc({ limit: 50, search: 'product 3' }))} t := t || ',rep_search_seen=' || (r->>'total_count') || ',rep_search_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_first', keyset({ limit: 50 }, 'NULL'))} t := t || ',rep_bookmark_first_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_next', keyset({ limit: 50 }, "r->'next_cursor'"))} t := t || ',rep_bookmark_next_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_sort_first', keyset({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }, 'NULL'))}
+    ${ms('rep_bookmark_sort_next', keyset({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }, "r->'next_cursor'"))} t := t || ',rep_bookmark_sort_rows=' || jsonb_array_length(r->'rows');
+    ${signIn(USERS.admin)}
+    ${ms('admin_first', rpc({ limit: 50 }))}
+    v := t || ',admin_seen=' || (r->>'total_count');`);
+  assert.ok(timed.startsWith('ok|'), `speed probe failed: ${timed}`);
+  const times = Object.fromEntries(timed.slice(3).split(',').map((kv) => kv.split('=')).map(([k, n]) => [k, Number(n)]));
+  console.log(`[orders-page] 60,000 more orders, ms: ${JSON.stringify(times)}`);
+  // The rep's timed reads must have done the full work, not returned an empty list fast.
+  assert.ok(times.admin_seen > 60000 && times.rep_first_seen > 60000, `the timed reads saw too few orders: ${timed}`);
+  assert.ok(times.rep_first_rows === 50 && times.rep_deep_rows === 50 && times.rep_export_rows === 1000 && times.rep_sort_rows === 50 && times.rep_search_seen > 1000 && times.rep_search_rows === 50
+    && times.rep_bookmark_first_rows === 50 && times.rep_bookmark_next_rows === 50 && times.rep_bookmark_sort_rows === 50,
+    `a rep's timed read returned a short page: ${timed}`);
+  for (const k of ['base', 'rep_first', 'rep_deep_page', 'rep_export', 'rep_sort', 'rep_search', 'rep_bookmark_first', 'rep_bookmark_next', 'rep_bookmark_sort_first', 'rep_bookmark_sort_next', 'admin_first']) {
+    assert.ok(Number.isFinite(times[k]), `no timing for ${k}: ${timed}`);
+    assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 orders (authenticated statement_timeout is 8 s)`);
+    // Floor of 1 s: on a fast PC a tiny baseline must not fail a healthy page.
+    if (k !== 'base') assert.ok(times[k] < 3 * Math.max(times.base, 1000), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
+  }
   console.log('\nORDERS_LIST_PAGE_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

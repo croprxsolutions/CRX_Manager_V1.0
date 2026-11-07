@@ -519,10 +519,12 @@ pickers match a customer name in the database instead of only the first 50 match
 Programs was not capped: its programs are one settings record and its product picker searches (PR #944).
 The Orders list pages in the database with the true count and total of every match (`get_orders_page`, PR #1550). Dispatch
 Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1538; rest waits on KI-28, issue
-#1497); Call Lists say how many customers match beyond their 200 (same PRs). Still capped: the blend-ticket scanner
-Edge Function (needs a deploy). Per the PR #1048 note, also left for later: the Invoice Detail customer picker and Bulk PO Import products,
-Label Data Quality, Product Detail choice lists, bulk import name matching, and the Field Customer Assignment
-dropdown. Past a cap, a record cannot be chosen.
+#1497); Call Lists say how many customers match beyond their 200 (same PRs). The PR #1048 leftovers are done: Bulk
+PO/Order/Quote Import read every product and match names against all of them (PR #1441); Label Data Quality, Product
+Detail vendor/maker choices and the Invoice Detail customer picker read every row (PR #1512); the Field Customer
+Assignment dropdown lists an exact or starting-with name first and says "Showing 20 of N" (2026-11-06). Each was shown
+in the local test copy with 1,053 products and 26 customers. Still capped: the blend-ticket scanner Edge Function
+(needs a deploy).
 
 ---
 
@@ -921,8 +923,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 
 ### KI-77 — Lists, UI and CRM details (extends KI-26, KI-30, KI-32, KI-41)
 **MED/LOW · OPEN · UI/database**
-Still row-capped: the Invoice Detail customer selector, Bulk PO Import products, bulk-import name matching,
-Label Data Quality choices, Product Detail choice lists (MED). Paging caveats: two identical reads can still miss
+The row-capped pickers listed here are fixed (see KI-32). Paging caveats: two identical reads can still miss
 concurrent changes, load/count cost grows on large tables (the Orders list now reads one page at a time, but each page
 still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer

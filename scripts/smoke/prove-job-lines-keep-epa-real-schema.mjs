@@ -40,7 +40,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(job_chemicals|job_applied_records|job_product_epa|job_epa_sprayed|_job_epa_freeze|_epa_norm|save_job)/i;
+const TOUCHED = /(job_chemicals|job_applied_records|job_product_epa|job_epa_sprayed|_job_epa_freeze|_epa_norm|save_job)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

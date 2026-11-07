@@ -3,7 +3,7 @@
  * Real-schema proof for 20261202120000_parent_epa_correction: invoice lines are never written
  * without an EPA number, the readers are unchanged (they move to the copies with the screens PR),
  * and the parent EPA correction (switched off by the file, switched on here for the test) writes the
- * parent, every size and, through 20261201100000's products trigger, open jobs only; it refuses
+ * parent, every size and, through 20261202115000's products trigger, open jobs only; it refuses
  * while an invoice line has no copy, and leaves sprayed and finished jobs and invoices as they were.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
@@ -408,7 +408,7 @@ async function main() {
     FROM public.product_parent_events WHERE id = ${receipt.event_id};`), `identity_corrected:2:${NEW}`);
   console.log('[prover] the correction wrote the parent, both sizes and two lines of unsprayed jobs in one logged event; sprayed, finished, invoiced and deleted jobs and every invoice line kept their number');
 
-  // A sprayed job saved again from the job screen (each line sent back by its id, 20261201100000) keeps
+  // A sprayed job saved again from the job screen (each line sent back by its id, 20261202115000) keeps
   // the number it was sprayed under, after the correction.
   const sent = scalar(`SELECT string_agg(id::text || '/' || product_id::text || '/' || sort_order, ',' ORDER BY sort_order)
     FROM public.job_chemicals WHERE job_id = '${JSPRAY}';`).split(',').map((x) => x.split('/'));

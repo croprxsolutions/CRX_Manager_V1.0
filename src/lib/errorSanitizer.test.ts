@@ -24,6 +24,18 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
   });
+  // RAISE texts of 20261108120000_product_parents.sql (PAR-1).
+  it.each([
+    ['PRODUCT_PARENT_VALUE: category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)',
+      'Nothing was saved. Category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)'],
+    ['PRODUCT_PARENT_STALE: parent "Atrazine 4L" changed since you opened it; reload and try again',
+      'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
+    ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
+      'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
+  ])('explains the parent refusal %s by name', (raw, expected) => {
+    expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');

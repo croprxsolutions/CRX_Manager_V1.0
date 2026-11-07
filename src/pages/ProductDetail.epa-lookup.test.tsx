@@ -87,7 +87,8 @@ function lookupResult(overrides: Partial<EpaLookupResult> = {}): EpaLookupResult
 
 // The Vendors section has its own tests; these page tests do not mock its reads.
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
-vi.mock('../lib/db', () => {
+vi.mock('../lib/db', async () => {
+  const { hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   function chainable(resolveWith: unknown) {
     const builder: Record<string, unknown> = {};
     let resolved = resolveWith;
@@ -124,8 +125,17 @@ vi.mock('../lib/db', () => {
       return data;
     },
     checkMutationResult: vi.fn(),
+    hasRpcCode,
+    RpcErrorCodes,
+    sanitizeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   };
 });
+
+// PAR-1: the page asks for the product's parent; these products have none (and the rpc spy stays EPA-only).
+vi.mock('../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productParents')>()),
+  getParentOfProduct: async () => null,
+}));
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: H.toast }),
@@ -157,6 +167,8 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({
     getKey: () => 'epa-draft-key',
+    getKeyFor: () => 'create-key',
+    resetKeyFor: vi.fn(),
     resetKey: H.resetDraftKey,
   }),
 }));

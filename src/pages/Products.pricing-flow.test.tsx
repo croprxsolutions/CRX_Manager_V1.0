@@ -96,6 +96,7 @@ vi.mock('../lib/productPricingWorkbook', () => ({
   MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
   MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
   parseProductPricingWorkbook: mockParsePricing,
+  groupedUseTimingRefusal: () => null,
 }));
 
 vi.mock('../components/ui/EditableDataTable', () => ({
@@ -210,6 +211,10 @@ vi.mock('../components/products/ProductsMobileList', async () => {
         : null
     ),
   };
+});
+vi.mock('../lib/productParents', () => {
+  const empty = { parents: [], byProduct: new Map(), index: new Map() };
+  return { useProductParents: () => empty, searchProductParents: async () => [] };
 });
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 

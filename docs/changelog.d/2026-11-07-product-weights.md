@@ -4,7 +4,7 @@
   database half of DM-2 (`docs/plans/2026-11-06-product-DM2-BUILD-SHEET.md`). No screen changes; the
   screens (section 4 of the sheet) come in a follow-up PR.
 - Liquids get one approved weight per gallon on their product parent (entered as lb/gal or specific
-  gravity, stored as lb/gal to 4 decimals, 0 < value <= 25). Dry sizes stocked by the pack ("Ea") get one
+  gravity, stored as lb/gal to 4 decimals, 0 < value <= 20). Dry sizes stocked by the pack ("Ea") get one
   approved net weight per pack (0 < value <= 4000 lb). A dry size stocked in a weight unit (Lb, oz, MG...)
   needs no entry: its weight comes from the unit. Seed and each products have no weight.
 - Only an approved value is ever read. An admin saving a value directly approves it; values typed by the

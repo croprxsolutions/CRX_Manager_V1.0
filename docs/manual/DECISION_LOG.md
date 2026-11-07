@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-07 — Weight per gallon is capped at 20 lb/gal (DM-2 and DM-1 match)
+
+**Decision (Mason, in session, 2026-11-07):** "there is no liquid that heavy, most is 8lb-12lb is normal range of product weights, set them both to 20lbs". DM-2's density limit drops from 25 to 20 lb/gal, matching DM-1's 20 lb/gal strength limit.
+**Why:** the cap is a typo guard; real products run about 8 to 12 lb/gal, and the two sheets disagreed (flagged on PR #1617).
+**Enforcement:** `supabase/migrations/20261207100000_product_weights.sql` (table CHECK and `set_parent_density` range check, changed before its live apply), proven by `scripts/smoke/prove-product-weights-real-schema.mjs`.
+
 ## 2026-11-07 — Sol: a test file is not money code by its name alone
 
 **Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.

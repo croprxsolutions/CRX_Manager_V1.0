@@ -62,7 +62,7 @@ function BuildSummary({ proposal, groups, build }: { proposal: Proposal; groups:
             {build.rejected_count === 1 ? '' : 's'} carried from an earlier proposal.
           </p>
         )}
-        {build && build.duplicate_parents.length > 0 && (
+        {build && build.proposal_id === proposal.id && build.duplicate_parents.length > 0 && (
           <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
             <p className="flex items-center gap-2 font-semibold">
               <AlertTriangle className="h-4 w-4" /> Parents that already duplicate one another: fix these by hand
@@ -346,9 +346,9 @@ export default function GroupProducts() {
             shownCount={visible.length}
             selectedCount={selected.size}
             busy={busy}
-            onStatus={(v) => { setStatusFilter(v); setShown(PAGE); }}
-            onFlag={(v) => { setFlagFilter(v); setShown(PAGE); }}
-            onSearch={(v) => { setSearch(v); setShown(PAGE); }}
+            onStatus={(v) => { setStatusFilter(v); setShown(PAGE); setSelected(new Set()); }}
+            onFlag={(v) => { setFlagFilter(v); setShown(PAGE); setSelected(new Set()); }}
+            onSearch={(v) => { setSearch(v); setShown(PAGE); setSelected(new Set()); }}
             onApproveSelected={() => void startApproval([...selected])}
           />
           <div className="space-y-2">

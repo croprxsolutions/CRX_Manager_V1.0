@@ -157,6 +157,15 @@ describe('GroupProducts', () => {
     expect(screen.getByRole('button', { name: 'Reject…' })).toBeEnabled();
   });
 
+  it('clears batch selections when a filter changes, so a hidden group cannot be approved', async () => {
+    M.loadProposalGroups.mockResolvedValue([group('g-ok', {})]);
+    render(<GroupProducts />);
+    fireEvent.click(await screen.findByLabelText(/for batch approval/));
+    expect(screen.getByRole('button', { name: 'Approve 1 selected' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search groups'), { target: { value: 'zzz' } });
+    expect(screen.queryByRole('button', { name: /selected/ })).not.toBeInTheDocument();
+  });
+
   it('turns the EPA-has-parent refusal into plain English', async () => {
     M.approveGroups.mockRejectedValue({ message: 'PRODUCT_PARENT_EPA_HAS_PARENT: parent "Rho" already has EPA number 524-475 and this name; build a new proposal' });
     M.loadProposalGroups.mockResolvedValue([group('g-ok', {})]);

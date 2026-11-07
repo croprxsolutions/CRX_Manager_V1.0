@@ -1635,31 +1635,6 @@ export default function QuoteBuilder() {
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
   const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
 
-  // `toAssigned` is "Use Tier N" from the tier note: on a sent quote it also moves each line without a
-  // negotiated price to today's Tier N price (as "Use today" does), so the label never changes while the
-  // lines keep another tier's locked price (Sol, KI-105). The tier menu itself keeps sent prices.
-  const applyTier = (t: number, toAssigned = false) => {
-    if (repriceBlocked) {
-      toast('error', 'Products are still loading. Try again in a moment.');
-      return;
-    }
-    setTier(t);
-    if (!toAssigned || !priceLocked) {
-      recalcAllForTier(t);
-      return;
-    }
-    const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
-    // A new choice: send it again even where an earlier one was saved.
-    sections.forEach((sec) => sec.items.forEach((item) => {
-      const saved = repriced(item) ? savedLineIdsRef.current.get(item._key) : undefined;
-      if (saved) saved.todayApplied = false;
-    }));
-    setSections((prev) => prev.map((sec) => ({
-      ...sec,
-      items: sec.items.map((item) => recalcItem(repriced(item) ? { ...item, use_todays_price: true } : item, t)),
-    })));
-  };
-
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
@@ -1835,6 +1810,29 @@ export default function QuoteBuilder() {
         items: sec.items.map((item) => recalcItem(item, tierNum)),
       }))
     );
+  };
+
+  // `toAssigned` is "Use Tier N" from the tier note: on a sent quote it also moves each line without a
+  // negotiated price to today's Tier N price (as "Use today" does), so the label never changes while the
+  // lines keep another tier's locked price (Sol, KI-105). The tier menu itself keeps sent prices.
+  const applyTier = (t: number, toAssigned = false) => {
+    if (repriceBlocked) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
+    setTier(t);
+    if (!toAssigned || !priceLocked) {
+      recalcAllForTier(t);
+      return;
+    }
+    const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
+    // A new choice: send it again even where an earlier one was saved.
+    const keys = new Set(sections.flatMap((sec) => sec.items.filter(repriced).map((item) => item._key)));
+    savedLineIdsRef.current.forEach((saved, key) => { if (keys.has(key)) saved.todayApplied = false; });
+    setSections((prev) => prev.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => recalcItem(repriced(item) ? { ...item, use_todays_price: true } : item, t)),
+    })));
   };
 
   // "Update to today's prices" for the whole quote (Mason, 2026-10-14): every line, manual prices
@@ -2299,11 +2297,11 @@ export default function QuoteBuilder() {
 
     // KI-105: a tier other than the customer's assigned one needs "Use Tier N" or the tick. The assigned
     // tier is re-read here, since an admin may have changed it while this quote was open (Sol).
-    let currentAssignedTier: number;
-    try {
-      currentAssignedTier = await readAssignedTier(customerId);
-    } catch (err) {
+    const currentAssignedTier = await readAssignedTier(customerId).catch((err: unknown) => {
       Sentry.captureException(err, { tags: { action: 'quote_tier_check' } });
+      return null;
+    });
+    if (currentAssignedTier === null) {
       toast('error', "The customer's price tier could not be checked. Try again in a moment.");
       return null;
     }
@@ -2719,6 +2717,8 @@ export default function QuoteBuilder() {
 
         if (!isEditing) {
           skipUnsavedPromptRef.current = true;
+          // The new quote's tier tick (KI-105) stays with it once it has an id.
+          setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
           navigate(`/quotes/${result}`, { replace: true });
         }
       }

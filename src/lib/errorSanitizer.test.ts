@@ -38,6 +38,11 @@ describe('sanitizeError', () => {
       'Nothing was saved. Stock of the tote or its bulk has moved since this fill; adjust stock instead'],
     ['TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)',
       'Nothing was saved. "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)'],
+    // RAISE texts of 20261207100000_product_weights.sql (DM-2).
+    ['PRODUCT_WEIGHT_OUT_OF_RANGE: weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)',
+      'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
+    ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
+      'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });

@@ -6,6 +6,7 @@
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
 import { asProductForm } from './units';
+import { weightTotalWarnings, type WeightTotalOptions } from './blendWeightTotals';
 
 interface TicketData {
   total_acres: number | null;
@@ -248,7 +249,8 @@ export interface BlendMathWarning {
 
 export function validateBlendMath(
   ticketData: TicketData,
-  products: ProductData[]
+  products: ProductData[],
+  weights?: WeightTotalOptions
 ): BlendMathWarning[] {
   const warnings: BlendMathWarning[] = [];
   /** A comparison ran and disagreed — something here is actually wrong. */
@@ -374,6 +376,14 @@ export function validateBlendMath(
         );
       }
     }
+  }
+
+  // DM-2 (blendWeightTotals.ts): a screen that passes weights gets the total checked through the unit map;
+  // null means the checks below run exactly as before.
+  if (weights) {
+    const total = weightTotalWarnings({ total: totalVolume, rawUnit: ticketData.total_volume_unit, legacyUnit: headerUnit,
+      weights, legacyWeightUnits: WEIGHT_ONLY_UNITS, legacyVolumeUnits: VOLUME_ONLY_UNITS });
+    if (total) return [...warnings, ...total];
   }
 
   // (2) and (3) both need each product measured in the ticket's own unit.

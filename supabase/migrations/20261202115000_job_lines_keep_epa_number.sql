@@ -129,9 +129,9 @@ COMMENT ON COLUMN public.job_chemicals.epa_registration IS
 GRANT SELECT (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT REFERENCES (epa_registration) ON public.job_chemicals TO authenticated;
 GRANT SELECT (epa_registration) ON public.job_chemicals TO anon;
--- Item 6: no direct writes by app roles. PostgreSQL's table-level REVOKE also removes column-level
--- grants of the same privilege; the column REVOKE after it names every column anyway, so no reader
--- has to rely on that (20261022101000 granted INSERT and UPDATE column lists).
+-- Item 6: no direct writes by app roles. Both REVOKEs are needed: the table-level one, and the
+-- column-level one naming every column (20261022101000 granted INSERT and UPDATE column lists).
+-- The postflight checks no column is left writable.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.job_chemicals FROM authenticated, anon;
 DO $revoke_cols$
 DECLARE

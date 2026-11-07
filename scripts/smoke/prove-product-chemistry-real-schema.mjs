@@ -302,7 +302,9 @@ const ver = (pid) => Number(owner(`SELECT COALESCE((SELECT chemistry_version FRO
 const setC = (pid, changes, k = key(), v = ver(pid)) => `SELECT public.set_parent_chemistry('${pid}', ${v}, ${J(changes)}, ${q(k)});`;
 const prevC = (pid, changes) => js(ADMIN, `SELECT public.preview_parent_chemistry_correction('${pid}', ${J(changes)});`);
 const corrC = (pid, changes, reason = 'label reread', evidence = 'label page 2', o = {}) => {
-  const fp = o.fp ?? prevC(pid, changes).preview_fingerprint;
+  // A refused preview gives no fingerprint; save-side refusals are still tested with the real one.
+  const fp = 'fp' in o ? o.fp : (prevC(pid, changes).preview_fingerprint
+    ?? owner(`SELECT public._chemistry_preview_fingerprint('${pid}', ${J(changes)});`));
   return `SELECT public.correct_parent_chemistry('${pid}', ${o.v ?? ver(pid)}, ${q(fp)}, ${J(changes)}, ${q(reason)}, ${q(evidence)}, ${q(o.k ?? key())});`;
 };
 const chem = (pid, uid = REP) => js(uid, `SELECT public.get_parent_chemistry('${pid}');`);
@@ -688,7 +690,12 @@ async function main() {
   const add = (n) => [ing(`Gate ${n}`, 1)];
   for (const p of [PEPA1, PEPA2, PEPA3, PEPA4]) {
     refused(ADMIN, setC(p, add(p)), /CHEMISTRY_FROM_EPA_ONLY/);
-    refused(ADMIN, corrC(p, [{ kind: 'ingredient', action: 'retire', row_id: id('fff') }]), /CHEMISTRY_FROM_EPA_ONLY|CHEMISTRY_ROW|NOT_FOUND|ROW/);
+    // A refused preview hands back no fingerprint (Sol round 2); the save's own gate is checked with the real one.
+    const gch = [{ kind: 'ingredient', action: 'retire', row_id: id('fff') }];
+    assert.equal(prevC(p, gch).preview_fingerprint, null, 'a refused preview gives no fingerprint');
+    refused(ADMIN, corrC(p, gch, undefined, undefined, { fp: null }), /CHEMISTRY_PREVIEW_CHANGED/);
+    const gfp = owner(`SELECT public._chemistry_preview_fingerprint('${p}', ${J(gch)});`);
+    refused(ADMIN, corrC(p, gch, undefined, undefined, { fp: gfp }), /CHEMISTRY_FROM_EPA_ONLY|CHEMISTRY_ROW|NOT_FOUND|ROW/);
   }
   ok(ADMIN, setC(PEPA5, add('5')));
   assert.equal(owner(`SELECT count(*) FROM public.product_parent_ingredients WHERE parent_id IN ('${PEPA1}', '${PEPA2}', '${PEPA3}', '${PEPA4}');`), '0');
@@ -735,6 +742,9 @@ async function main() {
   ok(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: null, source: 'label' }]));
   refused(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'oxide', percent: 10, source: 'label' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
   refused(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: 10, source: 'supplier' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
+  // A fill cannot add a note where none was (Sol round 2): that is a correction too.
+  refused(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: 10, source: 'label', source_note: 'new note' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
+  refused(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', source_note: 'new note' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION/);
   ok(ADMIN, setC(pid, [{ kind: 'fertilizer', nutrient: 'P', basis: 'elemental', percent: 10, source: 'label' }]));
   ok(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]));
   refused(ADMIN, setC(pid, [{ kind: 'ingredient', ingredient_id: fillId, strength_value: 3, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]), /CHEMISTRY_CHANGE_NEEDS_CORRECTION|CHEMISTRY_/);
@@ -749,6 +759,9 @@ async function main() {
   assert.equal(p.after.ingredients.find((x) => x.name === 'Fill me').strength_value, 3);
   assert.equal(p.sizes.length, 1);
   assert.equal(chem(pid).chemistry.ingredients.find((x) => x.name === 'Fill me').strength_value, 2, 'the preview wrote nothing');
+  // A parent change after the preview (an EPA correction moves parent_version) voids it (Sol round 2).
+  owner(`UPDATE public.product_parents SET parent_version = parent_version + 1 WHERE id = '${pid}';`);
+  refused(ADMIN, corrC(pid, change, undefined, undefined, { fp: p.preview_fingerprint }), /CHEMISTRY_PREVIEW_CHANGED/);
   ok(ADMIN, corrC(pid, change));
   const oldRow = rowId(pid, fillId);
   ok(ADMIN, corrC(pid, [{ kind: 'ingredient', action: 'retire', row_id: oldRow }]));
@@ -756,7 +769,7 @@ async function main() {
   assert.equal(owner(`SELECT status FROM public.product_parent_ingredients WHERE id = '${oldRow}';`), 'retired', 'and kept with its history');
   assert.equal(js(REP, `SELECT count(*) FROM public.product_parent_ingredients WHERE id = '${oldRow}';`), 0, 'a rep cannot see retired rows');
   assert.equal(js(ADMIN, `SELECT count(*) FROM public.product_parent_ingredients WHERE id = '${oldRow}';`), 1, 'an admin can');
-  console.log('[prover] add vs correct: add and fill through set; change/retire refused there and done through correct with reason and evidence; preview writes nothing; retired rows hidden but kept');
+  console.log('[prover] add vs correct: add and fill through set; change/retire refused there and done through correct with reason and evidence; preview writes nothing; a refused or outdated preview cannot save; retired rows hidden but kept');
 
   // ---- Identity (D-AA).
   const r1 = js(ADMIN, createI({ name: 'Atrazine', cas: '1912-24-9' }));

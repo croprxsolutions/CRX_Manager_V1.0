@@ -1083,7 +1083,7 @@ BEGIN
         END IF;
         -- A typed fill sets the value only: a different unit, basis, source or note is a correction (sheet section 3).
         IF p_mode <> 'epa' AND (v_row.strength_unit IS DISTINCT FROM v_s->>'unit' OR v_row.strength_basis IS DISTINCT FROM v_s->>'basis'
-            OR v_row.source IS DISTINCT FROM v_s->>'source' OR v_row.source_note <> v_s->>'note') THEN
+            OR v_row.source IS DISTINCT FROM v_s->>'source' OR (v_s->>'note' IS NOT NULL AND v_row.source_note IS DISTINCT FROM v_s->>'note')) THEN
           RAISE EXCEPTION 'CHEMISTRY_CHANGE_NEEDS_CORRECTION: filling the unknown strength of % keeps its unit, basis and source; change those with a correction',
             (SELECT name FROM public.active_ingredients WHERE id = v_ing);
         END IF;
@@ -1227,7 +1227,7 @@ BEGIN
           RAISE EXCEPTION 'CHEMISTRY_TYPED_ROW_KEPT: % was typed in; the EPA value goes to review', v_nutrient;
         END IF;
         IF p_mode <> 'epa' AND (v_fert.basis IS DISTINCT FROM v_s->>'basis' OR v_fert.source IS DISTINCT FROM v_s->>'source'
-            OR v_fert.source_note <> v_s->>'note') THEN
+            OR (v_s->>'note' IS NOT NULL AND v_fert.source_note IS DISTINCT FROM v_s->>'note')) THEN
           RAISE EXCEPTION 'CHEMISTRY_CHANGE_NEEDS_CORRECTION: filling the unknown % keeps its basis and source; change those with a correction', v_nutrient;
         END IF;
         UPDATE public.product_parent_fertilizer_analysis
@@ -1582,13 +1582,14 @@ GRANT EXECUTE ON FUNCTION public.get_parent_active_costs(uuid) TO authenticated;
 -- Fingerprints (what a preview showed, so the save refuses if it moved)
 -- ---------------------------------------------------------------------------------------------
 
--- Chemistry correction: the requested changes, the chemistry version, the sorted member size IDs, and the
+-- Chemistry correction: the requested changes, the chemistry and parent versions (an EPA change moves it), the sorted member size IDs, and the
 -- row_version of every ingredient on the parent or named by the changes.
 CREATE FUNCTION public._chemistry_preview_fingerprint(p_parent_id uuid, p_changes jsonb) RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT md5(jsonb_build_object(
     'changes', p_changes,
     'version', COALESCE((SELECT chemistry_version FROM public.product_parent_chemistry_state WHERE parent_id = p_parent_id), 0),
+    'parent', (SELECT parent_version FROM public.product_parents WHERE id = p_parent_id),
     'members', COALESCE((SELECT jsonb_agg(m.product_id ORDER BY m.product_id)
                            FROM public.product_parent_members m WHERE m.parent_id = p_parent_id), '[]'::jsonb),
     'ingredients', COALESCE((SELECT jsonb_agg(jsonb_build_array(a.id, a.row_version) ORDER BY a.id)
@@ -1665,7 +1666,8 @@ REVOKE ALL ON FUNCTION public.set_parent_chemistry(uuid, bigint, jsonb, text) FR
 GRANT EXECUTE ON FUNCTION public.set_parent_chemistry(uuid, bigint, jsonb, text) TO authenticated;
 
 -- Admin, read-only: runs the real correction in a subtransaction that is always rolled back, so the preview
--- shows exactly what the save would do (or the refusal it would give). VOLATILE because of that rehearsal;
+-- shows exactly what the save would do (or the refusal it would give); IDs of ingredients it would create are
+-- rehearsal-only (the save makes its own, matched by CAS or name). VOLATILE because of that rehearsal;
 -- nothing it writes survives.
 CREATE FUNCTION public.preview_parent_chemistry_correction(p_parent_id uuid, p_changes jsonb)
 RETURNS jsonb
@@ -1699,7 +1701,8 @@ BEGIN
       v_refusal := SQLERRM;
   END;
   RETURN jsonb_build_object('parent_id', p_parent_id, 'parent_name', v_parent.name, 'is_active', v_parent.is_active,
-    'chemistry_version', v_version, 'preview_fingerprint', v_fingerprint,
+    -- A refused preview hands back no fingerprint, so it can never authorize a save.
+    'chemistry_version', v_version, 'preview_fingerprint', CASE WHEN v_refusal IS NULL THEN v_fingerprint END,
     'epa_refusal', public._parent_chemistry_epa_refusal(p_parent_id),
     'before', v_before, 'after', v_result->'chemistry', 'changed', COALESCE((v_result->>'changed')::boolean, false),
     'created_ingredients', v_result->'created_ingredients', 'refusal', v_refusal,

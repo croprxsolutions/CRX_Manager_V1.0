@@ -814,7 +814,7 @@ export default function LabelDataQuality() {
     if (!canSave || editor.saving || running) return;
     const parentName = parentNames.get(row.product.id);
     if (parentName) {
-      updateEditor(row.id, { error: `Set on parent ${parentName}. Use Correct identity on the product page.` });
+      updateEditor(row.id, { error: `Set on parent ${parentName}. Correcting a grouped product's EPA number isn't available yet.` });
       return;
     }
     if (!profile?.id) {
@@ -944,7 +944,7 @@ export default function LabelDataQuality() {
         }
         const parentName = parentNames.get(row.product.id);
         if (parentName) {
-          return <span className="text-xs text-secondary">Set on parent {parentName}. Use Correct identity on the product page.</span>;
+          return <span className="text-xs text-secondary">Set on parent {parentName}. Correcting a grouped product's EPA number isn't available yet.</span>;
         }
         const editor = editors[row.id] ?? EMPTY_EDITOR;
         const normalizedInput = editor.input.trim();

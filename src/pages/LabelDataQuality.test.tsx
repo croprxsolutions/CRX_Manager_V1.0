@@ -527,7 +527,8 @@ describe('LabelDataQuality', () => {
         <LabelDataQuality />
       </MemoryRouter>,
     );
-    expect(await screen.findByText('Set on parent Callisto 4L. Use Correct identity on the product page.')).toBeInTheDocument();
+    expect(await screen.findByText("Set on parent Callisto 4L. Correcting a grouped product's EPA number isn't available yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Correct identity/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Corrected EPA registration for Callisto Herbicide')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();

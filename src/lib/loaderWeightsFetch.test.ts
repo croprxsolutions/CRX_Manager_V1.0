@@ -3,7 +3,7 @@ import * as db from './db';
 import { buildLoaderWorksheetPdfPlan, loaderPdfMixBody, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
 import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob } from './loaderWeightsFetch';
 import { computeLoaderWorksheet } from './loaderWorksheet';
-import { selectedLoaderWeights } from '../components/jobs/loaderPanelWeights';
+import { loaderPanelProducts, selectedLoaderWeights } from '../components/jobs/loaderPanelWeights';
 import type { JobLoaderWorksheet, JobLoaderWorksheetWeight, WeightUnitFactors } from '../types';
 
 const units: WeightUnitFactors = { factors: { lb: { kind: 'weight', factor: 1 }, gal: { kind: 'volume', factor: 1 } }, ambiguous: [] };
@@ -79,6 +79,13 @@ describe('selectedLoaderWeights (job page)', () => {
 
   it('shows the weights when the fresh read matches the plan on screen', () => {
     const result = selectedLoaderWeights(read, selected, shownPlan(20));
+    expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
+  });
+
+  it('shows the weights for the plan the job page builds from its own chemical rows', () => {
+    const rows = [{ product_id: 'p1', product_name: 'TEST Liquid', quantity: '20', unit: 'Gal' }, { product_id: null, product_name: 'TEST Note', quantity: '', unit: null }];
+    const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: loaderPanelProducts(rows) });
+    const result = selectedLoaderWeights(read, selected, shown);
     expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
   });
 

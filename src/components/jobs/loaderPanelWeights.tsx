@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { computeLoaderWorksheet, type LoaderWorksheet } from '../../lib/loaderWorksheet';
+import { computeLoaderWorksheet, type LoaderProductInput, type LoaderWorksheet } from '../../lib/loaderWorksheet';
 import { loaderLoadWeights, loaderWeightCaption, type LoaderWeights } from '../../lib/loaderWeights';
 import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob } from '../../lib/loaderWeightsFetch';
 import type { JobLoaderWorksheet, WeightUnitFactors } from '../../types';
@@ -28,7 +28,17 @@ export function useLoaderJobWeights(jobId: string, version: number): LoaderWeigh
   return read.tag === tag ? read.value : { status: 'loading' };
 }
 
-const sameSettings = (a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacity_gal === b.capacity_gal
+/** The job page's linked chemical rows as worksheet products; product_id is part of the plan the weights must match. */
+export function loaderPanelProducts(rows: readonly { product_id?: string | null; product_name?: string | null; quantity: string; unit?: string | null }[]): LoaderProductInput[] {
+  return rows.filter((row) => row.product_id).map((row) => ({
+    product_name: row.product_name || 'Product',
+    total_quantity: row.quantity.trim() === '' ? null : parseFloat(row.quantity),
+    unit: row.unit || null,
+    product_id: row.product_id,
+  }));
+}
+
+const sameSettings =(a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacity_gal === b.capacity_gal
   && a.carrier_rate_gpa === b.carrier_rate_gpa && a.load_balance_mode === b.load_balance_mode
   && (a.per_load_acres ?? []).join('|') === (b.per_load_acres ?? []).join('|');
 

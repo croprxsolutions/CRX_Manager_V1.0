@@ -82,6 +82,7 @@ const JobFieldPickerModal = lazy(() => import('../components/jobs/JobFieldPicker
 import JobAttachments from '../components/jobs/JobAttachments';
 import { LegacyLoaderWorksheet } from '../components/jobs/LegacyLoaderWorksheet';
 import { LoaderWorksheetsPanel } from '../components/jobs/LoaderWorksheetsPanel';
+import { loaderPanelProducts } from '../components/jobs/loaderPanelWeights';
 import type { LoaderWorksheetDisplayMode } from '../lib/loaderWorksheets';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -4862,13 +4863,7 @@ export default function JobDetail() {
               vehicles={vehicles}
               jobVehicleId={vehicleId || null}
               totalAcres={totalAcres}
-              products={chemRows
-                .filter((chemical) => chemical.product_id)
-                .map((chemical) => ({
-                  product_name: chemical.product_name || 'Product',
-                  total_quantity: chemical.quantity.trim() === '' ? null : parseFloat(chemical.quantity),
-                  unit: chemical.unit || null,
-                }))}
+              products={loaderPanelProducts(chemRows)}
               defaultCarrierRateGpa={!Number.isNaN(parsedCarrierRate) ? parsedCarrierRate : null}
               legacyWorksheet={{
                 vehicleId: vehicleId || null,

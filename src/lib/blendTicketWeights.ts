@@ -101,7 +101,9 @@ function pick(line: TicketLineInput, { saved, current }: TicketWeightSources): P
   if (!line.product_id) return { basis: { kind: 'none', none_reason: 'unlinked' }, units: currentUnits, form: line.catalogForm, note: '' };
   const row = savedRowFor(line, saved);
   if (row && isSnapshot(row)) {
-    const basis = { kind: row.weight_kind, none_reason: row.none_reason, lb_per_unit: row.lb_per_unit, per_unit: row.per_unit };
+    // A saved "no weight yet" is a fact about save time; a weight approved later must not make it read as current.
+    const atSave = row.none_reason === 'no_parent' || row.none_reason === 'no_approved_weight' ? 'none_at_save' as const : row.none_reason;
+    const basis = { kind: row.weight_kind, none_reason: atSave, lb_per_unit: row.lb_per_unit, per_unit: row.per_unit };
     return { basis, units: row.unit_factors, form: row.product_form, note: `weight saved with this ticket: ${provenance(row)}` };
   }
   if (row) return { basis: { kind: 'none', none_reason: row.none_reason }, units: EMPTY_UNITS, form: line.catalogForm, note: '' };

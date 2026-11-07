@@ -6,7 +6,7 @@
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
-**KI-18 verified: 2026-11-06 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` and `financial_dashboard_summary` were then moved to the Chicago date by `20261121090000` (applied live 2026-11-06). KI-18 stands for the parts listed in its entry. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
+**KI-18 verified: 2026-11-07 (America/Chicago)** for KI-18 only: read-only live function definitions show `generate_quote_number`, `generate_order_number` and the rebate-claim body take the Chicago year; `generate_ticket_number` and `financial_dashboard_summary` were then moved to the Chicago date by `20261121090000` (applied live 2026-11-06). On 2026-11-07 the live `get_ar_aging` and `get_detailed_statement_data` definitions were read after `20261208100000`, the last KI-18 part, so KI-18 is fixed. The rest of the file was last verified 2026-10-25; evidence for each re-check is in its PR changelog and timestamped live-ledger captures in [migration history](../reference/migration-history.md). Earlier verification notes are preserved in [the archive](archive/verification-notes-2026-10.md).
 Every "applied live" statement not re-read since is the older record's claim, marked as such.
 
 This file is the short list of things that are genuinely open, or that someone decided to live with. Everything
@@ -374,23 +374,23 @@ can make old splits refuse to save (LOW-MED).
   in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
   changes rounding on every quote line, so it needs its own money PR. LOW.
 
-### KI-18 — Dates and seasons follow the UTC clock or the browser clock
-**MED · OPEN · money/UI · unassigned (fixed: seasons, screens, blend-ticket year, dashboard aging, the invoice date limit and the database "today" (PR #1579); open: statement and AR aging, evening hold expiry)**
+### KI-18 — Dates and seasons follow the UTC clock or the browser clock (fixed; last part `20261208100000`)
+**MED · FIXED LIVE (2026-11-07, PRs #1579, #1615, #1613) · money/UI** (seasons, screens, blend-ticket year, dashboard aging, the invoice date limit, the database "today", evening hold expiry, and statement and AR aging)
 - Fixed 2026-11-06 by `20261121090000` (applied live, ledger `20261106152929`, PR #1560): blend-ticket numbers take
   the Chicago year; the Financial Dashboard's AR-aging strip uses the AR Aging page's ranges on the Chicago date; the
   database refuses an invoice date more than 365 days after the Chicago date. Earlier fixes: `20261103120000`
   (`current_season()` and the `invoice_date` default) and `20261029160300` (quote, order and rebate-claim years).
-- Customer statements (`get_detailed_statement_data`) age by <=30 / 31-60 / 61-90 / 91-120 / >120 days; the AR Aging
-  page uses 0-29 / 30-59 / 60-89 / 90-119 / 120+, so a 30-day-old invoice is "current" on the statement and 30-59 on
-  AR Aging. Which ranges both use is Mason's decision (recommended: the AR Aging ones). MED.
+- Fixed 2026-11-07 by `20261208100000` (applied live, ledger `20261107201450`, PR #1613): customer statements
+  (`get_detailed_statement_data`, so single, emailed and Month-End batch statements) age by the AR Aging page's ranges,
+  0-29 / 30-59 / 60-89 / 90-119 / 120+ (Mason, 2026-11-07), instead of <=30 / 31-60 / 61-90 / 91-120 / >120; and
+  `get_ar_aging`'s fallback date is the Chicago date instead of the UTC `CURRENT_DATE`.
 - Fixed 2026-11-06 by PR #1579: `20261204100000` (applied live, ledger `20261107041703`) moves 33 money,
   compliance and stock functions (period checks, commission dates, default quote expiry, AR reminders, license and RUP
   dates, hold and stock checks, default bill, payment and delivery dates) and `20261204110000` (applied live, ledger
   `20261107053254`) moves 13 boards and reports to the Chicago date; the database clock is UTC, so from 6-7 pm Central
   `CURRENT_DATE` was tomorrow. The overnight overdue, quote-expiry and morning-notice jobs need no change (they run
   midnight to 6 am Central).
-- Still open: statement and AR aging (batch 3, the ranges above). MED. Fixed in `20261206110000` (applied live
-  2026-11-07): `_sync_job_holds` counts a hold that expires today until the Chicago day ends, and refuses a
+- Fixed in `20261206110000` (applied live 2026-11-07): `_sync_job_holds` counts a hold that expires today until the Chicago day ends, and refuses a
   signed-in caller passing another user as the actor.
 - Sol notes on the live batches (2026-11-07), fixed in `20261206110000` (applied live 2026-11-07): reversing a write-off or
   credit application checks only the month of the Chicago day it was made (Mason, 2026-11-07; batch 1 checked the

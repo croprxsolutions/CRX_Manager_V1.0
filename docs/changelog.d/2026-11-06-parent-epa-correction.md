@@ -1,6 +1,6 @@
 ## 2026-11-06 — Parent EPA correction built, switched off; invoice lines always keep an EPA number (database)
 
-- New migration `20261205100000_parent_epa_correction.sql` (record in `docs/reference/migrations.d/`).
+- New migration `20261208110000_parent_epa_correction.sql` (record in `docs/reference/migrations.d/`).
   Applies after `20261204120000_job_lines_keep_epa_number` (sprayed and finished jobs keep their number).
 - An invoice line written without an EPA number, saved without one on a draft or unposted invoice, or
   moved to another product without one, gets the product's, so no new invoice line can silently follow a

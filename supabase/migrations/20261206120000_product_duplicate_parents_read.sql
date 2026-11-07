@@ -1,5 +1,5 @@
 -- Written 2026-11-07. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261206100000_product_duplicate_parents_read.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20261206120000_product_duplicate_parents_read.md. Re-read the live ledger before applying.
 --
 -- WHY (PAR-2 follow-up after PR #1602): build_product_parent_proposal returns duplicate_parents (active
 --   parents that already duplicate one another) only in its reply, so the Group products screen shows the

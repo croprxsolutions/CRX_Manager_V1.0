@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261206100000_product_duplicate_parents_read: get_duplicate_product_parents()
+ * Real-schema proof for 20261206120000_product_duplicate_parents_read: get_duplicate_product_parents()
  * returns the active parents that duplicate one another (the build's duplicate_parents list, by the same
  * query) to an admin, refuses a non-admin and an anonymous caller, and is callable by authenticated only.
  *
@@ -23,7 +23,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261206100000_product_duplicate_parents_read.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261206120000_product_duplicate_parents_read.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

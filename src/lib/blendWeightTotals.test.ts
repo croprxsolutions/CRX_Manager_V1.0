@@ -67,6 +67,15 @@ describe('mapped ticket total (spray tank)', () => {
     expect(check(100, 'Gal', [liquid({}), line({ product_name: 'TEST Dry' }), liquid({ product_name: 'TEST U', product_id: null })]))
       .toEqual([{ level: 'unchecked', message: 'Total volume not checked: TEST Dry is dry; TEST U is not linked to a product' }]);
   });
+
+  it('still flags overfill from a left-out row whose gallons are known (30 Gal unlinked in a 20 Gal tank)', () => {
+    expect(check(20, 'Gal', [liquid({ product_name: 'TEST U', product_id: null, quantity: 30 })])).toEqual([{ level: 'mismatch',
+      message: "The products add up to at least 30.00 gal, which is more than the total volume of 20 gal. A tank can't hold more product than its total. Counted by volume only, or left out: TEST U is not linked to a product." }]);
+  });
+
+  it('says a zero total in a unit it cannot use is not checked', () => {
+    expect(check(0, 'Ea', [liquid({ quantity: 10 })])[0].message).toBe('Total not checked: ea is a count, not a weight or volume');
+  });
 });
 
 describe('blank header unit with a map', () => {

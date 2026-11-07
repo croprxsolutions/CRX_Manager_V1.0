@@ -25,6 +25,7 @@ import {
   loadProposalGroups,
   previewGroupPrices,
   productParentErrorMessage,
+  sameEpaGroupNames,
   type BuildResult,
   type GroupDraft,
   type Proposal,
@@ -366,6 +367,7 @@ export default function GroupProducts() {
                 onApprove={() => void startApproval([group.id])}
                 approveOff={!groupingOpen}
                 busy={busy}
+                sameEpaNames={sameEpaGroupNames(group, groups)}
               />
             ))}
             {visible.length > shown && (

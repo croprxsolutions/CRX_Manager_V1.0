@@ -9,6 +9,7 @@ import {
   initialDraft,
   membersWithRateChange,
   productParentErrorMessage,
+  sameEpaGroupNames,
   type ProposalGroup,
   type ProposalMember,
 } from './productParentProposals';
@@ -31,6 +32,23 @@ function group(patch: Partial<ProposalGroup> = {}): ProposalGroup {
 }
 
 describe('approval drafts', () => {
+  it('refuses a parent name over the 200 characters a parent can hold', () => {
+    const g = group();
+    expect(approvalProblems(g, { ...initialDraft(g), name: 'x'.repeat(200) })).toEqual([]);
+    expect(approvalProblems(g, { ...initialDraft(g), name: 'x'.repeat(201) })).toEqual(['Shorten the parent name to 200 characters or fewer.']);
+    // Counted as the database counts: one character each, not two UTF-16 units.
+    expect(approvalProblems(g, { ...initialDraft(g), name: '\u{1F33E}'.repeat(150) })).toEqual([]);
+  });
+
+  it('names the other groups that share the EPA number, and none for a group with no EPA number', () => {
+    const a = group({ id: 'a', suggested_name: 'Rho' });
+    const b = group({ id: 'b', suggested_name: 'Rho Max' });
+    const c = group({ id: 'c', suggested_name: 'Other', generic_epa_registration: '100-1' });
+    const none = group({ id: 'n', generic_epa_registration: null });
+    expect(sameEpaGroupNames(a, [a, b, c, none])).toEqual(['Rho Max']);
+    expect(sameEpaGroupNames(none, [a, b, c, group({ id: 'm', generic_epa_registration: null })])).toEqual([]);
+  });
+
   it('is ready as suggested when the sizes agree', () => {
     const g = group();
     expect(approvalProblems(g, initialDraft(g))).toEqual([]);

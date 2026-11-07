@@ -62,6 +62,11 @@ vi.mock('../lib/emailService', () => ({ sendEmail: vi.fn(), pdfToBase64: vi.fn()
 vi.mock('../lib/rupCompliance', () => ({
   checkRUPCompliance: vi.fn().mockResolvedValue({ compliant: true, warnings: [], rupProductNames: [] }),
 }));
+vi.mock('../components/quotes/QuoteCustomerChecks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../components/quotes/QuoteCustomerChecks')>()),
+  QuoteCreditStatus: () => null,
+}));
+vi.mock('../lib/customerTier', () => ({ readAssignedTier: async () => 1 }));
 vi.mock('../components/ui/CommissionSplitEditor', () => ({ default: () => null }));
 
 import QuoteBuilder from './QuoteBuilder';

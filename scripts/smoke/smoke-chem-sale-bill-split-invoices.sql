@@ -46,6 +46,7 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
+--   AL A line delivered past its planned quantity splits its capped total by percentage
 --   AJ A payer's share under 0.01 of quantity worth cents refuses the split (option B); the delivery completes,
 --      the office is told, Create Invoice refuses too, and the card stays open so the office can fix it
 --
@@ -1076,6 +1077,20 @@ BEGIN
     NULL;
   END;
   RESET ROLE;
+
+  -- AL: a line delivered past its planned quantity bills at its capped total, so its unit price no longer
+  -- multiplies. The payers split those cents by percentage; nobody pays the full rate for the main customer's free units.
+  PERFORM pg_temp.smk_new_sale('ovp' || v_suffix, false);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 50);
+  UPDATE order_items SET total_units_needed = total_units_needed * 0.8, total_price = ROUND(total_price * 0.8, 2) WHERE id = v_l1;
+  PERFORM confirm_delivery(v_d, v_admin, 'smk-spl-confirm-ovp' || v_suffix);
+  PERFORM pg_temp.smk_done(v_d, 'ovp' || v_suffix);
+  IF (SELECT max(ii.extended_cents) - min(ii.extended_cents) FROM invoice_items ii WHERE ii.order_item_id = v_l1) > 1
+     OR (SELECT sum(ii.extended_cents) FROM invoice_items ii WHERE ii.order_item_id = v_l1)
+        IS DISTINCT FROM (SELECT ROUND(oi.total_price * 100)::bigint FROM order_items oi WHERE oi.id = v_l1) THEN
+    v_fails := v_fails || ' (AL) a line past its planned quantity did not split its capped total by percentage;';
+  END IF;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL chem sale bill split:%', v_fails;

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-06 for the live ledger only (permission tightening applied, ledger `20261106062807`); other evidence retains its stated dates.
+**Last verified:** 2026-11-07 for the live ledger only (1163 rows; newest KI-18 batch 2, ledger `20261107053254`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -37,7 +37,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Status | Count |
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
-| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104) | 16 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 15 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -820,6 +820,7 @@ Delete with a grep of every reference first; keep one copy of each helper.
 | KI-79 | A saved quote line forgets whether its acres were typed or filled in from the section's field (`save_quote` stores the acres, not the source; Quote Builder's `acres_source` lives only in the browser). Totals stay correct. After reopening, switching a section's field leaves those lines' acres as they were and shows "This section's saved lines keep their acres. Check them against the new field." Options weighed 2026-10-23: (1) keep as is, no cost; (2) store a typed/field flag on `quote_items`: a migration plus changes to `save_quote` (a money RPC) and every quote-copy path (duplicate, versions, rollover, template), which fall back to today's warning if they drop it; (3) save each line's field link and have the server recompute acres: a large `save_quote` rewrite, highest risk | Mason chose option 1, keep as is (2026-10-23, #1060 follow-up); revisit if reps report wrong acres after switching fields |
 | KI-80 | A job line priced from a product's tier price is not re-checked when that tier price is later removed or the customer's tier changes; it is re-checked (`job_chemicals_price_required`, #1060) only when the line is next edited | Mason declined the re-check (2026-10-23, #1060 follow-up): rare case |
 | KI-104 | Invoice email: the invoice page's Email button does not recognise a send made before 2026-11-05 under the old clock-based retry key, so it can send an unchanged invoice once more. The bulk Email on the Invoices list also checks the email log (a key that starts with the server-written `invoice:invoice:<id>:` prefix, to the same address, since the invoice last changed), so it skips those. A bulk skip does not see a bill-to correction made without changing the invoice; the invoice page's Email sends it. From then on the shared record key (invoice, its last change, the address and bill-to) stops repeats exactly | Mason, option A, 2026-11-05, narrowed by option A2 (To-Do 9.6): the email service change that would catch every old send was not approved |
+| KI-106 | RUP sales register: an active admin can still add a row to `rup_sales_records` directly (the `rup_sales_insert` policy, older than KI-18). Such a row gets only the posted-invoice check; the sale-date, season and license checks run only in `generate_rup_sales_records`, which is the only path the app uses | ACCEPTED (Mason 2026-11-07): the register is low-importance; no extra guard wanted (Sol finding on PR #1579) |
 
 ---
 

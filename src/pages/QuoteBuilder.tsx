@@ -495,6 +495,8 @@ export default function QuoteBuilder() {
   const [tierChoice, setTierChoice] = useState('');
   // What the tier check (KI-105) depends on, as on screen now; Save compares it after its re-read.
   const tierInputsRef = useRef('');
+  // The id a new quote's first save opens: its tick carries over; opening any other quote clears it.
+  const keepTierChoiceForRef = useRef<string | null>(null);
   useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
@@ -1612,6 +1614,10 @@ export default function QuoteBuilder() {
       quoteNumberSeqRef.current += 1;
       newQuoteNumberRequestedRef.current = false;
       setQuoteNumberLoading(false);
+      // A tier tick or "Use Tier N" belongs to one visit to a quote (Luna, #1605).
+      if (keepTierChoiceForRef.current !== id) setTierChoice('');
+      keepTierChoiceForRef.current = null;
+      useTierKeysRef.current = new Set();
       fetchQuote(id);
     } else if (!newQuoteNumberRequestedRef.current) {
       newQuoteNumberRequestedRef.current = true;
@@ -2747,6 +2753,7 @@ export default function QuoteBuilder() {
           skipUnsavedPromptRef.current = true;
           // The new quote's tier tick (KI-105) stays with it once it has an id.
           setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
+      keepTierChoiceForRef.current = result;
           navigate(`/quotes/${result}`, { replace: true });
         }
       }

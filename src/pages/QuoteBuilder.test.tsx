@@ -3729,6 +3729,36 @@ describe('QuoteBuilder', () => {
       expect(saveCalls()).toHaveLength(0);
     });
 
+    it('a tick does not survive leaving the quote and coming back (Luna, #1605)', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quoteA = { ...fixture.quote, tier: 2 };
+      const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header' };
+      const reads = [quoteA, quoteA, quoteB, quoteB, quoteA]; // each load reads the quote twice
+      let quoteReads = 0;
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? reads[Math.min(quoteReads++, reads.length - 1)]
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [{ ...fixture.item, price_per_unit: 9 }]
+              : table === 'products' ? [{ ...fixture.product, tier2_price: 9 }]
+                : [],
+        error: null,
+      }));
+      render(
+        <MemoryRouter initialEntries={[`/quotes/${quoteA.id}/edit`]}>
+          <Link to={`/quotes/${quoteB.id}/edit`}>To B</Link>
+          <Link to={`/quotes/${quoteA.id}/edit`}>To A</Link>
+          <Routes><Route path="/quotes/:id/edit" element={<QuoteBuilder />} /></Routes>
+        </MemoryRouter>,
+      );
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).toBeChecked();
+      fireEvent.click(screen.getByRole('link', { name: 'To B' }));
+      await screen.findByDisplayValue('Quote B header');
+      fireEvent.click(screen.getByRole('link', { name: 'To A' }));
+      await waitFor(() => expect(screen.queryByDisplayValue('Quote B header')).not.toBeInTheDocument());
+      expect(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
+    });
+
     it('refuses Save when the assigned tier cannot be read', async () => {
       renderDraftAtTier(1);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());

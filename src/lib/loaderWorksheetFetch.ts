@@ -40,7 +40,7 @@ interface LoaderJobRow {
   loader_comment: string | null;
   vehicle: { vehicle_name: string | null; capacity_gallons: number | null; capacity_unit: string | null } | null;
   job_fields: Array<{ field_id: string | null; acres_to_treat: number | null }> | null;
-  job_chemicals: Array<{ quantity: number | null; unit: string | null; product: { product_name: string | null } | null }> | null;
+  job_chemicals: Array<{ id: string; product_id: string | null; quantity: number | null; unit: string | null; product: { product_name: string | null } | null }> | null;
 }
 
 interface WorksheetVehicleRow {
@@ -63,7 +63,7 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
       carrier_rate_gpa, loader_tank_capacity, loader_comment,
       vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
       job_fields(field_id, acres_to_treat),
-      job_chemicals(quantity, unit, product:products(product_name))
+      job_chemicals(id, product_id, quantity, unit, product:products(product_name))
     `)
     .in('id', jobIds);
   if (error) throw error;
@@ -143,7 +143,9 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
       const job = weights?.jobs.get(r.id);
       if (weights && job?.found && job.job) return { ...mapGetterJobToPdfData(r, job, weights), ...base };
       const fallback = mapRowToPdfData(r, nameById, base.customers, selectedWorksheetByJob.get(r.id), worksheetVehicleNameById);
-      return { ...fallback, weights: { byProductId: {}, currentUnits: { factors: {}, ambiguous: [] }, sourceLines: [], saved: false,
+      // The job's own lines go along, so a bad amount still prints its reason (never a negative or 0) without weights.
+      const sourceLines = (r.job_chemicals || []).map(({ id, product_id, quantity, unit }) => ({ id, product_id, quantity, unit }));
+      return { ...fallback, weights: { byProductId: {}, currentUnits: { factors: {}, ambiguous: [] }, sourceLines, saved: false,
         unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' } };
     });
 }
@@ -216,6 +218,8 @@ function mapRowToPdfData(
         product_name: c.product?.product_name || 'Product',
         total_quantity: c.quantity,
         unit: c.unit,
+        product_id: c.product_id,
+        source_line_id: c.id,
       })),
     loader_comment: selectedWorksheet ? selectedWorksheet.comment : r.loader_comment,
     load_balance_mode: selectedWorksheet?.load_balance_mode,

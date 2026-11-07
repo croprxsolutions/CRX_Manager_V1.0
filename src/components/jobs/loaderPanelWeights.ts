@@ -44,10 +44,11 @@ const sameSettings = (a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacit
 
 /**
  * Every load's volume and each product's printed amount, so a weight is shown only for the exact plan on screen.
- * Products are sorted: the job page and the getter list a job's chemicals in different orders.
+ * Products are sorted (the job page and the getter list a job's chemicals in different orders) and JSON-encoded,
+ * so no name or unit can make two different plans read the same.
  */
-const planKey = (ws: LoaderWorksheet) => ws.loads.map((load) =>
-  `${load.volume}:${load.products.map((product) => `${product.product_id ?? ''}:${product.product_name}=${product.amount} ${product.unit ?? ''}`).sort().join(',')}`).join('|');
+const planKey = (ws: LoaderWorksheet) => JSON.stringify(ws.loads.map((load) => [load.volume,
+  load.products.map((product) => JSON.stringify([product.product_id ?? '', product.product_name, product.amount, product.unit ?? ''])).sort()]));
 
 export interface SelectedLoaderWeights { ws: LoaderWorksheet; weights: LoaderWeights; caption: string }
 
@@ -65,7 +66,8 @@ export function selectedLoaderWeights(read: LoaderWeightsRead, selected: JobLoad
   const inputs = loaderJobInputs(read.entry);
   const ws = computeLoaderWorksheet({ total_acres: Number(read.entry.acres ?? 0), carrier_rate_gpa: saved.worksheet.carrier_rate_gpa,
     tank_capacity: saved.worksheet.capacity_gal, mode: saved.worksheet.load_balance_mode,
-    perLoadAcresOverride: saved.worksheet.per_load_acres ?? undefined, products: inputs.products });
+    // The panel lists linked lines only (loaderPanelProducts), so an unlinked line must not make the plans differ.
+    perLoadAcresOverride: saved.worksheet.per_load_acres ?? undefined, products: inputs.products.filter((product) => product.product_id) });
   if (!ws.valid || planKey(ws) !== planKey(shown)) return changed;
   const weights = loaderLoadWeights(ws, inputs.weights, read.units, inputs.sourceLines);
   return { ws, weights, caption: loaderWeightCaption(true, weights.anyCurrent) };

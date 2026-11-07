@@ -69,6 +69,18 @@ describe('loader worksheet weights from the getter', () => {
     expect(body).toEqual([['TEST Liquid (Gal)', '10', '10', '20']]);
     expect(caption).toMatch(/could not be read/);
   });
+
+  it('with the read failed, a negative job amount still prints its reason (the job lines go along), never a number', () => {
+    const data: LoaderWorksheetPdfData = {
+      job_number: 'A', customers: [], scheduled_date: '2026-11-07', scheduled_time: null, applicator_name: null, vehicle_name: null,
+      total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, capacity_unit: 'gal', loader_comment: null,
+      products: [{ product_name: 'TEST Liquid', total_quantity: -2, unit: 'Gal', product_id: 'p1', source_line_id: 'l1' }],
+      weights: { byProductId: {}, currentUnits: units, sourceLines: [{ id: 'l1', product_id: 'p1', quantity: -2, unit: 'Gal' }], saved: false,
+        unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' },
+    };
+    const { body } = loaderPdfMixBody(data, buildLoaderWorksheetPdfPlan(data));
+    expect(body[0].slice(1, 3).every((cell) => /TEST Liquid/.test(cell) && !/^-?\d/.test(cell))).toBe(true);
+  });
 });
 
 describe('selectedLoaderWeights (job page)', () => {
@@ -95,6 +107,23 @@ describe('selectedLoaderWeights (job page)', () => {
     const rows = [{ product_id: 'p2', product_name: 'TEST Second', quantity: '10', unit: 'Gal' }, { product_id: 'p1', product_name: 'TEST Liquid', quantity: '20', unit: 'Gal' }];
     const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: loaderPanelProducts(rows) });
     expect('weights' in selectedLoaderWeights({ status: 'ready', entry: two, units }, { ...worksheet, id: 'B-w' } as JobLoaderWorksheet, shown)).toBe(true);
+  });
+
+  it('still shows the linked line\'s weight when the job also has an unlinked line with an amount', () => {
+    const mixed = job('C', 8);
+    mixed.lines = [...mixed.lines!, { id: 'C-l2', product_id: null, quantity: 5, unit: 'Gal', product_name: 'TEST Unlinked', product_form: null }];
+    const rows = [{ product_id: 'p1', product_name: 'TEST Liquid', quantity: '20', unit: 'Gal' }, { product_id: null, product_name: 'TEST Unlinked', quantity: '5', unit: 'Gal' }];
+    const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: loaderPanelProducts(rows) });
+    const result = selectedLoaderWeights({ status: 'ready', entry: mixed, units }, { ...worksheet, id: 'C-w' } as JobLoaderWorksheet, shown);
+    expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
+  });
+
+  it('does not match a plan whose product fields only join to the same text', () => {
+    const tricky = job('D', 8);
+    tricky.lines = [{ id: 'D-l1', product_id: 'p1', quantity: 20, unit: 'Gal,p2:TEST Q=10 Gal', product_name: 'TEST Liquid', product_form: 'liquid' }];
+    const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: [
+      { product_name: 'TEST Liquid', total_quantity: 20, unit: 'Gal', product_id: 'p1' }, { product_name: 'TEST Q', total_quantity: 20, unit: 'Gal', product_id: 'p2' }] });
+    expect('reason' in selectedLoaderWeights({ status: 'ready', entry: tricky, units }, { ...worksheet, id: 'D-w' } as JobLoaderWorksheet, shown)).toBe(true);
   });
 
   it('withholds them when a product amount changed but the tank volumes did not', () => {

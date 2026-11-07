@@ -28,6 +28,10 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261206113000_parent_epa_correction.sql');
 const FOLLOW_UPS = [];
+// Later files that only READ what this proof covers and redefine none of it. 20261207100000 reads
+// job_chemicals; its product_parents EPA trigger was proven with this file replayed after it
+// (PARENT_EPA_CORRECTION_PROOF_PASS at stamp 20261208110000, 2026-11-07).
+const LATER_READ_ONLY = new Set(['20261207100000_product_weights.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -155,7 +159,7 @@ function plan() {
     assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
     last = i;
   }
-  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

@@ -117,7 +117,7 @@ function EnterWeightModal({ subject, entry, profileId, startAsCorrection, onClos
     >
       <fieldset disabled={saving} className="space-y-3">
         <p className="text-sm text-secondary">{introText(subject, entry)}</p>
-        <Input id="weight-value" label={density ? 'Weight' : `Net weight (lb per ${entry.inventory_unit || 'unit'})`} inputMode="decimal"
+        <Input id="weight-value" maxLength={30} label={density ? 'Weight' : `Net weight (lb per ${entry.inventory_unit || 'unit'})`} inputMode="decimal"
           value={value} onChange={(event) => setValue(event.target.value)}
           error={value.trim() !== '' && stored === null ? 'Enter a number, like 8.34' : undefined} />
         {density && (
@@ -326,23 +326,25 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   /** Changes when the product or its parent is saved, so a pack or parent change re-reads the weight. */
   reloadKey: string;
 }) {
-  const [state, setState] = useState<{ status: 'loading' } | { status: 'failed' } | { status: 'loaded'; entry: ProductWeightEntry }>({ status: 'loading' });
+  const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry }>({ forKey: '', status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
+  // Only a result for the product and saved state on screen counts, so a stale card can never act on another product.
+  const forKey = JSON.stringify([productId, reloadKey, attempt]);
+  const state = loaded.forKey === forKey ? loaded : { status: 'loading' as const };
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'loading' });
     fetchProductWeights([productId]).then((result) => {
       if (cancelled) return;
       const entry = result.products[productId];
-      setState(entry?.found ? { status: 'loaded', entry } : { status: 'failed' });
+      setState(entry?.found ? { forKey, status: 'loaded', entry } : { forKey, status: 'failed' });
     }).catch((error: unknown) => {
       Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), { extra: { context: 'get_product_weights' } });
-      if (!cancelled) setState({ status: 'failed' });
+      if (!cancelled) setState({ forKey, status: 'failed' });
     });
     return () => { cancelled = true; };
-  }, [productId, reloadKey, attempt]);
+  }, [productId, forKey]);
 
   if (state.status === 'loaded' && (state.entry.product_form === 'seed' || state.entry.product_form === 'each')) return null;
   return (

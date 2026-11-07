@@ -110,6 +110,17 @@ describe('ProductWeightCard', () => {
       source: 'supplier', correction: { reason: 'supplier sheet newer', evidence: 'sheet dated 2026-11' } })));
   });
 
+  it('never shows the previous product\'s weight or buttons while the next product loads', async () => {
+    const { rerender } = show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation,
+      weight: { kind: 'density', lb_per_unit: 9.5972, per_unit: 'Gal', source: 'sds', reviewed_by_name: 'Pat', reviewed_at: 't' } });
+    expect(await screen.findByRole('button', { name: 'Enter new weight' })).toBeInTheDocument();
+    mocks.fetchProductWeights.mockReturnValue(new Promise(() => {}));
+    rerender(<ProductWeightCard productId="p2" isAdmin profileId="u1" busy={false} reloadKey="k" />);
+    expect(screen.queryByRole('button', { name: 'Enter new weight' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('product-weight-summary')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading weight…')).toBeInTheDocument();
+  });
+
   it('hides the editors from a non-admin', async () => {
     show({ product_form: 'liquid', subject: densitySubject, current_basis: formulation, weight: { kind: 'none', none_reason: 'no_approved_weight' } }, false);
     expect(await screen.findByText('TEST Atrazine 2.5 Gal has no approved weight yet')).toBeInTheDocument();

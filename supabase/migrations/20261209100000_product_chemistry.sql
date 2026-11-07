@@ -561,7 +561,8 @@ $function$;
 ALTER FUNCTION public._parent_chemistry_epa_refusal(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._parent_chemistry_epa_refusal(uuid) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
--- The lock order every chemistry writer uses (sheet section 3): parent FOR NO KEY UPDATE; member products
+-- The lock order every chemistry writer uses (sheet section 3): parent FOR UPDATE (also blocks any concurrent
+-- foreign-key insert of a brand or size on it, so the EPA gate never relies on the other writers); member products
 -- FOR SHARE in ID order; the chemistry state row (created at version 0 if missing, then FOR UPDATE); then
 -- the ingredient-list lock. Refuses a stale expected version. Returns the current version.
 CREATE FUNCTION public._lock_parent_chemistry(p_parent_id uuid, p_expected_version bigint) RETURNS bigint
@@ -570,7 +571,7 @@ DECLARE
   v_name text;
   v_version bigint;
 BEGIN
-  SELECT name INTO v_name FROM public.product_parents WHERE id = p_parent_id FOR NO KEY UPDATE;
+  SELECT name INTO v_name FROM public.product_parents WHERE id = p_parent_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_FOUND'; END IF;
   PERFORM 1 FROM public.products p
    WHERE p.id IN (SELECT m.product_id FROM public.product_parent_members m WHERE m.parent_id = p_parent_id)
@@ -1738,7 +1739,7 @@ GRANT EXECUTE ON FUNCTION public.correct_parent_chemistry(uuid, bigint, text, js
 CREATE FUNCTION public._lock_ingredient_parents(p_parent_ids uuid[]) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
-  PERFORM 1 FROM public.product_parents WHERE id = ANY(p_parent_ids) ORDER BY id FOR NO KEY UPDATE;
+  PERFORM 1 FROM public.product_parents WHERE id = ANY(p_parent_ids) ORDER BY id FOR UPDATE;
   PERFORM 1 FROM public.products p
    WHERE p.id IN (SELECT m.product_id FROM public.product_parent_members m WHERE m.parent_id = ANY(p_parent_ids))
    ORDER BY p.id FOR SHARE;
@@ -2172,7 +2173,7 @@ DECLARE
 BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'set_parent_cost_reference', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
-  SELECT name INTO v_name FROM public.product_parents WHERE id = p_parent_id FOR NO KEY UPDATE;
+  SELECT name INTO v_name FROM public.product_parents WHERE id = p_parent_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_FOUND'; END IF;
   PERFORM 1 FROM public.products p
    WHERE p.id IN (SELECT m.product_id FROM public.product_parent_members m WHERE m.parent_id = p_parent_id)

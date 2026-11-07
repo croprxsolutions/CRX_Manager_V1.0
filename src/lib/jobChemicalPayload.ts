@@ -1,6 +1,4 @@
 export interface JobChemicalPayloadSource {
-  /** The saved line's id: save_job keeps a sprayed job's EPA number for a line sent back by id. */
-  id?: string;
   product_id: string;
   quantity: string;
   unit: string;
@@ -22,7 +20,6 @@ export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
   return rows.map((row, index) => {
     const parsedRatePerAcre = Number.parseFloat(row.rate_per_acre);
     return {
-    id: row.id ?? null,
     product_id: row.product_id,
     quantity: parseFloat(row.quantity) || 0,
     unit: row.unit || null,

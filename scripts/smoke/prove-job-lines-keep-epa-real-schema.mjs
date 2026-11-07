@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261202115000_job_lines_keep_epa_number: every spray-job chemical line
- * carries its own EPA number, a product EPA edit reaches only jobs not sprayed yet, and re-saving
- * a sprayed or finished job keeps the number on each line the screen sends back by its line id.
+ * Real-schema proof for 20261202140000_job_lines_keep_epa_number: once a job is sprayed or finished,
+ * every product on it keeps the EPA number the job recorded (job_product_epa), through re-saves,
+ * remove + re-add, duplicate positions, and a spray record deleted and re-entered; a job not sprayed
+ * yet keeps reading the product's current number; app roles cannot write job lines or the locks.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
  * migration before the candidate, seeds invented rows and checks each case.
@@ -23,7 +24,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261202115000_job_lines_keep_epa_number.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261202140000_job_lines_keep_epa_number.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -39,7 +40,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(job_chemicals|save_job|get_job_proof_data|_job_line_epa|_job_chemical_epa|_product_epa_to_unsprayed)/i;
+const TOUCHED = /(job_chemicals|job_applied_records|job_product_epa|job_epa_sprayed|_job_epa_freeze|_epa_norm|save_job)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -55,7 +56,7 @@ function docker(args, options = {}) {
 }
 function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
-// A second session held open in the background, for the lock-order cases.
+// A second session held open in the background, for the race cases.
 function session(sql) {
   let markReady;
   const ready = new Promise((resolve) => { markReady = resolve; });
@@ -243,10 +244,11 @@ function buildContainer() {
 const id = (n) => `7a7e4000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const ADMIN = id('a1');
 const REP = id('a2');
+const STRANGER = id('a9');  // signed in, no profile: sees no job lines
 const CUST = id('c1');
 const FIELD = id('d1');
-const PA = id('f1'), PB = id('f2');
-const JOLD = id('10'), JOTHER = id('11');
+const PA = id('f1'), PB = id('f2'), PC = id('f3'), PD = id('f4'), PE = id('f5'), PF = id('f6'), PG = id('f7');
+const JOLD = id('10'), JOTHER = id('11'), JSPRAYED = id('12'), JOPEN = id('13');
 const OLD = '524-475', NEW = '524-476', B_EPA = '100-1070';
 
 function txIn(uid, sql) {
@@ -266,16 +268,33 @@ function refused(uid, sql, pattern) {
 const J = (v) => `'${JSON.stringify(v).replaceAll("'", "''")}'::jsonb`;
 // A customer-supplied line at zero: passes every money and unit refusal, so only the EPA behaviour is tested.
 const chem = (pid, sort, extra = {}) => ({ product_id: pid, quantity: 0, unit: 'Gal', rate_per_acre: null, rate_unit: null,
-  cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, id: null, ...extra });
+  cost_per_unit_cents: 0, price_per_unit_cents: 0, customer_supplied: true, sort_order: sort, ...extra });
 const saveSql = (job, chems, key = null) => `SELECT public.save_job(${job ? `'${job}'` : 'NULL'},
   jsonb_build_object('customer_id', '${CUST}', 'job_date', current_date::text),
   ${J([{ field_id: FIELD, acres_to_treat: 10, sort_order: 0 }])}, ${J(chems)}, auth.uid(), ${key ? `'${key}'` : 'NULL'})->>'job_id';`;
 const save = (uid, job, chems, key = null) => ok(uid, saveSql(job, chems, key));
-const lines = (job) => scalar(`SELECT COALESCE(string_agg(sort_order || ':' || COALESCE(epa_registration, '<null>'), ',' ORDER BY sort_order), '<none>')
-  FROM public.job_chemicals WHERE job_id = '${job}';`);
-const lineIds = (job) => scalar(`SELECT string_agg(id::text, ',' ORDER BY sort_order) FROM public.job_chemicals WHERE job_id = '${job}';`).split(',');
-const setProductEpa = (pid, epa) => psql(`UPDATE public.products SET epa_registration = ${epa ? `'${epa}'` : 'NULL'} WHERE id = '${pid}';`);
+// What a job shows for each line: the kept number when its product is locked, else the product's current one.
+const shown = (job) => scalar(`SELECT COALESCE(string_agg(jc.sort_order || ':' || COALESCE(
+    CASE WHEN l.product_id IS NOT NULL THEN l.epa_registration ELSE public._epa_norm(p.epa_registration) END, '<null>'),
+    ',' ORDER BY jc.sort_order, p.product_name), '<none>')
+  FROM public.job_chemicals jc JOIN public.products p ON p.id = jc.product_id
+  LEFT JOIN public.job_product_epa l ON l.job_id = jc.job_id AND l.product_id = jc.product_id
+ WHERE jc.job_id = '${job}';`);
+const locks = (job) => scalar(`SELECT COALESCE(string_agg(COALESCE(p.sku, '<deleted>') || '=' || COALESCE(l.epa_registration, '<null>'), ',' ORDER BY p.sku), '<none>')
+  FROM public.job_product_epa l LEFT JOIN public.products p ON p.id = l.product_id WHERE l.job_id = '${job}';`);
+const backfilled = (job) => scalar(`SELECT string_agg(DISTINCT from_backfill::text, ',') FROM (
+  SELECT from_backfill FROM public.job_product_epa WHERE job_id = '${job}' UNION ALL
+  SELECT from_backfill FROM public.job_epa_sprayed WHERE job_id = '${job}') x;`);
+const marked = (job) => scalar(`SELECT count(*) FROM public.job_epa_sprayed WHERE job_id = '${job}';`);
+const setProductEpa = (pid, epa) => psql(`UPDATE public.products SET epa_registration = ${epa === null ? 'NULL' : `'${epa}'`} WHERE id = '${pid}';`);
+// Legacy-shaped numbers (blank, padded): the product setup guard refuses them on new writes, so write them the
+// way old rows hold them, below the triggers. products has no trigger from this file, so nothing is skipped here.
+const legacyEpa = (pid, literal) => psql(`SET session_replication_role = replica;
+  UPDATE public.products SET epa_registration = ${literal} WHERE id = '${pid}';`, { user: 'supabase_admin' });
 const spray = (job) => psql(`INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${job}', current_date, 10);`);
+const line = (job, pid, sort) => `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+  VALUES ('${job}', '${pid}', 0, 'Gal', 0, true, ${sort});`;
+const quick = (fn, what) => { const t = Date.now(); const r = fn(); assert.ok(Date.now() - t < 2000, `${what} waited`); return r; };
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -286,19 +305,24 @@ function seed() {
     UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active) VALUES
-      ${p(PA, 'Gly', OLD)}, ${p(PB, 'Other', B_EPA)};
+      ${p(PA, 'A', OLD)}, ${p(PB, 'B', B_EPA)}, ${p(PC, 'C', '300-1')}, ${p(PD, 'D', '400-1')}, ${p(PE, 'E', '500-1')},
+      ${p(PF, 'F', '600-1')}, ${p(PG, 'G', '700-1')};
     INSERT INTO public.product_categories (name, sort_order) VALUES ('Herbicide', 60) ON CONFLICT DO NOTHING;
     INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT 'Gal', 128, 'liquid' WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = 'Gal');
     INSERT INTO public.customers (id, farm_name) VALUES ('${CUST}', '[PROVER] Farm');
     INSERT INTO public.fields (id, customer_id, field_name, total_acres) VALUES ('${FIELD}', '${CUST}', '[PROVER] Field', 100);
     INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by) VALUES
       ('${JOLD}', 'JK-OLD', '${CUST}', 'completed', current_date, '${ADMIN}'),
-      ('${JOTHER}', 'JK-OTHER', '${CUST}', 'completed', current_date, '${ADMIN}');
+      ('${JOTHER}', 'JK-OTHER', '${CUST}', 'invoiced', current_date, '${ADMIN}'),
+      ('${JSPRAYED}', 'JK-SPRAYED', '${CUST}', 'in_progress', current_date, '${ADMIN}'),
+      ('${JOPEN}', 'JK-OPEN', '${CUST}', 'scheduled', current_date, '${ADMIN}');
     INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order) VALUES
       ('${JOLD}', '${PA}', 0, 'Gal', 0, true, 0), ('${JOLD}', '${PB}', 0, 'Gal', 0, true, 1),
-      ('${JOTHER}', '${PA}', 0, 'Gal', 0, true, 0);
+      ('${JOTHER}', '${PA}', 0, 'Gal', 0, true, 0), ('${JSPRAYED}', '${PB}', 0, 'Gal', 0, true, 0),
+      ('${JOPEN}', '${PA}', 0, 'Gal', 0, true, 0);
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${JSPRAYED}', current_date, 10);
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  console.log('[prover] seeded an admin, a rep, a customer and field, two products and two finished jobs with lines');
+  console.log('[prover] seeded an admin, a rep, a customer and field, seven products, two finished jobs, a sprayed job and an open job');
 }
 
 async function main() {
@@ -310,7 +334,7 @@ async function main() {
   let r = docker([...psqlArgs(), '-f', '/tmp/cand.sql'], { allowFailure: true });
   assert.notEqual(r.status, 0);
   assert.match(`${r.stdout}\n${r.stderr}`, /JOB_LINES_KEEP_EPA_NOT_IN_TRANSACTION/);
-  assert.equal(scalar("SELECT count(*) FROM information_schema.columns WHERE table_name = 'job_chemicals' AND column_name = 'epa_registration';"), '0');
+  assert.equal(scalar("SELECT to_regclass('public.job_product_epa') IS NULL;"), 't');
   r = apply('cand.sql');
   assert.equal(r.status, 0, r.output);
   r = apply('cand.sql');
@@ -318,215 +342,208 @@ async function main() {
   assert.match(r.output, /already exists/);
   console.log('[prover] the file applies once, as one transaction');
 
-  // Existing lines carry the number they print today; the app reads the copy but never writes it.
-  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`);
-  assert.equal(ok(ADMIN, `SELECT epa_registration FROM public.job_chemicals WHERE job_id = '${JOLD}' AND sort_order = 0;`), OLD);
-  refused(ADMIN, `UPDATE public.job_chemicals SET epa_registration = '1-1' WHERE job_id = '${JOLD}';`, /permission denied/);
-  refused(ADMIN, `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, epa_registration, sort_order)
-    VALUES ('${JOLD}', '${PB}', 0, 'Gal', 0, true, '1-1', 9);`, /permission denied/);
-  for (const fn of ['_job_line_epa_kept(NULL::uuid, NULL::jsonb, NULL::boolean)', '_job_line_epa_restore(NULL::uuid, NULL::jsonb)', '_job_line_epa_follows_product(NULL::uuid)']) {
-    refused(ADMIN, `SELECT public.${fn};`, /permission denied/);
-  }
-  console.log("[prover] existing lines got their product's number; signed-in users read it but cannot write it or call the helpers");
+  // Backfill: finished and sprayed jobs are marked and lock their products at today's number; open jobs are not.
+  assert.equal(locks(JOLD), `A=${OLD},B=${B_EPA}`);
+  assert.equal(locks(JOTHER), `A=${OLD}`);
+  assert.equal(locks(JSPRAYED), `B=${B_EPA}`);
+  assert.equal(locks(JOPEN), '<none>');
+  assert.deepEqual([JOLD, JOTHER, JSPRAYED, JOPEN].map(marked), ['1', '1', '1', '0']);
+  assert.deepEqual([JOLD, JOTHER, JSPRAYED].map(backfilled), ['true', 'true', 'true'], 'backfilled rows are flagged');
+  console.log('[prover] backfill: finished and sprayed jobs locked at the number they print today; the open job is not');
 
-  // A new job's lines take the product's number; a job not sprayed yet follows a product edit.
+  // Permissions: no direct job line writes; the lock tables are not writable; the marker is not readable.
+  for (const uid of [ADMIN, REP]) {
+    refused(uid, `DELETE FROM public.job_chemicals WHERE job_id = '${JOLD}';`, /permission denied/);
+    refused(uid, line(JOLD, PC, 5), /permission denied/);
+    refused(uid, `UPDATE public.job_chemicals SET product_id = '${PB}' WHERE job_id = '${JOLD}';`, /permission denied/);
+    refused(uid, `UPDATE public.job_chemicals SET quantity = 1 WHERE job_id = '${JOLD}';`, /permission denied/);
+    refused(uid, 'TRUNCATE public.job_chemicals;', /permission denied/);
+    refused(uid, `INSERT INTO public.job_product_epa (job_id, product_id, epa_registration) VALUES ('${JOPEN}', '${PA}', '1-1');`, /permission denied/);
+    refused(uid, `UPDATE public.job_product_epa SET epa_registration = '1-1';`, /permission denied/);
+    refused(uid, `DELETE FROM public.job_product_epa;`, /permission denied/);
+    refused(uid, `SELECT count(*) FROM public.job_epa_sprayed;`, /permission denied/);
+    refused(uid, `DELETE FROM public.job_epa_sprayed;`, /permission denied/);
+    assert.equal(ok(uid, `SELECT count(*) FROM public.job_chemicals WHERE job_id = '${JOLD}';`), '2', 'line reads still work');
+  }
+  assert.equal(ok(ADMIN, `SELECT count(*) FROM public.job_product_epa WHERE job_id = '${JOLD}';`), '2', 'staff read the locks of jobs they can see');
+  assert.equal(ok(STRANGER, `SELECT count(*) FROM public.job_chemicals;`), '0', 'the stranger sees no job lines');
+  assert.equal(ok(STRANGER, `SELECT count(*) FROM public.job_product_epa;`), '0', 'so the stranger sees no locks');
+  refused(null, `SELECT count(*) FROM public.job_product_epa;`, /permission denied/);
+  refused(ADMIN, 'SELECT public._job_epa_freeze(NULL::uuid);', /permission denied/);
+  assert.equal(ok(REP, "SELECT public._epa_norm(E' \t 1-2 \n');"), '1-2', 'signed-in users may call the normalizer to read');
+  refused(null, "SELECT public._epa_norm('x');", /permission denied/);
+  console.log('[prover] signed-in users cannot write job lines or locks, cannot read the marker, read locks only for jobs they can see; anon reads nothing; helpers are not callable');
+
+  // An unsprayed job follows a product edit; a sprayed one keeps its number.
   const open = save(ADMIN, null, [chem(PA, 0), chem(PB, 1)]);
-  assert.equal(lines(open), `0:${OLD},1:${B_EPA}`);
   const sprayed = save(ADMIN, null, [chem(PA, 0), chem(PB, 1)]);
+  assert.equal(locks(open), '<none>');
   spray(sprayed);
+  assert.equal(locks(sprayed), `A=${OLD},B=${B_EPA}`);
+  assert.equal(backfilled(sprayed), 'false', 'locks recorded after the file are not flagged as backfill');
   setProductEpa(PA, NEW);
-  assert.equal(lines(open), `0:${NEW},1:${B_EPA}`, 'an unsprayed job follows the product edit');
-  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`, 'a sprayed job keeps its number');
-  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`, 'a finished job keeps its number');
+  assert.equal(shown(open), `0:${NEW},1:${B_EPA}`, 'an unsprayed job follows the product edit');
+  assert.equal(shown(sprayed), `0:${OLD},1:${B_EPA}`, 'a sprayed job keeps its number');
+  assert.equal(shown(JOLD), `0:${OLD},1:${B_EPA}`, 'a finished job keeps its number');
   console.log('[prover] a product EPA edit reaches only jobs not sprayed yet');
 
-  // THE FIX: re-saving a sprayed job with each line's id sent back keeps the stored number.
-  let ids = lineIds(sprayed);
-  save(ADMIN, sprayed, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
-  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
-  // The same for a non-admin save (cost worked out on the server) and a finished job.
-  ids = lineIds(JOLD);
-  save(REP, JOLD, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
-  assert.equal(lines(JOLD), `0:${OLD},1:${B_EPA}`);
-  // Reordered lines keep their own numbers (the id travels with the line, not the position).
-  ids = lineIds(JOLD);
-  save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PA, 1, { id: ids[0] })]);
-  assert.equal(lines(JOLD), `0:${B_EPA},1:${OLD}`);
-  // A position sent as text with a leading '+' is the same position save_job writes, so it keeps too.
-  ids = lineIds(JOLD);
-  save(ADMIN, JOLD, [chem(PB, '0', { id: ids[0] }), chem(PA, '+1', { id: ids[1] })]);
-  assert.equal(lines(JOLD), `0:${B_EPA},1:${OLD}`, "a '+1' position keeps its number");
-  // A keyed save replayed after it committed (its ids are gone now) answers the same and changes nothing.
-  ids = lineIds(sprayed);
-  const keyed = [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })];
-  save(ADMIN, sprayed, keyed, 'jk-replay-1');
-  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
-  save(ADMIN, sprayed, keyed, 'jk-replay-1');
-  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`);
-  // An expired receipt is not a replay: the same request retried after it expires is a new save, and
-  // its line ids are gone, so it is refused instead of giving the lines the product's current number.
-  psql(`UPDATE public.idempotency_keys SET expires_at = now() - interval '1 hour' WHERE idempotency_key = 'jk-replay-1';`, { user: 'supabase_admin' });
-  refused(ADMIN, saveSql(sprayed, keyed, 'jk-replay-1'), /Reload the job/);
-  assert.equal(lines(sprayed), `0:${OLD},1:${B_EPA}`, 'an expired-key retry changes nothing');
-  console.log("[prover] re-saving a sprayed or finished job keeps each returned line's number (admin, rep, reordered, replayed)");
+  // Re-saves (admin and rep, delete-and-rewrite) keep the locks; a keyed replay changes nothing.
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1)]);
+  save(REP, sprayed, [chem(PB, 0), chem(PA, 1)]);
+  assert.equal(shown(sprayed), `0:${B_EPA},1:${OLD}`);
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1)], 'jk-replay-1');
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1)], 'jk-replay-1');
+  assert.equal(locks(sprayed), `A=${OLD},B=${B_EPA}`);
+  console.log('[prover] re-saving a sprayed job (admin, rep, reordered, replayed) keeps every number');
 
-  // Anything that is not the same line of the same job takes the product's current number.
-  ids = lineIds(sprayed);
-  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: ids[1] })]);
-  assert.equal(lines(sprayed), `0:${NEW},1:${B_EPA}`, 'no id sent: the product\'s number');
-  // A line id that is not a line of this sprayed job (another job's, or one a second tab saw before a
-  // save replaced it) is refused: the screen must reload. The job keeps its numbers.
-  const before = lines(sprayed);
-  // An older cached screen sends no "id" key at all: refused on a sprayed job until the app reloads.
-  const { id: _noId, ...oldScreenLine } = chem(PA, 0);
-  refused(ADMIN, saveSql(sprayed, [oldScreenLine]), /screen is out of date/);
-  assert.equal(lines(sprayed), before, 'a refused old-screen save changes nothing');
-  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: 'not-a-line-id' })]), /screen is out of date/);
-  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: 7 })]), /screen is out of date/);
-  assert.equal(lines(sprayed), before, 'a malformed line id changes nothing');
-  ids = lineIds(JOTHER);
-  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: ids[0] })]), /saved somewhere else since you opened it/);
-  const staleTab = lineIds(sprayed);
-  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1, { id: staleTab[1] })]);
-  refused(ADMIN, saveSql(sprayed, [chem(PA, 0, { id: staleTab[0] }), chem(PB, 1, { id: staleTab[1] })]), /Reload the job/);
-  assert.equal(lines(sprayed), before, 'a refused stale save changes nothing');
-  ids = lineIds(sprayed);
-  save(ADMIN, sprayed, [chem(PA, 0)]);
-  assert.equal(lines(sprayed), `0:${NEW}`);
-  ids = lineIds(JOLD);
-  save(ADMIN, JOLD, [chem(PB, 0, { id: ids[1] }), chem(PB, 1, { id: ids[0] })]);
-  assert.equal(lines(JOLD), `0:${B_EPA},1:${B_EPA}`, 'a line moved to another product takes that product\'s number');
-  ids = lineIds(JOTHER);
-  save(ADMIN, JOTHER, [chem(PA, 0, { id: ids[0] }), chem(PA, 0, { id: ids[0] })]);
-  assert.equal(lines(JOTHER), `0:${NEW},0:${NEW}`, 'an id or sort_order sent twice keeps nothing');
-  // A job not sprayed yet follows its product on a re-save too.
-  const openStale = lineIds(open);
-  save(ADMIN, open, [chem(PA, 0), chem(PB, 1)]);
-  save(ADMIN, open, [chem(PA, 0, { id: openStale[0] }), chem(PB, 1, { id: openStale[1] })]);
-  ids = lineIds(open);
+  // Remove a product, save, then re-add it: it keeps the number the job recorded.
+  save(ADMIN, sprayed, [chem(PB, 0)]);
+  assert.equal(shown(sprayed), `0:${B_EPA}`);
+  setProductEpa(PA, '524-477');
+  save(ADMIN, sprayed, [chem(PB, 0), chem(PA, 1)]);
+  assert.equal(shown(sprayed), `0:${B_EPA},1:${OLD}`, 're-added product keeps its recorded number');
+  // Two lines of one product at one position: both show the one kept number.
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PA, 0), chem(PB, 1)]);
+  assert.equal(shown(sprayed), `0:${OLD},0:${OLD},1:${B_EPA}`);
+  assert.equal(locks(sprayed), `A=${OLD},B=${B_EPA}`, 'still one lock per product');
+  // A product never on the job, added after the spray: locked at its number when added.
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1), chem(PC, 2)]);
+  setProductEpa(PC, '300-2');
+  assert.equal(shown(sprayed), `0:${OLD},1:${B_EPA},2:300-1`);
+  console.log('[prover] remove + re-add keeps the number; two lines at one position share it; a new product locks at its add-time number');
+
+  // Delete the spray record: the job stays locked. Edit, save, add a never-seen product, edit it,
+  // re-enter the spray record: every number stays as first recorded.
+  psql(`DELETE FROM public.job_applied_records WHERE job_id = '${sprayed}';`);
+  assert.equal(marked(sprayed), '1', 'the marker survives');
+  setProductEpa(PA, '524-478');
   setProductEpa(PB, '100-1071');
-  save(ADMIN, open, [chem(PA, 0, { id: ids[0] }), chem(PB, 1, { id: ids[1] })]);
-  assert.equal(lines(open), `0:${NEW},1:100-1071`);
-  // A product with no EPA number: the line carries none, and a finished job keeps none after a later edit.
-  setProductEpa(PB, null);
-  const none = save(ADMIN, null, [chem(PB, 0)]);
-  assert.equal(lines(none), '0:<null>');
-  spray(none);
-  setProductEpa(PB, B_EPA);
-  ids = lineIds(none);
-  save(ADMIN, none, [chem(PB, 0, { id: ids[0] })]);
-  assert.equal(lines(none), '0:<null>');
-  // Two written lines at one position (a sort_order spelling the keep does not read) keep nothing.
-  ids = lineIds(none);
-  save(ADMIN, none, [chem(PB, 1, { id: ids[0] }), chem(PB, '+1')]);
-  assert.equal(lines(none), `1:${B_EPA},1:${B_EPA}`, "an ambiguous position takes the product's number");
-  // Signed-in users cannot write job lines directly at all (only through save_job and the other job
-  // functions), so a sprayed line cannot be deleted and re-added, or changed in place, to pick up a
-  // product's newer number. Reads still work.
-  ids = lineIds(sprayed);
-  setProductEpa(PA, OLD);
-  const sprayedBefore = lines(sprayed);
-  for (const uid of [ADMIN, REP]) {
-    refused(uid, `DELETE FROM public.job_chemicals WHERE id = '${ids[0]}';`, /permission denied/);
-    refused(uid, `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
-      VALUES ('${sprayed}', '${PA}', 0, 'Gal', 0, true, 5);`, /permission denied/);
-    refused(uid, `UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`, /permission denied/);
-    refused(uid, `UPDATE public.job_chemicals SET quantity = 1 WHERE id = '${ids[0]}';`, /permission denied/);
-    refused(uid, `TRUNCATE public.job_chemicals;`, /permission denied/);
-    assert.equal(ok(uid, `SELECT count(*) FROM public.job_chemicals WHERE id = '${ids[0]}';`), '1', 'reads still work');
-  }
-  assert.equal(lines(sprayed), sprayedBefore, 'a refused direct write changes nothing');
-  // Below the app roles (a server function or SQL fix): changing a sprayed or finished line's product or
-  // job in place is refused; on a job not sprayed yet it is allowed and takes the new product's number.
-  const suRefused = (sql) => {
-    const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: sql });
-    assert.notEqual(r.status, 0, `expected a refusal:\n${sql}`);
-    assert.match(`${r.stdout}\n${r.stderr}`, /cannot change product or move to another job/);
-  };
-  suRefused(`UPDATE public.job_chemicals SET product_id = '${PB}' WHERE id = '${ids[0]}';`);
-  suRefused(`UPDATE public.job_chemicals SET job_id = '${open}', sort_order = 7 WHERE id = '${ids[0]}';`);
-  const openIds = lineIds(open);
-  suRefused(`UPDATE public.job_chemicals SET job_id = '${JOLD}', sort_order = 7 WHERE id = '${openIds[0]}';`);
-  assert.equal(lines(sprayed), sprayedBefore, 'a refused write changes nothing');
-  psql(`UPDATE public.job_chemicals SET product_id = '${PA}' WHERE id = '${openIds[1]}';`);
-  assert.equal(scalar(`SELECT epa_registration FROM public.job_chemicals WHERE id = '${openIds[1]}';`), OLD);
-  console.log("[prover] stale or other jobs' line ids on a sprayed job are refused; new lines, changed products, duplicates and unsprayed jobs take the product's number; a blank stays blank on a finished job; ambiguous positions take the product's number; signed-in users cannot write lines directly; a server-side product or job change on a sprayed or finished line is refused");
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1), chem(PC, 2)]);
+  save(ADMIN, sprayed, [chem(PA, 0), chem(PB, 1), chem(PC, 2), chem(PD, 3)]);
+  setProductEpa(PD, '400-2');
+  spray(sprayed);
+  assert.equal(shown(sprayed), `0:${OLD},1:${B_EPA},2:300-1,3:400-1`);
+  console.log('[prover] deleting and re-entering a spray record changes no number');
 
-  // A product EPA edit changes no demand, so it leaves inventory holds alone: same hold ids on an open
-  // job, and an edit with no signed-in user succeeds even where an open job has no creator.
-  const holdJob = save(ADMIN, null, [chem(PB, 0, { customer_supplied: false, quantity: 10, rate_per_acre: 1, rate_unit: 'gal/ac', price_per_unit_cents: 2000 })]);
-  const HOLDS = (job) => scalar(`SELECT COALESCE(string_agg(id::text || '@' || created_at::text, ',' ORDER BY id), '<none>')
-    FROM public.inventory_holds WHERE source_id = '${job}' AND hold_type = 'job';`);
-  const holdsBefore = HOLDS(holdJob);
-  assert.notEqual(holdsBefore, '<none>', 'the open job has a hold to keep');
-  const NOCREATOR = '00000000-0000-4000-8000-0000000000c2';
+  // Finished without a spray record: completed and invoiced both lock. A spray record moved to
+  // another job locks that job.
+  const done = save(ADMIN, null, [chem(PE, 0)]);
+  // Each step separately: the app allows scheduled -> in_progress -> completed -> invoiced only.
+  for (const st of ['in_progress', 'completed']) psql(`UPDATE public.jobs SET status = '${st}' WHERE id = '${done}';`);
+  assert.equal(locks(done), 'E=500-1');
+  const billed = save(ADMIN, null, [chem(PE, 0)]);
+  for (const st of ['in_progress', 'completed', 'invoiced']) psql(`UPDATE public.jobs SET status = '${st}' WHERE id = '${billed}';`);
+  assert.equal(locks(billed), 'E=500-1');
+  const moveTo = save(ADMIN, null, [chem(PF, 0)]);
+  const moveFrom = save(ADMIN, null, [chem(PE, 0)]);
+  spray(moveFrom);
+  psql(`UPDATE public.job_applied_records SET job_id = '${moveTo}' WHERE job_id = '${moveFrom}';`);
+  assert.equal(locks(moveTo), 'F=600-1');
+  setProductEpa(PE, '500-2');
+  setProductEpa(PF, '600-2');
+  assert.equal(shown(done), '0:500-1');
+  assert.equal(shown(moveTo), '0:600-1');
+  // A job created already completed, then given lines (below the app roles): its products lock.
+  const born = scalar(`INSERT INTO public.jobs (job_number, customer_id, status, job_date, created_by)
+    VALUES ('JK-BORN', '${CUST}', 'completed', current_date, '${ADMIN}') RETURNING id;`);
+  assert.equal(marked(born), '1', 'a job created completed is marked');
+  psql(line(born, PF, 0));
+  assert.equal(locks(born), 'F=600-2');
+  console.log('[prover] completed, invoiced, a moved spray record, and a job created completed each lock the job');
+
+  // A blank or missing number is kept as blank; spaces count as blank.
+  legacyEpa(PG, "'   '");
+  const blank = save(ADMIN, null, [chem(PG, 0)]);
+  spray(blank);
+  assert.equal(locks(blank), 'G=<null>');
+  setProductEpa(PG, '700-2');
+  assert.equal(shown(blank), '0:<null>', 'a kept blank stays blank');
+  legacyEpa(PG, "' 700-3 '");
+  const trimmed = save(ADMIN, null, [chem(PG, 0)]);
+  spray(trimmed);
+  assert.equal(locks(trimmed), 'G=700-3', 'the kept number is trimmed');
+  legacyEpa(PG, "E'\t700-4\r\n'");
+  const tabbed = save(ADMIN, null, [chem(PG, 0)]);
+  spray(tabbed);
+  assert.equal(locks(tabbed), 'G=700-4', 'tabs and line breaks are trimmed too');
+  console.log('[prover] blank and spaces-only numbers are kept as blank; spaces, tabs and line breaks are trimmed');
+
+  // A product deleted after a job locked it: the job's kept number stays (no foreign key to products).
+  const gone = '7a7a7a7a-0000-4000-8000-00000000002a';
   psql(`SET session_replication_role = replica;
-    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
-      VALUES ('${NOCREATOR}', 'JK-NOCREATOR', '${CUST}', 'scheduled', current_date, NULL);
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order, epa_registration)
-      VALUES ('${NOCREATOR}', '${PB}', 10, 'Gal', 2000, false, 0, '${B_EPA}');
-    SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  setProductEpa(PB, '100-1079');
-  assert.equal(HOLDS(holdJob), holdsBefore, 'an EPA edit keeps the open job\'s holds as they were');
-  assert.equal(lines(holdJob), '0:100-1079');
-  assert.equal(lines(NOCREATOR), '0:100-1079', 'an edit with no signed-in user reaches a job with no creator');
-  setProductEpa(PB, B_EPA);
-  // A rep's chemical cost is still worked out on the server: a sent cost is not stored.
-  const repJob = save(REP, null, [chem(PB, 0, { customer_supplied: false, quantity: 10, rate_per_acre: 1, rate_unit: 'gal/ac', cost_per_unit_cents: 999999, price_per_unit_cents: 2000 })]);
-  assert.equal(scalar(`SELECT cost_per_unit_cents FROM public.job_chemicals WHERE job_id = '${repJob}';`), '1000', 'a rep cannot set chemical cost');
-  console.log("[prover] an EPA edit leaves holds alone (no creator needed); a rep's sent chemical cost is not stored");
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active)
+    VALUES ('${gone}', '[PROVER] Gone', 'Z', 'liquid', 'Gal', 'Herbicide', '900-1', 10.00, 15.00, true);`, { user: 'supabase_admin' });
+  const goneJob = save(ADMIN, null, [chem(gone, 0), chem(PE, 1)]);
+  spray(goneJob);
+  save(ADMIN, goneJob, [chem(PE, 0)]);
+  psql(`DELETE FROM public.products WHERE id = '${gone}';`);
+  assert.equal(locks(goneJob), 'E=500-2,<deleted>=900-1', 'a deleted product keeps its kept number on the job');
+  console.log('[prover] deleting a product never deletes the kept number of a job');
 
-  // Lock order: a spray in flight when an EPA edit starts finishes first, and the edit then leaves
-  // that job alone (the edit waits on the job lock the spray's foreign key holds).
-  const raceJob = save(ADMIN, null, [chem(PA, 0)]);
-  assert.equal(lines(raceJob), `0:${OLD}`);
-  const spraying = session(`BEGIN;
-    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceJob}', current_date, 10);
+  // Below the app roles: a line changed in place to another product on a sprayed job locks that product.
+  const lineId = scalar(`SELECT id FROM public.job_chemicals WHERE job_id = '${trimmed}';`);
+  psql(`UPDATE public.job_chemicals SET product_id = '${PF}' WHERE id = '${lineId}';`);
+  assert.equal(locks(trimmed), 'F=600-2,G=700-3');
+  // A definer function an app role calls (how save_job, the quote path and recipes write lines) records locks too.
+  psql(`CREATE FUNCTION public.jk_definer_line(p_job uuid, p_product uuid) RETURNS void LANGUAGE sql SECURITY DEFINER
+      SET search_path = public, pg_temp AS $$
+      INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+      VALUES (p_job, p_product, 0, 'Gal', 0, true, 9) $$;
+    GRANT EXECUTE ON FUNCTION public.jk_definer_line(uuid, uuid) TO authenticated;`);
+  ok(REP, `SELECT public.jk_definer_line('${trimmed}', '${PE}');`);
+  assert.equal(locks(trimmed), 'E=500-2,F=600-2,G=700-3');
+  psql('DROP FUNCTION public.jk_definer_line(uuid, uuid);');
+  console.log('[prover] a server-side product change and a definer writer called by a signed-in user both record locks');
+
+  // Races. A spray in flight: a save adding a new product waits, then its product is locked.
+  setProductEpa(PC, '300-3');
+  const raceA = save(ADMIN, null, [chem(PA, 0)]);
+  let bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceA}', current_date, 10);
     SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
-  await spraying.ready;
-  waited(() => setProductEpa(PA, NEW), 'the EPA edit');
-  await spraying.done;
-  assert.equal(lines(raceJob), `0:${OLD}`, 'a spray recorded while the edit waited keeps its number');
-  // An EPA edit in flight when a save starts: the save waits, and every line takes the new number.
-  const lineJob = save(ADMIN, null, [chem(PB, 0)]);
-  const editing = session(`BEGIN; UPDATE public.products SET epa_registration = '100-1072' WHERE id = '${PB}';
+  await bg.ready;
+  waited(() => save(ADMIN, raceA, [chem(PA, 0), chem(PC, 1)]), 'the save');
+  await bg.done;
+  assert.equal(locks(raceA), `A=524-478,C=300-3`, 'a product saved during a spray is locked');
+  // A save in flight adding a new product: a spray waits, then the new product is locked.
+  const raceB = save(ADMIN, null, [chem(PA, 0)]);
+  bg = session(txIn(ADMIN, `${saveSql(raceB, [chem(PA, 0), chem(PC, 1)])}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
+  await bg.ready;
+  waited(() => spray(raceB), 'the spray');
+  await bg.done;
+  assert.equal(locks(raceB), `A=524-478,C=300-3`, 'a spray recorded while a save was in flight sees its lines');
+  // A line written by another path (no job lock of its own) in flight: the freeze waits on the line's
+  // job lock and then sees it. And the reverse.
+  const raceC = save(ADMIN, null, [chem(PA, 0)]);
+  bg = session(`BEGIN; ${line(raceC, PC, 1)} SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  await bg.ready;
+  waited(() => spray(raceC), 'the spray');
+  await bg.done;
+  assert.equal(locks(raceC), `A=524-478,C=300-3`, 'a freeze waits for a line write in flight and sees it');
+  const raceD = save(ADMIN, null, [chem(PA, 0)]);
+  bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 10);
     SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
-  await editing.ready;
-  waited(() => save(ADMIN, lineJob, [chem(PB, 0), chem(PB, 1)]), 'the save');
-  await editing.done;
-  assert.equal(lines(lineJob), '0:100-1072,1:100-1072', 'lines written while an edit was in flight take the new number');
-  // A first line of a product on a NEW job, not committed yet when an EPA edit starts: the edit waits
-  // for it (the line holds its product FOR SHARE) and then reaches it.
-  const creating = session(txIn(ADMIN, `${saveSql(null, [chem(PA, 0)])}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
-  await creating.ready;
-  waited(() => setProductEpa(PA, '524-477'), 'the EPA edit');
-  const newJob = (await creating.done).split(/\r?\n/).find((l) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(l.trim()))?.trim();
-  assert.ok(newJob, 'the background save returned a job id');
-  assert.equal(lines(newJob), '0:524-477', 'a new line still uncommitted when an edit started takes the edited number');
-  // The same through a direct line write (any path other than save_job): the line itself holds its product.
-  const DJOB = '00000000-0000-4000-8000-0000000000d1';
-  const writing = session(`BEGIN;
-    INSERT INTO public.jobs (id, job_number, customer_id, status, job_date, created_by)
-      VALUES ('${DJOB}', 'JK-DIRECT', '${CUST}', 'scheduled', current_date, '${ADMIN}');
-    INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
-      VALUES ('${DJOB}', '${PA}', 0, 'Gal', 0, true, 0);
+  await bg.ready;
+  waited(() => psql(line(raceD, PC, 1)), 'the line write');
+  await bg.done;
+  assert.equal(locks(raceD), `A=524-478,C=300-3`, 'a line written while a freeze was in flight is locked');
+  // Two spray records on one job at once: the second waits, neither fails.
+  bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 1);
     SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
-  await writing.ready;
-  waited(() => setProductEpa(PA, '524-478'), 'the EPA edit');
-  await writing.done;
-  assert.equal(lines(DJOB), '0:524-478', 'a directly written line still uncommitted when an edit started takes the edited number');
-  // Two identical keyed saves of a sprayed job in flight at once: the second waits for the first and then
-  // replays its result (its line ids are gone by then, but the receipt is read after the job lock).
-  const dupJob = save(ADMIN, null, [chem(PB, 0)]);
-  spray(dupJob);
-  const dupIds = lineIds(dupJob);
-  const dupSent = [chem(PB, 0, { id: dupIds[0] })];
-  const first = session(txIn(ADMIN, `${saveSql(dupJob, dupSent, 'jk-dup-1')}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
-  await first.ready;
-  const second = waited(() => save(ADMIN, dupJob, dupSent, 'jk-dup-1'), 'the second identical save');
-  await first.done;
-  assert.equal(second, dupJob, 'an overlapping identical save replays the first one');
-  console.log('[prover] an EPA edit and a spray, save or new line on the same product run one after the other (no stale number either way); an overlapping identical save replays');
+  await bg.ready;
+  waited(() => spray(raceD), 'the second spray');
+  await bg.done;
+  // A product EPA edit never waits on a spray in flight (no product lock is taken).
+  bg = session(`BEGIN;
+    INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 1);
+    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  await bg.ready;
+  quick(() => setProductEpa(PA, '524-479'), 'the EPA edit');
+  await bg.done;
+  assert.equal(locks(raceD), `A=524-478,C=300-3`);
+  console.log('[prover] a spray and a save or line write on one job run one after the other and the later sees the earlier; two sprays queue; an EPA edit never waits');
 
   console.log('JOB_LINES_KEEP_EPA_PROOF_PASS');
 }

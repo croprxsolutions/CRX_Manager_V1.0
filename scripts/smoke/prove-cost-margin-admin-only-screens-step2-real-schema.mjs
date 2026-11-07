@@ -56,13 +56,6 @@ const LEDGER_ONLY = new Set([
 ]);
 // A later or parked file that (re)defines, renames or re-grants anything the candidate replaces or relies on.
 const TOUCHED = /FUNCTION\s+(public\.)?"?(save_job|save_field_app_invoice|save_invoice|save_purchase_order|get_chemical_history|match_quick_receive_items|get_admin_cost_fields|get_quote_versions|set_purchase_order_item_costs|_cost_step2_\w+|_\w+_cost_step2_impl|_save_purchase_order_atomic_number_impl|_save_field_app_invoice_impl_20260714|_save_invoice_lineage_unaware_impl_20260827|field_app_priced_quantity|is_admin|is_sales_rep|require_admin)\b/i;
-// Later files that match TOUCHED and were checked against this proof. This proof replays only up to
-// its candidate, so a later file never runs here; each entry says why it leaves the cost split intact.
-const REVIEWED_LATER = new Set([
-  // Re-emits the save_job wrapper with the same is_admin() / _cost_step2_job_chemicals split, adding
-  // only an EPA-number keep around the unchanged _save_job_cost_step2_impl call.
-  '20261202115000_job_lines_keep_epa_number.sql',
-]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -126,7 +119,6 @@ function plan() {
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
   const before = all.slice(0, at);
   for (const file of all.slice(at + 1)) {
-    if (REVIEWED_LATER.has(path.basename(file))) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it changes; re-think this proof`);
   }
   for (const name of PARKED) {

@@ -87,10 +87,10 @@ const REVIEWED_LATER = new Set([
   // Alters cost_history (not a locked table); its FK clause names public.products, which is what
   // matches. No grant on, and no column of, any locked table changes.
   '20261026140000_product_price_history_starting_snapshot.sql',
-  // Adds job_chemicals.epa_registration (not a cost) with only the read grants every non-cost column
-  // there has and no write grant; its postflight and prove-job-lines-keep-epa-real-schema.mjs check
-  // that. No cost column's grant changes.
-  '20261202115000_job_lines_keep_epa_number.sql',
+  // Revokes direct INSERT/UPDATE/DELETE/TRUNCATE on job_chemicals from app roles (no read grant
+  // changes) and adds two job-EPA tables with their own grants; its postflight and
+  // prove-job-lines-keep-epa-real-schema.mjs check that. No cost column's grant changes.
+  '20261202140000_job_lines_keep_epa_number.sql',
 ]);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

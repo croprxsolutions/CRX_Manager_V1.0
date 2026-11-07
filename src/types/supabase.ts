@@ -5592,7 +5592,6 @@ export type Database = {
           customer_supplied: boolean
           diluent_rate: number | null
           driver: string | null
-          epa_registration: string | null
           id: string
           job_id: string
           phi_days: number | null
@@ -5612,7 +5611,6 @@ export type Database = {
           customer_supplied?: boolean
           diluent_rate?: number | null
           driver?: string | null
-          epa_registration?: string | null
           id?: string
           job_id: string
           phi_days?: number | null
@@ -5632,7 +5630,6 @@ export type Database = {
           customer_supplied?: boolean
           diluent_rate?: number | null
           driver?: string | null
-          epa_registration?: string | null
           id?: string
           job_id?: string
           phi_days?: number | null

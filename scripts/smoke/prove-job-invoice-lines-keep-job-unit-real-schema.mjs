@@ -55,9 +55,10 @@ const TOUCHED = /transfer_job_to_invoice|job_chemicals|convert_to_gl_lb/i;
 // Later files that match TOUCHED and were checked against this proof. This proof replays only up to
 // its candidate, so a later file never runs here; each entry says why it leaves what it relies on intact.
 const REVIEWED_LATER = new Set([
-  // Adds job_chemicals.epa_registration (read-only to the app, set by a trigger) and wraps save_job's
-  // lines with an EPA keep; transfer_job_to_invoice, the line units and convert_to_gl_lb are unchanged.
-  '20261202115000_job_lines_keep_epa_number.sql',
+  // Revokes direct app writes on job_chemicals and adds an AFTER trigger that records a sprayed job's
+  // product EPA numbers in a separate table; transfer_job_to_invoice, the line units and convert_to_gl_lb
+  // are unchanged.
+  '20261202140000_job_lines_keep_epa_number.sql',
 ]);
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.

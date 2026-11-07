@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-06 for the live ledger only (permission tightening applied, ledger `20261106062807`); other evidence retains its stated dates.
+**Last verified:** 2026-11-07 for the live ledger only (latest live row `20261107053254`, `20261204110000_ki18_batch2_chicago_boards`); other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 

@@ -1256,8 +1256,9 @@ export function codexAppIdleOnRecentHeads(recentHeads, reviewedShas) {
 }
 
 // The PR's last pushed heads, newest first. A commit is a pushed head when GitHub
-// ran check suites on it; commits inside a multi-commit push have none. Looks at
-// most `maxLook` commits back, so a long run of suite-less commits stays cheap.
+// ran check suites on it (or the App reviewed it); commits inside a multi-commit push
+// have none. Looks at most `maxLook` commits back, so a long run of suite-less commits
+// stays cheap; finding fewer than 3 heads keeps the wait (the safe side).
 // prCommits: oldest first, as GitHub lists them. Throws on an unreadable read.
 export function recentPushedHeads(prCommits, headSha, isPushed, { want = SOL_APP_IDLE_HEADS, maxLook = 30 } = {}) {
   const shas = (prCommits || []).map((sha) => String(sha || "").toLowerCase());
@@ -1526,7 +1527,10 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
     facts.appReviewedShas = reviews.filter((review) => isCodexBotLogin(review?.user?.login)).map((review) => review?.commit_id);
     const commits = JSON.parse(gh(["api", `repos/${owner}/${name}/pulls/${number}/commits?per_page=100`, "--paginate", "--slurp"])).flat();
     facts.prCommits = commits.map((commit) => String(commit?.sha || "").toLowerCase());
+    // The App reviews only pushed heads, so a commit it reviewed counts even without check suites (Luna MED).
+    const appReviewed = new Set([...facts.appReviewedShas, facts.codexState?.sha].map((sha) => String(sha || "").toLowerCase()));
     facts.recentHeads = recentPushedHeads(facts.prCommits, headSha, (sha) => {
+      if (appReviewed.has(sha)) return true;
       const total = JSON.parse(gh(["api", `repos/${owner}/${name}/commits/${sha}/check-suites?per_page=1`]))?.total_count;
       if (!Number.isInteger(total)) throw new Error("unreadable check suites");
       return total > 0;

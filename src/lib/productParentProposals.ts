@@ -311,10 +311,20 @@ export function membersWithRateChange(group: ProposalGroup, rates: RateValues): 
   });
 }
 
+/** The other groups in the same proposal that share this group's EPA number (what the same-EPA flag points at). */
+export function sameEpaGroupNames(group: ProposalGroup, groups: ProposalGroup[]): string[] {
+  if (!group.generic_epa_registration) return [];
+  return groups
+    .filter((g) => g.id !== group.id && g.generic_epa_registration === group.generic_epa_registration)
+    .map((g) => g.suggested_name);
+}
+
 /** What still needs an answer before this group can be approved; empty when it is ready. */
 export function approvalProblems(group: ProposalGroup, draft: GroupDraft): string[] {
   const problems: string[] = [];
   if (!draft.name.trim()) problems.push('Name the parent.');
+  // product_parents.name holds at most 200 characters; say so here rather than fail at save.
+  else if ([...draft.name.trim()].length > 200) problems.push('Shorten the parent name to 200 characters or fewer.');
   for (const field of Object.keys(group.conflicts) as ConflictField[]) {
     if (draft.picks[field] === undefined) problems.push(`Pick the ${field === 'use_timings' ? 'Use Timing' : field === 'rates' ? 'rate' : field}.`);
   }

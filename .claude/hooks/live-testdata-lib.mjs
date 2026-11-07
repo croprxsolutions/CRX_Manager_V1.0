@@ -971,7 +971,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["5ea47dde9df5671b8b4acce4e274f242467e3eb71eeb0b3487c8940316a3019d", "profile-role-lock-insert-arm.sql"],
   ["201e22f0b21de39e663a7e732475a759b1e56a34316bed517dba68415ffc35cc", "quote-price-lock-boundary.sql"],
   ["cab1d5703f569d05b0c88812028f4ff4c6267256f4cc0163289152458873088d", "quote-versions-rpc-owned.sql"],
-  ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
+  ["4a12c1643b9f68d41a4b624706837f57b4a85ba3a97ff882e9d2986a029bdc32", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],
   ["7dab8645f051bbcf2d619853b721b8beac3eef0f901c37538b9d9c1b579c0961", "save-field-actor-binding.sql"],
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],

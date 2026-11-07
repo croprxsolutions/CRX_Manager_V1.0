@@ -2815,6 +2815,9 @@ function registryMigrationHighWater(): string {
 // 20261104130000, 20261104140000 and 20261104150000 were added on 2026-11-03 for the same reason:
 // all three applied live that day and the registry refresh after WP-PM-9 moved the boundary to
 // 20261104150000.
+// 20261202110000 and 20261204120000 were added on 2026-11-07: both applied live and the registry
+// refresh after #1584 moved the boundary past them (20261202110000 holds the newest
+// _insert_parent_size body). Clear them on the same type-regeneration rule.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2850,6 +2853,8 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261115160000',
   '20261123120000',
   '20261120100000',
+  '20261202110000',
+  '20261204120000',
 ]);
 
 /**
@@ -3044,6 +3049,15 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20261120100000 (KI-14) re-creates this renamed body with a trailing p_terms_by_invoice; it keeps
   // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes 20261120100000.
   '_update_field_app_invoice_billing_replay_impl_20261015',
+  // 20261204100000 (KI-18 batch 1) re-emits these renamed bodies only to take "today" from the Chicago date;
+  // each keeps p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water
+  // passes 20261204100000 (the bodies never reach the generated types).
+  '_batch_reschedule_deliveries_replay_impl_20261015',
+  '_create_followup_delivery_replay_impl_20261015',
+  '_create_job_from_quote_section_replay_impl_20261015',
+  '_dispatch_job_locations_replay_impl_20261015',
+  '_save_field_crop_history_replay_impl_20261015',
+  '_transition_rebate_claim_replay_impl_20261015',
   // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
   // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
   // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
@@ -3188,6 +3202,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_remainder_reminders: 'maintenance reminder sweep uses persisted sent markers to deduplicate',
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
+  // 20261204100000 (KI-18 batch 1) re-emits this trigger to take the season from the Chicago date. Prune once
+  // the registry high-water passes 20261204100000.
+  snapshot_field_crop_history:
+    'trigger-only crop-change recorder (RETURNS trigger, Postgres refuses direct calls); one row per field and season via ON CONFLICT (field_id, season), so a repeat converges',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
   // The forward-only label and stale-recipient candidates are NOT APPLIED and
   // re-emit both recorder helpers. Canonical local-candidate identities retain

@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
+
+**Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.
+**Why:** the tier is a pricing judgment the person quoting may need to make; the screen check makes it deliberate.
+**What this forbids/implies:** don't build a database refusal of a different tier for reps, and don't describe the screen check as a money invariant.
 ## 2026-11-06 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
 
 **Decision (Mason, Slack #crx-work, evening of 2026-11-06 Central, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs, before any migration apply and the merge, until Taha submits a review or 4 hours pass after opening.

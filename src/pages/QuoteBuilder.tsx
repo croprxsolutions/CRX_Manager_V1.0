@@ -2310,7 +2310,8 @@ export default function QuoteBuilder() {
       return null;
     }
     if (currentAssignedTier !== selectedCustomer.assigned_tier) {
-      setCustomerRow({ ...selectedCustomer, assigned_tier: currentAssignedTier });
+      // Only if the operator has not picked another customer while the read ran (Luna, #1605).
+      setCustomerRow((row) => (row?.id === customerId ? { ...row, assigned_tier: currentAssignedTier } : row));
     }
     if (tier !== currentAssignedTier && tierChoice !== tierChoiceKey(id, customerId, tier, currentAssignedTier)) {
       toast('error', customerView

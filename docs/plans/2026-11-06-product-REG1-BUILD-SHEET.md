@@ -357,4 +357,14 @@ Migration stamps in this project run ahead of the calendar; the stamps above are
 | 2026-11-06 | gpt-6-luna xhigh, re-plan round 8 | a9ef8e973 | 2 HIGH, 1 MED | fixed: seed screen PR before the seed; blank-number posted lines listed unless the product's registration is No; draft commit takes today's path until seeded |
 | 2026-11-06 | gpt-6-luna xhigh, re-plan round 9 | e644bc929 | 3 HIGH, 1 MED | fixed: blank-number posted lines always listed; sprayed job lines left Not recorded at 7.7 apply; seed requires Q1 and Q8; per-line RUP raise in the seed. Partly refuted: registrations cannot change before the seed (none exist), so seed capture is never worse than today |
 | 2026-11-06 | gpt-6-luna xhigh, re-plan round 10 | b58793379 | 1 MED | fixed: step 6 keeps `seed-assumed` for assumed picks. No BLOCKER or HIGH |
-| _pending_ | Sol (advisory) on the re-plan | | | |
+| 2026-11-06 | gpt-6-sol high (advisory), re-plan round 1 | 8d3ab0d64 | 4 HIGH, 1 MED | **open; review stopped** (below) |
+
+**Stopped after Sol re-plan round 1 (AGENTS stop rule).** Three of the four HIGHs, like Luna re-plan rounds 7 to 9, come from one mechanism: **capturing the 19 old not-yet-posted invoice lines (and listing old posted lines) at the seed from picks**. Open findings, kept for whoever continues:
+1. HIGH: a not-yet-posted line for a product with no EPA number has no truthful non-blank pick (section 5 steps 4 and 6 conflict).
+2. HIGH: a kept line whose quantity is edited after its product moved from A to B posts the whole new quantity under A (4.C kept-line rule).
+3. HIGH: the Compliance list of uncaptured posted sales filters on the registration's current status, so a sale under a number with no registration, or one now marked No, drops off the list.
+4. HIGH: the seed preview proposes the product's current number even when the line already stores a different, non-blank number.
+5. MED: the draft commit stores `registration_version` in `label_draft_targets` but never checks it, so a label link or status change after the draft is not detected.
+
+**Trade-off for Mason that would delete the mechanism:** instead of confirming the 19 old open lines one by one, the seed captures each from **the number already on the line, or for a blank line the product's current number** (exactly what posting uses today), marks them all `seed-assumed`, and Compliance lists every `seed-assumed` line and every posted line saved before the seed, with no status filter, for a person to check. No picks, no invented numbers. Cost: a blank old line is assumed to be the product's current number, as today.
+

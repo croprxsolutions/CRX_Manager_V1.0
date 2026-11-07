@@ -517,7 +517,7 @@ async function main() {
 
   // ---- Bad input, every writer: refused by name, nothing written.
   const before = owner('SELECT count(*) FROM public.product_weight_events;');
-  for (const [v, pat] of [['0', /OUT_OF_RANGE/], ['-1', /OUT_OF_RANGE/], ["'NaN'", /BAD_VALUE/], ["'Infinity'", /BAD_VALUE/], ['25.00005', /OUT_OF_RANGE/],
+  for (const [v, pat] of [['0', /OUT_OF_RANGE/], ['-1', /OUT_OF_RANGE/], ["'NaN'", /BAD_VALUE/], ["'Infinity'", /BAD_VALUE/], ['20.00005', /OUT_OF_RANGE/],
     ['0.00004', /OUT_OF_RANGE/]]) {
     refused(ADMIN, setD(P1, v), pat);
     refused(ADMIN, corrD(P1, v, 'measured', 'r', 'e'), pat);
@@ -546,8 +546,8 @@ async function main() {
   assert.equal(weight(L2).lb_per_unit, 10.1234, '4 decimals round-trip');
   ok(ADMIN, setD(P3, 8.12345, 'lb_per_gal', 'measured'));
   assert.equal(weight(L3).lb_per_unit, 8.1235, 'a fifth decimal rounds half-up');
-  ok(ADMIN, setD(P4, 25, 'lb_per_gal', 'measured'));
-  assert.equal(weight(L4).lb_per_unit, 25, 'the 25 lb/gal limit saves');
+  ok(ADMIN, setD(P4, 20, 'lb_per_gal', 'measured'));
+  assert.equal(weight(L4).lb_per_unit, 20, 'the 20 lb/gal limit saves');
   ok(ADMIN, setN(DEA, 5, 'label'));
   assert.equal(weight(DEA).lb_per_unit, 5, 'a 2 x 2.5-lb pack stocked in Ea weighs 5 lb per Ea');
   ok(ADMIN, setN(DEA3, '4000.00004', 'measured'));
@@ -835,7 +835,7 @@ async function main() {
   assert.equal(wsRow(WA, L2), 'none:no_approved_weight', 'a later save does not lock it in');
   psql(`INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order) VALUES ('${JA}', '${L4}', 1, 'Gal', 0, true, 4);`);
   touchWs(WA);
-  assert.equal(wsRow(WA, L4), 'density:25', 'a product added to the job is captured at today\'s weight');
+  assert.equal(wsRow(WA, L4), 'density:20', 'a product added to the job is captured at today\'s weight');
   // Qt line keeps its pounds after the factor changes (the row keeps its own map).
   setFactor('Qt', 30);
   assert.equal(JSON.parse(owner(`SELECT unit_factors->'factors'->'qt' FROM public.job_loader_worksheet_weights WHERE worksheet_id = '${WA}' AND product_id = '${L2}';`)).factor, 0.25);

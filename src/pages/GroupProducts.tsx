@@ -76,6 +76,10 @@ function BuildSummary({ proposal, groups, build }: { proposal: Proposal; groups:
             </ul>
           </div>
         )}
+        {/* shortcut: duplicate parents come only from a build reply, not stored; store them if admins miss the warning. */}
+        {!(build && build.proposal_id === proposal.id) && (
+          <p className="text-gray-600">Parents that already duplicate one another are listed here after you press Build.</p>
+        )}
       </div>
     </Card>
   );

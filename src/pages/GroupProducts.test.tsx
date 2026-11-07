@@ -89,8 +89,11 @@ describe('GroupProducts', () => {
     });
     render(<GroupProducts />);
     await screen.findByText('Rho');
+    // On a revisit there is no build reply, so the page says where the duplicate check shows.
+    expect(screen.getByText(/listed here after you press Build/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Build a new proposal' }));
     expect(await screen.findByText(/1 rejection carried from an earlier proposal/)).toBeInTheDocument();
+    expect(screen.queryByText(/listed here after you press Build/)).not.toBeInTheDocument();
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('fix these by hand');
     expect(alert).toHaveTextContent('Rho, Rho (EPA 524-475) (EPA 524-475, liquid)');

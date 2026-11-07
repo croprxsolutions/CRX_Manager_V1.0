@@ -76,6 +76,13 @@ export async function saveProductBrand(input: ProductBrandInput, idempotencyKey:
     p_signal_word: input.signalWord,
     p_idempotency_key: idempotencyKey,
   };
+  // upsert_parent_brand takes no size id, so re-read which list this size uses right before saving: a size
+  // moved to another parent since the screen loaded must not edit its old parent's brands.
+  // shortcut: a move landing in the milliseconds between this read and the save is not caught; close it in SQL if moves get frequent.
+  const current = await getProductBrands(input.productId);
+  if (current.parentId !== (input.parentId ?? null)) {
+    throw new Error(`${RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED}: this size's brand list moved since it loaded`);
+  }
   if (input.parentId) {
     const { data, error } = await supabaseUntyped.rpc('upsert_parent_brand', { p_parent_id: input.parentId, ...fields });
     if (error) throw error;
@@ -96,6 +103,12 @@ export function productBrandErrorMessage(error: unknown): string {
   if (hasRpcCode(error, RpcErrorCodes.BRAND_TEXT_TOO_LONG)) return 'Brand and manufacturer names are limited to 200 characters.';
   if (hasRpcCode(error, RpcErrorCodes.BRAND_NOT_FOUND) || hasRpcCode(error, RpcErrorCodes.PRODUCT_NOT_FOUND)) {
     return 'This brand or product no longer exists. Reload the page.';
+  }
+  if (hasRpcCode(error, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED) || hasRpcCode(error, RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT)) {
+    return 'This size joined or moved to a different parent since the page loaded, so nothing was saved. The list has been reloaded; open it again to edit.';
+  }
+  if (hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_GROUPING_NOT_OPEN)) {
+    return 'Shared parent brands can be changed once grouping is switched on. Nothing was saved.';
   }
   if (hasRpcCode(error, RpcErrorCodes.NOT_AUTHORIZED)) return 'Only an admin can change a product’s brands.';
   if (hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH)) {

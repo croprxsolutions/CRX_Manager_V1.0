@@ -122,6 +122,9 @@ function isClearRefusal(err: unknown): boolean {
     RpcErrorCodes.NOT_AUTHORIZED,
     RpcErrorCodes.PRODUCT_NOT_FOUND,
     RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH,
+    RpcErrorCodes.PRODUCT_PARENT_GROUPING_NOT_OPEN,
+    RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT,
+    RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED,
   ].some((code) => hasRpcCode(err, code));
 }
 
@@ -308,7 +311,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'upsert_product_brand' } });
       // An edit needs no lock: a changed resubmit after a lost-but-committed edit fails BRAND_CHANGED.
       if (!draft.brandId && !isClearRefusal(err)) setCreateUncertain(true);
-      if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED)) {
+      if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED) || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED)
+        || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT)) {
         // The form holds a version that is no longer current; close it so the next edit starts fresh.
         toast('error', productBrandErrorMessage(err));
         setDraft(null);

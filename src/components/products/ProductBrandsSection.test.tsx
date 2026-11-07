@@ -147,6 +147,18 @@ describe('ProductBrandsSection', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('after a definite refusal (grouping not switched on), leaves the form editable, not locked as uncertain', async () => {
+    mocks.saveProductBrand.mockRejectedValueOnce({ message: 'PRODUCT_PARENT_GROUPING_NOT_OPEN: grouping opens later' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByText(/once grouping is switched on/i)).toBeInTheDocument();
+    expect(screen.queryByText(/may already have been saved/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toBeEnabled());
+  });
+
   it('after an uncertain create is cancelled, keeps new creates off until the reload shows the saved brand', async () => {
     const madDog = { ...slam, id: 'b2', brand_name: 'Mad Dog', row_version: 1 };
     let releaseReload: (rows: typeof slam[]) => void = () => {};

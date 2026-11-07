@@ -22,6 +22,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** keeping numbers by job-line identity failed three Sol rounds on the same mechanism (save_job deletes and re-writes every line, so a line's identity does not survive a save). Locking by job and product has no such gap.
 **What this forbids/implies:** kept numbers live in `job_product_epa` (insert-only); a job's unlocked products read `products.epa_registration`. Printouts move to the kept numbers in a follow-up PR. A correction made between the physical spray and its record being entered reaches the job.
 
+## 2026-11-06 — A moved spray record makes its new job "Not recorded"
+
+**Decision (Mason, 2026-11-06: "Mark Not recorded"):** when a spray record is moved to a job that was not yet sprayed or finished, that job's products are kept as "Not recorded", never at the product's current number. A job already sprayed keeps its own numbers. Migration 20261204120000, PR #1584.
+**Why:** Sol found a new HIGH in three rounds in a row, each about a lock filled in when the true history is unknown; a moved record proves nothing about which numbers its new job used. The choice was block (refuse the move) vs loss (allow it, record no number); Mason chose loss, so nothing ever prints an invented number.
+**What this forbids/implies:** a job or product ID that has kept numbers can never be reused (both refused with `JOB_EPA_HISTORY_ID` / `PRODUCT_EPA_HISTORY_ID`).
+
 ## 2026-11-06 — Signed-in users cannot write job chemical lines directly
 
 **Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261204120000, PR #1584). Reads are unchanged.

@@ -13,7 +13,9 @@
   product's number today cannot prove what was sprayed (REG-1 build sheet section 7). A product added
   to such a job later is "Not recorded" too, since it may have been on the job before and removed.
 - Kept numbers survive deleting the product or the job, and staff see them wherever they can see the job.
-  A deleted job's ID can never be given to a new job, so its numbers cannot attach to another job.
+  A deleted job's or product's ID can never be given to a new one, so its numbers cannot attach elsewhere.
+- A spray record moved onto a job not yet sprayed or finished makes that job "Not recorded" (Mason,
+  2026-11-06, "Mark Not recorded"): a moved record proves nothing about the numbers its new job used.
 - No printout reads the kept numbers yet, so every printout still shows the product's number. A
   follow-up PR moves the sent proof, applicator sheet, chemical application report and WPS notice to
   them. Recording starts when this is applied, so that history exists for the follow-up.

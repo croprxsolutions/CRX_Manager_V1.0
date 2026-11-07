@@ -72,11 +72,20 @@ function session(sql) {
   done.catch(() => markReady());
   return { ready, done };
 }
-// Runs fn and asserts it waited for the background transaction (which sleeps 4 s after JK_READY).
-function waited(fn, what) {
-  const t = Date.now();
+// Held by a background transaction after JK_READY: it commits only once another session is seen waiting
+// on a lock (or after 8 s, printing JK_NO_WAITER), so a wait is observed in pg_locks, not inferred from time.
+const HOLD_UNTIL_WAITER = `DO $w$ BEGIN
+  FOR i IN 1..80 LOOP
+    EXIT WHEN EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND pid <> pg_backend_pid());
+    PERFORM pg_sleep(0.1);
+  END LOOP; END $w$;
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND pid <> pg_backend_pid())
+  THEN 'JK_SAW_WAITER' ELSE 'JK_NO_WAITER' END;`;
+// Runs fn while bg holds its lock and asserts fn really waited on a lock behind it.
+async function waited(bg, fn, what) {
   const r = fn();
-  assert.ok(Date.now() - t >= 2000, `${what} did not wait for the transaction in flight`);
+  const out = await bg.done;
+  assert.match(out, /JK_SAW_WAITER/, `${what} did not wait for the transaction in flight`);
   return r;
 }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
@@ -282,9 +291,9 @@ const shown = (job) => scalar(`SELECT COALESCE(string_agg(jc.sort_order || ':' |
  WHERE jc.job_id = '${job}';`);
 const locks = (job) => scalar(`SELECT COALESCE(string_agg(COALESCE(p.sku, '<deleted>') || '=' || COALESCE(l.epa_registration, '<null>'), ',' ORDER BY p.sku), '<none>')
   FROM public.job_product_epa l LEFT JOIN public.products p ON p.id = l.product_id WHERE l.job_id = '${job}';`);
-const backfilled = (job) => scalar(`SELECT string_agg(DISTINCT from_backfill::text, ',') FROM (
-  SELECT from_backfill FROM public.job_product_epa WHERE job_id = '${job}' UNION ALL
-  SELECT from_backfill FROM public.job_epa_sprayed WHERE job_id = '${job}') x;`);
+const backfilled = (job) => scalar(`SELECT string_agg(DISTINCT not_recorded::text, ',') FROM (
+  SELECT not_recorded FROM public.job_product_epa WHERE job_id = '${job}' UNION ALL
+  SELECT not_recorded FROM public.job_epa_sprayed WHERE job_id = '${job}') x;`);
 const marked = (job) => scalar(`SELECT count(*) FROM public.job_epa_sprayed WHERE job_id = '${job}';`);
 const setProductEpa = (pid, epa) => psql(`UPDATE public.products SET epa_registration = ${epa === null ? 'NULL' : `'${epa}'`} WHERE id = '${pid}';`);
 // Legacy-shaped numbers (blank, padded): the product setup guard refuses them on new writes, so write them the
@@ -426,7 +435,8 @@ async function main() {
   console.log('[prover] deleting and re-entering a spray record changes no number');
 
   // Finished without a spray record: completed and invoiced both lock. A spray record moved to
-  // another job locks that job.
+  // another job makes that job "Not recorded" (Mason, 2026-11-06), never today's number; a job already
+  // sprayed keeps its own numbers when one is moved onto it.
   const done = save(ADMIN, null, [chem(PE, 0)]);
   // Each step separately: the app allows scheduled -> in_progress -> completed -> invoiced only.
   for (const st of ['in_progress', 'completed']) psql(`UPDATE public.jobs SET status = '${st}' WHERE id = '${done}';`);
@@ -438,18 +448,28 @@ async function main() {
   const moveFrom = save(ADMIN, null, [chem(PE, 0)]);
   spray(moveFrom);
   psql(`UPDATE public.job_applied_records SET job_id = '${moveTo}' WHERE job_id = '${moveFrom}';`);
-  assert.equal(locks(moveTo), 'F=600-1');
+  assert.equal(locks(moveTo), 'F=<null>', 'a moved spray record never records the current number');
+  assert.equal(backfilled(moveTo), 'true');
+  assert.equal(locks(moveFrom), 'E=500-1', 'the job it came from keeps its numbers');
+  save(ADMIN, moveTo, [chem(PF, 0), chem(PA, 1)]);
+  assert.equal(locks(moveTo), 'A=<null>,F=<null>', 'a product added later to that job is Not recorded too');
+  const keepTo = save(ADMIN, null, [chem(PF, 0)]);
+  spray(keepTo);
+  psql(`UPDATE public.job_applied_records SET job_id = '${keepTo}' WHERE job_id = '${moveTo}';`);
+  assert.equal(locks(keepTo), 'F=600-1', 'a sprayed job keeps its numbers when a record is moved onto it');
+  assert.equal(backfilled(keepTo), 'false');
   setProductEpa(PE, '500-2');
   setProductEpa(PF, '600-2');
   assert.equal(shown(done), '0:500-1');
-  assert.equal(shown(moveTo), '0:600-1');
+  assert.equal(shown(moveTo), '0:<null>,1:<null>');
+  assert.equal(shown(keepTo), '0:600-1');
   // A job created already completed, then given lines (below the app roles): its products lock.
   const born = scalar(`INSERT INTO public.jobs (job_number, customer_id, status, job_date, created_by)
     VALUES ('JK-BORN', '${CUST}', 'completed', current_date, '${ADMIN}') RETURNING id;`);
   assert.equal(marked(born), '1', 'a job created completed is marked');
   psql(line(born, PF, 0));
   assert.equal(locks(born), 'F=600-2');
-  console.log('[prover] completed, invoiced, a moved spray record, and a job created completed each lock the job');
+  console.log('[prover] completed, invoiced and a job created completed lock the job; a moved spray record makes its new job Not recorded');
 
   // A job finished before the file: a product added later may have been on it then (no history), so it is
   // "Not recorded" too, never its current number. A new spray record on it changes nothing either.
@@ -510,7 +530,18 @@ ${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
   save(ADMIN, goneJob, [chem(PE, 0)]);
   psql(`DELETE FROM public.products WHERE id = '${gone}';`);
   assert.equal(locks(goneJob), 'E=500-2,<deleted>=900-1', 'a deleted product keeps its kept number on the job');
-  console.log('[prover] deleting a product never deletes the kept number of a job');
+  // Its ID can never be taken by a new product, and a product with kept numbers never changes its ID.
+  for (const sql of [
+    `INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, category, epa_registration, current_cost, tier1_price, is_active)
+      VALUES ('${gone}', '[PROVER] Reuse', 'Z2', 'liquid', 'Gal', 'Herbicide', '900-2', 10.00, 15.00, true);`,
+    `UPDATE public.products SET id = gen_random_uuid() WHERE id = '${PE}';`,
+  ]) {
+    const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: sql });
+    assert.notEqual(r.status, 0);
+    assert.match(`${r.stdout}
+${r.stderr}`, /PRODUCT_EPA_HISTORY_ID/);
+  }
+  console.log('[prover] deleting a product never deletes the kept number of a job, and its ID can never be reused');
 
   // Below the app roles: a line changed in place to another product on a sprayed job locks that product.
   const lineId = scalar(`SELECT id FROM public.job_chemicals WHERE job_id = '${trimmed}';`);
@@ -532,41 +563,36 @@ ${reuse.stderr}`, /JOB_EPA_HISTORY_ID/);
   const raceA = save(ADMIN, null, [chem(PA, 0)]);
   let bg = session(`BEGIN;
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceA}', current_date, 10);
-    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
   await bg.ready;
-  waited(() => save(ADMIN, raceA, [chem(PA, 0), chem(PC, 1)]), 'the save');
-  await bg.done;
+  await waited(bg, () => save(ADMIN, raceA, [chem(PA, 0), chem(PC, 1)]), 'the save');
   assert.equal(locks(raceA), `A=524-478,C=300-3`, 'a product saved during a spray is locked');
   // A save in flight adding a new product: a spray waits, then the new product is locked.
   const raceB = save(ADMIN, null, [chem(PA, 0)]);
-  bg = session(txIn(ADMIN, `${saveSql(raceB, [chem(PA, 0), chem(PC, 1)])}\nSELECT 'JK_READY';\nSELECT pg_sleep(4);`));
+  bg = session(txIn(ADMIN, `${saveSql(raceB, [chem(PA, 0), chem(PC, 1)])}\nSELECT 'JK_READY';\n${HOLD_UNTIL_WAITER}`));
   await bg.ready;
-  waited(() => spray(raceB), 'the spray');
-  await bg.done;
+  await waited(bg, () => spray(raceB), 'the spray');
   assert.equal(locks(raceB), `A=524-478,C=300-3`, 'a spray recorded while a save was in flight sees its lines');
   // A line written by another path (no job lock of its own) in flight: the freeze waits on the line's
   // job lock and then sees it. And the reverse.
   const raceC = save(ADMIN, null, [chem(PA, 0)]);
-  bg = session(`BEGIN; ${line(raceC, PC, 1)} SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+  bg = session(`BEGIN; ${line(raceC, PC, 1)} SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
   await bg.ready;
-  waited(() => spray(raceC), 'the spray');
-  await bg.done;
+  await waited(bg, () => spray(raceC), 'the spray');
   assert.equal(locks(raceC), `A=524-478,C=300-3`, 'a freeze waits for a line write in flight and sees it');
   const raceD = save(ADMIN, null, [chem(PA, 0)]);
   bg = session(`BEGIN;
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 10);
-    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
   await bg.ready;
-  waited(() => psql(line(raceD, PC, 1)), 'the line write');
-  await bg.done;
+  await waited(bg, () => psql(line(raceD, PC, 1)), 'the line write');
   assert.equal(locks(raceD), `A=524-478,C=300-3`, 'a line written while a freeze was in flight is locked');
   // Two spray records on one job at once: the second waits, neither fails.
   bg = session(`BEGIN;
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 1);
-    SELECT 'JK_READY'; SELECT pg_sleep(4); COMMIT;`);
+    SELECT 'JK_READY'; ${HOLD_UNTIL_WAITER} COMMIT;`);
   await bg.ready;
-  waited(() => spray(raceD), 'the second spray');
-  await bg.done;
+  await waited(bg, () => spray(raceD), 'the second spray');
   // A product EPA edit never waits on a spray in flight (no product lock is taken).
   bg = session(`BEGIN;
     INSERT INTO public.job_applied_records (job_id, application_date, applied_acres) VALUES ('${raceD}', current_date, 1);

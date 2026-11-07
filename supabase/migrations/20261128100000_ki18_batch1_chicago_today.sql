@@ -40,7 +40,12 @@
 -- each function's body md5, argument list (with defaults), search_path, SECURITY DEFINER, owner and exact
 -- live EXECUTE grants, and refuse if any replaced function has a second overload. Each has exactly one live
 -- signature (2026-11-06); for example the old ten-argument create_vendor_bill is gone and only the twelve-argument
--- one re-emitted here exists.
+-- one re-emitted here exists. Overload evidence for create_vendor_bill: 20260831161000_require_cumulative_po_bill_confirmation
+-- renamed the ten-argument version to _section9_create_vendor_bill_cumulative_impl (ALTER FUNCTION ... RENAME TO) and
+-- created the twelve-argument one with CREATE FUNCTION; live read-only check on 2026-11-06,
+--   SELECT oid::regprocedure FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'create_vendor_bill'
+-- returned exactly one row: create_vendor_bill(uuid,uuid,text,date,date,text,bigint,bigint,text,text,boolean,text).
+-- The same live check found exactly one signature for each of the 33 functions replaced here.
 -- No row is written; the preflight refuses if any RUP sales record's sale date is not the earlier of its invoice
 -- date and its Chicago creation day (live had none on 2026-11-06). Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: comment-only mentions; the advisory-lock key in _create_blend_ticket_replay_impl_20261015

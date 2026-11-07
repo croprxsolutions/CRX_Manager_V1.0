@@ -38,7 +38,9 @@
 -- Signatures, return types, SECURITY DEFINER and search_path are unchanged (each statement is the function's
 -- current live definition, reviewed here, with only its dates changed); CREATE OR REPLACE keeps owners and grants. The preflight and postflight pin
 -- each function's body md5, argument list (with defaults), search_path, SECURITY DEFINER, owner and exact
--- live EXECUTE grants.
+-- live EXECUTE grants, and refuse if any replaced function has a second overload. Each has exactly one live
+-- signature (2026-11-06); for example the old ten-argument create_vendor_bill is gone and only the twelve-argument
+-- one re-emitted here exists.
 -- No row is written; the preflight refuses if any RUP sales record's sale date is not the earlier of its invoice
 -- date and its Chicago creation day (live had none on 2026-11-06). Re-runnable: the preflight accepts the pre-image or this file's body.
 -- Not changed here: comment-only mentions; the advisory-lock key in _create_blend_ticket_replay_impl_20261015
@@ -111,6 +113,11 @@ BEGIN
            NOT IN ('CURRENT_DATE', '((now() AT TIME ZONE ''America/Chicago''::text))::date')
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: a column date default drifted from CURRENT_DATE; re-review before replacing it';
+  END IF;
+  -- Overloads: every function this file replaces must have exactly one signature (live: one each, 2026-11-06).
+  IF EXISTS (SELECT 1 FROM (VALUES ('_reverse_credit_memo_application'), ('_reverse_write_off_replay_impl_20261015'), ('apply_credit_memo_to_invoice'), ('_apply_prepay_to_invoice_replay_impl_20261015'), ('_apply_write_off_replay_impl_20261015'), ('_post_commission_payment_intent_impl_20260809'), ('_void_commission_payment_intent_impl_20260809'), ('_void_payment_replay_impl_20261015'), ('_create_commission_payment_intent_impl_20260809'), ('_save_quote_below_cost_impl_20260810'), ('get_ar_reminder_candidates'), ('_enforce_applicator_license'), ('_dispatch_job_locations_replay_impl_20261015'), ('generate_rup_sales_records'), ('get_dispatch_stock_status'), ('get_job_inventory_shortfalls'), ('_get_inventory_position_cost_impl_20261019'), ('_create_inventory_hold_intent_impl_20260905'), ('_transition_rebate_claim_replay_impl_20261015'), ('_create_rush_order_below_cost_impl_20260810'), ('_create_followup_delivery_replay_impl_20261015'), ('_create_job_from_quote_section_replay_impl_20261015'), ('_batch_reschedule_deliveries_replay_impl_20261015'), ('_save_field_crop_history_replay_impl_20261015'), ('_save_field_app_split_invoice_impl'), ('snapshot_field_crop_history'), ('create_vendor_bill'), ('record_vendor_payment'), ('create_order_from_blend_ticket'), ('create_quick_delivery'), ('reverse_credit_memo_application'), ('_unapply_return_credit_guard_impl_20260826'), ('_void_invoice_split_provenance_impl_20260719')) t(n)
+              WHERE (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = t.n) <> 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: a function this file replaces has another overload; re-review before replacing it';
   END IF;
   IF EXISTS (SELECT 1 FROM rup_sales_records r JOIN invoices i ON i.id = r.invoice_id
               WHERE r.sale_date IS DISTINCT FROM LEAST(i.invoice_date, (r.created_at AT TIME ZONE 'America/Chicago')::date)) THEN

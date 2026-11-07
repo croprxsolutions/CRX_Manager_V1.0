@@ -11,7 +11,7 @@
 --   corrected only once every old record that shows an EPA number keeps its own copy (build sheet
 --   docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md, PAR-1 identity correction; DECISION_LOG
 --   2026-10-30). The reader trace is in docs/reference/product-corrections-record-map.md. Spray-job
---   lines got their copy in 20261201100000_job_lines_keep_epa_number (which also makes a product EPA
+--   lines got their copy in 20261202115000_job_lines_keep_epa_number (which also makes a product EPA
 --   edit reach only jobs not sprayed yet, keeps a sprayed job's numbers through save_job, refuses
 --   moving a sprayed line to another job, and locks product, then job, then lines). This file adds the
 --   invoice-line copy rule and the correction itself; the switch stays OFF here. A later migration
@@ -25,7 +25,7 @@
 --   - No reader changes here (Mason, 2026-11-06, simpler plan): every printout, the sent proof and the
 --     year-end summary still show what they show today.
 --   - The parent identity correction can change the generic EPA number: the parent, every size
---     (under the parent copy pass) and, through 20261201100000's products trigger, the lines of jobs
+--     (under the parent copy pass) and, through 20261202115000's products trigger, the lines of jobs
 --     not sprayed yet take the new number, in one transaction with one logged event. Sprayed and
 --     finished jobs, invoices and restricted-use records keep the number they were made with. It is
 --     refused while any invoice line for one of the sizes has no EPA copy of its own (that line would
@@ -38,7 +38,7 @@
 --   notes change went live in 20261202110000).
 --
 -- LOCK ORDER: the correction locks the parent and its sizes (_lock_product_parent), then each size's
---   EPA write runs 20261201100000's products trigger, which locks the open jobs (id order) and then
+--   EPA write runs 20261202115000's products trigger, which locks the open jobs (id order) and then
 --   their lines: product, then job, then lines, the order every other writer uses. The invoice trigger
 --   reads the product FOR SHARE, as the job-line trigger does.
 --
@@ -46,7 +46,7 @@
 --   correct_product_parent_identity from their previous live bodies, drop trg_fill_invoice_line_epa
 --   and _fill_invoice_line_epa, and drop _product_parent_epa_correction_enabled.
 --
--- ORDERING: apply after 20261201100000_job_lines_keep_epa_number and every older pending migration.
+-- ORDERING: apply after 20261202115000_job_lines_keep_epa_number and every older pending migration.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -69,7 +69,7 @@ BEGIN
      OR to_regprocedure('public._job_line_epa_follows_product(uuid)') IS NULL
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
                      AND tgname = 'trg_product_epa_to_unsprayed_job_lines' AND tgenabled = 'O') THEN
-    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261201100000_job_lines_keep_epa_number first';
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_PREFLIGHT: apply 20261202115000_job_lines_keep_epa_number first';
   END IF;
   IF to_regprocedure('public._product_parent_epa_correction_enabled()') IS NOT NULL
      OR to_regprocedure('public._fill_invoice_line_epa()') IS NOT NULL THEN

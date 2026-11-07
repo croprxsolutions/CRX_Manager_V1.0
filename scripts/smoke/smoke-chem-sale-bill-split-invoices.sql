@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a Bill Split sale bills one invoice per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261204130000_chem_sale_bill_split_invoices (billing plan M2).
+-- Migration 20261208110000_chem_sale_bill_split_invoices (billing plan M2).
 --   A  Card 60/40 on line 1, line 2's own shares 100% to the main customer: a delivery drafts two
 --      invoices in one group, base-1 and base-2, CS- numbers, each line adds up exactly
 --   B  A three-way split: the leftover cents go to the main customer
@@ -46,6 +46,8 @@
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
 --   AH An inactive customer can't become a payer, on the card or on a line
 --   AI A line with its own shares can't move to another sale (ORDER_ITEM_SHARES_LINE_MOVE)
+--   AN A one-customer draft with a group id but no split record still blocks a payer
+--   AO A delivery that drafts its payers clears the split flag
 --   AM A posted invoice keeps its type; only a draft switches between chemical sale and misc charge
 --   AL A line delivered past its planned quantity splits its capped total by percentage
 --   AJ A payer's share under 0.01 of quantity worth cents refuses the split (option B); the delivery completes,
@@ -690,6 +692,9 @@ BEGIN
   END IF;
   PERFORM void_invoice_group((SELECT invoice_group_id FROM invoices WHERE delivery_id = v_d LIMIT 1), 'Rolled-back smoke; bill split', 'smk-spl-xv-' || v_suffix);
   v_r := create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-xc-' || v_suffix);
+  IF jsonb_array_length(v_r->'invoice_numbers') IS DISTINCT FROM jsonb_array_length(v_r->'invoice_ids') THEN
+    v_fails := v_fails || ' (X) Create Invoice did not name every payer''s invoice;';
+  END IF;
   v_n := (SELECT count(*) FROM invoices WHERE delivery_id = v_d);
   IF create_invoice_for_unbilled_delivery(v_d, v_admin, 'smk-spl-xc-' || v_suffix) IS DISTINCT FROM v_r
      OR (SELECT count(*) FROM invoices WHERE delivery_id = v_d) <> v_n THEN
@@ -994,11 +999,7 @@ BEGIN
   -- AH: an inactive customer can't become a payer, on the card or on a line.
   PERFORM pg_temp.smk_new_sale('ah' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
-  SELECT id INTO v_inv2 FROM customers
-   WHERE is_active = true AND id NOT IN (v_main, v_payer2, v_payer3)
-     AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = customers.id AND i.status IN ('posted', 'overdue'))
-   ORDER BY created_at LIMIT 1;
-  UPDATE customers SET is_active = false WHERE id = v_inv2;
+  INSERT INTO customers (farm_name, is_active) VALUES ('SMK-SPL-AH' || v_suffix, false) RETURNING id INTO v_inv2;
   BEGIN
     PERFORM pg_temp.smk_card(v_o, v_inv2, 40);
     v_fails := v_fails || ' (AH) the card took an inactive customer;';
@@ -1118,6 +1119,29 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'INVOICE_TYPE_IMMUTABLE%' THEN v_fails := v_fails || ' (AM) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
+
+  -- AN: a one-customer draft with a group id but no split record still blocks a payer: only the split writer's
+  -- invoices stand as a group.
+  PERFORM pg_temp.smk_new_sale('fgp' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, status, invoice_date, total_amount_cents, total_cost_cents, created_by, invoice_group_id)
+    VALUES ('SMK-SPL-AN' || v_suffix, 'chemical_sale', v_o, v_main, 'draft', CURRENT_DATE, 0, 0, v_admin, gen_random_uuid());
+  BEGIN
+    PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+    v_fails := v_fails || ' (AN) a payer was added past a one-customer draft with a made-up group id;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'BILL_SPLIT_HAS_DRAFT%' THEN v_fails := v_fails || ' (AN) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+
+  -- AO: a delivery that drafts its payers clears a flag an earlier field split left, and Create Invoice names every payer's invoice.
+  PERFORM pg_temp.smk_new_sale('flg' || v_suffix);
+  SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
+  PERFORM pg_temp.smk_card(v_o, v_payer2, 40);
+  UPDATE orders SET needs_split_billing = true WHERE id = v_o;
+  PERFORM pg_temp.smk_done(v_d, 'flg' || v_suffix);
+  IF (SELECT needs_split_billing FROM orders WHERE id = v_o) THEN
+    v_fails := v_fails || ' (AO) the split flag stayed after every delivery was billed;';
+  END IF;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL chem sale bill split:%', v_fails;

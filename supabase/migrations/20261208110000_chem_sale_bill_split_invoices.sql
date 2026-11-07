@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261204130000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261208110000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
@@ -134,7 +134,9 @@ BEGIN
       JOIN public.orders o ON o.id = s.order_id
       JOIN public.invoices i ON i.order_id = o.id
      WHERE s.customer_id <> o.customer_id
-       AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.invoice_group_id IS NULL
+       AND i.invoice_type IN ('chemical_sale', 'misc_charge')
+       AND (i.invoice_group_id IS NULL
+            OR NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.invoice_id = i.id))
        AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
   ) THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a sale with other payers has a one-customer invoice; resolve it before applying';
@@ -239,7 +241,9 @@ BEGIN
     FROM invoices i
    WHERE i.order_id = p_order_id
      AND i.invoice_type IN ('chemical_sale', 'misc_charge')
-     AND i.invoice_group_id IS NULL
+     -- Only the split writer's invoices stand as a group: a group id with no split record is still one customer's draft.
+     AND (i.invoice_group_id IS NULL
+          OR NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.invoice_id = i.id))
      AND i.deleted_at IS NULL
      AND i.status IN ('draft', 'unposted')
    ORDER BY i.created_at
@@ -1333,6 +1337,17 @@ BEGIN
         -- is told; Create Invoice on the delivery runs the same split again.
         BEGIN
           v_bill_split_ids := public._create_bill_split_delivery_invoices(p_delivery_id, v_effective_completion_date, v_actor);
+          -- As Create Invoice does: the flag stays while another completed delivery is still unbilled.
+          UPDATE orders SET needs_split_billing = false, updated_at = now()
+           WHERE id = v_delivery.order_id AND needs_split_billing
+             AND NOT EXISTS (
+               SELECT 1 FROM deliveries d
+                WHERE d.order_id = v_delivery.order_id AND d.id <> p_delivery_id
+                  AND d.status = 'completed' AND d.deleted_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM invoices i
+                     WHERE i.delivery_id = d.id AND i.status NOT IN ('voided', 'cancelled')
+                       AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL));
         EXCEPTION WHEN OTHERS THEN
           v_bill_split_failed := true;
           INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
@@ -1568,6 +1583,7 @@ BEGIN
     SELECT id, invoice_number INTO v_invoice_id, v_invoice_number FROM invoices WHERE id = v_invoice_ids[1];
     v_result := jsonb_build_object('success', true, 'delivery_id', p_delivery_id,
       'invoice_id', v_invoice_id, 'invoice_number', v_invoice_number, 'invoice_ids', to_jsonb(v_invoice_ids),
+      'invoice_numbers', (SELECT jsonb_agg(invoice_number ORDER BY invoice_number) FROM invoices WHERE id = ANY (v_invoice_ids)),
       'total_cents', (SELECT sum(total_amount_cents) FROM invoices WHERE id = ANY (v_invoice_ids)));
     IF p_idempotency_key IS NOT NULL THEN
       PERFORM save_idempotency(p_idempotency_key, 'create_invoice_for_unbilled_delivery', v_result);

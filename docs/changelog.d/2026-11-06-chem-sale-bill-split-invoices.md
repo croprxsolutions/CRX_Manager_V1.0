@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261204130000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261208110000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -37,3 +37,4 @@ A payer share under 0.01 of a unit that is worth cents now refuses the split, so
 A Bill Split bills only delivered quantities in whole hundredths (2.12, not 2.125), so every payer, the main customer too, can return a share in full (Mason, 2026-11-06, an independent Opus review agreed). A finer delivery still completes, the office is told, and Fix Delivery corrects it before Create Invoice.
 An unposted Bill Split invoice can be corrected like a draft: header edits and charges save, its product lines stay locked, and the group posts again.
 Each other payer pays exactly their percentage of each line again, rounded down to the cent, on their quantity in whole hundredths; the main customer takes the rest, under a cent per other payer on each line (Mason, 2026-11-06, restoring exact cents over quantity times price). A line delivered past its planned quantity splits its capped total by percentage the same way. A save retried after a lost response still answers once the group posts.
+A one-customer draft given a group id with no split record blocks adding a payer. A delivery that drafts its payers clears the split flag, and Create Invoice returns every payer's invoice number.

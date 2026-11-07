@@ -325,7 +325,7 @@ BEGIN
   -- than a missing-row check: insert the exact field-acre audit payload the old
   -- guard trusted. The fixed guard ignores audit history entirely and requires
   -- an immutable row in the private canonical-RPC provenance table.
-  -- A draft joins a group only inside a split claim (20261204130000), so first prove a bare
+  -- A draft joins a group only inside a split claim (20261208110000), so first prove a bare
   -- assign is refused, then open a claim by hand to reach the provenance check behind it.
   BEGIN
     UPDATE public.invoices SET invoice_group_id = v_fake_group WHERE id = v_invoice;

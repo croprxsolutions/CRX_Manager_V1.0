@@ -18,6 +18,16 @@
  *     and under 3x a rep's plain read of the same deliveries.
  * It also runs the live smoke chain in the scratch database.
  *
+ * 20261202100000_deliveries_list_keyset_page.sql (Goal 4 follow-up): get_deliveries_page now calls
+ * get_deliveries_keyset_page, so every check above also covers it with no bookmark. Section 11 adds:
+ *   - following next_cursor lists exactly the full read for the default order, every sort key both ways,
+ *     filters with search, and a driver; the last page has no next_cursor;
+ *   - a delivery cancelled before the bookmark, and the bookmarked delivery itself, make offset paging skip
+ *     rows while bookmark paging returns the same next page (default order and five sorts);
+ *   - stale (other sort, direction or day) and malformed bookmarks are refused, as are a bookmark with an
+ *     offset or an id cursor; anon cannot execute; a second apply is refused; its smoke chain passes;
+ *   - at 60,000 deliveries a rep's bookmarked page stays under 8 s and 3x a plain read.
+ *
  * Run: node scripts/smoke/prove-deliveries-page-real-schema.mjs   (needs Docker; never touches live)
  * Reuse a built database: UNDO_PATHS_CONTAINER=<name> DELIVERIES_PAGE_PROOF_REUSE=1 (left running).
  * Prints DELIVERIES_PAGE_PROOF_PASS on success.
@@ -28,6 +38,7 @@ import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, asUser, refuse, claims, signIn, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20261130100000_deliveries_list_page.sql';
+const KEYSET = '20261202100000_deliveries_list_keyset_page.sql';
 const reuse = process.env.DELIVERIES_PAGE_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const N = 1203;
@@ -336,6 +347,91 @@ try {
   assert.match(again.stderr, /DELIVERIES_PAGE_ALREADY_EXISTS/);
   console.log('[deliveries-page] second apply refused');
 
+  // 11. Bookmark (keyset) paging: get_deliveries_keyset_page (20261202100000).
+  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${path.basename(KEYSET, '.sql')}';`), '1',
+    'the keyset candidate must have replayed (its preflight and postflight passed)');
+  const callK = (uid, o, after) => JSON.parse(probe(uid,
+    `${asUser(`r := public.get_deliveries_keyset_page(${args(o)}${after ? `, p_after => ${q(JSON.stringify(after))}::jsonb` : ''});`)} v := r::text;`));
+  /** Follows next_cursor in pages of `size`; the rows must be exactly the full read, in order. */
+  function keysetMatch(uid, o, size) {
+    const all = callAll(uid, o);
+    const first = callK(uid, { ...o, limit: size });
+    assert.deepEqual(first, call(uid, { ...o, limit: size }), `${JSON.stringify(o)}: get_deliveries_page and the keyset page differ on page one`);
+    const got = [];
+    for (let page = first, n = 0; ; n++) {
+      assert.equal(page.total_count, all.total_count, `${JSON.stringify(o)}: total_count moved`);
+      assert.ok(page.rows.length <= size);
+      got.push(...ids(page));
+      if (!page.next_cursor) break;
+      assert.ok(n < 1000, 'next_cursor never ended');
+      page = callK(uid, { ...o, limit: size }, page.next_cursor);
+    }
+    assert.deepEqual(got, ids(all), `${JSON.stringify(o)}: bookmark pages of ${size} differ from the full read`);
+  }
+  keysetMatch(USERS.admin, {}, 37);
+  for (const key of ['delivery_number', 'customer_name', 'driver_name', 'scheduled_date', 'priority', 'status', 'item_count']) {
+    for (const desc of [false, true]) keysetMatch(USERS.admin, { sort_key: key, sort_desc: desc }, 50);
+  }
+  keysetMatch(USERS.admin, { search: 'beta', statuses: ['completed', 'scheduled'] }, 23);
+  keysetMatch(USERS.admin, { statuses: ['cancelled'], sort_key: 'priority', sort_desc: true }, 11);
+  keysetMatch(USERS.driver, {}, 37);
+  console.log('[deliveries-page] bookmark paging equals the full read: default, 7 sorts x 2, filters + search, a driver');
+
+  // A delivery on page one is cancelled, and so is the bookmarked (last) one: offset paging skips two rows,
+  // bookmark paging returns the same page two.
+  for (const o of [{}, { sort_key: 'priority' }, { sort_key: 'priority', sort_desc: true }, { sort_key: 'status' },
+    { sort_key: 'item_count', sort_desc: true }, { sort_key: 'customer_name' }]) {
+    const keyset = (extra) => `public.get_deliveries_keyset_page(${args({ ...o, limit: 50 })}${extra})`;
+    const out = probe(USERS.admin, `
+      ${asUser(`r := ${keyset('')}; r2 := ${keyset(", p_after => r->'next_cursor'")};`)}
+      SET LOCAL session_replication_role = replica;
+      UPDATE public.deliveries SET status = 'cancelled' WHERE id IN ((r->'rows'->9->>'id')::uuid, (r->'rows'->49->>'id')::uuid);
+      SET LOCAL session_replication_role = origin;
+      ${asUser(`r3 := ${keyset(", p_after => r->'next_cursor'")};`)}
+      t := (SELECT string_agg(e->>'id', ',' ORDER BY i) FROM jsonb_array_elements(r2->'rows') WITH ORDINALITY x(e, i));
+      t2 := (SELECT string_agg(e->>'id', ',' ORDER BY i) FROM jsonb_array_elements(r3->'rows') WITH ORDINALITY x(e, i));
+      ${asUser(`r3 := public.get_deliveries_page(${args({ ...o, limit: 50, offset: 50 })});`)}
+      v := concat_ws('|', jsonb_array_length(r2->'rows'), t = t2, r3->'rows'->0->>'id' = r2->'rows'->2->>'id');`);
+    assert.equal(out, '50|t|t', `${JSON.stringify(o)}: expected a full page two, unchanged by bookmark, and offset paging to skip two (got ${out})`);
+  }
+  console.log('[deliveries-page] two deliveries removed before the bookmark (one the bookmark itself): offset skips 2, bookmark skips none, 6 orders');
+
+  // Refused bookmarks.
+  const page1 = callK(USERS.admin, { sort_key: 'priority', limit: 50 });
+  const cur = page1.next_cursor;
+  assert.deepEqual(Object.keys(cur).sort(), ['dir', 'id', 'k', 'n', 's', 'today', 'v']);
+  const kRefuse = (o, after, extra = '') => attempt(USERS.admin,
+    `${refuse(`PERFORM public.get_deliveries_keyset_page(${args(o)}, p_after => ${q(JSON.stringify(after))}::jsonb${extra});`)} v := t;`);
+  for (const [o, after] of [[{ sort_key: 'status' }, cur], [{}, cur], [{ sort_key: 'priority', sort_desc: true }, cur],
+    [{ sort_key: 'priority' }, { ...cur, today: '2026-06-16' }]]) {
+    assert.match(kRefuse(o, after), /DELIVERIES_PAGE_STALE_CURSOR/, `stale bookmark not refused: ${JSON.stringify(o)} ${JSON.stringify(after)}`);
+  }
+  const { v: _v, ...noV } = cur;
+  for (const after of [[1], { ...cur, id: 'nope' }, { ...cur, id: 7 }, noV, { ...cur, s: 'not-a-date' }, { ...cur, s: 3 }]) {
+    assert.match(kRefuse({ sort_key: 'priority' }, after), /DELIVERIES_PAGE_BAD_CURSOR/, `malformed bookmark not refused: ${JSON.stringify(after)}`);
+  }
+  const countCur = callK(USERS.admin, { sort_key: 'item_count', limit: 50 }).next_cursor;
+  assert.match(kRefuse({ sort_key: 'item_count' }, { ...countCur, v: 'x' }), /DELIVERIES_PAGE_BAD_CURSOR/);
+  const defCur = callK(USERS.admin, { limit: 50 }).next_cursor;
+  assert.match(kRefuse({}, { ...defCur, v: 'x' }), /DELIVERIES_PAGE_BAD_CURSOR/, 'a value in v with no sort column must be refused');
+  assert.match(kRefuse({ sort_key: 'priority' }, cur, ', p_offset => 50'), /DELIVERIES_PAGE_BAD_ARGS/);
+  assert.match(kRefuse({ sort_key: 'priority' }, cur, `, p_after_id => '${NIL}'`), /DELIVERIES_PAGE_BAD_ARGS/);
+  assert.equal(scalar("SELECT has_function_privilege('anon', 'public.get_deliveries_keyset_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid,jsonb)', 'EXECUTE');"), 'f');
+  assert.equal(scalar("SELECT prosecdef FROM pg_proc WHERE proname = 'get_deliveries_keyset_page';"), 'f');
+  console.log('[deliveries-page] stale and malformed bookmarks refused; anon cannot execute; SECURITY INVOKER');
+
+  const kChain = readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-goal4-deliveries-keyset-page.sql'), 'utf8');
+  const kSmoked = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1'], { input: kChain, allowFailure: true });
+  assert.match(kSmoked.stderr, /SMOKE_PASS_ROLLBACK/, `smoke-goal4-deliveries-keyset-page.sql did not pass:\n${kSmoked.stderr}`);
+  console.log('[deliveries-page] smoke-goal4-deliveries-keyset-page.sql: PASS (rolled back)');
+
+  const keysetSql = readFileSync(path.join(ROOT, 'supabase', 'migrations', KEYSET), 'utf8').replaceAll('\r\n', '\n');
+  docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/dp-keyset.sql'], { input: keysetSql });
+  const againK = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/dp-keyset.sql'], { allowFailure: true });
+  assert.notEqual(againK.status, 0, 'a second apply of the keyset migration must be refused');
+  assert.match(againK.stderr, /DELIVERIES_KEYSET_PAGE_ALREADY_EXISTS/);
+  console.log('[deliveries-page] keyset migration: second apply refused');
+
   // 10. Speed at 60,000 deliveries (Sol + Taha, 2026-11-06: a rep's first page took ~9 s on live hardware when
   // every page counted items for every match). Seeded in one rolled-back transaction. Each call is compared with a
   // rep's plain read of the same deliveries (the same row level security cost), so the check holds on any PC:
@@ -359,19 +455,26 @@ try {
     ANALYZE public.deliveries; ANALYZE public.delivery_items; ANALYZE public.customers;
     ${ms('warm', 'n := (SELECT count(*) FROM public.deliveries);')}
     ${ms('base', 'n := (SELECT count(*) FROM public.deliveries);')}
+    ${ms('rep_cold', page({ limit: 50 }))}
     ${ms('rep_first', page({ limit: 50 }))}
     ${ms('rep_by_id', page({ limit: 500, after_id: NIL }))}
     ${ms('rep_export', page({ limit: 500, offset: 30000 }))}
     ${ms('rep_items_sort', page({ limit: 50, sort_key: 'item_count' }))}
     ${signIn(USERS.admin)}
     ${ms('admin_first', page({ limit: 50 }))}
+    ${signIn(USERS.rep)}
+    ${asUser(page({ limit: 50 }))}
+    ${ms('rep_keyset', `r2 := public.get_deliveries_keyset_page(${args({ limit: 50 })}, p_after => r->'next_cursor');`)}
     v := t;`);
   const times = Object.fromEntries(timed.split(',').map((kv) => kv.split('=')).map(([k, n]) => [k, Number(n)]));
   console.log(`[deliveries-page] 60,000 deliveries, ms: ${JSON.stringify(times)}`);
-  for (const k of ['rep_first', 'rep_by_id', 'rep_export', 'admin_first']) {
+  for (const k of ['rep_first', 'rep_by_id', 'rep_export', 'admin_first', 'rep_keyset']) {
     assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 deliveries (authenticated statement_timeout is 8 s)`);
     assert.ok(times[k] < 3 * Math.max(times.base, 100), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
   }
+  // The very first call also plans get_deliveries_page and the keyset function it wraps (one-time; 0.2-0.6 s here, more on a busy PC);
+  // it is held only to the timeout, and rep_first measures the per-page cost.
+  assert.ok(times.rep_cold < 8000, `rep_cold took ${times.rep_cold} ms at 60,000 deliveries`);
   // Sorting by item count still counts every match (known limit, in the migration record and KNOWN_ISSUES); it must
   // at least stay under the timeout here.
   assert.ok(times.rep_items_sort < 8000, `rep_items_sort took ${times.rep_items_sort} ms at 60,000 deliveries`);

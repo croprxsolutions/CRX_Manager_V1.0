@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-07: "Yes, remove it"; migration 20261201100000, PR #1584). Reads are unchanged.
 **Why:** a sprayed job's lines keep the EPA number actually used, but a direct delete-and-re-add through the database API would give the line the product's newer number; two Sol rounds found variants of that hole, and the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions).
 **What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
+## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
+
+**Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.
+**Why:** in the DM-1 plan, Sol found new HIGHs from the merge alias three rounds running (a decision race, an undo that broke its own rule, a CAS moved by the merge). Duplicates will be rare: a typed CAS number already reuses the existing entry (D-AA-1). Removing the link deletes the whole class of bugs, at the cost of a few more clicks per duplicate.
+**What this forbids/implies:** this refines D-AA (2026-08-27). D-AA-1 now means "a CAS match reuses the entry", and a CAS that already belongs to another entry is refused rather than joined. D-AA-2's side-by-side approval is the possible-duplicates list, which Mason resolves by correction. Plan: `docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md`.
 
 ## 2026-11-06 — A Deliveries export may miss a delivery cancelled or reactivated while it runs
 

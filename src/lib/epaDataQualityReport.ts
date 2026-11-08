@@ -163,6 +163,20 @@ export function buildFindingsForRegistration(
 
   if (!epaResult) return [];
 
+  if (epaResult.transferredTo) {
+    const movedTo = epaResult.transferredTo;
+    return products.map((product) => finding(
+      'TRANSFERRED',
+      'action',
+      registrationNumber,
+      product,
+      classification.kind === 'distributor'
+        ? `EPA moved this product's base registration to ${movedTo}. Confirm the new distributor number with the supplier.`
+        : `EPA moved this registration to ${movedTo}. Update the saved number.`,
+      { ourValue: registrationNumber, epaValue: movedTo },
+    ));
+  }
+
   if (!epaResult.found) {
     return products.map((product) => finding(
       'NOT_FOUND',
@@ -176,19 +190,6 @@ export function buildFindingsForRegistration(
 
   const findings: EpaDataQualityFinding[] = [];
   for (const product of products) {
-    if (epaResult.transferredTo) {
-      findings.push(finding(
-        'TRANSFERRED',
-        'action',
-        registrationNumber,
-        product,
-        classification.kind === 'distributor'
-          ? `EPA moved this product's base registration to ${epaResult.transferredTo}. Confirm the new distributor number with the supplier.`
-          : `EPA moved this registration to ${epaResult.transferredTo}. Update the saved number.`,
-        { ourValue: registrationNumber, epaValue: epaResult.transferredTo },
-      ));
-    }
-
     if (
       epaResult.productname &&
       namesClearlyDifferent(product.product_name, epaResult.productname)

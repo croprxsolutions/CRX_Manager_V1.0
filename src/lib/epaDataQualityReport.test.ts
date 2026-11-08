@@ -144,7 +144,7 @@ describe('EPA data-quality finding classification', () => {
       '524-475',
       classifyRegistrationNumber('524-475'),
       [product({ epa_registration: '524-475', product_name: 'Roundup Ultra' })],
-      epa({ eparegno: '105211-77', transferredTo: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE' }),
+      epa({ found: false, eparegno: '105211-77', transferredTo: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE' }),
     );
 
     expect(findings[0]).toMatchObject({
@@ -155,7 +155,7 @@ describe('EPA data-quality finding classification', () => {
       epaValue: '105211-77',
       message: 'EPA moved this registration to 105211-77. Update the saved number.',
     });
-    expect(findings.map((finding) => finding.type)).toContain('SIGNAL_WORD_AVAILABLE');
+    expect(findings.map((finding) => finding.type)).toEqual(['TRANSFERRED']);
     expect(trustedAvailableSignalWord(findings)).toBeNull();
   });
 

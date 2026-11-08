@@ -178,7 +178,7 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
-  /** Set when EPA moved the requested number to a new one; eparegno is then the new number. */
+  /** Set when EPA moved the requested number; the result is then found:false and describes the new registration. */
   transferredTo?: string | null;
 }
 

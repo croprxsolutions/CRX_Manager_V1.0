@@ -275,18 +275,19 @@ describe('ProductDetail EPA lookup', () => {
     expect(JSON.stringify(params)).not.toContain('UNRECOGNIZED RAW VALUE');
   });
 
-  it('shows a moved registration and refuses to apply it', async () => {
+  it('shows a moved registration and offers nothing to apply', async () => {
     render(<ProductDetail />);
-    await runLookup(lookupResult({ eparegno: '105211-77', transferredTo: '105211-77' }));
+    H.invoke.mockResolvedValueOnce({
+      data: lookupResult({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+      error: null,
+    });
+    const registrationInputs = await screen.findAllByLabelText('EPA Registration');
+    fireEvent.change(registrationInputs[0], { target: { value: '264-849' } });
+    fireEvent.click((await screen.findAllByRole('button', { name: /look up epa/i }))[0]);
 
-    expect(await screen.findByText(/EPA moved 264-849 to 105211-77/)).toBeInTheDocument();
-    const applyButtons = await screen.findAllByRole('button', { name: /apply to product/i });
-    fireEvent.click(applyButtons[0]);
-
-    await waitFor(() => expect(H.toast).toHaveBeenCalledWith(
-      'warning',
-      'EPA moved 264-849 to 105211-77. Look up the new number before applying.',
-    ));
+    expect(await screen.findByText(/EPA moved 264-849 to 105211-77 \(ROUNDUP ULTRA HERBICIDE\)/)).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('warning', 'EPA moved registration 264-849 to 105211-77.');
+    expect(screen.queryByRole('button', { name: /apply to product/i })).toBeNull();
     expect(H.rpc).not.toHaveBeenCalled();
   });
 

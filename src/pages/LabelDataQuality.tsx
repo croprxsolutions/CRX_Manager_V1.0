@@ -136,7 +136,6 @@ const FINDINGS_REQUIRING_FOUND_EPA = new Set<EpaDataQualityFindingType>([
   'NAME_MISMATCH',
   'DISTRIBUTOR_NAME_DIFF',
   'CANCELLED',
-  'TRANSFERRED',
   'RUP_DISAGREE',
   'SIGNAL_WORD_AVAILABLE',
   'NEEDS_MANUAL',
@@ -751,7 +750,7 @@ export default function LabelDataQuality() {
       if (!isEpaLookupResult(data)) {
         throw new Error('EPA lookup returned an invalid response.');
       }
-      if (data.found && data.transferredTo) {
+      if (data.transferredTo) {
         updateEditor(row.id, {
           verifiedNumber: null,
           verifiedResult: null,
@@ -905,13 +904,18 @@ export default function LabelDataQuality() {
             ? <span className="text-secondary">No EPA number saved</span>
             : <span className="text-secondary">Not lookupable / lookup failed</span>;
         }
-        if (!row.epa.found) return <span className="font-medium text-red-700">No EPA match</span>;
         const movedTo = row.findings.find((finding) => finding.type === 'TRANSFERRED')?.epaValue;
+        if (typeof movedTo === 'string') {
+          return (
+            <div>
+              <p className="font-medium text-red-700">EPA moved this to {movedTo}</p>
+              {row.epa.productName && <p className="mt-0.5 text-xs text-secondary">{row.epa.productName}</p>}
+            </div>
+          );
+        }
+        if (!row.epa.found) return <span className="font-medium text-red-700">No EPA match</span>;
         return (
           <div>
-            {typeof movedTo === 'string' && (
-              <p className="font-medium text-red-700">EPA moved this to {movedTo}</p>
-            )}
             <p className="font-medium text-nav-dark">{row.epa.productName ?? 'Unnamed EPA product'}</p>
             <p className="mt-0.5 text-xs text-secondary">
               {row.epa.status ?? 'Status not provided'}

@@ -280,7 +280,7 @@ describe('ProductBrandsSection', () => {
 
   it('shows a moved EPA registration and offers no fill from it', async () => {
     mocks.lookupEpaRegistration.mockResolvedValue({
-      found: true, regType: 'section3', eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE',
+      found: false, regType: 'section3', eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE',
       signalWordCanonical: 'Caution', needsManual: false, manufacturer: 'Ruveon', rupYn: 'No',
       productStatus: 'Active', isCancelled: false, latestLabelPdfUrl: null, activeIngredients: [], labelPdfs: [],
       transferredTo: '105211-77',

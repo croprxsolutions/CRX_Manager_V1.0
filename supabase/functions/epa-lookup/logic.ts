@@ -45,7 +45,12 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
-  /** Set when EPA moved the requested number to a new one; eparegno is then the new number. */
+  /**
+   * Set when EPA moved the requested number to a new one. The result is then
+   * found:false (so screens that predate this field never apply the new
+   * registration's details to the old number); eparegno and the details
+   * describe the new registration.
+   */
   transferredTo?: string | null;
 }
 
@@ -247,7 +252,7 @@ export function normalizeEpaPayload(
   const labelPdfs = normalizeLabelPdfs(item.pdffiles);
 
   return {
-    found: true,
+    found: transferredTo === null,
     regType,
     eparegno: transferredTo ?? requestedRegNumber,
     productname: cleanString(item.productname, 500),
@@ -284,7 +289,5 @@ export function normalizeDistributorBasePayload(
     "distributor",
     distributorBaseRegistration(distributorRegNumber),
   );
-  return result.found && !result.transferredTo
-    ? { ...result, eparegno: distributorRegNumber }
-    : result;
+  return result.found ? { ...result, eparegno: distributorRegNumber } : result;
 }

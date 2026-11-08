@@ -249,7 +249,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       if (!result || isStale()) return;
       setEpaResult(result);
       setEpaResultNumber(regNumber);
-      if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
+      if (result.transferredTo) toast('warning', `EPA moved registration ${regNumber} to ${result.transferredTo}.`);
+      else if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
     } catch (err) {
       if (isStale()) return;
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
@@ -265,7 +266,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     && epaResultNumber === draft.epaRegistration.trim();
 
   const applyEpaDetails = () => {
-    if (!epaResult?.found || epaResult.transferredTo || !epaResultMatchesDraft) return;
+    if (!epaResult?.found || !epaResultMatchesDraft) return;
     // Only fill what EPA actually reports; a blank from EPA never erases what the admin entered.
     const patch: Partial<BrandDraft> = {};
     if (epaResult.signalWordCanonical) patch.signalWord = epaResult.signalWordCanonical;
@@ -564,16 +565,15 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                 <div className="rounded-lg border bg-gray-50 p-3 text-sm">
                   {epaResult.found ? (
                     <>
-                      {epaResult.transferredTo && <p className="text-red-700">EPA moved this registration to {epaResult.transferredTo}. Enter the new number to use EPA’s details.</p>}
                       <p><strong>EPA has:</strong> {epaResult.productname ?? 'No product name'}{epaResult.manufacturer ? ` — ${epaResult.manufacturer}` : ''}</p>
                       <p>Signal word: {epaResult.signalWordCanonical ?? 'None'} · Restricted use: {epaResult.rupYn ?? 'Not provided'}</p>
                       {epaResult.isCancelled && <p className="text-amber-700">EPA lists this registration as cancelled.</p>}
-                      {!epaResult.transferredTo && (
-                        <Button size="sm" variant="secondary" className="mt-2" onClick={applyEpaDetails}>
-                          Use EPA’s signal word and restricted-use status (and manufacturer, if blank)
-                        </Button>
-                      )}
+                      <Button size="sm" variant="secondary" className="mt-2" onClick={applyEpaDetails}>
+                        Use EPA’s signal word and restricted-use status (and manufacturer, if blank)
+                      </Button>
                     </>
+                  ) : epaResult.transferredTo ? (
+                    <p className="text-red-700">EPA moved this registration to {epaResult.transferredTo}. Enter the new number to use EPA’s details.</p>
                   ) : (
                     <p>EPA did not find this registration number.</p>
                   )}

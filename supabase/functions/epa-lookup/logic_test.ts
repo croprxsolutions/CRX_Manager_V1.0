@@ -247,7 +247,8 @@ const MOVED_PAYLOAD = {
 
 Deno.test("EPA payload normalizer reports a moved registration with its new number", () => {
   const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "524-475");
-  assertEquals(result.found, true);
+  // found:false keeps screens without transferredTo from applying the new record.
+  assertEquals(result.found, false);
   assertEquals(result.eparegno, "105211-77");
   assertEquals(result.transferredTo, "105211-77");
   assertEquals(result.productname, "ROUNDUP ULTRA HERBICIDE");
@@ -256,6 +257,7 @@ Deno.test("EPA payload normalizer reports a moved registration with its new numb
 
 Deno.test("EPA payload normalizer does not mark the current number as moved", () => {
   const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "105211-77");
+  assertEquals(result.found, true);
   assertEquals(result.eparegno, "105211-77");
   assertEquals(result.transferredTo, null);
 });
@@ -323,7 +325,7 @@ Deno.test("distributor fallback stays not found when the base is missing", () =>
 
 Deno.test("distributor fallback reports a moved base registration", () => {
   const result = normalizeDistributorBasePayload(MOVED_PAYLOAD, "524-475-12345");
-  assertEquals(result.found, true);
+  assertEquals(result.found, false);
   assertEquals(result.eparegno, "105211-77");
   assertEquals(result.transferredTo, "105211-77");
 });

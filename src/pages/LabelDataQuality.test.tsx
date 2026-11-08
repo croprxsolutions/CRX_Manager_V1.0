@@ -503,7 +503,7 @@ describe('LabelDataQuality', () => {
     H.invoke.mockImplementation((_name: string, { body }: { body: { regNumber: string } }) => Promise.resolve({
       data: body.regNumber === '62719-671-55467'
         ? verifiedLookup({ regType: 'distributor', eparegno: '62719-671-55467', productname: 'KEYSTONE NXT', signalWordCanonical: 'Warning', transferredTo: null })
-        : verifiedLookup({ eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+        : verifiedLookup({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
       error: null,
     }));
 

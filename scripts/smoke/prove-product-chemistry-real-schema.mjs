@@ -5,6 +5,7 @@
 // "Done when" list (docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md section 7).
 // Usage: node scripts/smoke/prove-product-chemistry-real-schema.mjs   (needs Docker; prints PRODUCT_CHEMISTRY_PROOF_PASS)
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -18,11 +19,18 @@ const REUSE = process.env.CRX_DM1_CONTAINER || '';
 const NAME = REUSE || `crx-dm1-${process.pid}-${Date.now().toString(36)}`;
 let DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+// Only a container this proof created carries the label; reuse refuses any other, so its drops never touch someone else's databases.
+const OWNER_LABEL_VALUE = 'dm1-product-chemistry';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261209100000_product_chemistry.sql');
 const FOLLOW_UPS = [];
+// Later migrations that only name what this proof covers (they call _product_parent_require_admin() and list
+// product tables in a CHECK) and redefine none of it; pinned by sha256 of their LF text, so any edit re-asks.
+const LATER_NAME_ONLY = new Map([
+  ['20261210100000_epa_registrations.sql', 'cac5e17d8503922f33dca9ac3ea1859937fab7173a52e0d7de4bcf37f6f4a9f3'],
+]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -183,6 +191,8 @@ function plan() {
     last = i;
   }
   for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+    const pin = LATER_NAME_ONLY.get(path.basename(file));
+    if (pin && createHash('sha256').update(lf(file)).digest('hex') === pin) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -198,7 +208,7 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
-  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  docker(['run', '-d', '--name', NAME, '--label', `crx.prover=${OWNER_LABEL_VALUE}`, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -413,6 +423,8 @@ function seedBeforeCandidate() {
 
 async function main() {
   if (REUSE) {
+    const label = docker(['inspect', '--format', '{{index .Config.Labels "crx.prover"}}', NAME]).stdout.trim();
+    if (label !== OWNER_LABEL_VALUE) throw new Error(`CRX_DM1_CONTAINER=${NAME} was not created by this proof (label crx.prover='${label}'); refusing to drop its databases.`);
     DB = 'template1';
     psql('DROP DATABASE IF EXISTS dm1work WITH (FORCE);', { user: 'supabase_admin' });
     psql('DROP DATABASE IF EXISTS dm1stub WITH (FORCE);', { user: 'supabase_admin' });

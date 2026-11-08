@@ -57,6 +57,14 @@ describe('masterMixLoadBody (DM-2)', () => {
     ]);
   });
 
+  it('a refused load keeps the other loads\' weights and withholds only the row total', () => {
+    const units = { factors: { gal: { kind: 'volume' as const, factor: 1 } }, ambiguous: [] };
+    const mix = buildMasterMixSummaryData([job('j1', ['a'])], [], { byProductId: { a: { kind: 'density', lb_per_unit: 8 } }, units });
+    const g = mix.load_groups[0];
+    g.weights!.loads[0].cells[0] = { ...g.weights!.loads[0].cells[0], amountCell: 'Not shown: refused' };
+    expect(masterMixLoadBody(g)[0]).toEqual(['P a (gal)', 'Not shown: refused', '2\n16.00 lb', '—']);
+  });
+
   it('keeps the old table when no weights are passed', () => {
     const mix = buildMasterMixSummaryData([job('j1', ['a'])]);
     expect(masterMixLoadBody(mix.load_groups[0])).toEqual([['P a (gal)', '2', '2', '4']]);

@@ -88,8 +88,10 @@ export function masterMixLoadBody(g: MasterMixLoadGroup): string[][] {
         row.push(fmtNum(lp.amount));
         return;
       }
-      if (cell.amountCell !== fmtNum(lp.amount)) refused = true;
-      row.push(refused ? cell.amountCell : `${cell.amountCell}\n${cell.weightText}`);
+      // Judge each load on its own: one refused load withholds only the row total, never another load's weight.
+      const cellRefused = cell.amountCell !== fmtNum(lp.amount);
+      if (cellRefused) refused = true;
+      row.push(cellRefused ? cell.amountCell : `${cell.amountCell}\n${cell.weightText}`);
     });
     row.push(refused ? '—' : fmtNum(rowTotal));
     return row;

@@ -499,9 +499,10 @@ and reading needs the file to be the delivery's recorded signature.
 **MED · FIX WRITTEN, NOT APPLIED (`20261212100000`) · database · Claude (2026-11-08)**
 The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later did not
 add the job back. Fix: a `profiles` trigger dispatches the open jobs' undispatched locations to a person the moment
-they become an active applicator (board splits, undispatched locations and all-expired licenses left alone; proof
-`scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Still manual: renewing an expired license later
-does not dispatch by itself, nor does a job assigned to the person at the same instant as the activation (use the board). Detection sweep:
+they become an active applicator, and a license trigger does the same when an expired license is renewed (board
+splits, undispatched locations and all-expired licenses left alone; a license edit, job assignment or location add
+at the same instant waits for the activation instead of being missed; proof
+`scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason

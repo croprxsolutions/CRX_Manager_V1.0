@@ -3,8 +3,10 @@
 - New migration `20261212100000_dispatch_sync_on_applicator_qualify.sql` (record in `docs/reference/migrations.d/`).
   A job assigned to someone who was inactive, or not an applicator, used to stay off the Dispatch Board for good.
   Now, the moment that person becomes an active applicator, each location of their open jobs that has no board
-  row is dispatched to them.
+  row is dispatched to them. Renewing an expired license does the same.
+- Edits made at the same instant (a license change, a job assignment, a new location) wait for each other, so
+  none is missed and an expired license is honoured.
 - Left alone: locations already split or undispatched on the board, finished or deleted jobs, and a person whose
-  licenses are all expired (the board's own dispatch, with its license override, decides those).
+  licenses are all expired (until a license is renewed, or the board dispatches with its override).
 - Proof: `node scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs` (disposable real-schema database).
 - Preventive: the detection sweep found 0 such jobs live on 2026-11-08. Not applied live yet.

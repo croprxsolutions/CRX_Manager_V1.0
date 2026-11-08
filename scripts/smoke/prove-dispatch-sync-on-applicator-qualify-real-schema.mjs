@@ -40,7 +40,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(_sync_job_location_dispatch_on_applicator_qualify|_sync_job_location_dispatch_on_field_insert|_sync_job_location_dispatch_on_applicator_change|_enforce_applicator_license|job_location_dispatches_job_field_id_key|TRIGGER\s+\w+\s+(BEFORE|AFTER)\s+[\w\s,]+?\s+ON\s+(public\.)?profiles)\b/i;
+const TOUCHED = /(_sync_job_location_dispatch_on_applicator_qualify|_dispatch_open_job_locations_to_applicator|_sync_job_location_dispatch_on_license_change|_lock_assigned_applicator_profile|_sync_job_location_dispatch_on_field_insert|_sync_job_location_dispatch_on_applicator_change|_enforce_applicator_license|job_location_dispatches_job_field_id_key|TRIGGER\s+\w+\s+(BEFORE|AFTER)\s+[\w\s,]+?\s+ON\s+(public\.)?profiles)\b/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -224,6 +224,8 @@ const APP_B = id('b2');   // active sales rep, given the applicator role
 const APP_C = id('b3');   // inactive applicator whose only active license expired
 const APP_D = id('b4');   // active applicator from the start: an unrelated edit must not fire
 const APP_E = id('b5');   // inactive applicator: a no-user re-activation is refused, then the admin's works
+const APP_F = id('b6');   // inactive applicator whose license is expired at the same instant as the activation
+const APP_G = id('b7');   // inactive applicator assigned a job at the same instant as the activation
 const CUST = id('c1');
 const F = (n) => id(`f${n}`);
 const J = (n) => id(`d${n}`);
@@ -252,6 +254,24 @@ function board() {
 function sweepRows() {
   const predicate = lf(SWEEP).replace(/^\s*--.*$/gm, '').replace(/;\s*$/, '');
   return scalar(`SELECT coalesce(string_agg(${short('job_field_id')}, ' ' ORDER BY job_field_id), '-') FROM (${predicate}) s;`);
+}
+
+// Session 1 runs holderSql as the admin and holds its transaction open for 4 s; session 2 then runs mainSql as
+// the admin. Returns how long session 2 waited (it must wait on session 1's lock, then see its committed write).
+async function race(name, holderSql, mainSql) {
+  stageText(name, txIn(ADMIN, `${holderSql}\nSELECT pg_sleep(4);`));
+  const holder = spawn('docker', [...psqlArgs(), '-f', `/tmp/${name}`], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  holder.stdout.on('data', (d) => { out += d; });
+  holder.stderr.on('data', (d) => { out += d; });
+  const done = new Promise((resolve) => holder.on('close', resolve));
+  wait(1500);
+  const started = Date.now();
+  ok(ADMIN, mainSql);
+  const waited = Date.now() - started;
+  assert.equal(await done, 0, out);
+  assert.ok(waited >= 1000, `${name}: session 2 should have waited for session 1 (waited ${waited} ms)`);
+  return waited;
 }
 
 function seed() {
@@ -335,7 +355,7 @@ async function main() {
 
   ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_C}';`);
   assert.equal(board(), afterB);
-  console.log("[prover] C (only active license expired) is re-activated but not auto-dispatched: e7 waits for the board's license check");
+  console.log("[prover] C (only active license expired) is re-activated but not auto-dispatched: e7 waits for a renewed license");
 
   // With no signed-in user (a dashboard or service run) the role lock refuses the change outright, so the
   // trigger's no-user attribution fallback is never reached; E then is re-activated by the admin.
@@ -360,27 +380,54 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
   // session 2 (the re-activation) must wait on the job lock and then see the committed location.
   ok(ADMIN, `UPDATE public.profiles SET is_active = false WHERE id = '${APP_A}';`);
   asOwner(`INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${F(10)}', '${CUST}', '[PROVER] Field 10');`);
-  stageText('race.sql', txIn(ADMIN, `INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(10)}', '${J(1)}', '${F(10)}');
-SELECT pg_sleep(4);`));
-  const racer = spawn('docker', [...psqlArgs(), '-f', '/tmp/race.sql'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
-  let racerOut = '';
-  racer.stdout.on('data', (d) => { racerOut += d; });
-  racer.stderr.on('data', (d) => { racerOut += d; });
-  const racerDone = new Promise((resolve) => racer.on('close', resolve));
-  wait(1500);
-  const started = Date.now();
-  ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
-  const waited = Date.now() - started;
-  assert.equal(await racerDone, 0, racerOut);
-  assert.ok(waited >= 1000, `the re-activation should have waited for the open location insert (waited ${waited} ms)`);
+  const waited = await race('race.sql',
+    `INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(10)}', '${J(1)}', '${F(10)}');`,
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
   const afterRace = `${afterE} 10|b1|dispatched|a1`;
   assert.equal(board(), afterRace);
   assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '6');
   console.log(`[prover] RACE: a location added to A's job while A was inactive, committed during A's re-activation (which waited ${waited} ms), still reaches the board`);
 
+  // RENEWAL: C's only license was expired, so C's re-activation held e7 back; renewing the license dispatches it.
+  ok(ADMIN, `UPDATE public.applicator_licenses SET expiry_date = current_date + 100 WHERE profile_id = '${APP_C}';`);
+  const afterRenew = afterRace.replace('e7|-|none|-', 'e7|b3|dispatched|a1');
+  assert.equal(board(), afterRenew);
+  console.log("[prover] RENEWED: renewing C's expired license puts C's held-back location e7 on the board");
+
+  // Two more people for the remaining same-instant cases: F (valid license) on job 8, G (no license) for job 9.
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+      ('${APP_F}', 'ki28-6@example.invalid', '{"full_name":"[PROVER] applicator 6","role":"applicator"}'::jsonb),
+      ('${APP_G}', 'ki28-7@example.invalid', '{"full_name":"[PROVER] applicator 7","role":"applicator"}'::jsonb);`);
+  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id IN ('${APP_F}', '${APP_G}');
+    INSERT INTO public.applicator_licenses (profile_id, license_number, holder_name, expiry_date, is_active) VALUES
+      ('${APP_F}', 'PROVER-F', '[PROVER] F', current_date + 300, true);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES
+      ('${F(11)}', '${CUST}', '[PROVER] Field 11'), ('${F(12)}', '${CUST}', '[PROVER] Field 12');
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by) VALUES
+      ('${J(8)}', 'PRV-KI28-8', '${CUST}', current_date, 'scheduled', '${APP_F}', '${ADMIN}'),
+      ('${J(9)}', 'PRV-KI28-9', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}');
+    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(11)}', '${J(8)}', '${F(11)}'), ('${JF(12)}', '${J(9)}', '${F(12)}');`);
+  const withNew = `${afterRenew} 11|-|none|- 12|-|none|-`;
+  assert.equal(board(), withNew);
+
+  // LICENSE RACE (Sol HIGH): F's only license is expired by one session while another re-activates F.
+  const waitedLicense = await race('race-license.sql',
+    `UPDATE public.applicator_licenses SET expiry_date = current_date - 1 WHERE profile_id = '${APP_F}';`,
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_F}';`);
+  assert.equal(board(), withNew, 'F, whose license expired at the same instant, must not be auto-dispatched');
+  console.log(`[prover] LICENSE RACE: F's license expired in another session during F's re-activation (which waited ${waitedLicense} ms); e11 is not auto-dispatched`);
+
+  // ASSIGNMENT RACE (Luna/Sol MED): job 9 is assigned to inactive G by one session while another re-activates G.
+  const waitedAssign = await race('race-assign.sql',
+    `UPDATE public.jobs SET applicator_id = '${APP_G}' WHERE id = '${J(9)}';`,
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_G}';`);
+  const afterAssign = withNew.replace('12|-|none|-', '12|b7|dispatched|a1');
+  assert.equal(board(), afterAssign);
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '8');
+  console.log(`[prover] ASSIGNMENT RACE: job 9 assigned to G in another session during G's re-activation (which waited ${waitedAssign} ms) reaches the board`);
+
   assert.equal(sweepRows(), '-');
-  assert.ok(afterE.includes('e7|-|none|-'), 'C (expired license) must still be undispatched');
-  console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched); e7 (C, expired license) is still undispatched, by design, and the sweep cannot see it');
+  console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched); e11 (F, license expired) stays undispatched by design');
 
   stageText('again.sql', lf(CANDIDATE));
   const again = apply('again.sql');

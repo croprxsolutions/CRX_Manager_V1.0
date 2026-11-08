@@ -825,11 +825,37 @@ r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace("'test_fn'", "'other_fn'"))
 ok(isDeny(r), "intent check and receipt under different operation literals are blocked");
 
 const SAVE = "PERFORM public.save_idempotency(p_idempotency_key, 'test_fn', v_result);";
-r = runHook(intentBody(INTENT_CHECK, SAVE));
-ok(!isDeny(r), "check_idempotency_intent + save_idempotency under the same operation is allowed");
+const BIND = "PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'test_fn', v_fingerprint);";
+r = runHook(intentBody(INTENT_CHECK, SAVE + "\n" + BIND));
+ok(!isDeny(r), "check_idempotency_intent + save_idempotency + replay-receipt binding is allowed");
 
-r = runHook(intentBody(INTENT_CHECK, SAVE.replace("'test_fn'", "'other_fn'")));
+// Codex P2 (PR #1666): save_idempotency() writes no actor/fingerprint, and
+// check_idempotency_intent() rejects such a receipt — every retry would fail.
+r = runHook(intentBody(INTENT_CHECK, SAVE));
+ok(isDeny(r), "check_idempotency_intent + save_idempotency with no binding is blocked");
+ok(r.stdout.includes("not bound"), "unbound-receipt block explains the binding");
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace(", request_actor_id, request_fingerprint", "").replace(", v_actor, v_fingerprint)", ")")));
+ok(isDeny(r), "receipt INSERT without request_actor_id/request_fingerprint is blocked");
+
+// The save_job shape: plain INSERT, then an UPDATE that binds actor + fingerprint.
+r = runHook(intentBody(INTENT_CHECK,
+  "INSERT INTO idempotency_keys (idempotency_key, operation, result) VALUES (p_idempotency_key, 'test_fn', v_result);\n" +
+  "UPDATE idempotency_keys SET request_fingerprint = v_fingerprint, request_actor_id = v_actor WHERE idempotency_key = p_idempotency_key AND operation = 'test_fn';"));
+ok(!isDeny(r), "INSERT followed by a binding UPDATE under the same operation is allowed");
+
+r = runHook(intentBody(INTENT_CHECK, SAVE.replace("'test_fn'", "'other_fn'") + "\n" + BIND.replace("'test_fn'", "'other_fn'")));
 ok(isDeny(r), "check_idempotency_intent + save_idempotency under a different operation is blocked");
+
+// Codex P2 (PR #1666): the checked operation appearing only in the result
+// payload must not count as a matching receipt.
+r = runHook(intentBody(INTENT_CHECK,
+  "PERFORM public.save_idempotency(p_idempotency_key, 'other_fn', jsonb_build_object('test_fn', v_result));\n" +
+  BIND.replace("'test_fn'", "'other_fn'")));
+ok(isDeny(r), "save under another operation is blocked even when the payload mentions the checked one");
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace("v_result,", "jsonb_build_object('test_fn', 1),").replace("(p_idempotency_key, 'test_fn',", "(p_idempotency_key, 'other_fn',")));
+ok(isDeny(r), "INSERT under another operation is blocked even when its result mentions the checked one");
 
 // Schema-qualified direct pattern counts the same as the bare one.
 r = runHook(fn(`

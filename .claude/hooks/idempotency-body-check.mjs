@@ -699,11 +699,40 @@ while (masked !== null && (head = fnHeadRe.exec(masked)) !== null) {
 
   if (intentWired && !directWired && !helperWired) {
     // FIX 6 for pattern 3: the check must name an operation, and each literal
-    // operation it checks must appear in a receipt write.
-    const receipts = [
-      ...body.matchAll(/INSERT\s+INTO\s+(?:public\.)?idempotency_keys\b[^;]*/gi),
-      ...body.matchAll(/\bsave_idempotency\s*\([^)]*\)/gi),
-    ].map((m) => m[0]);
+    // operation it checks needs a receipt written under that exact operation
+    // AND bound to actor + fingerprint — check_idempotency_intent() rejects an
+    // unbound receipt, so every honest retry would fail (Codex P2, PR #1666).
+    const literal = (arg) => {
+      const m = /^\s*'((?:[^']|'')*)'\s*$/.exec(arg || "");
+      return m ? m[1] : null;
+    };
+    const callArgs = (re) => [...body.matchAll(re)].map((m) => {
+      const p = readBalancedParens(body, m.index + m[0].length - 1);
+      return p ? splitTopLevelArgs(p.params) : [];
+    });
+    const bindOps = callArgs(/\b_bind_replay_receipt\w*\s*\(/gi).map((a) => literal(a[1]));
+    const updateBinds = [...body.matchAll(/UPDATE\s+(?:public\.)?idempotency_keys\b[^;]*/gi)]
+      .filter((m) => /\brequest_fingerprint\b/i.test(m[0]))
+      .map((m) => (/\boperation\s*=\s*'((?:[^']|'')*)'/i.exec(m[0]) || [])[1] ?? null);
+    const boundLater = (op) => op !== null && (bindOps.includes(op) || updateBinds.includes(op));
+    const receipts = []; // { op: string|null, bound: boolean }
+    for (const m of body.matchAll(/INSERT\s+INTO\s+(?:public\.)?idempotency_keys\s*\(/gi)) {
+      const cols = readBalancedParens(body, m.index + m[0].length - 1);
+      const valsHead = cols && /^\s*VALUES\s*\(/i.exec(body.slice(cols.end));
+      const vals = valsHead && readBalancedParens(body, cols.end + valsHead[0].length - 1);
+      const names = cols ? splitTopLevelArgs(cols.params).map((c) => c.toLowerCase()) : [];
+      const values = vals ? splitTopLevelArgs(vals.params) : [];
+      const opIdx = names.indexOf("operation");
+      const op = opIdx >= 0 ? literal(values[opIdx]) : null;
+      receipts.push({
+        op,
+        bound: (names.includes("request_actor_id") && names.includes("request_fingerprint")) || boundLater(op),
+      });
+    }
+    for (const args of callArgs(/\bsave_idempotency\s*\(/gi)) {
+      const op = literal(args[1]);
+      receipts.push({ op, bound: boundLater(op) });
+    }
     for (const call of intentCalls) {
       const parts = splitTopLevelArgs(call[1]);
       if (parts.length < 2) {
@@ -714,11 +743,19 @@ while (masked !== null && (head = fnHeadRe.exec(masked)) !== null) {
         );
         continue;
       }
-      const op = /^\s*'((?:[^']|'')*)'\s*$/.exec(parts[1]);
-      if (op && !receipts.some((stmt) => stmt.includes(`'${op[1]}'`))) {
+      const op = literal(parts[1]);
+      if (op === null) continue; // parameterized operation: left to the reviewers
+      const same = receipts.filter((r) => r.op === op);
+      if (same.length === 0) {
         violations.push(
-          `Function ${fnName}: mismatched idempotency operation keys — check_idempotency_intent() checks '${op[1]}' ` +
-          `but no INSERT INTO idempotency_keys or save_idempotency() records it, so every retry replays the mutation.`
+          `Function ${fnName}: mismatched idempotency operation keys — check_idempotency_intent() checks '${op}' ` +
+          `but no INSERT INTO idempotency_keys or save_idempotency() records that operation, so every retry replays the mutation.`
+        );
+      } else if (!same.some((r) => r.bound)) {
+        violations.push(
+          `Function ${fnName}: the '${op}' receipt is not bound to the request — check_idempotency_intent() rejects a ` +
+          `receipt without request_actor_id and request_fingerprint, so every identical retry fails. Write both columns ` +
+          `in the INSERT, or call _bind_replay_receipt_<stamp>(key, '${op}', fingerprint) after save_idempotency().`
         );
       }
     }

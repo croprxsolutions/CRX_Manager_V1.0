@@ -22,6 +22,7 @@ import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
 import ProductParentPanel from '../components/products/ProductParentPanel';
 import ProductWeightCard from '../components/products/ProductWeightCard';
+import ProductChemistrySection from '../components/products/ProductChemistrySection';
 import ToteFillCard from '../components/inventory/ToteFillCard';
 import {
   addProductSize, createProductWithParent, getParentOfProduct, newSizeFields, SIZE_ROLE_LABELS,
@@ -269,6 +270,8 @@ export default function ProductDetail() {
   // undefined while loading or after a failed load, null when the product has no parent.
   const [parent, setParent] = useState<ProductParent | null | undefined>(isNew ? null : undefined);
   const [parentLoadFailed, setParentLoadFailed] = useState(false);
+  // DM-1: a weight save on this page re-reads cost per lb of active.
+  const [weightSaves, setWeightSaves] = useState(0);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
@@ -1358,7 +1361,24 @@ export default function ProductDetail() {
               reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
                 persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
                 parent?.id ?? null, parent?.parent_version ?? null])}
+              onSaved={() => setWeightSaves((n) => n + 1)}
             />
+          )}
+          {/* DM-1: the parent's chemistry, shared by every size; an ungrouped size has none. */}
+          {!isNew && parent && profile && (
+            <ProductChemistrySection
+              parentId={parent.id}
+              parentVersion={parent.parent_version}
+              refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+            />
+          )}
+          {!isNew && parent === null && (
+            <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary">
+              Put this product in a parent to record its chemistry.
+            </p>
           )}
           {!isNew && parentLoadFailed && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" role="alert">

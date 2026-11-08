@@ -786,16 +786,18 @@ async function main() {
   refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDM4, ingId('Typed only')), ingredient_id: glyAcid, strength_value: 1,
     strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', modes_of_action: [] }]), /CHEMISTRY_FROM_EPA_ONLY/);
   ok(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, ingId('Typed only')) }]));
-  // A swap made while the number is away keeps an EPA-confirmed mode of action marked so; back under the gate it still cannot be retired.
+  // A swap made while the number is away records the moved modes as typed (the lookup confirmed the old ingredient, not this one);
+  // back under the gate the lookup confirms the new one again, and then it cannot be retired.
   fixture(`UPDATE public.product_parents SET generic_epa_registration = NULL WHERE id = '${PDM4}';`);
   ok(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDM4, tte), ingredient_id: glyAcid, strength_value: 1,
     strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', modes_of_action: [{ scheme: 'HRAC', group_code: '2' }, { scheme: 'HRAC', group_code: '3' }] }]));
   assert.equal(owner(`SELECT string_agg(group_code || ':' || source, ',' ORDER BY group_code) FROM public.product_parent_modes_of_action
-    WHERE parent_id = '${PDM4}' AND ingredient_id = '${glyAcid}' AND status = 'active';`), '2:epa_lookup,3:typed', 'a moved mode of action keeps its source');
+    WHERE parent_id = '${PDM4}' AND ingredient_id = '${glyAcid}' AND status = 'active';`), '2:typed,3:typed', 'a moved mode of action is typed until the lookup confirms the new ingredient');
   fixture(`UPDATE public.product_parents SET generic_epa_registration = '100-66' WHERE id = '${PDM4}';`);
+  assert.equal(epaWrite([{ kind: 'mode_of_action', ingredient_id: glyAcid, scheme: 'HRAC', group_code: '2' }]), 'true', 'the lookup confirms the new ingredient');
   refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, glyAcid) }]), /CHEMISTRY_EPA_ROW_KEPT/);
   refused(ADMIN, setC(PEPA5, [ing('Gate typed epa', 1, { source: 'epa_lookup' })]), /epa_lookup|SOURCE/);
-  console.log('[prover] gate: generic, size, parent-brand and legacy-brand numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused; a typed row whose mode of action the EPA lookup confirmed cannot be retired (CHEMISTRY_EPA_ROW_KEPT), one without can; a swap keeps the source of each mode of action it moves');
+  console.log('[prover] gate: generic, size, parent-brand and legacy-brand numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused; a typed row whose mode of action the EPA lookup confirmed cannot be retired (CHEMISTRY_EPA_ROW_KEPT), one without can; a swap records moved modes of action as typed until the lookup confirms them');
 
   // ---- Gate race: a legacy brand number added while a chemistry write holds its locks.
   let bg = session(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);

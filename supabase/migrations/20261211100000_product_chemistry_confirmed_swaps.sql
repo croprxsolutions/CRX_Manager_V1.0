@@ -416,11 +416,9 @@ BEGIN
          WHERE id = v_moa.id;
         IF (v_moa.scheme || ':' || v_moa.group_code) = ANY (v_keep) THEN
           INSERT INTO public.product_parent_modes_of_action (parent_id, ingredient_id, scheme, group_code, source, created_by, updated_by)
-          VALUES (p_parent_id, v_ing, v_moa.scheme, v_moa.group_code, v_moa.source, v_actor, v_actor)
-          -- A moved mode keeps its source, so one the EPA lookup confirmed stays protected (Luna, 2026-11-08).
-          ON CONFLICT (parent_id, ingredient_id, scheme, group_code) WHERE status = 'active' DO UPDATE
-            SET source = 'epa_lookup', row_version = product_parent_modes_of_action.row_version + 1, updated_by = v_actor, updated_at = now()
-            WHERE EXCLUDED.source = 'epa_lookup' AND product_parent_modes_of_action.source <> 'epa_lookup';
+          VALUES (p_parent_id, v_ing, v_moa.scheme, v_moa.group_code, 'typed', v_actor, v_actor)
+          -- Typed again: the EPA lookup confirmed it for the old ingredient, not this one; a later lookup re-confirms it (Sol, 2026-11-08).
+          ON CONFLICT (parent_id, ingredient_id, scheme, group_code) WHERE status = 'active' DO NOTHING;
         END IF;
       END LOOP;
       v_changed := true;
@@ -449,11 +447,9 @@ BEGIN
          WHERE id = v_moa.id;
         IF (v_moa.scheme || ':' || v_moa.group_code) = ANY (v_keep) THEN
           INSERT INTO public.product_parent_modes_of_action (parent_id, ingredient_id, scheme, group_code, source, created_by, updated_by)
-          VALUES (p_parent_id, v_into.ingredient_id, v_moa.scheme, v_moa.group_code, v_moa.source, v_actor, v_actor)
-          -- A moved mode keeps its source, so one the EPA lookup confirmed stays protected (Luna, 2026-11-08).
-          ON CONFLICT (parent_id, ingredient_id, scheme, group_code) WHERE status = 'active' DO UPDATE
-            SET source = 'epa_lookup', row_version = product_parent_modes_of_action.row_version + 1, updated_by = v_actor, updated_at = now()
-            WHERE EXCLUDED.source = 'epa_lookup' AND product_parent_modes_of_action.source <> 'epa_lookup';
+          VALUES (p_parent_id, v_into.ingredient_id, v_moa.scheme, v_moa.group_code, 'typed', v_actor, v_actor)
+          -- Typed again: the EPA lookup confirmed it for the old ingredient, not this one; a later lookup re-confirms it (Sol, 2026-11-08).
+          ON CONFLICT (parent_id, ingredient_id, scheme, group_code) WHERE status = 'active' DO NOTHING;
         END IF;
       END LOOP;
       v_changed := true;

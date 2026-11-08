@@ -513,8 +513,8 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
 **Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data), re-measured read-only 2026-11-08 against EPA PPLS: all
 286 active products that carry a number use the valid format; of the 203 different numbers, 169 match the
-registry and 34 are wrong (9 moved by EPA to a new number, 21 belong to another brand or are not in the
-registry, 4 need a person to read the jug); 8 products with no number have a registry match to add. Each has a
+registry, 30 are confirmed wrong (9 moved by EPA to a new number, 21 belong to another brand or are not in the
+registry) and 4 are unconfirmed until a person reads the jug; 8 products with no number have a registry match to add. Each has a
 proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
 changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
 lookup error instead of the new number, and a three-part distributor number returns "not found" even when

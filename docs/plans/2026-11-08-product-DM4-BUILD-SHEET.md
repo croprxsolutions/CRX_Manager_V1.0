@@ -140,13 +140,13 @@ The trigger allows only these changes:
 - `proposed` → `held` | `committed` | `rejected` | `superseded`
 - `held` → `rejected` | `superseded`
 
-`committed`, `rejected` and `superseded` are final. Any other change raises `EPA_PROPOSAL_STATUS`. Only `items`-free columns may change (status, version, hold reason, the decision columns and `commit_result`). `items` and the binding columns are frozen once inserted.
+`committed`, `rejected` and `superseded` are final. Any other change raises `EPA_PROPOSAL_STATUS`. Only these columns may change: `status`, `proposal_version`, `hold_reason`, `decided_by`, `decided_at`, `decision_reason`, `commit_result`, `updated_at` and `superseded_by_lookup_id`. `items` and the binding columns are frozen once inserted.
 
 ### 3.3 Locking
 
 Every DM-4 function that reads or writes an EPA number or label facts takes the REG-1 advisory pair first:
 - **Exclusive** `pg_advisory_xact_lock(20261210, hashtext('crx_epa_registration'))` in `commit_epa_proposal`.
-- **Shared** in `start_epa_lookup` and `record_epa_lookup` (they read numbers and versions, and write only DM-4's own rows).
+- **Shared** in `start_epa_lookup` and `record_epa_lookup` (they read numbers and versions, and write only DM-4's own rows). Both also lock the parent row `FOR UPDATE`, so starts and records for one parent run one at a time (step 2 below).
 
 Row order after that, following REG-1 §3.2 and then the DM-1 chemistry lock:
 1. the registration (`FOR UPDATE` in commit, `FOR SHARE` otherwise);
@@ -184,7 +184,7 @@ DM-4 rows are last, because no other writer touches them. `reject_epa_proposal` 
 | `signal_word` | `signalWordCanonical` (null → no item) | Registration null → `fill`; equal → `confirm`; else `differs` |
 | `rup_status` | `rupYn`: `Yes` → `yes`, `No` → `no`, null → no item | Registration `unknown` → `fill`; equal → `confirm`; else `differs` |
 | `registration_status` | `isCancelled` | Both agree → `confirm`. Registration not cancelled and EPA says cancelled → `differs`, with a D-T warning ("EPA lists this registration as cancelled; record the date on the registration"). Registration cancelled and EPA says not cancelled → `differs` ("EPA lists this registration as active"). Nothing is written either way (the lookup has no cancellation date). Selling is not blocked (D-T). |
-| `label_url`, `label_accepted_on` | `latestLabelPdfUrl` (https, `www3.epa.gov`), newest **valid** `labelPdfs.acceptedDate` | Registration null, or EPA's date is newer → `fill`; same → `confirm`; EPA older → `differs`. A date counts only if it parses to a real calendar date (`YYYY-MM-DD` or `MM/DD/YYYY`, round-tripped through `to_date`; the build confirms the format on real payloads). Unparseable dates are ignored and named in the item's note, so a bad date can never reach the registration writer. |
+| `label_accepted_on`, then `label_url` | Newest **valid** `labelPdfs.acceptedDate`; `latestLabelPdfUrl` (https, `www3.epa.gov`) | **Classified separately, date first.** Date: registration date null or EPA's date newer → `fill`; same → `confirm`; EPA older → `differs` (never written, so an older EPA date never replaces a newer one). URL: written only together with a date `fill` (the link belongs to that label), or as a `fill` on its own when both the registration's URL and EPA's date are null; otherwise equal → `confirm`, different → `differs`. A date counts only if it parses to a real calendar date (`YYYY-MM-DD` or `MM/DD/YYYY`, round-tripped through `to_date`; the build confirms the format on real payloads). Unparseable dates are ignored and named in the item's note, so a bad date can never reach the registration writer. |
 
 A `differs` label fact is never written (D-L applies to registration facts as well). `checked_at` and `source = 'epa_lookup'` are written on any commit that writes or confirms at least one label fact.
 
@@ -200,7 +200,7 @@ A `differs` label fact is never written (D-L applies to registration facts as we
 2. Refuse `EPA_REGISTRATION_NOT_SEEDED` unless `_epa_registrations_seeded()` (REG-1 step 2).
 3. Normalize the number with `_normalize_epa_registration` (the gate uses the same helper), then check the strict pattern. On no match, refuse `EPA_NUMBER_INVALID`.
 4. Take the shared advisory pair. Lock the registration `FOR SHARE`; if it is missing, refuse `EPA_REGISTRATION_MISSING`.
-5. Lock the parent `FOR SHARE`; if it is missing or inactive (`is_active` false), refuse `PARENT_NOT_FOUND`. Find the parent link in this fixed order: parent generic number, member size (lowest ID), active parent brand (lowest ID), legacy brand on a member size (lowest ID). If none, refuse `EPA_NUMBER_NOT_ON_PARENT`.
+5. Lock the parent `FOR UPDATE` (the first step of the DM-1 order, so no inversion with commit); if it is missing or inactive (`is_active` false), refuse `PARENT_NOT_FOUND`. Find the parent link in this fixed order: parent generic number, member size (lowest ID), active parent brand (lowest ID), legacy brand on a member size (lowest ID). If none, refuse `EPA_NUMBER_NOT_ON_PARENT`.
 6. Mark earlier `pending` lookups for the same number and parent as `abandoned`.
 7. Insert the lookup with the registration version and the chemistry version (0 when there is no state row).
 8. Return `{lookup_id, epa_registration, link_kind, link_id, registration_version, chemistry_version}`.
@@ -210,7 +210,7 @@ A `differs` label fact is never written (D-L applies to registration facts as we
 **Who calls it: only the `epa-lookup` Edge Function.** The browser never sends EPA's answer to the database, so an admin cannot type a fake "EPA result" and then commit it as `epa_lookup` chemistry (D-Z). The flow:
 1. The screen calls `start_epa_lookup` and gets a `lookup_id`.
 2. The screen calls `epa-lookup` with `{regNumber, lookupId}`.
-3. The function checks the caller as today, but with `requireActiveProfile(…, ['admin'])`. It fetches EPA, then calls `record_epa_lookup` with its service-role client, passing:
+3. **Only when `lookupId` is present**, the function requires an admin (`requireActiveProfile(…, ['admin'])`). A call without `lookupId` keeps today's check (any active user), so existing screens are unchanged for non-admins. It fetches EPA, then calls `record_epa_lookup` with its service-role client, passing:
    - `p_actor` = the verified caller ID;
    - `p_result` = the exact `EpaLookupResult` it built, or `{error}` when the EPA fetch failed;
    - `p_idempotency_key` = `'epa-record:' || lookupId`, so a retry replays.
@@ -218,8 +218,9 @@ A `differs` label fact is never written (D-L applies to registration facts as we
 
 A call without `lookupId` behaves as today and records nothing, so the other screens that use the lookup keep working. This function change ships with the DM-4 screens PR and needs a Mason-approved deploy (section 10).
 
-1. Key check and replay (scope `record_epa_lookup`; the fingerprint includes `p_actor`).
+1. Key check and replay (scope `record_epa_lookup`). The fingerprint is md5 of `{lookup_id, actor_id}` only, **not** `p_result`: the first recorded answer for a lookup wins, and a retry with a different EPA answer replays the saved result instead of refusing. (A fresh answer needs a new lookup.)
 2. Take the shared advisory pair. Lock the registration `FOR SHARE`, then the parent `FOR UPDATE`, then the lookup `FOR UPDATE`.
+   - **Newest lookup only:** if a later lookup exists for the same number and parent (by `requested_at`, then `id`), mark this one `abandoned` and refuse `EPA_LOOKUP_SUPERSEDED`. Because start and record both hold the parent lock, an older lookup can never be recorded after a newer one starts, and its proposal can never be left open over a newer result.
    - Refuse `EPA_LOOKUP_ACTOR` unless `p_actor` equals the lookup's `requested_by` and that profile is active with role `admin`. Refuse if it is missing (`EPA_LOOKUP_NOT_FOUND`), if it is not `pending` (`EPA_LOOKUP_NOT_PENDING`), or if it is more than 30 minutes old (`EPA_LOOKUP_EXPIRED`). A refused lookup records nothing; the screen starts a new one.
 3. Refuse `EPA_RESULT_TOO_LARGE` if `octet_length(p_result::text) > 262144`.
 4. **Shape check.** This mirrors `isEpaLookupResult` as changed by PR #1648, plus the database's own limits. Any failure here records a failure row with reason `invalid_result` and `detail` = the rule that failed; it never raises.
@@ -329,7 +330,7 @@ The PR checklist is Stage 2 §3 rule 9:
   - A cancelled result shows the D-T warning.
   - **Commit** opens a `ConfirmModal` listing what will be written, then calls `commit_epa_proposal` with the version read. A `held` reply shows the hold reason and a **Run lookup again** button.
   - **Reject** needs a reason.
-- **Failures list:** grouped by number, showing the reason, the moved-to number for `transferred` (with a link to REG-1's Change EPA number), and the time. After a `not_found` failure the chemistry section says "EPA has no record of this number; you can type chemistry".
+- **Failures list:** grouped by number, showing the reason, the moved-to number for `transferred` (with a link to REG-1's Change EPA number), and the time. The chemistry section says "EPA has no record of this number; you can type chemistry" only when the gate's whole rule (4.F) holds for every number on the parent, including no proposed, held or committed proposal. Otherwise it says which proposal is waiting or committed. The database gate stays the authority; the screen only mirrors it.
 - **Differences on the product page:** the latest committed proposal's `kept_difference` items appear under the chemistry table as "EPA says …" (D-L: shown, never written).
 - Uses toasts, Lucide icons, Tailwind, Sentry through `src/lib/sentry`, and `docs/workflows/UI_PATTERNS.md`. Tests: screen tests for the three flows, plus a mocked-RPC test that a refused commit keeps the ticks.
 
@@ -357,6 +358,8 @@ The harness is `scripts/smoke/prove-epa-chemistry-proposals-real-schema.mjs`, ru
 | H14 | Provenance | `authenticated` (even an admin) cannot execute `record_epa_lookup`; `service_role` with a `p_actor` other than the lookup's requester, or a non-admin, refuses `EPA_LOOKUP_ACTOR`. Edge Function test: a call with `lookupId` records once; a retry replays |
 | H15 | Two results for the same parent at once (two sessions) | The second waits on the parent lock, then supersedes the first; no unique-index error |
 | H16 | Bad `acceptedDate`; EPA "active" against a cancelled registration | The date is ignored with a note and the commit succeeds; the status shows as a `differs` item |
+| H18 | Older lookup recorded after a newer start | Refused `EPA_LOOKUP_SUPERSEDED`; the older lookup is `abandoned`; no proposal from it |
+| H19 | Record retry with a different result | Replays the first result; no second row |
 | H17 | Read access | A non-admin active user reads 0 rows from all three tables |
 
 The grand plan's "Done when" maps to H1–H4 and H6. After the DB PR is live, a read-only live check confirms the tables, grants and the gate md5, and that no proposal rows exist until the first real lookup.
@@ -434,3 +437,11 @@ The grand plan's "Done when" maps to H1–H4 and H6. After the DB PR is live, a 
 - MED: "EPA says active" against a cancelled registration made no item. **Fixed:** it is now a `differs` item.
 - MED: stale screen replies. **Fixed:** request ownership in section 5.
 - LOW: the stamp `20261214100000` is later than the check date. **Refuted:** stamps are ordering numbers set ahead of the calendar (noted in section 9).
+
+**Luna round 2** (head `d4de117ac`): 3 HIGH, 3 MED. All fixed in the next commit:
+- HIGH: an older lookup could be recorded after a newer one started. **Fixed:** start and record both lock the parent `FOR UPDATE`, and record refuses `EPA_LOOKUP_SUPERSEDED` for any lookup that is not the newest (4.B, H18).
+- HIGH: the admin-only Edge Function check would block non-admins on existing screens. **Fixed:** the admin check applies only to calls with `lookupId`.
+- HIGH: the status trigger's column list left out `updated_at` and `superseded_by_lookup_id`. **Fixed** (3.2).
+- MED: a retry with a different EPA answer would conflict with its own key. **Fixed:** the record fingerprint is the lookup and the actor only; the first answer wins (H19).
+- MED: an older EPA date could overwrite a newer one through the combined URL/date item. **Fixed:** date and URL are classified separately; an older date is a difference.
+- MED: the "you can type chemistry" message could contradict the gate. **Fixed:** the screen mirrors the gate's whole rule.

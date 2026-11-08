@@ -13,4 +13,4 @@
   logs each old and new number. Saved invoice lines and sprayed-job EPA copies are not touched (the only
   two invoice lines on these products are drafts with no number).
 - Proof: `node scripts/smoke/prove-ki30-epa-corrections-real-schema.mjs` (KI30_EPA_CORRECTIONS_PROOF_PASS).
-- Applying it live changes existing rows, so it needs Mason's own approval through the apply gate.
+- Applied live 2026-11-08 about 1:20 pm Central with Mason's chat approval (ledger version `20261108192049`); 48 history rows confirmed.

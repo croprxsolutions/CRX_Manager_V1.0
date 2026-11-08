@@ -245,7 +245,9 @@ describe('completion paths', () => {
     const [first, replay] = completeRpcCalls().map(([, params]) => params);
     expect(replay).toEqual(first);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Delivery completed/)));
-    await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+    // KI-25: the receipt is asked for in the completion itself (the replay too); the screen emails nothing.
+    expect(first.p_email_receipt).toBe(true);
+    expect(mockSendEmail).not.toHaveBeenCalled();
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
   });
 

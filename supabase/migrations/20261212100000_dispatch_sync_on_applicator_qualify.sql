@@ -25,7 +25,13 @@
 --     date; the admin-override bypass is not consulted): the job stays undispatched and the board's own
 --     dispatch (with its license override) decides. Renewing the license later does not re-fire this trigger,
 --     and the KI-28 sweep no longer lists the location once the person qualifies: a known, documented gap;
---   * deactivation or a role change away from applicator: unchanged, as today.
+--   * deactivation or a role change away from applicator: unchanged, as today;
+--   * a job ASSIGNED (or created) for the person in another transaction at the same instant as the
+--     activation: neither side can see the other's uncommitted change, so that job can stay undispatched
+--     and is dispatched from the Dispatch Board, as today. Closing it would need every job assignment and
+--     location insert to lock the person's profile row, which can deadlock against save paths that lock the
+--     job first (a visible error instead of a rare, visible undispatched job). A location ADDED to an
+--     already-assigned job concurrently is covered: see the job lock below.
 --
 -- NOT CHANGED: every existing function, trigger, table and row (no backfill: 0 affected rows live). A trigger
 --   function, not an RPC, so it takes no idempotency key; re-running it adds nothing (NOT EXISTS + ON CONFLICT).

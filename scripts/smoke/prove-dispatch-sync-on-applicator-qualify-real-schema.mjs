@@ -226,6 +226,9 @@ const APP_D = id('b4');   // active applicator from the start: an unrelated edit
 const APP_E = id('b5');   // inactive applicator: a no-user re-activation is refused, then the admin's works
 const APP_F = id('b6');   // inactive applicator whose license is expired at the same instant as the activation
 const APP_G = id('b7');   // inactive applicator assigned a job at the same instant as the activation
+const APP_H = id('b8');   // reverse order: activation in progress while H's license is expired
+const APP_I = id('b9');   // reverse order: activation in progress while a job is assigned to I
+const APP_K = id('ba');   // reverse order: activation in progress while a location is added to K's job
 const CUST = id('c1');
 const F = (n) => id(`f${n}`);
 const J = (n) => id(`d${n}`);
@@ -431,6 +434,46 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
   assert.equal(board(), afterAssign.replace('11|-|none|-', '11|b6|dispatched|a1'));
   assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '9');
   console.log("[prover] MOVED: a valid license moved to F releases F's held-back location e11");
+
+  // REVERSE ORDER (Sol round 2): the activation runs first and holds its transaction open; the license edit,
+  // assignment or location add arrives during it, must wait (no deadlock) and then end correctly.
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+      ('${APP_H}', 'ki28-8@example.invalid', '{"full_name":"[PROVER] applicator 8","role":"applicator"}'::jsonb),
+      ('${APP_I}', 'ki28-9@example.invalid', '{"full_name":"[PROVER] applicator 9","role":"applicator"}'::jsonb),
+      ('${APP_K}', 'ki28-10@example.invalid', '{"full_name":"[PROVER] applicator 10","role":"applicator"}'::jsonb);`);
+  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id IN ('${APP_H}', '${APP_I}', '${APP_K}');
+    INSERT INTO public.applicator_licenses (profile_id, license_number, holder_name, expiry_date, is_active) VALUES
+      ('${APP_H}', 'PROVER-H', '[PROVER] H', current_date + 300, true);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES
+      ('${F(13)}', '${CUST}', '[PROVER] Field 13'), ('${F(14)}', '${CUST}', '[PROVER] Field 14'), ('${F(15)}', '${CUST}', '[PROVER] Field 15');
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by) VALUES
+      ('${J(10)}', 'PRV-KI28-10', '${CUST}', current_date, 'scheduled', '${APP_H}', '${ADMIN}'),
+      ('${J(11)}', 'PRV-KI28-11', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}'),
+      ('${J(12)}', 'PRV-KI28-12', '${CUST}', current_date, 'scheduled', '${APP_K}', '${ADMIN}');
+    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(13)}', '${J(10)}', '${F(13)}'), ('${JF(14)}', '${J(11)}', '${F(14)}');`);
+  const beforeReverse = `${afterAssign.replace('11|-|none|-', '11|b6|dispatched|a1')} 13|-|none|- 14|-|none|-`;
+  assert.equal(board(), beforeReverse);
+
+  const wLicense = await race('rev-license.sql',
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_H}';`,
+    `UPDATE public.applicator_licenses SET expiry_date = current_date - 1 WHERE profile_id = '${APP_H}';`);
+  const afterRevLicense = beforeReverse.replace('13|-|none|-', '13|b8|dispatched|a1');
+  assert.equal(board(), afterRevLicense);
+  console.log(`[prover] REVERSE LICENSE: H's license edit during H's activation waited ${wLicense} ms (no deadlock); e13 was dispatched by the activation, which saw the license still valid`);
+
+  const wAssign = await race('rev-assign.sql',
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_I}';`,
+    `UPDATE public.jobs SET applicator_id = '${APP_I}' WHERE id = '${J(11)}';`);
+  const afterRevAssign = afterRevLicense.replace('14|-|none|-', '14|b9|dispatched|a1');
+  assert.equal(board(), afterRevAssign);
+  console.log(`[prover] REVERSE ASSIGNMENT: assigning job 11 to I during I's activation waited ${wAssign} ms (no deadlock) and e14 reached the board`);
+
+  const wField = await race('rev-field.sql',
+    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_K}';`,
+    `INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(15)}', '${J(12)}', '${F(15)}');`);
+  assert.equal(board(), `${afterRevAssign} 15|ba|dispatched|a1`);
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '12');
+  console.log(`[prover] REVERSE LOCATION: a location added to K's job during K's activation waited ${wField} ms (no deadlock) and reached the board`);
 
   assert.equal(sweepRows(), '-');
   console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched)');

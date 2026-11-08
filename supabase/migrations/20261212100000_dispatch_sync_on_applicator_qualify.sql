@@ -22,20 +22,22 @@
 --   dispatched_by follows the existing triggers: auth.uid() (the person making the change), else the job's
 --   updated_by, else created_by.
 --
--- CONCURRENCY (each case is proved with two live sessions in the prover):
+-- CONCURRENCY (each case is proved with two live sessions in the prover, in both orders):
 --   * The person's profile row is the meeting point. Activation holds it (its own UPDATE). A license insert or
 --     edit, and a job assignment (jobs INSERT with an applicator, or UPDATE OF applicator_id), take FOR SHARE
---     on that profile row in a BEFORE trigger, i.e. before they lock their own row. Whichever commits second
---     sees the other's committed change: the activation's helper reads in fresh statements after the wait, and
---     the existing assignment trigger re-reads the profile after it.
---   * Activation then locks the person's license rows (FOR SHARE) and re-reads them, so a license expired at
---     the same instant is honoured; then locks the person's open jobs (FOR UPDATE, as dispatch_job_locations
---     does) and reads their locations in a new statement, so a location added at the same instant (which holds
---     its job's FK KEY SHARE lock) is waited for and seen. A concurrent complete, cancel or unassign is waited
---     for and re-checked too.
---   * Lock order everywhere is profile, then license, then job, so these paths cannot deadlock each other. One
---     transaction that first locks an open job of the person and then assigns them another job could still
---     deadlock with an activation of the same person (an error and retry, nothing lost); no app path does that.
+--     on that profile row in a BEFORE trigger. Whichever commits second sees the other's committed change:
+--     the activation's helper reads licenses and jobs in fresh statements after its wait, and a license or
+--     assignment trigger re-reads the profile after its wait. So a license expired at the same instant is
+--     honoured, and a job assigned at the same instant is dispatched.
+--   * Activation then locks the person's open jobs (FOR UPDATE, as dispatch_job_locations does) and reads their
+--     locations in a new statement, so a location added at the same instant (which holds its job's FK KEY SHARE
+--     lock) is waited for and seen. A concurrent complete, cancel or unassign is waited for and re-checked too.
+--   * No deadlock between these paths: activation waits only on the person's open jobs and never on license
+--     rows, while an UPDATE of a license or job locks its own row before its BEFORE trigger asks for the
+--     profile (so those take row, then profile). A job being assigned to the person is not yet theirs in the
+--     activation's snapshot, so the activation does not wait on it. One transaction that first locks one of
+--     the person's open jobs and then assigns them another job or edits their license could still deadlock with
+--     an activation of the same person (an error and retry, nothing lost); no app path does that.
 --
 -- DELIBERATELY LEFT ALONE:
 --   * a location that already has any dispatch row (dispatched, completed or cancelled): a Dispatch Board
@@ -127,8 +129,6 @@ $function$;
 CREATE FUNCTION public._sync_job_location_dispatch_on_applicator_qualify() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
-  -- Wait for any concurrent edit of this person's licenses, so the helper reads them as committed.
-  PERFORM 1 FROM applicator_licenses WHERE profile_id = NEW.id FOR SHARE;
   PERFORM _dispatch_open_job_locations_to_applicator(NEW.id);
   RETURN NEW;
 END;
@@ -142,8 +142,8 @@ BEGIN
 END;
 $function$;
 
--- BEFORE trigger on jobs and applicator_licenses: share-lock the person's profile row before this row is
--- locked, so an activation of the same person is serialized with this write (see CONCURRENCY).
+-- BEFORE trigger on jobs and applicator_licenses: share-lock the person's profile row, so an activation of the
+-- same person is serialized with this write (see CONCURRENCY).
 CREATE FUNCTION public._lock_assigned_applicator_profile() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE

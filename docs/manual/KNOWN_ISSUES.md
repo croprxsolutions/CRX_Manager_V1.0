@@ -529,8 +529,9 @@ Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1
 PO/Order/Quote Import read every product and match names against all of them (PR #1441); Label Data Quality, Product
 Detail vendor/maker choices and the Invoice Detail customer picker read every row (PR #1512); the Field Customer
 Assignment dropdown lists an exact or starting-with name first and says "Showing 20 of N" (2026-11-06). Each was shown
-in the local test copy with 1,053 products and 26 customers. Still capped: the blend-ticket scanner Edge Function
-(needs a deploy).
+in the local test copy with 1,053 products and 26 customers. The blend-ticket scanner Edge Function
+(`process-blend-ticket`) now reads every active product and customer in id-ordered pages, so a scanned line can match
+product 1,001 and beyond (2026-11-08; live only once the function is redeployed, which needs Mason's approval).
 
 ---
 

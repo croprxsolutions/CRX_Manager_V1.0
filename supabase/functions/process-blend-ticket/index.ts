@@ -5,6 +5,7 @@ import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   fetchSignedBlendImage,
+  readAllById,
   startSerializedLeaseHeartbeat,
   validateBlendImageRecords,
 } from "./guards.ts";
@@ -1071,17 +1072,25 @@ Deno.serve(async (req: Request) => {
     const parsedData = parseOCRText(combinedText);
 
     // Fuzzy match products & customers
-    const { data: products, error: productsError } = await adminClient
-      .from("products")
-      .select("id, product_name, is_active")
-      .eq("is_active", true);
-
-    const { data: customers, error: customersError } = await adminClient
-      .from("customers")
-      .select("id, farm_name, contact_name, is_active")
-      .eq("is_active", true);
-
-    if (productsError || customersError) {
+    // Every active row, not the first 1,000 one read returns (KI-32).
+    let products: ProductRow[];
+    let customers: CustomerRow[];
+    try {
+      [products, customers] = await Promise.all([
+        readAllById<ProductRow>((afterId, limit) => {
+          const q = adminClient.from("products")
+            .select("id, product_name, is_active")
+            .eq("is_active", true).order("id").limit(limit);
+          return afterId ? q.gt("id", afterId) : q;
+        }),
+        readAllById<CustomerRow>((afterId, limit) => {
+          const q = adminClient.from("customers")
+            .select("id, farm_name, contact_name, is_active")
+            .eq("is_active", true).order("id").limit(limit);
+          return afterId ? q.gt("id", afterId) : q;
+        }),
+      ]);
+    } catch {
       throw new Error("Failed to load OCR product/customer reference data");
     }
 

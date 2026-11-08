@@ -166,6 +166,7 @@ DM-4 rows are last, because no other writer touches them. `reject_epa_proposal` 
   - By CAS first, against `active_ingredients.cas` of the parent's current rows.
   - With no CAS, by name (lower case, spaces collapsed) against the names of the parent's current rows.
   - Never against ingredients not on this parent (D-AA: never link by name).
+  - **Within one result first:** entries with the same CAS, or (with no CAS) the same normalized name, are merged into one item before matching. If the merged entries' strengths differ, the item's class is `epa_conflict` (not writable, shown), so the resolver is never called twice for one ingredient.
 
 | Class | When | Commit does |
 |---|---|---|
@@ -184,7 +185,7 @@ DM-4 rows are last, because no other writer touches them. `reject_epa_proposal` 
 | `signal_word` | `signalWordCanonical` (null → no item) | Registration null → `fill`; equal → `confirm`; else `differs` |
 | `rup_status` | `rupYn`: `Yes` → `yes`, `No` → `no`, null → no item | Registration `unknown` → `fill`; equal → `confirm`; else `differs` |
 | `registration_status` | `isCancelled` | Both agree → `confirm`. Registration not cancelled and EPA says cancelled → `differs`, with a D-T warning ("EPA lists this registration as cancelled; record the date on the registration"). Registration cancelled and EPA says not cancelled → `differs` ("EPA lists this registration as active"). Nothing is written either way (the lookup has no cancellation date). Selling is not blocked (D-T). |
-| `label_accepted_on`, then `label_url` | Newest **valid** `labelPdfs.acceptedDate`; `latestLabelPdfUrl` (https, `www3.epa.gov`) | **Classified separately, date first.** Date: registration date null or EPA's date newer → `fill`; same → `confirm`; EPA older → `differs` (never written, so an older EPA date never replaces a newer one). URL: written only together with a date `fill` (the link belongs to that label), or as a `fill` on its own when both the registration's URL and EPA's date are null; otherwise equal → `confirm`, different → `differs`. A date counts only if it parses to a real calendar date (`YYYY-MM-DD` or `MM/DD/YYYY`, round-tripped through `to_date`; the build confirms the format on real payloads). Unparseable dates are ignored and named in the item's note, so a bad date can never reach the registration writer. |
+| `label_accepted_on`, then `label_url` | Newest **valid** `labelPdfs.acceptedDate`; `latestLabelPdfUrl` (https, `www3.epa.gov`) | **Classified separately, date first.** Date: registration date null or EPA's date newer → `fill`; same → `confirm`; EPA older → `differs` (never written, so an older EPA date never replaces a newer one). URL: a null EPA URL is never written (no item). A non-null URL is written only together with a date `fill` (the link belongs to that label), or as a `fill` on its own when both the registration's URL and EPA's date are null; otherwise equal → `confirm`, different → `differs`. A date counts only if it parses to a real calendar date (`YYYY-MM-DD` or `MM/DD/YYYY`, round-tripped through `to_date`; the build confirms the format on real payloads). Unparseable dates are ignored and named in the item's note, so a bad date can never reach the registration writer. |
 
 A `differs` label fact is never written (D-L applies to registration facts as well). `checked_at` and `source = 'epa_lookup'` are written on any commit that writes or confirms at least one label fact.
 
@@ -283,7 +284,7 @@ Screens read the three tables directly through RLS. They show who requested and 
 ### 4.F Re-issued `_parent_chemistry_epa_refusal(p_parent_id uuid) RETURNS text`
 
 Same name, signature, owner, `search_path`, and no grants (as live). It is re-issued from the live body (md5 `c64e2bee…`); the build checks that md5 first. It keeps its four-place number scan. A usable number is **excused** only when **all** of these hold:
-- The most recent `recorded` lookup for (number, parent) has a failure row with reason `not_found`. An `upstream_error` or `invalid_result` is temporary and never excuses. A `transferred` number is fixed by REG-1's Change EPA number, not by typing chemistry.
+- The most recent lookup for (number, parent) that is not `abandoned` (so a newer `pending` lookup counts and cancels the excuse until it is recorded) has a failure row with reason `not_found`. An `upstream_error` or `invalid_result` is temporary and never excuses. A `transferred` number is fixed by REG-1's Change EPA number, not by typing chemistry.
 - That failure's `registration_version` equals the registration's current version.
 - That failure's `link_kind`/`link_id` still carries this number on this parent.
 - There is no `proposed`, `held` or `committed` proposal for (number, parent) at all. A committed one means EPA already supplied chemistry; an open one means a success is waiting.
@@ -321,7 +322,9 @@ The PR checklist is Stage 2 §3 rule 9:
   1. `start_epa_lookup` (with `assertRpcResult` and its own idempotency key, kept for retries);
   2. `lookupEpaRegistration(regNumber, …, lookupId)`. The Edge Function records the result itself (section 4.B) and returns `record`; the screen never calls `record_epa_lookup`.
 
-  **Request ownership:** while a lookup for a number is in flight, its Run button is disabled. The screen keeps the latest `lookup_id` per number and ignores any reply (success or error) whose `lookup_id` is not the latest, so a slow older reply can never replace a newer result on screen. After each reply, the screen re-reads the rows from the database rather than trusting the reply.
+  **Request ownership:** while a lookup for a number is in flight, its Run button is disabled. The screen keeps the latest `lookup_id` per number and ignores any reply (success or error) whose `lookup_id` is not the latest, so a slow older reply can never replace a newer result on screen. After each reply, the screen re-reads the rows from the database rather than trusting the reply; each re-read carries the `lookup_id` that triggered it and is dropped if a newer lookup has started for that number.
+
+  **Commit and reject:** the buttons are disabled while the request runs. The idempotency key is made when the admin confirms and kept until a confirmed reply, so a retry after a lost reply reuses it and replays the saved result instead of hitting `EPA_PROPOSAL_NOT_OPEN`.
 - **Proposal view:**
   - Chemistry items and label facts are shown side by side: current value, EPA value, class badge.
   - Add, fill and confirm items have a tick box (name-only unticked by default).
@@ -445,3 +448,10 @@ The grand plan's "Done when" maps to H1–H4 and H6. After the DB PR is live, a 
 - MED: a retry with a different EPA answer would conflict with its own key. **Fixed:** the record fingerprint is the lookup and the actor only; the first answer wins (H19).
 - MED: an older EPA date could overwrite a newer one through the combined URL/date item. **Fixed:** date and URL are classified separately; an older date is a difference.
 - MED: the "you can type chemistry" message could contradict the gate. **Fixed:** the screen mirrors the gate's whole rule.
+
+**Luna round 3** (head `6dcf844f3`): no BLOCKER or HIGH; 4 MED, 1 LOW, all fixed in one findings-only commit (no rule file touched, so no whole-branch rerun under the codex-review rule):
+- MED: a newer date with a null EPA URL could clear the stored URL. **Fixed:** a null EPA URL is never written.
+- MED: a newer pending lookup did not cancel an older `not_found` excuse. **Fixed:** the gate reads the newest non-abandoned lookup (4.F).
+- MED: a slow re-read could overwrite newer screen state. **Fixed:** re-reads carry their `lookup_id` and stale ones are dropped.
+- MED: commit/reject retries with a new key. **Fixed:** buttons disabled in flight; the key is kept until a confirmed reply.
+- LOW: two entries for one ingredient in one EPA result. **Fixed:** merged before matching; differing strengths become a non-writable `epa_conflict` item.

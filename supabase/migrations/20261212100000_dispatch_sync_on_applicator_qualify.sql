@@ -68,6 +68,18 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- Lock the person's live jobs FIRST, in its own statement (as dispatch_job_locations locks a job). A location
+  -- being added concurrently holds its job's FK KEY SHARE lock, so this waits for that insert to commit; the
+  -- INSERT below is a new statement with a fresh snapshot (READ COMMITTED) and sees it. A location added after
+  -- this lock waits for this transaction instead, and the field-insert trigger then sees an active applicator.
+  -- A concurrent complete, cancel or unassign is waited for and re-checked, never left with a stray row.
+  PERFORM 1
+    FROM jobs j
+   WHERE j.applicator_id = NEW.id
+     AND j.status IN ('scheduled', 'in_progress')
+     AND j.deleted_at IS NULL
+     FOR UPDATE;
+
   INSERT INTO job_location_dispatches
     (job_field_id, job_id, applicator_id, crew_id, dispatched_at, dispatch_status, dispatched_by)
   SELECT jf.id, j.id, NEW.id, NULL, now(), 'dispatched', COALESCE(auth.uid(), j.updated_by, j.created_by)
@@ -77,9 +89,6 @@ BEGIN
      AND j.status IN ('scheduled', 'in_progress')
      AND j.deleted_at IS NULL
      AND NOT EXISTS (SELECT 1 FROM job_location_dispatches d WHERE d.job_field_id = jf.id)
-     -- Lock each job (as dispatch_job_locations does) so a concurrent complete, cancel or unassign is waited
-     -- for and re-checked, never left with a stray 'dispatched' row.
-     FOR UPDATE OF j
   ON CONFLICT (job_field_id) DO NOTHING;
 
   RETURN NEW;

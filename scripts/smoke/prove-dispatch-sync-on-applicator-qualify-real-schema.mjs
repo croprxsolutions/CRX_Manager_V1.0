@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -354,6 +354,29 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
   assert.equal(board(), afterE);
   assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '5');
   console.log('[prover] deactivating and re-activating A again adds no second row');
+
+  // RACE (Luna MED): a location added to A's open job while A is inactive, committing only after A's
+  // re-activation has started, must still reach the board. Session 1 adds it and holds its transaction open;
+  // session 2 (the re-activation) must wait on the job lock and then see the committed location.
+  ok(ADMIN, `UPDATE public.profiles SET is_active = false WHERE id = '${APP_A}';`);
+  asOwner(`INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${F(10)}', '${CUST}', '[PROVER] Field 10');`);
+  stageText('race.sql', txIn(ADMIN, `INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(10)}', '${J(1)}', '${F(10)}');
+SELECT pg_sleep(4);`));
+  const racer = spawn('docker', [...psqlArgs(), '-f', '/tmp/race.sql'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  let racerOut = '';
+  racer.stdout.on('data', (d) => { racerOut += d; });
+  racer.stderr.on('data', (d) => { racerOut += d; });
+  const racerDone = new Promise((resolve) => racer.on('close', resolve));
+  wait(1500);
+  const started = Date.now();
+  ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
+  const waited = Date.now() - started;
+  assert.equal(await racerDone, 0, racerOut);
+  assert.ok(waited >= 1000, `the re-activation should have waited for the open location insert (waited ${waited} ms)`);
+  const afterRace = `${afterE} 10|b1|dispatched|a1`;
+  assert.equal(board(), afterRace);
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '6');
+  console.log(`[prover] RACE: a location added to A's job while A was inactive, committed during A's re-activation (which waited ${waited} ms), still reaches the board`);
 
   assert.equal(sweepRows(), '-');
   assert.ok(afterE.includes('e7|-|none|-'), 'C (expired license) must still be undispatched');

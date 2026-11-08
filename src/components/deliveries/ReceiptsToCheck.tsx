@@ -30,12 +30,14 @@ export default function ReceiptsToCheck() {
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let live = true;
     let latest = 0;
     const load = () => {
       const mine = ++latest;
+      setLoading(true);
       void supabase
         .from('delivery_receipt_queue')
         .select(
@@ -48,6 +50,7 @@ export default function ReceiptsToCheck() {
         .range(0, pages * RECEIPTS_TO_CHECK_PAGE - 1)
         .then(({ data, error, count }) => {
           if (!live || mine !== latest) return; // a newer load has started; its answer wins
+          setLoading(false);
           if (error) {
             Sentry.captureException(error, { level: 'warning', extra: { context: 'Receipts to check list failed to load' } });
             setFailed(true);
@@ -106,7 +109,7 @@ export default function ReceiptsToCheck() {
       </ul>
       {rows.length < total && (
         <div className="mt-2">
-          <Button variant="secondary" size="sm" showChevron={false} onClick={() => setPages((p) => p + 1)}>
+          <Button variant="secondary" size="sm" showChevron={false} loading={loading} onClick={() => setPages((p) => p + 1)}>
             Show more ({total - rows.length} not shown)
           </Button>
         </div>

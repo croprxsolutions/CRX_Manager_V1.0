@@ -37,14 +37,19 @@ describe('ReceiptsToCheck', () => {
   });
 
   it('shows the full count and lets the office reach every receipt past the first 50', async () => {
-    answers.push({ data: rows(50), error: null, count: 51 }, { data: rows(51), error: null, count: 51 });
+    let finishMore: (a: Answer) => void = () => {};
+    answers.push({ data: rows(50), error: null, count: 51 }, new Promise<Answer>((resolve) => { finishMore = resolve; }));
     show();
     expect(await screen.findByText(/receipts to check \(51\)/)).toBeInTheDocument();
     expect(screen.getAllByRole('listitem')).toHaveLength(50);
     expect(ranges[0]).toEqual([0, 49]);
-    fireEvent.click(screen.getByRole('button', { name: /Show more \(1 not shown\)/ }));
+    const more = screen.getByRole('button', { name: /Show more \(1 not shown\)/ });
+    fireEvent.click(more);
+    await waitFor(() => expect(more).toBeDisabled()); // a second click cannot start an overlapping read
+    fireEvent.click(more);
+    await act(async () => { finishMore({ data: rows(51), error: null, count: 51 }); });
     expect(await screen.findByText('D-50')).toBeInTheDocument();
-    expect(ranges[1]).toEqual([0, 99]);
+    expect(ranges).toEqual([[0, 49], [0, 99]]);
     expect(screen.queryByRole('button', { name: /Show more/ })).not.toBeInTheDocument();
   });
 

@@ -2,7 +2,7 @@ import { supabase } from './db';
 import { waitForEpaRequestSlot } from './epaRequestThrottle';
 import type { EpaLookupResult } from '../types';
 
-function isEpaLookupResult(value: unknown): value is EpaLookupResult {
+export function isEpaLookupResult(value: unknown): value is EpaLookupResult {
   if (!value || typeof value !== 'object') return false;
   const result = value as Partial<EpaLookupResult>;
   const nullableString = (field: unknown) => field === null || typeof field === 'string';

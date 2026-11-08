@@ -38,6 +38,7 @@ import {
   EPA_REQUEST_INTERVAL_MS,
   waitForEpaRequestSlot,
 } from '../lib/epaRequestThrottle';
+import { isEpaLookupResult } from '../lib/epaLookupClient';
 import { getProductParents } from '../lib/productParents';
 import { Sentry } from '../lib/sentry';
 import type { EpaLookupResult, LabelCoverageReport } from '../types';
@@ -152,28 +153,6 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isEpaLookupResult(value: unknown): value is EpaLookupResult {
-  if (!isRecord(value)) return false;
-  const nullableString = (field: unknown) => field === null || typeof field === 'string';
-  return typeof value.found === 'boolean'
-    && (value.regType === 'section3' || value.regType === 'distributor')
-    && nullableString(value.eparegno)
-    && nullableString(value.productname)
-    && (value.signalWordCanonical === null
-      || value.signalWordCanonical === 'Danger'
-      || value.signalWordCanonical === 'Warning'
-      || value.signalWordCanonical === 'Caution')
-    && typeof value.needsManual === 'boolean'
-    && nullableString(value.manufacturer)
-    && (value.rupYn === null || value.rupYn === 'Yes' || value.rupYn === 'No')
-    && nullableString(value.productStatus)
-    && typeof value.isCancelled === 'boolean'
-    && Array.isArray(value.activeIngredients)
-    && nullableString(value.latestLabelPdfUrl)
-    && (value.transferredTo === undefined || nullableString(value.transferredTo))
-    && Array.isArray(value.labelPdfs);
 }
 
 function isCachedFinding(value: unknown): value is EpaDataQualityFinding {

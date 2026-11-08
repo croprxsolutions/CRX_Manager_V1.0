@@ -7,6 +7,7 @@ import {
   classifyRegistrationNumber,
   distributorBaseRegistration,
   type EpaLookupResult,
+  needsDistributorBaseLookup,
   normalizeDistributorBasePayload,
   normalizeEpaPayload,
   type RegistrationClassification,
@@ -238,7 +239,7 @@ async function fetchEpaLookup(
       registration.kind,
       registration.normalized,
     );
-    if (result.found || registration.kind !== "distributor") return result;
+    if (!needsDistributorBaseLookup(result)) return result;
     // Second upstream call only for an unlisted C-P-D; the base is still a validated numeric C-P.
     const basePayload = await fetchEpaPayload(
       distributorBaseRegistration(registration.normalized),

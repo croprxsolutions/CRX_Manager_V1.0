@@ -1,6 +1,7 @@
 import {
   classifyRegistrationNumber,
   distributorBaseRegistration,
+  needsDistributorBaseLookup,
   normalizeDistributorBasePayload,
   normalizeEpaPayload,
   normalizeSignalWord,
@@ -328,4 +329,33 @@ Deno.test("distributor fallback reports a moved base registration", () => {
   assertEquals(result.found, false);
   assertEquals(result.eparegno, "105211-77");
   assertEquals(result.transferredTo, "105211-77");
+});
+
+Deno.test("only an unlisted, unmoved distributor number falls back to its base", () => {
+  const empty = normalizeEpaPayload({ items: [] }, "distributor", "62719-671-55467");
+  assertEquals(needsDistributorBaseLookup(empty), true);
+  assertEquals(
+    needsDistributorBaseLookup(
+      normalizeEpaPayload({ items: [] }, "section3", "62719-671"),
+    ),
+    false,
+  );
+  const movedDistributor = normalizeEpaPayload(
+    {
+      items: [{
+        eparegno: "62719-671-55468",
+        transfer_history: [{ previous_eparegno: "62719-671-55467" }],
+      }],
+    },
+    "distributor",
+    "62719-671-55467",
+  );
+  assertEquals(movedDistributor.transferredTo, "62719-671-55468");
+  assertEquals(needsDistributorBaseLookup(movedDistributor), false);
+  assertEquals(
+    needsDistributorBaseLookup(
+      normalizeEpaPayload(MOVED_PAYLOAD, "section3", "105211-77"),
+    ),
+    false,
+  );
 });

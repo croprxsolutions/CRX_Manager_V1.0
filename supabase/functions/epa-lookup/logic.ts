@@ -270,6 +270,12 @@ export function normalizeEpaPayload(
   };
 }
 
+/** Only an unlisted, unmoved C-P-D number falls back to its base C-P record. */
+export function needsDistributorBaseLookup(result: EpaLookupResult): boolean {
+  return result.regType === "distributor" && !result.found &&
+    !result.transferredTo;
+}
+
 /** The C-P base of a C-P-D distributor number. */
 export function distributorBaseRegistration(distributorRegNumber: string): string {
   return distributorRegNumber.split("-").slice(0, 2).join("-");

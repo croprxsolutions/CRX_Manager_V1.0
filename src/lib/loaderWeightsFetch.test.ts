@@ -109,13 +109,15 @@ describe('selectedLoaderWeights (job page)', () => {
     expect('weights' in selectedLoaderWeights({ status: 'ready', entry: two, units }, { ...worksheet, id: 'B-w' } as JobLoaderWorksheet, shown)).toBe(true);
   });
 
-  it('still shows the linked line\'s weight when the job also has an unlinked line with an amount', () => {
+  it('matches a job that also has an unlinked line with an amount, but withholds the load total as the PDF does', () => {
     const mixed = job('C', 8);
     mixed.lines = [...mixed.lines!, { id: 'C-l2', product_id: null, quantity: 5, unit: 'Gal', product_name: 'TEST Unlinked', product_form: null }];
     const rows = [{ product_id: 'p1', product_name: 'TEST Liquid', quantity: '20', unit: 'Gal' }, { product_id: null, product_name: 'TEST Unlinked', quantity: '5', unit: 'Gal' }];
     const shown = computeLoaderWorksheet({ total_acres: 20, carrier_rate_gpa: 10, tank_capacity: 100, products: loaderPanelProducts(rows) });
     const result = selectedLoaderWeights({ status: 'ready', entry: mixed, units }, { ...worksheet, id: 'C-w' } as JobLoaderWorksheet, shown);
-    expect('weights' in result && result.weights.loads[0].totalText).toBe('Product weight: 80.00 lb');
+    if (!('weights' in result)) throw new Error('expected a plan match');
+    expect(result.weights.loads[0].cells[0].weightText).toBe('80.00 lb');
+    expect(result.weights.loads[0].totalText).toMatch(/^Product weight not shown: .*TEST Unlinked/);
   });
 
   it('does not match a plan whose product fields only join to the same text', () => {

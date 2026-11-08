@@ -47,8 +47,10 @@ const sameSettings = (a: JobLoaderWorksheet, b: JobLoaderWorksheet) => a.capacit
  * Products are sorted (the job page and the getter list a job's chemicals in different orders) and JSON-encoded,
  * so no name or unit can make two different plans read the same.
  */
+// Linked lines only: the panel lists linked lines (loaderPanelProducts), so an unlinked line must not make the plans differ.
 const planKey = (ws: LoaderWorksheet) => JSON.stringify(ws.loads.map((load) => [load.volume,
-  load.products.map((product) => JSON.stringify([product.product_id ?? '', product.product_name, product.amount, product.unit ?? ''])).sort()]));
+  load.products.filter((product) => product.product_id)
+    .map((product) => JSON.stringify([product.product_id, product.product_name, product.amount, product.unit ?? ''])).sort()]));
 
 export interface SelectedLoaderWeights { ws: LoaderWorksheet; weights: LoaderWeights; caption: string }
 
@@ -66,8 +68,8 @@ export function selectedLoaderWeights(read: LoaderWeightsRead, selected: JobLoad
   const inputs = loaderJobInputs(read.entry);
   const ws = computeLoaderWorksheet({ total_acres: Number(read.entry.acres ?? 0), carrier_rate_gpa: saved.worksheet.carrier_rate_gpa,
     tank_capacity: saved.worksheet.capacity_gal, mode: saved.worksheet.load_balance_mode,
-    // The panel lists linked lines only (loaderPanelProducts), so an unlinked line must not make the plans differ.
-    perLoadAcresOverride: saved.worksheet.per_load_acres ?? undefined, products: inputs.products.filter((product) => product.product_id) });
+    // Every line, as the PDF does: an unlinked line with an amount withholds the load total instead of being left out.
+    perLoadAcresOverride: saved.worksheet.per_load_acres ?? undefined, products: inputs.products });
   if (!ws.valid || planKey(ws) !== planKey(shown)) return changed;
   const weights = loaderLoadWeights(ws, inputs.weights, read.units, inputs.sourceLines);
   return { ws, weights, caption: loaderWeightCaption(true, weights.anyCurrent) };

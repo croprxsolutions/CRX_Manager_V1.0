@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`, `20261211100000_product_chemistry_confirmed_swaps`); other evidence retains its stated dates.
+**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -511,8 +511,14 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
-**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). About 105 of 204 stored EPA registration numbers are wrong (MED, compliance data; the
-`LabelDataQuality` screen exists, data entry is not done). CRM has no data entered; 146 of 151 active customers lack a
+**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data), re-measured read-only 2026-11-08 against EPA PPLS: all
+286 active products that carry a number use the valid format; of the 203 different numbers, 169 match the
+registry, 30 are confirmed wrong (9 moved by EPA to a new number, 21 belong to another brand or are not in the
+registry) and 4 are unconfirmed until a person reads the jug; 8 products with no number have a registry match to add. Each has a
+proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
+changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
+lookup error instead of the new number, and a three-part distributor number returns "not found" even when
+valid. CRM has no data entered; 146 of 151 active customers lack a
 sales rep (live read-only count, 2026-11-08). The tool exists: an admin ticks customers on the Customers list and uses
 **Assign sales rep** (PR #381), so what remains is Mason choosing each customer's rep.
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.

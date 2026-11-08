@@ -26,15 +26,25 @@ import {
 import { validateParkedMigrationCrossReferences } from "../.claude/hooks/worktree-awareness-lib.mjs";
 
 // --pins-only [dir]: only the sha256 pin check, on dir (pre-push passes the pushed commit's files).
+// --freshness-only [dir]: only the CURRENT_STATE / KNOWN_ISSUES stamp checks, always enforced;
+// pre-push runs it when the push carries migration SQL (PR #1652 found the stale stamp in CI).
 const pinsOnly = process.argv.indexOf("--pins-only");
-const ROOT = pinsOnly >= 0 && process.argv[pinsOnly + 1]
-  ? path.resolve(process.argv[pinsOnly + 1])
+const freshnessOnly = process.argv.indexOf("--freshness-only");
+const onlyFlag = Math.max(pinsOnly, freshnessOnly);
+const ROOT = onlyFlag >= 0 && process.argv[onlyFlag + 1]
+  ? path.resolve(process.argv[onlyFlag + 1])
   : path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const rows = [];
 const row = (check, claim, actual, status, note = "") => rows.push({ check, claim: String(claim), actual: String(actual), status, note });
 const read = (relative) => readFileSync(path.join(ROOT, relative), "utf8");
 
 const migrations = readdirSync(path.join(ROOT, "supabase", "migrations")).filter((name) => name.endsWith(".sql"));
+if (freshnessOnly >= 0) {
+  const liveStateDocs = ["CURRENT_STATE.md", "KNOWN_ISSUES.md"];
+  manualDocChecks(liveStateDocs);
+  liveStateFreshness(liveStateDocs, "FAIL");
+  report();
+}
 const history = readCombinedMigrationHistory(ROOT);
 
 // The CI guard-regression suite's check, run on disk before a push. A Windows checkout holds
@@ -151,22 +161,24 @@ row("wired hooks documented in agent-guardrails.md", wiredHooks.length, wiredHoo
   undocumentedHooks.length ? `undocumented: ${undocumentedHooks.join(", ")}` : "");
 
 // Operating-manual docs must exist and carry a "Last verified:" stamp so staleness is visible.
-const manualDocs = [
+manualDocChecks([
   "ARCHITECTURE.md", "DECISION_LOG.md", "KNOWN_ISSUES.md",
   "CURRENT_STATE.md", "OWNER_PLAYBOOK.md", "AGENT_ONBOARDING.md",
-];
-for (const doc of manualDocs) {
-  const rel = `docs/manual/${doc}`;
-  if (!existsSync(path.join(ROOT, rel))) {
-    row(`manual doc ${doc}`, "exists", "missing", "FAIL");
-    continue;
-  }
-  const stamped = /^\*{0,2}Last verified:?\*{0,2}\s*\d{4}-\d{2}-\d{2}/m.test(read(rel));
-  row(`manual doc ${doc}`, "Last verified stamp", stamped ? "present" : "missing",
-    stamped ? "PASS" : "FAIL");
-  const stampProblems = manualStampProblems(read(rel));
-  row(`manual doc ${doc} stamp line`, `one line, at most 200 characters`, stampProblems.length ? "no" : "yes",
-    stampProblems.length ? "FAIL" : "PASS", stampProblems.join("; "));
+]);
+function manualDocChecks(manualDocs) {
+  for (const doc of manualDocs) {
+    const rel = `docs/manual/${doc}`;
+    if (!existsSync(path.join(ROOT, rel))) {
+      row(`manual doc ${doc}`, "exists", "missing", "FAIL");
+      continue;
+    }
+    const stamped = /^\*{0,2}Last verified:?\*{0,2}\s*\d{4}-\d{2}-\d{2}/m.test(read(rel));
+    row(`manual doc ${doc}`, "Last verified stamp", stamped ? "present" : "missing",
+      stamped ? "PASS" : "FAIL");
+    const stampProblems = manualStampProblems(read(rel));
+    row(`manual doc ${doc} stamp line`, `one line, at most 200 characters`, stampProblems.length ? "no" : "yes",
+      stampProblems.length ? "FAIL" : "PASS", stampProblems.join("; "));
+}
 }
 
 // HARD freshness gate (2026-07-16 scaffolding review): the two docs that describe
@@ -179,13 +191,6 @@ for (const doc of manualDocs) {
 // forcing function the manual layer lacked: within 48h of shipping, KNOWN_ISSUES
 // listed an applied-live fix as "parked" while claiming same-day re-verification.
 // Bump the stamp ONLY after actually re-reading the doc against live state.
-const newestMigDate = migrations
-  .map((name) => name.match(/^(\d{8})/)?.[1])
-  .filter(Boolean)
-  .sort()
-  .at(-1); // YYYYMMDD of the newest migration
-const todayChicago = chicagoCalendarStamp();
-const freshnessDate = manualFreshnessBoundary(newestMigDate, todayChicago);
 // Files changed since the base (CI passes the PR base or push-before sha). An
 // unreadable base enforces, so a broken diff can never silence the gate.
 const freshnessBase = process.env.DOCS_FRESHNESS_BASE || "origin/main";
@@ -195,21 +200,34 @@ try {
   const changed = git("diff", "--name-only", "--no-renames", git("merge-base", freshnessBase, "HEAD"), "HEAD").split(/\r?\n/).filter(Boolean);
   if (!freshnessEnforcedFor(changed)) staleStatus = "WARN";
 } catch { /* keep FAIL */ }
-for (const doc of ["CURRENT_STATE.md", "KNOWN_ISSUES.md"]) {
-  const rel = `docs/manual/${doc}`;
-  if (!existsSync(path.join(ROOT, rel))) continue; // the "stamp present" check above already failed this
-  const m = read(rel).match(/Last verified:?\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) continue; // no parseable stamp — already a FAIL above
-  const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
-  const fresh = !freshnessDate || stampDate >= freshnessDate;
-  row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
-    fresh ? "PASS" : staleStatus,
-    fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
+liveStateFreshness(["CURRENT_STATE.md", "KNOWN_ISSUES.md"], staleStatus);
+function liveStateFreshness(docs, staleStatus) {
+  const newestMigDate = migrations
+    .map((name) => name.match(/^(\d{8})/)?.[1])
+    .filter(Boolean)
+    .sort()
+    .at(-1); // YYYYMMDD of the newest migration
+  const todayChicago = chicagoCalendarStamp();
+  const freshnessDate = manualFreshnessBoundary(newestMigDate, todayChicago);
+  for (const doc of docs) {
+    const rel = `docs/manual/${doc}`;
+    if (!existsSync(path.join(ROOT, rel))) continue; // the "stamp present" check above already failed this
+    const m = read(rel).match(/Last verified:?\*{0,2}\s*(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) continue; // no parseable stamp — already a FAIL above
+    const stampDate = `${m[1]}${m[2]}${m[3]}`; // YYYYMMDD
+    const fresh = !freshnessDate || stampDate >= freshnessDate;
+    row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
+      fresh ? "PASS" : staleStatus,
+      fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
 }
 
-console.log("check-doc-drift");
-for (const item of rows) {
-  console.log(`${item.status.padEnd(4)} ${item.check}: claim=${item.claim} actual=${item.actual}${item.note ? ` - ${item.note}` : ""}`);
+}
+
+report();
+function report() {
+  console.log("check-doc-drift");
+  for (const item of rows) {
+    console.log(`${item.status.padEnd(4)} ${item.check}: claim=${item.claim} actual=${item.actual}${item.note ? ` - ${item.note}` : ""}`);
 }
 const failed = rows.filter((item) => item.status === "FAIL" || item.status === "ERROR");
 if (failed.length > 0) {
@@ -217,3 +235,5 @@ if (failed.length > 0) {
   process.exit(1);
 }
 console.log("PASS - reference documentation matches repository reality.");
+process.exit(0);
+}

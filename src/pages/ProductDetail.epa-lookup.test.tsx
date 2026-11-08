@@ -275,6 +275,22 @@ describe('ProductDetail EPA lookup', () => {
     expect(JSON.stringify(params)).not.toContain('UNRECOGNIZED RAW VALUE');
   });
 
+  it('shows a moved registration and offers nothing to apply', async () => {
+    render(<ProductDetail />);
+    H.invoke.mockResolvedValueOnce({
+      data: lookupResult({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+      error: null,
+    });
+    const registrationInputs = await screen.findAllByLabelText('EPA Registration');
+    fireEvent.change(registrationInputs[0], { target: { value: '264-849' } });
+    fireEvent.click((await screen.findAllByRole('button', { name: /look up epa/i }))[0]);
+
+    expect(await screen.findByText(/EPA moved 264-849 to 105211-77 \(ROUNDUP ULTRA HERBICIDE\)/)).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('warning', 'EPA moved registration 264-849 to 105211-77.');
+    expect(screen.queryByRole('button', { name: /apply to product/i })).toBeNull();
+    expect(H.rpc).not.toHaveBeenCalled();
+  });
+
   it('blocks applying a lookup of a registration different from the product\'s saved one', async () => {
     // Product already has a saved registration; admin looks up a DIFFERENT number.
     // Empty-fields-only would keep the saved reg but still fill the signal word

@@ -316,7 +316,7 @@ export default function BrandVsGeneric() {
           <div role="note" className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-secondary">
             <Info className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
             <span>
-              This list is read-only. Active ingredients will be recorded on each product&apos;s Chemistry section (coming soon).
+              This list is read-only. Active ingredients are recorded in the Chemistry section of each product.
             </span>
           </div>
           <DataTable<MappingRow>

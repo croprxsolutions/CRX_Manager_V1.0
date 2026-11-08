@@ -56,7 +56,7 @@ check('a live name that differs from its file (same stamp) is a name mismatch', 
 check('changed SQL is a mismatch; CRLF, renumbering, pre-baseline rows and a pinned edit are not', () => {
   assert.deepEqual(r.contentMismatch.map((x) => x.name), ['changed_sql']);
   assert.deepEqual(r.acceptedContent.map((x) => x.name), ['edited_after_apply']);
-  assert.equal(r.compared, 4);
+  assert.equal(r.compared, 5); // includes the renamed row, compared against its stamp-matched file
 });
 check('a post-baseline row whose SQL cannot be compared is reported, never skipped', () => {
   assert.deepEqual(r.notCompared.map((x) => [x.name, x.why]), [['no_hash_in_read', 'the ledger read carried no SQL hash']]);
@@ -94,6 +94,18 @@ check('a pinned difference stops being accepted once either side changes again',
     baselineHighWater: BASE, allowlist,
   });
   assert.deepEqual(out.contentMismatch.map((x) => x.name), ['edited_after_apply']);
+});
+check('a renamed row is still SQL-compared; a name pin covers the name only, not new SQL', () => {
+  const live = { version: '20260805000000', name: 'renamed_before_merge', sha: sql('create table e(changed);'), parts: 1 };
+  const file = { name: '20260805000000_renamed_file.sql', sha: sql('create table e();') };
+  const bare = compareLedgerToMain({ rows: [live], files: [file], baselineHighWater: BASE });
+  assert.deepEqual(bare.nameMismatch.map((x) => x.name), ['renamed_before_merge']);
+  assert.deepEqual(bare.contentMismatch.map((x) => x.name), ['renamed_before_merge']);
+  const pinned = compareLedgerToMain({ rows: [live], files: [file], baselineHighWater: BASE, allowlist: {
+    acceptedMismatches: [{ version: '20260805000000', liveName: 'renamed_before_merge', file: file.name, reason: 'renamed on purpose' }],
+  } });
+  assert.deepEqual(pinned.nameMismatch, []);
+  assert.deepEqual(pinned.contentMismatch.map((x) => x.name), ['renamed_before_merge']);
 });
 check('the real repository lists its migration files at HEAD', () => {
   const real = filesAtRef('HEAD');

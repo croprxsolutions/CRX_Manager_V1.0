@@ -51,7 +51,8 @@ export function sqlHash(text) {
  */
 export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist = {} }) {
   const accepted = new Set((allowlist.acceptedLedgerRows ?? []).map((r) => String(r.version)));
-  // A SQL difference is accepted only while BOTH pinned hashes still hold; a name difference by version.
+  // A SQL difference is accepted only while BOTH pinned hashes still hold; a name difference only
+  // while the pinned live name and file name both still hold (`liveName` + `file`).
   const acceptedMismatch = new Map((allowlist.acceptedMismatches ?? []).map((r) => [String(r.version), r]));
   const parked = new Set((allowlist.parkedFiles ?? []).map((p) => migrationStem(p.file)));
   const fileSlugs = new Map();
@@ -83,10 +84,14 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
     const bySlug = namesOnlyStamps(slug) ? [] : (fileSlugs.get(slug) ?? []);
     const entry = { version: String(row.version), name: String(row.name ?? '') };
     if (bySlug.length === 0 && !(namesOnlyStamps(slug) && byStamp.length)) {
-      if (accepted.has(entry.version)) acceptedNoFile.push(entry);
-      else if (byStamp.length && !acceptedMismatch.has(entry.version)) nameMismatch.push({ ...entry, file: byStamp[0].name });
-      else if (!byStamp.length) noFile.push(entry);
-      continue;
+      if (accepted.has(entry.version)) { acceptedNoFile.push(entry); continue; }
+      if (!byStamp.length) { noFile.push(entry); continue; }
+      // Same stamp, different name. Reported unless pinned to this exact pair of names, then
+      // still SQL-compared below against the stamp-matched file.
+      const pin = acceptedMismatch.get(entry.version);
+      if (!(pin?.liveName === entry.name && byStamp.some((f) => f.name === pin.file))) {
+        nameMismatch.push({ ...entry, file: byStamp[0].name });
+      }
     }
     const candidates = bySlug.length ? bySlug : byStamp;
     const file = candidates.length === 1 ? candidates[0] : candidates.find((f) => stamps.includes(fileStamp(f.stem)));

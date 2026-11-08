@@ -1,5 +1,5 @@
 {
-  "_about": "KI-35 drift check (scripts/check-migration-drift.mjs). acceptedLedgerRows (share this one reason): live rows with no file on main, accepted as pre-existing drift (KI-62); all were applied before the 2026-07-27 schema baseline (supabase/baselines/manifest.json). parkedFiles: {file, reason} for a migration on main that is deliberately not applied. acceptedMismatches: {version, liveSha, fileSha, reason} for a live row whose SQL differs from its file on purpose; it stays accepted only while both hashes are unchanged.",
+  "_about": "KI-35 drift check (scripts/check-migration-drift.mjs). acceptedLedgerRows (share this one reason): live rows with no file on main, accepted as pre-existing drift (KI-62); all were applied before the 2026-07-27 schema baseline (supabase/baselines/manifest.json). parkedFiles: {file, reason} for a migration on main that is deliberately not applied. acceptedMismatches: {version, file, liveSha, fileSha, reason} for a live row whose SQL differs from its file on purpose; it stays accepted only while both hashes are unchanged. A deliberate name difference uses {version, liveName, file, reason} instead and is still SQL-compared.",
   "acceptedLedgerRows": [
     {
       "version": "20260212035255",

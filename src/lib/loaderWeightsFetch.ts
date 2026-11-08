@@ -20,6 +20,9 @@ export interface LoaderGetterJob {
   found: boolean;
   job?: {
     job_number: string;
+    job_date: string;
+    scheduled_time: string | null;
+    applicator_id: string | null;
     carrier_rate_gpa: number | null;
     loader_tank_capacity: number | null;
     loader_comment: string | null;

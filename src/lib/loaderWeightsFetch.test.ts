@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as db from './db';
+
+vi.mock('./billedCustomersResolver', () => ({ resolveBilledCustomers: () => Promise.resolve({ customers: [], complete: true }) }));
 import { buildLoaderWorksheetPdfPlan, loaderPdfMixBody, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
 import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob } from './loaderWeightsFetch';
+import { fetchLoaderWorksheetData } from './loaderWorksheetFetch';
 import { computeLoaderWorksheet } from './loaderWorksheet';
 import { loaderPanelProducts, selectedLoaderWeights } from '../components/jobs/loaderPanelWeights';
 import type { JobLoaderWorksheet, JobLoaderWorksheetWeight, WeightUnitFactors } from '../types';
@@ -13,7 +16,7 @@ const saved = (lb: number) => ({ product_id: 'p1', product_form: 'liquid', weigh
   none_reason: null, unit_factors: units }) as unknown as JobLoaderWorksheetWeight;
 const job = (id: string, lb: number, quantity: unknown = 20): LoaderGetterJob => ({
   job_id: id, found: true, acres: 20,
-  job: { job_number: id, carrier_rate_gpa: 10, loader_tank_capacity: null, loader_comment: null, vehicle: null },
+  job: { job_number: id, job_date: '2026-11-07', scheduled_time: null, applicator_id: null, carrier_rate_gpa: 10, loader_tank_capacity: null, loader_comment: null, vehicle: null },
   lines: [{ id: `${id}-l1`, product_id: 'p1', quantity, unit: 'Gal', product_name: 'TEST Liquid', product_form: 'liquid' }],
   current: { p1: { kind: 'density', lb_per_unit: 9, per_unit: 'Gal' } as never },
   worksheet: { id: `${id}-w`, worksheet, vehicle_name: 'Manual', saved: { p1: saved(lb) } },
@@ -153,5 +156,29 @@ describe('fetchLoaderJobWeights', () => {
     expect(unitsByJob.get('job-0')).toBe(chunkUnits[0]);
     expect(unitsByJob.get('job-200')).toBe(chunkUnits[1]);
     rpc.mockRestore();
+  });
+});
+
+describe('fetchLoaderWorksheetData', () => {
+  it('prints the date, time and applicator of the getter read that gave the lines, not the earlier jobs read', async () => {
+    // A query builder that resolves to `data` however it is chained.
+    const query = (data: unknown) => {
+      const chain: Record<string, unknown> = { then: (resolve: (v: unknown) => void) => resolve({ data, error: null }) };
+      for (const name of ['select', 'in', 'eq']) chain[name] = () => chain;
+      return chain;
+    };
+    const jobsRead = [{ id: 'A', job_number: 'A', job_date: '2026-11-01', scheduled_time: '07:00:00', applicator_id: 'old',
+      carrier_rate_gpa: 10, loader_tank_capacity: null, loader_comment: null, vehicle: null, job_fields: [], job_chemicals: [] }];
+    const tables: Record<string, unknown> = { jobs: jobsRead, job_loader_worksheets: [],
+      profile_public_view: [{ id: 'old', full_name: 'TEST Old Applicator' }, { id: 'new', full_name: 'TEST New Applicator' }] };
+    const fake = ((table: string) => query(tables[table])) as never;
+    const from = vi.spyOn(db.supabase, 'from').mockImplementation(fake);
+    const fromUntyped = vi.spyOn(db.supabaseUntyped, 'from').mockImplementation(fake);
+    const getter = { ...job('A', 8), job: { ...job('A', 8).job!, job_date: '2026-11-09', scheduled_time: '08:30:00', applicator_id: 'new' } };
+    const rpc = vi.spyOn(db.supabaseUntyped, 'rpc').mockImplementation((() =>
+      Promise.resolve({ data: { read_at: 't', unit_factors: units, jobs: [getter] }, error: null })) as never);
+    const [pageData] = await fetchLoaderWorksheetData(['A']);
+    expect([pageData.scheduled_date, pageData.scheduled_time, pageData.applicator_name]).toEqual(['2026-11-09', '08:30:00', 'TEST New Applicator']);
+    from.mockRestore(); fromUntyped.mockRestore(); rpc.mockRestore();
   });
 });

@@ -16,9 +16,9 @@
 --   soft-deleted) that has NO dispatch row at all: the rows the field-insert trigger writes for a qualifying
 --   applicator. It runs:
 --   * when a person BECOMES an active applicator (AFTER UPDATE OF is_active, role ON profiles);
---   * when one of their licenses is added, renewed or re-activated (AFTER INSERT OR UPDATE OF is_active,
---     expiry_date ON applicator_licenses), so a job held back by an expired license reaches the board once
---     the license is renewed.
+--   * when one of their licenses is added, renewed, re-activated or moved to them (AFTER INSERT OR UPDATE OF
+--     is_active, expiry_date, profile_id ON applicator_licenses), so a job held back by an expired license
+--     reaches the board once the license is renewed.
 --   dispatched_by follows the existing triggers: auth.uid() (the person making the change), else the job's
 --   updated_by, else created_by.
 --
@@ -178,13 +178,13 @@ CREATE TRIGGER trg_sync_job_location_dispatch_on_applicator_qualify
   EXECUTE FUNCTION public._sync_job_location_dispatch_on_applicator_qualify();
 
 CREATE TRIGGER trg_sync_job_location_dispatch_on_license_change
-  AFTER INSERT OR UPDATE OF is_active, expiry_date ON public.applicator_licenses
+  AFTER INSERT OR UPDATE OF is_active, expiry_date, profile_id ON public.applicator_licenses
   FOR EACH ROW
   WHEN (NEW.is_active)
   EXECUTE FUNCTION public._sync_job_location_dispatch_on_license_change();
 
 CREATE TRIGGER trg_lock_applicator_profile_on_license_write
-  BEFORE INSERT OR UPDATE OF is_active, expiry_date ON public.applicator_licenses
+  BEFORE INSERT OR UPDATE OF is_active, expiry_date, profile_id ON public.applicator_licenses
   FOR EACH ROW
   EXECUTE FUNCTION public._lock_assigned_applicator_profile();
 

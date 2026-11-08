@@ -426,8 +426,14 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
   assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '8');
   console.log(`[prover] ASSIGNMENT RACE: job 9 assigned to G in another session during G's re-activation (which waited ${waitedAssign} ms) reaches the board`);
 
+  // MOVED (Luna round 3): A's valid license is moved to F (whose own license expired); F's held-back e11 is released.
+  ok(ADMIN, `UPDATE public.applicator_licenses SET profile_id = '${APP_F}' WHERE license_number = 'PROVER-A';`);
+  assert.equal(board(), afterAssign.replace('11|-|none|-', '11|b6|dispatched|a1'));
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '9');
+  console.log("[prover] MOVED: a valid license moved to F releases F's held-back location e11");
+
   assert.equal(sweepRows(), '-');
-  console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched); e11 (F, license expired) stays undispatched by design');
+  console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched)');
 
   stageText('again.sql', lf(CANDIDATE));
   const again = apply('again.sql');

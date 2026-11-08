@@ -387,11 +387,11 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       <Card padding={false}>
         <div className="flex items-center justify-end gap-3 p-4 sm:p-5">
           {isAdmin && (
-            <Button type="button" variant="ghost" size="sm" icon={<Archive className="h-4 w-4" />} showChevron={false} onClick={() => { setDocuments([]); setShowRemoved((current) => !current); }} className="min-h-11">
+            <Button type="button" variant="ghost" size="sm" icon={<Archive className="h-4 w-4" />} showChevron={false} disabled={restoringId !== null} onClick={() => { setDocuments([]); setShowRemoved((current) => !current); }} className="min-h-11">
               {showRemoved ? 'Show current documents' : 'Show removed documents'}
             </Button>
           )}
-          <Button type="button" variant="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} onClick={() => void loadDocuments()} className="min-h-11">Refresh</Button>
+          <Button type="button" variant="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} disabled={restoringId !== null} onClick={() => void loadDocuments()} className="min-h-11">Refresh</Button>
         </div>
         {loading ? (
           <div className="space-y-3 px-4 pb-5 sm:px-5">

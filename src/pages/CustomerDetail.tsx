@@ -56,6 +56,8 @@ import CustomerFacts from '../components/customers/CustomerFacts';
 import CustomerPrepCard from '../components/customers/CustomerPrepCard';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import CustomerDocuments from '../components/customers/CustomerDocuments';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { findLikelyDuplicateCustomers, type CustomerDuplicateMatch } from '../lib/customerDuplicates';
 import { downloadYearEndSummaryPdf } from '../lib/yearEndSummaryPdf';
 import { ORDER_COLUMNS, QUOTE_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
@@ -212,6 +214,7 @@ export default function CustomerDetail() {
   // Narrow local structural state: generated types are refreshed only after apply.
   const customerRowVersionRef = useRef<number | null>(null);
   const [staleSaveOpen, setStaleSaveOpen] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState<CustomerDuplicateMatch[]>([]);
   const [openSections, setOpenSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
   const [timeline, setTimeline] = useState<ActivityFeedItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
@@ -922,7 +925,7 @@ export default function CustomerDetail() {
     openSection(section);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (skipDuplicateCheck = false) => {
     if (saving) return;
     // The save writes the CURRENT route id, so it must never carry a form that
     // belongs to a previously-viewed customer. `fetchCustomerSnapshot` is guarded
@@ -995,6 +998,29 @@ export default function CustomerDetail() {
       }
       if (Math.abs(splitTotal - 100) >= 0.01) {
         toast('error', `Commission splits must total 100% (currently ${splitTotal.toFixed(1)}%)`);
+        return;
+      }
+    }
+
+    // KI-77: warn (never block) when a new or renamed customer looks like one already on file.
+    const loaded = loadedCustomerRef.current;
+    const identityChanged = isNew || !loaded
+      || customer.farm_name !== loaded.farm_name
+      || (customer.phone ?? '') !== (loaded.phone ?? '')
+      || (customer.email ?? '') !== (loaded.email ?? '');
+    if (!skipDuplicateCheck && identityChanged) {
+      setSaving(true);
+      let matches: CustomerDuplicateMatch[] = [];
+      try {
+        matches = await findLikelyDuplicateCustomers(customer as Customer, isNew ? undefined : id);
+      } catch (err) {
+        // Warn-only: a failed duplicate check must never stop the save.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_duplicate_check' } });
+      }
+      if (currentIdRef.current !== id) { setSaving(false); return; }
+      if (matches.length > 0) {
+        setDuplicateMatches(matches);
+        setSaving(false);
         return;
       }
     }
@@ -1599,7 +1625,7 @@ export default function CustomerDetail() {
           </SectionCard>
 
           <div className="flex justify-end">
-            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving}>
+            <Button icon={<Save className="w-4 h-4" />} onClick={() => handleSave()} loading={saving}>
               {isNew ? 'Create Customer' : 'Save Changes'}
             </Button>
           </div>
@@ -2311,6 +2337,19 @@ export default function CustomerDetail() {
         onGenerate={handleGenerateSummary}
         loading={summaryLoading}
         customerName={customer.farm_name || ''}
+      />
+
+      <ConfirmModal
+        open={duplicateMatches.length > 0}
+        onClose={() => setDuplicateMatches([])}
+        onConfirm={() => { setDuplicateMatches([]); void handleSave(true); }}
+        title="Possible duplicate customer"
+        message={`This looks like a customer already on file: ${duplicateMatches.slice(0, 5).map((m) => (
+          `${m.farm_name}${[m.city, m.state].filter(Boolean).length ? ` (${[m.city, m.state].filter(Boolean).join(', ')})` : ''}${m.is_active ? '' : ' [inactive]'} - ${m.reasons.join(', ')}`
+        )).join('; ')}${duplicateMatches.length > 5 ? `; and ${duplicateMatches.length - 5} more` : ''}. Save anyway?`}
+        confirmLabel={isNew ? 'Create anyway' : 'Save anyway'}
+        cancelLabel="Go back"
+        variant="warning"
       />
 
       <UnsavedChangesModal

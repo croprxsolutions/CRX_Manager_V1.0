@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`, `20261211100000_product_chemistry_confirmed_swaps`); other evidence retains its stated dates.
+**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 
@@ -480,10 +480,16 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (deliberately deferred) · UI/database · unassigned (next Goal 5/6 change)**
-After completion the phone sends the receipt email. If signal drops between, the delivery is complete with no
-receipt; the driver is warned and the office can resend by hand. A queue table plus scheduled sender was designed
-and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
+**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
+check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
+that waits on Mason's approval to
+deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
+provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
+and should land before the app switch.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**
@@ -511,8 +517,14 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
-**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). About 105 of 204 stored EPA registration numbers are wrong (MED, compliance data; the
-`LabelDataQuality` screen exists, data entry is not done). CRM has no data entered; 146 of 150 customers lack a
+**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data), re-measured read-only 2026-11-08 against EPA PPLS: all
+286 active products that carry a number use the valid format; of the 203 different numbers, 169 match the
+registry, 30 are confirmed wrong (9 moved by EPA to a new number, 21 belong to another brand or are not in the
+registry) and 4 are unconfirmed until a person reads the jug; 8 products with no number have a registry match to add. Each has a
+proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
+changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
+lookup error instead of the new number, and a three-part distributor number returns "not found" even when
+valid. CRM has no data entered; 146 of 150 customers lack a
 sales rep (older counts).
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
@@ -633,9 +645,16 @@ quote changes the tier label without repricing its locked lines.
 ## Database and release process
 
 ### KI-35 — Live ledger vs files on `main` is checked only by noticing
-**MED · UNVERIFIED · process/database · unassigned**
-Nothing automatically compares migrations applied live with migration files on `main` (four past mismatches). The
-live ledger also has older entries with no file (ACCEPTED, pre-existing drift; see KI-62).
+**MED · FIXED (tool), run by hand · process/database · unassigned**
+Nothing compared migrations applied live with migration files on `main` (four past mismatches). Now
+`npm run db-drift:live` (`scripts/check-migration-drift.mjs`, read-only) lists live rows with no file on `main`, files
+on `main` never applied (parked drafts named in `scripts/migration-drift-allowlist.json` are shown apart), and live
+rows whose name or SQL differs from the file, or whose SQL cannot be compared. It reuses the pending-set guard's row
+matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version, and 13
+rows whose files had only a header comment edited after the apply are allowlisted pinned to both hashes.
+First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared; one row with no
+file, `20261214100000_ki30_epa_registration_corrections`, applied before its PR #1653 merged (clean against that
+branch). Not yet scheduled: it needs Mason's PC token, so run it after each live apply or merge.
 
 ### KI-36 — A table lock does not serialize the OLD body of a replaced function
 **MED (rule) · ACCEPTED as guidance (same as KI-61) · database · Mason (2026-09-03)**
@@ -985,7 +1004,7 @@ service-role tools (LOW).
 
 KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
-(live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
+(live-data counts), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.
 
 ---

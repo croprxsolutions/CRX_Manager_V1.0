@@ -249,7 +249,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       if (!result || isStale()) return;
       setEpaResult(result);
       setEpaResultNumber(regNumber);
-      if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
+      if (result.transferredTo) toast('warning', `EPA moved registration ${regNumber} to ${result.transferredTo}.`);
+      else if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
     } catch (err) {
       if (isStale()) return;
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
@@ -571,6 +572,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                         Use EPA’s signal word and restricted-use status (and manufacturer, if blank)
                       </Button>
                     </>
+                  ) : epaResult.transferredTo ? (
+                    <p className="text-red-700">EPA moved this registration to {epaResult.transferredTo}. Enter the new number to use EPA’s details.</p>
                   ) : (
                     <p>EPA did not find this registration number.</p>
                   )}

@@ -1631,6 +1631,21 @@ export function codeHealthBeforeSol(root, baseSha, headSha, {
   return { ok: result.status === 0, ran: true, output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim() };
 }
 
+// CI's "Documentation consistency" check failing after Sol means a docs-only fix
+// that voids the proof and a second Sol run (PR #1650, 2026-11-08: the manual
+// "Last verified" stamps a new migration requires; sixth time). It takes about a
+// second, so it always runs, against the same base Sol reviews.
+export function docsCheckBeforeSol(root, baseSha, { spawn = spawnSync } = {}) {
+  const result = spawn(process.execPath, ["scripts/check-doc-drift.mjs"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, DOCS_FRESHNESS_BASE: baseSha },
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  const failures = output.split(/\r?\n/).filter((line) => line.startsWith("FAIL")).join("\n");
+  return { ok: result.status === 0, output: failures || output.trim() };
+}
+
 // ── Sol round count (Mason, 2026-11-06) ─────────────────────────────────────
 // PR 1524 spent about 6 Sol rounds on one rounding mechanism before anyone asked
 // Mason the trade-off, because no one could see the count. Every full Sol run
@@ -2775,6 +2790,15 @@ export function run(argv = process.argv.slice(2)) {
     process.stderr.write(
       "SOL PRE-FLIGHT: src/ fails the code-health check that pre-push runs, so no Sol tokens were spent.\n" +
       `${health.output}\nFix it (node scripts/check-code-health.mjs), commit, then re-run this command.\n`,
+    );
+    return 1;
+  }
+  const docs = docsCheckBeforeSol(root, baseBefore);
+  if (!docs.ok) {
+    process.stderr.write(
+      "SOL PRE-FLIGHT: the docs check CI runs fails, so no Sol tokens were spent.\n" +
+      `${docs.output}\nFix it (npm run check:docs; a stale "Last verified" stamp needs a read-only live ledger read first), ` +
+      "commit, then re-run this command.\n",
     );
     return 1;
   }

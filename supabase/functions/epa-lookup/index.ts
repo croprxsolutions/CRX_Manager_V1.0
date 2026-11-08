@@ -5,7 +5,11 @@ import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sent
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   classifyRegistrationNumber,
+  confirmedDistributorListing,
+  distributorBaseRegistration,
   type EpaLookupResult,
+  needsDistributorBaseLookup,
+  normalizeDistributorBasePayload,
   normalizeEpaPayload,
   type RegistrationClassification,
 } from "./logic.ts";
@@ -22,6 +26,8 @@ const MAX_RATE_LIMIT_ENTRIES = 1_000;
 const EPA_ORIGIN = "https://ordspub.epa.gov";
 const EPA_HOST = "ordspub.epa.gov";
 const EPA_LOOKUP_PATH = "/ords/pesticides/cswu/ppls/";
+const EPA_REGNUM_SEARCH_PATH =
+  "/ords/pesticides/cswu/ProductSearch/partialprodsearch/v2/regnum/";
 
 type SupportedRegistration = Extract<
   RegistrationClassification,
@@ -164,11 +170,12 @@ function clientErrorForClassification(
   return "Enter an EPA registration number in C-P or C-P-D numeric format.";
 }
 
-async function fetchEpaLookup(
-  registration: SupportedRegistration,
-): Promise<EpaLookupResult> {
+async function fetchEpaPayload(
+  path: typeof EPA_LOOKUP_PATH | typeof EPA_REGNUM_SEARCH_PATH,
+  regNumber: string,
+): Promise<unknown> {
   const url = new URL(
-    `${EPA_LOOKUP_PATH}${encodeURIComponent(registration.normalized)}`,
+    `${path}${encodeURIComponent(regNumber)}`,
     EPA_ORIGIN,
   );
   if (url.protocol !== "https:" || url.hostname !== EPA_HOST) {
@@ -221,20 +228,45 @@ async function fetchEpaLookup(
     () => new UpstreamResponseError("EPA response exceeded the byte limit"),
   );
 
-  let payload: unknown;
   try {
-    payload = JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch (_error) {
     throw new UpstreamResponseError("EPA returned invalid JSON");
   }
+}
 
+async function fetchEpaLookup(
+  registration: SupportedRegistration,
+): Promise<EpaLookupResult> {
+  const payload = await fetchEpaPayload(
+    EPA_LOOKUP_PATH,
+    registration.normalized,
+  );
   try {
-    return normalizeEpaPayload(
+    const result = normalizeEpaPayload(
       payload,
       registration.kind,
       registration.normalized,
     );
+    if (!needsDistributorBaseLookup(result)) return result;
+    // Unlisted C-P-D: EPA's search must confirm the exact number before the base
+    // record supplies its label. Both requests reuse the validated numeric parts.
+    const listing = confirmedDistributorListing(
+      await fetchEpaPayload(EPA_REGNUM_SEARCH_PATH, registration.normalized),
+      registration.normalized,
+    );
+    if (!listing) return result;
+    const basePayload = await fetchEpaPayload(
+      EPA_LOOKUP_PATH,
+      distributorBaseRegistration(registration.normalized),
+    );
+    return normalizeDistributorBasePayload(
+      basePayload,
+      registration.normalized,
+      listing,
+    );
   } catch (error) {
+    if (error instanceof UpstreamResponseError) throw error;
     throw new UpstreamResponseError(
       error instanceof Error
         ? `EPA response shape was invalid: ${error.message}`

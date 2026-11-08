@@ -317,13 +317,13 @@ function ApproveDraftModal({ draft, subject, entry, name, profileId, onClose, on
   );
 }
 
-function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload }: {
-  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void;
+function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload, onSaved }: {
+  entry: ProductWeightEntry; isAdmin: boolean; profileId: string; busy: boolean; reloadToken: number; reload: () => void; onSaved?: () => void;
 }) {
   const [open, setOpen] = useState<OpenState>(null);
   const subject = entry.subject ?? null;
   const name = entry.product_name ?? 'This product';
-  const saved = () => { setOpen(null); reload(); };
+  const saved = () => { setOpen(null); reload(); onSaved?.(); };
   return (
     <>
       <CardHeader title="Weight" accent={subject?.kind === 'density' ? `Parent ${subject.parent_name ?? ''}`.trim() : undefined} />
@@ -344,7 +344,7 @@ function LoadedWeight({ entry, isAdmin, profileId, busy, reloadToken, reload }: 
  * DM-2 weight on the product page: weight per gallon on a liquid's parent, net weight per pack on a dry
  * size stocked in a count unit, or where the weight comes from. Seed and each products have no weight row.
  */
-export default function ProductWeightCard({ productId, isAdmin, profileId, busy, reloadKey }: {
+export default function ProductWeightCard({ productId, isAdmin, profileId, busy, reloadKey, onSaved }: {
   productId: string;
   isAdmin: boolean;
   profileId: string;
@@ -352,6 +352,8 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   busy: boolean;
   /** Changes when the product or its parent is saved, so a pack or parent change re-reads the weight. */
   reloadKey: string;
+  /** After a weight save or stale refusal, so figures that use the weight (cost per lb of active) re-read. */
+  onSaved?: () => void;
 }) {
   const [loaded, setState] = useState<{ forKey: string; status: 'loading' | 'failed' } | { forKey: string; status: 'loaded'; entry: ProductWeightEntry }>({ forKey: '', status: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -377,7 +379,7 @@ export default function ProductWeightCard({ productId, isAdmin, profileId, busy,
   return (
     <Card>
       {state.status === 'loaded' ? (
-        <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt} reload={reload} />
+        <LoadedWeight entry={state.entry} isAdmin={isAdmin} profileId={profileId} busy={busy} reloadToken={attempt} reload={reload} onSaved={onSaved} />
       ) : (
         <>
           <CardHeader title="Weight" />

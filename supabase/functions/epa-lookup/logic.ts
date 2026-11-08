@@ -203,24 +203,7 @@ export function normalizeEpaPayload(
     throw new Error("EPA response did not contain an items array");
   }
 
-  if (payload.items.length === 0) {
-    return {
-      found: false,
-      regType,
-      eparegno: null,
-      productname: null,
-      signalWordCanonical: null,
-      needsManual: false,
-      manufacturer: null,
-      rupYn: null,
-      productStatus: null,
-      isCancelled: false,
-      activeIngredients: [],
-      latestLabelPdfUrl: null,
-      labelPdfs: [],
-      transferredTo: null,
-    };
-  }
+  if (payload.items.length === 0) return notFoundResult(regType);
 
   let item = payload.items.find((candidate) =>
     isRecord(candidate) &&
@@ -237,6 +220,10 @@ export function normalizeEpaPayload(
         cleanString(entry.previous_eparegno, 50) === requestedRegNumber
       )
     );
+    // A distributor number EPA does not list here still goes on to the exact search.
+    if (!isRecord(item) && regType === "distributor") {
+      return notFoundResult(regType);
+    }
     const newRegistration = isRecord(item)
       ? classifyRegistrationNumber(cleanString(item.eparegno, 50))
       : null;
@@ -267,6 +254,25 @@ export function normalizeEpaPayload(
     latestLabelPdfUrl: labelPdfs[0]?.url ?? null,
     labelPdfs,
     transferredTo,
+  };
+}
+
+function notFoundResult(regType: EpaLookupResult["regType"]): EpaLookupResult {
+  return {
+    found: false,
+    regType,
+    eparegno: null,
+    productname: null,
+    signalWordCanonical: null,
+    needsManual: false,
+    manufacturer: null,
+    rupYn: null,
+    productStatus: null,
+    isCancelled: false,
+    activeIngredients: [],
+    latestLabelPdfUrl: null,
+    labelPdfs: [],
+    transferredTo: null,
   };
 }
 
@@ -311,9 +317,9 @@ export function confirmedDistributorListing(
 /**
  * A distributor product EPA has confirmed carries its base C-P registration's
  * label, so the label facts come from the base record and the name and status
- * from the distributor's own listing. A base registration that EPA moved is
- * still that label's current record; the distributor number is not reported
- * as moved, because EPA has not named a new distributor number.
+ * from the distributor's own listing. If EPA moved the base registration,
+ * nothing confirms the new record's label covers this distributor number, so
+ * the result is not found rather than borrowing the new record's facts.
  */
 export function normalizeDistributorBasePayload(
   basePayload: unknown,
@@ -325,7 +331,7 @@ export function normalizeDistributorBasePayload(
     "distributor",
     distributorBaseRegistration(distributorRegNumber),
   );
-  if (!base.found && !base.transferredTo) return base;
+  if (!base.found) return notFoundResult("distributor");
   const productStatus = listing.productStatus ?? base.productStatus;
   return {
     ...base,

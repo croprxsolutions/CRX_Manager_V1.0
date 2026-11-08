@@ -369,16 +369,28 @@ Deno.test("confirmed distributor stays not found when the base is missing", () =
   assertEquals(result.eparegno, null);
 });
 
-Deno.test("a moved base never names the base's new number as the distributor's", () => {
+Deno.test("a moved base lends the distributor neither its new number nor its label facts", () => {
   const result = normalizeDistributorBasePayload(
     MOVED_PAYLOAD,
     "524-475-12345",
     { productname: "SOME DISTRIBUTOR BRAND", productStatus: "Active" },
   );
-  assertEquals(result.found, true);
-  assertEquals(result.eparegno, "524-475-12345");
+  assertEquals(result.found, false);
+  assertEquals(result.eparegno, null);
   assertEquals(result.transferredTo, null);
-  assertEquals(result.productname, "SOME DISTRIBUTOR BRAND");
+  assertEquals(result.signalWordCanonical, null);
+  assertEquals(result.rupYn, null);
+});
+
+Deno.test("a distributor number missing from a non-empty lookup still goes on to the search", () => {
+  const result = normalizeEpaPayload(
+    { items: [{ eparegno: "62719-671", product_status: "Active" }] },
+    "distributor",
+    "62719-671-55467",
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.eparegno, null);
+  assertEquals(needsDistributorBaseLookup(result), true);
 });
 
 Deno.test("only an unlisted, unmoved distributor number falls back to its base", () => {

@@ -777,14 +777,16 @@ then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenanc
 
 ### KI-52 — Tests and tooling hygiene
 **LOW · OPEN · tooling-guards · unassigned**
-Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `scripts/fleet-status.mjs` lacks
-the fsmonitor override; `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction;
-`scripts/land-pr.mjs:167` prints a `gh pr merge --squash --auto` command the merge guard refuses;
-`src/lib/rlsContracts.test.ts:148-160` comment still says "NOT APPLIED" for `20260813080000`; the Phase 3
+**Fixed 2026-11-08 (`claude/ki52-tooling-hygiene`):** `scripts/land-pr.mjs` now prints the pinned, immediate
+`gh pr merge … --match-head-commit <head>` the merge guard accepts (no `--auto`); `scripts/fleet-status.mjs` runs
+every Git command with `core.fsmonitor=false`; `src/lib/rlsContracts.test.ts` records `20260813080000` as applied
+(live 2026-08-16, ledger `20260816174353`) with `quote_versions` INSERT `none`; `docs/reference/gotchas.md` has the
+"gross margin means markup" note. **Still open:**
+Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction; the Phase 3
 return-policy concurrency prover can't reach its chain (UNVERIFIED; PR #1110 repaired three different provers and does not establish this one's result); no static guard catches invoice-type leaks or
 direct-URL edit-lock bypasses (MED, UI); extra live-sweep predicates (concurrency hotspot, more money identities)
 not written; Gauntlet V2 Phase 2 unfinished (no staging database, E2E switched off, 44 page-render skips,
-counts not re-measured); `docs/reference/gotchas.md` has no "gross margin means markup" note.
+counts not re-measured).
 Further small LOW notes from the 2026-10-13 branch salvage, carried from the archive and not re-checked: invoices
 created through the order functions would be numbered INV- instead of CS-/MC- (latent; 0 of 12 live order
 invoices affected); on the bulk order import,

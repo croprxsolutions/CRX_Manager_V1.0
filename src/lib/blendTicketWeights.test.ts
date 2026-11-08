@@ -90,7 +90,8 @@ describe('warnWeightsChangedWhileSaving', () => {
 
     warn.mockClear();
     await warnWeightsChangedWhileSaving('t1', lines, { ...ready, status: 'unavailable' }, warn, 'test');
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn.mock.calls).toEqual([['The ticket saved, but its weights were not shown before saving. Reopen the ticket to see the weights it kept.']]);
+    warn.mockClear();
 
     rpc.mockResolvedValue({ data: null, error: { message: 'down' } } as never);
     await warnWeightsChangedWhileSaving('t1', lines, ready, warn, 'test');

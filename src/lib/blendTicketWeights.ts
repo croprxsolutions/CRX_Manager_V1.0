@@ -162,11 +162,16 @@ export async function weightsChangedWhileSaving(ticketId: string, lines: readonl
 
 /**
  * After a save: one warning per line whose kept weight differs from the preview, or one saying the check could not
- * run. A preview that was not ready (still loading, or its read failed) is not compared, so it never reads "changed".
+ * run. A preview that was not ready (still loading, or its read failed) is not compared, so it never reads "changed";
+ * the user is told to reopen the ticket instead.
  */
 export async function warnWeightsChangedWhileSaving(ticketId: string, lines: readonly TicketLineInput[],
   preview: { status: string; lines: readonly ResolvedLine[] }, warn: (message: string) => void, context: string): Promise<void> {
-  if (preview.status !== 'ready') return;
+  if (preview.status !== 'ready') {
+    // Nothing shown to compare with: say so instead of staying silent (never a false "changed").
+    if (lines.some((line) => line.product_id)) warn('The ticket saved, but its weights were not shown before saving. Reopen the ticket to see the weights it kept.');
+    return;
+  }
   try {
     const names = await weightsChangedWhileSaving(ticketId, lines, preview.lines);
     names.forEach((name) => warn(`${name}'s weight changed while saving; the ticket keeps the saved weight`));

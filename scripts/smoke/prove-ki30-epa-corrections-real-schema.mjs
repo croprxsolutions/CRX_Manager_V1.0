@@ -286,6 +286,42 @@ async function main() {
   raw(`UPDATE public.products SET epa_registration = ${q(pick.old)} WHERE id = '${pick.pid}';`);
   console.log('[prover] case 3b: a padded stored number refuses');
 
+  // 3c. History that would start showing the new number stops it: a posted invoice line, a job line,
+  // a frozen job EPA copy or a spray-record lot on any listed product.
+  const CUST = '7a7e4000-0000-4000-8000-0000000000e1';
+  const INV = '7a7e4000-0000-4000-8000-0000000000e2';
+  const JOB = '7a7e4000-0000-4000-8000-0000000000e3';
+  raw(`INSERT INTO public.invoices (id, invoice_number, customer_id, status, created_by, posted_at) VALUES ('${INV}', 'KI30-INV', '${CUST}', 'posted', '${CUST}', now());
+    INSERT INTO public.invoice_items (invoice_id, product_id) VALUES ('${INV}', '${pick.pid}');`);
+  refusedApply(new RegExp(`KI30_HISTORY_EXISTS[^\\n]*${pick.name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
+  raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV}';`);
+  const draftOnly = snapshot();
+  raw(`INSERT INTO public.jobs (id, job_number, customer_id, job_date) VALUES ('${JOB}', 'KI30-J', '${CUST}', '2026-11-08');
+    INSERT INTO public.job_chemicals (job_id, product_id) VALUES ('${JOB}', '${pick.pid}');`);
+  refusedApply(/KI30_HISTORY_EXISTS/);
+  raw(`DELETE FROM public.job_chemicals WHERE job_id = '${JOB}'; DELETE FROM public.jobs WHERE id = '${JOB}';`);
+  assert.equal(snapshot(), draftOnly);
+  console.log('[prover] case 3c: a posted invoice line or a job line on a listed product refuses; a draft invoice line does not block');
+
+  // 3d. The 10-second lock limit holds even when the file runs outside a transaction (no psql -1).
+  const holder = spawn('docker', [...psqlArgs(), '-c',
+    `BEGIN; SELECT 1 FROM public.products WHERE id = '${pick.pid}' FOR UPDATE; SELECT pg_sleep(60); COMMIT;`], { stdio: 'ignore' });
+  try {
+    for (let i = 0; i < 40 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(60)%' AND state = 'active' AND pid <> pg_backend_pid();") !== '1'; i += 1) wait(250);
+    const before = snapshot();
+    const started = Date.now();
+    const r = docker([...psqlArgs(), '-f', '/tmp/cand.sql'], { allowFailure: true });
+    const took = Date.now() - started;
+    assert.notEqual(r.status, 0, 'expected a lock timeout');
+    assert.match(`${r.stdout}\n${r.stderr}`, /lock timeout/);
+    assert.ok(took >= 9000 && took < 30000, `lock wait took ${took} ms`);
+    assert.equal(snapshot(), before);
+  } finally {
+    psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(60)%' AND pid <> pg_backend_pid();", { allowFailure: true });
+    holder.kill();
+  }
+  console.log('[prover] case 3d: run outside a transaction, a held row lock stops it after 10 seconds and changes nothing');
+
   // 4. The real apply with every live trigger on: all 48 change, each logged once, nothing else moves.
   assert.equal(snapshot().split('|')[1], scalar('SELECT count(*) FROM public.product_change_history;'));
   const historyBefore = Number(scalar('SELECT count(*) FROM public.product_change_history;'));

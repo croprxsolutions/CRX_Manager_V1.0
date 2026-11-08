@@ -11,8 +11,10 @@
 -- checked under a row lock; if any of the 48 has
 -- moved, been deleted or joined a product family, nothing changes and the migration stops. The existing
 -- trigger write_product_change_history records each change (old and new number) in product_change_history.
--- Saved records keep their own copy: invoice lines (the two affected are drafts with no number) and
--- sprayed-job copies in job_product_epa (none for these products) are not touched.
+-- Some readers (spray-job proofs, application reports, year-end summaries) still show the product's current
+-- number, so the migration also stops if any listed product now has a posted invoice line or a job or spray
+-- record; on 2026-11-08 none had (the only two invoice lines are drafts with no number, which should pick up
+-- the corrected one).
 -- No schema, function, grant or policy change.
 --
 -- ROLLBACK: set each listed product back to its measured value (old_epa below) with the same guard in reverse
@@ -20,14 +22,14 @@
 -- NULL and three empty text, which the app and every EPA check treat alike as "no number". product_change_history
 -- keeps each row's old and new number (field_name = 'epa_registration', change_type 'updated').
 
-SET LOCAL lock_timeout = '10s';
-
 DO $ki30$
 DECLARE
   v_expected constant integer := 48;
   v_bad text;
   v_done integer;
 BEGIN
+  -- Set here, not with SET LOCAL above the block, so it holds however the file is run.
+  PERFORM set_config('lock_timeout', '10s', true);
   CREATE TEMP TABLE ki30_epa_fix (id uuid PRIMARY KEY, product_name text NOT NULL, old_epa text NOT NULL, new_epa text NOT NULL)
     ON COMMIT DROP;
   INSERT INTO ki30_epa_fix (id, product_name, old_epa, new_epa) VALUES
@@ -102,6 +104,20 @@ BEGIN
       OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'KI30_ROW_MOVED: these products no longer match the reviewed list, nothing was changed: %', v_bad;
+  END IF;
+
+  -- Spray-job proofs, application reports and year-end summaries still read the product's current number.
+  -- On 2026-11-08 none of these products had a posted invoice line or any job or spray record, so changing
+  -- the number rewrites no history. If one appeared since (the lock above makes new ones wait), stop.
+  SELECT string_agg(f.product_name, ', ' ORDER BY f.product_name) INTO v_bad
+    FROM ki30_epa_fix f
+   WHERE EXISTS (SELECT 1 FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+                  WHERE ii.product_id = f.id AND i.status IS DISTINCT FROM 'draft')
+      OR EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.product_id = f.id)
+      OR EXISTS (SELECT 1 FROM public.job_product_epa k WHERE k.product_id = f.id)
+      OR EXISTS (SELECT 1 FROM public.application_record_lots l WHERE l.product_id = f.id);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'KI30_HISTORY_EXISTS: these products now have a posted invoice or a job or spray record, nothing was changed: %', v_bad;
   END IF;
 
   UPDATE public.products p

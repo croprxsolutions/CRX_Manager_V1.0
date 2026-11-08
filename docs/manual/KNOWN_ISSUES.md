@@ -482,9 +482,10 @@ this number is fixed and live (archive, 2026-11-05).
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
 **MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
 The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`), the app change that asks for
-it, and the office "Customer receipts to check" card on Deliveries are built and waiting on Mason's approval to
-deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app change must not go live before the sender is on. Not built:
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
+check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
+that waits on Mason's approval to
+deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
 provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action (the office
 card shows the last 14 days).
 

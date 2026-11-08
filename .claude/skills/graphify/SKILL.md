@@ -14,14 +14,14 @@ Ripgrep answers this faster and more reliably than the graph, which is often sta
 ```bash
 rg -n "\.rpc\(\s*['\"]<name>['\"]" src supabase/functions
 rg -n "['\"\`]<name>['\"\`]" src supabase/functions
-rg -l -i "FUNCTION\s+(public\.)?<name>\s*\(" supabase/migrations | sort | tail -3
+rg -n -i "FUNCTION\s+(public\.)?<name>\s*\(" supabase/migrations | sort
 rg -l -i "<name>\s*\(" supabase/migrations | sort | tail -5
 rg -n "\.from\(\s*['\"]<table>['\"]" src supabase/functions
 ```
 
 1. Direct callers from screens, hooks and Edge Functions.
 2. Indirect callers that pass the name as a string, such as the offline action queue, plus tests and comments to set aside.
-3. Migrations that define the function. The newest file holds the latest definition; read it whole, and check live read-only evidence before claiming it is what runs.
+3. Every migration that creates or drops the function, oldest first. For each argument list, the newest file holds the latest definition, and an older overload with different arguments stays active unless a later file drops it. Read the matching definition whole, and check live read-only evidence before claiming it is what runs.
 4. SQL that calls it from other functions or triggers.
 5. App code that reads or writes the table.
 

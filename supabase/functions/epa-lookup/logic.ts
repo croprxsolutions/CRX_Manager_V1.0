@@ -45,6 +45,8 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
+  /** Set when EPA moved the requested number to a new one; eparegno is then the new number. */
+  transferredTo?: string | null;
 }
 
 const SECTION_3_PATTERN = /^[1-9]\d{0,5}-[1-9]\d{0,4}$/;
@@ -211,15 +213,32 @@ export function normalizeEpaPayload(
       activeIngredients: [],
       latestLabelPdfUrl: null,
       labelPdfs: [],
+      transferredTo: null,
     };
   }
 
-  const item = payload.items.find((candidate) =>
+  let item = payload.items.find((candidate) =>
     isRecord(candidate) &&
     cleanString(candidate.eparegno, 50) === requestedRegNumber
   );
+  let transferredTo: string | null = null;
   if (!isRecord(item)) {
-    throw new Error("EPA response registration did not match the request");
+    // EPA answers a moved number with the new registration, listing the old one in transfer_history.
+    item = payload.items.find((candidate) =>
+      isRecord(candidate) &&
+      Array.isArray(candidate.transfer_history) &&
+      candidate.transfer_history.some((entry) =>
+        isRecord(entry) &&
+        cleanString(entry.previous_eparegno, 50) === requestedRegNumber
+      )
+    );
+    const newRegistration = isRecord(item)
+      ? classifyRegistrationNumber(cleanString(item.eparegno, 50))
+      : null;
+    if (!isRecord(item) || !newRegistration?.supported) {
+      throw new Error("EPA response registration did not match the request");
+    }
+    transferredTo = newRegistration.normalized;
   }
 
   const signalWord = normalizeSignalWord(item.signal_word);
@@ -230,7 +249,7 @@ export function normalizeEpaPayload(
   return {
     found: true,
     regType,
-    eparegno: requestedRegNumber,
+    eparegno: transferredTo ?? requestedRegNumber,
     productname: cleanString(item.productname, 500),
     signalWordCanonical: signalWord.canonical,
     needsManual: signalWord.needsManual,
@@ -242,5 +261,30 @@ export function normalizeEpaPayload(
     activeIngredients: normalizeActiveIngredients(item.active_ingredients),
     latestLabelPdfUrl: labelPdfs[0]?.url ?? null,
     labelPdfs,
+    transferredTo,
   };
+}
+
+/** The C-P base of a C-P-D distributor number. */
+export function distributorBaseRegistration(distributorRegNumber: string): string {
+  return distributorRegNumber.split("-").slice(0, 2).join("-");
+}
+
+/**
+ * EPA's lookup returns no items for most C-P-D distributor numbers. A distributor
+ * product carries the base C-P registration's label, so read the base record and
+ * keep the distributor number the caller asked about.
+ */
+export function normalizeDistributorBasePayload(
+  basePayload: unknown,
+  distributorRegNumber: string,
+): EpaLookupResult {
+  const result = normalizeEpaPayload(
+    basePayload,
+    "distributor",
+    distributorBaseRegistration(distributorRegNumber),
+  );
+  return result.found && !result.transferredTo
+    ? { ...result, eparegno: distributorRegNumber }
+    : result;
 }

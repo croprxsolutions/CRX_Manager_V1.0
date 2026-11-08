@@ -1068,6 +1068,11 @@ export default function ProductDetail() {
       return;
     }
 
+    if (epaLookupResult.transferredTo) {
+      toast('warning', `EPA moved ${epaLookupRegNumber} to ${epaLookupResult.transferredTo}. Look up the new number before applying.`);
+      return;
+    }
+
     const validatedRegNumber = epaLookupResult.eparegno?.trim();
     if (!validatedRegNumber) {
       toast('error', 'EPA did not return a validated registration number.');
@@ -1582,11 +1587,18 @@ export default function ProductDetail() {
                     </div>
 
                     {(epaNameMismatch
+                      || epaLookupResult.transferredTo
                       || epaLookupResult.isCancelled
                       || epaLookupResult.regType === 'distributor'
                       || epaRupMismatch
                       || epaLookupResult.needsManual) && (
                       <div className="space-y-2" aria-label="EPA lookup warnings">
+                        {epaLookupResult.transferredTo && (
+                          <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <span><strong>Registration moved:</strong> EPA moved {epaLookupRegNumber} to {epaLookupResult.transferredTo}. The details below are for the new number; look up the new number before applying.</span>
+                          </div>
+                        )}
                         {epaLookupResult.isCancelled && (
                           <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
                             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

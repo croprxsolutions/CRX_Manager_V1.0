@@ -39,6 +39,7 @@ function isEpaLookupResult(value: unknown): value is EpaLookupResult {
     && nullableString(result.productStatus)
     && typeof result.isCancelled === 'boolean'
     && nullableString(result.latestLabelPdfUrl)
+    && (result.transferredTo === undefined || nullableString(result.transferredTo))
     && activeIngredientsValid
     && labelPdfsValid;
 }

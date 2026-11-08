@@ -23,6 +23,7 @@ export type EpaDataQualityFindingType =
   | 'RUP_DISAGREE'
   | 'UNSUPPORTED_REGNUM'
   | 'NOT_FOUND'
+  | 'TRANSFERRED'
   | 'SIGNAL_WORD_AVAILABLE'
   | 'MISSING_EPA'
   | 'NEEDS_MANUAL'
@@ -117,6 +118,7 @@ const SIGNAL_WORD_TRUST_BREAKERS = new Set<EpaDataQualityFindingType>([
   'NAME_MISMATCH',
   'CANCELLED',
   'NOT_FOUND',
+  'TRANSFERRED',
   'UNSUPPORTED_REGNUM',
   'NEEDS_MANUAL',
   'LOOKUP_ERROR',
@@ -174,6 +176,19 @@ export function buildFindingsForRegistration(
 
   const findings: EpaDataQualityFinding[] = [];
   for (const product of products) {
+    if (epaResult.transferredTo) {
+      findings.push(finding(
+        'TRANSFERRED',
+        'action',
+        registrationNumber,
+        product,
+        classification.kind === 'distributor'
+          ? `EPA moved this product's base registration to ${epaResult.transferredTo}. Confirm the new distributor number with the supplier.`
+          : `EPA moved this registration to ${epaResult.transferredTo}. Update the saved number.`,
+        { ourValue: registrationNumber, epaValue: epaResult.transferredTo },
+      ));
+    }
+
     if (
       epaResult.productname &&
       namesClearlyDifferent(product.product_name, epaResult.productname)

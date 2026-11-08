@@ -5,7 +5,9 @@ import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sent
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   classifyRegistrationNumber,
+  distributorBaseRegistration,
   type EpaLookupResult,
+  normalizeDistributorBasePayload,
   normalizeEpaPayload,
   type RegistrationClassification,
 } from "./logic.ts";
@@ -164,11 +166,9 @@ function clientErrorForClassification(
   return "Enter an EPA registration number in C-P or C-P-D numeric format.";
 }
 
-async function fetchEpaLookup(
-  registration: SupportedRegistration,
-): Promise<EpaLookupResult> {
+async function fetchEpaPayload(regNumber: string): Promise<unknown> {
   const url = new URL(
-    `${EPA_LOOKUP_PATH}${encodeURIComponent(registration.normalized)}`,
+    `${EPA_LOOKUP_PATH}${encodeURIComponent(regNumber)}`,
     EPA_ORIGIN,
   );
   if (url.protocol !== "https:" || url.hostname !== EPA_HOST) {
@@ -221,20 +221,34 @@ async function fetchEpaLookup(
     () => new UpstreamResponseError("EPA response exceeded the byte limit"),
   );
 
-  let payload: unknown;
   try {
-    payload = JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch (_error) {
     throw new UpstreamResponseError("EPA returned invalid JSON");
   }
+}
 
+async function fetchEpaLookup(
+  registration: SupportedRegistration,
+): Promise<EpaLookupResult> {
+  const payload = await fetchEpaPayload(registration.normalized);
   try {
-    return normalizeEpaPayload(
+    const result = normalizeEpaPayload(
       payload,
       registration.kind,
       registration.normalized,
     );
+    if (result.found || registration.kind !== "distributor") return result;
+    // Second upstream call only for an unlisted C-P-D; the base is still a validated numeric C-P.
+    const basePayload = await fetchEpaPayload(
+      distributorBaseRegistration(registration.normalized),
+    );
+    return normalizeDistributorBasePayload(
+      basePayload,
+      registration.normalized,
+    );
   } catch (error) {
+    if (error instanceof UpstreamResponseError) throw error;
     throw new UpstreamResponseError(
       error instanceof Error
         ? `EPA response shape was invalid: ${error.message}`

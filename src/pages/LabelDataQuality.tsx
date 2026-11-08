@@ -96,6 +96,7 @@ const FILTERS: FindingFilter[] = [
   'DISTRIBUTOR_NAME_DIFF',
   'CANCELLED',
   'NOT_FOUND',
+  'TRANSFERRED',
   'RUP_DISAGREE',
   'SIGNAL_WORD_AVAILABLE',
   'MISSING_EPA',
@@ -109,6 +110,7 @@ const FIXABLE_FINDINGS = new Set<EpaDataQualityFindingType>([
   'NAME_MISMATCH',
   'CANCELLED',
   'NOT_FOUND',
+  'TRANSFERRED',
   'UNSUPPORTED_REGNUM',
   'MISSING_EPA',
 ]);
@@ -120,6 +122,7 @@ const VALID_FINDING_TYPES = new Set<EpaDataQualityFindingType>([
   'RUP_DISAGREE',
   'UNSUPPORTED_REGNUM',
   'NOT_FOUND',
+  'TRANSFERRED',
   'SIGNAL_WORD_AVAILABLE',
   'MISSING_EPA',
   'NEEDS_MANUAL',
@@ -132,6 +135,7 @@ const FINDINGS_REQUIRING_FOUND_EPA = new Set<EpaDataQualityFindingType>([
   'NAME_MISMATCH',
   'DISTRIBUTOR_NAME_DIFF',
   'CANCELLED',
+  'TRANSFERRED',
   'RUP_DISAGREE',
   'SIGNAL_WORD_AVAILABLE',
   'NEEDS_MANUAL',
@@ -168,6 +172,7 @@ function isEpaLookupResult(value: unknown): value is EpaLookupResult {
     && typeof value.isCancelled === 'boolean'
     && Array.isArray(value.activeIngredients)
     && nullableString(value.latestLabelPdfUrl)
+    && (value.transferredTo === undefined || nullableString(value.transferredTo))
     && Array.isArray(value.labelPdfs);
 }
 
@@ -305,6 +310,7 @@ function findingLabel(type: FindingFilter): string {
     DISTRIBUTOR_NAME_DIFF: 'Distributor name differs',
     CANCELLED: 'Cancelled',
     NOT_FOUND: 'Not found',
+    TRANSFERRED: 'Moved by EPA',
     RUP_DISAGREE: 'RUP differs',
     SIGNAL_WORD_AVAILABLE: 'Signal word available',
     MISSING_EPA: 'Missing EPA number',
@@ -323,6 +329,7 @@ function findingVariant(type: DisplayFindingType): BadgeVariant {
     case 'NAME_MISMATCH':
     case 'CANCELLED':
     case 'NOT_FOUND':
+    case 'TRANSFERRED':
     case 'MISSING_EPA':
       return 'error';
     case 'RUP_DISAGREE':
@@ -765,6 +772,14 @@ export default function LabelDataQuality() {
       if (!isEpaLookupResult(data)) {
         throw new Error('EPA lookup returned an invalid response.');
       }
+      if (data.found && data.transferredTo) {
+        updateEditor(row.id, {
+          verifiedNumber: null,
+          verifiedResult: null,
+          error: `EPA moved ${classification.normalized} to ${data.transferredTo}. Enter the new number to save it.`,
+        });
+        return;
+      }
       if (!data.found || !data.productname || data.eparegno?.trim() !== classification.normalized) {
         updateEditor(row.id, {
           verifiedNumber: null,
@@ -912,8 +927,12 @@ export default function LabelDataQuality() {
             : <span className="text-secondary">Not lookupable / lookup failed</span>;
         }
         if (!row.epa.found) return <span className="font-medium text-red-700">No EPA match</span>;
+        const movedTo = row.findings.find((finding) => finding.type === 'TRANSFERRED')?.epaValue;
         return (
           <div>
+            {typeof movedTo === 'string' && (
+              <p className="font-medium text-red-700">EPA moved this to {movedTo}</p>
+            )}
             <p className="font-medium text-nav-dark">{row.epa.productName ?? 'Unnamed EPA product'}</p>
             <p className="mt-0.5 text-xs text-secondary">
               {row.epa.status ?? 'Status not provided'}
@@ -1030,6 +1049,7 @@ export default function LabelDataQuality() {
     type === 'NAME_MISMATCH'
     || type === 'CANCELLED'
     || type === 'NOT_FOUND'
+    || type === 'TRANSFERRED'
     || type === 'UNSUPPORTED_REGNUM'
     || type === 'MISSING_EPA'
   ))).length;

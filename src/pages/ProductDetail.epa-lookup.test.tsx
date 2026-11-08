@@ -275,6 +275,21 @@ describe('ProductDetail EPA lookup', () => {
     expect(JSON.stringify(params)).not.toContain('UNRECOGNIZED RAW VALUE');
   });
 
+  it('shows a moved registration and refuses to apply it', async () => {
+    render(<ProductDetail />);
+    await runLookup(lookupResult({ eparegno: '105211-77', transferredTo: '105211-77' }));
+
+    expect(await screen.findByText(/EPA moved 264-849 to 105211-77/)).toBeInTheDocument();
+    const applyButtons = await screen.findAllByRole('button', { name: /apply to product/i });
+    fireEvent.click(applyButtons[0]);
+
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith(
+      'warning',
+      'EPA moved 264-849 to 105211-77. Look up the new number before applying.',
+    ));
+    expect(H.rpc).not.toHaveBeenCalled();
+  });
+
   it('blocks applying a lookup of a registration different from the product\'s saved one', async () => {
     // Product already has a saved registration; admin looks up a DIFFERENT number.
     // Empty-fields-only would keep the saved reg but still fill the signal word

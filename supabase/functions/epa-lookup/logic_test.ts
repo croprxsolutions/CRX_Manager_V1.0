@@ -1,5 +1,7 @@
 import {
   classifyRegistrationNumber,
+  distributorBaseRegistration,
+  normalizeDistributorBasePayload,
   normalizeEpaPayload,
   normalizeSignalWord,
 } from "./logic.ts";
@@ -189,6 +191,7 @@ Deno.test("EPA payload normalizer returns the Stage 1 response shape", () => {
           "https://www3.epa.gov/pesticides/chem_search/ppls/000264-00849-20240124.pdf",
       },
     ],
+    transferredTo: null,
   });
 });
 
@@ -217,4 +220,110 @@ Deno.test("EPA payload normalizer flags unrecognized signal words for manual rev
   );
   assertEquals(result.signalWordCanonical, null);
   assertEquals(result.needsManual, true);
+});
+
+// Shape copied from the live EPA PPLS answer for 524-475 on 2026-11-08.
+const MOVED_PAYLOAD = {
+  items: [{
+    eparegno: "105211-77",
+    productname: "ROUNDUP ULTRA HERBICIDE",
+    product_status: "Active",
+    cancel_flag: "No",
+    signal_word: "Caution",
+    transfer_history: [
+      {
+        previous_eparegno: "524-475",
+        previous_company: "BAYER CROPSCIENCE, LLC",
+        transferred_date: "January 14, 2026",
+      },
+      {
+        previous_eparegno: "105211-18",
+        previous_company: "RUVEON, LLC",
+        transferred_date: "January 22, 2026",
+      },
+    ],
+  }],
+};
+
+Deno.test("EPA payload normalizer reports a moved registration with its new number", () => {
+  const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "524-475");
+  assertEquals(result.found, true);
+  assertEquals(result.eparegno, "105211-77");
+  assertEquals(result.transferredTo, "105211-77");
+  assertEquals(result.productname, "ROUNDUP ULTRA HERBICIDE");
+  assertEquals(result.signalWordCanonical, "Caution");
+});
+
+Deno.test("EPA payload normalizer does not mark the current number as moved", () => {
+  const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "105211-77");
+  assertEquals(result.eparegno, "105211-77");
+  assertEquals(result.transferredTo, null);
+});
+
+Deno.test("EPA payload normalizer still rejects an unrelated registration", () => {
+  let message = "";
+  try {
+    normalizeEpaPayload(MOVED_PAYLOAD, "section3", "264-849");
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA response registration did not match the request");
+});
+
+Deno.test("EPA payload normalizer rejects a move to a malformed number", () => {
+  let message = "";
+  try {
+    normalizeEpaPayload(
+      {
+        items: [{
+          eparegno: "https://evil.example/1",
+          transfer_history: [{ previous_eparegno: "524-475" }],
+        }],
+      },
+      "section3",
+      "524-475",
+    );
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA response registration did not match the request");
+});
+
+Deno.test("distributor base is the first two parts", () => {
+  assertEquals(distributorBaseRegistration("62719-671-55467"), "62719-671");
+});
+
+Deno.test("distributor fallback reads the base record and keeps the distributor number", () => {
+  const result = normalizeDistributorBasePayload(
+    {
+      items: [{
+        eparegno: "62719-671",
+        productname: "KEYSTONE NXT",
+        product_status: "Active",
+        rup_yn: "Yes",
+        signal_word: "Warning",
+      }],
+    },
+    "62719-671-55467",
+  );
+  assertEquals(result.found, true);
+  assertEquals(result.regType, "distributor");
+  assertEquals(result.eparegno, "62719-671-55467");
+  assertEquals(result.productname, "KEYSTONE NXT");
+  assertEquals(result.rupYn, "Yes");
+  assertEquals(result.transferredTo, null);
+});
+
+Deno.test("distributor fallback stays not found when the base is missing", () => {
+  const result = normalizeDistributorBasePayload({ items: [] }, "62719-671-55467");
+  assertEquals(result.found, false);
+  assertEquals(result.regType, "distributor");
+  assertEquals(result.eparegno, null);
+});
+
+Deno.test("distributor fallback reports a moved base registration", () => {
+  const result = normalizeDistributorBasePayload(MOVED_PAYLOAD, "524-475-12345");
+  assertEquals(result.found, true);
+  assertEquals(result.eparegno, "105211-77");
+  assertEquals(result.transferredTo, "105211-77");
 });

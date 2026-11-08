@@ -178,6 +178,8 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
+  /** Set when EPA moved the requested number to a new one; eparegno is then the new number. */
+  transferredTo?: string | null;
 }
 
 // ─── Label Drafts (§1 AI Label-Data Backfill) ───────────────────────────────

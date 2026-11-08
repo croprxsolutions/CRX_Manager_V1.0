@@ -64,7 +64,7 @@ export type MasterMixWeights =
   | { byProductId: Record<string, ProductWeight | undefined>; units: WeightUnitFactors }
   | { unavailable: string };
 
-export const MASTER_MIX_WEIGHT_CAPTION = 'Weights use the current approved weights.';
+const MASTER_MIX_WEIGHT_CAPTION = 'Weights use the current approved weights.';
 
 /** One combined product line: a product+unit total summed across the included jobs. */
 export interface MasterMixRow {

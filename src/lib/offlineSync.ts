@@ -2,10 +2,8 @@
  * Offline Sync Service — Processes the offline queue when connection returns.
  * Maps stored operations to actual Supabase RPC calls.
  */
-import { supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from './db';
+import { supabase, hasRpcCode, RpcErrorCodes } from './db';
 import { Sentry } from './sentry';
-import type { Database } from '../types/supabase';
-import { withBelowCostReason, type BelowCostApprovalRunner } from './belowCostApproval';
 import {
   getPendingActions,
   getActionOwnerUserId,
@@ -36,15 +34,6 @@ export interface OfflineSyncResult {
 
 let activeSync: { userId: string; promise: Promise<OfflineSyncResult> } | null = null;
 
-/** Known RPC-name union from the generated DB types. */
-type FunctionName = keyof Database['public']['Functions'];
-/** Args shape the typed client expects for a given RPC. */
-type FunctionArgs<N extends FunctionName> = Database['public']['Functions'][N] extends {
-  Args: infer A;
-}
-  ? A
-  : never;
-
 /**
  * Process all pending actions in the offline queue.
  * Called automatically when the browser comes back online.
@@ -53,7 +42,7 @@ type FunctionArgs<N extends FunctionName> = Database['public']['Functions'][N] e
  */
 export function syncPendingActions(
   currentUserId: string,
-  options: { force?: boolean; runWithBelowCostApproval?: BelowCostApprovalRunner } = {}
+  options: { force?: boolean } = {}
 ): Promise<OfflineSyncResult> {
   if (activeSync) {
     if (activeSync.userId === currentUserId && !options.force) return activeSync.promise;
@@ -72,7 +61,7 @@ export function syncPendingActions(
 
 async function processPendingActions(
   currentUserId: string,
-  { force = false, runWithBelowCostApproval }: { force?: boolean; runWithBelowCostApproval?: BelowCostApprovalRunner }
+  { force = false }: { force?: boolean }
 ): Promise<OfflineSyncResult> {
   const now = Date.now();
   const attemptTimestamp = new Date(now).toISOString();
@@ -177,7 +166,7 @@ async function processPendingActions(
       // Doing so would accept office edits made during the offline window as
       // the action's baseline. The durable server path stages these actions as
       // permanent LEGACY_OUTCOME_UNKNOWN review work instead.
-      await executeAction(action, runWithBelowCostApproval);
+      await executeAction(action);
       await removeAction(action.id!);
       synced++;
     } catch (error: unknown) {
@@ -352,11 +341,8 @@ function isPermanentFailure(message: string): boolean {
  * Execute a single queued action against Supabase.
  * Maps operation names to their corresponding RPC calls.
  */
-async function executeAction(
-  action: PendingAction,
-  runWithBelowCostApproval?: BelowCostApprovalRunner,
-): Promise<void> {
-  const { operation, params } = action;
+async function executeAction(action: PendingAction): Promise<void> {
+  const { operation } = action;
 
   // Conflict detection: if we captured a snapshot, check for server-side changes
   if (!isDurableOfflineOperation(operation) && action.snapshotAt && action.entityTable && action.entityId) {
@@ -394,79 +380,16 @@ async function executeAction(
     }
   }
 
-  // Audit 2026-05-16 P1 #3: all mapped offline RPCs return jsonb (verified
-  // via pg_proc). If supabase returns { data: null, error: null } — RLS denial
-  // on a chained SELECT, trigger fail-soft path, etc. — the action would be
-  // silently removed as synced. assertRpcResult throws on null data so the
-  // action is retained in queue for retry.
-  //
-  // Per-branch literal RPC names (not a dynamic `supabase.rpc(name, ...)`)
-  // because assertRpcCoverage.test.ts's regex only matches string-literal call
-  // sites. See LogbookReport.tsx for the canonical example of this shape.
+  // Phones queue only these two completions (FieldView queues complete_job; complete_delivery
+  // was queued until 2026-10-19 and may still sit on a device). No screen ever queued anything else.
   switch (operation) {
-    case 'complete_delivery': {
+    case 'complete_delivery':
+    case 'complete_job':
       await executeDurableOfflineAction(action);
       return;
-    }
-    case 'allocate_payment': {
-      const { data, error } = await supabase.rpc('allocate_payment', params as FunctionArgs<'allocate_payment'>);
-      if (error) throw error;
-      assertRpcResult(data, 'allocate_payment');
-      return;
-    }
-    case 'receive_po_items': {
-      const { data, error } = await supabase.rpc('receive_po_items', params as FunctionArgs<'receive_po_items'>);
-      if (error) throw error;
-      assertRpcResult(data, 'receive_po_items');
-      return;
-    }
-    case 'update_order_items': {
-      const execute = runWithBelowCostApproval ?? ((attempt) => attempt(null, null));
-      const { data, error } = await execute((reason) => supabase.rpc(
-        'update_order_items',
-        withBelowCostReason(
-          'update_order_items',
-          params as FunctionArgs<'update_order_items'>,
-          reason,
-        ),
-      ));
-      if (error) throw error;
-      assertRpcResult(data, 'update_order_items');
-      return;
-    }
-    case 'complete_job': {
-      await executeDurableOfflineAction(action);
-      return;
-    }
-    case 'cancel_delivery': {
-      const { data, error } = await supabase.rpc('cancel_delivery', params as FunctionArgs<'cancel_delivery'>);
-      if (error) throw error;
-      assertRpcResult(data, 'cancel_delivery');
-      return;
-    }
-    case 'cancel_order': {
-      const { data, error } = await supabase.rpc('cancel_order', params as FunctionArgs<'cancel_order'>);
-      if (error) throw error;
-      assertRpcResult(data, 'cancel_order');
-      return;
-    }
-    case 'confirm_delivery': {
-      const { data, error } = await supabase.rpc('confirm_delivery', params as FunctionArgs<'confirm_delivery'>);
-      if (error) throw error;
-      assertRpcResult(data, 'confirm_delivery');
-      return;
-    }
-    case 'match_quick_receive_items': {
-      const { data, error } = await supabase.rpc('match_quick_receive_items', params as FunctionArgs<'match_quick_receive_items'>);
-      if (error) throw error;
-      assertRpcResult(data, 'match_quick_receive_items');
-      return;
-    }
     default:
       throw new Error(
-        `Unknown offline operation: ${operation}. Valid operations: ` +
-        `complete_delivery, allocate_payment, receive_po_items, update_order_items, ` +
-        `complete_job, cancel_delivery, cancel_order, confirm_delivery, match_quick_receive_items`
+        `Unknown offline operation: ${operation}. Valid operations: complete_delivery, complete_job`
       );
   }
 }

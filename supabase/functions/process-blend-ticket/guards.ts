@@ -246,6 +246,9 @@ export async function fetchSignedBlendImage(
 }
 
 export const REFERENCE_PAGE_SIZE = 1000;
+// Live has about 1,050 active products. A list 50 times that is not a real
+// catalog, so the scan fails loudly instead of running out of time or memory.
+export const REFERENCE_MAX_ROWS = 50_000;
 
 /**
  * Read every row of a reference list in id order, one page after another.
@@ -274,6 +277,9 @@ export async function readAllById<T extends { id: string }>(
       throw new Error("Reference read did not advance");
     }
     for (const row of data) rows.push(row);
+    if (rows.length > REFERENCE_MAX_ROWS) {
+      throw new Error(`Reference read passed ${REFERENCE_MAX_ROWS} rows`);
+    }
     afterId = lastId;
   }
 }

@@ -1072,7 +1072,9 @@ Deno.serve(async (req: Request) => {
     const parsedData = parseOCRText(combinedText);
 
     // Fuzzy match products & customers
-    // Every active row, not the first 1,000 one read returns (KI-32).
+    // Every active row, not the first 1,000 one read returns (KI-32). Matching
+    // any customer is intended for reps too: reps read and edit every customer
+    // (DECISION_LOG 2026-10-13, live migration 20261013220000).
     let products: ProductRow[];
     let customers: CustomerRow[];
     try {

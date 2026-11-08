@@ -381,3 +381,11 @@ Deno.test("readAllById refuses a page that does not move past the last id", asyn
     "did not advance",
   );
 });
+
+Deno.test("readAllById fails loudly past the row ceiling instead of reading forever", async () => {
+  await assertRejects(
+    () => readAllById(fakeProductsTable(50_001, 1000).fetchPage),
+    Error,
+    "passed 50000 rows",
+  );
+});

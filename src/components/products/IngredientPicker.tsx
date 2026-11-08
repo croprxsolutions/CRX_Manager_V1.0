@@ -21,7 +21,9 @@ export function IngredientSearch({ id, label, onPick, acidsOnly = false, disable
   useEffect(() => () => { seq.current += 1; }, []);
   useEffect(() => {
     const mine = ++seq.current;
-    if (text.trim().length < 2) { setResults(null); setFailed(null); return; }
+    // Old results go as soon as the text changes, so a late click never picks a match for earlier text.
+    setResults(null); setFailed(null);
+    if (text.trim().length < 2) return;
     const timer = window.setTimeout(() => {
       searchActiveIngredients(text.trim()).then((rows) => {
         if (mine === seq.current) { setResults(rows); setFailed(null); }

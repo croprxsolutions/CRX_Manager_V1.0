@@ -155,18 +155,31 @@ export async function fetchParentChemistry(parentId: string): Promise<ParentChem
   return assertRpcResult<ParentChemistry>(data, 'get_parent_chemistry');
 }
 
-export async function fetchParentActiveCosts(parentId: string): Promise<ParentActiveCosts> {
+async function fetchParentActiveCosts(parentId: string): Promise<ParentActiveCosts> {
   const { data, error } = await supabaseUntyped.rpc('get_parent_active_costs', { p_parent_id: parentId });
   if (error) throw error;
   return assertRpcResult<ParentActiveCosts>(data, 'get_parent_active_costs');
 }
 
 /** The cost reference row's version (0 when none), which `set_parent_cost_reference` checks. Admin read. */
-export async function fetchCostReferenceVersion(parentId: string): Promise<number> {
+async function fetchCostReferenceVersion(parentId: string): Promise<number> {
   const { data, error } = await supabaseUntyped.from('product_parent_cost_reference')
     .select('row_version').eq('parent_id', parentId).maybeSingle();
   if (error) throw error;
   return (data as { row_version: number } | null)?.row_version ?? 0;
+}
+
+/**
+ * The costs and the reference version they were read at. The version only grows, so the same version before and
+ * after the costs read means the costs show that version's reference (a change in between reads again).
+ */
+export async function fetchActiveCostsWithVersion(parentId: string): Promise<{ costs: ParentActiveCosts; refVersion: number }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = await fetchCostReferenceVersion(parentId);
+    const costs = await fetchParentActiveCosts(parentId);
+    if (await fetchCostReferenceVersion(parentId) === before) return { costs, refVersion: before };
+  }
+  throw new Error('The reference size kept changing while loading; try again.');
 }
 
 export async function searchActiveIngredients(text: string): Promise<ActiveIngredientSummary[]> {
@@ -287,17 +300,18 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
 async function send<T>(record: PendingChemistrySave): Promise<T> {
   const store = storage();
   const name = PREFIX + record.key;
-  // Written before the call, so a closed tab or a refresh still finds it.
-  store?.setItem(name, JSON.stringify(record));
+  // Written before the call, so a closed tab or a refresh still finds it. No record, no send: an unconfirmed
+  // save could then only be retried with a new key.
+  try {
+    if (!store) throw new Error('no storage');
+    store.setItem(name, JSON.stringify(record));
+  } catch {
+    throw new Error('This browser cannot keep the save record this needs (private window or storage full?). Nothing was sent.');
+  }
   let result: { data?: unknown; error?: unknown };
   try {
     result = await callChemistryWrite(record.rpc, { ...record.args, p_idempotency_key: record.key });
   } catch (error) {
-    // assertRpcResult: the database answered but returned nothing, so the record is not kept.
-    if (error instanceof Error && error.message.startsWith(`${record.rpc} returned no data`)) {
-      store?.removeItem(name);
-      throw error;
-    }
     throw new ChemistrySaveUncertain(error);
   }
   if (result.error) {

@@ -24,7 +24,7 @@ function ChemistryActions({ chem, parentId, locked, waiting, open }: {
     <div className="flex flex-wrap justify-end gap-2">
       {!gated && chem.is_active && <Button size="sm" variant="secondary" disabled={locked} onClick={() => open({ kind: 'entry' })}>Add</Button>}
       {recorded && <Button size="sm" variant="secondary" disabled={locked} onClick={() => open({ kind: 'correct', parentId, prefill: null })}>Correct</Button>}
-      <Button size="sm" variant="secondary" onClick={() => open({ kind: 'review' })}>
+      <Button size="sm" variant="secondary" disabled={locked} onClick={() => open({ kind: 'review' })}>
         Review ingredients{waiting ? ` (${waiting} waiting)` : ''}
       </Button>
     </div>

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const rpc = vi.fn();
 vi.mock('./db', () => ({
   supabaseUntyped: { rpc: (...args: unknown[]) => rpc(...args) },
-  assertRpcResult: <T,>(data: unknown) => data as T,
+  assertRpcResult: <T,>(data: unknown, name: string) => { if (data == null) throw new Error(`${name} returned no data`); return data as T; },
 }));
 
 import {
@@ -81,6 +81,22 @@ describe('unfinished chemistry saves (retry key kept until the outcome is known)
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'COST_REFERENCE_STALE: reload', code: 'P0001' } });
     await expect(finishChemistrySave(record)).rejects.toMatchObject({ message: 'COST_REFERENCE_STALE: reload' });
     expect(pendingSaves('user-a', 'p')).toEqual([]);
+  });
+
+  it('keeps the record when the database answers with no data (it may have committed)', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(startChemistrySave('user-a', 'p', 'set_parent_chemistry', {}, 'Entry')).rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    expect(pendingSaves('user-a', 'p')).toHaveLength(1);
+  });
+
+  it('sends nothing when the browser cannot keep the record', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError'); });
+    try {
+      await expect(startChemistrySave('user-a', 'p', 'set_parent_chemistry', {}, 'Entry')).rejects.toThrow(/Nothing was sent/);
+      expect(rpc).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   it('ignores a stored record that names any other function', () => {

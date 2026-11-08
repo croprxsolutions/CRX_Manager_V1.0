@@ -41,14 +41,14 @@ function fillChanges(ingredients: ParentChemistryIngredientRow[], nutrients: Par
     const value = amountOf(text, false, strengthMax(row.strength_unit), `strength of ${row.name}`);
     if (typeof value === 'string') return value;
     out.push({ kind: 'ingredient', ingredient_id: row.ingredient_id, strength_value: value, strength_unit: row.strength_unit,
-      strength_basis: row.strength_basis, source: row.source, source_note: null });
+      strength_basis: row.strength_basis, source: row.source, source_note: row.source_note });
   }
   for (const row of nutrients) {
     const text = fills[row.row_id]?.trim();
     if (!text) continue;
     const value = amountOf(text, false, 100, `percent of ${row.nutrient}`);
     if (typeof value === 'string') return value;
-    out.push({ kind: 'fertilizer', nutrient: row.nutrient, basis: row.basis, percent: value, source: row.source, source_note: null });
+    out.push({ kind: 'fertilizer', nutrient: row.nutrient, basis: row.basis, percent: value, source: row.source, source_note: row.source_note });
   }
   return null;
 }

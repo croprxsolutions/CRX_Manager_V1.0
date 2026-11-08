@@ -390,7 +390,7 @@ export default function IngredientReviewModal({ profileId, onClose, onReplace }:
             {tab === 'retired' && <RetiredTab list={list} locked={locked} onReactivate={(item) => setSub({ kind: 'reactivate', ingredient: item })} />}
             {tab === 'find' && (
               <div className="space-y-2">
-                <IngredientSearch id="review-find" label="Find an ingredient to edit or retire" disabled={locked}
+                <IngredientSearch id="review-find" label="Find an ingredient to edit" disabled={locked}
                   onPick={(item) => setSub({ kind: 'edit', ingredient: item, casOnly: false })} />
                 <p className="text-xs text-secondary">Picking one opens Edit. Retire is offered from the lists above once nothing uses it.</p>
               </div>

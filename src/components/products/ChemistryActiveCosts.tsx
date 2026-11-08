@@ -4,7 +4,7 @@ import Select from '../ui/Select';
 import { LoadFailedState } from '../ui/EmptyState';
 import { useToast } from '../ui/Toast';
 import { Sentry } from '../../lib/sentry';
-import { BASIS_LABEL, centsText, costReasonText, fetchCostReferenceVersion, fetchParentActiveCosts, nutrientLabel, startChemistrySave } from '../../lib/productChemistry';
+import { BASIS_LABEL, centsText, costReasonText, fetchActiveCostsWithVersion, nutrientLabel, startChemistrySave } from '../../lib/productChemistry';
 import { errorOf, reportSaveError, type SaveOutcome } from './chemistryFormHelpers';
 import type { ActiveCostRow, ParentActiveCosts, ParentChemistry } from '../../types';
 
@@ -40,7 +40,7 @@ export default function ChemistryActiveCosts({ chem, profileId, reloadKey, pendi
   const state = loaded?.forKey === forKey ? loaded : null;
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchParentActiveCosts(chem.parent_id), fetchCostReferenceVersion(chem.parent_id)]).then(([costs, refVersion]) => {
+    fetchActiveCostsWithVersion(chem.parent_id).then(({ costs, refVersion }) => {
       if (cancelled) return;
       setLoaded({ forKey, status: 'loaded', costs, refVersion });
       setPicked(costs.reference.source === 'picked' ? costs.reference.product_id ?? '' : '');

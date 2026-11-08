@@ -2052,6 +2052,8 @@ export interface ProductParentModeOfAction {
   ingredient_id: string;
   scheme: ModeOfActionScheme;
   group_code: string;
+  /** 'epa_lookup' once the EPA lookup has confirmed it (20261211100000); only the EPA writer removes those. */
+  source: 'typed' | 'epa_lookup';
   status: ChemistryRowStatus;
   row_version: number;
   created_by: string;

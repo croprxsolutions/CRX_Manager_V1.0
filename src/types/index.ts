@@ -2126,6 +2126,7 @@ export interface ParentChemistryModeRow {
   name: string;
   scheme: ModeOfActionScheme;
   group_code: string;
+  source: 'typed' | 'epa_lookup';
   row_version: number;
 }
 
@@ -2138,6 +2139,109 @@ export interface ParentChemistryFertilizerRow {
   source: ChemistrySource;
   source_note: string | null;
   row_version: number;
+}
+
+export interface ParentChemistryValues {
+  ingredients: ParentChemistryIngredientRow[];
+  modes_of_action: ParentChemistryModeRow[];
+  fertilizer: ParentChemistryFertilizerRow[];
+}
+
+export interface ChemistryParentSize {
+  product_id: string;
+  product_name: string;
+  size_role: string;
+  is_active: boolean;
+}
+
+/** get_parent_chemistry (active users). `epa_refusal` is the D-Z gate's message, or null when typed chemistry is allowed. */
+export interface ParentChemistry {
+  parent_id: string;
+  parent_name: string;
+  product_form: string;
+  is_active: boolean;
+  chemistry_version: number;
+  chemistry: ParentChemistryValues;
+  epa_refusal: string | null;
+  sizes: ChemistryParentSize[];
+}
+
+/** preview_parent_chemistry_correction (admin). A refused preview has `refusal` and no fingerprint. */
+export interface ParentChemistryPreview {
+  parent_id: string;
+  parent_name: string;
+  is_active: boolean;
+  chemistry_version: number;
+  preview_fingerprint: string | null;
+  epa_refusal: string | null;
+  before: ParentChemistryValues;
+  after: ParentChemistryValues | null;
+  changed: boolean;
+  refusal: string | null;
+  sizes: ChemistryParentSize[];
+}
+
+export interface ActiveCostRow {
+  kind: 'ingredient' | 'fertilizer';
+  row_id: string;
+  ingredient_id: string | null;
+  name: string;
+  nutrient: FertilizerNutrient | null;
+  strength_value: number | null;
+  strength_unit: ChemistryStrengthUnit;
+  figure: ActiveCostFigure;
+  converted: ActiveCostFigure | null;
+  weight_row_id: string | null;
+  label: string;
+}
+
+export interface ActiveCostSize {
+  product_id: string;
+  product_name: string;
+  is_active: boolean;
+  size_role: string;
+  product_form: string;
+  priced_unit: string | null;
+  cost_per_base: { base: 'gal' | 'lb'; cents: string } | null;
+  cost_reason: string | null;
+  figures: ActiveCostRow[];
+}
+
+/** get_parent_active_costs (admin only). Cents are exact whole-number strings. */
+export interface ParentActiveCosts {
+  parent_id: string;
+  parent_name: string;
+  chemistry_version: number;
+  label: string;
+  density: { lb_per_gal: number; weight_row_id: string } | { reason: string };
+  reference: { product_id: string | null; source: 'bulk' | 'picked' | null; reason: string | null };
+  parent_figures: ActiveCostRow[] | null;
+  sizes: ActiveCostSize[];
+}
+
+export interface IngredientUsers {
+  parents: Array<{ parent_id: string; name: string; is_active: boolean }>;
+  forms: Array<{ ingredient_id: string; name: string }>;
+}
+export type ActiveIngredientWithUsers = ActiveIngredientSummary & IngredientUsers;
+
+/** get_active_ingredient_worklist (admin). */
+export interface IngredientWorklist {
+  needs_cas: ActiveIngredientWithUsers[];
+  possible_duplicates: Array<{ provisional: ActiveIngredientWithUsers; other: ActiveIngredientWithUsers }>;
+  retired: ActiveIngredientSummary[];
+}
+
+/** preview_active_ingredient_change (admin). */
+export interface IngredientChangePreview {
+  ingredient: ActiveIngredientSummary;
+  usage_fingerprint: string;
+  users: IngredientUsers;
+  affected_parents: Array<{ parent_id: string; name: string; is_active: boolean; epa_refusal: string | null; sizes: string[] }>;
+  after: ActiveIngredientSummary | null;
+  changed_fields: string[] | null;
+  needs_reason: boolean | null;
+  refusal: string | null;
 }
 
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';

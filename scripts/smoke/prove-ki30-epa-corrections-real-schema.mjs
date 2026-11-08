@@ -300,8 +300,14 @@ async function main() {
     INSERT INTO public.job_chemicals (job_id, product_id) VALUES ('${JOB}', '${pick.pid}');`);
   refusedApply(/KI30_HISTORY_EXISTS/);
   raw(`DELETE FROM public.job_chemicals WHERE job_id = '${JOB}'; DELETE FROM public.jobs WHERE id = '${JOB}';`);
+  raw(`INSERT INTO public.job_product_epa (job_id, product_id) VALUES ('${JOB}', '${pick.pid}');`);
+  refusedApply(/KI30_HISTORY_EXISTS/);
+  raw(`DELETE FROM public.job_product_epa WHERE job_id = '${JOB}';
+    INSERT INTO public.application_record_lots (application_record_id, product_id, lot_number) VALUES ('${JOB}', '${pick.pid}', 'KI30-LOT');`);
+  refusedApply(/KI30_HISTORY_EXISTS/);
+  raw(`DELETE FROM public.application_record_lots WHERE lot_number = 'KI30-LOT';`);
   assert.equal(snapshot(), draftOnly);
-  console.log('[prover] case 3c: a posted invoice line or a job line on a listed product refuses; a draft invoice line does not block');
+  console.log('[prover] case 3c: a posted invoice line, job line, job EPA copy or spray-record lot on a listed product refuses; a draft invoice line does not block');
 
   // 3e. A listed product tied to a family any way (fill source of a member, or the family's cost reference) refuses.
   const FAM = '7a7e4000-0000-4000-8000-0000000000f1';

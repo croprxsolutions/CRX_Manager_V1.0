@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as db from './db';
-import { headerEdited, matchesPageRead, resolveTicketLines, totalWeightText, weightsChangedWhileSaving, type BlendTicketWeights, type TicketSnapshot } from './blendTicketWeights';
+import { headerEdited, matchesPageRead, resolveTicketLines, totalWeightText, warnWeightsChangedWhileSaving, weightsChangedWhileSaving, type BlendTicketWeights, type TicketSnapshot } from './blendTicketWeights';
 import type { ProductWeightsResult } from './productWeights';
 import type { WeightUnitFactors } from '../types';
 
@@ -25,7 +25,7 @@ describe('resolveTicketLines', () => {
   it('weighs a saved line at its saved weight, with its current amount, not today\'s weight', () => {
     const [first] = resolveTicketLines([line({ quantity: 3 })], { saved, current });
     expect(lbOf(first)).toBe(24);
-    expect(first.text).toBe('24.00 lb · weight saved with this ticket: 8 lb/gal, from the SDS, approved ' + new Date('2026-11-07T15:00:00Z').toLocaleDateString());
+    expect(first.text).toBe('24.00 lb · weight saved with this ticket: 8 lb/gal, from the SDS, approved 11/7/2026');
   });
 
   it('previews a new line of a captured product at the ticket\'s saved weight (the save reuses it)', () => {
@@ -75,6 +75,26 @@ describe('weightsChangedWhileSaving', () => {
     const preview = resolveTicketLines(lines, { saved: null, current });
     expect(await weightsChangedWhileSaving('t1', lines, preview)).toEqual(['TEST P']);
     expect(await weightsChangedWhileSaving('t1', lines, [])).toEqual([]);
+    rpc.mockRestore();
+  });
+});
+
+describe('warnWeightsChangedWhileSaving', () => {
+  it('warns per changed line, skips a preview that was not ready, and says so when the check cannot run', async () => {
+    const lines = [line({})];
+    const ready = { status: 'ready', lines: resolveTicketLines(lines, { saved: null, current }) };
+    const warn = vi.fn();
+    const rpc = vi.spyOn(db.supabaseUntyped, 'rpc').mockResolvedValue({ data: saved, error: null } as never);
+    await warnWeightsChangedWhileSaving('t1', lines, ready, warn, 'test');
+    expect(warn.mock.calls).toEqual([["TEST P's weight changed while saving; the ticket keeps the saved weight"]]);
+
+    warn.mockClear();
+    await warnWeightsChangedWhileSaving('t1', lines, { ...ready, status: 'unavailable' }, warn, 'test');
+    expect(warn).not.toHaveBeenCalled();
+
+    rpc.mockResolvedValue({ data: null, error: { message: 'down' } } as never);
+    await warnWeightsChangedWhileSaving('t1', lines, ready, warn, 'test');
+    expect(warn.mock.calls).toEqual([['The ticket saved, but its weights could not be checked. Reopen the ticket to see them.']]);
     rpc.mockRestore();
   });
 });

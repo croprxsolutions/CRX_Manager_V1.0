@@ -825,6 +825,11 @@ times, money formatting in a dozen files (two print "$-5.00"), customer-notifica
 invoice pages. `src/pages/QuoteBuilder.tsx` (~6,000 lines) and the job page (~5,400) mix loading, pricing, saving,
 status actions and PDF/email; moving status actions and PDF/email into their own files changes nothing for users.
 Delete with a grep of every reference first; keep one copy of each helper.
+**Part 1 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-delete-unreferenced-tooling.md`): the seven
+never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpclaude-*` files are gone. Still open:
+the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
+deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
+them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
 
 ---
 

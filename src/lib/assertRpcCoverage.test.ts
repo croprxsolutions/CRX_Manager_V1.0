@@ -32,8 +32,7 @@ const RPC_CAPTURE_PATTERN = /=\s*await\s+supabase(?:Untyped)?\s*\.\s*rpc\s*\(\s*
 
 // Wrapped capture: `= await someRunner((reason) => supabase.rpc('name', ...))`.
 // Introduced by the below-cost approval flow (2026-08-13):
-// `runWithBelowCostApproval((reason) => supabase.rpc(...))` and the offlineSync
-// `execute((reason) => supabase.rpc(...))` alias. The runner resolves to the
+// `runWithBelowCostApproval((reason) => supabase.rpc(...))`. The runner resolves to the
 // rpc response, so the caller HAS captured it and the assertRpcResult contract
 // applies exactly as for the direct form. The runner name is deliberately
 // generic (`\w+`): any single-arg arrow returning a literal-named supabase.rpc

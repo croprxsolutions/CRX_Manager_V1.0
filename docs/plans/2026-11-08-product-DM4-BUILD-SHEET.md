@@ -72,7 +72,7 @@
 All three tables:
 - have RLS on;
 - have one `SELECT` policy for admins only, `TO authenticated USING ((SELECT public.is_admin()))`, because the screens are admin-only and an uncommitted proposal is not for other users;
-- `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT SELECT … TO authenticated` (the policy limits it to admins);
+- `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT SELECT … TO authenticated` (the policy limits it to admins); `epa_lookups` also gets `GRANT SELECT … TO service_role`, because the Edge Function reads the lookup row with its service-role client (4.B), and bypassing RLS does not bypass table privileges;
 - have no insert, update or delete grants to any client role.
 
 Every function in this sheet:
@@ -210,7 +210,10 @@ A `differs` label fact is never written (D-L applies to registration facts as we
 
 **Who calls it: only the `epa-lookup` Edge Function.** The browser never sends EPA's answer to the database, so an admin cannot type a fake "EPA result" and then commit it as `epa_lookup` chemistry (D-Z). The flow:
 1. The screen calls `start_epa_lookup` and gets a `lookup_id`.
-2. The screen calls `epa-lookup` with `{lookupId}`. When `lookupId` is present, the function ignores any `regNumber`: it reads the lookup row with its service-role client, refuses unless the row is `pending` and its `requested_by` is the verified caller, and fetches EPA for **the stored number**. So a failure (or success) can never be recorded against a number other than the one the lookup was started for.
+2. The screen calls `epa-lookup` with `{lookupId}`. When `lookupId` is present, the function ignores any `regNumber`: it reads the lookup row with its service-role client, refuses unless its `requested_by` is the verified caller, and then:
+   - if the row is `pending`, fetches EPA for **the stored number**;
+   - if the row is already `recorded` (a retry after a lost reply), does **not** fetch EPA again and calls `record_epa_lookup` with the same key and `p_result = '{}'`. The replay in step 1 runs before any status or shape check and returns the first saved result;
+   - if the row is `abandoned`, refuses. So a failure (or success) can never be recorded against a number other than the one the lookup was started for.
 3. **Only when `lookupId` is present**, the function requires an admin (`requireActiveProfile(…, ['admin'])`). A call without `lookupId` keeps today's check (any active user), so existing screens are unchanged for non-admins. It fetches EPA, then calls `record_epa_lookup` with its service-role client, passing:
    - `p_actor` = the verified caller ID;
    - `p_result` = the exact `EpaLookupResult` it built, or `{error}` when the EPA fetch failed;
@@ -455,6 +458,10 @@ The grand plan's "Done when" maps to H1–H4 and H6. After the DB PR is live, a 
 - MED: a slow re-read could overwrite newer screen state. **Fixed:** re-reads carry their `lookup_id` and stale ones are dropped.
 - MED: commit/reject retries with a new key. **Fixed:** buttons disabled in flight; the key is kept until a confirmed reply.
 - LOW: two entries for one ingredient in one EPA result. **Fixed:** merged before matching; differing strengths become a non-writable `epa_conflict` item.
+
+**Codex GitHub App review, second pass** (head `1d0961934`): 2 P2 findings, both fixed:
+- The Edge Function could not read `epa_lookups` because `service_role` had no SELECT grant. **Fixed:** `GRANT SELECT` on `epa_lookups` to `service_role` (section 3).
+- A retry after a lost reply hit the `pending` check before it could replay. **Fixed:** for a `recorded` lookup the function skips EPA and calls the record RPC with the same key, and the replay runs first (4.B).
 
 **Codex GitHub App review** (head `511676768`): 3 P2 findings, all fixed:
 - `_product_parent_replay` compares the saved actor with `auth.uid()`, which is empty under the service role, so a retry would refuse. **Fixed:** `record_epa_lookup` does the same replay steps by hand and checks against `p_actor` (4.B step 1).

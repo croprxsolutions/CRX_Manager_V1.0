@@ -71,5 +71,5 @@ Deno.test("nothing is sent unless confirm says send", async () => {
   });
   assertEquals(sends.length, 0);
   assertEquals(calls, ["claim_delivery_receipts", "confirm_delivery_receipt_send"]);
-  assertEquals(result.skipped, 1);
+  assertEquals([result.skipped, result.check], [0, 1]);
 });

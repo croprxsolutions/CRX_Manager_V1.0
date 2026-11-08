@@ -144,7 +144,8 @@ export async function runReceiptBatch(deps: BatchDeps, limit = 10): Promise<Batc
         p_idempotency_key: `confirm/${claim.id}/${claim.claim_token}`,
       });
       if (verdict !== "send") {
-        result.skipped += 1;
+        if (verdict === "needs_check") result.check += 1; // the database flagged it for the office list
+        else result.skipped += 1;
         continue;
       }
       const sent = await deps.send(request);

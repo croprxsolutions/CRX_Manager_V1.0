@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261108003926",
+    "migrations_high_water": "20261108043505",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -552,6 +552,7 @@
       "20261208100000_ki18_batch3_aging_ranges_and_chicago_default",
       "20261209100000_product_chemistry",
       "20261210100000_epa_registrations",
+      "20261211100000_product_chemistry_confirmed_swaps",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1599,7 +1600,6 @@
     "product_parent_brand_events",
     "product_parent_brand_sources",
     "product_parent_copy_passes",
-    "product_parent_cost_reference",
     "product_parent_density_state",
     "product_parent_density_values",
     "product_parent_events",
@@ -3034,6 +3034,15 @@
       ],
       "constraints": [
         "product_parent_modes_of_action_scheme_check"
+      ]
+    },
+    "product_parent_modes_of_action.source": {
+      "values": [
+        "typed",
+        "epa_lookup"
+      ],
+      "constraints": [
+        "product_parent_modes_of_action_source"
       ]
     },
     "product_parent_modes_of_action.status": {
@@ -7504,7 +7513,8 @@
       ],
       "with_default": [
         "row_version",
-        "set_at"
+        "set_at",
+        "updated_at"
       ]
     },
     "product_parent_density_state": {
@@ -7606,7 +7616,8 @@
         "status",
         "row_version",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "source"
       ]
     },
     "product_parent_proposal_groups": {
@@ -10451,7 +10462,8 @@
       "reference_product_id",
       "row_version",
       "set_by",
-      "set_at"
+      "set_at",
+      "updated_at"
     ],
     "product_parent_density_state": [
       "parent_id",
@@ -10542,7 +10554,8 @@
       "created_by",
       "updated_by",
       "created_at",
-      "updated_at"
+      "updated_at",
+      "source"
     ],
     "product_parent_proposal_groups": [
       "id",

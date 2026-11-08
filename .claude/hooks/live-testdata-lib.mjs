@@ -1658,10 +1658,13 @@ function withoutTriggerEvents(t) {
 const PRIV = String.raw`(?:select|insert|update|delete|truncate|references|trigger|maintain)(?:\s+with\s+grant\s+option)?`;
 const PRIV_LIST = String.raw`${PRIV}(?:\s*,\s*${PRIV})*`;
 const GRANT_LIST_RE = new RegExp(String.raw`(\b(?:grant|revoke)\s+(?:grant\s+option\s+for\s+)?)(${PRIV_LIST})(\s+on\b)`, "gi");
-const PRIV_CHECK_RE = new RegExp(String.raw`(\bhas_(?:table|any_column|column)_privilege\s*\([^;]*?,\s*')(\s*${PRIV_LIST}\s*)('\s*\))`, "gi");
+// The privilege string may be single- or dollar-quoted ($$...$$ / $tag$...$tag$); the same quote must close it.
+const PRIV_CHECK_RE = new RegExp(String.raw`(\bhas_(?:table|any_column|column)_privilege\s*\([^;]*?,\s*('|\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$))(\s*${PRIV_LIST}\s*)(\2\s*\))`, "gi");
 function withoutPrivilegeNames(t) {
-  const blank = (_, head, list, tail) => head + list.replace(/\btruncate\b/gi, "privilege_name") + tail;
-  return t.replace(GRANT_LIST_RE, blank).replace(PRIV_CHECK_RE, blank);
+  const blank = (list) => list.replace(/\btruncate\b/gi, "privilege_name");
+  return t
+    .replace(GRANT_LIST_RE, (_, head, list, tail) => head + blank(list) + tail)
+    .replace(PRIV_CHECK_RE, (_, head, _quote, list, tail) => head + blank(list) + tail);
 }
 
 export function destructiveMigrationCheck(sql) {

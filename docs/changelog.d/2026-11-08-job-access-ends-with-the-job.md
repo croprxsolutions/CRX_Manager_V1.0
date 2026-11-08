@@ -46,3 +46,9 @@ unassigned applicator: addresses 14 → 0. Admin and sales rep: identical before
 
 What office staff read or write; `application_records` (an applicator's own spray records); every
 billing, invoice, quote, sale and commission function. No rows change.
+
+### Doc stamps
+
+`CURRENT_STATE.md` and `KNOWN_ISSUES.md` re-stamped 2026-11-08 for the live ledger only: a read-only
+read of `supabase_migrations.schema_migrations` at 12:25 PM Central showed the latest live row
+`20261108043505` (`20261211100000_product_chemistry_confirmed_swaps`). This PR's migration is not in it.

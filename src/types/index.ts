@@ -1998,6 +1998,146 @@ export type BlendTicketLineWeight =
   | BlendTicketWeightSnapshot
   | { weight_kind: 'none'; none_reason: 'unlinked' | 'not_recorded' };
 
+// DM-1 (20261209100000_product_chemistry): active ingredients on a product parent (Product Stage 2),
+// read through get_parent_chemistry; cost per lb of active through get_parent_active_costs (admin).
+export type ChemistryRowStatus = 'active' | 'retired';
+export type ChemistryStrengthUnit = 'pct_ww' | 'lb_per_gal';
+export type ChemistryStrengthBasis = 'active_ingredient' | 'acid_equivalent';
+export type ChemistrySource = 'label' | 'sds' | 'supplier' | 'other' | 'epa_lookup';
+export type ModeOfActionScheme = 'HRAC' | 'FRAC' | 'IRAC';
+export type FertilizerNutrient = 'N' | 'P' | 'K' | 'S' | 'Ca' | 'Mg' | 'B' | 'Cl' | 'Co' | 'Cu' | 'Fe' | 'Mn' | 'Mo' | 'Ni' | 'Zn';
+export type FertilizerBasis = 'elemental' | 'oxide';
+export type ActiveIngredientEventType = 'created' | 'updated' | 'retired' | 'reactivated';
+export type ProductChemistryEventType = 'set' | 'corrected';
+
+export interface ActiveIngredient {
+  id: string;
+  name: string;
+  name_key: string; // generated
+  cas: string | null;
+  canonical_ingredient_id: string | null;
+  canonical_fraction: number | null;
+  fraction_basis: 'acid_equivalent' | null;
+  is_parent_form: boolean;
+  status: ChemistryRowStatus;
+  retire_reason: string | null;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentIngredient {
+  id: string;
+  parent_id: string;
+  ingredient_id: string;
+  strength_value: number | null;
+  strength_unknown: boolean;
+  strength_unit: ChemistryStrengthUnit;
+  strength_basis: ChemistryStrengthBasis;
+  source: ChemistrySource;
+  source_note: string | null;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentModeOfAction {
+  id: string;
+  parent_id: string;
+  ingredient_id: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentFertilizerAnalysis {
+  id: string;
+  parent_id: string;
+  nutrient: FertilizerNutrient;
+  basis: FertilizerBasis;
+  percent: number | null;
+  percent_unknown: boolean;
+  source: ChemistrySource;
+  source_note: string | null;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One cost-per-lb figure: exact whole cents as a string, or a named refusal (never a number guessed). */
+// A figure carries exactly one of cents (exact whole cents as a string) or reason; the other key is absent.
+export type ActiveCostFigure =
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; cents: string }
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; reason: string };
+
+// Payload shapes returned by the chemistry RPCs (not the table rows).
+export interface ActiveIngredientSummary {
+  id: string;
+  name: string;
+  cas: string | null;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  fraction_basis: 'acid_equivalent' | null;
+  is_parent_form: boolean;
+  provisional: boolean;
+  status: ChemistryRowStatus;
+  retire_reason: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryIngredientRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  cas: string | null;
+  provisional: boolean;
+  is_parent_form: boolean;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  strength_value: number | null;
+  strength_unknown: boolean;
+  strength_unit: ChemistryStrengthUnit;
+  strength_basis: ChemistryStrengthBasis;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryModeRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  row_version: number;
+}
+
+export interface ParentChemistryFertilizerRow {
+  row_id: string;
+  nutrient: FertilizerNutrient;
+  basis: FertilizerBasis;
+  percent: number | null;
+  percent_unknown: boolean;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
+}
+
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';
 export type BlendTicketReviewStatus = 'unreviewed' | 'approved' | 'rejected';
 export type BlendTicketOrderLinkStatus = 'unlinked' | 'linked';

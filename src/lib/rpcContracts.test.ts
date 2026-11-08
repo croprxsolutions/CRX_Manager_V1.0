@@ -2860,6 +2860,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261204110000',
   '20261204120000',
   '20261207100000',
+  '20261209100000',
   '20261210100000',
 ]);
 
@@ -3097,6 +3098,14 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'correct_size_net_weight',
   'set_parent_density',
   'set_size_net_weight',
+  // 20261209100000 (DM-1, local candidate): admin-only chemistry and ingredient writers; each replays
+  // through _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'correct_parent_chemistry',
+  'reactivate_active_ingredient',
+  'retire_active_ingredient',
+  'save_active_ingredient',
+  'set_parent_chemistry',
+  'set_parent_cost_reference',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3198,6 +3207,17 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER DELETE row trigger on blend_tickets (DM-2): deletes that ticket\'s snapshot rows, so a replayed delete matches no row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   capture_loader_worksheet_weights:
     'AFTER row trigger on job_loader_worksheets (DM-2): stores a weight per product only when none valid is held, so a replayed save writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // 20261209100000 (DM-1, local candidate): private helpers and dry-run previews. Prune once applied
+  // and the registry high-water moves past it.
+  _active_ingredient_event: 'internal DM-1 helper (20261209100000): appends one ingredient event inside the calling keyed writer; every API-role EXECUTE is revoked',
+  _apply_parent_chemistry: 'internal DM-1 helper (20261209100000): the one chemistry row writer, called only by the keyed writers after their own replay check (and by the coming DM-4 EPA writer); every API-role EXECUTE is revoked',
+  _edit_active_ingredient: 'internal DM-1 helper (20261209100000): called only by save_active_ingredient after its replay check, and by the preview inside a rolled-back subtransaction; every API-role EXECUTE is revoked',
+  _lock_parent_chemistry: 'internal DM-1 helper (20261209100000): creates the per-parent version row ON CONFLICT DO NOTHING and locks it inside the calling keyed writer; every API-role EXECUTE is revoked',
+  _resolve_active_ingredient: 'internal DM-1 helper (20261209100000): finds or creates one ingredient by CAS or name inside the calling keyed writer; every API-role EXECUTE is revoked',
+  preview_active_ingredient_change:
+    'admin read-only preview (DM-1, 20261209100000): runs the real edit inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  preview_parent_chemistry_correction:
+    'admin read-only preview (DM-1, 20261209100000): runs the real correction inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   return_net_weight_to_draft:
     'AFTER UPDATE row trigger on products pack columns (DM-2): fires only when a watched value really changes, so a replayed edit with the same values does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   return_density_to_draft:

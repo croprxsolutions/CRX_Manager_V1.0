@@ -25,7 +25,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261209100000_product_chemistry.sql');
-const FOLLOW_UPS = [];
+// Landing fixes (Mason 2026-11-07: a swap states its values, nothing is copied).
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20261211100000_product_chemistry_confirmed_swaps.sql')];
 // Later migrations that only name what this proof covers (they call _product_parent_require_admin() and list
 // product tables in a CHECK) and redefine none of it; pinned by sha256 of their LF text, so any edit re-asks.
 const LATER_NAME_ONLY = new Map([
@@ -336,7 +337,7 @@ const saveI = (iid, fields, reason = null, evidence = null, o = {}) => {
 const createI = (fields, k = key()) => `SELECT public.save_active_ingredient(NULL, NULL, NULL, ${J(fields)}, NULL, NULL, ${q(k)});`;
 const ing = (name, value, extra = {}) => ({ kind: 'ingredient', name, strength_value: value, strength_unit: 'lb_per_gal',
   strength_basis: 'active_ingredient', source: 'label', ...extra });
-const DM1_FUNCTIONS = [...new Set([...lf(CANDIDATE).matchAll(/^CREATE FUNCTION public\.(\w+)\(/gm)].map((m) => m[1]))];
+const DM1_FUNCTIONS = [...new Set([...[CANDIDATE, ...FOLLOW_UPS].map(lf).join('\n').matchAll(/^CREATE FUNCTION public\.(\w+)\(/gm)].map((m) => m[1]))];
 const DM1_TABLES = ['active_ingredients', 'active_ingredient_events', 'product_parent_ingredients', 'product_parent_modes_of_action',
   'product_parent_fertilizer_analysis', 'product_parent_chemistry_state', 'product_chemistry_events', 'product_parent_cost_reference'];
 const dm1FunctionsMd5 = () => owner(`SELECT md5(string_agg(p.oid::regprocedure::text || md5(p.prosrc), ',' ORDER BY p.oid::regprocedure::text))
@@ -503,6 +504,9 @@ async function main() {
 
   // ---- The real apply after DM-2 (its function is checked and left alone).
   const dm2Before = owner(`SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._approved_parent_lb_per_gal(uuid)'::regprocedure;`);
+  stageText('fix.sql', lf(FOLLOW_UPS[0]));
+  r = apply('fix.sql');
+  assert.match(r.output, /PREFLIGHT_DM1_MISSING/, 'the landing fixes refuse to run before DM-1');
   r = apply('cand.sql');
   assert.equal(r.status, 0, r.output);
   ledger(path.basename(CANDIDATE, '.sql'));
@@ -511,6 +515,22 @@ async function main() {
   assert.match(r.output, /PREFLIGHT_DM1_ALREADY_PRESENT/, 'a second apply is refused');
   noExecute('public._approved_parent_lb_per_gal(uuid)');
   console.log('[prover] applied after DM-2: its weight function is kept unchanged and still private; a second apply is refused');
+
+  // ---- Landing fixes on top, as live gets them: a row written before keeps its values and reads as typed.
+  ok(ADMIN, setC(PSEED, [{ kind: 'ingredient', name: 'Pre-fix active', strength_value: 1, strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', ref: 'p' },
+    { kind: 'mode_of_action', ingredient_ref: 'p', scheme: 'FRAC', group_code: '4' }]));
+  const preFix = () => owner(`SELECT string_agg(to_jsonb(m)::text, ',') FROM (SELECT id, ingredient_id, scheme, group_code, status, row_version
+    FROM public.product_parent_modes_of_action WHERE parent_id = '${PSEED}') m;`);
+  const preFixRows = preFix();
+  r = apply('fix.sql');
+  assert.equal(r.status, 0, r.output);
+  ledger(path.basename(FOLLOW_UPS[0], '.sql'));
+  assert.equal(preFix(), preFixRows, 'the fixes changed no existing row');
+  assert.equal(owner(`SELECT string_agg(source, ',') FROM public.product_parent_modes_of_action WHERE parent_id = '${PSEED}';`), 'typed');
+  r = apply('fix.sql');
+  assert.match(r.output, /PREFLIGHT_DM1_FIXES_ALREADY_PRESENT/, 'a second apply of the fixes is refused');
+  noExecute('public._chemistry_kept_modes(jsonb,uuid,uuid)');
+  console.log('[prover] landing fixes: refused before DM-1, applied after it with no existing row changed (old modes of action read typed), a second apply refused');
 
   // ---- Catalogue: RLS, grants, owners, function security.
   for (const t of DM1_TABLES) {
@@ -543,14 +563,14 @@ async function main() {
       '_cents_half_up', '_size_cost_per_base', '_oxide_factor', '_chemistry_form_mass', '_active_ingredient_values',
       '_active_ingredient_event', '_chemistry_uuid', '_check_parent_chemistry', '_chemistry_strength', '_chemistry_nutrient',
       '_ingredient_usage_parents', '_ingredient_users', '_chemistry_preview_fingerprint', '_ingredient_usage_fingerprint',
-      '_lock_ingredient_parents', '_edit_active_ingredient');`).split(' ');
-  assert.equal(PRIVATE.length, 25, `private helpers: ${PRIVATE.join(' ')}`);
+      '_lock_ingredient_parents', '_edit_active_ingredient', '_chemistry_kept_modes');`).split(' ');
+  assert.equal(PRIVATE.length, 26, `private helpers: ${PRIVATE.join(' ')}`);
   for (const s of PRIVATE) {
     for (const role of ['anon', 'authenticated', 'service_role']) {
       assert.equal(owner(`SELECT has_function_privilege('${role}', '${s}'::regprocedure, 'EXECUTE');`), 'f', `${role} can run ${s}`);
     }
   }
-  console.log('[prover] catalogue: 8 tables RLS on, owned by postgres, SELECT only for authenticated; 12 RPCs and 25 helpers definer-safe, helpers private');
+  console.log('[prover] catalogue: 8 tables RLS on, owned by postgres, SELECT only for authenticated; 12 RPCs and 26 helpers definer-safe, helpers private');
 
   // ---- ingredient_map is frozen; its grants and policies are unchanged.
   assert.equal(owner(`SELECT COALESCE(relacl::text, '') || '|' || COALESCE((SELECT string_agg(polname || ':' || pg_get_expr(polqual, polrelid), ',' ORDER BY polname)
@@ -589,13 +609,21 @@ async function main() {
   }
   density(PPCT, 10);
   // Actives heavier than the product (2.5 + 12 lb in a 10 lb gallon) refuse every figure, fertilizer included (Codex App).
-  ok(ADMIN, setC(PPCT, [ing('Heavy active', 12), { kind: 'fertilizer', nutrient: 'N', basis: 'elemental', percent: 10, source: 'label' }]));
+  // Saving them is refused while the weight is approved (Sol round 8); saved while it is unusable, the read still refuses.
+  const heavyIn = [ing('Heavy active', 12), { kind: 'fertilizer', nutrient: 'N', basis: 'elemental', percent: 10, source: 'label' }];
+  refused(ADMIN, setC(PPCT, heavyIn), /CHEMISTRY_TOTAL_IMPOSSIBLE: the ingredients weigh more than the product's approved 10 lb\/gal/);
+  density(PPCT, 0);
+  ok(ADMIN, setC(PPCT, heavyIn));
+  density(PPCT, 10);
   const heavy = costs(PPCT).parent_figures;
   assert.equal(heavy.length, 3, JSON.stringify(heavy));
   for (const f of heavy) assert.equal(f.figure.reason, 'STRENGTH_EXCEEDS_DENSITY', JSON.stringify(f));
   ok(ADMIN, corrC(PPCT, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PPCT, ingId('Heavy active')) }]));
   assert.equal(fig(costs(PPCT).parent_figures, 'N').cents !== undefined, true, 'with the heavy row gone the fertilizer figure computes');
-  console.log('[prover] DM-2 live: a draft weight gives DENSITY_NOT_APPROVED; stand-in 10 lb/gal gives 1200 cents; 0, NaN, 21 and a missing row ID give DENSITY_INVALID; actives heavier than the product refuse every figure, fertilizer included');
+  // Exactly the product's weight saves (2.5 lb from 25% w/w + 7.5 lb/gal = 10); 7.6 is refused.
+  refused(ADMIN, setC(PPCT, [ing('Fit active', 7.6)]), /CHEMISTRY_TOTAL_IMPOSSIBLE: the ingredients weigh more/);
+  ok(ADMIN, setC(PPCT, [ing('Fit active', 7.5)]));
+  console.log('[prover] DM-2 live: a draft weight gives DENSITY_NOT_APPROVED; stand-in 10 lb/gal gives 1200 cents; 0, NaN, 21 and a missing row ID give DENSITY_INVALID; actives heavier than an approved weight are refused at save (exactly the weight saves), and saved under an unusable weight they refuse every figure, fertilizer included');
 
   // ---- Hand-checked cost cases.
   const glyAcid = js(ADMIN, createI({ name: 'Glyphosate', cas: '1071-83-6', is_parent_form: true })).ingredient.id;
@@ -689,7 +717,14 @@ async function main() {
   assert.equal(cpb(0, 'Gal', 'liquid').reason, 'COST_MISSING');
   assert.equal(cpb(1, 'Unit', 'dry').reason, 'UNIT_IS_COUNT');
   assert.equal(cpb(6, 'qt', 'liquid').cents, '2400');
-  console.log('[prover] refusals by name: g, MG and kg (UNIT_NOT_SUPPORTED), Ea, unknown unit, missing and zero cost, seed parent, lb/gal on dry, zero strength, unknown strength, unset reference, bad prices');
+  // A unit with one unusable spelling is refused, not costed from the other (Sol round 8); a disagreeing one too.
+  for (const bad of ['-1', "'NaN'", '2']) {  // factor_oz is NOT NULL
+    fixture(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('QT', ${bad}, 'liquid');`);
+    assert.equal(cpb(6, 'qt', 'liquid').reason, 'UNIT_UNKNOWN', `a QT spelling with factor ${bad}`);
+    fixture(`DELETE FROM public.unit_conversions WHERE unit = 'QT';`);
+  }
+  assert.equal(cpb(6, 'qt', 'liquid').cents, '2400');
+  console.log('[prover] refusals by name: g, MG and kg (UNIT_NOT_SUPPORTED), Ea, unknown unit, a unit with a bad or disagreeing second spelling, missing and zero cost, seed parent, lb/gal on dry, zero strength, unknown strength, unset reference, bad prices');
 
   // ---- Mutation: removing the salt's fraction makes the ae figure a refusal, never the ai number.
   const salt = ingId('Glyphosate IPA salt');
@@ -724,8 +759,45 @@ async function main() {
     SELECT public._lock_parent_chemistry('${PDM4}', 0);
     SELECT public._apply_parent_chemistry('${PDM4}', ${J([{ kind: 'ingredient', name: 'EPA active', strength_value: 2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'epa_lookup' }])}, 'epa', NULL, NULL)->>'changed';`);
   assert.equal(dm4, 'true');
+  // EPA-confirmed modes of action (Sol round 8). Typed rows from before the number arrived, then the EPA lookup
+  // confirms one existing mode (it becomes epa_lookup) and adds one: retiring that typed row is refused; a typed
+  // row with no confirmed mode still retires. Swaps and mode-of-action retires stay refused on a gated parent.
+  fixture(`UPDATE public.product_parents SET generic_epa_registration = NULL WHERE id = '${PDM4}';`);
+  ok(ADMIN, setC(PDM4, [ing('Typed then EPA', 1, { ref: 't' }), ing('Typed only', 1), { kind: 'mode_of_action', ingredient_ref: 't', scheme: 'HRAC', group_code: '2' },
+    { kind: 'mode_of_action', ingredient_ref: 't', scheme: 'HRAC', group_code: '3' }]));
+  fixture(`UPDATE public.product_parents SET generic_epa_registration = '100-66' WHERE id = '${PDM4}';`);
+  const tte = ingId('Typed then EPA');
+  const epaWrite = (changes) => ok(OWNER, `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+    SELECT public._lock_parent_chemistry('${PDM4}', ${ver(PDM4)});
+    SELECT public._apply_parent_chemistry('${PDM4}', ${J(changes)}, 'epa', NULL, NULL)->>'changed';`);
+  assert.equal(epaWrite([{ kind: 'mode_of_action', ingredient_id: tte, scheme: 'HRAC', group_code: '2' },
+    { kind: 'mode_of_action', ingredient_id: tte, scheme: 'HRAC', group_code: '4' }]), 'true');
+  const dm4Moa = () => owner(`SELECT string_agg(group_code || ':' || source, ',' ORDER BY group_code) FROM public.product_parent_modes_of_action
+    WHERE parent_id = '${PDM4}' AND ingredient_id = '${tte}' AND status = 'active';`);
+  assert.equal(dm4Moa(), '2:epa_lookup,3:typed,4:epa_lookup', 'the lookup confirmed 2 and added 4; 3 stays typed');
+  assert.equal(epaWrite([{ kind: 'mode_of_action', ingredient_id: tte, scheme: 'HRAC', group_code: '2' }]), 'false', 'confirming again changes nothing');
+  refused(ADMIN, setC(PDM4, [{ kind: 'mode_of_action', ingredient_id: tte, scheme: 'HRAC', group_code: '3' }]), /CHEMISTRY_FROM_EPA_ONLY|CHEMISTRY_ROW_EXISTS/);
+  refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, tte) }]), /CHEMISTRY_EPA_ROW_KEPT/);
+  refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDM4, tte), ingredient_id: glyAcid, strength_value: 1,
+    strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', modes_of_action: [] }]), /CHEMISTRY_FROM_EPA_ONLY/);
+  const confirmed = owner(`SELECT id FROM public.product_parent_modes_of_action WHERE parent_id = '${PDM4}' AND ingredient_id = '${tte}' AND group_code = '2' AND status = 'active';`);
+  refused(ADMIN, corrC(PDM4, [{ kind: 'mode_of_action', action: 'retire', row_id: confirmed }]), /CHEMISTRY_FROM_EPA_ONLY/);
+  assert.equal(dm4Moa(), '2:epa_lookup,3:typed,4:epa_lookup', 'the refusals changed nothing');
+  refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDM4, ingId('Typed only')), ingredient_id: glyAcid, strength_value: 1,
+    strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', modes_of_action: [] }]), /CHEMISTRY_FROM_EPA_ONLY/);
+  ok(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, ingId('Typed only')) }]));
+  // A swap made while the number is away records the moved modes as typed (the lookup confirmed the old ingredient, not this one);
+  // back under the gate the lookup confirms the new one again, and then it cannot be retired.
+  fixture(`UPDATE public.product_parents SET generic_epa_registration = NULL WHERE id = '${PDM4}';`);
+  ok(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDM4, tte), ingredient_id: glyAcid, strength_value: 1,
+    strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', modes_of_action: [{ scheme: 'HRAC', group_code: '2' }, { scheme: 'HRAC', group_code: '3' }] }]));
+  assert.equal(owner(`SELECT string_agg(group_code || ':' || source, ',' ORDER BY group_code) FROM public.product_parent_modes_of_action
+    WHERE parent_id = '${PDM4}' AND ingredient_id = '${glyAcid}' AND status = 'active';`), '2:typed,3:typed', 'a moved mode of action is typed until the lookup confirms the new ingredient');
+  fixture(`UPDATE public.product_parents SET generic_epa_registration = '100-66' WHERE id = '${PDM4}';`);
+  assert.equal(epaWrite([{ kind: 'mode_of_action', ingredient_id: glyAcid, scheme: 'HRAC', group_code: '2' }]), 'true', 'the lookup confirms the new ingredient');
+  refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, glyAcid) }]), /CHEMISTRY_EPA_ROW_KEPT/);
   refused(ADMIN, setC(PEPA5, [ing('Gate typed epa', 1, { source: 'epa_lookup' })]), /epa_lookup|SOURCE/);
-  console.log('[prover] gate: generic, size, parent-brand and legacy-brand numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused');
+  console.log('[prover] gate: generic, size, parent-brand and legacy-brand numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused; a typed row whose mode of action the EPA lookup confirmed cannot be retired (CHEMISTRY_EPA_ROW_KEPT), one without can; a swap records moved modes of action as typed until the lookup confirms them');
 
   // ---- Gate race: a legacy brand number added while a chemistry write holds its locks.
   let bg = session(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
@@ -828,30 +900,50 @@ async function main() {
   assert.equal(owner('SELECT count(*) FROM public.active_ingredients;'), String(Number(nIng) + 1), 'the new refusals wrote nothing');
   console.log('[prover] identity: one CAS under two names is one ingredient (never renamed); two name-only entries stay two and are listed; conflicting acid or fraction refused with zero writes; CAS taken, rename, bad CAS, non-acid parent and orphan fraction refused');
 
-  // Swap carries mode of action; swap onto a parent that already has the target is refused; consolidate.
-  ok(ADMIN, setC(PDUP1, [ing('Dup A', 1, { ref: 'a' }), { kind: 'mode_of_action', ingredient_ref: 'a', scheme: 'HRAC', group_code: '5' }]));
+  // Swap and consolidate copy nothing (Mason, 2026-11-07): the request states the new strength and lists the
+  // modes of action that stay; the screen pre-fills both. A swap onto an ingredient already on the parent is refused.
+  ok(ADMIN, setC(PDUP1, [ing('Dup A', 1, { ref: 'a' }), { kind: 'mode_of_action', ingredient_ref: 'a', scheme: 'HRAC', group_code: '5' },
+    { kind: 'mode_of_action', ingredient_ref: 'a', scheme: 'HRAC', group_code: '6' }]));
   const dupA = ingId('Dup A');
   const keepB = js(ADMIN, createI({ name: 'Dup B', cas: '87392-12-9' })).ingredient.id; // reuses S-metolachlor by CAS
   assert.equal(keepB, ingId('S-metolachlor'));
-  p = prevC(PDUP1, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDUP1, dupA), ingredient_id: keepB }]);
+  const STATED = { strength_value: 1.2, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'sds' };
+  const swap = (pid, from, to, modes, extra = {}) => [{ kind: 'ingredient', action: 'swap', row_id: rowId(pid, from), ingredient_id: to,
+    ...STATED, modes_of_action: modes, ...extra }];
+  const hrac = (...codes) => codes.map((c) => ({ scheme: 'HRAC', group_code: c }));
+  const bare = [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDUP1, dupA), ingredient_id: keepB }];
+  assert.match(String(prevC(PDUP1, bare).refusal), /CHEMISTRY_STRENGTH_INVALID/, 'a swap must state the strength');
+  refused(ADMIN, corrC(PDUP1, bare), /CHEMISTRY_STRENGTH_INVALID/);
+  refused(ADMIN, corrC(PDUP1, [{ ...bare[0], ...STATED }]), /CHEMISTRY_MODES_REQUIRED/);
+  refused(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, hrac('9'))), /CHEMISTRY_MODES_INVALID: HRAC:9 is not a mode of action of the row being replaced/);
+  refused(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, hrac('5', '5'))), /CHEMISTRY_MODES_INVALID: HRAC:5 is listed twice/);
+  refused(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, [{ scheme: 'HRAC', group_code: '5', ingredient_id: keepB }])), /CHEMISTRY_MODES_INVALID: each/);
+  refused(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, { scheme: 'HRAC', group_code: '5' })), /CHEMISTRY_MODES_REQUIRED/);
+  p = prevC(PDUP1, swap(PDUP1, dupA, keepB, hrac('5')));
   assert.equal(p.refusal, null, JSON.stringify(p));
-  ok(ADMIN, corrC(PDUP1, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDUP1, dupA), ingredient_id: keepB }]));
-  let moa = chem(PDUP1).chemistry.modes_of_action;
-  assert.equal(moa.length, 1);
-  assert.equal(moa[0].ingredient_id, keepB, 'the swap carried the mode of action');
-  ok(ADMIN, setC(PDUP1, [ing('Dup A', 0.5, { ingredient_id: dupA, name: undefined, cas: undefined }), { kind: 'mode_of_action', ingredient_id: dupA, scheme: 'HRAC', group_code: '15' }]));
-  refused(ADMIN, corrC(PDUP1, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDUP1, dupA), ingredient_id: keepB }]), /INGREDIENT_ALREADY_ON_PARENT/);
-  const cons = [{ kind: 'ingredient', action: 'consolidate', row_id: rowId(PDUP1, dupA), into_row_id: rowId(PDUP1, keepB),
-    strength_value: 1.5, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }];
-  ok(ADMIN, corrC(PDUP1, cons));
+  ok(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, hrac(' 5 '))));
+  const swapped = chem(PDUP1).chemistry;
+  assert.deepEqual(swapped.ingredients.map((x) => [x.ingredient_id, x.strength_value, x.source]), [[keepB, 1.2, 'sds']], 'the stated strength and source, not the old 1 lb/gal label row');
+  let moa = swapped.modes_of_action;
+  assert.deepEqual(moa.map((m) => `${m.ingredient_id === keepB}:${m.group_code}`), ['true:5'], 'the listed mode of action moved; the unlisted one was dropped');
+  assert.equal(owner(`SELECT string_agg(DISTINCT source, ',') FROM public.product_parent_modes_of_action WHERE parent_id = '${PDUP1}' AND status = 'active';`), 'typed');
+  ok(ADMIN, setC(PDUP1, [ing('Dup A', 0.5, { ingredient_id: dupA, name: undefined, cas: undefined }), { kind: 'mode_of_action', ingredient_id: dupA, scheme: 'HRAC', group_code: '15' },
+    { kind: 'mode_of_action', ingredient_id: dupA, scheme: 'HRAC', group_code: '5' }]));
+  refused(ADMIN, corrC(PDUP1, swap(PDUP1, dupA, keepB, hrac('15'))), /INGREDIENT_ALREADY_ON_PARENT/);
+  const cons = (modes) => [{ kind: 'ingredient', action: 'consolidate', row_id: rowId(PDUP1, dupA), into_row_id: rowId(PDUP1, keepB),
+    strength_value: 1.5, strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label', ...(modes ? { modes_of_action: modes } : {}) }];
+  refused(ADMIN, corrC(PDUP1, cons(null)), /CHEMISTRY_MODES_REQUIRED/);
+  refused(ADMIN, corrC(PDUP1, cons(hrac('6'))), /CHEMISTRY_MODES_INVALID: HRAC:6 is not a mode of action/);
+  ok(ADMIN, corrC(PDUP1, cons(hrac('15', '5'))));
   moa = chem(PDUP1).chemistry.modes_of_action;
-  assert.deepEqual(moa.map((m) => `${m.ingredient_id === keepB}:${m.group_code}`).sort(), ['true:15', 'true:5'], 'consolidate kept every mode of action on the kept ingredient');
+  assert.deepEqual(moa.map((m) => `${m.ingredient_id === keepB}:${m.group_code}`).sort(), ['true:15', 'true:5'], 'consolidate moved the listed modes; one already on the kept row is not doubled');
   assert.equal(chem(PDUP1).chemistry.ingredients.length, 1);
+  assert.equal(chem(PDUP1).chemistry.ingredients[0].strength_value, 1.5, 'the kept row takes the stated strength');
   // Retire: refused while used, allowed once unused, then unpickable; reactivated, its CAS re-resolves to it.
   ok(ADMIN, setC(PDUP2, [ing('Dup A', 1, { ingredient_id: dupA, name: undefined })]));
   refused(ADMIN, `SELECT public.retire_active_ingredient('${dupA}', ${ingVer(dupA)}, 'duplicate', ${q(key())});`, /INGREDIENT_IN_USE/);
   refused(ADMIN, `SELECT public.retire_active_ingredient('${glyAcid}', ${ingVer(glyAcid)}, 'x', ${q(key())});`, /INGREDIENT_IN_USE/);
-  ok(ADMIN, corrC(PDUP2, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PDUP2, dupA), ingredient_id: keepB }]));
+  ok(ADMIN, corrC(PDUP2, swap(PDUP2, dupA, keepB, [])));
   refused(ADMIN, `SELECT public.retire_active_ingredient('${dupA}', ${ingVer(dupA)}, NULL, ${q(key())});`, /REASON_REQUIRED/);
   refused(ADMIN, `SELECT public.retire_active_ingredient('${dupA}', ${ingVer(dupA) - 1}, 'dup', ${q(key())});`, /INGREDIENT_STALE/);
   ok(ADMIN, `SELECT public.retire_active_ingredient('${dupA}', ${ingVer(dupA)}, 'duplicate of Dup B', ${q(key())});`);
@@ -862,7 +954,7 @@ async function main() {
   refused(ADMIN, createI({ name: 'Atrazine again', cas: '1912-24-9' }), /INGREDIENT_RETIRED: Atrazine was retired/);
   ok(ADMIN, `SELECT public.reactivate_active_ingredient('${r1.ingredient.id}', ${ingVer(r1.ingredient.id)}, 'needed again', ${q(key())});`);
   assert.equal(js(ADMIN, createI({ name: 'Atrazine again', cas: '1912-24-9' })).ingredient.id, r1.ingredient.id, 'its CAS re-resolves to it');
-  console.log('[prover] replace: swap carries mode of action; swap onto an existing target refused; consolidate keeps every MoA; retire refused while used, then allowed and unpickable; reactivate re-resolves its CAS');
+  console.log('[prover] replace: swap and consolidate refuse without a stated strength and a listed set of modes of action (missing, unknown, repeated or malformed); the stated values are saved and only listed modes move; swap onto an existing target refused; retire refused while used, then allowed and unpickable; reactivate re-resolves its CAS');
 
   // ---- Astra round.
   ok(ADMIN, setC(PAE, [{ kind: 'mode_of_action', ingredient_id: ingId('Glyphosate DMA salt'), scheme: 'HRAC', group_code: '9' }]));
@@ -893,7 +985,7 @@ async function main() {
   ok(ADMIN, setC(PINACT, [ing('Inact old', 1)]));
   fixture(`UPDATE public.product_parents SET is_active = false WHERE id = '${PINACT}';`);
   refused(ADMIN, setC(PINACT, [ing('Inact add', 1)]), /INACTIVE|inactive/);
-  ok(ADMIN, corrC(PINACT, [{ kind: 'ingredient', action: 'swap', row_id: rowId(PINACT, ingId('Inact old')), ingredient_id: keepB }]));
+  ok(ADMIN, corrC(PINACT, swap(PINACT, ingId('Inact old'), keepB, [])));
   // An ae strength on a salt with no acid and not itself the acid is refused.
   refused(ADMIN, setC(PREF, [ing('Orphan salt', 1, { strength_basis: 'acid_equivalent' })]), /CHEMISTRY_AE_NEEDS_CANONICAL/);
   // A second analysis row for one nutrient on another basis is refused.
@@ -978,13 +1070,19 @@ async function main() {
   refused(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${GQT}', 0, ${q(key())});`, /COST_REFERENCE_NOT_MEMBER/);
   ok(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${REFA}', 0, ${q(key())});`);
   assert.equal(costs(PREF).reference.source, 'picked', 'an inactive bulk size lets an admin pick');
+  const refStamp = () => owner(`SELECT updated_at::text || '|' || (updated_at = set_at)::text FROM public.product_parent_cost_reference WHERE parent_id = '${PREF}';`);
+  const firstStamp = refStamp();
+  ok(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${REFB}', 1, ${q(key())});`);
+  assert.notEqual(refStamp(), firstStamp, 'a changed reference moves updated_at (Sol round 8)');
+  assert.match(refStamp(), /\|true$/);
+  ok(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${REFA}', 2, ${q(key())});`);
   fixture(`UPDATE public.products SET is_active = false WHERE id = '${REFA}';`);
   assert.equal(costs(PREF).reference.reason, 'REFERENCE_INACTIVE');
-  refused(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${REFA}', 1, ${q(key())});`, /COST_REFERENCE_INACTIVE/);
+  refused(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', '${REFA}', 3, ${q(key())});`, /COST_REFERENCE_INACTIVE/);
   fixture(`UPDATE public.products SET is_active = true WHERE id = '${REFA}';
     UPDATE public.product_parent_members SET parent_id = '${PDUP1}' WHERE product_id = '${REFA}';`);
   assert.equal(costs(PREF).reference.reason, 'REFERENCE_NOT_MEMBER');
-  ok(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', NULL, 1, ${q(key())});`);
+  ok(ADMIN, `SELECT public.set_parent_cost_reference('${PREF}', NULL, 3, ${q(key())});`);
   assert.equal(costs(PREF).reference.reason, 'REFERENCE_UNSET');
   console.log('[prover] reference: active bulk wins; non-member refused; inactive bulk lets an admin pick; an inactive or moved reference stops the parent figure by name; NULL clears it');
 

@@ -459,7 +459,12 @@ describe('buildMasterMixSummaryData — DM-2 product weights (sheet 4.3)', () =>
     expect(out.rows.map((r) => r.weight_text).sort()).toEqual(['10.00 lb', '8.00 lb']);
     // The printout tells the two apart, in the totals table and in the load table.
     expect(out.rows.map((r) => r.product_name).sort()).toEqual(['Same (product 1)', 'Same (product 2)']);
-    expect(out.load_groups[0].worksheet.loads[0].products.map((p) => p.product_name).sort()).toEqual(['Same (product 1)', 'Same (product 2)']);
+    // Same name, unit and rate but different products: separate load groups, never mixed in one tank.
+    expect(out.load_groups).toHaveLength(2);
+    for (const g of out.load_groups) {
+      expect(g.worksheet.loads.every((l) => l.products.length === 1)).toBe(true);
+      expect(g.job_numbers).toHaveLength(1);
+    }
   });
 
   it('names a product with no weight and withholds its load total; the amounts still print', () => {

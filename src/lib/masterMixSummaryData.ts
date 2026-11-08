@@ -274,13 +274,14 @@ function recipeSignature(products: ApplicatorSheetData['products'], totalAcres: 
   return products
     .filter((p) => p.total_applied != null && Number.isFinite(p.total_applied))
     .map((p) => {
-      const unit = (p.total_unit ?? '').trim().toLowerCase();
+      const unit = (p.total_unit ?? '').trim();
       // Effective per-acre concentration drives the load split — derive it from the total
       // and the acre basis, falling back to the raw total when there is no acre basis.
       const effRate = acres > 0 ? round4((p.total_applied as number) / acres) : `q${round4(p.total_applied as number)}`;
       // NUL-delimited (not "|"): a product name could in principle contain a pipe, which
       // would let two distinct recipes collide into one signature (Codex P2 sibling case).
-      return `${p.product_name}\u0000${unit}\u0000${effRate}`;
+      // The same product identity the load groups combine by, so two products sharing a name never share loads.
+      return `${lineKey(p, unit)}\u0000${effRate}`;
     })
     .sort()
     .join('::');

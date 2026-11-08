@@ -205,6 +205,27 @@ function lineKey(p: ApplicatorSheetData['products'][number], unit: string): stri
   return p.product_id ? `id\u0000${p.product_id}\u0000${unit.toLowerCase()}` : productUnitKey(p.product_name, unit);
 }
 
+/**
+ * Two different products can share a name and unit; they stay separate rows (never added together), so each
+ * gets its EPA number, or a count when it has none, to tell them apart on the printout.
+ */
+function nameSameNamedProducts<T extends { product_name: string; unit: string | null }>(
+  items: T[], epaOf: (item: T) => string | null | undefined,
+): T[] {
+  const nameKey = (t: T) => `${t.product_name}\u0000${(t.unit ?? '').toLowerCase()}`;
+  const counts = new Map<string, number>();
+  for (const t of items) counts.set(nameKey(t), (counts.get(nameKey(t)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return items.map((t) => {
+    const k = nameKey(t);
+    if ((counts.get(k) ?? 0) < 2) return t;
+    const n = (seen.get(k) ?? 0) + 1;
+    seen.set(k, n);
+    const epa = epaOf(t)?.trim();
+    return { ...t, product_name: `${t.product_name} (${epa ? `EPA ${epa}` : `product ${n}`})` };
+  });
+}
+
 type ReadWeights = Extract<MasterMixWeights, { units: WeightUnitFactors }>;
 
 /** The current weight basis for a line: none when unlinked, null when the read has no entry for its product. */
@@ -343,7 +364,7 @@ export function buildMasterMixSummaryData(
     }
   }
 
-  const rows: MasterMixRow[] = [...acc.values()]
+  const rows: MasterMixRow[] = nameSameNamedProducts([...acc.values()], (a) => a.lines[0]?.epa_registration)
     .map((a) => {
       // RE-DERIVE the gal/lb equivalent from the SUMMED quantity (not by adding display
       // strings). Omit it on a product_form conflict — never guess a wrong branch.
@@ -396,7 +417,7 @@ function buildLoadGroups(jobs: MasterMixJobInput[], weights?: MasterMixWeights):
     capacity_sources: Set<string>;
     total_acres: number;
     /** Combined products keyed by product name + unit (summed across the group's jobs). */
-    products: Map<string, LoaderProductInput & { _key: string }>;
+    products: Map<string, LoaderProductInput & { _key: string; epa: string | null }>;
   }
   const groups = new Map<string, GroupAcc>();
   const no_load_jobs: MasterMixNoLoadJob[] = [];
@@ -481,14 +502,14 @@ function buildLoadGroups(jobs: MasterMixJobInput[], weights?: MasterMixWeights):
         existing.total_quantity = round4((existing.total_quantity ?? 0) + p.total_applied);
       } else {
         g.products.set(pk, { _key: pk, product_name: p.product_name, total_quantity: round4(p.total_applied), unit: unit || null,
-          product_id: p.product_id ?? null, product_form: p.product_form, source_line_id: pk });
+          product_id: p.product_id ?? null, product_form: p.product_form, source_line_id: pk, epa: p.epa_registration });
       }
     }
   }
 
   const load_groups: MasterMixLoadGroup[] = [...groups.values()]
     .map((g) => {
-      const products: LoaderProductInput[] = [...g.products.values()]
+      const products: LoaderProductInput[] = nameSameNamedProducts([...g.products.values()], (p) => p.epa)
         .map((p) => ({ product_name: p.product_name, total_quantity: p.total_quantity, unit: p.unit,
           product_id: p.product_id, product_form: p.product_form, source_line_id: p.source_line_id }))
         .sort((a, b) =>

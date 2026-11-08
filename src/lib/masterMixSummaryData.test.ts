@@ -453,10 +453,13 @@ describe('buildMasterMixSummaryData — DM-2 product weights (sheet 4.3)', () =>
 
   it('combines by product, so two products sharing a name stay separate rows with their own weights', () => {
     const out = buildMasterMixSummaryData([
-      job('j1', { products: [liquid({ product_id: 'p1', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }),
-      job('j2', { products: [liquid({ product_id: 'p2', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }),
+      job('j1', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p1', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }, capacity),
+      job('j2', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p2', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }, capacity),
     ], [], weights);
     expect(out.rows.map((r) => r.weight_text).sort()).toEqual(['10.00 lb', '8.00 lb']);
+    // The printout tells the two apart, in the totals table and in the load table.
+    expect(out.rows.map((r) => r.product_name).sort()).toEqual(['Same (product 1)', 'Same (product 2)']);
+    expect(out.load_groups[0].worksheet.loads[0].products.map((p) => p.product_name).sort()).toEqual(['Same (product 1)', 'Same (product 2)']);
   });
 
   it('names a product with no weight and withholds its load total; the amounts still print', () => {

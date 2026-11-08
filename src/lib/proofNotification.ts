@@ -26,6 +26,7 @@
  */
 
 import { buildEmailHtml, type SendEmailParams } from './emailService';
+import { escapeHtml } from '../../supabase/functions/_shared/deliveryReceiptHtml.ts';
 import { formatRei, formatPhi, phiHarvestWarning } from './labelGuardrails';
 
 // ── The proof-data shape (mirrors get_job_proof_data's jsonb return) ─────────
@@ -359,13 +360,7 @@ export function buildProofDraft(data: JobProofData): ProofDraft {
 // ── HTML + plain-text rendering ──────────────────────────────────────────────
 
 /** Minimal HTML escaping so customer/field/product text with <, >, &, " renders safely. */
-export function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+export { escapeHtml };
 
 export interface ProofRenderInput {
   /** The resolved recipient farm name (per recipient), already trusted as text. */

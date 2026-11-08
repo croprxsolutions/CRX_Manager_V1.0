@@ -45,6 +45,13 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
+  /**
+   * Set when EPA moved the requested number to a new one. The result is then
+   * found:false (so screens that predate this field never apply the new
+   * registration's details to the old number); eparegno and the details
+   * describe the new registration.
+   */
+  transferredTo?: string | null;
 }
 
 const SECTION_3_PATTERN = /^[1-9]\d{0,5}-[1-9]\d{0,4}$/;
@@ -196,30 +203,40 @@ export function normalizeEpaPayload(
     throw new Error("EPA response did not contain an items array");
   }
 
-  if (payload.items.length === 0) {
-    return {
-      found: false,
-      regType,
-      eparegno: null,
-      productname: null,
-      signalWordCanonical: null,
-      needsManual: false,
-      manufacturer: null,
-      rupYn: null,
-      productStatus: null,
-      isCancelled: false,
-      activeIngredients: [],
-      latestLabelPdfUrl: null,
-      labelPdfs: [],
-    };
-  }
+  if (payload.items.length === 0) return notFoundResult(regType);
 
-  const item = payload.items.find((candidate) =>
+  // EPA answers a moved number with the new registration, listing the old one in
+  // transfer_history; a move wins even if the old record is listed too.
+  let item = payload.items.find((candidate) =>
     isRecord(candidate) &&
-    cleanString(candidate.eparegno, 50) === requestedRegNumber
+    cleanString(candidate.eparegno, 50) !== requestedRegNumber &&
+    Array.isArray(candidate.transfer_history) &&
+    candidate.transfer_history.some((entry) =>
+      isRecord(entry) &&
+      cleanString(entry.previous_eparegno, 50) === requestedRegNumber
+    )
   );
-  if (!isRecord(item)) {
-    throw new Error("EPA response registration did not match the request");
+  let transferredTo: string | null = null;
+  if (isRecord(item)) {
+    const newRegistration = classifyRegistrationNumber(
+      cleanString(item.eparegno, 50),
+    );
+    if (!newRegistration.supported) {
+      throw new Error("EPA response registration did not match the request");
+    }
+    transferredTo = newRegistration.normalized;
+  } else {
+    item = payload.items.find((candidate) =>
+      isRecord(candidate) &&
+      cleanString(candidate.eparegno, 50) === requestedRegNumber
+    );
+    // A distributor number EPA does not list here still goes on to the exact search.
+    if (!isRecord(item) && regType === "distributor") {
+      return notFoundResult(regType);
+    }
+    if (!isRecord(item)) {
+      throw new Error("EPA response registration did not match the request");
+    }
   }
 
   const signalWord = normalizeSignalWord(item.signal_word);
@@ -228,9 +245,9 @@ export function normalizeEpaPayload(
   const labelPdfs = normalizeLabelPdfs(item.pdffiles);
 
   return {
-    found: true,
+    found: transferredTo === null,
     regType,
-    eparegno: requestedRegNumber,
+    eparegno: transferredTo ?? requestedRegNumber,
     productname: cleanString(item.productname, 500),
     signalWordCanonical: signalWord.canonical,
     needsManual: signalWord.needsManual,
@@ -242,5 +259,94 @@ export function normalizeEpaPayload(
     activeIngredients: normalizeActiveIngredients(item.active_ingredients),
     latestLabelPdfUrl: labelPdfs[0]?.url ?? null,
     labelPdfs,
+    transferredTo,
+  };
+}
+
+function notFoundResult(regType: EpaLookupResult["regType"]): EpaLookupResult {
+  return {
+    found: false,
+    regType,
+    eparegno: null,
+    productname: null,
+    signalWordCanonical: null,
+    needsManual: false,
+    manufacturer: null,
+    rupYn: null,
+    productStatus: null,
+    isCancelled: false,
+    activeIngredients: [],
+    latestLabelPdfUrl: null,
+    labelPdfs: [],
+    transferredTo: null,
+  };
+}
+
+/** Only an unlisted, unmoved C-P-D number goes on to EPA's search and base record. */
+export function needsDistributorBaseLookup(result: EpaLookupResult): boolean {
+  return result.regType === "distributor" && !result.found &&
+    !result.transferredTo;
+}
+
+/** The C-P base of a C-P-D distributor number. */
+export function distributorBaseRegistration(distributorRegNumber: string): string {
+  return distributorRegNumber.split("-").slice(0, 2).join("-");
+}
+
+export interface DistributorListing {
+  productname: string | null;
+  productStatus: string | null;
+}
+
+/**
+ * EPA's registration-number search lists distributor numbers the ppls lookup
+ * omits. It is a partial-match search, so only an exact entry confirms the number.
+ */
+export function confirmedDistributorListing(
+  searchPayload: unknown,
+  distributorRegNumber: string,
+): DistributorListing | null {
+  if (!isRecord(searchPayload) || !Array.isArray(searchPayload.items)) {
+    throw new Error("EPA search response did not contain an items array");
+  }
+  const entry = searchPayload.items.find((candidate) =>
+    isRecord(candidate) &&
+    cleanString(candidate.eparegno, 50) === distributorRegNumber
+  );
+  if (!isRecord(entry)) return null;
+  return {
+    productname: cleanString(entry.productname, 500),
+    productStatus: cleanString(entry.product_status, 100),
+  };
+}
+
+/**
+ * A distributor product EPA has confirmed carries its base C-P registration's
+ * label, so the label facts come from the base record and the name and status
+ * from the distributor's own listing. If EPA moved the base registration,
+ * nothing confirms the new record's label covers this distributor number, so
+ * the result is not found rather than borrowing the new record's facts.
+ */
+export function normalizeDistributorBasePayload(
+  basePayload: unknown,
+  distributorRegNumber: string,
+  listing: DistributorListing,
+): EpaLookupResult {
+  const base = normalizeEpaPayload(
+    basePayload,
+    "distributor",
+    distributorBaseRegistration(distributorRegNumber),
+  );
+  if (!base.found) return notFoundResult("distributor");
+  const productStatus = listing.productStatus ?? base.productStatus;
+  return {
+    ...base,
+    found: true,
+    eparegno: distributorRegNumber,
+    productname: listing.productname ?? base.productname,
+    productStatus,
+    isCancelled: base.isCancelled ||
+      productStatus?.toLowerCase() === "cancelled",
+    transferredTo: null,
   };
 }

@@ -494,6 +494,48 @@ describe('LabelDataQuality', () => {
     );
   });
 
+  it('shows a moved registration and a base-matched distributor number after a fresh check', async () => {
+    sessionStorage.clear();
+    H.products = [
+      { id: 'moved-1', product_name: 'Roundup Ultra', epa_registration: '524-475', is_rup: false, signal_word: null },
+      { id: 'dist-1', product_name: 'Volley', epa_registration: '62719-671-55467', is_rup: false, signal_word: null },
+    ];
+    H.invoke.mockImplementation((_name: string, { body }: { body: { regNumber: string } }) => Promise.resolve({
+      data: body.regNumber === '62719-671-55467'
+        ? verifiedLookup({ regType: 'distributor', eparegno: '62719-671-55467', productname: 'KEYSTONE NXT', signalWordCanonical: 'Warning', transferredTo: null })
+        : verifiedLookup({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+      error: null,
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run EPA check/ }));
+    expect(await screen.findByText('EPA moved this to 105211-77')).toBeInTheDocument();
+    expect(await screen.findByText('KEYSTONE NXT')).toBeInTheDocument();
+    expect(screen.getAllByText('Moved by EPA').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Distributor name differs').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('No EPA match')).not.toBeInTheDocument();
+    // Only the filter dropdown option, no row badge.
+    expect(screen.getAllByText('Lookup error')).toHaveLength(1);
+    // A moved number never offers the signal-word fill.
+    expect(screen.queryByRole('button', { name: 'Apply “Caution”' })).toBeNull();
+    // The distributor's base-record signal word stays offered, as for any distributor match.
+    expect(screen.getByRole('button', { name: 'Apply “Warning”' })).toBeEnabled();
+
+    fireEvent.change(
+      screen.getByLabelText('Corrected EPA registration for Roundup Ultra'),
+      { target: { value: '524-475' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByText('EPA moved 524-475 to 105211-77. Enter the new number to save it.'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
   it('discards a cached run with internally inconsistent EPA-derived findings', async () => {
     H.products = [];
     sessionStorage.clear();

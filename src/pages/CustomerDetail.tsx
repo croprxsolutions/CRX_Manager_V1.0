@@ -575,6 +575,7 @@ export default function CustomerDetail() {
     setAddresses(noAddresses);
     setCrops([]);
     setParentName('');
+    setDuplicateMatches([]);
     customerRowVersionRef.current = null;
     loadedDefaultSplitRef.current = null;
     defaultSplitTouchedRef.current = false;
@@ -1002,6 +1003,9 @@ export default function CustomerDetail() {
       }
     }
 
+    // Read now: the form values below are this click's, so the version must be too, even
+    // if a reload of this customer lands during the duplicate check.
+    const rowVersionAtClick = customerRowVersionRef.current;
     // KI-77: warn (never block) when a new or renamed customer looks like one already on file.
     const loaded = loadedCustomerRef.current;
     const identityChanged = isNew || !loaded
@@ -1012,7 +1016,11 @@ export default function CustomerDetail() {
       setSaving(true);
       let matches: CustomerDuplicateMatch[] = [];
       try {
-        matches = await findLikelyDuplicateCustomers(customer as Customer, isNew ? undefined : id);
+        // A hung check must not hold the save either: after 4 seconds it counts as "no matches".
+        matches = await Promise.race([
+          findLikelyDuplicateCustomers(customer as Customer, isNew ? undefined : id),
+          new Promise<CustomerDuplicateMatch[]>((resolve) => { setTimeout(() => resolve([]), 4000); }),
+        ]);
       } catch (err) {
         // Warn-only: a failed duplicate check must never stop the save.
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_duplicate_check' } });
@@ -1048,7 +1056,7 @@ export default function CustomerDetail() {
           value: customer.default_commission_split ?? null,
           loaded: loadedDefaultSplitRef.current,
         }) : {}),
-        ...buildRowVersionPatch(!isNew, customerRowVersionRef.current),
+        ...buildRowVersionPatch(!isNew, rowVersionAtClick),
         credit_limit_cents: customer.credit_limit_cents || 0,
         finance_charge_rate: customer.finance_charge_rate || 0,
         finance_charge_enabled: customer.finance_charge_enabled ?? true,
@@ -1361,7 +1369,7 @@ export default function CustomerDetail() {
       )}
 
       {(
-        <fieldset id={sectionAnchor('info')} disabled={isNew && saving} className="min-w-0 scroll-mt-32 space-y-4">
+        <fieldset id={sectionAnchor('info')} disabled={saving} className="min-w-0 scroll-mt-32 space-y-4">
           {/* Locked while a new record saves: an edit typed then would be neither saved nor warned about. */}
           {/* key remounts on customer switch — in-flight loads/mutations from the previous customer must never write into this one's view (Sol 2.G r2) */}
           {/* interactionRefresh in the key: logging a call remounts the prep card so "Last conversation" is never stale (Sol final gauntlet) */}

@@ -55,47 +55,63 @@ export interface CustomerDuplicateMatch {
   reasons: string[];
 }
 
+function phonesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const da = phoneDigits(a);
+  const db = phoneDigits(b);
+  if (da.length < 7 || db.length < 7) return false;
+  // A 7-digit local number matches the same number stored with its area code.
+  return da.length >= db.length ? da.endsWith(db) : db.endsWith(da);
+}
+
 /** Reasons `candidate` looks like the same customer as `input`; empty when it does not. */
 export function duplicateReasons(input: CustomerDuplicateInput, candidate: CustomerDuplicateInput): string[] {
   const reasons: string[] = [];
   if (namesLookAlike(input.farm_name, candidate.farm_name)) reasons.push('similar name');
-  const phone = phoneDigits(input.phone);
-  if (phone.length >= 7 && phone === phoneDigits(candidate.phone)) reasons.push('same phone');
+  if (phonesMatch(input.phone, candidate.phone)) reasons.push('same phone');
   const email = (input.email ?? '').trim().toLowerCase();
   if (email && email === (candidate.email ?? '').trim().toLowerCase()) reasons.push('same email');
   return reasons;
 }
 
+const CANDIDATE_COLUMNS = 'id, farm_name, phone, email, city, state, is_active';
+
+async function readCandidates(filters: string[], excludeId: string | undefined, limit: number) {
+  if (filters.length === 0) return [];
+  let query = supabase.from('customers').select(CANDIDATE_COLUMNS).or(filters.join(','));
+  if (excludeId) query = query.not('id', 'in', excludedIdList([excludeId]));
+  const { data, error } = await query.order('farm_name').order('id').limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
 /**
  * Likely existing duplicates of a customer about to be created or renamed, active or not.
- * The database narrows by name word, phone digits or email; `duplicateReasons` decides.
- * shortcut: reads at most 100 candidates, so a very common name word can hide a match; upgrade to a trigram RPC if that bites.
+ * The database narrows by name-word prefix, phone digits or email; `duplicateReasons` decides.
+ * Phone and email are read on their own so a common name word cannot crowd them out.
+ * shortcut: reads at most 200 name candidates and misses a typo in a word's first 4 letters; upgrade to a trigram RPC if that bites.
  */
 export async function findLikelyDuplicateCustomers(
   input: CustomerDuplicateInput,
   excludeId?: string,
 ): Promise<CustomerDuplicateMatch[]> {
-  const filters = normalizeFarmName(input.farm_name)
-    .split(' ')
-    .filter((w) => w.length >= 3)
+  // The first 4 letters of each word, so a typo later in a one-word name ("Hendriks") still finds "Hendricks".
+  const nameFilters = [...new Set(normalizeFarmName(input.farm_name).split(' ').filter(Boolean).map((w) => w.slice(0, 4)))]
     .slice(0, 4)
     .map((w) => `farm_name.ilike.${ilikeOrPattern(w)}`);
+  const contactFilters: string[] = [];
   const phone = phoneDigits(input.phone);
   // Digits in order with anything between, so "(555) 123-4567" and "555.123.4567" both match.
-  if (phone.length >= 7) filters.push(`phone.ilike."%${phone.slice(-7).split('').join('%')}%"`);
+  if (phone.length >= 7) contactFilters.push(`phone.ilike."%${phone.slice(-7).split('').join('%')}%"`);
   const email = (input.email ?? '').trim();
-  if (email) filters.push(`email.ilike.${ilikeOrPattern(email)}`);
-  if (filters.length === 0) return [];
+  if (email) contactFilters.push(`email.ilike.${ilikeOrPattern(email)}`);
 
-  let query = supabase
-    .from('customers')
-    .select('id, farm_name, phone, email, city, state, is_active')
-    .or(filters.join(','));
-  if (excludeId) query = query.not('id', 'in', excludedIdList([excludeId]));
-  const { data, error } = await query.order('farm_name').order('id').limit(100);
-  if (error) throw error;
-
-  return (data ?? [])
+  const [byName, byContact] = await Promise.all([
+    readCandidates(nameFilters, excludeId, 200),
+    readCandidates(contactFilters, excludeId, 50),
+  ]);
+  const seen = new Set<string>();
+  return [...byContact, ...byName]
+    .filter((row) => !seen.has(row.id) && Boolean(seen.add(row.id)))
     .map((row) => ({
       id: row.id,
       farm_name: row.farm_name,

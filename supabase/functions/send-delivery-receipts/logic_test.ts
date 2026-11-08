@@ -42,6 +42,21 @@ Deno.test("provider answers map to sent / retry / check", async () => {
   assertEquals((await sendViaResend(req, "k", down)).outcome, "retry");
 });
 
+Deno.test("the tally follows what the database recorded, not the provider", async () => {
+  const run = (finish: string) => runReceiptBatch({
+    rpc: (fn) => Promise.resolve(
+      fn === "claim_delivery_receipts" ? [claim] : fn === "confirm_delivery_receipt_send" ? "send" : finish,
+    ),
+    send: () => Promise.resolve({ outcome: "sent", messageId: "m" }),
+    from: "f@x.invalid",
+    newKey: () => "k",
+  });
+  assertEquals((await run("sent")).sent, 1);
+  const stale = await run("stale");
+  assertEquals([stale.sent, stale.lost], [0, 1]);
+  assertEquals((await run("needs_check")).check, 1);
+});
+
 Deno.test("nothing is sent unless confirm says send", async () => {
   const sends: unknown[] = [];
   const calls: string[] = [];

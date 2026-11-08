@@ -151,13 +151,20 @@ export async function runReceiptBatch(deps: BatchDeps, limit = 10): Promise<Batc
       const finishArgs = sent.outcome === "sent"
         ? { p_outcome: "sent", p_detail: null, p_resend_message_id: sent.messageId, p_sent_to: claim.to }
         : { p_outcome: sent.outcome, p_detail: sent.detail, p_resend_message_id: null, p_sent_to: null };
-      await call(deps.rpc, "finish_delivery_receipt", {
+      const recorded = await call(deps.rpc, "finish_delivery_receipt", {
         p_id: claim.id,
         p_claim_token: claim.claim_token,
         ...finishArgs,
         p_idempotency_key: `finish/${claim.id}/${claim.claim_token}`,
       });
-      result[sent.outcome] += 1;
+      // Count what the database recorded, not what the provider said ('stale' = the claim was no longer ours).
+      if (recorded === "sent") result.sent += 1;
+      else if (recorded === "pending") result.retry += 1;
+      else if (recorded === "needs_check") result.check += 1;
+      else {
+        result.lost += 1;
+        deps.log?.("delivery receipt finish was not recorded", { id: claim.id, status: String(recorded) });
+      }
     } catch (err) {
       // The claim's lease runs out in 10 minutes and the next run resends under the same provider key.
       result.lost += 1;

@@ -92,4 +92,4 @@ old_fn.sql
 .impeccable/config.local.json
 
 # Stray working-folder markers some tools leave at the repo root (KI-96)
-tmpclaude-*
+/tmpclaude-*

@@ -268,7 +268,12 @@ export async function readAllById<T extends { id: string }>(
     if (error) throw new Error(error.message);
     if (!Array.isArray(data)) throw new Error("Reference read returned no list");
     if (data.length === 0) return rows;
+    const lastId = data[data.length - 1].id;
+    // A page that does not move past the last id would loop forever.
+    if (typeof lastId !== "string" || (afterId !== null && lastId <= afterId)) {
+      throw new Error("Reference read did not advance");
+    }
     for (const row of data) rows.push(row);
-    afterId = data[data.length - 1].id;
+    afterId = lastId;
   }
 }

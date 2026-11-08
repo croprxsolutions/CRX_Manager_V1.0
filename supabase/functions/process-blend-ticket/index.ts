@@ -1090,8 +1090,12 @@ Deno.serve(async (req: Request) => {
           return afterId ? q.gt("id", afterId) : q;
         }),
       ]);
-    } catch {
-      throw new Error("Failed to load OCR product/customer reference data");
+    } catch (e) {
+      throw new Error(
+        `Failed to load OCR product/customer reference data: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
     }
 
     let matchedCustomerId: string | null = null;

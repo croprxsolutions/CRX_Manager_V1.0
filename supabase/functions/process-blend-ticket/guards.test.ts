@@ -370,3 +370,14 @@ Deno.test("readAllById fails the whole read when any page fails", async () => {
     "boom",
   );
 });
+
+Deno.test("readAllById refuses a page that does not move past the last id", async () => {
+  await assertRejects(
+    () =>
+      readAllById<{ id: string }>(() =>
+        Promise.resolve({ data: [{ id: "a" }], error: null })
+      ),
+    Error,
+    "did not advance",
+  );
+});

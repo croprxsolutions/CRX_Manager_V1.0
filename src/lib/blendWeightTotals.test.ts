@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { validateBlendMath } from './blendMathValidator';
-import type { MappedLine } from './blendWeightTotals';
+import type { MappedLine, WeightTotalOptions } from './blendWeightTotals';
 import type { WeightUnitFactors } from '../types';
 
 // DM-2 sheet 4.1/4.4: the ticket total checked through the unit map and line weights.
@@ -114,5 +114,60 @@ describe('weights unavailable or still loading', () => {
     const legacy = validateBlendMath(header(100, 'Gal'), [gal]);
     expect(legacy.length).toBeGreaterThan(0);
     expect(validateBlendMath(header(100, 'Gal'), [gal], { loading: true })).toEqual(legacy);
+  });
+});
+
+// Invariant (Sol HIGHs on #1627, twice): a spray tank the legacy check flags as overfilled stays flagged when a
+// screen passes weights, in every weights situation. A new situation is one row.
+describe('invariant: a legacy tank overfill is never dropped by the weights check', () => {
+  const liquid = (over: Partial<MappedLine>) => line({ form: 'liquid', unit: 'Gal', quantity: 30, ...over });
+  const current: WeightUnitFactors = { factors: { ...units.factors }, ambiguous: [] }; // knows no Pt
+  const snapshot: WeightUnitFactors = { factors: { ...units.factors, pt: { kind: 'volume', factor: 0.125 } }, ambiguous: [] };
+  type Row = [situation: string, lines: MappedLine[], weights: (lines: MappedLine[]) => WeightTotalOptions];
+  const mapped = (headerUnits: WeightUnitFactors | null) => (lines: MappedLine[]) => ({ headerUnits, lines });
+  const rows: Row[] = [
+    ['loading', [liquid({})], () => ({ loading: true })],
+    ['unavailable', [liquid({})], (lines) => ({ unavailable: true, lines })],
+    ['mapped, linked liquid line', [liquid({})], mapped(units)],
+    ['unlinked line', [liquid({ product_id: null })], mapped(units)],
+    ['dry Lb line beside an overfilling liquid line', [line({ product_name: 'TEST Dry' }), liquid({})], mapped(units)],
+    ['formless line', [liquid({ form: null })], mapped(units)],
+    ['line read through its saved snapshot map', [liquid({ quantity: 200, unit: 'Pt', rowUnits: snapshot })], mapped(current)],
+    ['saved ticket whose unit basis was never recorded', [liquid({})], mapped(null)],
+    ['saved line with no recorded weight (empty line map)', [liquid({ rowUnits: { factors: {}, ambiguous: [] } })], mapped(units)],
+    ['a weights mismatch that is not the overfill (map reads gal as a weight)', [liquid({})],
+      mapped({ factors: { ...units.factors, gal: { kind: 'weight', factor: 1 } }, ambiguous: [] })],
+  ];
+  // 30 Gal (or 200 Pt = 25 Gal) of product in a 20 Gal (80 Qt) tank.
+  const headers: [total: number, unit: string][] = [[20, 'Gal'], [80, 'Qt']];
+
+  it.each(rows.flatMap(([situation, lines, weights]) => headers.map(([total, unit]) => [situation, unit, total, lines, weights] as const)))(
+    '%s, %s header', (_situation, unit, total, lines, weights) => {
+      const products = lines.map((l) => ({ product_name: l.product_name, quantity: l.quantity as number, unit: l.unit,
+        rate_per_acre: null, rate_per_acre_unit: null, product_form: l.form, product_rate_unit: null, product_inventory_unit: null }));
+      const overfill = (w: { level: string; message: string }[]) =>
+        w.some((x) => x.level === 'mismatch' && x.message.includes("A tank can't hold more product"));
+      expect(overfill(validateBlendMath(header(total, unit), products))).toBe(true); // the legacy check flags it
+      expect(overfill(validateBlendMath(header(total, unit), products, weights(lines)))).toBe(true);
+    });
+});
+
+describe('plain oz total with weights', () => {
+  it('keeps the mapped result and adds no legacy overfill for a dry line (oz may be a weight)', () => {
+    const oz: WeightUnitFactors = { factors: { ...units.factors, oz: { kind: 'volume', factor: 0.0078125 } }, ambiguous: [] };
+    const products = [{ product_name: 'TEST A', quantity: 1, unit: 'Lb', rate_per_acre: null, rate_per_acre_unit: null,
+      product_form: 'dry', product_rate_unit: null, product_inventory_unit: null }];
+    const result = validateBlendMath(header(10, 'oz'), products, { headerUnits: oz, lines: [line({ quantity: 1 })] });
+    expect(result.some((w) => w.message.includes("A tank can't hold more product"))).toBe(false);
+  });
+});
+
+describe('per-acre total unit with weights', () => {
+  it('adds no legacy overfill when the total unit is a rate (Gal/ac)', () => {
+    const products = [{ product_name: 'TEST A', quantity: 30, unit: 'Gal', rate_per_acre: null, rate_per_acre_unit: null,
+      product_form: 'liquid', product_rate_unit: null, product_inventory_unit: null }];
+    const result = validateBlendMath({ ...header(20, 'Gal/ac'), total_acres: 10 }, products,
+      { headerUnits: units, lines: [line({ form: 'liquid', unit: 'Gal', quantity: 30 })] });
+    expect(result.some((w) => w.message.includes("A tank can't hold more product"))).toBe(false);
   });
 });

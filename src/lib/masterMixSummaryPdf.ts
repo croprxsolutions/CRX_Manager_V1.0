@@ -51,6 +51,58 @@ function ensureRoom(doc: JsPDFWithAutoTable, y: number, needed: number, margin: 
   return y;
 }
 
+/** The weights caption (or why weights are not shown) under a table; returns new y. */
+function drawWeightCaption(doc: JsPDFWithAutoTable, caption: string | null, margin: number, pageW: number, y: number): number {
+  if (!caption) return y;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...GRAY);
+  const lines = doc.splitTextToSize(caption, pageW - margin * 2);
+  doc.text(lines, margin, y - 6);
+  return y + lines.length * 10;
+}
+
+/**
+ * The per-load table's rows: Product | Load 1 | … | Total. With `g.weights` (DM-2), each cell prints the
+ * weighed amount (a refused amount prints its reason, never 0) with its weight under it, and a
+ * "Product weight" row closes the table, as on the loader worksheet.
+ */
+export function masterMixLoadBody(g: MasterMixLoadGroup): string[][] {
+  const ws = g.worksheet;
+  const w = g.weights;
+  // The first load carries every group product in order (computeLoaderWorksheet pushes one entry per input
+  // product onto each load), so its product list IS the row order and load.products[pi] is THIS product line.
+  const body: string[][] = (ws.loads[0]?.products ?? []).map((fp, pi) => {
+    const row: string[] = [fp.unit ? `${fp.product_name} (${fp.unit})` : fp.product_name];
+    let rowTotal = 0;
+    let refused = false;
+    ws.loads.forEach((l, li) => {
+      const lp = l.products[pi];
+      if (!lp) {
+        row.push('—');
+        return;
+      }
+      rowTotal = Math.round((rowTotal + lp.amount) * 10000) / 10000;
+      const cell = w?.loads[li]?.cells[pi];
+      if (!cell) {
+        row.push(fmtNum(lp.amount));
+        return;
+      }
+      // Judge each load on its own: one refused load withholds only the row total, never another load's weight.
+      const cellRefused = cell.amountCell !== fmtNum(lp.amount);
+      if (cellRefused) refused = true;
+      row.push(cellRefused ? cell.amountCell : `${cell.amountCell}\n${cell.weightText}`);
+    });
+    row.push(refused ? '—' : fmtNum(rowTotal));
+    return row;
+  });
+  if (w && body.length > 0) {
+    body.push(['Product weight', ...w.loads.map((load) =>
+      load.totalLb != null ? load.totalText.replace(/^Product weight: /, '') : load.totalText), '']);
+  }
+  return body;
+}
+
 /** Draw ONE combined-loads block (group summary + per-load split) for a capacity group. */
 function drawLoadGroup(
   doc: JsPDFWithAutoTable,
@@ -61,6 +113,7 @@ function drawLoadGroup(
   startY: number,
   groupIndex: number,
   groupCount: number,
+  weightsCaption: string | null,
 ): number {
   let y = ensureRoom(doc, startY, 90, margin);
   const ws = g.worksheet;
@@ -96,45 +149,27 @@ function drawLoadGroup(
     return y + reason.length * 11 + 12;
   }
 
-  // Per-load table: Product | Load 1 | … | Total. Mirrors the #10 loader layout. The
-  // group's combined products were built name+unit-keyed and index-aligned across loads
-  // by computeLoaderWorksheet, so load.products[pi] is THIS product line.
+  // Per-load table: Product | Load 1 | … | Total. Mirrors the #10 loader layout.
   const head: string[] = ['Product'];
   ws.loads.forEach((l) => {
     head.push(`Load ${l.load_number}\n${fmtNum(l.volume)} gal${l.is_partial ? ' (partial)' : ''}`);
   });
   head.push('Total');
-
-  // The first load carries every group product in order (computeLoaderWorksheet pushes
-  // one entry per input product onto each load), so its product list IS the row order.
-  const firstLoad = ws.loads[0];
-  const body: string[][] = (firstLoad?.products ?? []).map((fp, pi) => {
-    const row: string[] = [fp.unit ? `${fp.product_name} (${fp.unit})` : fp.product_name];
-    let rowTotal = 0;
-    ws.loads.forEach((l) => {
-      const lp = l.products[pi];
-      if (lp) {
-        rowTotal = Math.round((rowTotal + lp.amount) * 10000) / 10000;
-        row.push(fmtNum(lp.amount));
-      } else {
-        row.push('—');
-      }
-    });
-    row.push(fmtNum(rowTotal));
-    return row;
-  });
+  const body = masterMixLoadBody(g);
 
   autoTable(doc, {
     startY: y,
     margin: { left: margin, right: margin },
     head: [head],
     body: body.length > 0 ? body : [['No products to mix', ...ws.loads.map(() => '—'), '—']],
+    // An amount and the weight printed under it stay on one page.
+    rowPageBreak: 'avoid',
     styles: { fontSize: 9, cellPadding: 4, halign: 'right' },
     headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 8 },
     alternateRowStyles: { fillColor: ALT_ROW_BG },
     columnStyles: { 0: { halign: 'left', fontStyle: 'bold', textColor: CHARCOAL } },
   });
-  return doc.lastAutoTable.finalY + 18;
+  return drawWeightCaption(doc, weightsCaption, margin, pageW, doc.lastAutoTable.finalY + 16) + 4;
 }
 
 /** Draw the cross-job master mix summary onto the doc. */
@@ -202,22 +237,27 @@ function drawMasterMix(
     doc.text('No product quantities to mix for the included jobs.', margin, y);
     y += 16;
   } else {
+    // DM-2: a Weight column (each job line weighed on its own, then added) whenever weights were asked for.
+    const weighed = data.weights_caption != null;
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [['Product', 'Total to Mix', 'gal/lb Equiv.', 'Jobs']],
+      head: [['Product', 'Total to Mix', 'gal/lb Equiv.', ...(weighed ? ['Weight'] : []), 'Jobs']],
       body: data.rows.map((r) => [
         r.product_name,
         r.total_quantity_display,
         r.gl_lb_display,
+        ...(weighed ? [r.weight_text ?? '—'] : []),
         String(r.job_count),
       ]),
       styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: CRX_GREEN, textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: ALT_ROW_BG },
-      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+      columnStyles: weighed
+        ? { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right', cellWidth: 200 }, 4: { halign: 'right' } }
+        : { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
     });
-    y = doc.lastAutoTable.finalY + 18;
+    y = drawWeightCaption(doc, data.weights_caption, margin, pageW, doc.lastAutoTable.finalY + 16) + 2;
   }
 
   // ── Loads picture (per-capacity combined blocks; never averaged) ─────────────
@@ -259,7 +299,7 @@ function drawMasterMix(
     y += msg.length * 12 + 12;
   } else {
     data.load_groups.forEach((g, i) => {
-      y = drawLoadGroup(doc, autoTable, g, margin, pageW, y, i, data.load_groups.length);
+      y = drawLoadGroup(doc, autoTable, g, margin, pageW, y, i, data.load_groups.length, data.weights_caption);
     });
   }
 

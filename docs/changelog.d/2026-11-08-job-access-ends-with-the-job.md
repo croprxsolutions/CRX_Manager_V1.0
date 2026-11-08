@@ -21,7 +21,9 @@ assignment is current.
 * New `_is_job_applicator(job)`: the active whole-job applicator, job not deleted, and scheduled, in
   progress, or completed/invoiced with `job_date` within 7 days of today, either side (Central), so a job
   completed long before its date does not stay open until then. Never cancelled. The
-  clock is `job_date` because only office staff change it.
+  clock is `job_date` because only office staff change it. The applicator's own dispatch rows (written by
+  the assignment trigger, marked completed when the job is) still give them 7 days from the actual
+  completion, as part B set.
 * `jobs_select` uses it, and every policy that looks the job up through `jobs` inherits it. The
   eleven SECURITY DEFINER functions above change only their whole-job line.
 * `_is_dispatched_to_me` refuses a deleted job.
@@ -31,12 +33,13 @@ assignment is current.
 
 ### Proof (disposable copy of the real schema, each role signed in)
 
-Whole-job applicator: 8 jobs before, 3 after (scheduled; completed 2 days ago; invoiced yesterday);
-loses completed 10 days ago, one completed early but dated 30 days out, cancelled, and the two deleted
-ones in every table and function.
+Whole-job applicator: 9 jobs before, 4 after (scheduled; completed 2 days ago; invoiced yesterday; done
+today but dated 30 days out); loses completed 10 days ago, done 8 days ago but dated 30 days out,
+cancelled, and the two deleted ones in every table and function. The fixture includes the dispatch rows
+the assignment triggers would write.
 Dispatch-only applicator: before 2 jobs and none of their records; after 1 job (not the deleted one)
-and all of its records. Driver: addresses 12 → 1 (their delivery customer). Entity recipient and an
-unassigned applicator: addresses 12 → 0. Admin and sales rep: identical before and after.
+and all of its records. Driver: addresses 13 → 1 (their delivery customer). Entity recipient and an
+unassigned applicator: addresses 13 → 0. Admin and sales rep: identical before and after.
 
 ### Not changed
 

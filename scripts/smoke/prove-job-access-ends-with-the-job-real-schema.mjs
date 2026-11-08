@@ -16,9 +16,9 @@
  *   3. the candidate applies as one transaction and prints POSTFLIGHT_OK; each replaced body differs
  *      from the replayed one only on the marked lines;
  *   4. AFTER: the same table, checked exactly: the whole-job applicator keeps a scheduled or in-progress
- *      job and a completed/invoiced one scheduled within 7 days of today, and loses the rest (including one
- *      completed long before its date); a dispatch-only
- *      applicator reads the rest of the job it is sent to but never a deleted one; drivers and entity
+ *      job, and a completed/invoiced one scheduled within 7 days of today or actually completed in the last
+ *      7 days (its own dispatch row), and loses the rest (cancelled, deleted, done 8+ days ago even when dated
+ *      in the future); a dispatch-only applicator reads the rest of the job it is sent to but never a deleted one; drivers and entity
  *      recipients read only the addresses of customers they can already see; admin and sales rep get
  *      exactly what they got before;
  *   5. RE-APPLY: refused by the preflight.
@@ -48,17 +48,18 @@ const ROLES = { admin: USERS.admin, rep: USERS.rep, W, D, X, OFF, driver: USERS.
 // attachment id(1000+n), address id(1100+n), dispatch id(1200+n). Customer 11 is the driver's delivery.
 const JOBS = {
   1: { who: W, status: 'scheduled', days: 0, note: 'scheduled' },
-  2: { who: W, status: 'completed', days: -2, note: 'completed 2 days ago' },
-  3: { who: W, status: 'completed', days: -10, note: 'completed 10 days ago' },
+  2: { who: W, status: 'completed', days: -2, done: 2, note: 'completed 2 days ago' },
+  3: { who: W, status: 'completed', days: -10, done: 10, note: 'completed 10 days ago' },
   4: { who: W, status: 'cancelled', days: 0, note: 'cancelled' },
   5: { who: W, status: 'scheduled', days: 0, deleted: true, note: 'scheduled, deleted' },
-  6: { who: W, status: 'invoiced', days: -1, note: 'invoiced yesterday' },
+  6: { who: W, status: 'invoiced', days: -1, done: 1, note: 'invoiced yesterday' },
   7: { who: W, status: 'in_progress', days: 0, deleted: true, note: 'in progress, deleted' },
   8: { who: OFF, status: 'scheduled', days: 0, note: 'deactivated applicator' },
   9: { who: null, dispatch: D, status: 'scheduled', days: 0, note: 'dispatch-only' },
   10: { who: null, dispatch: D, status: 'scheduled', days: 0, deleted: true, note: 'dispatch-only, deleted' },
   // 11 is the driver's delivery customer, so the next job case is 12.
-  12: { who: W, status: 'completed', days: 30, note: 'completed early, dated in 30 days' },
+  12: { who: W, status: 'completed', days: 30, done: 8, note: 'done 8 days ago, dated in 30 days' },
+  13: { who: W, status: 'completed', days: 30, done: 0, note: 'done today, dated in 30 days' },
 };
 const uid = (n) => id(String(n));
 const today = "((now() AT TIME ZONE 'America/Chicago')::date)";
@@ -94,6 +95,7 @@ function seed() {
       INSERT INTO public.job_applied_record_crew (id, application_record_id, member_name_snapshot) VALUES ('${uid(900 + n)}', '${uid(700 + n)}', 'crew ${n}');
       INSERT INTO public.job_attachments (id, job_id, storage_path, file_name) VALUES ('${uid(1000 + n)}', '${uid(100 + n)}', '${uid(100 + n)}/a.jpg', 'a.jpg');
       INSERT INTO storage.objects (bucket_id, name) VALUES ('job-attachments', '${uid(100 + n)}/a.jpg');
+      ${j.who ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.who}', '${j.status === 'cancelled' ? 'cancelled' : j.done === undefined ? 'dispatched' : 'completed'}', now() - interval '${j.done ?? 0} days');` : ''}
       ${j.dispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.dispatch}', 'dispatched');` : ''}`);
   }
   // Customer 11: the driver's delivery today (the only customer a driver may see).
@@ -101,7 +103,9 @@ function seed() {
     INSERT INTO public.customer_addresses (id, customer_id) VALUES ('${uid(1111)}', '${uid(211)}');
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, assigned_driver, scheduled_date)
       VALUES ('${uid(1311)}', 'KI73-D', '${uid(1411)}', '${uid(211)}', '${USERS.admin}', '${USERS.driver}', ${today});`);
-  // Fixtures only: replica skips foreign keys and the job triggers (e.g. the assign trigger's dispatch rows).
+  // Fixtures only: replica skips foreign keys and the job triggers, so each whole-job applicator's dispatch row is
+  // written above as those triggers leave it: dispatched while open, cancelled with the job, completed (updated_at =
+  // when the job was actually completed) for a completed or invoiced job.
   psql(`BEGIN; SET LOCAL session_replication_role = replica;\n${rows.join('\n')}\nCOMMIT;`);
   const roles = scalar(`SELECT string_agg(role || ':' || is_active, ',' ORDER BY id) FROM public.profiles WHERE id IN ('${D}','${X}','${OFF}','${RECIP}');`);
   assert.equal(roles, 'applicator:true,applicator:true,applicator:false,entity_recipient:true', 'extra profiles must land with their roles');
@@ -148,8 +152,8 @@ const calls = (who, n) => probe(who, `
 const CALLS = 'start complete offline print map billed';
 const lists = (who) => probe(who, `SET LOCAL ROLE authenticated;
   v := concat_ws(' ',
-    (SELECT COALESCE(string_agg(DISTINCT (right(x->>'job_id', 4)::int - 100)::text, ','), '-') FROM public.get_dispatched_list(NULL, NULL) x),
-    (SELECT COALESCE(string_agg(DISTINCT (right(x->>'id', 4)::int - 100)::text, ','), '-') FROM public.get_dispatch_board_jobs('${who}') x));
+    (SELECT COALESCE(string_agg(DISTINCT (right(x->>'job_id', 4)::int - 100)::text, ',' ORDER BY (right(x->>'job_id', 4)::int - 100)::text), '-') FROM public.get_dispatched_list(NULL, NULL) x),
+    (SELECT COALESCE(string_agg(DISTINCT (right(x->>'id', 4)::int - 100)::text, ',' ORDER BY (right(x->>'id', 4)::int - 100)::text), '-') FROM public.get_dispatch_board_jobs('${who}') x));
   RESET ROLE;`);
 // An applicator adding a photo record to the job (write policies that reach the job through jobs).
 const canAttach = (who, n) => probe(who, `BEGIN SET LOCAL ROLE authenticated;
@@ -157,7 +161,7 @@ const canAttach = (who, n) => probe(who, `BEGIN SET LOCAL ROLE authenticated;
   RAISE EXCEPTION 'PROBE_OK';
   EXCEPTION WHEN OTHERS THEN v := CASE WHEN SQLERRM = 'PROBE_OK' THEN 'yes' WHEN SQLERRM ~ 'row-level security' THEN 'no' ELSE 'ERR:' || SQLERRM END; END;`);
 
-const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12], D: [9, 10], X: [1], OFF: [8] };
+const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12, 13], D: [9, 10], X: [1], OFF: [8] };
 function snapshot() {
   const reads = Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)]));
   const fns = {};
@@ -218,11 +222,11 @@ try {
   const after = snapshot();
   print('AFTER', after);
   for (const r of ['admin', 'rep']) assert.deepEqual(after.reads[r], before.reads[r], `${r} reads must not change`);
-  const all = '1,2,3,4,5,6,7,8,9,10,12';
-  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12", addresses: "1,2,3,4,5,6,7,8,9,10,11,12",
+  const all = '1,2,3,4,5,6,7,8,9,10,12,13';
+  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12,13", addresses: "1,2,3,4,5,6,7,8,9,10,11,12,13",
     shares: all, applied_info: all, records: all, record_fields: all, record_crew: all, attachments: all, photos: all });
   const job = (s) => ({ jobs: s, job_fields: s, shares: s, applied_info: s, records: s, record_fields: s, record_crew: s, attachments: s, photos: s });
-  assert.deepEqual(after.reads.W, { ...job('1,2,6'), fields: '1,2,6', customers: '1,2,6', addresses: '1,2,6' }, 'whole-job applicator keeps only current jobs');
+  assert.deepEqual(after.reads.W, { ...job('1,2,6,13'), fields: '1,2,6,13', customers: '1,2,6,13', addresses: '1,2,6,13' }, 'whole-job applicator keeps only current jobs');
   assert.deepEqual(after.reads.D, { ...job('9'), fields: '9', customers: '9', addresses: '9' }, 'dispatch-only applicator reads the rest of the job, never a deleted one');
   const none = { ...job('-'), fields: '-', customers: '-', addresses: '-' };
   for (const r of ['X', 'OFF', 'recip']) assert.deepEqual(after.reads[r], none, `${r} reads nothing`);
@@ -231,11 +235,14 @@ try {
   const yes = 'yes yes yes yes yes yes', no = 'no no no no no no';
   assert.deepEqual(after.fns, {
     'W job 1': yes, 'W job 2': yes, 'W job 3': no, 'W job 4': no, 'W job 5': no, 'W job 6': yes, 'W job 7': no, 'W job 12': no,
+    // Job 13 is reached only through its completed dispatch row: read, print, map and billed; completing it again
+    // needs an open dispatch (part B), and it is already completed. start counts as allowed (status refusal).
+    'W job 13': 'yes no no yes yes yes',
     'D job 9': yes, 'D job 10': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
   });
   // "<dispatched list> <dispatch board>" per applicator; the board never showed deleted jobs.
-  assert.deepEqual(before.dispatchLists, { W: '- 1,12,2,3,4,6', D: '9 9' }); // text order
-  assert.deepEqual(after.dispatchLists, { W: '- 1,2,6', D: '9 9' }, 'the board drops the ended jobs');
+  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,2,3,4,6', D: '9 9' }); // text order
+  assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,2,6', D: '9 9' }, 'the board drops the ended jobs');
   assert.deepEqual(before.attach, { 'W job 1': 'yes', 'W job 4': 'yes', 'D job 9': 'no' }, 'before: the whole-job applicator writes to a cancelled job');
   assert.deepEqual(after.attach, { 'W job 1': 'yes', 'W job 4': 'no', 'D job 9': 'no' }, 'writes reaching the job through jobs inherit the window; dispatch stays read-only');
 

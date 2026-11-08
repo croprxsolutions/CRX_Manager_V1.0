@@ -23,7 +23,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261214100000_ki30_epa_registration_corrections.sql');
-const FOLLOW_UPS = [];
+const FOLLOW_UP = path.join(MIGRATIONS, '20261214100100_ki30_epa_followup_checks.sql');
+const FOLLOW_UPS = [FOLLOW_UP];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
@@ -377,6 +378,27 @@ async function main() {
   // 5. Running it again refuses and changes nothing.
   refusedApply(/KI30_ROW_MOVED/);
   console.log('[prover] case 5: a second run refuses and changes nothing');
+
+  // 6. The follow-up checks change nothing and pass on the corrected rows; a stale invoice copy or a family link stops them.
+  stageText('follow.sql', lf(FOLLOW_UP));
+  const corrected = snapshot();
+  const ok = apply('follow.sql');
+  assert.equal(ok.status, 0, ok.output);
+  assert.equal(snapshot(), corrected, 'the follow-up changed something');
+  raw(`UPDATE public.invoice_items SET epa_registration = ${q(pick.neu)} WHERE invoice_id = '${INV}';`);
+  assert.equal(apply('follow.sql').status, 0, 'a line holding the corrected number must pass');
+  raw(`UPDATE public.invoice_items SET epa_registration = ${q(pick.old)} WHERE invoice_id = '${INV}';`);
+  const stale = apply('follow.sql');
+  assert.notEqual(stale.status, 0, stale.output);
+  assert.match(stale.output, /KI30F_STALE_INVOICE_LINE/);
+  raw(`UPDATE public.invoice_items SET epa_registration = NULL WHERE invoice_id = '${INV}';
+    UPDATE public.products SET product_family_id = '${FAM}' WHERE id = '${pick.pid}';`);
+  const fam = apply('follow.sql');
+  assert.notEqual(fam.status, 0, fam.output);
+  assert.match(fam.output, /KI30F_FAMILY_LINK/);
+  raw(`UPDATE public.products SET product_family_id = NULL WHERE id = '${pick.pid}';`);
+  assert.equal(snapshot(), corrected);
+  console.log('[prover] case 6: the follow-up passes and changes nothing; a stale invoice EPA copy or a family link stops it');
   console.log('KI30_EPA_CORRECTIONS_PROOF_PASS');
 }
 try { await main(); }

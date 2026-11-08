@@ -171,11 +171,10 @@ export async function weightsChangedWhileSaving(ticketId: string, lines: readonl
  */
 export async function warnWeightsChangedWhileSaving(ticketId: string, lines: readonly TicketLineInput[],
   preview: { status: string; lines: readonly ResolvedLine[] }, warn: (message: string) => void, context: string): Promise<void> {
-  if (preview.status !== 'ready') {
-    // Nothing shown to compare with: say so instead of staying silent (never a false "changed").
-    if (lines.some((line) => line.product_id)) warn('The ticket saved, but its weights were not shown before saving. Reopen the ticket to see the weights it kept.');
-    return;
-  }
+  // A line with no weight shown has nothing to compare with: say so instead of staying silent (never a false "changed").
+  const notShown = lines.some((line, index) => line.product_id && (preview.status !== 'ready' || !preview.lines[index] || preview.lines[index].unread));
+  if (notShown) warn('The ticket saved, but some weights were not shown before saving. Reopen the ticket to see the weights it kept.');
+  if (preview.status !== 'ready') return;
   try {
     const names = await weightsChangedWhileSaving(ticketId, lines, preview.lines);
     names.forEach((name) => warn(`${name}'s weight changed while saving; the ticket keeps the saved weight`));

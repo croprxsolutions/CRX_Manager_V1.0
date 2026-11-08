@@ -94,7 +94,12 @@ describe('warnWeightsChangedWhileSaving', () => {
 
     warn.mockClear();
     await warnWeightsChangedWhileSaving('t1', lines, { ...ready, status: 'unavailable' }, warn, 'test');
-    expect(warn.mock.calls).toEqual([['The ticket saved, but its weights were not shown before saving. Reopen the ticket to see the weights it kept.']]);
+    expect(warn.mock.calls).toEqual([['The ticket saved, but some weights were not shown before saving. Reopen the ticket to see the weights it kept.']]);
+    warn.mockClear();
+
+    // Ready overall, but one line's weight was never read: told to reopen, and that line is not called "changed".
+    await warnWeightsChangedWhileSaving('t1', lines, { status: 'ready', lines: resolveTicketLines(lines, { saved: null, current: null }) }, warn, 'test');
+    expect(warn.mock.calls).toEqual([['The ticket saved, but some weights were not shown before saving. Reopen the ticket to see the weights it kept.']]);
     warn.mockClear();
 
     rpc.mockResolvedValue({ data: null, error: { message: 'down' } } as never);

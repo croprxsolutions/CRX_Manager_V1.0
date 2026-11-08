@@ -7,7 +7,7 @@
   to a new number, or belonging to another brand) and 8 blank ones with a registry match. The 4 products
   that need a person to read the jug are not touched.
 - The 48 rows are locked first. A product changes only if its stored number and name still match the
-  reviewed list exactly, it is not in a product family, and it has no posted invoice line, job line, frozen
+  reviewed list exactly, it is not tied to a product family (member, fill source or cost reference), and it has no posted invoice line, job line, frozen
   job EPA copy or spray-record lot (spray-job proofs and year-end summaries still read the product's current
   number, so a number must not change under existing history); otherwise nothing changes and it stops. The existing change-history trigger
   logs each old and new number. Saved invoice lines and sprayed-job EPA copies are not touched (the only

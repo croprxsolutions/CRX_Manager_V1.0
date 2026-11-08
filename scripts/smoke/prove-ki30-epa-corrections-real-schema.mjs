@@ -303,6 +303,18 @@ async function main() {
   assert.equal(snapshot(), draftOnly);
   console.log('[prover] case 3c: a posted invoice line or a job line on a listed product refuses; a draft invoice line does not block');
 
+  // 3e. A listed product tied to a family any way (fill source of a member, or the family's cost reference) refuses.
+  const FAM = '7a7e4000-0000-4000-8000-0000000000f1';
+  raw(`INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${FAM}', 'KI30 family', 'liquid', '${CUST}', '${CUST}');
+    INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role, fill_source_product_id) VALUES ('${CONTROL}', '${FAM}', '${CUST}', 'fixed_tote', '${pick.pid}');`);
+  refusedApply(new RegExp(`KI30_ROW_MOVED[^\\n]*${pick.name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
+  raw(`DELETE FROM public.product_parent_members WHERE parent_id = '${FAM}';
+    INSERT INTO public.product_parent_cost_reference (parent_id, reference_product_id, set_by) VALUES ('${FAM}', '${pick.pid}', '${CUST}');`);
+  refusedApply(/KI30_ROW_MOVED/);
+  raw(`DELETE FROM public.product_parent_cost_reference WHERE parent_id = '${FAM}'; DELETE FROM public.product_parents WHERE id = '${FAM}';`);
+  assert.equal(snapshot(), draftOnly);
+  console.log('[prover] case 3e: a listed product used as a family fill source or cost reference refuses');
+
   // 3d. The 10-second lock limit holds even when the file runs outside a transaction (no psql -1).
   const holder = spawn('docker', [...psqlArgs(), '-c',
     `BEGIN; SELECT 1 FROM public.products WHERE id = '${pick.pid}' FOR UPDATE; SELECT pg_sleep(60); COMMIT;`], { stdio: 'ignore' });

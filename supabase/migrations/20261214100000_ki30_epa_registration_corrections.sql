@@ -91,17 +91,18 @@ BEGIN
   END IF;
 
   -- Lock the listed rows first, so nobody can rename them, change their number or add them to a family
-  -- (product_parent_members.product_id is a foreign key, so that insert waits on this lock) until commit.
+  -- (the family tables reference products by foreign key, so those inserts wait on this lock) until commit.
   PERFORM 1 FROM public.products p WHERE p.id IN (SELECT id FROM ki30_epa_fix) ORDER BY p.id FOR UPDATE;
 
   -- Every row must still be exactly as measured: same product, same name, same stored number (exactly; a
-  -- blank means NULL or empty text), not in a family.
+  -- blank means NULL or empty text), not in a family (as a member, a fill source or a cost reference).
   SELECT string_agg(f.product_name, ', ' ORDER BY f.product_name) INTO v_bad
     FROM ki30_epa_fix f LEFT JOIN public.products p ON p.id = f.id
    WHERE p.id IS NULL
       OR p.product_name IS DISTINCT FROM f.product_name
       OR COALESCE(p.epa_registration, '') <> f.old_epa
-      OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id);
+      OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id OR m.fill_source_product_id = f.id)
+      OR EXISTS (SELECT 1 FROM public.product_parent_cost_reference c WHERE c.reference_product_id = f.id);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'KI30_ROW_MOVED: these products no longer match the reviewed list, nothing was changed: %', v_bad;
   END IF;
@@ -124,7 +125,8 @@ BEGIN
      SET epa_registration = f.new_epa, updated_at = now()
     FROM ki30_epa_fix f
    WHERE p.id = f.id AND p.product_name = f.product_name AND COALESCE(p.epa_registration, '') = f.old_epa
-     AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id);
+     AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id OR m.fill_source_product_id = f.id)
+     AND NOT EXISTS (SELECT 1 FROM public.product_parent_cost_reference c WHERE c.reference_product_id = f.id);
   GET DIAGNOSTICS v_done = ROW_COUNT;
   IF v_done <> v_expected THEN
     RAISE EXCEPTION 'KI30_UPDATE_COUNT: updated % of % rows', v_done, v_expected;

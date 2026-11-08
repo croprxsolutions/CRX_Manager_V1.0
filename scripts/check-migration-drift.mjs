@@ -30,23 +30,17 @@ import { ledgerRowsToNames } from '../.claude/hooks/migration-ordering-lib.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT_ID = 'rhyzpcqhnizqbxphqdkr';
 export const ALLOWLIST_FILE = 'scripts/migration-drift-allowlist.json';
-// The whole migration is stored as ONE statements element by both apply paths. CRLF, whole-line
-// `--` comments and surrounding blank space are dropped on both sides, identically, so a header
-// comment edited after the apply (e.g. "PARKED" -> "APPLIED LIVE") is not reported as drift.
-// `raw_sha` keeps the comment lines, so a comment-only difference is still LISTED (not drift): a
-// line starting with `--` inside a quoted string is SQL, and this way it can never pass silently.
+// The whole migration is stored as ONE statements element by both apply paths. Only CRLF and
+// surrounding blank space are normalised, identically on both sides; comments count, because a line
+// starting with `--` can be SQL inside a quoted string. A known harmless edit (a header note changed
+// after the apply) goes in the allowlist pinned to both hashes.
 export const LEDGER_QUERY = `select version, name, cardinality(statements) as parts,
-  encode(sha256(convert_to(btrim(regexp_replace(replace(array_to_string(statements, E'\\n'), E'\\r\\n', E'\\n'),
-    E'^[ \\t]*--[^\\n]*(\\n|$)', '', 'gn'), E' \\t\\n'), 'UTF8')), 'hex') as sha,
-  encode(sha256(convert_to(btrim(replace(array_to_string(statements, E'\\n'), E'\\r\\n', E'\\n'), E' \\t\\n'), 'UTF8')), 'hex') as raw_sha
+  encode(sha256(convert_to(btrim(replace(array_to_string(statements, E'\\n'), E'\\r\\n', E'\\n'), E' \\t\\n'), 'UTF8')), 'hex') as sha
 from supabase_migrations.schema_migrations order by version;`;
 
-const digest = (body) => createHash('sha256').update(body.replace(/^[ \t\n]+|[ \t\n]+$/g, ''), 'utf8').digest('hex');
 export function sqlHash(text) {
-  return digest(String(text).replace(/\r\n/g, '\n').replace(/^[ \t]*--[^\n]*(\n|$)/gm, ''));
-}
-export function rawSqlHash(text) {
-  return digest(String(text).replace(/\r\n/g, '\n'));
+  const body = String(text).replace(/\r\n/g, '\n').replace(/^[ \t\n]+|[ \t\n]+$/g, '');
+  return createHash('sha256').update(body, 'utf8').digest('hex');
 }
 
 /**
@@ -57,7 +51,8 @@ export function rawSqlHash(text) {
  */
 export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist = {} }) {
   const accepted = new Set((allowlist.acceptedLedgerRows ?? []).map((r) => String(r.version)));
-  const acceptedMismatch = new Set((allowlist.acceptedMismatches ?? []).map((r) => String(r.version)));
+  // A SQL difference is accepted only while BOTH pinned hashes still hold; a name difference by version.
+  const acceptedMismatch = new Map((allowlist.acceptedMismatches ?? []).map((r) => [String(r.version), r]));
   const parked = new Set((allowlist.parkedFiles ?? []).map((p) => migrationStem(p.file)));
   const fileSlugs = new Map();
   const fileStamps = new Map();
@@ -77,7 +72,8 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
   const acceptedNoFile = [];
   const nameMismatch = [];
   const contentMismatch = [];
-  const commentOnly = [];
+  const acceptedContent = [];
+  const notCompared = [];
   let compared = 0;
   for (const row of rows) {
     const live = migrationStem(ledgerRowsToNames([row])[0] ?? '');
@@ -92,14 +88,22 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
       else if (!byStamp.length) noFile.push(entry);
       continue;
     }
-    // Content is compared only when the match is unambiguous and the row holds the whole file.
     const candidates = bySlug.length ? bySlug : byStamp;
     const file = candidates.length === 1 ? candidates[0] : candidates.find((f) => stamps.includes(fileStamp(f.stem)));
-    if (!file || !row.sha || Number(row.parts ?? 1) !== 1 || acceptedMismatch.has(entry.version)) continue;
-    if ((orderingStamp(file.stem) ?? '') <= baselineHighWater) continue; // pre-baseline history is unreconstructable (KI-62)
+    if (entry.version <= baselineHighWater || (file && (orderingStamp(file.stem) ?? '') <= baselineHighWater)) {
+      continue; // pre-baseline history is unreconstructable (KI-62)
+    }
+    // A post-baseline row that cannot be compared is reported, never skipped silently.
+    if (!file || !/^[0-9a-f]{64}$/.test(String(row.sha ?? '')) || Number(row.parts ?? 1) !== 1) {
+      notCompared.push({ ...entry, why: !file ? 'more than one file could be its file' : Number(row.parts ?? 1) !== 1
+        ? `the live SQL is stored in ${row.parts} pieces` : 'the ledger read carried no SQL hash' });
+      continue;
+    }
     compared += 1;
-    if (row.sha !== file.sha) contentMismatch.push({ ...entry, file: file.name });
-    else if (row.raw_sha && file.rawSha && row.raw_sha !== file.rawSha) commentOnly.push({ ...entry, file: file.name });
+    if (row.sha === file.sha) continue;
+    const pin = acceptedMismatch.get(entry.version);
+    if (pin && pin.liveSha === row.sha && pin.fileSha === file.sha) acceptedContent.push(entry);
+    else contentMismatch.push({ ...entry, file: file.name, liveSha: row.sha, fileSha: file.sha });
   }
 
   // The pending-set guard's own matcher, asked about a stamp later than every file.
@@ -115,11 +119,12 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
     (parked.has(stem) ? parkedWaiting : neverApplied).push(stem);
   }
   const undecided = verdict.abstained ? { reason: verdict.abstainReason, files: verdict.ambiguous ?? [] } : null;
-  return { noFile, acceptedNoFile, nameMismatch, contentMismatch, commentOnly, compared, neverApplied, parkedWaiting, undecided };
+  return { noFile, acceptedNoFile, nameMismatch, contentMismatch, acceptedContent, notCompared, compared, neverApplied, parkedWaiting, undecided };
 }
 
 export function hasDrift(r) {
-  return Boolean(r.noFile.length || r.nameMismatch.length || r.contentMismatch.length || r.neverApplied.length || r.undecided);
+  return Boolean(r.noFile.length || r.nameMismatch.length || r.contentMismatch.length || r.notCompared.length
+    || r.neverApplied.length || r.undecided);
 }
 
 export function plainReport(r, { rowCount, fileCount, ref }) {
@@ -131,14 +136,12 @@ export function plainReport(r, { rowCount, fileCount, ref }) {
   section('Applied live, but no file on main', r.noFile, (x) => `${x.version}  ${x.name}`);
   section('File on main never applied live', r.neverApplied, (x) => x);
   section('Live name differs from the file on main', r.nameMismatch, (x) => `${x.version}  live "${x.name}"  file "${x.file}"`);
-  section(`Live SQL differs from the file on main (of ${r.compared} checked; comment lines ignored)`, r.contentMismatch, (x) => `${x.version}  ${x.name}  (file ${x.file})`);
+  section(`Live SQL differs from the file on main (of ${r.compared} checked)`, r.contentMismatch,
+    (x) => `${x.version}  ${x.name}  (file ${x.file}; live sha ${x.liveSha}, file sha ${x.fileSha})`);
+  section('Live SQL could not be compared', r.notCompared, (x) => `${x.version}  ${x.name}: ${x.why}`);
   if (r.undecided) lines.push(`✗ Could not decide some files: ${r.undecided.reason}`);
-  if (r.commentOnly.length) {
-    lines.push('', `Differ only in lines starting with "--" (${r.commentOnly.length}; usually a header comment edited after the apply, not drift. `
-      + 'Open one only if such a line could sit inside a quoted string):');
-    for (const x of r.commentOnly) lines.push(`    ${x.version}  ${x.name}  (file ${x.file})`);
-  }
   lines.push('', `Known and accepted (not drift): ${r.acceptedNoFile.length} old live rows with no file (KI-62); `
+    + `${r.acceptedContent.length} SQL difference(s) already checked by hand and pinned in the allowlist; `
     + `${r.parkedWaiting.length} parked draft(s) waiting on purpose${r.parkedWaiting.length ? ` (${r.parkedWaiting.join(', ')})` : ''}.`);
   lines.push(hasDrift(r) ? 'RESULT: DRIFT FOUND. Each line above needs a merge, an apply, or an allowlist entry with a reason. '
     + '(A migration applied live just before its PR merges shows as "no file on main" until that merge.)'
@@ -164,12 +167,10 @@ export function filesAtRef(ref) {
   for (const f of listing) {
     const headerEnd = out.indexOf(10, at);
     const size = Number(out.subarray(at, headerEnd).toString().split(' ')[2]);
-    const text = out.subarray(headerEnd + 1, headerEnd + 1 + size).toString('utf8');
-    f.sha = sqlHash(text);
-    f.rawSha = rawSqlHash(text);
+    f.sha = sqlHash(out.subarray(headerEnd + 1, headerEnd + 1 + size).toString('utf8'));
     at = headerEnd + 1 + size + 1;
   }
-  return listing.map(({ name, sha, rawSha }) => ({ name, sha, rawSha }));
+  return listing.map(({ name, sha }) => ({ name, sha }));
 }
 
 async function liveRows() {

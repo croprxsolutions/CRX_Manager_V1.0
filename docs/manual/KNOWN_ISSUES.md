@@ -637,9 +637,10 @@ quote changes the tier label without repricing its locked lines.
 Nothing compared migrations applied live with migration files on `main` (four past mismatches). Now
 `npm run db-drift:live` (`scripts/check-migration-drift.mjs`, read-only) lists live rows with no file on `main`, files
 on `main` never applied (parked drafts named in `scripts/migration-drift-allowlist.json` are shown apart), and live
-rows whose name or SQL differs from the file (whole-line comments ignored). It reuses the pending-set guard's row
-matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version.
-First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared, all matching; one row with no
+rows whose name or SQL differs from the file, or whose SQL cannot be compared. It reuses the pending-set guard's row
+matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version, and 13
+rows whose files had only a header comment edited after the apply are allowlisted pinned to both hashes.
+First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared; one row with no
 file, `20261214100000_ki30_epa_registration_corrections`, applied before its PR #1653 merged (clean against that
 branch). Not yet scheduled: it needs Mason's PC token, so run it after each live apply or merge.
 

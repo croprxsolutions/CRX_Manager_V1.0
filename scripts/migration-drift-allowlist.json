@@ -1,5 +1,5 @@
 {
-  "_about": "KI-35 drift check (scripts/check-migration-drift.mjs). acceptedLedgerRows (share this one reason): live rows with no file on main, accepted as pre-existing drift (KI-62); all were applied before the 2026-07-27 schema baseline (supabase/baselines/manifest.json). parkedFiles: {file, reason} for a migration on main that is deliberately not applied. acceptedMismatches: {version, reason} for a live row whose name or SQL differs from its file on purpose.",
+  "_about": "KI-35 drift check (scripts/check-migration-drift.mjs). acceptedLedgerRows (share this one reason): live rows with no file on main, accepted as pre-existing drift (KI-62); all were applied before the 2026-07-27 schema baseline (supabase/baselines/manifest.json). parkedFiles: {file, reason} for a migration on main that is deliberately not applied. acceptedMismatches: {version, liveSha, fileSha, reason} for a live row whose SQL differs from its file on purpose; it stays accepted only while both hashes are unchanged.",
   "acceptedLedgerRows": [
     {
       "version": "20260212035255",
@@ -639,5 +639,97 @@
     }
   ],
   "parkedFiles": [],
-  "acceptedMismatches": []
+  "acceptedMismatches": [
+    {
+      "version": "20260729015706",
+      "file": "20260729015706_application_service_cost_admin_only.sql",
+      "liveSha": "6d53eb771ff221f2e30f9396d0589d5e18a58a1409788cd86a0d23cfffb6a1bd",
+      "fileSha": "003591982f3bbdc967a24ede72e6bde8ffeed70f0fd58b76de0d875515d52159",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260729213733",
+      "file": "20260729213733_supplier_pricing_phase3c_return_policy_classification.sql",
+      "liveSha": "7e5f5d1286859a75de58c68eeba80bed71a59e2839abf09240b40b85f5125e3e",
+      "fileSha": "fae503029bc8084761e5a1901d2a81bc431f02747f9c7a45e76397de544b6ec4",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730114102",
+      "file": "20260730114102_vendor_bill_period_close_lock.sql",
+      "liveSha": "0dad8f71675abefbfc5e5afe326c77127a83464df4393c6c4480a1f2df123d72",
+      "fileSha": "fc89ea883741ea9aa200939e286707f443b33ff55cb1a6a1933c5b9608b45ba0",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730124308",
+      "file": "20260730124308_close_accounting_period_idempotency_recheck.sql",
+      "liveSha": "e3de3c5d94e7aca6297885d1da8069cb24c4464c47834dd2b61b871c9c048503",
+      "fileSha": "693ac20aab115b46ab74ac1e01e3fa4acd2fb84e8437b175074841d2c3f8a6a2",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730140808",
+      "file": "20260730140808_accounting_period_immutable_date_math.sql",
+      "liveSha": "1936d4a5a8fe3fe9798f1fbaac69098eb831d95df11b4cd3a767797c6a380d6c",
+      "fileSha": "7f36873c24197e639e84138258f19244326a3216f5228187114d50f200ea6b06",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260807215532",
+      "file": "20260807215532_profile_role_lock_covers_insert.sql",
+      "liveSha": "fc2fcfa92760a6e1bc0e29382a1c917311633ce9a085bd5281d57af4cc90a9c0",
+      "fileSha": "e61b98948c8de82993f5841b230115c42d9f8266122ad2fcfffe755886c69699",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260807220323",
+      "file": "20260807220323_log_customer_fact_rpc.sql",
+      "liveSha": "509976763363d07ca4f89f24be4c45ab56b706e03fec5bf2da21354a36365717",
+      "fileSha": "312d70006c0c6e162a5fb1782e6bc1f8cf294c40d93b7379a99c920667a49720",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903023935",
+      "file": "20260831160000_harden_receiving_reversal_and_ap_reporting.sql",
+      "liveSha": "feffa79f5309e5b5e9ed58e786da77ae855b5a99403aa46b9551a1fa22186f66",
+      "fileSha": "8be80541a80ae3e2143a844a40bb47e1623a9b2d0e7391249b68df46029a08e1",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903024550",
+      "file": "20260831161000_require_cumulative_po_bill_confirmation.sql",
+      "liveSha": "30a748012462966cc55109a67013e01c863bda2d232846cca30c809c0cd6f155",
+      "fileSha": "51e284156e9d14a0f37597298846bebfc9ac1b7a1dfbd4333e779b526a2bf7aa",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903025249",
+      "file": "20260831162000_fail_closed_historical_commission_balance.sql",
+      "liveSha": "2c8e92abefa119d933f9de613a9a80d7a2c6c58e725eef78531852c908672dea",
+      "fileSha": "b2ff899c539c47d9a9b0a0f63f8c1c43d34b414e03be422106a63ac3bcf1515c",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903025854",
+      "file": "20260831212415_guard_cycle_count_completion_revision.sql",
+      "liveSha": "eed4c2414501fdaaf4eb6d77df74ec0a5255db68654479c26ade10186da6a706",
+      "fileSha": "74b19d1b0cebc1f0d3d6f04a571ccd2c64c4c3eb491e29fdb6980a8e293586c1",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903124710",
+      "file": "20260831233000_bind_section9_replays_to_intent.sql",
+      "liveSha": "4f014c700f738e199b07ef7d9d4420ec8324dade38fae91bb65accf6609e690b",
+      "fileSha": "c3b17f869970c3669c73be921ca23f39bc7c9d9158727b27d6a5a7d41635cf4c",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903124741",
+      "file": "20260831235900_serialize_gauntlet_write_boundaries.sql",
+      "liveSha": "948e59776a2a48ba8ce7a72d61b27210c2467aebf0bfaceeb1cda3314d814fae",
+      "fileSha": "fcfdd459c526cf5ad73a9ee8214bc24992f8c6b92987b4ec9e302ba668523aff",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    }
+  ]
 }

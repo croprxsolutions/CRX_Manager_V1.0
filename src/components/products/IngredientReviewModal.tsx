@@ -11,9 +11,12 @@ import {
   ingredientLine, parseFraction, startChemistrySave, type IngredientFields,
 } from '../../lib/productChemistry';
 import { IngredientSearch } from './IngredientPicker';
-import { PendingSavesNotice, type ReplacePrefill } from './ProductChemistrySection';
+import { PendingSavesNotice } from './ChemistryParts';
+import { previewRefusalText, type ReplacePrefill } from './chemistryFormHelpers';
 import { ReasonField } from './ProductParentPanel';
 import type { ActiveIngredientSummary, ActiveIngredientWithUsers, IngredientChangePreview, IngredientWorklist } from '../../types';
+
+type Acid = { id: string; name: string } | null;
 
 type Tab = 'duplicates' | 'needs_cas' | 'retired' | 'find';
 type SubForm =
@@ -34,6 +37,91 @@ function Users({ item }: { item: ActiveIngredientWithUsers }) {
   );
 }
 
+/** Only the fields that differ are sent; the database checks the resulting ingredient as a whole. */
+function editFields(ingredient: ActiveIngredientSummary, casOnly: boolean, input: { cas: string; isAcid: boolean; acid: Acid; fraction: string }): {
+  fields: IngredientFields; problem: string | null;
+} {
+  const fields: IngredientFields = {};
+  let problem: string | null = null;
+  const casText = input.cas.trim();
+  if (casText !== (ingredient.cas ?? '')) {
+    if (casText && !casValid(casText)) problem = 'That CAS number is not valid (format or check digit).';
+    fields.cas = casText || null;
+  }
+  if (!casOnly) problem = acidFields(ingredient, input, fields) ?? problem;
+  if (!problem && Object.keys(fields).length === 0) problem = casOnly ? 'Type the CAS number.' : 'Nothing changed yet.';
+  return { fields, problem };
+}
+
+function acidFields(ingredient: ActiveIngredientSummary, input: { isAcid: boolean; acid: Acid; fraction: string }, fields: IngredientFields): string | null {
+  const parsed = parseFraction(input.fraction);
+  let problem: string | null = null;
+  if (parsed !== null && parsed !== 'invalid' && !input.acid) problem = 'A fraction needs the acid it is measured as.';
+  if (parsed === 'invalid') problem = 'The fraction must be above 0 and at most 1, like 0.741.';
+  if (input.isAcid !== ingredient.is_parent_form) fields.is_parent_form = input.isAcid;
+  if ((input.acid?.id ?? null) !== ingredient.canonical_ingredient_id) fields.canonical_ingredient_id = input.acid?.id ?? null;
+  const nextFraction = typeof parsed === 'number' ? parsed : null;
+  if (parsed !== 'invalid' && nextFraction !== ingredient.canonical_fraction) {
+    fields.canonical_fraction = nextFraction;
+    fields.fraction_basis = nextFraction === null ? null : 'acid_equivalent';
+  }
+  return problem;
+}
+
+function EditPreview({ shown }: { shown: IngredientChangePreview }) {
+  return (
+    <div className="space-y-1 rounded-lg border border-gray-200 p-3 text-sm" aria-live="polite">
+      {shown.refusal ? (
+        <p className="text-red-700" role="alert">This change would be refused. {previewRefusalText(shown.refusal)}</p>
+      ) : (
+        <>
+          <p>Changes: {(shown.changed_fields ?? []).map((field) => FIELD_LABEL[field] ?? field).join(', ') || 'nothing'}{shown.after ? ` → ${ingredientLine(shown.after)}` : ''}</p>
+          <p className="text-secondary">
+            Products affected: {shown.affected_parents.length
+              ? shown.affected_parents.map((p) => `${p.name} (${p.sizes.length} size${p.sizes.length === 1 ? '' : 's'})${p.epa_refusal ? ', EPA-confirmed' : ''}`).join('; ')
+              : 'none'}
+          </p>
+          {shown.users.forms.length > 0 && <p className="text-secondary">Forms measured as it: {shown.users.forms.map((f) => f.name).join(', ')}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+const initialAcid = (ingredient: ActiveIngredientSummary): Acid =>
+  (ingredient.canonical_ingredient_id ? { id: ingredient.canonical_ingredient_id, name: ingredient.canonical_name ?? 'its acid' } : null);
+
+function editReady(problem: string | null, shown: IngredientChangePreview | null, needsReason: boolean, reason: string, evidence: string): boolean {
+  if (problem || !shown || shown.refusal !== null) return false;
+  return !needsReason || (reason.trim() !== '' && evidence.trim() !== '');
+}
+
+function AcidFields({ ingredientId, isAcid, setIsAcid, acid, setAcid, fraction, setFraction }: {
+  ingredientId: string; isAcid: boolean; setIsAcid: (value: boolean) => void; acid: Acid; setAcid: (value: Acid) => void;
+  fraction: string; setFraction: (value: string) => void;
+}) {
+  return (
+    <>
+      <label className="flex min-h-11 items-center gap-2 text-sm">
+        <input type="checkbox" checked={isAcid} disabled={acid !== null} onChange={(event) => setIsAcid(event.target.checked)} />
+        This is the acid other forms are measured as
+      </label>
+      {!isAcid && (acid ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>Measured as acid: {acid.name}</span>
+          <Button size="sm" variant="secondary" onClick={() => { setAcid(null); setFraction(''); }}>Remove acid</Button>
+        </div>
+      ) : (
+        <IngredientSearch id="edit-ing-acid" label="Acid it is measured as" acidsOnly excludeIds={[ingredientId]} onPick={(item) => setAcid(item)} />
+      ))}
+      {acid && (
+        <Input id="edit-ing-fraction" label="Acid fraction (e.g. 0.741)" inputMode="decimal" maxLength={20} value={fraction}
+          onChange={(event) => setFraction(event.target.value)} />
+      )}
+    </>
+  );
+}
+
 /** Edit one ingredient's CAS, acid flag, acid and fraction, with a database preview of everything it touches. */
 function EditIngredient({ ingredient, casOnly, profileId, onDone, onCancel }: {
   ingredient: ActiveIngredientSummary; casOnly: boolean; profileId: string; onDone: (outcome: 'saved' | 'uncertain' | 'stale') => void; onCancel: () => void;
@@ -41,9 +129,8 @@ function EditIngredient({ ingredient, casOnly, profileId, onDone, onCancel }: {
   const { toast } = useToast();
   const [cas, setCas] = useState(ingredient.cas ?? '');
   const [isAcid, setIsAcid] = useState(ingredient.is_parent_form);
-  const [acid, setAcid] = useState<{ id: string; name: string } | null>(
-    ingredient.canonical_ingredient_id ? { id: ingredient.canonical_ingredient_id, name: ingredient.canonical_name ?? 'its acid' } : null);
-  const [fraction, setFraction] = useState(ingredient.canonical_fraction == null ? '' : String(ingredient.canonical_fraction));
+  const [acid, setAcid] = useState<Acid>(() => initialAcid(ingredient));
+  const [fraction, setFraction] = useState(() => (ingredient.canonical_fraction == null ? '' : String(ingredient.canonical_fraction)));
   const [preview, setPreview] = useState<{ forFields: string; result: IngredientChangePreview } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [reason, setReason] = useState('');
@@ -52,31 +139,11 @@ function EditIngredient({ ingredient, casOnly, profileId, onDone, onCancel }: {
   const seq = useRef(0);
   useEffect(() => () => { seq.current += 1; }, []);
 
-  // Only the fields that differ are sent; the database checks the resulting ingredient as a whole.
-  const fields: IngredientFields = {};
-  let problem: string | null = null;
-  const casText = cas.trim();
-  if (casText !== (ingredient.cas ?? '')) {
-    if (casText && !casValid(casText)) problem = 'That CAS number is not valid (format or check digit).';
-    fields.cas = casText || null;
-  }
-  if (!casOnly) {
-    const parsed = parseFraction(fraction);
-    if (parsed === 'invalid') problem = 'The fraction must be above 0 and at most 1, like 0.741.';
-    if (parsed !== null && parsed !== 'invalid' && !acid) problem = 'A fraction needs the acid it is measured as.';
-    if (isAcid !== ingredient.is_parent_form) fields.is_parent_form = isAcid;
-    if ((acid?.id ?? null) !== ingredient.canonical_ingredient_id) fields.canonical_ingredient_id = acid?.id ?? null;
-    const nextFraction = typeof parsed === 'number' ? parsed : null;
-    if (parsed !== 'invalid' && nextFraction !== ingredient.canonical_fraction) {
-      fields.canonical_fraction = nextFraction;
-      fields.fraction_basis = nextFraction === null ? null : 'acid_equivalent';
-    }
-  }
-  if (!problem && Object.keys(fields).length === 0) problem = casOnly ? 'Type the CAS number.' : 'Nothing changed yet.';
+  const { fields, problem } = editFields(ingredient, casOnly, { cas, isAcid, acid, fraction });
   const fieldsKey = JSON.stringify(fields);
-  const shown = preview && preview.forFields === fieldsKey ? preview.result : null;
+  const shown = preview?.forFields === fieldsKey ? preview.result : null;
   const needsReason = shown?.needs_reason === true;
-  const ready = !problem && shown !== null && shown.refusal === null && (!needsReason || (reason.trim() !== '' && evidence.trim() !== ''));
+  const ready = editReady(problem, shown, needsReason, reason, evidence);
 
   const runPreview = async () => {
     if (problem) return;
@@ -121,44 +188,12 @@ function EditIngredient({ ingredient, casOnly, profileId, onDone, onCancel }: {
         <Input id="edit-ing-cas" label="CAS number" maxLength={12} value={cas} onChange={(event) => setCas(event.target.value)}
           error={cas.trim() && !casValid(cas) ? 'Not a valid CAS number (format or check digit)' : undefined} />
         {!casOnly && (
-          <>
-            <label className="flex min-h-11 items-center gap-2 text-sm">
-              <input type="checkbox" checked={isAcid} disabled={acid !== null} onChange={(event) => setIsAcid(event.target.checked)} />
-              This is the acid other forms are measured as
-            </label>
-            {!isAcid && (acid ? (
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span>Measured as acid: {acid.name}</span>
-                <Button size="sm" variant="secondary" onClick={() => { setAcid(null); setFraction(''); }}>Remove acid</Button>
-              </div>
-            ) : (
-              <IngredientSearch id="edit-ing-acid" label="Acid it is measured as" acidsOnly excludeIds={[ingredient.id]} onPick={(item) => setAcid(item)} />
-            ))}
-            {acid && (
-              <Input id="edit-ing-fraction" label="Acid fraction (e.g. 0.741)" inputMode="decimal" maxLength={20} value={fraction}
-                onChange={(event) => setFraction(event.target.value)} />
-            )}
-          </>
+          <AcidFields ingredientId={ingredient.id} isAcid={isAcid} setIsAcid={setIsAcid} acid={acid} setAcid={setAcid}
+            fraction={fraction} setFraction={setFraction} />
         )}
       </fieldset>
       {problem && <p className="text-sm text-amber-800" role="status">{problem}</p>}
-      {shown && (
-        <div className="space-y-1 rounded-lg border border-gray-200 p-3 text-sm" aria-live="polite">
-          {shown.refusal ? (
-            <p className="text-red-700" role="alert">This change would be refused. {sanitizeError({ message: shown.refusal }).replace(/^Nothing was saved\.\s*/, '')}</p>
-          ) : (
-            <>
-              <p>Changes: {(shown.changed_fields ?? []).map((field) => FIELD_LABEL[field] ?? field).join(', ') || 'nothing'}{shown.after ? ` → ${ingredientLine(shown.after)}` : ''}</p>
-              <p className="text-secondary">
-                Products affected: {shown.affected_parents.length
-                  ? shown.affected_parents.map((p) => `${p.name} (${p.sizes.length} size${p.sizes.length === 1 ? '' : 's'})${p.epa_refusal ? ', EPA-confirmed' : ''}`).join('; ')
-                  : 'none'}
-              </p>
-              {shown.users.forms.length > 0 && <p className="text-secondary">Forms measured as it: {shown.users.forms.map((f) => f.name).join(', ')}</p>}
-            </>
-          )}
-        </div>
-      )}
+      {shown && <EditPreview shown={shown} />}
       {preview && !shown && <p className="text-sm text-secondary">The fields changed since the preview. Preview again.</p>}
       {needsReason && (
         <fieldset disabled={saving} className="space-y-2">
@@ -211,6 +246,75 @@ function RetireOrReactivate({ kind, ingredient, profileId, onDone, onCancel }: {
         </Button>
       </div>
     </div>
+  );
+}
+
+function DuplicatesTab({ list, locked, actions, onReplace }: {
+  list: IngredientWorklist; locked: boolean; actions: (item: ActiveIngredientWithUsers) => React.ReactNode;
+  onReplace: (parentId: string, prefill: ReplacePrefill) => void;
+}) {
+  if (list.possible_duplicates.length === 0) return <p className="text-sm text-secondary">No possible duplicates.</p>;
+  return (
+    <ul className="space-y-3">
+      {list.possible_duplicates.map(({ provisional, other }) => (
+        <li key={`${provisional.id}-${other.id}`} className="rounded-lg border border-gray-200 p-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            {[provisional, other].map((item, index) => (
+              <div key={item.id} className="space-y-1">
+                <p className="text-xs uppercase text-secondary">{index === 0 ? 'New (provisional)' : 'Already listed'}</p>
+                <p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p>
+                <Users item={item} />
+                {actions(item)}
+              </div>
+            ))}
+          </div>
+          {provisional.parents.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {provisional.parents.map((parent) => (
+                <Button key={parent.parent_id} size="sm" disabled={locked}
+                  onClick={() => onReplace(parent.parent_id, { ingredientId: provisional.id, withIngredient: other })}>
+                  Replace on {parent.name}
+                </Button>
+              ))}
+            </div>
+          )}
+          {provisional.forms.length > 0 && (
+            <p className="mt-2 text-xs text-secondary">Forms measured as {provisional.name} must be edited to name {other.name} before it can be retired.</p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function NeedsCasTab({ list, locked, onAddCas }: { list: IngredientWorklist; locked: boolean; onAddCas: (item: ActiveIngredientWithUsers) => void }) {
+  if (list.needs_cas.length === 0) return <p className="text-sm text-secondary">Every ingredient has a CAS number.</p>;
+  return (
+    <ul className="space-y-2">
+      {list.needs_cas.map((item) => (
+        <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gray-200 p-3">
+          <div><p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p><Users item={item} /></div>
+          <Button size="sm" disabled={locked} onClick={() => onAddCas(item)}>Add CAS</Button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RetiredTab({ list, locked, onReactivate }: { list: IngredientWorklist; locked: boolean; onReactivate: (item: IngredientWorklist['retired'][number]) => void }) {
+  if (list.retired.length === 0) return <p className="text-sm text-secondary">No retired ingredients.</p>;
+  return (
+    <ul className="space-y-2">
+      {list.retired.map((item) => (
+        <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gray-200 p-3">
+          <div>
+            <p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p>
+            {item.retire_reason && <p className="text-xs text-secondary">Retired: {item.retire_reason}</p>}
+          </div>
+          <Button size="sm" variant="secondary" disabled={locked} onClick={() => onReactivate(item)}>Reactivate</Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -281,60 +385,9 @@ export default function IngredientReviewModal({ profileId, onClose, onReplace }:
                   onClick={() => setTab(item.key)}>{item.label}</Button>
               ))}
             </div>
-            {tab === 'duplicates' && (list.possible_duplicates.length === 0 ? <p className="text-sm text-secondary">No possible duplicates.</p> : (
-              <ul className="space-y-3">
-                {list.possible_duplicates.map(({ provisional, other }) => (
-                  <li key={`${provisional.id}-${other.id}`} className="rounded-lg border border-gray-200 p-3">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {[provisional, other].map((item, index) => (
-                        <div key={item.id} className="space-y-1">
-                          <p className="text-xs uppercase text-secondary">{index === 0 ? 'New (provisional)' : 'Already listed'}</p>
-                          <p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p>
-                          <Users item={item} />
-                          {actions(item)}
-                        </div>
-                      ))}
-                    </div>
-                    {provisional.parents.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {provisional.parents.map((parent) => (
-                          <Button key={parent.parent_id} size="sm" disabled={locked}
-                            onClick={() => onReplace(parent.parent_id, { ingredientId: provisional.id, withIngredient: other })}>
-                            Replace on {parent.name}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    {provisional.forms.length > 0 && (
-                      <p className="mt-2 text-xs text-secondary">Forms measured as {provisional.name} must be edited to name {other.name} before it can be retired.</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ))}
-            {tab === 'needs_cas' && (list.needs_cas.length === 0 ? <p className="text-sm text-secondary">Every ingredient has a CAS number.</p> : (
-              <ul className="space-y-2">
-                {list.needs_cas.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gray-200 p-3">
-                    <div><p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p><Users item={item} /></div>
-                    <Button size="sm" disabled={locked} onClick={() => setSub({ kind: 'edit', ingredient: item, casOnly: true })}>Add CAS</Button>
-                  </li>
-                ))}
-              </ul>
-            ))}
-            {tab === 'retired' && (list.retired.length === 0 ? <p className="text-sm text-secondary">No retired ingredients.</p> : (
-              <ul className="space-y-2">
-                {list.retired.map((item) => (
-                  <li key={item.id} className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gray-200 p-3">
-                    <div>
-                      <p className="text-sm font-medium text-nav-dark">{ingredientLine(item)}</p>
-                      {item.retire_reason && <p className="text-xs text-secondary">Retired: {item.retire_reason}</p>}
-                    </div>
-                    <Button size="sm" variant="secondary" disabled={locked} onClick={() => setSub({ kind: 'reactivate', ingredient: item })}>Reactivate</Button>
-                  </li>
-                ))}
-              </ul>
-            ))}
+            {tab === 'duplicates' && <DuplicatesTab list={list} locked={locked} actions={actions} onReplace={onReplace} />}
+            {tab === 'needs_cas' && <NeedsCasTab list={list} locked={locked} onAddCas={(item) => setSub({ kind: 'edit', ingredient: item, casOnly: true })} />}
+            {tab === 'retired' && <RetiredTab list={list} locked={locked} onReactivate={(item) => setSub({ kind: 'reactivate', ingredient: item })} />}
             {tab === 'find' && (
               <div className="space-y-2">
                 <IngredientSearch id="review-find" label="Find an ingredient to edit or retire" disabled={locked}

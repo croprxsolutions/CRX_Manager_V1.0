@@ -9,7 +9,7 @@ Use this skill for structure and connection questions, not for a simple single-f
 
 ## Who calls this database function or table? Search first
 
-Ripgrep answers this faster and more reliably than the graph, which is often stale and holds every historical copy of each function. Run these in Bash (Git Bash), not PowerShell, which lacks `sort` and `tail` and quotes differently. Replace `<name>` and `<table>`:
+Ripgrep answers this faster and more reliably than the graph, which is often stale and holds every historical copy of each function. Run these in Bash (Git Bash), not PowerShell, which has no `tail` and quotes differently. Replace `<name>` and `<table>`:
 
 ```bash
 rg -n "\.rpc\(\s*['\"]<name>['\"]" src supabase/functions
@@ -29,7 +29,7 @@ No hits never proves "no impact" on money, inventory, database or login work: na
 
 ## Optional: the Graphify graph
 
-For broad "how do these modules connect" questions, the graph can narrow where to read. It is local and gitignored under `graphify-out/`, covers only the operating-code corpus in `.graphifyignore`, and never sends code anywhere. Check `graphify-out/GRAPH_REPORT.md`'s build commit against `git rev-parse HEAD`; refresh with `npm run graph:refresh` only when the question needs the graph. If Graphify is missing or skips, use the search recipe and source reads instead and say so. A genuine refresh or query error is a tool problem to report, not something to hide.
+For broad "how do these modules connect" questions, the graph can narrow where to read. It is local and gitignored under `graphify-out/`, covers only the operating-code corpus in `.graphifyignore`, and never sends code anywhere. Check `graphify-out/GRAPH_REPORT.md`'s build commit against `git rev-parse HEAD`, and treat the graph as stale when they differ or when operating-code or database files have uncommitted changes; refresh with `npm run graph:refresh` only when the question needs the graph. If Graphify is missing or skips, use the search recipe and source reads instead and say so. A genuine refresh or query error is a tool problem to report, not something to hide.
 
 ```bash
 graphify explain "<symbol>"

@@ -1049,7 +1049,9 @@ export default function ProductDetail() {
 
       setEpaLookupResult(data);
       setEpaLookupRegNumber(regNumber);
-      if (!data.found) {
+      if (data.transferredTo) {
+        toast('warning', `EPA moved registration ${regNumber} to ${data.transferredTo}.`);
+      } else if (!data.found) {
         toast('warning', `EPA did not find registration ${regNumber}.`);
       }
     } catch (err) {
@@ -1572,10 +1574,21 @@ export default function ProductDetail() {
                     <div className="flex items-start gap-2 text-amber-900">
                       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                       <div>
-                        <p className="font-semibold">No EPA registration found</p>
-                        <p className="mt-1 text-sm">
-                          EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
-                        </p>
+                        {epaLookupResult.transferredTo ? (
+                          <>
+                            <p className="font-semibold">Registration moved</p>
+                            <p className="mt-1 text-sm">
+                              EPA moved {epaLookupRegNumber} to {epaLookupResult.transferredTo}{epaLookupResult.productname ? ` (${epaLookupResult.productname})` : ''}. Look up the new number to use its label details.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold">No EPA registration found</p>
+                            <p className="mt-1 text-sm">
+                              EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

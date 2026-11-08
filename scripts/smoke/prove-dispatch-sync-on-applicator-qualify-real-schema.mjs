@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261212100000_dispatch_sync_on_applicator_qualify (KI-28): when a person BECOMES an
+ * Real-schema proof for 20261215100000_dispatch_sync_on_applicator_qualify (KI-28): when a person BECOMES an
  * active applicator (re-activated, or given the applicator role), their open jobs' locations that have no
  * dispatch row get one, so the job reaches the Dispatch Board, whatever their license (Mason, 2026-11-08). The
  * apply backfills any such location already waiting. Locations that already have any dispatch row and finished
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261212100000_dispatch_sync_on_applicator_qualify.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261215100000_dispatch_sync_on_applicator_qualify.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

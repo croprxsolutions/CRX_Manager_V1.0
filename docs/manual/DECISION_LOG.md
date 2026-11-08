@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in session, 2026-11-08: "A: show them right away" / "Yes do the recomended option"):** when a person is re-activated or made an applicator, their already-assigned open jobs go straight onto the Dispatch Board even if their license has expired, the same as adding a location to their job today. The license is checked when a job is assigned, and the Expiring Licenses card warns.
 **Why:** holding such jobs back until a license was renewed needed license triggers and locks that Sol found a new same-instant race in three rounds running (PR for KI-28). Dropping the hold-back removes that whole mechanism.
-**What this forbids/implies:** don't re-add a license check to `_sync_job_location_dispatch_on_applicator_qualify` (`20261212100000`) without re-deciding this; a license rule for dispatch belongs at assignment or on the board.
+**What this forbids/implies:** don't re-add a license check to `_sync_job_location_dispatch_on_applicator_qualify` (`20261215100000`) without re-deciding this; a license rule for dispatch belongs at assignment or on the board.
 
 ## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
 

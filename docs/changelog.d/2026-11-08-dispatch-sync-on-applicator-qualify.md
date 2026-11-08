@@ -1,6 +1,6 @@
 ## 2026-11-08 — Jobs reach the Dispatch Board when their applicator is re-activated or made an applicator (KI-28, database)
 
-- New migration `20261212100000_dispatch_sync_on_applicator_qualify.sql` (record in `docs/reference/migrations.d/`).
+- New migration `20261215100000_dispatch_sync_on_applicator_qualify.sql` (record in `docs/reference/migrations.d/`).
   A job assigned to someone who was inactive, or not an applicator, used to stay off the Dispatch Board for good.
   Now, the moment that person becomes an active applicator, each location of their open jobs that has no board
   row is dispatched to them, even if their license has expired (Mason's decision, the same as adding a location).

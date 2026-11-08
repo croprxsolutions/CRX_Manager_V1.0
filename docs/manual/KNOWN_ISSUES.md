@@ -502,7 +502,7 @@ The four older signature policies (fixed path `signatures/<id>.png`) are narrowe
 and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · FIX WRITTEN, NOT APPLIED (`20261212100000`) · database · Claude (2026-11-08)**
+**MED · FIX WRITTEN, NOT APPLIED (`20261215100000`) · database · Claude (2026-11-08)**
 The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later did not
 add the job back. Fix: a `profiles` trigger dispatches the open jobs' undispatched locations to a person the moment
 they become an active applicator, whatever their license (Mason, 2026-11-08, DECISION_LOG), and the apply backfills

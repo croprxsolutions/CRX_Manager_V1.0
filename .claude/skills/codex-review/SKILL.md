@@ -251,7 +251,8 @@ CodeRabbit is not reviewing it; and if CodeRabbit already reviewed a money or Ma
 review covers this head (or Mason sent `skip coderabbit #<PR>`; the merging session must still hold
 it). A money PR with no CodeRabbit review does not wait for one: CodeRabbit is optional unless the
 PR carries the `needs-coderabbit` label (`AGENTS.md`).
-An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`
+It also runs the docs check CI runs (`npm run check:docs`) and refuses on a failure, so a stale
+"Last verified" stamp is fixed before Sol, not after (2026-11-08). An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`
 skips it. Merge main in before this point, not after Sol alongside fixes (ship.md Step 8 item 4).
 
 **Round count (Mason, 2026-11-06).** Each full run prints `Sol round N on PR #<n>`. When the same mechanism

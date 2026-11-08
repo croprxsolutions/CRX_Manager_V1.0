@@ -120,7 +120,9 @@
 > this commit is still running, no open Codex App thread stands on it, no open CodeRabbit thread stands on current code,
 > and CodeRabbit is not mid-review. With no PR yet, Sol simply runs. `--dry-run` prints the same decision. It is a cost
 > control: the merge gates check their own conditions again, and a refusal leaves any existing proof in place.
-> `--carry-forward` does not run it.
+> `--carry-forward` does not run it. **Docs check before Sol (2026-11-08 retro):** after the pre-flight and code health it
+> runs `scripts/check-doc-drift.mjs` (about a second) against the reviewed base and refuses on any `FAIL`, so a stale
+> "Last verified" stamp is fixed before Sol instead of voiding its proof (PR #1650, the sixth time).
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into

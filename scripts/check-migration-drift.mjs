@@ -72,6 +72,7 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
   const noFile = [];
   const acceptedNoFile = [];
   const nameMismatch = [];
+  const stampMatched = new Set();
   const contentMismatch = [];
   const acceptedContent = [];
   const notCompared = [];
@@ -89,9 +90,10 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
       // Same stamp, different name. Reported unless pinned to this exact pair of names, then
       // still SQL-compared below against the stamp-matched file.
       const pin = acceptedMismatch.get(entry.version);
-      if (!(pin?.liveName === entry.name && byStamp.some((f) => f.name === pin.file))) {
-        nameMismatch.push({ ...entry, file: byStamp[0].name });
-      }
+      const pinned = pin?.liveName === entry.name && byStamp.find((f) => f.name === pin.file);
+      if (!pinned) nameMismatch.push({ ...entry, file: byStamp[0].name });
+      // Either way this row is the file's apply, so the pending scan must not call the file unapplied.
+      stampMatched.add((pinned || byStamp[0]).stem);
     }
     const candidates = bySlug.length ? bySlug : byStamp;
     const file = candidates.length === 1 ? candidates[0] : candidates.find((f) => stamps.includes(fileStamp(f.stem)));
@@ -118,9 +120,8 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
   });
   const neverApplied = [];
   const parkedWaiting = [];
-  const renamed = new Set(nameMismatch.map((m) => migrationStem(m.file)));
   for (const stem of verdict.pending ?? []) {
-    if (renamed.has(stem)) continue; // already reported once, as a name mismatch
+    if (stampMatched.has(stem)) continue; // applied under another name: a name mismatch or a pinned rename
     (parked.has(stem) ? parkedWaiting : neverApplied).push(stem);
   }
   const undecided = verdict.abstained ? { reason: verdict.abstainReason, files: verdict.ambiguous ?? [] } : null;

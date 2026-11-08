@@ -107,6 +107,16 @@ check('a renamed row is still SQL-compared; a name pin covers the name only, not
   assert.deepEqual(pinned.nameMismatch, []);
   assert.deepEqual(pinned.contentMismatch.map((x) => x.name), ['renamed_before_merge']);
 });
+check('a pinned rename with matching SQL is clean: its file is not called unapplied', () => {
+  const out = compareLedgerToMain({
+    rows: [{ version: '20260805000000', name: 'renamed_before_merge', sha: sql('create table e();'), parts: 1 }],
+    files: [{ name: '20260805000000_renamed_file.sql', sha: sql('create table e();') }],
+    baselineHighWater: BASE,
+    allowlist: { acceptedMismatches: [{ version: '20260805000000', liveName: 'renamed_before_merge', file: '20260805000000_renamed_file.sql', reason: 'renamed on purpose' }] },
+  });
+  assert.deepEqual(out.neverApplied, []);
+  assert.equal(hasDrift(out), false);
+});
 check('the real repository lists its migration files at HEAD', () => {
   const real = filesAtRef('HEAD');
   assert.ok(real.length > 1000, `only ${real.length} files`);

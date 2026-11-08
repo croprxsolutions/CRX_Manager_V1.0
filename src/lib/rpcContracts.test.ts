@@ -3137,6 +3137,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // KI-07 (local candidate 20261215100000): trigger function, never called as an RPC.
+  _record_customer_document_restore:
+    'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.
   _snapshot_financial_hard_delete:
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',

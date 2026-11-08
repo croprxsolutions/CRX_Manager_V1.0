@@ -178,7 +178,7 @@ function buildContainer() {
   // has them: 20261022075000 (replayed before the candidate) checks that shape in its preflight.
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
     CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
-    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), UNIQUE (bucket_id, name));
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
@@ -224,6 +224,8 @@ const DOC = id('d1');
 const DOC_PATH = `${CUST}/${id('d2')}-License.pdf`;
 const P = id('f1'); const O = id('e1'); const OI = id('e2'); const D = id('b1'); const DI = id('b2');
 const TICKET = 'Signed paper delivery ticket';
+const FILE_TIME = '2026-01-02 03:04:05+00';
+const restoreLog = () => scalar(`SELECT count(*) || '|' || coalesce(string_agg(removed_by::text || '>' || restored_by::text, ',' ORDER BY restored_at, id), '-') FROM public.customer_document_restores WHERE document_id = '${DOC}';`);
 
 function claims(uid) {
   return `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
@@ -274,10 +276,10 @@ function seed() {
       VALUES ('${D}', 'PROVER-DR-D1', '${O}', '${CUST}', '${ADMIN}', 'in_progress', current_date, '${DRIVER}');
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size)
       VALUES ('${DI}', '${D}', '${OI}', '${P}', 10, 'GL');
-    INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES
-      ('delivery-photos', 'delivery-photos/${D}/driver.jpg', '${DRIVER}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb),
-      ('delivery-photos', 'delivery-photos/${D}/admin.jpg', '${ADMIN}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb),
-      ('receiving-photos', 'delivery-photos/${D}/other-bucket.jpg', '${DRIVER}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb);`);
+    INSERT INTO storage.objects (bucket_id, name, owner_id, metadata, created_at) VALUES
+      ('delivery-photos', 'delivery-photos/${D}/driver.jpg', '${DRIVER}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb, '${FILE_TIME}'),
+      ('delivery-photos', 'delivery-photos/${D}/admin.jpg', '${ADMIN}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb, now()),
+      ('receiving-photos', 'delivery-photos/${D}/other-bucket.jpg', '${DRIVER}', '{"mimetype":"image/jpeg","size":"5000"}'::jsonb, now());`);
 }
 const photoInsert = (uploader, file, uploadedAt) => `INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, caption, uploaded_by${uploadedAt ? ', uploaded_at' : ''})
   VALUES ('${D}', 'delivery-photos/${D}/${file}', 'x', '${TICKET}', '${uploader}'${uploadedAt ? `, ${uploadedAt}` : ''}) RETURNING id`;
@@ -328,6 +330,11 @@ function main() {
   assert.equal(restored.status, 0, restored.err);
   assert.equal(restored.out, '1', 'the admin restore changed one row');
   assert.equal(docState(), 'live|-|-');
+  assert.equal(restoreLog(), `1|${REP}>${ADMIN}`, 'the restore is recorded with who removed and who restored');
+  assert.equal(as(ADMIN, 'SELECT count(*) FROM public.customer_document_restores').out, '1', 'an admin reads the restore record');
+  assert.equal(as(REP, 'SELECT count(*) FROM public.customer_document_restores').out, '0', 'a rep reads no restore record');
+  refused(as(ADMIN, `INSERT INTO public.customer_document_restores (document_id, customer_id, removed_at, restored_by) VALUES ('${DOC}', '${CUST}', now(), '${ADMIN}')`), /permission denied/, 'admin writes a restore record');
+  refused(as(ADMIN, 'DELETE FROM public.customer_document_restores'), /permission denied/, 'admin deletes a restore record');
   assert.equal(as(REP, `SELECT count(*) FROM public.customer_documents WHERE id = '${DOC}'`).out, '1', 'a rep sees the restored document');
   console.log('[prover] only an active admin restores, by clearing both removal columns and nothing else');
 
@@ -339,6 +346,15 @@ function main() {
   assert.match(docState(), REMOVED_BY_REP);
   assert.equal(as(ADMIN, RESTORE).status, 0, 'a document can be restored again after a second removal');
   assert.equal(docState(), 'live|-|-');
+  assert.equal(restoreLog(), `2|${REP}>${ADMIN},${REP}>${ADMIN}`, 'each restore is recorded');
+  // A retry of the rep's removal (same key) after the restore must not report "removed".
+  refused(as(REP, `SELECT public.soft_delete_customer_document('${DOC}', '${CUST}', 'doc-restore-rep-remove')::text`),
+    /CUSTOMER_DOCUMENT_RESTORED/, 'replayed removal after a restore');
+  assert.equal(docState(), 'live|-|-');
+  // A new removal with a new key still works.
+  assert.equal(as(REP, `SELECT public.soft_delete_customer_document('${DOC}', '${CUST}', 'doc-restore-rep-remove-2')::text`).status, 0);
+  assert.match(docState(), REMOVED_BY_REP);
+  assert.equal(as(ADMIN, RESTORE).out, '1');
   console.log('[prover] identity, attributable removal and the rep remove RPC are unchanged');
 
   // ---- Photos ----
@@ -350,8 +366,8 @@ function main() {
   const ok = as(DRIVER, photoInsert(DRIVER, 'driver.jpg', "'2020-01-01'"));
   assert.equal(ok.status, 0, ok.err);
   const photo = scalar(`SELECT id FROM public.delivery_photos WHERE storage_path = 'delivery-photos/${D}/driver.jpg';`);
-  assert.equal(scalar(`SELECT uploaded_by::text || '|' || (uploaded_at > now() - interval '5 minutes')::text FROM public.delivery_photos WHERE id = '${photo}';`),
-    `${DRIVER}|true`, 'uploader recorded, upload time from the server clock');
+  assert.equal(scalar(`SELECT uploaded_by::text || '|' || (uploaded_at = '${FILE_TIME}'::timestamptz)::text FROM public.delivery_photos WHERE id = '${photo}';`),
+    `${DRIVER}|true`, "uploader recorded, upload time is the file's own");
   console.log('[prover] a photo row must name its uploader and a file that uploader owns');
 
   for (const [col, value] of [['uploaded_by', `'${ADMIN}'`], ['uploaded_at', "'2020-01-01'"], ['storage_path', `'delivery-photos/${D}/admin.jpg'`], ['delivery_id', `'${id('b9')}'`]]) {

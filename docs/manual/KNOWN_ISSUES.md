@@ -157,8 +157,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
   cleared, nothing else), and `customer-document-files` lets admins download a removed one; the Documents tab has an
   admin-only "Show removed documents" view with Restore. Proven in the local app (admin remove, view, download,
   restore; activity recorded) and on a real-schema replay. Live needs the migration applied and the function
-  deployed. Deferred: a restore clears `deleted_by`, so the only record of who removed and who restored a document
-  is the activity feed the screen writes (not a database-enforced trail). LOW.
+  deployed. Each restore is kept in `customer_document_restores` (who removed it and when, who restored it), written
+  by the database; a retried removal after a restore is refused instead of reporting "removed". LOW.
 - Signed-in rep click-through of `customer-document-files` RECORDED 2026-11-08 (local test copy): a sales rep opens
   a customer document and sees no removed-documents view; after removing one, the download service answers "no
   longer available" and a restore attempt changes 0 rows. Repeat on live after the deploy — LOW.

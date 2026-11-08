@@ -2,7 +2,7 @@
 // Fixture tests for the KI-35 live-ledger vs main drift check (scripts/check-migration-drift.mjs).
 // Run: node scripts/check-migration-drift.test.mjs
 import assert from 'node:assert/strict';
-import { compareLedgerToMain, hasDrift, plainReport, sqlHash } from './check-migration-drift.mjs';
+import { compareLedgerToMain, filesAtRef, hasDrift, plainReport, rawSqlHash, sqlHash } from './check-migration-drift.mjs';
 
 const BASE = '20260727174805';
 const sql = (s) => sqlHash(s);
@@ -66,6 +66,22 @@ check('a matching ledger is clean', () => {
   });
   assert.equal(hasDrift(clean), false);
   assert.match(plainReport(clean, { rowCount: 3, fileCount: 3, ref: 'origin/main' }), /RESULT: CLEAN/);
+});
+check('a difference only in "--" lines (e.g. inside a quoted string) is listed, never silent', () => {
+  const live = "select $$\n--old\n$$;";
+  const file = "select $$\n--new\n$$;";
+  const out = compareLedgerToMain({
+    rows: [{ version: '20260901000000', name: 'quoted', sha: sqlHash(live), raw_sha: rawSqlHash(live), parts: 1 }],
+    files: [{ name: '20260901000000_quoted.sql', sha: sqlHash(file), rawSha: rawSqlHash(file) }],
+    baselineHighWater: BASE,
+  });
+  assert.deepEqual(out.commentOnly.map((x) => x.name), ['quoted']);
+  assert.match(plainReport(out, { rowCount: 1, fileCount: 1, ref: 'origin/main' }), /Differ only in lines starting with "--" \(1/);
+});
+check('the real repository lists its migration files at HEAD', () => {
+  const real = filesAtRef('HEAD');
+  assert.ok(real.length > 1000, `only ${real.length} files`);
+  assert.ok(real.every((f) => /^\S+\.sql$/.test(f.name) && /^[0-9a-f]{64}$/.test(f.sha)));
 });
 check('the SQL-side hash normalisation matches the JS one on a comment-only edit', () => {
   assert.equal(sqlHash('-- a\n  -- b\r\ncreate x;\n-- tail'), sqlHash('\ncreate x;\n'));

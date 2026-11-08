@@ -33,14 +33,20 @@ export const ALLOWLIST_FILE = 'scripts/migration-drift-allowlist.json';
 // The whole migration is stored as ONE statements element by both apply paths. CRLF, whole-line
 // `--` comments and surrounding blank space are dropped on both sides, identically, so a header
 // comment edited after the apply (e.g. "PARKED" -> "APPLIED LIVE") is not reported as drift.
+// `raw_sha` keeps the comment lines, so a comment-only difference is still LISTED (not drift): a
+// line starting with `--` inside a quoted string is SQL, and this way it can never pass silently.
 export const LEDGER_QUERY = `select version, name, cardinality(statements) as parts,
   encode(sha256(convert_to(btrim(regexp_replace(replace(array_to_string(statements, E'\\n'), E'\\r\\n', E'\\n'),
-    E'^[ \\t]*--[^\\n]*(\\n|$)', '', 'gn'), E' \\t\\n'), 'UTF8')), 'hex') as sha
+    E'^[ \\t]*--[^\\n]*(\\n|$)', '', 'gn'), E' \\t\\n'), 'UTF8')), 'hex') as sha,
+  encode(sha256(convert_to(btrim(replace(array_to_string(statements, E'\\n'), E'\\r\\n', E'\\n'), E' \\t\\n'), 'UTF8')), 'hex') as raw_sha
 from supabase_migrations.schema_migrations order by version;`;
 
+const digest = (body) => createHash('sha256').update(body.replace(/^[ \t\n]+|[ \t\n]+$/g, ''), 'utf8').digest('hex');
 export function sqlHash(text) {
-  const body = String(text).replace(/\r\n/g, '\n').replace(/^[ \t]*--[^\n]*(\n|$)/gm, '').replace(/^[ \t\n]+|[ \t\n]+$/g, '');
-  return createHash('sha256').update(body, 'utf8').digest('hex');
+  return digest(String(text).replace(/\r\n/g, '\n').replace(/^[ \t]*--[^\n]*(\n|$)/gm, ''));
+}
+export function rawSqlHash(text) {
+  return digest(String(text).replace(/\r\n/g, '\n'));
 }
 
 /**
@@ -71,6 +77,7 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
   const acceptedNoFile = [];
   const nameMismatch = [];
   const contentMismatch = [];
+  const commentOnly = [];
   let compared = 0;
   for (const row of rows) {
     const live = migrationStem(ledgerRowsToNames([row])[0] ?? '');
@@ -92,6 +99,7 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
     if ((orderingStamp(file.stem) ?? '') <= baselineHighWater) continue; // pre-baseline history is unreconstructable (KI-62)
     compared += 1;
     if (row.sha !== file.sha) contentMismatch.push({ ...entry, file: file.name });
+    else if (row.raw_sha && file.rawSha && row.raw_sha !== file.rawSha) commentOnly.push({ ...entry, file: file.name });
   }
 
   // The pending-set guard's own matcher, asked about a stamp later than every file.
@@ -107,7 +115,7 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
     (parked.has(stem) ? parkedWaiting : neverApplied).push(stem);
   }
   const undecided = verdict.abstained ? { reason: verdict.abstainReason, files: verdict.ambiguous ?? [] } : null;
-  return { noFile, acceptedNoFile, nameMismatch, contentMismatch, compared, neverApplied, parkedWaiting, undecided };
+  return { noFile, acceptedNoFile, nameMismatch, contentMismatch, commentOnly, compared, neverApplied, parkedWaiting, undecided };
 }
 
 export function hasDrift(r) {
@@ -125,6 +133,11 @@ export function plainReport(r, { rowCount, fileCount, ref }) {
   section('Live name differs from the file on main', r.nameMismatch, (x) => `${x.version}  live "${x.name}"  file "${x.file}"`);
   section(`Live SQL differs from the file on main (of ${r.compared} checked; comment lines ignored)`, r.contentMismatch, (x) => `${x.version}  ${x.name}  (file ${x.file})`);
   if (r.undecided) lines.push(`✗ Could not decide some files: ${r.undecided.reason}`);
+  if (r.commentOnly.length) {
+    lines.push('', `Differ only in lines starting with "--" (${r.commentOnly.length}; usually a header comment edited after the apply, not drift. `
+      + 'Open one only if such a line could sit inside a quoted string):');
+    for (const x of r.commentOnly) lines.push(`    ${x.version}  ${x.name}  (file ${x.file})`);
+  }
   lines.push('', `Known and accepted (not drift): ${r.acceptedNoFile.length} old live rows with no file (KI-62); `
     + `${r.parkedWaiting.length} parked draft(s) waiting on purpose${r.parkedWaiting.length ? ` (${r.parkedWaiting.join(', ')})` : ''}.`);
   lines.push(hasDrift(r) ? 'RESULT: DRIFT FOUND. Each line above needs a merge, an apply, or an allowlist entry with a reason. '
@@ -138,10 +151,11 @@ function git(args) {
 }
 
 export function filesAtRef(ref) {
-  // The trailing slash lists the folder's entries (no -r: migrations live directly in it).
-  const listing = git(['ls-tree', ref, '--', 'supabase/migrations/']).split('\n').filter(Boolean)
-    .map((line) => { const [meta, path] = line.split('\t'); return { blob: meta.split(' ')[2], name: path.split('/').pop() }; })
-    .filter((f) => f.name.endsWith('.sql'));
+  // Every blob under the folder, keeping only .sql files directly in it (the deploy reads no subfolder).
+  const listing = git(['ls-tree', '-r', ref, '--', 'supabase/migrations/']).split('\n').filter(Boolean)
+    .map((line) => { const [meta, path] = line.split('\t'); return { blob: meta.split(' ')[2], path }; })
+    .filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f.path))
+    .map(({ blob, path }) => ({ blob, name: path.split('/').pop() }));
   if (listing.length === 0) throw new Error(`no migration files found at ${ref}; refusing to report every live row as drift`);
   const out = execFileSync('git', ['cat-file', '--batch'], {
     cwd: ROOT, input: listing.map((f) => f.blob).join('\n') + '\n', maxBuffer: 512 * 1024 * 1024,
@@ -150,10 +164,12 @@ export function filesAtRef(ref) {
   for (const f of listing) {
     const headerEnd = out.indexOf(10, at);
     const size = Number(out.subarray(at, headerEnd).toString().split(' ')[2]);
-    f.sha = sqlHash(out.subarray(headerEnd + 1, headerEnd + 1 + size).toString('utf8'));
+    const text = out.subarray(headerEnd + 1, headerEnd + 1 + size).toString('utf8');
+    f.sha = sqlHash(text);
+    f.rawSha = rawSqlHash(text);
     at = headerEnd + 1 + size + 1;
   }
-  return listing.map(({ name, sha }) => ({ name, sha }));
+  return listing.map(({ name, sha, rawSha }) => ({ name, sha, rawSha }));
 }
 
 async function liveRows() {

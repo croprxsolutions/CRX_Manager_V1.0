@@ -152,6 +152,8 @@ export interface ApplicatorSheetProduct {
    * of string-adding per-job gal/lb displays. Display-only consumers (#9/#11) ignore it.
    */
   product_form: ProductForm | null;
+  /** The line's product, so the master mix can combine and weigh by product (DM-2); absent from older callers. */
+  product_id?: string | null;
   rei_hours: number | null;
   phi_days: number | null;
   epa_registration: string | null;
@@ -234,6 +236,7 @@ export interface RawSheetProduct {
   total_quantity: number | null;
   /** Product form so the gal/lb conversion matches the server convert_to_gl_lb. */
   product_form: ProductForm | null;
+  product_id?: string | null;
   rei_hours: number | null;
   phi_days: number | null;
   epa_registration: string | null;
@@ -310,6 +313,7 @@ export function buildApplicatorSheetData(input: BuildSheetInput): ApplicatorShee
       total_unit: totalUnit,
       total_gl_lb: conv ? `${fmtNum(conv.value)} ${conv.unit}` : null,
       product_form: p.product_form,
+      product_id: p.product_id ?? null,
       rei_hours: p.rei_hours,
       phi_days: p.phi_days,
       epa_registration: p.epa_registration,

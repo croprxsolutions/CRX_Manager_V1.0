@@ -315,6 +315,23 @@ async function main() {
   assert.equal(snapshot(), draftOnly);
   console.log('[prover] case 3e: a listed product used as a family fill source or cost reference refuses');
 
+  // 3f. While the migration runs (held open before commit), the draft invoice on a listed product cannot be
+  // posted and job_product_epa cannot be written: both wait on its locks.
+  const runner = spawn('docker', [...psqlArgs(), '-c', 'BEGIN', '-f', '/tmp/cand.sql', '-c', 'SELECT pg_sleep(25)', '-c', 'ROLLBACK'], { stdio: 'ignore' });
+  try {
+    for (let i = 0; i < 80 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(25)%' AND state = 'active' AND pid <> pg_backend_pid();") !== '1'; i += 1) wait(250);
+    const post = psql(`SET lock_timeout = '2s'; UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV}';`, { allowFailure: true });
+    assert.match(`${post.stdout}\n${post.stderr}`, /lock timeout/, 'posting the draft invoice did not wait');
+    const epa = psql("SET lock_timeout = '2s'; BEGIN; LOCK TABLE public.job_product_epa IN ROW EXCLUSIVE MODE; ROLLBACK;", { allowFailure: true });
+    assert.match(`${epa.stdout}\n${epa.stderr}`, /lock timeout/, 'a job_product_epa write did not wait');
+  } finally {
+    psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(25)%' AND pid <> pg_backend_pid();", { allowFailure: true });
+    runner.kill();
+  }
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${INV}';`), 'draft');
+  assert.equal(snapshot(), draftOnly);
+  console.log('[prover] case 3f: during the run, posting a draft invoice on a listed product and job EPA writes wait');
+
   // 3d. The 10-second lock limit holds even when the file runs outside a transaction (no psql -1).
   const holder = spawn('docker', [...psqlArgs(), '-c',
     `BEGIN; SELECT 1 FROM public.products WHERE id = '${pick.pid}' FOR UPDATE; SELECT pg_sleep(60); COMMIT;`], { stdio: 'ignore' });

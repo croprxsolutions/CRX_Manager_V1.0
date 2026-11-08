@@ -93,6 +93,13 @@ BEGIN
   -- Lock the listed rows first, so nobody can rename them, change their number or add them to a family
   -- (the family tables reference products by foreign key, so those inserts wait on this lock) until commit.
   PERFORM 1 FROM public.products p WHERE p.id IN (SELECT id FROM ki30_epa_fix) ORDER BY p.id FOR UPDATE;
+  -- New invoice, job and spray-lot lines also reference products by foreign key, so they wait too. Hold the
+  -- invoices already carrying these products, so a draft cannot be posted between the check below and the
+  -- update, and hold job_product_epa (no foreign key to products) still for these few seconds.
+  PERFORM 1 FROM public.invoices i
+   WHERE EXISTS (SELECT 1 FROM public.invoice_items ii WHERE ii.invoice_id = i.id AND ii.product_id IN (SELECT id FROM ki30_epa_fix))
+   ORDER BY i.id FOR SHARE;
+  LOCK TABLE public.job_product_epa IN SHARE MODE;
 
   -- Every row must still be exactly as measured: same product, same name, same stored number (exactly; a
   -- blank means NULL or empty text), not in a family (as a member, a fill source or a cost reference).

@@ -2860,6 +2860,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261204110000',
   '20261204120000',
   '20261207100000',
+  '20261210100000',
 ]);
 
 /**
@@ -3063,6 +3064,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   '_dispatch_job_locations_replay_impl_20261015',
   '_save_field_crop_history_replay_impl_20261015',
   '_transition_rebate_claim_replay_impl_20261015',
+  // 20261210100000 (REG-1 step 1) re-emits both label-draft bodies only to record each new draft's
+  // label_draft_targets row; each keeps p_idempotency_key behind its required-key public wrapper. Prune once
+  // the registry high-water passes 20261210100000 (the bodies never reach the generated types).
+  '_create_label_draft_replay_impl_20261015',
+  '_bulk_create_label_drafts_replay_impl_20261015',
   // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
   // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
   // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
@@ -3172,6 +3178,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _parent_brand_event: 'internal PAR-2 helper (20261123120000): called only by the keyed proposal writers after their own replay check; every API-role EXECUTE is revoked',
   write_product_change_history:
     'trigger-only history writer re-issued by 20261108120000 (PAR-1); it runs inside the calling product write and is never an RPC',
+  // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
+  _record_label_draft_target:
+    'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
   // 20261207100000 (DM-2, local candidate): private helpers and trigger functions. Prune once applied
   // and the registry high-water moves past it.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',

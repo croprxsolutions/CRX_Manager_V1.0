@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as db from './db';
 
-vi.mock('./billedCustomersResolver', () => ({ resolveBilledCustomers: () => Promise.resolve({ customers: [], complete: true }) }));
 import { buildLoaderWorksheetPdfPlan, loaderPdfMixBody, type LoaderWorksheetPdfData } from './loaderWorksheetPdf';
 import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob } from './loaderWeightsFetch';
 import { fetchLoaderWorksheetData } from './loaderWorksheetFetch';
 import { computeLoaderWorksheet } from './loaderWorksheet';
 import { loaderPanelProducts, selectedLoaderWeights } from '../components/jobs/loaderPanelWeights';
 import type { JobLoaderWorksheet, JobLoaderWorksheetWeight, WeightUnitFactors } from '../types';
+
+vi.mock('./billedCustomersResolver', () => ({ resolveBilledCustomers: () => Promise.resolve({ customers: [], complete: true }) }));
 
 const units: WeightUnitFactors = { factors: { lb: { kind: 'weight', factor: 1 }, gal: { kind: 'volume', factor: 1 } }, ambiguous: [] };
 const worksheet = { id: 'w', capacity_gal: 100, carrier_rate_gpa: 10, load_balance_mode: 'proportional', per_load_acres: null,
@@ -160,25 +161,43 @@ describe('fetchLoaderJobWeights', () => {
 });
 
 describe('fetchLoaderWorksheetData', () => {
-  it('prints the date, time and applicator of the getter read that gave the lines, not the earlier jobs read', async () => {
-    // A query builder that resolves to `data` however it is chained.
-    const query = (data: unknown) => {
-      const chain: Record<string, unknown> = { then: (resolve: (v: unknown) => void) => resolve({ data, error: null }) };
-      for (const name of ['select', 'in', 'eq']) chain[name] = () => chain;
+  // Runs the PDF fetch with a jobs read (applicator 'old') and a getter read that differs from it.
+  const fetchWith = async (getterJob: { job_date: string; scheduled_time: string | null; applicator_id: string | null }) => {
+    const profiles = [{ id: 'old', full_name: 'TEST Old Applicator' }, { id: 'new', full_name: 'TEST New Applicator' }];
+    // A query builder that resolves to `rows` however it is chained, honouring .in('id', ids).
+    const query = (rows: Array<{ id: string }>) => {
+      let ids: string[] | null = null;
+      const chain: Record<string, unknown> = {
+        then: (resolve: (v: unknown) => void) => resolve({ data: ids ? rows.filter((row) => ids!.includes(row.id)) : rows, error: null }),
+        in: (column: string, values: string[]) => { if (column === 'id') ids = values; return chain; },
+      };
+      for (const name of ['select', 'eq']) chain[name] = () => chain;
       return chain;
     };
     const jobsRead = [{ id: 'A', job_number: 'A', job_date: '2026-11-01', scheduled_time: '07:00:00', applicator_id: 'old',
       carrier_rate_gpa: 10, loader_tank_capacity: null, loader_comment: null, vehicle: null, job_fields: [], job_chemicals: [] }];
-    const tables: Record<string, unknown> = { jobs: jobsRead, job_loader_worksheets: [],
-      profile_public_view: [{ id: 'old', full_name: 'TEST Old Applicator' }, { id: 'new', full_name: 'TEST New Applicator' }] };
+    const tables: Record<string, Array<{ id: string }>> = { jobs: jobsRead, job_loader_worksheets: [], profile_public_view: profiles };
     const fake = ((table: string) => query(tables[table])) as never;
     const from = vi.spyOn(db.supabase, 'from').mockImplementation(fake);
     const fromUntyped = vi.spyOn(db.supabaseUntyped, 'from').mockImplementation(fake);
-    const getter = { ...job('A', 8), job: { ...job('A', 8).job!, job_date: '2026-11-09', scheduled_time: '08:30:00', applicator_id: 'new' } };
+    const getter = { ...job('A', 8), job: { ...job('A', 8).job!, ...getterJob } };
     const rpc = vi.spyOn(db.supabaseUntyped, 'rpc').mockImplementation((() =>
       Promise.resolve({ data: { read_at: 't', unit_factors: units, jobs: [getter] }, error: null })) as never);
-    const [pageData] = await fetchLoaderWorksheetData(['A']);
-    expect([pageData.scheduled_date, pageData.scheduled_time, pageData.applicator_name]).toEqual(['2026-11-09', '08:30:00', 'TEST New Applicator']);
-    from.mockRestore(); fromUntyped.mockRestore(); rpc.mockRestore();
+    try {
+      const [pageData] = await fetchLoaderWorksheetData(['A']);
+      return [pageData.scheduled_date, pageData.scheduled_time, pageData.applicator_name];
+    } finally {
+      from.mockRestore(); fromUntyped.mockRestore(); rpc.mockRestore();
+    }
+  };
+
+  it('prints the date, time and applicator of the getter read that gave the lines, not the earlier jobs read', async () => {
+    expect(await fetchWith({ job_date: '2026-11-09', scheduled_time: '08:30:00', applicator_id: 'new' }))
+      .toEqual(['2026-11-09', '08:30:00', 'TEST New Applicator']);
+  });
+
+  it('prints a time or applicator the getter read cleared as blank, not the earlier value', async () => {
+    expect(await fetchWith({ job_date: '2026-11-09', scheduled_time: null, applicator_id: null }))
+      .toEqual(['2026-11-09', null, null]);
   });
 });

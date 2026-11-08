@@ -1,5 +1,6 @@
 import {
   classifyRegistrationNumber,
+  confirmedDistributorListing,
   distributorBaseRegistration,
   needsDistributorBaseLookup,
   normalizeDistributorBasePayload,
@@ -296,7 +297,35 @@ Deno.test("distributor base is the first two parts", () => {
   assertEquals(distributorBaseRegistration("62719-671-55467"), "62719-671");
 });
 
-Deno.test("distributor fallback reads the base record and keeps the distributor number", () => {
+// Shape copied from EPA's regnum search for 62719-671-5546 on 2026-11-08 (partial match).
+const VOLLEY_SEARCH = {
+  items: [{
+    eparegno: "62719-671-55467",
+    productname: "VOLLEY ATZ NXT ",
+    product_name_status: "Active",
+    product_status: "Active",
+  }],
+};
+const VOLLEY_LISTING = { productname: "VOLLEY ATZ NXT", productStatus: "Active" };
+
+Deno.test("distributor search confirms only an exact listing", () => {
+  assertEquals(
+    confirmedDistributorListing(VOLLEY_SEARCH, "62719-671-55467"),
+    VOLLEY_LISTING,
+  );
+  // A partial-match hit for another number never confirms a made-up number.
+  assertEquals(confirmedDistributorListing(VOLLEY_SEARCH, "62719-671-5546"), null);
+  assertEquals(confirmedDistributorListing({ items: [] }, "62719-671-999999"), null);
+  let message = "";
+  try {
+    confirmedDistributorListing({ nope: true }, "62719-671-55467");
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA search response did not contain an items array");
+});
+
+Deno.test("confirmed distributor takes label facts from the base and name from its listing", () => {
   const result = normalizeDistributorBasePayload(
     {
       items: [{
@@ -308,27 +337,48 @@ Deno.test("distributor fallback reads the base record and keeps the distributor 
       }],
     },
     "62719-671-55467",
+    VOLLEY_LISTING,
   );
   assertEquals(result.found, true);
   assertEquals(result.regType, "distributor");
   assertEquals(result.eparegno, "62719-671-55467");
-  assertEquals(result.productname, "KEYSTONE NXT");
+  assertEquals(result.productname, "VOLLEY ATZ NXT");
   assertEquals(result.rupYn, "Yes");
+  assertEquals(result.signalWordCanonical, "Warning");
   assertEquals(result.transferredTo, null);
 });
 
-Deno.test("distributor fallback stays not found when the base is missing", () => {
-  const result = normalizeDistributorBasePayload({ items: [] }, "62719-671-55467");
+Deno.test("a cancelled distributor listing is reported cancelled even on an active base", () => {
+  const result = normalizeDistributorBasePayload(
+    { items: [{ eparegno: "62719-671", product_status: "Active" }] },
+    "62719-671-55467",
+    { productname: "VOLLEY ATZ NXT", productStatus: "Cancelled" },
+  );
+  assertEquals(result.isCancelled, true);
+  assertEquals(result.productStatus, "Cancelled");
+});
+
+Deno.test("confirmed distributor stays not found when the base is missing", () => {
+  const result = normalizeDistributorBasePayload(
+    { items: [] },
+    "62719-671-55467",
+    VOLLEY_LISTING,
+  );
   assertEquals(result.found, false);
   assertEquals(result.regType, "distributor");
   assertEquals(result.eparegno, null);
 });
 
-Deno.test("distributor fallback reports a moved base registration", () => {
-  const result = normalizeDistributorBasePayload(MOVED_PAYLOAD, "524-475-12345");
-  assertEquals(result.found, false);
-  assertEquals(result.eparegno, "105211-77");
-  assertEquals(result.transferredTo, "105211-77");
+Deno.test("a moved base never names the base's new number as the distributor's", () => {
+  const result = normalizeDistributorBasePayload(
+    MOVED_PAYLOAD,
+    "524-475-12345",
+    { productname: "SOME DISTRIBUTOR BRAND", productStatus: "Active" },
+  );
+  assertEquals(result.found, true);
+  assertEquals(result.eparegno, "524-475-12345");
+  assertEquals(result.transferredTo, null);
+  assertEquals(result.productname, "SOME DISTRIBUTOR BRAND");
 });
 
 Deno.test("only an unlisted, unmoved distributor number falls back to its base", () => {

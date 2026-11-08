@@ -270,7 +270,7 @@ export function normalizeEpaPayload(
   };
 }
 
-/** Only an unlisted, unmoved C-P-D number falls back to its base C-P record. */
+/** Only an unlisted, unmoved C-P-D number goes on to EPA's search and base record. */
 export function needsDistributorBaseLookup(result: EpaLookupResult): boolean {
   return result.regType === "distributor" && !result.found &&
     !result.transferredTo;
@@ -281,19 +281,60 @@ export function distributorBaseRegistration(distributorRegNumber: string): strin
   return distributorRegNumber.split("-").slice(0, 2).join("-");
 }
 
+export interface DistributorListing {
+  productname: string | null;
+  productStatus: string | null;
+}
+
 /**
- * EPA's lookup returns no items for most C-P-D distributor numbers. A distributor
- * product carries the base C-P registration's label, so read the base record and
- * keep the distributor number the caller asked about.
+ * EPA's registration-number search lists distributor numbers the ppls lookup
+ * omits. It is a partial-match search, so only an exact entry confirms the number.
+ */
+export function confirmedDistributorListing(
+  searchPayload: unknown,
+  distributorRegNumber: string,
+): DistributorListing | null {
+  if (!isRecord(searchPayload) || !Array.isArray(searchPayload.items)) {
+    throw new Error("EPA search response did not contain an items array");
+  }
+  const entry = searchPayload.items.find((candidate) =>
+    isRecord(candidate) &&
+    cleanString(candidate.eparegno, 50) === distributorRegNumber
+  );
+  if (!isRecord(entry)) return null;
+  return {
+    productname: cleanString(entry.productname, 500),
+    productStatus: cleanString(entry.product_status, 100),
+  };
+}
+
+/**
+ * A distributor product EPA has confirmed carries its base C-P registration's
+ * label, so the label facts come from the base record and the name and status
+ * from the distributor's own listing. A base registration that EPA moved is
+ * still that label's current record; the distributor number is not reported
+ * as moved, because EPA has not named a new distributor number.
  */
 export function normalizeDistributorBasePayload(
   basePayload: unknown,
   distributorRegNumber: string,
+  listing: DistributorListing,
 ): EpaLookupResult {
-  const result = normalizeEpaPayload(
+  const base = normalizeEpaPayload(
     basePayload,
     "distributor",
     distributorBaseRegistration(distributorRegNumber),
   );
-  return result.found ? { ...result, eparegno: distributorRegNumber } : result;
+  if (!base.found && !base.transferredTo) return base;
+  const productStatus = listing.productStatus ?? base.productStatus;
+  return {
+    ...base,
+    found: true,
+    eparegno: distributorRegNumber,
+    productname: listing.productname ?? base.productname,
+    productStatus,
+    isCancelled: base.isCancelled ||
+      productStatus?.toLowerCase() === "cancelled",
+    transferredTo: null,
+  };
 }

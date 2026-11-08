@@ -517,7 +517,7 @@ export default function FieldStop() {
       await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || receiptRecipient?.farmName || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
       // KI-25: the receipt was recorded with the completion; the server emails it (or lists it for the office).
-      if (emailOnComplete && delivery.customer && !delivery.customer.email) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
+      if (emailOnComplete && (delivery.customer || receiptRecipient) && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
 
       if (stillOnStop) setStep('done');
     };

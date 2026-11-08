@@ -1358,7 +1358,7 @@ export default function DeliveryDetail() {
       if (submittedEvidence === 'no_proof') {
         // No customer confirmed this delivery, so no automatic "your delivery was completed" receipt.
         toast('info', 'Recorded without proof. No receipt was emailed; the office can send one later with Email Confirmation.');
-      } else if (emailOnComplete && customer && !customer.email) {
+      } else if (emailOnComplete && (customer || receiptRecipient) && !receiptEmail) {
         toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
       }
 

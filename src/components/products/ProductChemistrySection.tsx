@@ -65,8 +65,10 @@ function ChemistryForms({ form, chem, profileId, onClose, onFinished, onReviewCl
  * DM-1: a parent's ingredients, modes of action and fertilizer analysis, shared by every size. Everyone signed in
  * reads it; admins enter, correct, review the ingredient list and see cost per lb of active (admin only).
  */
-export default function ProductChemistrySection({ parentId, parentVersion, isAdmin, profileId, busy }: {
+export default function ProductChemistrySection({ parentId, parentVersion, refreshKey, isAdmin, profileId, busy }: {
   parentId: string; parentVersion: number; isAdmin: boolean; profileId: string;
+  /** Changes when this page saves pricing or a weight, so cost per lb of active re-reads. */
+  refreshKey: string;
   /** Other unsaved edits on the page: chemistry actions wait for them. */
   busy: boolean;
 }) {
@@ -77,7 +79,7 @@ export default function ProductChemistrySection({ parentId, parentVersion, isAdm
   const [waiting, setWaiting] = useState<number | null>(null);
   const tokens = useRef(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  const forKey = JSON.stringify([parentId, parentVersion, attempt]);
+  const forKey = JSON.stringify([parentId, parentVersion, refreshKey, attempt]);
   const state = loaded?.forKey === forKey ? loaded : null;
 
   // A new product or parent closes any open form: a form never acts on a product other than the one it opened for.

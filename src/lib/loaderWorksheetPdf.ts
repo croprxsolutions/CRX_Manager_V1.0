@@ -21,7 +21,7 @@ import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from '
 import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
-import { loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
+import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
 import type { WeightUnitFactors } from '../types';
 import {
   computeLoaderWorksheet,
@@ -156,6 +156,7 @@ export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<
     ? loaderLoadWeights(ws, data.weights.byProductId, data.weights.currentUnits, data.weights.sourceLines) : null;
   const w = data.weights?.unavailable ? null : weighed;
   const loadIndex = (column: LoaderWorksheetPdfLoadColumn) => ws.loads.indexOf(column.load);
+  const groupIndexes = (column: LoaderWorksheetPdfLoadColumn) => column.loads.map((load) => ws.loads.indexOf(load));
   const markCurrent = data.weights?.saved === true;
   const body: string[][] = data.products.map((p, pi) => {
     const row: string[] = [p.unit ? `${p.product_name} (${p.unit})` : p.product_name];
@@ -180,14 +181,14 @@ export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<
       }
       const mark = markCurrent && cell.mark === 'current' ? ' (current)' : '';
       row.push(refused ? cell.amountCell : `${done}${cell.amountCell}${each}
-${cell.weightText}${mark}`);
+${loaderGroupWeightText(w, groupIndexes(column), pi)}${mark}`);
     });
     const rowTotal = ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0);
     row.push(refused ? '—' : fmtNum(Math.round(rowTotal * 10000) / 10000));
     return row;
   });
   if (w) body.push(['Product weight', ...plan.columns.map((column) => {
-    const total = w.loads[loadIndex(column)]?.totalText;
+    const total = loaderGroupWeightText(w, groupIndexes(column), 'total');
     if (!total) return '—';
     return total.startsWith('Product weight: ') ? `${total.slice('Product weight: '.length)}${column.loads.length > 1 ? ' each' : ''}` : total;
   }), '']);

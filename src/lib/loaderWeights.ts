@@ -35,6 +35,8 @@ export interface LoaderLoadWeights {
   cells: LoaderCell[];
   /** "Product weight: 115.40 lb", or why the load's total is withheld. */
   totalText: string;
+  /** The load's product weight in pounds, or null when withheld. */
+  totalLb: number | null;
 }
 
 export interface LoaderWeights {
@@ -125,9 +127,29 @@ export function loaderLoadWeights(ws: LoaderWorksheet, weightsByProductId: Recor
     // An amount refusal is counted even on a load that printed 0, so its total is withheld (never `0 lb`).
     const sum = sumWeights(cells.map((cell, index) => ({ quantity: refusals[index] ? null : Math.round(load.products[index].amount * 10000) / 10000, weight: cell.weight })));
     const totalText = 'lb' in sum ? `Product weight: ${formatLb(sum.lb)}` : `Product weight not shown: ${sum.reasons.join('; ')}`;
-    return { cells, totalText };
+    return { cells, totalText, totalLb: 'lb' in sum ? sum.lb : null };
   });
   return { loads, anyCurrent };
+}
+
+/**
+ * A condensed column's weight for one line (or its total): one text when every load in the group weighs the same,
+ * else lowest to highest ("80.00–80.01 lb"), so "each" never shows the first load's weight for all of them.
+ */
+export function loaderGroupWeightText(weights: LoaderWeights, loadIndexes: readonly number[], line: number | 'total'): string {
+  const items = loadIndexes.flatMap((index) => {
+    const load = weights.loads[index];
+    if (!load) return [];
+    if (line === 'total') return [{ text: load.totalText, lb: load.totalLb }];
+    const cell = load.cells[line];
+    return cell ? [{ text: cell.weightText, lb: 'lb' in cell.weight ? cell.weight.lb : null }] : [];
+  });
+  const texts = [...new Set(items.map((item) => item.text))];
+  if (texts.length <= 1) return texts[0] ?? '';
+  if (items.some((item) => item.lb == null)) return texts.join('; ');
+  const lbs = items.map((item) => item.lb as number);
+  const range = `${formatLb(Math.min(...lbs)).replace(/ lb$/, '')}–${formatLb(Math.max(...lbs))}`;
+  return line === 'total' ? `Product weight: ${range}` : range;
 }
 
 /** The caption under a worksheet's weights (sheet 4.3). */

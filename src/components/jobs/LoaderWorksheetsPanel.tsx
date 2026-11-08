@@ -617,7 +617,7 @@ export function LoaderWorksheetsPanel({
                           <td className="px-3 py-2">
                             {canEdit ? <button type="button" disabled={busyId === selectedWorksheet.id} onClick={() => void toggleDone(index)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-crx-green hover:bg-crx-green-tint disabled:opacity-50"><Check className="h-3.5 w-3.5" />{done ? 'Done' : 'Mark done'}</button> : (done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>)}
                           </td>
-                          <td className="px-3 py-2">{weightsShown ? <LoaderLoadWeightsCell result={weightsShown} loadIndex={index} /> : <>&mdash;</>}</td>
+                          <td className="px-3 py-2">{weightsShown ? <LoaderLoadWeightsCell result={weightsShown} loadIndexes={[index]} /> : <>&mdash;</>}</td>
                         </tr>
                       );
                     }) : condenseLoaderLoads(selectedComputed.loads, selectedLoadsDone).map((group) => {
@@ -629,7 +629,7 @@ export function LoaderWorksheetsPanel({
                           <td className="px-3 py-2 text-right">{formatNumber(load.volume / selectedComputed.carrier_rate_gpa)}{each}</td>
                           <td className="px-3 py-2 text-right">{formatNumber(load.volume)} gal{each}</td>
                           <td className="px-3 py-2">{group.done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>}</td>
-                          <td className="px-3 py-2">{weightsShown ? <><LoaderLoadWeightsCell result={weightsShown} loadIndex={selectedComputed.loads.indexOf(load)} />{each && <p className="text-xs text-secondary">each</p>}</> : <>&mdash;</>}</td>
+                          <td className="px-3 py-2">{weightsShown ? <><LoaderLoadWeightsCell result={weightsShown} loadIndexes={group.loads.map((member) => selectedComputed.loads.indexOf(member))} />{each && <p className="text-xs text-secondary">each</p>}</> : <>&mdash;</>}</td>
                         </tr>
                       );
                     })}

@@ -70,6 +70,21 @@ describe('ProductWeightCard', () => {
     await waitFor(() => expect(mocks.approveWeightDraft).toHaveBeenCalledWith(subject, 'd1', expect.any(String)));
   });
 
+  // Regression (PR #1646): the page re-reads cost per lb of active only if a save tells it.
+  it('tells the page after a weight is saved', async () => {
+    const pack = { container_size: 5, container_type: 'bag', container_unit: 'Lb', inventory_unit: 'Ea', unit_size: null };
+    const draft = { id: 'd1', value: 5, entered_value: 5, entered_unit: 'lb', source: 'label', source_note: null, reason: null, evidence: null,
+      created_by: null, created_by_name: null, created_at: 't', basis: pack };
+    mocks.fetchProductWeights.mockResolvedValue(result({ product_form: 'dry', inventory_unit: 'Ea', subject: { kind: 'net_weight', subject_id: 'p1', version: 4 },
+      current_basis: pack, draft, weight: { kind: 'none', none_reason: 'no_approved_weight' } }));
+    const onSaved = vi.fn();
+    render(<ProductWeightCard productId="p1" isAdmin profileId="u1" busy={false} reloadKey="k" onSaved={onSaved} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve draft' }));
+    mocks.approveWeightDraft.mockResolvedValue({});
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  });
+
   it('after a pack change, offers Set weight instead of Approve', async () => {
     const oldPack = { container_size: 5, container_type: 'bag', container_unit: 'Lb', inventory_unit: 'Ea', unit_size: null };
     const draft = { id: 'd1', value: 5, entered_value: 5, entered_unit: 'lb', source: 'label', source_note: null, reason: null, evidence: null,

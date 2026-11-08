@@ -43,7 +43,8 @@
 --     job_loader_worksheets, job_location_dispatches, customers, the job_applied_* and job_attachments
 --     writes, the storage job-attachments insert/delete) runs that subquery under jobs' row security,
 --     so it inherits the window without being edited (the prover checks each one).
---   * _is_dispatched_to_me: also requires the job not soft-deleted.
+--   * _is_dispatched_to_me, _can_see_field's dispatch leg and get_dispatched_list: the job must also not be
+--     soft-deleted or cancelled (a dispatch completed before an office cancel no longer keeps it open).
 --   * The SECURITY DEFINER functions above: only their whole-job leg changes, to _is_job_applicator
 --     (each line marked "KI-73 part C"). _can_see_field's whole-job leg likewise.
 --   * addresses_select: an address is readable exactly when its customer is (customers_select and
@@ -244,8 +245,9 @@ AS $function$
   -- re-check profiles.is_active, so a DEACTIVATED user with a still-valid token loses
   -- dispatch visibility immediately (Codex re-review-6 P2).
   SELECT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = (select auth.uid()) AND p.is_active)
-  -- KI-73 part C: a soft-deleted job grants no dispatch access.
-  AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = p_job_id AND j.deleted_at IS NULL)
+  -- KI-73 part C: a soft-deleted or cancelled job grants no dispatch access (not even a dispatch
+  -- completed before the job was cancelled; the terminal trigger only closes open dispatches).
+  AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = p_job_id AND j.deleted_at IS NULL AND j.status <> 'cancelled')
   AND EXISTS (
     SELECT 1 FROM public.job_location_dispatches d
      WHERE d.job_id = p_job_id
@@ -309,6 +311,7 @@ AS $function$
             JOIN public.jobs j ON j.id = d.job_id
            WHERE jf.field_id = p_field_id
              AND j.deleted_at IS NULL
+             AND j.status <> 'cancelled'  -- KI-73 part C: a cancelled job ends dispatch access
              AND (
                d.dispatch_status = 'dispatched'
                OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
@@ -1884,7 +1887,7 @@ AS $function$
     'job_total_acres',   j.total_acres
   )
     FROM public.job_location_dispatches d
-    JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL
+    JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL AND j.status <> 'cancelled'  -- KI-73 part C
     JOIN public.job_fields jf ON jf.id = d.job_field_id
     JOIN public.customers c   ON c.id = j.customer_id
    WHERE (
@@ -2003,8 +2006,8 @@ BEGIN
            a.owner AS was_owner, a.acl AS was_acl, a.proconfig AS was_config, a.prorettype AS was_rettype,
            a.provolatile AS was_volatile, a.prosecdef AS was_secdef
       FROM (VALUES
-      ('public._is_dispatched_to_me(uuid)',                                                                                '778c159e220e8225ec4e05e39576f597'),
-      ('public._can_see_field(uuid)',                                                                                      '985b8cd0f6956e4e66d4a39302ee7dc8'),
+      ('public._is_dispatched_to_me(uuid)',                                                                                'a6c698c4a1209e24c47fca84144cca96'),
+      ('public._can_see_field(uuid)',                                                                                      'be7fa8fe3b4616b4e1ec006c33d4bebc'),
       ('public._start_job_replay_impl_20261015(uuid,uuid,text)',                                                           '31412ba33e4d6eebd145b7813878a655'),
       ('public._complete_job_replay_impl_20261015(uuid,jsonb,uuid,text)',                                                  '3bd9dfe0729d8175ffbb1cf16b258b5c'),
       ('public.stage_offline_action(uuid,text,uuid,integer,timestamp with time zone,jsonb,text,timestamp with time zone)', 'e3f9a5aaa1d9ac54bf9cee0546b057f9'),
@@ -2013,7 +2016,7 @@ BEGIN
       ('public.get_jobs_billed_customers(uuid[])',                                                                         '42bb182795a3a5cbbcf3106eaab97625'),
       ('public.get_job_billed_customers(uuid)',                                                                            '316d0eb63b76ef9a640a70db22b4f40c'),
       ('public.get_dispatch_board_jobs(uuid,text,date,date)',                                                              'cc849915c479a72bc391f359ccd1fa8f'),
-      ('public.get_dispatched_list(uuid,uuid)',                                                                            'd3819d5f0b8f1ff4ded83eee63f1eb4c')
+      ('public.get_dispatched_list(uuid,uuid)',                                                                            '13f69a7c68b70dfdba488dbe2c08fddb')
       ) AS t(sig, new_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(t.sig)
       -- CREATE OR REPLACE keeps each OID, so the preflight snapshot is matched by OID.

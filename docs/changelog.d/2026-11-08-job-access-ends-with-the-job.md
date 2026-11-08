@@ -26,7 +26,8 @@ assignment is current.
   completion, as part B set.
 * `jobs_select` uses it, and every policy that looks the job up through `jobs` inherits it. The
   eleven SECURITY DEFINER functions above change only their whole-job line.
-* `_is_dispatched_to_me` refuses a deleted job.
+* `_is_dispatched_to_me`, `_can_see_field`'s dispatch leg and `get_dispatched_list` refuse a deleted or
+  cancelled job, including one cancelled after its dispatch was completed.
 * `customer_addresses`: readable exactly when the customer is.
 * Dispatch-only applicators gain reads (no writes) of the job's shares, completion info, records and
   their field and crew rows, attachments and photos.
@@ -37,9 +38,9 @@ Whole-job applicator: 9 jobs before, 4 after (scheduled; completed 2 days ago; i
 today but dated 30 days out); loses completed 10 days ago, done 8 days ago but dated 30 days out,
 cancelled, and the two deleted ones in every table and function. The fixture includes the dispatch rows
 the assignment triggers would write.
-Dispatch-only applicator: before 2 jobs and none of their records; after 1 job (not the deleted one)
-and all of its records. Driver: addresses 13 → 1 (their delivery customer). Entity recipient and an
-unassigned applicator: addresses 13 → 0. Admin and sales rep: identical before and after.
+Dispatch-only applicator: before 3 jobs and none of their records; after 1 job (not the deleted one,
+nor one cancelled after its dispatch was completed) and all of its records. Driver: addresses 14 → 1 (their delivery customer). Entity recipient and an
+unassigned applicator: addresses 14 → 0. Admin and sales rep: identical before and after.
 
 ### Not changed
 

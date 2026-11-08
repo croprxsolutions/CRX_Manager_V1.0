@@ -109,7 +109,7 @@ export function compareLedgerToMain({ rows, files, baselineHighWater, allowlist 
     compared += 1;
     if (row.sha === file.sha) continue;
     const pin = acceptedMismatch.get(entry.version);
-    if (pin && pin.liveSha === row.sha && pin.fileSha === file.sha) acceptedContent.push(entry);
+    if (pin && pin.file === file.name && pin.liveSha === row.sha && pin.fileSha === file.sha) acceptedContent.push(entry);
     else contentMismatch.push({ ...entry, file: file.name, liveSha: row.sha, fileSha: file.sha });
   }
 

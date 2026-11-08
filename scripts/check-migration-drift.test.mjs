@@ -33,7 +33,7 @@ const allowlist = {
   acceptedLedgerRows: [{ version: '20260212035255' }],
   parkedFiles: [{ file: '20260807000000_parked_draft.sql', reason: 'waits for Mason' }],
   acceptedMismatches: [{
-    version: '20260803000000', reason: 'header note edited after the apply',
+    version: '20260803000000', file: '20260803000000_edited_after_apply.sql', reason: 'header note edited after the apply',
     liveSha: sql('-- PARKED, DO NOT APPLY\ncreate table c();'), fileSha: sql('-- APPLIED LIVE\ncreate table c();'),
   }],
 };
@@ -94,6 +94,12 @@ check('a pinned difference stops being accepted once either side changes again',
     baselineHighWater: BASE, allowlist,
   });
   assert.deepEqual(out.contentMismatch.map((x) => x.name), ['edited_after_apply']);
+  const moved = compareLedgerToMain({
+    rows: [{ ...rows.find((x) => x.version === '20260803000000'), name: 'other_migration' }],
+    files: [{ name: '20260803000000_other_migration.sql', sha: sql('-- APPLIED LIVE\ncreate table c();') }],
+    baselineHighWater: BASE, allowlist,
+  });
+  assert.deepEqual(moved.contentMismatch.map((x) => x.name), ['other_migration'], 'the pin is bound to its file name too');
 });
 check('a renamed row is still SQL-compared; a name pin covers the name only, not new SQL', () => {
   const live = { version: '20260805000000', name: 'renamed_before_merge', sha: sql('create table e(changed);'), parts: 1 };

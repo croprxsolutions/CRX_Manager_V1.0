@@ -120,6 +120,8 @@ export interface ResolvedLine {
   mapped: MappedLine;
   /** What the screen shows under the line: its pounds and where the weight came from, or why there is none. */
   text: string;
+  /** True when no weight was read for the line (its read failed or has not answered), so it showed none. */
+  unread?: boolean;
 }
 
 /** Each line's weight from its current amount and unit, through the weight and map its source gives. */
@@ -137,6 +139,7 @@ export function resolveTicketLines(lines: readonly TicketLineInput[], sources: T
       mapped: { product_name: name, product_id: line.product_id, quantity: line.quantity, unit: line.unit, form: picked.form,
         weightLb: weight, rowUnits: picked.units },
       text,
+      ...(picked.basis ? {} : { unread: true }),
     };
   });
 }
@@ -156,8 +159,9 @@ export async function weightsChangedWhileSaving(ticketId: string, lines: readonl
   const saved = await fetchBlendTicketWeights(ticketId);
   const after = resolveTicketLines(lines, { saved, current: null });
   const lb = (line: ResolvedLine | undefined) => (line?.mapped.weightLb && 'lb' in line.mapped.weightLb ? line.mapped.weightLb.lb : null);
-  // A line the screen never previewed (still loading, or its read failed) is not reported as changed.
-  return after.flatMap((line, index) => (lines[index].product_id && preview[index] && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
+  // A line the screen never previewed, or showed as unread (its read failed), is not reported as changed.
+  return after.flatMap((line, index) => (lines[index].product_id && preview[index] && !preview[index].unread
+    && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
 }
 
 /**

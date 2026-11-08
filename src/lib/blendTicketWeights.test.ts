@@ -75,6 +75,10 @@ describe('weightsChangedWhileSaving', () => {
     const preview = resolveTicketLines(lines, { saved: null, current });
     expect(await weightsChangedWhileSaving('t1', lines, preview)).toEqual(['TEST P']);
     expect(await weightsChangedWhileSaving('t1', lines, [])).toEqual([]);
+    // A line whose weight read failed showed "weights unavailable": never reported as changed.
+    const unread = resolveTicketLines(lines, { saved: null, current: null });
+    expect(unread[0].unread).toBe(true);
+    expect(await weightsChangedWhileSaving('t1', lines, unread)).toEqual([]);
     rpc.mockRestore();
   });
 });

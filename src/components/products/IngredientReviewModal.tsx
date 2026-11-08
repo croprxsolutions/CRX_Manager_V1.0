@@ -249,6 +249,24 @@ function RetireOrReactivate({ kind, ingredient, profileId, onDone, onCancel }: {
   );
 }
 
+/** Any active ingredient: edit it, or retire it (the database refuses, in words, while a product or form still uses it). */
+function FindTab({ locked, onEdit, onRetire }: {
+  locked: boolean; onEdit: (item: ActiveIngredientSummary) => void; onRetire: (item: ActiveIngredientSummary) => void;
+}) {
+  const [found, setFound] = useState<ActiveIngredientSummary | null>(null);
+  if (!found) return <IngredientSearch id="review-find" label="Find an ingredient" disabled={locked} onPick={setFound} />;
+  return (
+    <div className="space-y-2 rounded-lg border border-gray-200 p-3">
+      <p className="text-sm text-nav-dark">{ingredientLine(found)}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" disabled={locked} onClick={() => onEdit(found)}>Edit</Button>
+        <Button size="sm" variant="secondary" disabled={locked} onClick={() => onRetire(found)}>Retire</Button>
+        <Button size="sm" variant="secondary" onClick={() => setFound(null)}>Find another</Button>
+      </div>
+    </div>
+  );
+}
+
 function DuplicatesTab({ list, locked, actions, onReplace }: {
   list: IngredientWorklist; locked: boolean; actions: (item: ActiveIngredientWithUsers) => React.ReactNode;
   onReplace: (parentId: string, prefill: ReplacePrefill) => void;
@@ -389,11 +407,8 @@ export default function IngredientReviewModal({ profileId, onClose, onReplace }:
             {tab === 'needs_cas' && <NeedsCasTab list={list} locked={locked} onAddCas={(item) => setSub({ kind: 'edit', ingredient: item, casOnly: true })} />}
             {tab === 'retired' && <RetiredTab list={list} locked={locked} onReactivate={(item) => setSub({ kind: 'reactivate', ingredient: item })} />}
             {tab === 'find' && (
-              <div className="space-y-2">
-                <IngredientSearch id="review-find" label="Find an ingredient to edit" disabled={locked}
-                  onPick={(item) => setSub({ kind: 'edit', ingredient: item, casOnly: false })} />
-                <p className="text-xs text-secondary">Picking one opens Edit. Retire is offered from the lists above once nothing uses it.</p>
-              </div>
+              <FindTab locked={locked} onEdit={(item) => setSub({ kind: 'edit', ingredient: item, casOnly: false })}
+                onRetire={(item) => setSub({ kind: 'retire', ingredient: item })} />
             )}
           </>
         )}

@@ -56,7 +56,9 @@ export interface TicketWeights {
  */
 export function useTicketWeights({ ticketId, pageRead, lines, headerTotal, headerUnit }: TicketWeightArgs): TicketWeights {
   const productKey = useMemo(() => [...new Set(lines.map((line) => line.product_id).filter(Boolean))].sort().join(','), [lines]);
-  const current = useTaggedRead<ProductWeightsResult>(productKey, true,
+  // Re-read on every page load and save too, so a weight approved since the last save is the one shown.
+  const currentTag = useMemo(() => ({ productKey, pageRead }), [productKey, pageRead]);
+  const current = useTaggedRead<ProductWeightsResult>(currentTag, true,
     () => fetchProductWeights(productKey ? productKey.split(',') : []), 'blend_ticket_current_weights');
   // Tagged by ticket as well as page read, so another ticket's weights never show while this one loads.
   const savedTag = useMemo(() => ({ ticketId, pageRead }), [ticketId, pageRead]);

@@ -17,7 +17,7 @@ import { blockedUnitSaveMessage, type UnitLoadState } from '../../lib/units';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../products/ProductOptionPresentation';
 import UnitSelect from './UnitSelect';
 import { useTicketWeights } from './useTicketWeights';
-import { weightsChangedWhileSaving } from '../../lib/blendTicketWeights';
+import { warnWeightsChangedWhileSaving } from '../../lib/blendTicketWeights';
 import { useToast } from '../ui/Toast';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -540,10 +540,8 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
       setTicketAttemptId(crypto.randomUUID());
       setAttemptUncertain(false);
       // DM-2: the ticket keeps the weight in use at save; say so when that differs from the preview.
-      weightsChangedWhileSaving(attempt.ticketId, weightLines, ticketWeights.lines).then(
-        (names) => names.forEach((name) => toast('warning', `${name}'s weight changed while saving; the ticket keeps the saved weight`)),
-        (weightError: unknown) => Sentry.captureException(weightError, { level: 'warning', extra: { context: 'manual_ticket_saved_weights' } }),
-      );
+      void warnWeightsChangedWhileSaving(attempt.ticketId, weightLines, ticketWeights,
+        (message) => toast('warning', message), 'manual_ticket_saved_weights');
       onComplete();
     } catch (err: unknown) {
       Sentry.captureException(

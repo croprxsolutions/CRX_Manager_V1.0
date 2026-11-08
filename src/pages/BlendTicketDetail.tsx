@@ -36,6 +36,7 @@ import { jobSearchLabel } from '../lib/recordLabels';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import UnitSelect from '../components/blendtickets/UnitSelect';
 import { useTicketWeights } from '../components/blendtickets/useTicketWeights';
+import { warnWeightsChangedWhileSaving } from '../lib/blendTicketWeights';
 import QuotePriceChoiceModal from '../components/blendtickets/QuotePriceChoiceModal';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -540,6 +541,9 @@ export function BlendTicketDetail() {
       return;
     }
 
+    // DM-2: the weights shown when Save was pressed, compared after the save with the ones the ticket kept.
+    const weightPreview = ticketWeights;
+    const weightPreviewLines = weightLines;
     await runCriticalAction({
       action: async () => {
         const ticketPayload = {
@@ -592,6 +596,8 @@ export function BlendTicketDetail() {
         // updated_at token. A failed hydration leaves this guard armed.
         setSaveHydrationRequired(true);
         setIsDirty(false);
+        void warnWeightsChangedWhileSaving(ticket.id, weightPreviewLines, weightPreview,
+          (message) => toast('warning', message), 'blend_ticket_detail_saved_weights');
         await loadTicketData();
       },
       toast,

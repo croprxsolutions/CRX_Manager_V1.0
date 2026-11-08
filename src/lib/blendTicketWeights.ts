@@ -1,4 +1,6 @@
 import { assertRpcResult, supabaseUntyped } from './db';
+import { BUSINESS_TIMEZONE } from './dateUtils';
+import { Sentry } from './sentry';
 import { sourceText, type ProductWeightsResult } from './productWeights';
 import { formatLb, lineWeightLb, sumWeights, unitEntry, type LineWeight, type WeightBasis } from './weightMath';
 import type { MappedLine } from './blendWeightTotals';
@@ -68,7 +70,7 @@ function savedRowFor(line: TicketLineInput, saved: BlendTicketWeights | null): T
 }
 
 function provenance(row: TicketSnapshot): string {
-  const date = row.value_reviewed_at ? `, approved ${new Date(row.value_reviewed_at).toLocaleDateString()}` : '';
+  const date = row.value_reviewed_at ? `, approved ${new Date(row.value_reviewed_at).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}` : '';
   const kept = row.captured_how === 'backfill_at_apply' ? '; captured at DM-2 apply, original not recorded' : '';
   if (row.weight_kind === 'density') return `${row.lb_per_unit} lb/gal, from ${sourceText(row.source)}${date}${kept}`;
   if (row.weight_kind === 'net_weight') return `${row.lb_per_unit} lb per ${row.per_unit}, from ${sourceText(row.source)}${date}${kept}`;
@@ -118,6 +120,8 @@ export interface ResolvedLine {
   mapped: MappedLine;
   /** What the screen shows under the line: its pounds and where the weight came from, or why there is none. */
   text: string;
+  /** True when no weight was read for the line (its read failed or has not answered), so it showed none. */
+  unread?: boolean;
 }
 
 /** Each line's weight from its current amount and unit, through the weight and map its source gives. */
@@ -135,6 +139,7 @@ export function resolveTicketLines(lines: readonly TicketLineInput[], sources: T
       mapped: { product_name: name, product_id: line.product_id, quantity: line.quantity, unit: line.unit, form: picked.form,
         weightLb: weight, rowUnits: picked.units },
       text,
+      ...(picked.basis ? {} : { unread: true }),
     };
   });
 }
@@ -154,6 +159,27 @@ export async function weightsChangedWhileSaving(ticketId: string, lines: readonl
   const saved = await fetchBlendTicketWeights(ticketId);
   const after = resolveTicketLines(lines, { saved, current: null });
   const lb = (line: ResolvedLine | undefined) => (line?.mapped.weightLb && 'lb' in line.mapped.weightLb ? line.mapped.weightLb.lb : null);
-  // A line the screen never previewed (still loading, or its read failed) is not reported as changed.
-  return after.flatMap((line, index) => (lines[index].product_id && preview[index] && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
+  // A line the screen never previewed, or showed as unread (its read failed), is not reported as changed.
+  return after.flatMap((line, index) => (lines[index].product_id && preview[index] && !preview[index].unread
+    && lb(line) !== lb(preview[index]) ? [line.mapped.product_name] : []));
+}
+
+/**
+ * After a save: one warning per line whose kept weight differs from the preview, or one saying the check could not
+ * run. A preview that was not ready (still loading, or its read failed) is not compared, so it never reads "changed";
+ * the user is told to reopen the ticket instead.
+ */
+export async function warnWeightsChangedWhileSaving(ticketId: string, lines: readonly TicketLineInput[],
+  preview: { status: string; lines: readonly ResolvedLine[] }, warn: (message: string) => void, context: string): Promise<void> {
+  // A line with no weight shown has nothing to compare with: say so instead of staying silent (never a false "changed").
+  const notShown = lines.some((line, index) => line.product_id && (preview.status !== 'ready' || !preview.lines[index] || preview.lines[index].unread));
+  if (notShown) warn('The ticket saved, but some weights were not shown before saving. Reopen the ticket to see the weights it kept.');
+  if (preview.status !== 'ready') return;
+  try {
+    const names = await weightsChangedWhileSaving(ticketId, lines, preview.lines);
+    names.forEach((name) => warn(`${name}'s weight changed while saving; the ticket keeps the saved weight`));
+  } catch (error: unknown) {
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { level: 'warning', extra: { context } });
+    warn('The ticket saved, but its weights could not be checked. Reopen the ticket to see them.');
+  }
 }

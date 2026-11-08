@@ -13,3 +13,7 @@
 - Proof: `scripts/smoke/prove-delivery-receipt-queue-real-schema.mjs` now runs the sender's own code against the
   real schema: a failed first send, then a lost finish, ends with exactly one receipt emailed.
 - Order of going live: deploy the function and store its secrets (Mason's approval), then merge this app change.
+  Deploy it with `verify_jwt` OFF (the repo has no `supabase/config.toml`, so set it on the deploy call): the
+  timer's wake carries only the `x-receipt-worker-secret` header, and with JWT checking on the gateway refuses it
+  and receipts stay queued. Function secret `DELIVERY_RECEIPT_WORKER_SECRET`; Vault secrets
+  `delivery_receipt_worker_url` (the function URL) and `delivery_receipt_worker_secret` (the same value).

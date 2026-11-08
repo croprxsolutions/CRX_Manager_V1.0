@@ -6,5 +6,5 @@ export const RECEIPTS_TO_CHECK_LIMIT = 50;
 export function receiptsToCheckFilter(now: Date) {
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
   const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  return { or: `status.eq.needs_check,and(status.in.(pending,sending),created_at.lt.${hourAgo})`, since };
+  return { or: `status.eq.needs_check,and(status.in.(pending,sending),created_at.lt."${hourAgo}")`, since };
 }

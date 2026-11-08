@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-const answers: Array<{ data: unknown; error: unknown }> = [];
+type Answer = { data: unknown; error: unknown };
+const answers: Array<Answer | Promise<Answer>> = [];
 const query = {
   select: () => query,
   or: () => query,
@@ -44,5 +45,16 @@ describe('ReceiptsToCheck', () => {
     expect(await screen.findByText('D-1')).toBeInTheDocument();
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     await waitFor(() => expect(screen.queryByText('D-1')).not.toBeInTheDocument());
+  });
+
+  it('a slow older answer does not overwrite a newer one', async () => {
+    let finishOld: (a: Answer) => void = () => {};
+    answers.push(new Promise<Answer>((resolve) => { finishOld = resolve; }), { data: [row(2)], error: null });
+    show();
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(await screen.findByText('D-2')).toBeInTheDocument();
+    await act(async () => { finishOld({ data: [row(1)], error: null }); });
+    expect(screen.queryByText('D-1')).not.toBeInTheDocument();
+    expect(screen.getByText('D-2')).toBeInTheDocument();
   });
 });

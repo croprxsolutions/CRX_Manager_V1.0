@@ -23,7 +23,9 @@ export default function ReceiptsToCheck() {
 
   useEffect(() => {
     let live = true;
+    let latest = 0;
     const load = () => {
+      const mine = ++latest;
       const { or, since } = receiptsToCheckFilter(new Date());
       void supabase
         .from('delivery_receipt_queue')
@@ -33,7 +35,7 @@ export default function ReceiptsToCheck() {
         .order('created_at', { ascending: false })
         .limit(RECEIPTS_TO_CHECK_LIMIT + 1)
         .then(({ data, error }) => {
-          if (!live) return;
+          if (!live || mine !== latest) return; // a newer load has started; its answer wins
           if (error) {
             Sentry.captureException(error, { level: 'warning', extra: { context: 'Receipts to check list failed to load' } });
             setFailed(true);

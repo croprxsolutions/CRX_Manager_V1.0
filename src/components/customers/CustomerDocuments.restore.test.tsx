@@ -89,6 +89,15 @@ describe('CustomerDocuments removed documents (admin)', () => {
     expect(screen.queryByText('License.pdf')).not.toBeInTheDocument();
   });
 
+  it('opens another customer on its current documents', async () => {
+    const view = render(<CustomerDocuments customerId="customer-1" userId="user-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show removed documents' }));
+    expect(await screen.findByText('License.pdf')).toBeInTheDocument();
+    view.rerender(<CustomerDocuments customerId="customer-2" userId="user-1" />);
+    expect(await screen.findByText('No documents have been uploaded yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show removed documents' })).toBeInTheDocument();
+  });
+
   it('reports a refused restore and logs nothing', async () => {
     updateResult = { data: [], error: null };
     render(<CustomerDocuments customerId="customer-1" userId="user-1" />);

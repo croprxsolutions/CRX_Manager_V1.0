@@ -964,7 +964,10 @@ duplicate-action policy, and carries the risk of losing device-local work before
 evidence: photo proof tied to who uploaded the file — BUILT, NOT LIVE (`20261215100000`): a signed-in user's new delivery
 photo must name that user as uploader and a `delivery-photos` file that user owns (as signatures are checked), its
 upload time is the server clock, and its delivery, file, uploader and time never change. Older photo rows are not
-re-checked; storage-rule guarantees still do not cover dashboard or service-role tools (LOW).
+re-checked; storage-rule guarantees still do not cover dashboard or service-role tools (LOW). Not checked: a
+user can attach a photo file they uploaded for one delivery to another delivery they may add photos to, so that
+delivery's photo list shows it; `complete_delivery` still refuses it as proof (the evidence smoke files such rows
+on purpose to prove that). LOW.
 
 ### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)
 **MED/LOW · OPEN · tooling-guards**

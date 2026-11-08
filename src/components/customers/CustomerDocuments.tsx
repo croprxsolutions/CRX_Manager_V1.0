@@ -90,6 +90,12 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
   const [documentToDelete, setDocumentToDelete] = useState<CustomerDocumentRow | null>(null);
   // Admins only (KI-07): list removed documents to download or restore them.
   const [showRemoved, setShowRemoved] = useState(false);
+  // Another customer opens on its current documents, not the removed view.
+  const [viewCustomerId, setViewCustomerId] = useState(customerId);
+  if (viewCustomerId !== customerId) {
+    setViewCustomerId(customerId);
+    setShowRemoved(false);
+  }
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const { getKeyFor: getRemoveKeyFor, resetKeyFor: resetRemoveKeyFor } = useIdempotencyKey(
     'soft_delete_customer_document',

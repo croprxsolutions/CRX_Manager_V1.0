@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`, `20261211100000_product_chemistry_confirmed_swaps`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
 

@@ -486,8 +486,10 @@ save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-recei
 check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
 that waits on Mason's approval to
 deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
-provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action (the office
-card shows the last 14 days).
+provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
+and should land before the app switch.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**

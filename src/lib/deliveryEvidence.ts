@@ -184,22 +184,6 @@ export async function fetchReceiptRecipient(deliveryId: string): Promise<Receipt
   return { email: text(row.email), contactName: text(row.contact_name), farmName: text(row.farm_name) };
 }
 
-export const RECEIPT_LOOKUP_TIMEOUT_MS = 5000;
-
-/**
- * fetchReceiptRecipient, but never holds up a completion: resolves null after `timeoutMs`
- * (or on any failure). The completion runs either way; only the receipt is skipped.
- */
-export async function fetchReceiptRecipientWithin(deliveryId: string, timeoutMs = RECEIPT_LOOKUP_TIMEOUT_MS): Promise<ReceiptRecipient | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
-  try {
-    return await Promise.race([fetchReceiptRecipient(deliveryId).catch(() => null), timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 /** A failure that looks like no connection (the request may never have reached storage or the server). */
 export function isNetworkFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error

@@ -480,10 +480,13 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (deliberately deferred) · UI/database · unassigned (next Goal 5/6 change)**
-After completion the phone sends the receipt email. If signal drops between, the delivery is complete with no
-receipt; the driver is warned and the office can resend by hand. A queue table plus scheduled sender was designed
-and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
+**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`), the app change that asks for
+it, and the office "Customer receipts to check" card on Deliveries are built and waiting on Mason's approval to
+deploy the function and store its two secrets; the app change must not go live before the sender is on. Not built:
+provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action (the office
+card shows the last 14 days).
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**

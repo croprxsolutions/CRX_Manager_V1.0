@@ -2,8 +2,9 @@
 /**
  * Real-schema proof for 20261212100000_dispatch_sync_on_applicator_qualify (KI-28): when a person BECOMES an
  * active applicator (re-activated, or given the applicator role), their open jobs' locations that have no
- * dispatch row get one, so the job reaches the Dispatch Board. Locations that already have any dispatch row,
- * finished or soft-deleted jobs, and a person whose licenses are all expired are left alone.
+ * dispatch row get one, so the job reaches the Dispatch Board, whatever their license (Mason, 2026-11-08). The
+ * apply backfills any such location already waiting. Locations that already have any dispatch row and finished
+ * or soft-deleted jobs are left alone. Same-instant location adds and assignments are proved in both orders.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
  * migration before the candidate, seeds invented rows and checks each case.
@@ -40,7 +41,7 @@ const LEDGER_ONLY = new Set([
   '20261105170000_data11_preferred_vendor_links.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(_sync_job_location_dispatch_on_applicator_qualify|_dispatch_open_job_locations_to_applicator|_sync_job_location_dispatch_on_license_change|_lock_assigned_applicator_profile|_sync_job_location_dispatch_on_field_insert|_sync_job_location_dispatch_on_applicator_change|_enforce_applicator_license|job_location_dispatches_job_field_id_key|TRIGGER\s+\w+\s+(BEFORE|AFTER)\s+[\w\s,]+?\s+ON\s+(public\.)?profiles)\b/i;
+const TOUCHED = /(_sync_job_location_dispatch_on_applicator_qualify|_lock_assigned_applicator_profile|_sync_job_location_dispatch_on_field_insert|_sync_job_location_dispatch_on_applicator_change|job_location_dispatches_job_field_id_key|TRIGGER\s+\w+\s+(BEFORE|AFTER)\s+[\w\s,]+?\s+ON\s+(public\.)?(profiles|jobs))\b/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -222,11 +223,9 @@ const ADMIN = id('a1');
 const APP_A = id('b1');   // inactive applicator, re-activated
 const APP_B = id('b2');   // active sales rep, given the applicator role
 const APP_C = id('b3');   // inactive applicator whose only active license expired
-const APP_D = id('b4');   // active applicator from the start: an unrelated edit must not fire
+const APP_D = id('b4');   // active applicator from the start: backfilled at apply; an unrelated edit must not fire
 const APP_E = id('b5');   // inactive applicator: a no-user re-activation is refused, then the admin's works
-const APP_F = id('b6');   // inactive applicator whose license is expired at the same instant as the activation
 const APP_G = id('b7');   // inactive applicator assigned a job at the same instant as the activation
-const APP_H = id('b8');   // reverse order: activation in progress while H's license is expired
 const APP_I = id('b9');   // reverse order: activation in progress while a job is assigned to I
 const APP_K = id('ba');   // reverse order: activation in progress while a location is added to K's job
 const CUST = id('c1');
@@ -332,21 +331,28 @@ async function main() {
   const r = apply('cand.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(scalar('SELECT count(*) FROM supabase_migrations.schema_migrations;'), ledgerRows);
-  assert.equal(board(), before, 'applying the file alone must not write any row');
-  const fn = "'public._sync_job_location_dispatch_on_applicator_qualify()'";
-  assert.equal(scalar(`SELECT p.prosecdef::text || '|' || p.proowner::regrole::text || '|' || array_to_string(p.proconfig, ',') FROM pg_proc p WHERE p.oid = ${fn}::regprocedure;`),
-    'true|postgres|search_path=public, pg_temp');
-  assert.equal(scalar(`SELECT concat_ws('|', has_function_privilege('authenticated', ${fn}, 'EXECUTE'), has_function_privilege('anon', ${fn}, 'EXECUTE'), has_function_privilege('service_role', ${fn}, 'EXECUTE'));`), 'f|f|f');
-  console.log('[prover] the file applies and writes nothing by itself; SECURITY DEFINER, owner postgres, search_path pinned; no client role can execute it');
+  // BACKFILL: D was already an active applicator with an undispatched location (e8); the apply dispatches it,
+  // recorded as by the job's creator. Nothing else changes: the stuck people do not qualify yet.
+  const applied = before.replace('e8|-|none|-', 'e8|b4|dispatched|a1');
+  assert.equal(board(), applied, 'the apply must backfill only the active applicator D');
+  assert.equal(sweepRows(), 'e1 e4 e6 e7 e9');
+  for (const sig of ['_sync_job_location_dispatch_on_applicator_qualify()', '_lock_assigned_applicator_profile()']) {
+    const fn = `'public.${sig}'`;
+    assert.equal(scalar(`SELECT p.prosecdef::text || '|' || p.proowner::regrole::text || '|' || array_to_string(p.proconfig, ',') FROM pg_proc p WHERE p.oid = ${fn}::regprocedure;`),
+      'true|postgres|search_path=public, pg_temp');
+    assert.equal(scalar(`SELECT concat_ws('|', has_function_privilege('authenticated', ${fn}, 'EXECUTE'), has_function_privilege('anon', ${fn}, 'EXECUTE'), has_function_privilege('service_role', ${fn}, 'EXECUTE'));`), 'f|f|f');
+  }
+  console.log("[prover] the file applies; its backfill puts the already-active applicator D's waiting location e8 on the board and writes nothing else;"
+    + ' both functions SECURITY DEFINER, owner postgres, search_path pinned; no client role can execute them');
 
   // An unrelated edit of an applicator who already qualified does not fire.
   ok(ADMIN, `UPDATE public.profiles SET full_name = '[PROVER] renamed', is_active = true, role = 'applicator' WHERE id = '${APP_D}';`);
-  assert.equal(board(), before);
+  assert.equal(board(), applied);
   console.log('[prover] editing an applicator who already qualified changes nothing');
 
   // A is re-activated by the admin through an ordinary signed-in update (RLS and every profiles trigger on).
   ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
-  const afterA = before.replace('e1|-|none|-', 'e1|b1|dispatched|a1');
+  const afterA = applied.replace('e1|-|none|-', 'e1|b1|dispatched|a1');
   assert.equal(board(), afterA);
   console.log("[prover] RE-ACTIVATED: A's open job location e1 is now on the board, dispatched to A, recorded as dispatched by the admin;"
     + ' the undispatched e2, the board split e3, the completed job (e5) and the soft-deleted job (e6) are untouched');
@@ -356,9 +362,11 @@ async function main() {
   assert.equal(board(), afterB);
   console.log("[prover] RE-ROLED: sales rep B made an applicator; B's in-progress job location e4 is now on the board");
 
+  // Mason, 2026-11-08: the license is not re-checked here, exactly as when a location is added.
   ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_C}';`);
-  assert.equal(board(), afterB);
-  console.log("[prover] C (only active license expired) is re-activated but not auto-dispatched: e7 waits for a renewed license");
+  const afterC = afterB.replace('e7|-|none|-', 'e7|b3|dispatched|a1');
+  assert.equal(board(), afterC);
+  console.log("[prover] C (only license expired) is re-activated and e7 goes straight onto the board, as Mason decided");
 
   // With no signed-in user (a dashboard or service run) the role lock refuses the change outright, so the
   // trigger's no-user attribution fallback is never reached; E then is re-activated by the admin.
@@ -366,16 +374,16 @@ async function main() {
   assert.notEqual(blocked.status, 0);
   assert.match(`${blocked.stdout}
 ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
-  assert.equal(board(), afterB);
+  assert.equal(board(), afterC);
   ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_E}';`);
-  const afterE = afterB.replace('e9|-|none|-', 'e9|b5|dispatched|a1');
+  const afterE = afterC.replace('e9|-|none|-', 'e9|b5|dispatched|a1');
   assert.equal(board(), afterE);
   console.log('[prover] a re-activation with no signed-in user is refused by the role lock and writes nothing; the admin then re-activates E and e9 reaches the board');
 
   ok(ADMIN, `UPDATE public.profiles SET is_active = false WHERE id = '${APP_A}';`);
   ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
   assert.equal(board(), afterE);
-  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '5');
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '7');
   console.log('[prover] deactivating and re-activating A again adds no second row');
 
   // RACE (Luna MED): a location added to A's open job while A is inactive, committing only after A's
@@ -388,37 +396,24 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
     `UPDATE public.profiles SET is_active = true WHERE id = '${APP_A}';`);
   const afterRace = `${afterE} 10|b1|dispatched|a1`;
   assert.equal(board(), afterRace);
-  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '6');
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '8');
   console.log(`[prover] RACE: a location added to A's job while A was inactive, committed during A's re-activation (which waited ${waited} ms), still reaches the board`);
 
-  // RENEWAL: C's only license was expired, so C's re-activation held e7 back; renewing the license dispatches it.
-  ok(ADMIN, `UPDATE public.applicator_licenses SET expiry_date = current_date + 100 WHERE profile_id = '${APP_C}';`);
-  const afterRenew = afterRace.replace('e7|-|none|-', 'e7|b3|dispatched|a1');
-  assert.equal(board(), afterRenew);
-  console.log("[prover] RENEWED: renewing C's expired license puts C's held-back location e7 on the board");
-
-  // Two more people for the remaining same-instant cases: F (valid license) on job 8, G (no license) for job 9.
+  // More people for the remaining same-instant cases: G for job 9; I and K for the reverse order.
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-      ('${APP_F}', 'ki28-6@example.invalid', '{"full_name":"[PROVER] applicator 6","role":"applicator"}'::jsonb),
-      ('${APP_G}', 'ki28-7@example.invalid', '{"full_name":"[PROVER] applicator 7","role":"applicator"}'::jsonb);`);
-  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id IN ('${APP_F}', '${APP_G}');
-    INSERT INTO public.applicator_licenses (profile_id, license_number, holder_name, expiry_date, is_active) VALUES
-      ('${APP_F}', 'PROVER-F', '[PROVER] F', current_date + 300, true);
+      ('${APP_G}', 'ki28-7@example.invalid', '{"full_name":"[PROVER] applicator 7","role":"applicator"}'::jsonb),
+      ('${APP_I}', 'ki28-9@example.invalid', '{"full_name":"[PROVER] applicator 9","role":"applicator"}'::jsonb),
+      ('${APP_K}', 'ki28-10@example.invalid', '{"full_name":"[PROVER] applicator 10","role":"applicator"}'::jsonb);`);
+  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id IN ('${APP_G}', '${APP_I}', '${APP_K}');
     INSERT INTO public.fields (id, customer_id, field_name) VALUES
-      ('${F(11)}', '${CUST}', '[PROVER] Field 11'), ('${F(12)}', '${CUST}', '[PROVER] Field 12');
+      ('${F(12)}', '${CUST}', '[PROVER] Field 12'), ('${F(14)}', '${CUST}', '[PROVER] Field 14'), ('${F(15)}', '${CUST}', '[PROVER] Field 15');
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by) VALUES
-      ('${J(8)}', 'PRV-KI28-8', '${CUST}', current_date, 'scheduled', '${APP_F}', '${ADMIN}'),
-      ('${J(9)}', 'PRV-KI28-9', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}');
-    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(11)}', '${J(8)}', '${F(11)}'), ('${JF(12)}', '${J(9)}', '${F(12)}');`);
-  const withNew = `${afterRenew} 11|-|none|- 12|-|none|-`;
+      ('${J(9)}', 'PRV-KI28-9', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}'),
+      ('${J(11)}', 'PRV-KI28-11', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}'),
+      ('${J(12)}', 'PRV-KI28-12', '${CUST}', current_date, 'scheduled', '${APP_K}', '${ADMIN}');
+    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(12)}', '${J(9)}', '${F(12)}'), ('${JF(14)}', '${J(11)}', '${F(14)}');`);
+  const withNew = `${afterRace} 12|-|none|- 14|-|none|-`;
   assert.equal(board(), withNew);
-
-  // LICENSE RACE (Sol HIGH): F's only license is expired by one session while another re-activates F.
-  const waitedLicense = await race('race-license.sql',
-    `UPDATE public.applicator_licenses SET expiry_date = current_date - 1 WHERE profile_id = '${APP_F}';`,
-    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_F}';`);
-  assert.equal(board(), withNew, 'F, whose license expired at the same instant, must not be auto-dispatched');
-  console.log(`[prover] LICENSE RACE: F's license expired in another session during F's re-activation (which waited ${waitedLicense} ms); e11 is not auto-dispatched`);
 
   // ASSIGNMENT RACE (Luna/Sol MED): job 9 is assigned to inactive G by one session while another re-activates G.
   const waitedAssign = await race('race-assign.sql',
@@ -426,45 +421,15 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
     `UPDATE public.profiles SET is_active = true WHERE id = '${APP_G}';`);
   const afterAssign = withNew.replace('12|-|none|-', '12|b7|dispatched|a1');
   assert.equal(board(), afterAssign);
-  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '8');
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '9');
   console.log(`[prover] ASSIGNMENT RACE: job 9 assigned to G in another session during G's re-activation (which waited ${waitedAssign} ms) reaches the board`);
 
-  // MOVED (Luna round 3): A's valid license is moved to F (whose own license expired); F's held-back e11 is released.
-  ok(ADMIN, `UPDATE public.applicator_licenses SET profile_id = '${APP_F}' WHERE license_number = 'PROVER-A';`);
-  assert.equal(board(), afterAssign.replace('11|-|none|-', '11|b6|dispatched|a1'));
-  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '9');
-  console.log("[prover] MOVED: a valid license moved to F releases F's held-back location e11");
-
-  // REVERSE ORDER (Sol round 2): the activation runs first and holds its transaction open; the license edit,
-  // assignment or location add arrives during it, must wait (no deadlock) and then end correctly.
-  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-      ('${APP_H}', 'ki28-8@example.invalid', '{"full_name":"[PROVER] applicator 8","role":"applicator"}'::jsonb),
-      ('${APP_I}', 'ki28-9@example.invalid', '{"full_name":"[PROVER] applicator 9","role":"applicator"}'::jsonb),
-      ('${APP_K}', 'ki28-10@example.invalid', '{"full_name":"[PROVER] applicator 10","role":"applicator"}'::jsonb);`);
-  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id IN ('${APP_H}', '${APP_I}', '${APP_K}');
-    INSERT INTO public.applicator_licenses (profile_id, license_number, holder_name, expiry_date, is_active) VALUES
-      ('${APP_H}', 'PROVER-H', '[PROVER] H', current_date + 300, true);
-    INSERT INTO public.fields (id, customer_id, field_name) VALUES
-      ('${F(13)}', '${CUST}', '[PROVER] Field 13'), ('${F(14)}', '${CUST}', '[PROVER] Field 14'), ('${F(15)}', '${CUST}', '[PROVER] Field 15');
-    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by) VALUES
-      ('${J(10)}', 'PRV-KI28-10', '${CUST}', current_date, 'scheduled', '${APP_H}', '${ADMIN}'),
-      ('${J(11)}', 'PRV-KI28-11', '${CUST}', current_date, 'scheduled', NULL, '${ADMIN}'),
-      ('${J(12)}', 'PRV-KI28-12', '${CUST}', current_date, 'scheduled', '${APP_K}', '${ADMIN}');
-    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(13)}', '${J(10)}', '${F(13)}'), ('${JF(14)}', '${J(11)}', '${F(14)}');`);
-  const beforeReverse = `${afterAssign.replace('11|-|none|-', '11|b6|dispatched|a1')} 13|-|none|- 14|-|none|-`;
-  assert.equal(board(), beforeReverse);
-
-  const wLicense = await race('rev-license.sql',
-    `UPDATE public.profiles SET is_active = true WHERE id = '${APP_H}';`,
-    `UPDATE public.applicator_licenses SET expiry_date = current_date - 1 WHERE profile_id = '${APP_H}';`);
-  const afterRevLicense = beforeReverse.replace('13|-|none|-', '13|b8|dispatched|a1');
-  assert.equal(board(), afterRevLicense);
-  console.log(`[prover] REVERSE LICENSE: H's license edit during H's activation waited ${wLicense} ms (no deadlock); e13 was dispatched by the activation, which saw the license still valid`);
-
+  // REVERSE ORDER (Sol round 2): the activation runs first and holds its transaction open; the assignment or
+  // location add arrives during it, must wait (no deadlock) and then end correctly.
   const wAssign = await race('rev-assign.sql',
     `UPDATE public.profiles SET is_active = true WHERE id = '${APP_I}';`,
     `UPDATE public.jobs SET applicator_id = '${APP_I}' WHERE id = '${J(11)}';`);
-  const afterRevAssign = afterRevLicense.replace('14|-|none|-', '14|b9|dispatched|a1');
+  const afterRevAssign = afterAssign.replace('14|-|none|-', '14|b9|dispatched|a1');
   assert.equal(board(), afterRevAssign);
   console.log(`[prover] REVERSE ASSIGNMENT: assigning job 11 to I during I's activation waited ${wAssign} ms (no deadlock) and e14 reached the board`);
 
@@ -472,7 +437,7 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
     `UPDATE public.profiles SET is_active = true WHERE id = '${APP_K}';`,
     `INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(15)}', '${J(12)}', '${F(15)}');`);
   assert.equal(board(), `${afterRevAssign} 15|ba|dispatched|a1`);
-  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '12');
+  assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '11');
   console.log(`[prover] REVERSE LOCATION: a location added to K's job during K's activation waited ${wField} ms (no deadlock) and reached the board`);
 
   assert.equal(sweepRows(), '-');

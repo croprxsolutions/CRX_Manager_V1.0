@@ -3191,14 +3191,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
-  // KI-28 (local candidate 20261212100000): an internal helper and trigger functions, never called as RPCs.
+  // KI-28 (local candidate 20261212100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
-  _dispatch_open_job_locations_to_applicator:
-    'internal KI-28 helper called only by its profiles and applicator_licenses triggers: inserts dispatch rows only for open-job locations with none, ON CONFLICT (job_field_id) DO NOTHING, so a replay writes nothing; every API-role EXECUTE (incl. service_role) is revoked',
   _sync_job_location_dispatch_on_applicator_qualify:
-    'AFTER UPDATE OF is_active, role row trigger on profiles: when a person becomes an active applicator it calls _dispatch_open_job_locations_to_applicator, insert-only for locations with no row, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
-  _sync_job_location_dispatch_on_license_change:
-    'AFTER INSERT/UPDATE OF is_active, expiry_date row trigger on applicator_licenses: calls _dispatch_open_job_locations_to_applicator, insert-only for locations with no row, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+    'AFTER UPDATE OF is_active, role row trigger on profiles: when a person becomes an active applicator it inserts dispatch rows only for their open-job locations with none, ON CONFLICT (job_field_id) DO NOTHING, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // 20261207100000 (DM-2, local candidate): private helpers and trigger functions. Prune once applied
   // and the registry high-water moves past it.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',

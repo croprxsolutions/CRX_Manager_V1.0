@@ -1650,6 +1650,19 @@ const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?
 function withoutTriggerEvents(t) {
   return t.replace(TRIGGER_HEADER_RE, (_, head, events, on) => head + events.replace(/"(?:[^"]|"")*"|\btruncate\b/gi, (w) => (w[0] === '"' ? w : "trigger_event")) + on);
 }
+// TRUNCATE as a privilege NAME is not a wipe (PR #1635's postflight tripped this):
+// a GRANT/REVOKE privilege list, or the privilege string that ends a
+// has_*_privilege(...) call. Only a list made purely of privilege words, commas
+// and WITH GRANT OPTION is blanked; none of those can hold a table name or ;,
+// so a real TRUNCATE (EXECUTE 'TRUNCATE t', or one between two strings) stays visible.
+const PRIV = String.raw`(?:select|insert|update|delete|truncate|references|trigger|maintain)(?:\s+with\s+grant\s+option)?`;
+const PRIV_LIST = String.raw`${PRIV}(?:\s*,\s*${PRIV})*`;
+const GRANT_LIST_RE = new RegExp(String.raw`(\b(?:grant|revoke)\s+(?:grant\s+option\s+for\s+)?)(${PRIV_LIST})(\s+on\b)`, "gi");
+const PRIV_CHECK_RE = new RegExp(String.raw`(\bhas_(?:table|any_column|column)_privilege\s*\([^;]*?,\s*')(\s*${PRIV_LIST}\s*)('\s*\))`, "gi");
+function withoutPrivilegeNames(t) {
+  const blank = (_, head, list, tail) => head + list.replace(/\btruncate\b/gi, "privilege_name") + tail;
+  return t.replace(GRANT_LIST_RE, blank).replace(PRIV_CHECK_RE, blank);
+}
 
 export function destructiveMigrationCheck(sql) {
   // Strip ONLY clear function-definition bodies (AS $$...$$) — everything
@@ -1671,7 +1684,7 @@ export function destructiveMigrationCheck(sql) {
   if (/\balter\s+table\b[^;]*\bdrop\s+(?!constraint\b|not\s+null\b|default\b|identity\b|expression\b)/i.test(t)) {
     return { destructive: true, reason: "ALTER TABLE ... DROP [COLUMN]" };
   }
-  if (/\btruncate\b/i.test(withoutTriggerEvents(t))) return { destructive: true, reason: "TRUNCATE" };
+  if (/\btruncate\b/i.test(withoutPrivilegeNames(withoutTriggerEvents(t)))) return { destructive: true, reason: "TRUNCATE" };
   if (/\bdelete\s+from\b/i.test(t)) return { destructive: true, reason: "top-level DELETE FROM (any table)" };
   // MERGE can delete matched rows (WHEN MATCHED THEN DELETE) — and is rare
   // enough in a migration that ANY top-level MERGE deserves Mason's eyes

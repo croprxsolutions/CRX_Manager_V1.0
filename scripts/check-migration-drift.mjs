@@ -138,9 +138,11 @@ function git(args) {
 }
 
 export function filesAtRef(ref) {
+  // The trailing slash lists the folder's entries (no -r: migrations live directly in it).
   const listing = git(['ls-tree', ref, '--', 'supabase/migrations/']).split('\n').filter(Boolean)
     .map((line) => { const [meta, path] = line.split('\t'); return { blob: meta.split(' ')[2], name: path.split('/').pop() }; })
     .filter((f) => f.name.endsWith('.sql'));
+  if (listing.length === 0) throw new Error(`no migration files found at ${ref}; refusing to report every live row as drift`);
   const out = execFileSync('git', ['cat-file', '--batch'], {
     cwd: ROOT, input: listing.map((f) => f.blob).join('\n') + '\n', maxBuffer: 512 * 1024 * 1024,
   });

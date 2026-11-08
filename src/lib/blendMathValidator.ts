@@ -6,6 +6,7 @@
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
 import { asProductForm } from './units';
+import { weightTotalWarnings, type WeightTotalOptions } from './blendWeightTotals';
 
 interface TicketData {
   total_acres: number | null;
@@ -248,7 +249,8 @@ export interface BlendMathWarning {
 
 export function validateBlendMath(
   ticketData: TicketData,
-  products: ProductData[]
+  products: ProductData[],
+  weights?: WeightTotalOptions
 ): BlendMathWarning[] {
   const warnings: BlendMathWarning[] = [];
   /** A comparison ran and disagreed — something here is actually wrong. */
@@ -376,6 +378,19 @@ export function validateBlendMath(
     }
   }
 
+  // DM-2 (blendWeightTotals.ts): a screen that passes weights gets the total checked through the unit map;
+  // null means the checks below run exactly as before.
+  // A spray-tank total always runs the legacy overfill check below too, so the weights check can add notes but
+  // never hide an overfill (Mason, 2026-11-07, after three rounds of it doing so).
+  let weightTotals: BlendMathWarning[] | null = null;
+  const beforeTotals = warnings.length;
+  if (weights) {
+    weightTotals = weightTotalWarnings({ total: totalVolume, rawUnit: ticketData.total_volume_unit, legacyUnit: headerUnit,
+      weights, legacyWeightUnits: WEIGHT_ONLY_UNITS, legacyVolumeUnits: VOLUME_ONLY_UNITS });
+    // Only a unit typed as a plain volume: oz may be a dry weight, and 'Gal/ac' is a rate, not a tank size.
+    if (weightTotals && !VOLUME_ONLY_UNITS.has((ticketData.total_volume_unit ?? '').trim().toLowerCase())) return [...warnings, ...weightTotals];
+  }
+
   // (2) and (3) both need each product measured in the ticket's own unit.
   if (totalVolume && totalVolume > 0 && products.length > 0 && headerUnit !== '') {
     // A total recorded in a weight unit is a DRY BLEND: no water, so the parts
@@ -473,6 +488,14 @@ export function validateBlendMath(
         `Total not checked: "${ticketData.total_volume_unit}" isn't a unit the products can be added up in, so the total couldn't be compared. Please verify it by hand.`
       );
     }
+  }
+
+  if (weightTotals) {
+    // Keep only the legacy overfill (its notes are the weights check's job), unless the weights check already says overfill.
+    const isOverfill = (w: BlendMathWarning) => w.level === 'mismatch' && w.message.includes("A tank can't hold more product");
+    const legacyOverfill = weightTotals.some(isOverfill)
+      ? [] : warnings.slice(beforeTotals).filter((w) => w.level === 'mismatch');
+    return [...warnings.slice(0, beforeTotals), ...weightTotals, ...legacyOverfill];
   }
 
   // Legacy comparison, retained ONLY for the shape it was always right for: a

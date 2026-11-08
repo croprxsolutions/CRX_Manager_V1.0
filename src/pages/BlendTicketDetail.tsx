@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef , useCallback } from 'react';
+import { useState, useEffect, useRef , useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
 import { sanitizeError, supabase, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
@@ -35,6 +35,7 @@ import JobSearchPicker from '../components/jobs/JobSearchPicker';
 import { jobSearchLabel } from '../lib/recordLabels';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import UnitSelect from '../components/blendtickets/UnitSelect';
+import { useTicketWeights } from '../components/blendtickets/useTicketWeights';
 import QuotePriceChoiceModal from '../components/blendtickets/QuotePriceChoiceModal';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
@@ -72,6 +73,8 @@ export function BlendTicketDetail() {
   const [saving, setSaving] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [warnings, setWarnings] = useState<BlendMathWarning[]>([]);
+  // DM-2: the ticket and lines exactly as last loaded, which the weight read must match.
+  const [weightPageRead, setWeightPageRead] = useState<{ header: Record<string, unknown>; lines: ReadonlyArray<Record<string, unknown>> } | null>(null);
   const [showRawOcr, setShowRawOcr] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [fieldsDirty, setFieldsDirty] = useState(false);
@@ -380,6 +383,7 @@ export function BlendTicketDetail() {
       };
       hydratedStateRef.current.formData = hydratedForm;
       setFormData(hydratedForm);
+      setWeightPageRead({ header: ticketResult.data as Record<string, unknown>, lines: hydratedProducts as unknown as Record<string, unknown>[] });
       setSaveHydrationRequired(false);
       // Mark initial load complete so future changes trigger isDirty
       requestAnimationFrame(() => { initialLoadDone.current = true; });
@@ -435,6 +439,19 @@ export function BlendTicketDetail() {
     });
   }, [toast]);
 
+  const weightLines = useMemo(() => products.map((p) => {
+    const catalog = allProducts.find((candidate) => candidate.id === p.product_id);
+    return { id: p.id, product_id: p.product_id, product_name: p.product_name, quantity: p.quantity, unit: p.unit,
+      catalogForm: catalog ? (catalog.product_form ?? null) : (p.product?.product_form ?? null) };
+  }), [products, allProducts]);
+  const ticketWeights = useTicketWeights({
+    ticketId: id ?? null,
+    pageRead: weightPageRead,
+    lines: weightLines,
+    headerTotal: formData.total_volume ? parseFloat(formData.total_volume) : null,
+    headerUnit: formData.total_volume_unit || null,
+  });
+
   useEffect(() => {
     const ticketData = {
       total_acres: formData.total_acres ? parseFloat(formData.total_acres) : null,
@@ -470,8 +487,8 @@ export function BlendTicketDetail() {
           : (p.product?.inventory_unit || p.product?.unit_size || null),
       };
     });
-    setWarnings(validateBlendMath(ticketData, productData));
-  }, [products, allProducts, formData.total_acres, formData.total_volume, formData.total_volume_unit, formData.application_rate]);
+    setWarnings(validateBlendMath(ticketData, productData, ticketWeights.options));
+  }, [products, allProducts, formData.total_acres, formData.total_volume, formData.total_volume_unit, formData.application_rate, ticketWeights.options]);
 
   // Track dirty state from form changes
   useEffect(() => {
@@ -1409,7 +1426,12 @@ export function BlendTicketDetail() {
       >
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Products</h2>
+          <div>
+            <h2 className="text-lg font-semibold">Products</h2>
+            {ticketWeights.status !== 'loading' && products.length > 0 && (
+              <p className="text-sm text-gray-600" data-testid="ticket-total-weight">{ticketWeights.total}</p>
+            )}
+          </div>
           <Button size="sm" onClick={addProduct} disabled={catalogLoadFailed}>
             <Plus className="h-4 w-4" />
             Add Product
@@ -1533,6 +1555,12 @@ export function BlendTicketDetail() {
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
+
+              {ticketWeights.lines[index] && (
+                <p className="col-span-12 text-xs text-gray-600" data-testid="ticket-line-weight">
+                  Weight: {ticketWeights.lines[index].text}
+                </p>
+              )}
 
               {(product.confidence_score > 0 || product.manually_corrected) && (
                 <div className="col-span-12 flex items-center gap-2 text-xs">

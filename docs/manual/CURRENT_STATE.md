@@ -284,6 +284,14 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-08 4:02 PM Central (KI-30, PR #1648):** the `epa-lookup` Edge Function was deployed live as v7 (was v6)
+  on Mason's in-chat approval ("Yes, deploy it"), through the Supabase connector with main `700677517`'s
+  `index.ts`, `logic.ts` and `_shared/` `cors.ts`, `auth.ts`, `sentry.ts`.
+  - What changed: a number EPA moved now reports the new number (`transferredTo`, with `found: false` so older screens
+    never apply the new record to the old number), and an unlisted C-P-D distributor number is confirmed through EPA's
+    registration search and then takes its base C-P record's label facts.
+  - ACTIVE, with JWT checking on. Smoke from Mason's live admin session: 524-475 returned "moved to 105211-77" and
+    62719-671-55467 returned VOLLEY ATZ NXT, both HTTP 200; the function booted with no `SENTRY_MISCONFIG` line.
 - **2026-11-06 10:22 AM Central (KI-14, PR #1556):** the `send-email` Edge Function was deployed live as v28 (was
   v27) on Mason's in-chat approval ("Yes, deploy it"), with `supabase functions deploy send-email --use-api --yes`
   from main `d5e7884d2`'s `supabase/functions`; all 14 downloaded files matched main byte for byte.

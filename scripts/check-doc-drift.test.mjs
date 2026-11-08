@@ -103,4 +103,34 @@ assert.equal(freshnessEnforcedFor([]), false, 'an empty diff only warns');
   assert.equal(lf.status, 0, `the LF pin must pass: ${lf.stdout}${lf.stderr}`);
 }
 
+// --freshness-only: pre-push refuses a migration dated today when the live-state stamps are older,
+// even outside a git checkout, and passes once they are bumped (PR #1652 found it in CI).
+{
+  const today = chicagoCalendarStamp();
+  const dashed = `${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6)}`;
+  const freshnessOnly = (stamp, stampLine = `**Last verified:** ${stamp}`) => {
+    const root = tempDir('crx-freshness-only-');
+    try {
+      mkdirSync(path.join(root, 'supabase/migrations'), { recursive: true });
+      mkdirSync(path.join(root, 'docs/manual'), { recursive: true });
+      writeFileSync(path.join(root, `supabase/migrations/${today}120000_x.sql`), 'select 1;\n');
+      for (const doc of ['CURRENT_STATE.md', 'KNOWN_ISSUES.md']) {
+        writeFileSync(path.join(root, 'docs/manual', doc), `# ${doc}\n\n${stampLine}\n`);
+      }
+      return spawnSync(process.execPath, [path.resolve('scripts/check-doc-drift.mjs'), '--freshness-only', root], { encoding: 'utf8' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const stale = freshnessOnly('2000-01-01');
+  assert.equal(stale.status, 1, `a stamp older than today's migration must fail: ${stale.stdout}${stale.stderr}`);
+  assert.match(stale.stdout, /FAIL manual freshness CURRENT_STATE\.md/);
+  assert.match(stale.stdout, /FAIL manual freshness KNOWN_ISSUES\.md/);
+  const fresh = freshnessOnly(dashed);
+  assert.equal(fresh.status, 0, `today's stamp must pass: ${fresh.stdout}${fresh.stderr}`);
+  const long = freshnessOnly(dashed, `**Last verified:** ${dashed} ${'x'.repeat(200)}`);
+  assert.equal(long.status, 1, `an over-long stamp line must fail: ${long.stdout}`);
+  assert.match(long.stdout, /FAIL manual doc CURRENT_STATE\.md stamp line/);
+}
+
 console.log('PASS - check-doc-drift helpers keep one record per migration, a frozen history file, short single stamps and Chicago-date freshness.');

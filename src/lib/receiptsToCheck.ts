@@ -1,6 +1,7 @@
 // KI-25 office list: needs_check receipts, plus owed ones still waiting after an hour, from the last 14 days.
 // shortcut: no "mark handled" action; rows age off after 14 days. Add a close RPC if the list gets noisy.
 const WINDOW_DAYS = 14;
+export const RECEIPTS_TO_CHECK_LIMIT = 50;
 
 export function receiptsToCheckFilter(now: Date) {
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();

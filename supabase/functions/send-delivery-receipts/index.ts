@@ -13,6 +13,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+// Each worker RPC always answers (a list or a status word); no answer means something is wrong, so the attempt
+// stops and its lease expires instead of being treated as done.
+function assertRpcResult<T>(data: unknown, rpcName: string): T {
+  if (data === null || data === undefined) throw new Error(`${rpcName} returned no data`);
+  return data as T;
+}
+
 async function sameSecret(given: string, expected: string): Promise<boolean> {
   const enc = new TextEncoder();
   const [a, b] = await Promise.all([
@@ -45,7 +52,7 @@ Deno.serve(async (req) => {
       rpc: async (fn, args) => {
         const { data, error } = await admin.rpc(fn, args);
         if (error) throw new Error(`${fn}: ${error.message}`);
-        return data;
+        return assertRpcResult<unknown>(data, fn);
       },
       send: (request) => sendViaResend(request, resendKey),
       from: Deno.env.get("FROM_EMAIL") || "noreply@croprxsolutions.app",

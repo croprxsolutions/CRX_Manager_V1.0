@@ -16,7 +16,8 @@
  *   3. the candidate applies as one transaction and prints POSTFLIGHT_OK; each replaced body differs
  *      from the replayed one only on the marked lines;
  *   4. AFTER: the same table, checked exactly: the whole-job applicator keeps a scheduled or in-progress
- *      job and a completed/invoiced one scheduled in the last 7 days, and loses the rest; a dispatch-only
+ *      job and a completed/invoiced one scheduled within 7 days of today, and loses the rest (including one
+ *      completed long before its date); a dispatch-only
  *      applicator reads the rest of the job it is sent to but never a deleted one; drivers and entity
  *      recipients read only the addresses of customers they can already see; admin and sales rep get
  *      exactly what they got before;
@@ -56,6 +57,8 @@ const JOBS = {
   8: { who: OFF, status: 'scheduled', days: 0, note: 'deactivated applicator' },
   9: { who: null, dispatch: D, status: 'scheduled', days: 0, note: 'dispatch-only' },
   10: { who: null, dispatch: D, status: 'scheduled', days: 0, deleted: true, note: 'dispatch-only, deleted' },
+  // 11 is the driver's delivery customer, so the next job case is 12.
+  12: { who: W, status: 'completed', days: 30, note: 'completed early, dated in 30 days' },
 };
 const uid = (n) => id(String(n));
 const today = "((now() AT TIME ZONE 'America/Chicago')::date)";
@@ -154,7 +157,7 @@ const canAttach = (who, n) => probe(who, `BEGIN SET LOCAL ROLE authenticated;
   RAISE EXCEPTION 'PROBE_OK';
   EXCEPTION WHEN OTHERS THEN v := CASE WHEN SQLERRM = 'PROBE_OK' THEN 'yes' WHEN SQLERRM ~ 'row-level security' THEN 'no' ELSE 'ERR:' || SQLERRM END; END;`);
 
-const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7], D: [9, 10], X: [1], OFF: [8] };
+const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12], D: [9, 10], X: [1], OFF: [8] };
 function snapshot() {
   const reads = Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)]));
   const fns = {};
@@ -215,8 +218,8 @@ try {
   const after = snapshot();
   print('AFTER', after);
   for (const r of ['admin', 'rep']) assert.deepEqual(after.reads[r], before.reads[r], `${r} reads must not change`);
-  const all = '1,2,3,4,5,6,7,8,9,10';
-  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: `${all},11`, addresses: `${all},11`,
+  const all = '1,2,3,4,5,6,7,8,9,10,12';
+  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12", addresses: "1,2,3,4,5,6,7,8,9,10,11,12",
     shares: all, applied_info: all, records: all, record_fields: all, record_crew: all, attachments: all, photos: all });
   const job = (s) => ({ jobs: s, job_fields: s, shares: s, applied_info: s, records: s, record_fields: s, record_crew: s, attachments: s, photos: s });
   assert.deepEqual(after.reads.W, { ...job('1,2,6'), fields: '1,2,6', customers: '1,2,6', addresses: '1,2,6' }, 'whole-job applicator keeps only current jobs');
@@ -227,11 +230,11 @@ try {
   // Calls: start/complete/offline/print/map/billed. The whole-job leg follows the window; dispatch never reaches a deleted job.
   const yes = 'yes yes yes yes yes yes', no = 'no no no no no no';
   assert.deepEqual(after.fns, {
-    'W job 1': yes, 'W job 2': yes, 'W job 3': no, 'W job 4': no, 'W job 5': no, 'W job 6': yes, 'W job 7': no,
+    'W job 1': yes, 'W job 2': yes, 'W job 3': no, 'W job 4': no, 'W job 5': no, 'W job 6': yes, 'W job 7': no, 'W job 12': no,
     'D job 9': yes, 'D job 10': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
   });
   // "<dispatched list> <dispatch board>" per applicator; the board never showed deleted jobs.
-  assert.deepEqual(before.dispatchLists, { W: '- 1,2,3,4,6', D: '9 9' });
+  assert.deepEqual(before.dispatchLists, { W: '- 1,12,2,3,4,6', D: '9 9' }); // text order
   assert.deepEqual(after.dispatchLists, { W: '- 1,2,6', D: '9 9' }, 'the board drops the ended jobs');
   assert.deepEqual(before.attach, { 'W job 1': 'yes', 'W job 4': 'yes', 'D job 9': 'no' }, 'before: the whole-job applicator writes to a cancelled job');
   assert.deepEqual(after.attach, { 'W job 1': 'yes', 'W job 4': 'no', 'D job 9': 'no' }, 'writes reaching the job through jobs inherit the window; dispatch stays read-only');

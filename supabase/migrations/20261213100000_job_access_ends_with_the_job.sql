@@ -31,7 +31,7 @@
 -- HOW:
 --   * NEW public._is_job_applicator(job id): the caller is an active applicator, is the job's whole-job
 --     applicator, the job is not soft-deleted, and the job is scheduled or in progress, or completed or
---     invoiced with a scheduled date (job_date) within the last 7 days (Central). Cancelled: never.
+--     invoiced with a scheduled date (job_date) within 7 days of today, either side (Central). Cancelled: never.
 --     The clock is job_date, not updated_at or actual_end_time: printing a job (stamp_job_printed, open
 --     to the applicator) bumps updated_at, and actual_end_time is typed by the applicator, so either
 --     would let the applicator keep the job open forever; only office staff change job_date. It is the
@@ -209,7 +209,8 @@ SET search_path = public, pg_temp
 AS $function$
   -- KI-73 part C: is the caller this job's whole-job applicator (jobs.applicator_id) while the job is
   -- current? is_applicator() requires an ACTIVE applicator profile. Never a soft-deleted or cancelled
-  -- job; a completed or invoiced job only while its scheduled date is within the last 7 days (Central).
+  -- job; a completed or invoiced job only while its scheduled date is within 7 days of today (Central),
+  -- either side, so a job completed long before its date does not stay open until that date.
   -- job_date is the clock because only office staff change it (DECISION_LOG 2026-10-25).
   SELECT public.is_applicator() AND EXISTS (
     SELECT 1
@@ -220,7 +221,8 @@ AS $function$
        AND (
          j.status IN ('scheduled', 'in_progress')
          OR (j.status IN ('completed', 'invoiced')
-             AND j.job_date >= ((now() AT TIME ZONE 'America/Chicago')::date - 7))
+             AND j.job_date BETWEEN ((now() AT TIME ZONE 'America/Chicago')::date - 7)
+                                AND ((now() AT TIME ZONE 'America/Chicago')::date + 7))
        )
   );
 $function$;
@@ -229,7 +231,7 @@ REVOKE ALL ON FUNCTION public._is_job_applicator(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public._is_job_applicator(uuid) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public._is_job_applicator(uuid) IS
-  'KI-73 part C: the caller is the active whole-job applicator of a job that is not deleted or cancelled, and is scheduled, in progress, or completed/invoiced with job_date in the last 7 days (Central).';
+  'KI-73 part C: the caller is the active whole-job applicator of a job that is not deleted or cancelled, and is scheduled, in progress, or completed/invoiced with job_date within 7 days of today, either side (Central).';
 
 -- The replaced functions (only the lines marked "KI-73 part C" differ from live). ----------------------
 CREATE OR REPLACE FUNCTION public._is_dispatched_to_me(p_job_id uuid)
@@ -2040,7 +2042,7 @@ BEGIN
        AND p.prosecdef AND p.provolatile = 's' AND p.prorettype = 'boolean'::regtype
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proconfig = ARRAY['search_path=public, pg_temp']
-       AND md5(replace(p.prosrc, chr(13), '')) = 'ad3f752c2197da16f17f89067e2a244f')
+       AND md5(replace(p.prosrc, chr(13), '')) = '72f2ae43ef9e277a406f80c40a1a905d')
      OR has_function_privilege('anon', 'public._is_job_applicator(uuid)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public._is_job_applicator(uuid)', 'EXECUTE')
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a

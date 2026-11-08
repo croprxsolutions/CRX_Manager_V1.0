@@ -19,7 +19,8 @@ assignment is current.
 ### What changed
 
 * New `_is_job_applicator(job)`: the active whole-job applicator, job not deleted, and scheduled, in
-  progress, or completed/invoiced with `job_date` in the last 7 days (Central). Never cancelled. The
+  progress, or completed/invoiced with `job_date` within 7 days of today, either side (Central), so a job
+  completed long before its date does not stay open until then. Never cancelled. The
   clock is `job_date` because only office staff change it.
 * `jobs_select` uses it, and every policy that looks the job up through `jobs` inherits it. The
   eleven SECURITY DEFINER functions above change only their whole-job line.
@@ -30,11 +31,12 @@ assignment is current.
 
 ### Proof (disposable copy of the real schema, each role signed in)
 
-Whole-job applicator: 7 jobs before, 3 after (scheduled; completed 2 days ago; invoiced yesterday);
-loses completed 10 days ago, cancelled, and the two deleted ones in every table and function.
+Whole-job applicator: 8 jobs before, 3 after (scheduled; completed 2 days ago; invoiced yesterday);
+loses completed 10 days ago, one completed early but dated 30 days out, cancelled, and the two deleted
+ones in every table and function.
 Dispatch-only applicator: before 2 jobs and none of their records; after 1 job (not the deleted one)
-and all of its records. Driver: addresses 11 → 1 (their delivery customer). Entity recipient and an
-unassigned applicator: addresses 11 → 0. Admin and sales rep: identical before and after.
+and all of its records. Driver: addresses 12 → 1 (their delivery customer). Entity recipient and an
+unassigned applicator: addresses 12 → 0. Admin and sales rep: identical before and after.
 
 ### Not changed
 

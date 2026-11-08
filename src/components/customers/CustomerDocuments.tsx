@@ -220,7 +220,9 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       setEffectiveDate('');
       setExpirationDate('');
       setNotes('');
-      await loadDocuments();
+      // The new file is a current document: leave the removed view so the admin sees it.
+      if (showRemoved) setShowRemoved(false);
+      else await loadDocuments();
     } catch (error: unknown) {
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
         extra: { context: 'CustomerDocuments.upload' },
@@ -385,7 +387,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       <Card padding={false}>
         <div className="flex items-center justify-end gap-3 p-4 sm:p-5">
           {isAdmin && (
-            <Button type="button" variant="ghost" size="sm" icon={<Archive className="h-4 w-4" />} showChevron={false} aria-pressed={showRemoved} onClick={() => { setDocuments([]); setShowRemoved((current) => !current); }} className="min-h-11">
+            <Button type="button" variant="ghost" size="sm" icon={<Archive className="h-4 w-4" />} showChevron={false} onClick={() => { setDocuments([]); setShowRemoved((current) => !current); }} className="min-h-11">
               {showRemoved ? 'Show current documents' : 'Show removed documents'}
             </Button>
           )}
@@ -424,7 +426,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
                     <div className="flex shrink-0 gap-2">
                       <Button type="button" variant="secondary" size="sm" aria-label={`Download ${document.filename}`} loading={downloadingId === document.id} icon={<Download className="h-4 w-4" />} showChevron={false} onClick={() => void handleDownload(document)} className="min-h-11">Download</Button>
                       {document.deleted_at ? (
-                        isAdmin && <Button type="button" variant="secondary" size="sm" aria-label={`Restore ${document.filename}`} loading={restoringId === document.id} icon={<RotateCcw className="h-4 w-4" />} showChevron={false} onClick={() => void handleRestore(document)} className="min-h-11">Restore</Button>
+                        isAdmin && <Button type="button" variant="secondary" size="sm" aria-label={`Restore ${document.filename}`} loading={restoringId === document.id} disabled={restoringId !== null} icon={<RotateCcw className="h-4 w-4" />} showChevron={false} onClick={() => void handleRestore(document)} className="min-h-11">Restore</Button>
                       ) : canDelete && <Button type="button" variant="ghost" size="sm" icon={<Trash2 className="h-4 w-4" />} showChevron={false} onClick={() => setDocumentToDelete(document)} aria-label={`Remove ${document.filename}`} className="min-h-11 text-red-600 hover:text-red-700">Remove</Button>}
                     </div>
                   </div>

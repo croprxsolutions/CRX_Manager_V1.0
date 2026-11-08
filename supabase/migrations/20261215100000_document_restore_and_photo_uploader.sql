@@ -10,7 +10,7 @@
 --      sees only live rows, and is_admin() is false for them. The service role and the dashboard have no
 --      signed-in user, so is_admin() is false there too and they cannot restore through this path.
 --      The screen restores with a direct UPDATE under the existing admin policy (no new function).
---   2. KI-77 / KI-26. Delivery photo proof is tied to who took it, the way signatures are
+--   2. KI-77 / KI-26. Delivery photo proof is tied to who uploaded the file, the way signatures are
 --      (complete_delivery accepts only a signature image whose storage owner_id is the caller). A NEW
 --      trigger delivery_photos_uploader_guard (BEFORE INSERT OR UPDATE on delivery_photos):
 --        * INSERT by a signed-in user: uploaded_by must be that user, and the file the row names must be
@@ -27,7 +27,7 @@
 --
 -- ROLLBACK (its own reviewed migration): DROP TRIGGER delivery_photos_uploader_guard ON
 --   public.delivery_photos; DROP FUNCTION public._guard_delivery_photo_uploader(); and re-create
---   guard_customer_document_update from 20260717013415 (its search_path from 20260722111620).
+--   guard_customer_document_update and its COMMENT from 20260717013415 (its search_path from 20260722111620).
 --
 -- ORDERING: apply after every older pending migration.
 
@@ -42,6 +42,11 @@ BEGIN
                        AND tgfoid = 'public.guard_customer_document_update()'::regprocedure
                        AND NOT tgisinternal) THEN
     RAISE EXCEPTION 'DOC_RESTORE_PREFLIGHT: the customer document guard trigger is missing or moved';
+  END IF;
+  -- The body being replaced is the one 20260921180000 pinned; anything else is drift to look at first.
+  IF (SELECT md5(replace(prosrc, E'\r\n', E'\n')) FROM pg_proc WHERE oid = 'public.guard_customer_document_update()'::regprocedure)
+     IS DISTINCT FROM '49056708bdd24900db157ef617d763b3' THEN
+    RAISE EXCEPTION 'DOC_RESTORE_PREFLIGHT: guard_customer_document_update is not the expected 20260717013415 body';
   END IF;
   IF to_regprocedure('public._guard_delivery_photo_uploader()') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.delivery_photos'::regclass
@@ -149,6 +154,8 @@ BEGIN
     RAISE EXCEPTION 'DELIVERY_PHOTO_FILE_NOT_YOURS: the photo file must be one you uploaded'
       USING ERRCODE = '23514';
   END IF;
+  -- The file's folder is not checked here: complete_delivery accepts only a photo in its own delivery's
+  -- folder, and smoke-delivery-completion-evidence.sql files misplaced rows on purpose to prove that.
   NEW.uploaded_at := now();
   RETURN NEW;
 END;

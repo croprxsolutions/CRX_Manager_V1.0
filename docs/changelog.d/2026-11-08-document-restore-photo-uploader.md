@@ -1,4 +1,4 @@
-## 2026-11-08 — Admins can reopen and restore removed customer documents; delivery photos are tied to who took them
+## 2026-11-08 — Admins can reopen and restore removed customer documents; delivery photos are tied to who uploaded them
 
 - KI-07: on a customer's Documents tab an admin can switch to "Show removed documents", download a removed
   document and restore it. The `customer-document-files` Edge Function serves a removed document to an admin

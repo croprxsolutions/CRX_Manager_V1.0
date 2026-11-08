@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeLoaderWorksheet, type LoaderProductInput } from './loaderWorksheet';
-import { loaderLoadWeights, loaderWeightCaption, sourceAmount, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
+import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, sourceAmount, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
 import type { JobLoaderWorksheetWeight, WeightUnitFactors } from '../types';
 
 // Hand-checked values from the DM-2 build sheet, section 4.3.
@@ -125,5 +125,26 @@ describe('loaderLoadWeights', () => {
     expect(result.loads[0].cells[0].weightText).toBe('TEST Liquid: weights unavailable');
     expect(result.loads[0].cells[0].mark).toBeNull();
     expect(result.anyCurrent).toBe(false);
+  });
+});
+
+describe('loaderGroupWeightText', () => {
+  const cell = (lb: number) => ({ amountCell: '10', weight: { lb }, weightText: `${lb.toFixed(2)} lb`, mark: null });
+  const load = (lb: number) => ({ cells: [cell(lb)], totalText: `Product weight: ${lb.toFixed(2)} lb`, totalLb: lb });
+  const weights = { loads: [load(80), load(80.01), load(80)], anyCurrent: false };
+
+  it('shows one weight when every load in a condensed group weighs the same', () => {
+    expect(loaderGroupWeightText(weights, [0, 2], 0)).toBe('80.00 lb');
+    expect(loaderGroupWeightText(weights, [0, 2], 'total')).toBe('Product weight: 80.00 lb');
+  });
+
+  it('shows lowest to highest when grouped loads differ, never the first load\'s weight for all', () => {
+    expect(loaderGroupWeightText(weights, [1, 0, 2], 0)).toBe('80.00–80.01 lb');
+    expect(loaderGroupWeightText(weights, [0, 1, 2], 'total')).toBe('Product weight: 80.00–80.01 lb');
+  });
+
+  it('lists differing reasons instead of a range when a load has no weight', () => {
+    const withheld = { loads: [load(80), { cells: [cell(80)], totalText: 'Product weight not shown: X', totalLb: null }], anyCurrent: false };
+    expect(loaderGroupWeightText(withheld, [0, 1], 'total')).toBe('Product weight: 80.00 lb; Product weight not shown: X');
   });
 });

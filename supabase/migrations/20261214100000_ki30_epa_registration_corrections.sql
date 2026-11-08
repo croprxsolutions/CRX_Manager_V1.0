@@ -7,15 +7,17 @@
 -- a person to read the jug are left alone. Mason chose this reviewed migration over hand edits (2026-11-08).
 --
 -- WHAT: sets products.epa_registration (and updated_at) on exactly these 48 rows. A row changes only when
--- its stored number (blank counted as empty) still equals the measured value below; if any of the 48 has
+-- its name and stored number (exactly; blank means NULL or empty text) still equal the measured values below,
+-- checked under a row lock; if any of the 48 has
 -- moved, been deleted or joined a product family, nothing changes and the migration stops. The existing
 -- trigger write_product_change_history records each change (old and new number) in product_change_history.
 -- Saved records keep their own copy: invoice lines (the two affected are drafts with no number) and
 -- sprayed-job copies in job_product_epa (none for these products) are not touched.
 -- No schema, function, grant or policy change.
 --
--- ROLLBACK: set each listed product back to its measured value (old_epa below; a blank one goes back to
--- NULL) with the same guard in reverse (the stored number must still equal new_epa). product_change_history
+-- ROLLBACK: set each listed product back to its measured value (old_epa below) with the same guard in reverse
+-- (the stored number must still equal new_epa). The 8 blank ones go back to NULL: on 2026-11-08 five were
+-- NULL and three empty text, which the app and every EPA check treat alike as "no number". product_change_history
 -- keeps each row's old and new number (field_name = 'epa_registration', change_type 'updated').
 
 SET LOCAL lock_timeout = '10s';
@@ -86,12 +88,17 @@ BEGIN
     RAISE EXCEPTION 'KI30_BAD_TARGET: a new number is malformed or unchanged';
   END IF;
 
-  -- Every row must still be exactly as measured: same product, same name, same stored number, not in a family.
+  -- Lock the listed rows first, so nobody can rename them, change their number or add them to a family
+  -- (product_parent_members.product_id is a foreign key, so that insert waits on this lock) until commit.
+  PERFORM 1 FROM public.products p WHERE p.id IN (SELECT id FROM ki30_epa_fix) ORDER BY p.id FOR UPDATE;
+
+  -- Every row must still be exactly as measured: same product, same name, same stored number (exactly; a
+  -- blank means NULL or empty text), not in a family.
   SELECT string_agg(f.product_name, ', ' ORDER BY f.product_name) INTO v_bad
     FROM ki30_epa_fix f LEFT JOIN public.products p ON p.id = f.id
    WHERE p.id IS NULL
       OR p.product_name IS DISTINCT FROM f.product_name
-      OR COALESCE(btrim(p.epa_registration), '') <> f.old_epa
+      OR COALESCE(p.epa_registration, '') <> f.old_epa
       OR EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'KI30_ROW_MOVED: these products no longer match the reviewed list, nothing was changed: %', v_bad;
@@ -100,7 +107,8 @@ BEGIN
   UPDATE public.products p
      SET epa_registration = f.new_epa, updated_at = now()
     FROM ki30_epa_fix f
-   WHERE p.id = f.id AND COALESCE(btrim(p.epa_registration), '') = f.old_epa;
+   WHERE p.id = f.id AND p.product_name = f.product_name AND COALESCE(p.epa_registration, '') = f.old_epa
+     AND NOT EXISTS (SELECT 1 FROM public.product_parent_members m WHERE m.product_id = f.id);
   GET DIAGNOSTICS v_done = ROW_COUNT;
   IF v_done <> v_expected THEN
     RAISE EXCEPTION 'KI30_UPDATE_COUNT: updated % of % rows', v_done, v_expected;

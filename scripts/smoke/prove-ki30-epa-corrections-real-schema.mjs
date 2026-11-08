@@ -280,6 +280,12 @@ async function main() {
   raw(`UPDATE public.products SET id = '${gone.pid}' WHERE id = '${PARKED_ID}';`);
   console.log('[prover] case 3: a missing product refuses');
 
+  // 3b. The stored number must match exactly: the same number with stray spaces refuses.
+  raw(`UPDATE public.products SET epa_registration = ${q(` ${pick.old} `)} WHERE id = '${pick.pid}';`);
+  refusedApply(/KI30_ROW_MOVED/);
+  raw(`UPDATE public.products SET epa_registration = ${q(pick.old)} WHERE id = '${pick.pid}';`);
+  console.log('[prover] case 3b: a padded stored number refuses');
+
   // 4. The real apply with every live trigger on: all 48 change, each logged once, nothing else moves.
   assert.equal(snapshot().split('|')[1], scalar('SELECT count(*) FROM public.product_change_history;'));
   const historyBefore = Number(scalar('SELECT count(*) FROM public.product_change_history;'));

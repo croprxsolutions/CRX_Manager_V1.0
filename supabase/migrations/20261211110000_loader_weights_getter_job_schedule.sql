@@ -104,7 +104,7 @@ DECLARE
   v_fn regprocedure := 'public.get_loader_worksheet_weights(uuid[],uuid[])'::regprocedure;
 BEGIN
   IF (SELECT provolatile <> 's' OR prosecdef OR proowner <> 'postgres'::regrole
-        OR proacl::text <> '{postgres=X/postgres,authenticated=X/postgres}'
+        OR proacl::text IS DISTINCT FROM '{postgres=X/postgres,authenticated=X/postgres}'
         OR proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
       FROM pg_proc WHERE oid = v_fn) THEN
     RAISE EXCEPTION 'get_loader_worksheet_weights: volatility, security, owner, grants or search_path changed';

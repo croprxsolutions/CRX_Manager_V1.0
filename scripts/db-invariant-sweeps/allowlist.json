@@ -1783,9 +1783,9 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_loader_worksheet_weights(p_worksheet_ids uuid[], p_job_ids uuid[])#d32e81b918b7",
-      "justification": "New in 20261207100000_product_weights (DM-2, PR #1620, ledger 20261107180143), read live 2026-11-07 after the apply: SAFE. SECURITY INVOKER (prosecdef false), STABLE, search_path public, pg_temp; EXECUTE to authenticated only. It runs with the caller's own table and column privileges and RLS, so it cannot return anything the caller could not already select. It reads job_loader_worksheets (whole row; no cost or margin column, live information_schema read 2026-11-07), vehicles.vehicle_name, job_fields.acres_to_treat, job_chemicals quantity and unit, products name and form, and job_loader_worksheet_weights; the current weights come from get_product_weights, which returns weights and unit factors only. No cost, price or margin field is returned. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
-      "dated": "2026-11-07"
+      "violation_key": "get_loader_worksheet_weights(p_worksheet_ids uuid[], p_job_ids uuid[])#b3350b6c87b0",
+      "justification": "New in 20261207100000_product_weights (DM-2, PR #1620, ledger 20261107180143), read live 2026-11-07 after the apply: SAFE. SECURITY INVOKER (prosecdef false), STABLE, search_path public, pg_temp; EXECUTE to authenticated only. It runs with the caller's own table and column privileges and RLS, so it cannot return anything the caller could not already select. It reads job_loader_worksheets (whole row; no cost or margin column, live information_schema read 2026-11-07), vehicles.vehicle_name, job_fields.acres_to_treat, job_chemicals quantity and unit, products name and form, and job_loader_worksheet_weights; the current weights come from get_product_weights, which returns weights and unit factors only. No cost, price or margin field is returned. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-08 after 20261211110000_loader_weights_getter_job_schedule (PR #1643, ledger 20261108191256) was applied: the job object now also returns job_date, scheduled_time and applicator_id from jobs; still SECURITY INVOKER, STABLE, EXECUTE to authenticated only (read live after the apply), and no cost, price or margin field is returned.",
+      "dated": "2026-11-08"
     },
     {
       "predicate": "cost-exposure-review",

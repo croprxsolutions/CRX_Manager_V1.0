@@ -96,19 +96,6 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     });
   }
 
-  // Resolve applicator names via the public profile view (never a profiles embed).
-  const applicatorIds = [...new Set(rows.map((r) => r.applicator_id).filter((x): x is string => !!x))];
-  const nameById = new Map<string, string>();
-  if (applicatorIds.length > 0) {
-    const { data: profs } = await supabase
-      .from('profile_public_view')
-      .select('id, full_name')
-      .in('id', applicatorIds);
-    ((profs || []) as Array<{ id: string; full_name: string | null }>).forEach((p) => {
-      if (p.full_name) nameById.set(p.id, p.full_name);
-    });
-  }
-
   // Billed customers per job via the SECURITY DEFINER RPC (saved job_field_shares →
   // field_billing_defaults → primary customer_id), which resolves the CO-billed
   // customers an applicator's customers_select RLS hides. Resolved per job (the RPC
@@ -133,16 +120,31 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     weights = null;
   }
 
+  // Resolve applicator names via the public profile view (never a profiles embed).
+  // After the getter: a page built from its read names that read's applicator, which may differ from the jobs read.
+  const applicatorIds = [...new Set([...rows.map((r) => r.applicator_id), ...[...(weights?.jobs.values() ?? [])].map((j) => j.job?.applicator_id)]
+    .filter((x): x is string => !!x))];
+  const nameById = new Map<string, string>();
+  if (applicatorIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profile_public_view')
+      .select('id, full_name')
+      .in('id', applicatorIds);
+    ((profs || []) as Array<{ id: string; full_name: string | null }>).forEach((p) => {
+      if (p.full_name) nameById.set(p.id, p.full_name);
+    });
+  }
+
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Preserve the caller's order; skip any id that didn't come back.
   return jobIds
     .map((jid) => byId.get(jid))
     .filter((r): r is LoaderJobRow => !!r)
     .map((r) => {
-      const base = { applicator_name: r.applicator_id ? (nameById.get(r.applicator_id) ?? null) : null, customers: customersByJob.get(r.id) ?? [] };
+      const customers = customersByJob.get(r.id) ?? [];
       const job = weights?.jobs.get(r.id);
-      if (weights && job?.found && job.job) return { ...mapGetterJobToPdfData(r, job, weights), ...base };
-      const fallback = mapRowToPdfData(r, nameById, base.customers, selectedWorksheetByJob.get(r.id), worksheetVehicleNameById);
+      if (weights && job?.found && job.job) return { ...mapGetterJobToPdfData(job, weights, nameById), customers };
+      const fallback = mapRowToPdfData(r, nameById, customers, selectedWorksheetByJob.get(r.id), worksheetVehicleNameById);
       // The job's own lines go along, so a bad amount still prints its reason (never a negative or 0) without weights.
       const sourceLines = (r.job_chemicals || []).map(({ id, product_id, quantity, unit }) => ({ id, product_id, quantity, unit }));
       return { ...fallback, weights: { byProductId: {}, currentUnits: { factors: {}, ambiguous: [] }, sourceLines, saved: false,
@@ -150,8 +152,8 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     });
 }
 
-/** One job's page built from the getter's one read: settings, vehicle, acres, lines and weights together. */
-function mapGetterJobToPdfData(r: LoaderJobRow, entry: LoaderGetterJob, weights: LoaderJobWeights): LoaderWorksheetPdfData {
+/** One job's page built from the getter's one read: date, applicator, settings, vehicle, acres, lines and weights together. */
+function mapGetterJobToPdfData(entry: LoaderGetterJob, weights: LoaderJobWeights, nameById: Map<string, string>): LoaderWorksheetPdfData {
   const job = entry.job!;
   const selected = entry.worksheet?.worksheet;
   const legacy = legacyCapacity(job.loader_tank_capacity, job.vehicle);
@@ -159,9 +161,9 @@ function mapGetterJobToPdfData(r: LoaderJobRow, entry: LoaderGetterJob, weights:
   return {
     job_number: job.job_number,
     customers: [],
-    scheduled_date: r.job_date,
-    scheduled_time: r.scheduled_time,
-    applicator_name: null,
+    scheduled_date: job.job_date,
+    scheduled_time: job.scheduled_time,
+    applicator_name: job.applicator_id ? (nameById.get(job.applicator_id) ?? null) : null,
     vehicle_name: entry.worksheet ? entry.worksheet.vehicle_name : job.vehicle?.vehicle_name ?? null,
     total_acres: Number(entry.acres ?? 0),
     carrier_rate_gpa: selected ? selected.carrier_rate_gpa : job.carrier_rate_gpa,

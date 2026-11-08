@@ -9,13 +9,13 @@ Use this skill for structure and connection questions, not for a simple single-f
 
 ## Who calls this database function or table? Search first
 
-Ripgrep answers this faster and more reliably than the graph, which is often stale and holds every historical copy of each function. Run these in Bash (Git Bash), not PowerShell, which has no `tail` and quotes differently. Replace `<name>` and `<table>`:
+Ripgrep answers this faster and more reliably than the graph, which is often stale and holds every historical copy of each function. Run these in Bash (Git Bash), not PowerShell, which quotes these patterns differently. Replace `<name>` and `<table>`:
 
 ```bash
 rg -n "\.rpc\(\s*['\"]<name>['\"]" src supabase/functions
 rg -n "['\"\`]<name>['\"\`]" src supabase/functions
-rg -n -i "FUNCTION\s+(public\.)?<name>\s*\(" supabase/migrations | sort
-rg -l -i "<name>\s*\(" supabase/migrations | sort | tail -5
+rg -n -i "(CREATE( OR REPLACE)?|DROP) FUNCTION( IF EXISTS)?\s+(public\.)?<name>\s*\(" supabase/migrations | sort
+rg -l -i "<name>\s*\(" supabase/migrations | sort
 rg -n "\.from\(\s*['\"]<table>['\"]" src supabase/functions
 ```
 

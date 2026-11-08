@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-07",
+    "generated_at": "2026-11-08",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261107224146",
+    "migrations_high_water": "20261108003926",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -551,6 +551,7 @@
       "20261207113000_parent_epa_correction",
       "20261208100000_ki18_batch3_aging_ranges_and_chicago_default",
       "20261209100000_product_chemistry",
+      "20261210100000_epa_registrations",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1312,6 +1313,16 @@
       "failed",
       "bounced"
     ],
+    "epa_registrations.registration_status": [
+      "active",
+      "cancelled",
+      "unknown"
+    ],
+    "epa_registrations.rup_status": [
+      "yes",
+      "no",
+      "unknown"
+    ],
     "invoices.status": [
       "draft",
       "unposted",
@@ -1532,6 +1543,7 @@
     "delivery_items",
     "delivery_photos",
     "email_log",
+    "epa_registration_events",
     "field_app_billing_lines",
     "field_app_billing_sets",
     "field_app_location_shares",
@@ -2125,6 +2137,49 @@
       "constraints": [
         "email_log_status_check"
       ]
+    },
+    "epa_registration_events.event_type": {
+      "values": [
+        "seeded",
+        "created",
+        "updated",
+        "assigned",
+        "draft_committed"
+      ],
+      "constraints": [
+        "epa_registration_events_event_type_check"
+      ]
+    },
+    "epa_registrations.registration_status": {
+      "values": [
+        "active",
+        "cancelled",
+        "unknown"
+      ],
+      "constraints": [
+        "epa_registrations_registration_status_check"
+      ]
+    },
+    "epa_registrations.rup_status": {
+      "values": [
+        "yes",
+        "no",
+        "unknown"
+      ],
+      "constraints": [
+        "epa_registrations_rup_status_check"
+      ]
+    },
+    "epa_registrations.signal_word": {
+      "values": [
+        "Danger",
+        "Warning",
+        "Caution"
+      ],
+      "constraints": [
+        "epa_registrations_signal_word_check"
+      ],
+      "nullable": true
     },
     "field_app_billing_lines.line_kind": {
       "values": [
@@ -4044,6 +4099,72 @@
       "table": "delivery_remainders",
       "constraint": "delivery_remainders_quantity_remaining_check",
       "def": "CHECK ((quantity_remaining > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_check",
+      "def": "CHECK (((registration_status = 'cancelled'::text) = (cancelled_on IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_epa_registration_check",
+      "def": "CHECK ((epa_registration ~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_label_adjuvants_check",
+      "def": "CHECK (_epa_label_adjuvants_valid(label_adjuvants))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_label_url_check",
+      "def": "CHECK (((label_url IS NULL) OR ((label_url ~ '^https://[^[:space:]]+$'::text) AND (length(label_url) <= 2000))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_max_label_rate_check",
+      "def": "CHECK (((max_label_rate IS NULL) OR ((max_label_rate >= (0)::numeric) AND (max_label_rate < 'Infinity'::numeric))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_max_label_rate_unit_check",
+      "def": "CHECK (((max_label_rate_unit IS NULL) OR ((btrim(max_label_rate_unit) <> ''::text) AND (length(max_label_rate_unit) <= 40))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_phi_days_check",
+      "def": "CHECK (((phi_days IS NULL) OR (phi_days >= 0)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_rate_unit_pair",
+      "def": "CHECK (((max_label_rate IS NULL) = (max_label_rate_unit IS NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_registration_version_check",
+      "def": "CHECK ((registration_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_rei_hours_check",
+      "def": "CHECK (((rei_hours IS NULL) OR (rei_hours >= 0)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registrations",
+      "constraint": "epa_registrations_source_check",
+      "def": "CHECK (((source IS NULL) OR ((btrim(source) <> ''::text) AND (length(source) <= 500))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6243,6 +6364,32 @@
         "status"
       ]
     },
+    "epa_registration_events": {
+      "no_default": [
+        "epa_registration",
+        "event_type",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "affected",
+        "changed_at"
+      ]
+    },
+    "epa_registrations": {
+      "no_default": [
+        "epa_registration",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "registration_status",
+        "rup_status",
+        "registration_version",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "external_identities": {
       "no_default": [
         "customer_id",
@@ -6840,6 +6987,17 @@
         "updated_at",
         "priority",
         "applied_acres"
+      ]
+    },
+    "label_draft_targets": {
+      "no_default": [
+        "draft_id",
+        "product_id",
+        "product_label_fingerprint",
+        "proposed_values"
+      ],
+      "with_default": [
+        "updated_at"
       ]
     },
     "legacy_vendor_resolution": {
@@ -9010,6 +9168,39 @@
       "created_at",
       "send_lock_key"
     ],
+    "epa_registration_events": [
+      "id",
+      "epa_registration",
+      "event_type",
+      "reason",
+      "before_values",
+      "after_values",
+      "affected",
+      "changed_by",
+      "changed_by_name",
+      "changed_at"
+    ],
+    "epa_registrations": [
+      "epa_registration",
+      "registration_status",
+      "cancelled_on",
+      "label_url",
+      "label_accepted_on",
+      "source",
+      "checked_at",
+      "signal_word",
+      "rup_status",
+      "rei_hours",
+      "phi_days",
+      "max_label_rate",
+      "max_label_rate_unit",
+      "label_adjuvants",
+      "registration_version",
+      "created_by",
+      "created_at",
+      "updated_by",
+      "updated_at"
+    ],
     "external_identities": [
       "id",
       "customer_id",
@@ -9736,6 +9927,16 @@
       "carrier_rate_gpa",
       "loader_tank_capacity",
       "commission_split"
+    ],
+    "label_draft_targets": [
+      "draft_id",
+      "epa_registration",
+      "product_epa_registration",
+      "product_id",
+      "product_label_fingerprint",
+      "registration_version",
+      "proposed_values",
+      "updated_at"
     ],
     "legacy_vendor_resolution": [
       "id",

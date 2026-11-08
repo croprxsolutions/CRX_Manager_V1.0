@@ -633,9 +633,15 @@ quote changes the tier label without repricing its locked lines.
 ## Database and release process
 
 ### KI-35 — Live ledger vs files on `main` is checked only by noticing
-**MED · UNVERIFIED · process/database · unassigned**
-Nothing automatically compares migrations applied live with migration files on `main` (four past mismatches). The
-live ledger also has older entries with no file (ACCEPTED, pre-existing drift; see KI-62).
+**MED · FIXED (tool), run by hand · process/database · unassigned**
+Nothing compared migrations applied live with migration files on `main` (four past mismatches). Now
+`npm run db-drift:live` (`scripts/check-migration-drift.mjs`, read-only) lists live rows with no file on `main`, files
+on `main` never applied (parked drafts named in `scripts/migration-drift-allowlist.json` are shown apart), and live
+rows whose name or SQL differs from the file (whole-line comments ignored). It reuses the pending-set guard's row
+matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version.
+First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared, all matching; one row with no
+file, `20261214100000_ki30_epa_registration_corrections`, applied before its PR #1653 merged (clean against that
+branch). Not yet scheduled: it needs Mason's PC token, so run it after each live apply or merge.
 
 ### KI-36 — A table lock does not serialize the OLD body of a replaced function
 **MED (rule) · ACCEPTED as guidance (same as KI-61) · database · Mason (2026-09-03)**
@@ -977,7 +983,7 @@ service-role tools (LOW).
 
 KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
-(live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
+(live-data counts), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.
 
 ---

@@ -421,3 +421,13 @@ Deno.test("only an unlisted, unmoved distributor number falls back to its base",
     false,
   );
 });
+
+Deno.test("a move wins when EPA lists the old record next to its replacement", () => {
+  const result = normalizeEpaPayload(
+    { items: [{ eparegno: "524-475", productname: "OLD" }, ...MOVED_PAYLOAD.items] },
+    "section3",
+    "524-475",
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.transferredTo, "105211-77");
+});

@@ -205,32 +205,38 @@ export function normalizeEpaPayload(
 
   if (payload.items.length === 0) return notFoundResult(regType);
 
+  // EPA answers a moved number with the new registration, listing the old one in
+  // transfer_history; a move wins even if the old record is listed too.
   let item = payload.items.find((candidate) =>
     isRecord(candidate) &&
-    cleanString(candidate.eparegno, 50) === requestedRegNumber
+    cleanString(candidate.eparegno, 50) !== requestedRegNumber &&
+    Array.isArray(candidate.transfer_history) &&
+    candidate.transfer_history.some((entry) =>
+      isRecord(entry) &&
+      cleanString(entry.previous_eparegno, 50) === requestedRegNumber
+    )
   );
   let transferredTo: string | null = null;
-  if (!isRecord(item)) {
-    // EPA answers a moved number with the new registration, listing the old one in transfer_history.
+  if (isRecord(item)) {
+    const newRegistration = classifyRegistrationNumber(
+      cleanString(item.eparegno, 50),
+    );
+    if (!newRegistration.supported) {
+      throw new Error("EPA response registration did not match the request");
+    }
+    transferredTo = newRegistration.normalized;
+  } else {
     item = payload.items.find((candidate) =>
       isRecord(candidate) &&
-      Array.isArray(candidate.transfer_history) &&
-      candidate.transfer_history.some((entry) =>
-        isRecord(entry) &&
-        cleanString(entry.previous_eparegno, 50) === requestedRegNumber
-      )
+      cleanString(candidate.eparegno, 50) === requestedRegNumber
     );
     // A distributor number EPA does not list here still goes on to the exact search.
     if (!isRecord(item) && regType === "distributor") {
       return notFoundResult(regType);
     }
-    const newRegistration = isRecord(item)
-      ? classifyRegistrationNumber(cleanString(item.eparegno, 50))
-      : null;
-    if (!isRecord(item) || !newRegistration?.supported) {
+    if (!isRecord(item)) {
       throw new Error("EPA response registration did not match the request");
     }
-    transferredTo = newRegistration.normalized;
   }
 
   const signalWord = normalizeSignalWord(item.signal_word);

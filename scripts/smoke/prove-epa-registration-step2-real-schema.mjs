@@ -473,6 +473,9 @@ async function main() {
   const set2 = okJ(ADMIN, SET('400-4', null, { rup_status: 'no', signal_word: 'Caution' }, 'k-set2'));
   assert.equal(set2.event_type, 'created');
   refused(ADMIN, SET('0400-4', null, { rup_status: 'no' }, 'k-set3'), /EPA_REGISTRATION_NUMBER_INVALID/);
+  // Any decimal rate the products column can hold is a valid fact (Sol r1: the seed must not refuse what its preview shows).
+  okJ(ADMIN, SET('400-4', 1, { max_label_rate: 0.1234567, max_label_rate_unit: 'fl oz/A' }, 'k-set4'));
+  assert.equal(String(reg('400-4').max_label_rate), '0.1234567');
   refused(ADMIN, `SELECT public.assign_epa_registration('products', '${P5}', '400-4', NULL, 'x', 1, 'r', NULL, 'k-a1');`, /EPA_REGISTRATION/);
   console.log('[prover] case 7: Edit registration refuses a non-admin, an old version and no change; it bumps the version, replays under its key, creates a new number and copies nothing to sizes; Change EPA number stays Step 1\'s stub');
 
@@ -567,6 +570,13 @@ async function main() {
   raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '999-9');`);
   assert.equal(reasons()[L6], 'restricted_use_to_record');
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  // A record covers a line only when it holds every line sharing its number, unit and price (Sol r1): a second
+  // same-price line beside L5 makes L5's record short, so both are listed, and neither once it is removed.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '${N2}');`);
+  const short = reasons();
+  assert.equal(short[L6], 'restricted_use_to_record'); assert.equal(short[L5], 'restricted_use_to_record');
+  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  assert.equal(reasons()[L5], undefined);
   // A record covers only its own price: with the second-price record voided, that line is listed and L5 is not.
   raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV1}' AND unit_price_cents = 1700;`);
   const check2 = reasons();

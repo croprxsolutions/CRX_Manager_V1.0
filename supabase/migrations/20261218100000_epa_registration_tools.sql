@@ -132,8 +132,9 @@ BEGIN
    WHERE jsonb_typeof(e.value) <> 'null' AND CASE
      WHEN e.key IN ('rei_hours', 'phi_days') THEN jsonb_typeof(e.value) <> 'number' OR e.value::text !~ '^[0-9]{1,9}$'
      WHEN e.key = 'max_label_rate' THEN NOT (
-       (jsonb_typeof(e.value) = 'number' AND e.value::text ~ '^[0-9]{1,12}(\.[0-9]{1,6})?$')
-       OR (jsonb_typeof(e.value) = 'string' AND e.value #>> '{}' ~ '^\s*[0-9]{1,12}(\.[0-9]{1,6})?\s*$'))
+       -- any non-negative decimal, like the unconstrained products column the seed copies from
+       (jsonb_typeof(e.value) = 'number' AND e.value::text ~ '^[0-9]+(\.[0-9]+)?$')
+       OR (jsonb_typeof(e.value) = 'string' AND e.value #>> '{}' ~ '^\s*[0-9]+(\.[0-9]+)?\s*$'))
      WHEN e.key = 'label_adjuvants' THEN jsonb_typeof(e.value) <> 'array'
      ELSE jsonb_typeof(e.value) <> 'string'
    END

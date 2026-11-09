@@ -71,15 +71,26 @@ $preflight$;
 -- ---------------------------------------------------------------------------------------------
 
 -- A posted line has its restricted-use record when an active record has its invoice, product, sold number,
--- unit and unit price (posting writes one per each).
+-- unit and unit price (posting writes one per each) and that record's quantity and amount are the sum of every
+-- line on the invoice sharing them (an older record written for only some of those lines does not count).
 CREATE FUNCTION public._rup_record_covers_line(p_line public.invoice_items) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT EXISTS (SELECT 1 FROM public.rup_sales_records s
+  SELECT EXISTS (SELECT 1
+                   FROM public.rup_sales_records s,
+                        LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
+                                   FROM public.invoice_items o
+                                  WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
+                                    AND public._normalize_epa_registration(o.epa_registration)
+                                        IS NOT DISTINCT FROM public._normalize_epa_registration(p_line.epa_registration)
+                                    AND o.unit_size IS NOT DISTINCT FROM p_line.unit_size
+                                    AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
                   WHERE s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
                     AND public._normalize_epa_registration(s.epa_registration)
                         IS NOT DISTINCT FROM public._normalize_epa_registration(p_line.epa_registration)
                     AND s.unit IS NOT DISTINCT FROM p_line.unit_size
-                    AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents);
+                    AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents
+                    AND s.quantity IS NOT DISTINCT FROM l.quantity
+                    AND s.total_cents IS NOT DISTINCT FROM l.total_cents);
 $function$;
 ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;

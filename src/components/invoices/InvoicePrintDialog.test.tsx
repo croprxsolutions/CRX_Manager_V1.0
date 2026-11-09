@@ -47,6 +47,12 @@ describe('InvoicePrintDialog', () => {
     expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: true }));
   });
 
+  it('calls a Bill Split table payer shares, since a landlord payer is not a grower', () => {
+    render(<InvoicePrintDialog {...defaultProps} invoiceType="chemical_sale" hasShares sharesOnByDefault />);
+    expect(screen.getByText('Show payer shares')).toBeInTheDocument();
+    expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();
+  });
+
   it('hides grower shares checkbox when hasShares=false', () => {
     render(<InvoicePrintDialog {...defaultProps} hasShares={false} />);
     expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();

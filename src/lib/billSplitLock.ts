@@ -36,27 +36,6 @@ export function billSplitLock(invoices: LockInvoice[], deliveries: LockDelivery[
 }
 
 /**
- * A card payer's live amount on the products so far: each line without its own split gives them
- * floor(line cents × percent), as the split writer does. Exact integer math (percent is numeric(9,6)).
- * Freight and other charges, and per-delivery rounding, can move the billed total by a few cents.
- */
-export function cardPayerLiveCents(
-  items: Array<{ id: string; total_price: number | null }>,
-  linesWithOwnSplit: Set<string>,
-  percent: number,
-): number {
-  const micro = BigInt(Math.round(percent * 1_000_000));
-  let total = 0n;
-  for (const it of items) {
-    if (it.total_price == null || linesWithOwnSplit.has(it.id)) continue;
-    // toPrecision first: 1.005 * 100 is 100.49999999999999 in floating point, and the database rounds it to 101.
-    const cents = Math.round(Number((it.total_price * 100).toPrecision(12)));
-    total += (BigInt(cents) * micro) / 100_000_000n;
-  }
-  return Number(total);
-}
-
-/**
  * Who may open the split editors. The delivery status doesn't close them: completing a delivery marks the sale
  * fulfilled or part-delivered, and a split the database refused to bill must stay fixable. billSplitLock decides.
  */
@@ -78,4 +57,37 @@ export function sharesLeft(percents: number[]): number {
 /** The shares' total for display, added exactly (millionths). */
 export function sharesTotal(percents: number[]): number {
   return percents.reduce((sum, p) => sum + Math.round(p * 1_000_000), 0) / 1_000_000;
+}
+
+/**
+ * Every card payer's live amount on the products, as _bill_split_line_shares bills each line without its own
+ * split: other payers get floor(cents x percent); the taker (the main customer, else the largest share, then
+ * the lowest id) gets the rest, including any share left off the card.
+ */
+export function cardLiveCents(
+  items: Array<{ id: string; total_price: number | null }>,
+  linesWithOwnSplit: Set<string>,
+  card: Array<{ customer_id: string; pct: number }>,
+  mainCustomerId: string,
+): Map<string, number> {
+  const micro = new Map<string, bigint>();
+  for (const s of card) micro.set(s.customer_id, (micro.get(s.customer_id) ?? 0n) + BigInt(Math.round(s.pct * 1_000_000)));
+  const named = [...micro.values()].reduce((a, b) => a + b, 0n);
+  micro.set(mainCustomerId, (micro.get(mainCustomerId) ?? 0n) + (100_000_000n - named));
+  const payers = [...micro.entries()].filter(([, m]) => m > 0n)
+    .sort(([a, ma], [b, mb]) => (Number(b === mainCustomerId) - Number(a === mainCustomerId)) || (mb > ma ? 1 : mb < ma ? -1 : 0) || (a < b ? -1 : 1));
+  const out = new Map<string, number>();
+  for (const it of items) {
+    if (it.total_price == null || linesWithOwnSplit.has(it.id)) continue;
+    // ponytail: float cents conversion holds to 12 significant digits (lines under $10 billion); use a decimal type past that.
+    const cents = BigInt(Math.round(Number((it.total_price * 100).toPrecision(12))));
+    let rest = cents;
+    for (const [id, m] of payers.slice(1)) {
+      const c = (cents * m) / 100_000_000n;
+      rest -= c;
+      out.set(id, (out.get(id) ?? 0) + Number(c));
+    }
+    if (payers.length) out.set(payers[0][0], (out.get(payers[0][0]) ?? 0) + Number(rest));
+  }
+  return out;
 }

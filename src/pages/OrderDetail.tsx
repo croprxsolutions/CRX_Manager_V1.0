@@ -48,7 +48,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
-import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from '../lib/billSplitLock';
+import { billSplitLock, canEditBillSplit, cardLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from '../lib/billSplitLock';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
@@ -1350,6 +1350,9 @@ export default function OrderDetail() {
   const splitLock = billSplitLock(invoices, deliveries);
   const sharesLocked = !!splitLock;
   const linesWithOwnSplit = new Set(lineShares.map((ls) => ls.order_item_id));
+  // Each card payer's live amount, the main customer with whatever is left, as the split writer bills it.
+  const cardLive = cardLiveCents(items, linesWithOwnSplit,
+    shares.map((sh) => ({ customer_id: sh.customer_id, pct: sh.split_percentage })), order?.customer_id ?? '');
   // The split editors follow the lock, not the delivery status: a split the database refused to bill stays open.
   const canEditSplit = canEditBillSplit(role, order?.status);
 
@@ -2077,7 +2080,7 @@ export default function OrderDetail() {
                       <p className="text-sm font-medium text-nav-dark">{share.customer_name}</p>
                       {/* Live, not the amount saved when the share was added: it follows price edits and line splits. */}
                       <p className="text-xs text-secondary">
-                        about {fmt(cardPayerLiveCents(items, linesWithOwnSplit, share.split_percentage) / 100)} of the products
+                        about {fmt((cardLive.get(share.customer_id) ?? 0) / 100)} of the products
                       </p>
                     </div>
                   </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from './billSplitLock';
+import { billSplitLock, canEditBillSplit, cardLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from './billSplitLock';
 
 const delivery = (over: Record<string, unknown> = {}) => ({
   id: 'd1', delivery_number: 'DEL-1', status: 'completed', deleted_at: null, ...over,
@@ -46,30 +46,21 @@ describe('billSplitLock (same order as _refuse_bill_split_change)', () => {
   });
 });
 
-describe('cardPayerLiveCents (each other payer: floor of their percent, per line)', () => {
-  const items = [{ id: 'a', total_price: 100 }, { id: 'b', total_price: 33.33 }];
-
+describe('cardLiveCents cents (each other payer: floor of their percent, per line)', () => {
+  const p2 = (items: Array<{ id: string; total_price: number | null }>, own: Set<string>, pct: number) =>
+    cardLiveCents(items, own, [{ customer_id: 'p2', pct }], 'main').get('p2') ?? 0;
   it('follows the card percent on lines without their own split', () => {
-    // floor(10000 * 0.4) + floor(3333 * 0.4) = 4000 + 1333
-    expect(cardPayerLiveCents(items, new Set(), 40)).toBe(5333);
+    expect(p2([{ id: 'a', total_price: 100 }, { id: 'b', total_price: 33.33 }], new Set(), 40)).toBe(5333);
   });
-
-  it('a line with its own split bills nothing through the card', () => {
-    expect(cardPayerLiveCents([{ id: 'a', total_price: 100 }], new Set(['a']), 40)).toBe(0);
-  });
-
   it('is exact on long percents (no float drift)', () => {
-    // 1999 * 33.333333 / 100 = 666.33... -> 666; 100 * 29 / 100 = 29 exactly
-    expect(cardPayerLiveCents([{ id: 'x', total_price: 19.99 }], new Set(), 33.333333)).toBe(666);
-    expect(cardPayerLiveCents([{ id: 'y', total_price: 1 }], new Set(), 29)).toBe(29);
+    expect(p2([{ id: 'x', total_price: 19.99 }], new Set(), 33.333333)).toBe(666);
+    expect(p2([{ id: 'y', total_price: 1 }], new Set(), 29)).toBe(29);
   });
-
   it('turns dollars into cents without float noise (1.005 is 101 cents, as the database rounds)', () => {
-    expect(cardPayerLiveCents([{ id: 'z', total_price: 1.005 }], new Set(), 100)).toBe(101);
+    expect(cardLiveCents([{ id: 'z', total_price: 1.005 }], new Set(), [], 'main').get('main')).toBe(101);
   });
-
   it('skips lines with no price yet', () => {
-    expect(cardPayerLiveCents([{ id: 'p', total_price: null }], new Set(), 50)).toBe(0);
+    expect(p2([{ id: 'p', total_price: null }], new Set(), 50)).toBe(0);
   });
 });
 
@@ -110,5 +101,28 @@ describe('sharesTotal (shown on the card)', () => {
   it('shows 100, not 100.00000000000001, for 0.2 + 83.9 + 15.9', () => {
     expect(sharesTotal([0.2, 83.9, 15.9])).toBe(100);
     expect(sharesTotal([33.333333, 33.333333])).toBe(66.666666);
+  });
+});
+
+describe('cardLiveCents (each card payer as the split writer bills them)', () => {
+  const line = [{ id: 'a', total_price: 100 }];
+  it('gives the main customer their share plus whatever is left', () => {
+    const m = cardLiveCents(line, new Set(), [{ customer_id: 'main', pct: 40 }, { customer_id: 'p2', pct: 30 }], 'main');
+    expect(m.get('main')).toBe(7000);
+    expect(m.get('p2')).toBe(3000);
+  });
+  it('gives the leftover cent to the main customer, others rounded down', () => {
+    const m = cardLiveCents([{ id: 'a', total_price: 0.03 }], new Set(), [{ customer_id: 'p2', pct: 50 }], 'main');
+    expect(m.get('p2')).toBe(1);
+    expect(m.get('main')).toBe(2);
+  });
+  it('with no main share and a full card, the largest share takes the leftover', () => {
+    const m = cardLiveCents([{ id: 'a', total_price: 0.03 }], new Set(), [{ customer_id: 'p2', pct: 60 }, { customer_id: 'p3', pct: 40 }], 'main');
+    expect(m.get('p2')).toBe(2);
+    expect(m.get('p3')).toBe(1);
+  });
+  it('skips lines with their own split', () => {
+    const m = cardLiveCents(line, new Set(['a']), [{ customer_id: 'p2', pct: 30 }], 'main');
+    expect(m.get('p2') ?? 0).toBe(0);
   });
 });

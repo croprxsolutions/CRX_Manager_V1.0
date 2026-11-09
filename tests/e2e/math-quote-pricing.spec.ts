@@ -118,45 +118,25 @@ async function getQuoteSummaryTotals(
 ): Promise<{ totalPrice: number; totalCost: number; totalProfit: number; marginPct: number }> {
   const result = { totalPrice: 0, totalCost: 0, totalProfit: 0, marginPct: 0 };
 
-  const labels = [
-    { key: 'totalPrice', text: 'Total Price' },
-    { key: 'totalCost', text: 'Total Cost' },
-    { key: 'totalProfit', text: 'Total Profit' },
-  ];
+  // The quote builder's summary strip: <section aria-label="Summary"> with dt label / dd value pairs.
+  // "Total cost" and "Profit · margin" show only to admins outside Customer view.
+  const summary = page.getByRole('region', { name: 'Summary' });
+  const figure = async (label: string): Promise<string | null> => {
+    const dd = summary.locator(`dt:text-is("${label}") + dd`).first();
+    const visible = await dd.isVisible({ timeout: 3000 }).catch(() => false);
+    return visible ? ((await dd.textContent()) ?? '').trim() : null;
+  };
 
-  for (const { key, text } of labels) {
-    const el = page.locator(`text=${text}`).first();
-    const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
-    if (visible) {
-      const parent = el.locator('..');
-      const valEl = parent.locator('.font-mono, .font-medium, .font-semibold').first();
-      const valVisible = await valEl.isVisible({ timeout: 2000 }).catch(() => false);
-      if (valVisible) {
-        const val = parseDollars(await valEl.textContent());
-        (result as Record<string, number>)[key] = val / 100; // dollars
-      }
-    }
-  }
-
-  // Margin
-  // IMPORTANT: 'text=X, text=Y' is NOT valid Playwright syntax — commas are not "or" for text=.
-  // QuoteBuilder uses "Overall Margin" as the label in the totals card.
-  // DO NOT add a plain 'text=Margin' fallback — it matches the "Margin" column header in the
-  // line-items <table> (which appears earlier in DOM order). The <th> parent is a <tr> with no
-  // .font-mono child, causing parent traversal to return nothing and marginPct to stay 0.
-  const marginEl = page
-    .locator('text=Overall Margin')
-    .or(page.locator('text=Avg Margin'))
-    .first();
-  const marginVisible = await marginEl.isVisible({ timeout: 3000 }).catch(() => false);
-  if (marginVisible) {
-    const parent = marginEl.locator('..');
-    const valEl = parent.locator('.font-mono, .font-medium').first();
-    const valVisible = await valEl.isVisible({ timeout: 2000 }).catch(() => false);
-    if (valVisible) {
-      const valText = ((await valEl.textContent()) ?? '').trim();
-      result.marginPct = parseFloat(valText.replace(/[^0-9.-]/g, '')) || 0;
-    }
+  const total = await figure('Quote total');
+  if (total !== null) result.totalPrice = parseDollars(total) / 100; // dollars
+  const cost = await figure('Total cost');
+  if (cost !== null) result.totalCost = parseDollars(cost) / 100;
+  // One cell holds both: "$1,234.56 · 17.7%".
+  const profitMargin = await figure('Profit · margin');
+  if (profitMargin !== null) {
+    const [profitText, marginText = ''] = profitMargin.split('·');
+    result.totalProfit = parseDollars(profitText) / 100;
+    result.marginPct = parseFloat(marginText.replace(/[^0-9.-]/g, '')) || 0;
   }
 
   return result;

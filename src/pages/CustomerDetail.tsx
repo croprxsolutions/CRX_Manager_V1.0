@@ -1589,6 +1589,7 @@ export default function CustomerDetail() {
                   update('default_commission_split', val);
                 }}
                 label=""
+                disabled={saving}
               />
             ) : (
               <div className="space-y-1 text-sm">

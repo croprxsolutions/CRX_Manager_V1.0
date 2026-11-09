@@ -5200,6 +5200,10 @@ describe('QuoteBuilder', () => {
       expect(figure('Drawn')).toBe('$25.00');
       expect(figure('Left to draw')).toBe('$75.00');
       expect(within(summary()).getByRole('progressbar', { name: 'Drawn of booked' })).toHaveAttribute('aria-valuenow', '25');
+      // Valid list markup: every child of a dl item is a dt or dd.
+      for (const item of Array.from(summary().querySelectorAll('dl > div'))) {
+        expect(Array.from(item.children).map((el) => el.tagName)).toEqual(['DT', 'DD']);
+      }
       cleanup();
 
       // Not found: no booking figures, as the settlement card is hidden today.

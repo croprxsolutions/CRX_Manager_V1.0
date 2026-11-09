@@ -134,10 +134,10 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     await page.goto(quoteUrl);
     await waitForPageStable(page, 3000);
 
-    const body = await page.locator('body').textContent();
-    // Look for Total Price or similar totals text with a dollar amount
-    const hasTotals = body?.includes('Total Price') || body?.includes('Total Cost') || body?.includes('$');
-    expect(hasTotals).toBeTruthy();
+    // The summary strip (it replaced the Totals card) always shows the quote total in dollars.
+    const total = page.getByRole('region', { name: 'Summary' }).locator('dt:text-is("Quote total") + dd');
+    await expect(total).toBeVisible();
+    await expect(total).toContainText('$');
   });
 
   test('QBE7: Edit Acres field triggers recalculation', async ({ page }) => {

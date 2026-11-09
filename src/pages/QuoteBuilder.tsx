@@ -4346,8 +4346,11 @@ export default function QuoteBuilder() {
         {summaryFigures.map((f, i) => (
           <div key={f.label} className={isPhone ? 'flex items-baseline justify-between gap-3' : 'flex flex-[1_1_10rem] flex-col gap-0.5 bg-white px-4 py-3.5'}>
             <dt className={`text-secondary ${isPhone && i > 0 ? 'text-sm' : 'text-[13px]'}`}>{f.label}</dt>
-            <dd className={`tabular-nums text-nav-dark ${isPhone && i > 0 ? 'text-sm font-medium' : 'text-[22px] font-semibold leading-tight'}`}>{f.value}</dd>
-            {!isPhone && f.label === 'Left to draw' && <div className="mt-1.5">{drawnBar}</div>}
+            {/* A dl item holds only dt/dd, so the desktop bar sits inside the dd. */}
+            <dd className={`tabular-nums text-nav-dark ${isPhone && i > 0 ? 'text-sm font-medium' : 'text-[22px] font-semibold leading-tight'}`}>
+              {f.value}
+              {!isPhone && f.label === 'Left to draw' && <div className="mt-1.5">{drawnBar}</div>}
+            </dd>
           </div>
         ))}
       </dl>

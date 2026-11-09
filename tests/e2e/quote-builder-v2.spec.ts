@@ -368,10 +368,10 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
       expect((q[0] as Record<string, unknown>).is_planned).toBe(true);
     }
 
-    // Verify the checkbox renders correctly on the page
+    // Verify the switch renders correctly on the page (Details card)
     await nav(page, `/quotes/${S.quoteId}`);
     await waitStable(page);
-    const plannedCheckbox = page.getByRole('checkbox', { name: 'Planned Program' });
+    const plannedCheckbox = page.getByRole('switch', { name: /Planned program/ });
     if (await plannedCheckbox.isVisible({ timeout: 3000 }).catch(() => false)) {
       expect(await plannedCheckbox.isChecked()).toBe(true);
     }

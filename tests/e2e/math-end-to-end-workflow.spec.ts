@@ -190,15 +190,11 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
 
     if (tableCount > 0) {
       // Look for line item totals in the table
-      const totalElements = page.locator('text=Total Price, text=Grand Total, text=Total').first();
-      const totalVisible = await totalElements.isVisible({ timeout: 3000 }).catch(() => false);
-      if (totalVisible) {
-        const parent = totalElements.locator('..');
-        const dollarEl = parent.locator('.font-mono, .font-medium, .font-semibold').first();
-        const dollarVisible = await dollarEl.isVisible({ timeout: 2000 }).catch(() => false);
-        if (dollarVisible) {
-          state.quoteTotalCents = parseDollars(await dollarEl.textContent());
-        }
+      // The quote total lives in the summary strip: dt "Quote total" + dd value.
+      const dollarEl = page.getByRole('region', { name: 'Summary' }).locator('dt:text-is("Quote total") + dd').first();
+      const dollarVisible = await dollarEl.isVisible({ timeout: 3000 }).catch(() => false);
+      if (dollarVisible) {
+        state.quoteTotalCents = parseDollars(await dollarEl.textContent());
       }
     }
 

@@ -20,8 +20,8 @@ import {
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed } from '../lib/deliverySplitBilling';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -489,14 +489,18 @@ export default function FieldStop() {
     const finishCompleted = async (result: unknown) => {
       // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
-      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
+      // A Bill Split drafts one invoice per payer and no auto_invoice; name them all.
+      const billSplit = billSplitCompletion(result);
+      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || billSplit.numbers.join(', ') || null;
+      const plural = billSplit.numbers.length > 1;
       // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
       const stillOnStop = activeStopIdRef.current === id;
       if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
-      toast('success', invoiceNum
-        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
+      if (billSplit.failed) {
+        toast('warning', forThisStop(billSplitFailedMessage(profile.role)));
+      } else toast('success', invoiceNum
+        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice${plural ? 's' : ''} ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
-      if (billSplitFailed(result)) toast('warning', forThisStop(BILL_SPLIT_FAILED_MESSAGE));
 
       logActivity({
         event: 'delivery_completed',
@@ -817,7 +821,7 @@ export default function FieldStop() {
             <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
             {autoInvoiceNumber && (
               <p className="inline-flex items-center gap-1 text-sm text-nav-dark mt-3">
-                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice {autoInvoiceNumber} created
+                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice{autoInvoiceNumber.includes(',') ? 's' : ''} {autoInvoiceNumber} created
               </p>
             )}
           </div>

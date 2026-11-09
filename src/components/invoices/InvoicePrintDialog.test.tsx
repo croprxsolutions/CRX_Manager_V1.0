@@ -40,6 +40,28 @@ describe('InvoicePrintDialog', () => {
     expect(screen.getByText('Show grower shares')).toBeInTheDocument();
   });
 
+  it('prints a Bill Split invoice with its shares unless someone unticks them', () => {
+    const onPrint = vi.fn();
+    render(<InvoicePrintDialog {...defaultProps} invoiceType="chemical_sale" hasShares sharesOnByDefault onPrint={onPrint} />);
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
+    expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: true }));
+  });
+
+  it('calls a Bill Split table payer shares, since a landlord payer is not a grower', () => {
+    render(<InvoicePrintDialog {...defaultProps} invoiceType="chemical_sale" hasShares sharesOnByDefault />);
+    expect(screen.getByText('Show payer shares')).toBeInTheDocument();
+    expect(screen.getByText('Display each payer, their share and amount')).toBeInTheDocument();
+    expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();
+  });
+
+  it("a payer's misc charge invoice offers the payer table and prints it by default, like the chemical sale", () => {
+    const onPrint = vi.fn();
+    render(<InvoicePrintDialog {...defaultProps} invoiceType="misc_charge" hasShares sharesOnByDefault onPrint={onPrint} />);
+    expect(screen.getByText('Show payer shares')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
+    expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: true }));
+  });
+
   it('hides grower shares checkbox when hasShares=false', () => {
     render(<InvoicePrintDialog {...defaultProps} hasShares={false} />);
     expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();

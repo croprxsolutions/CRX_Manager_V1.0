@@ -45,7 +45,7 @@ import { formatCents as fmtCents } from '../lib/money';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed, fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
+import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -53,6 +53,7 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import TransactionThread from '../components/ui/TransactionThread';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { billSplitCompletion, billSplitFailedMessage, createdInvoicesMessage } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
@@ -91,6 +92,8 @@ interface CreateDeliveryInvoiceResult {
   delivery_id: string;
   invoice_id: string;
   invoice_number: string;
+  /** Every payer's invoice on a Bill Split delivery. */
+  invoice_numbers?: string[] | null;
   total_cents: number;
 }
 
@@ -1311,14 +1314,18 @@ export default function DeliveryDetail() {
         toast('warning', `Delivery completed, but ${shortN} product(s) were short — on-hand inventory went negative. Admins have been notified to review.`);
       }
 
-      if (invoiceNum) {
+      const billSplit = billSplitCompletion(completeResult);
+      if (billSplit.failed) {
+        toast('warning', billSplitFailedMessage(role));
+      } else if (billSplit.numbers.length > 0) {
+        toast('success', `Delivery completed${isPartialDelivery ? ' (partial)' : ''}. Draft invoices ${billSplit.numbers.join(', ')} created.`);
+      } else if (invoiceNum) {
         toast('success', isPartialDelivery
           ? `Delivery completed (partial). Draft invoice ${invoiceNum} created.`
           : `Delivery completed. Draft invoice ${invoiceNum} created.`);
       } else {
         toast('success', isPartialDelivery ? 'Delivery completed (partial quantities)' : 'Delivery completed');
       }
-      if (billSplitFailed(completeResult)) toast('warning', BILL_SPLIT_FAILED_MESSAGE);
       const proofText = submittedEvidence === 'no_proof'
         ? ` (recorded without proof: ${await storedNoProofReason(deliveryId, noProofReason)})`
         : usePaperTicket ? ' (signed paper ticket photo)' : ' (on-screen signature)';
@@ -1470,7 +1477,7 @@ export default function DeliveryDetail() {
       );
       createInvoiceIdem.resetKeyFor(delivery.id);
       setCreateInvoiceConfirmOpen(false);
-      toast('success', `Invoice ${result.invoice_number} created`);
+      toast('success', createdInvoicesMessage(result));
       await fetchDelivery();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {

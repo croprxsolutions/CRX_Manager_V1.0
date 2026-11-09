@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { billSplitFailed, orderRequiresSplitBilling, SPLIT_BILLING_BLOCK_REASON } from './deliverySplitBilling';
+import { orderRequiresSplitBilling, SPLIT_BILLING_BLOCK_REASON } from './deliverySplitBilling';
 
 /**
  * H5. Two admin surfaces used to offer a "Create invoice" button on deliveries
@@ -229,14 +229,8 @@ describe('the integrity panel no longer discards server error text', () => {
 });
 
 describe('a failed Bill Split is shown at completion', () => {
-  it('reads bill_split_failed from the completion result', () => {
-    expect(billSplitFailed({ success: true, bill_split_failed: true })).toBe(true);
-    expect(billSplitFailed({ success: true })).toBe(false);
-    expect(billSplitFailed(null)).toBe(false);
-  });
-
   it.each(['src/pages/DeliveryDetail.tsx', 'src/pages/FieldStop.tsx'])('%s warns when the split failed', (file) => {
     const src = readFileSync(join(process.cwd(), file), 'utf8');
-    expect(src).toMatch(/billSplitFailed\((completeResult|result)\)\) toast\('warning'/);
+    expect(src).toMatch(/if \(billSplit\.failed\) \{\s*toast\('warning', (forThisStop\()?billSplitFailedMessage\(/);
   });
 });

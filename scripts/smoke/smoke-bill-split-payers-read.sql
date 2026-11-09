@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: every payer of a Bill Split sale, for anyone who may read one of its invoices
 -- ----------------------------------------------------------------------------
--- Migration 20261221110000_bill_split_payers_read (#1534; Sol HIGH on a6aaa21f2).
+-- Migration 20261222110000_bill_split_payers_read (#1534; Sol HIGH on a6aaa21f2).
 --   A  Rep 1 sells a Bill Split 50/50; an admin moves payer 2's draft to rep 2 (save_invoice)
 --   B  Rep 1's direct read of the group now sees only payer 1 (the gap this closes)
 --   C  get_bill_split_payers on payer 1's invoice, as rep 1: both payers, adding up to the sale

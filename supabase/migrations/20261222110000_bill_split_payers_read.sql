@@ -1,5 +1,5 @@
 -- Written 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261221110000_bill_split_payers_read.md.
+-- docs/reference/migrations.d/20261222110000_bill_split_payers_read.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2 screens, #1534; Sol HIGH on a6aaa21f2; Mason 2026-11-09, option A):

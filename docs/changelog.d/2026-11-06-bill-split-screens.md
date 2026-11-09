@@ -8,5 +8,5 @@
 - Completing a delivery names the payers' draft invoices, and warns when the split couldn't be drafted. A field split's invoices don't show the payer table.
 - Each payer's invoice lists every payer of the sale, on the page, in print, in batch print and in email,
   including a payer's draft switched to misc charge (Mason, 9 Nov, option A). The payers are read through the
-  new `get_bill_split_payers` (migration `20261221110000`, not applied), so a rep who can see only some of the
+  new `get_bill_split_payers` (migration `20261222110000`, not applied), so a rep who can see only some of the
   payers' invoices still gets the whole table.

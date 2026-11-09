@@ -884,8 +884,9 @@ them from live is Mason's deploy action), and the helper and page-split work. Al
 `review-proof-guard.mjs` refuses `cd <worktree> && <delete or move>` when any later part of the command climbs out
 (for example a harmless `ls ../wt-b`), and cannot see `S=<path>; rm -rf "$S"` as a literal path. Closed PR #1536
 (branch `claude/review-proof-guard-worktree-path-7639d0`, tip `b8ae8bf6e0`, two Luna rounds) judges each delete on
-its own and reads such variables: of 19 real refusals on 2026-11-05, 6 pass and 13 stay refused. It needs porting
-onto current `main`, whose guard changed since (#1632).
+its own and reads such variables: of 19 real refusals on 2026-11-05, 6 pass and 13 stay refused. Mason closed it
+on 2026-11-05 because that narrowing kept leaking the same class of hole; the branch is kept for its pinned test
+cases only. Workaround: run a delete or cleanup as its own command, not in one that `cd`s into a worktree.
 
 ### KI-112 — A draft return-credit prover failed just after midnight UTC
 **LOW · UNVERIFIED · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**

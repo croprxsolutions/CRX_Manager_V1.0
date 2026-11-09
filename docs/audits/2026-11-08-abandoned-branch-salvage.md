@@ -16,7 +16,7 @@ Restore one with `git fetch <bundle> refs/heads/<branch>:refs/heads/<branch>`.
 | Branch | Tip | Why kept |
 |---|---|---|
 | `claude/loosen-claude-permissions-20260905` (PR #605) | `d5cc21353e` | Holds the env-guard fix (tooling-guards entry, PR #605 bullet); port it to current `main`, then delete |
-| `claude/review-proof-guard-worktree-path-7639d0` (PR #1536) | `b8ae8bf6e0` | Holds the false-refusal fix in KI-107; port it to current `main`, then delete |
+| `claude/review-proof-guard-worktree-path-7639d0` (PR #1536) | `b8ae8bf6e0` | Holds KI-107's pinned test cases (Mason closed its fix on 2026-11-05); carry the tests to `main`, then delete |
 
 ## Recorded in KNOWN_ISSUES.md
 

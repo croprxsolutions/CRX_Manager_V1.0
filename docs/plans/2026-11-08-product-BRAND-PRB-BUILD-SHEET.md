@@ -266,7 +266,7 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - **Screen state is keyed by delivery:** the on-screen picks belong to one delivery ID and are reloaded from the database when the screen opens another delivery, closes, or reopens. Each request carries a fresh random request ID (never a counter that restarts), and a reply whose delivery ID or request ID is not the current one is ignored.
 - **Retries reuse their key:** each save intent gets one retry key when the user saves, kept with the pending save in the offline queue's durable store (online or offline, so closing the screen or the app does not lose it) and reused, including after a reopen, on every retry until a reply confirms it. Changing the choices makes a new save with a new key, which supersedes the older one on screen; an older save that still lands is overwritten by the newer one, because saves are applied in queue order.
 - **Completion in flight:** after Complete is pressed, the picker, Split and Complete stay disabled until completion replies, and a second press is ignored. The database also refuses brand saves once the delivery is completed (`DELIVERY_BRANDS_LOCKED`, 4.A), so a save cannot slip in.
-- **Offline:** the queue keeps only the latest pending brand save per delivery, carrying the base event it was made from; a refused stale save is shown for follow-up like other refused replays.
+- **Offline:** the queue keeps one pending brand save per delivery, built by **merging** each new save into the pending one by `delivery_item_id` (the newer choice for a line wins, an explicit clear is kept as an empty `picks`, and lines named only in the older save stay), carrying the base event the first unsent save was made from; a refused stale save is shown for follow-up like other refused replays.
 - **One save at a time per delivery:** while a brand save is in flight, the picker and the Complete button are disabled; each save carries a request number and a reply for an older number is ignored. Online, completion is offered only after the latest save has come back; offline, Complete queues the completion right behind the pending save (section below) instead of waiting for a reply, and it sends nothing about brands (the database reads the saved picks). A failed save leaves the screen's choices in place, shows the error, and keeps Complete disabled until a save succeeds.
 - **Offline (`src/lib/offlineQueue.ts`, `src/lib/offlineSync.ts`):** `set_delivery_brands` is its own queued action, ordered before that delivery's completion action, with its own retry key. A queued completion that is refused after the switch went on is shown for office follow-up, as other refused replays are today.
 - **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
@@ -352,6 +352,7 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - P40. A whole-order invoice over two trips of one brand whose captured status differs makes separate entries; a trip with no picks adds an unrecorded portion with its own warning record.
 - P41. A correction that only changes the split keeps each brand's original captured facts after its registration changed; a correction to a different brand records `corrected:<date>` and the note.
 - P42. A save whose reply is lost, then the screen closed and reopened, retries with the same key and returns the original result (one event).
+- P43. Offline, a save for line A then a save for line B replay as one save holding both lines; a later clear of A is kept as a clear.
 
 ---
 
@@ -447,3 +448,5 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 **Luna round 5** (head `87dd75cf5`): 2 MED, no BLOCKER or HIGH. Both **fixed** in one commit with no rule change, so no rerun is needed (codex-review Step 3A).
 - MED, offline completion waited for a save reply: offline, completion queues behind the pending save (section 5).
 - MED, the correction note was added to unchanged lines' records: only records built from a corrected line get it (4.F).
+
+**Codex GitHub review** (head `b13da08f8`): 1 P2, **fixed**. Coalescing offline saves could drop an earlier line's pick: pending saves now merge by line (section 5, P43).

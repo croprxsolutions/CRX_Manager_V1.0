@@ -7194,3 +7194,21 @@ Original text:
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
   interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
   suppress the warning. MED (safety).
+
+### Closed 2026-11-08 — KI-89, KI-90, KI-91
+
+KI-89 was already fixed live by `20261204100000_ki18_batch1_chicago_today` (applied 2026-11-06), which re-emitted the position body after WP-PM-3 with Chicago dates; confirmed by a read-only live query on 2026-11-08. KI-90 and KI-91 are now covered by `scripts/smoke/prove-product-retire-race-and-negative-stock-real-schema.mjs`, which replays every migration on `main`.
+
+Original text:
+
+### KI-89 — Inventory position uses UTC dates
+**LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
+
+### KI-90 — Reopen race needs proof
+**MED · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The reopen race through `set_product_active` has no automated real-schema proof.
+
+### KI-91 — Retired negative stock needs proof
+**MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+A retired product with a negative balance in the position report was checked by hand only.

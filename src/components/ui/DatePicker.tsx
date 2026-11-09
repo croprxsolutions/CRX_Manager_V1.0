@@ -52,7 +52,7 @@ function safeParse(v: string | null | undefined): CalendarDate | null {
 }
 
 const navBtn =
-  'h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-crx-green-tint hover:text-nav-dark outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2';
+  'h-11 w-11 md:h-10 md:w-10 flex items-center justify-center rounded-full text-gray-500 hover:bg-crx-green-tint hover:text-nav-dark outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2';
 
 export default function DatePicker({
   label,
@@ -99,9 +99,9 @@ export default function DatePicker({
         className={`
           h-11 md:h-10 w-full flex items-center gap-2 px-3 text-sm text-nav-dark bg-white
           border rounded-lg transition-colors duration-150
-          focus-within:ring-2 focus-within:ring-crx-green/20
+          focus-within:ring-2
           data-[disabled]:opacity-50 data-[disabled]:bg-gray-50
-          ${error ? 'border-red-600 focus-within:ring-red-200 focus-within:border-red-600' : 'border-gray-300 focus-within:border-crx-green'}
+          ${error ? 'border-red-600 focus-within:ring-red-200 focus-within:border-red-600' : 'border-gray-300 focus-within:ring-crx-green/20 focus-within:border-crx-green'}
         `}
       >
         <Button
@@ -136,17 +136,17 @@ export default function DatePicker({
             <div className="flex flex-wrap gap-1.5 mb-3">
               {presets.map((p) => {
                 const pd = safeParse(p.value);
-                const tooEarly = !!(min && pd && pd.compare(min) < 0);
+                const blocked = !pd || !!(min && pd.compare(min) < 0);
                 return (
                 <button
                   key={p.value}
                   type="button"
-                  disabled={tooEarly}
+                  disabled={blocked}
                   onClick={() => {
                     onChange(p.value);
                     setOpen(false);
                   }}
-                  className={`h-11 md:h-8 px-2.5 rounded-full border text-xs font-medium outline-none disabled:text-gray-300 disabled:line-through disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 ${
+                  className={`h-11 md:h-10 px-2.5 rounded-full border text-xs font-medium outline-none disabled:text-gray-300 disabled:line-through disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 ${
                     p.value === value
                       ? 'border-crx-green bg-crx-green-light text-crx-green'
                       : 'border-gray-300 bg-white text-nav-dark'
@@ -179,7 +179,7 @@ export default function DatePicker({
                   <CalendarCell
                     date={d}
                     className={`
-                      h-11 w-11 md:h-9 md:w-9 flex items-center justify-center rounded-full text-sm text-nav-dark
+                      h-11 w-11 md:h-10 md:w-10 flex items-center justify-center rounded-full text-sm text-nav-dark
                       cursor-pointer outline-none
                       data-[outside-month]:hidden
                       data-[hovered]:bg-crx-green-tint

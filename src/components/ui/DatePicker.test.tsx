@@ -53,6 +53,16 @@ describe('DatePicker', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('a malformed preset is disabled and does not fire', () => {
+    const onChange = vi.fn();
+    render(<Harness initial={null} minValue="2027-01-01" onChange={onChange} presets={[{ label: 'Bad', value: '2026-12-31T05:00:00Z' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: /calendar/i }));
+    const chip = screen.getByRole('button', { name: 'Bad' });
+    expect(chip).toBeDisabled();
+    fireEvent.click(chip);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('returns the picked day as YYYY-MM-DD', () => {
     const onChange = vi.fn();
     render(<Harness initial="2027-09-30" onChange={onChange} />);

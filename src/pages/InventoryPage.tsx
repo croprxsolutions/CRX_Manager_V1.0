@@ -1517,7 +1517,7 @@ export default function InventoryPage() {
             content: (
               <>
       <div className="flex justify-end gap-2 flex-wrap">
-        <HelpTip text="Two distinct numbers worth knowing: 'Net Position' = Available − Prebooked + On Order (forward-looking — used for order creation warnings, dashboard widgets, this column, and the field-app shortfall preview). 'Today's Free' = Available − Prebooked − active Holds (right-now physical stock — used internally by the manual-hold modal warning, since a hold competes against today's stock not future PO arrivals). Holds and planned-quote demand are shown separately in the 'Planned' column, NOT subtracted from Net Position. Click the ledger icon on any row to see the full transaction history." className="mr-auto" />
+        <HelpTip text="Two distinct numbers worth knowing: 'Net Position' = Available − Prebooked + On Order (forward-looking: used for order creation warnings, dashboard widgets, this column, and the field-app shortfall preview). 'Today's Free' = Available − Prebooked − active Holds (right-now physical stock: used internally by the manual-hold modal warning, since a hold competes against today's stock not future PO arrivals). Holds and planned-quote demand are shown separately in the 'Planned' column, NOT subtracted from Net Position. Click the ledger icon on any row to see the full transaction history." className="mr-auto" />
         <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />} onClick={handleExportCSV} disabled={inventoryFailed}>
           Export CSV
         </Button>

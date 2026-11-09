@@ -38,7 +38,7 @@ function Item({ item }: { item: ActionMenuItem }) {
       textValue={item.label}
       isDisabled={item.disabled}
       onAction={item.onAction}
-      className={`flex items-center gap-2.5 px-2.5 py-3 md:py-2 rounded-md text-sm cursor-pointer outline-none data-[hovered]:bg-crx-green-tint data-[focused]:bg-crx-green-tint data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed ${
+      className={`flex items-center gap-2.5 px-2.5 py-3 md:py-2.5 rounded-md text-sm cursor-pointer outline-none data-[hovered]:bg-crx-green-tint data-[focused]:bg-crx-green-tint data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed ${
         item.danger ? 'text-red-700 font-medium' : 'text-nav-dark'
       }`}
     >

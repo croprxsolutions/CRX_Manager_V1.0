@@ -211,7 +211,7 @@ export default function DataTable<T extends Record<string, any>>({
                     key={col.key}
                     className={`px-4 py-3 text-left font-medium text-secondary ${col.className || ''}`}
                   >
-                    <span className={col.headerExtra ? 'inline-flex items-center' : undefined}>
+                    <span className={col.headerExtra ? 'inline-flex items-center gap-2.5' : undefined}>
                     {col.sortable ? (
                       <button
                         onClick={() => toggleSort(col.key)}

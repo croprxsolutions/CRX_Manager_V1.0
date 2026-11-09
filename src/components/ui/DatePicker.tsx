@@ -16,6 +16,7 @@ import {
   CalendarCell,
   Heading,
   Text,
+  I18nProvider,
 } from 'react-aria-components';
 import { parseDate, today, type CalendarDate } from '@internationalized/date';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -51,7 +52,7 @@ function safeParse(v: string | null | undefined): CalendarDate | null {
 }
 
 const navBtn =
-  'h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-crx-green-tint hover:text-nav-dark outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20';
+  'h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-crx-green-tint hover:text-nav-dark outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2';
 
 export default function DatePicker({
   label,
@@ -78,6 +79,7 @@ export default function DatePicker({
   const activePreset = presets?.find((p) => p.value === value);
 
   return (
+    <I18nProvider locale="en-US">
     <RacDatePicker
       value={date}
       onChange={(d) => onChange(d ? d.toString() : null)}
@@ -103,7 +105,7 @@ export default function DatePicker({
         `}
       >
         <Button
-          className="shrink-0 -ml-1 h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-md text-gray-500 outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20"
+          className="shrink-0 -ml-1 h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-md text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
         >
           <CalendarIcon className="h-4 w-4" aria-hidden="true" />
         </Button>
@@ -128,7 +130,7 @@ export default function DatePicker({
           helper && <Text slot="description" className="text-gray-500">{helper}</Text>
         )}
       </div>
-      <Popover className="bg-white rounded-xl border border-gray-200 shadow-lg p-3 outline-none">
+      <Popover className="bg-white rounded-xl border border-gray-200 shadow-lg p-2 md:p-3 outline-none">
         <Dialog className="outline-none">
           {presets && presets.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-3">
@@ -144,7 +146,7 @@ export default function DatePicker({
                     onChange(p.value);
                     setOpen(false);
                   }}
-                  className={`h-11 md:h-8 px-2.5 rounded-full border text-xs font-medium outline-none disabled:text-gray-300 disabled:line-through disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-crx-green/20 ${
+                  className={`h-11 md:h-8 px-2.5 rounded-full border text-xs font-medium outline-none disabled:text-gray-300 disabled:line-through disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 ${
                     p.value === value
                       ? 'border-crx-green bg-crx-green-light text-crx-green'
                       : 'border-gray-300 bg-white text-nav-dark'
@@ -181,7 +183,7 @@ export default function DatePicker({
                       cursor-pointer outline-none
                       data-[outside-month]:hidden
                       data-[hovered]:bg-crx-green-tint
-                      data-[focus-visible]:ring-2 data-[focus-visible]:ring-crx-green/40
+                      data-[focus-visible]:ring-2 data-[focus-visible]:ring-crx-green data-[focus-visible]:ring-offset-1
                       data-[selected]:bg-crx-green data-[selected]:text-white data-[selected]:font-semibold
                       data-[disabled]:text-gray-300 data-[disabled]:line-through data-[disabled]:cursor-not-allowed data-[disabled]:hover:bg-transparent
                       ${d.compare(todayChicago) === 0 ? 'ring-1 ring-gray-400' : ''}
@@ -194,5 +196,6 @@ export default function DatePicker({
         </Dialog>
       </Popover>
     </RacDatePicker>
+    </I18nProvider>
   );
 }

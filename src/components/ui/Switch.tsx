@@ -20,7 +20,7 @@ export default function Switch({ label, description, isSelected, onChange, isDis
         aria-hidden="true"
         className={`
           mt-0.5 flex h-6.5 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors duration-150
-          group-data-[focus-visible]:ring-2 group-data-[focus-visible]:ring-crx-green/20
+          group-data-[focus-visible]:ring-2 group-data-[focus-visible]:ring-crx-green group-data-[focus-visible]:ring-offset-2
           ${isSelected ? 'bg-crx-green' : 'bg-gray-300'}
         `}
       >

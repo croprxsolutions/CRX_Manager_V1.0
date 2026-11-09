@@ -188,6 +188,15 @@ describe('InventoryPage Product identity writers', () => {
     });
   });
 
+  it('keeps the Inventory help tip out of the tab buttons', async () => {
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
+    const tip = await screen.findByRole('button', { name: 'More info' });
+    expect(tip.closest('[role="tab"]')).toBeNull();
+    for (const tab of screen.getAllByRole('tab')) {
+      expect(within(tab).queryByRole('button', { name: 'More info' })).toBeNull();
+    }
+  });
+
   it('distinguishes siblings and sends exact UUID B to manual_inventory_add', async () => {
     render(<MemoryRouter><InventoryPage /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /add inventory/i }));

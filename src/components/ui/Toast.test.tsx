@@ -156,7 +156,7 @@ describe('ToastProvider + useToast', () => {
     );
 
     fireEvent.click(screen.getByText('Btn S'));
-    const successToast = screen.getByText('msg-success').parentElement?.querySelector('[class*="bg-crx-green-light"]');
+    const successToast = screen.getByText('msg-success').parentElement?.querySelector('[class*="bg-emerald-50"]');
     expect(successToast).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Btn E'));

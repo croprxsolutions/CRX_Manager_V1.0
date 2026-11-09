@@ -13,7 +13,7 @@ interface ModalProps {
   size?: 'default' | 'large' | 'fullscreen';
 }
 
-const FOCUSABLE = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]):not([type="hidden"]), select:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
 
 export default function Modal({
   open,
@@ -129,7 +129,7 @@ export default function Modal({
             onClick={onClose}
             disabled={closeDisabled}
             aria-label="Close"
-            className="inline-flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:text-nav-dark hover:bg-gray-100 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-11 w-11 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:text-nav-dark hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>

@@ -12,7 +12,7 @@ export default function HelpTip({ text, className = '' }: HelpTipProps) {
       <DialogTrigger>
         <Button
           aria-label="More info"
-          className="relative inline-flex h-7 w-7 items-center justify-center rounded-full text-secondary transition-colors hover:text-crx-green data-[focus-visible]:text-crx-green outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-crx-green/20 after:absolute after:-inset-2 after:content-['']"
+          className="relative inline-flex h-7 w-7 items-center justify-center rounded-full text-secondary transition-colors hover:text-crx-green data-[focus-visible]:text-crx-green outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-crx-green data-[focus-visible]:ring-offset-2 after:absolute after:-inset-2 after:content-['']"
         >
           <Info size={16} aria-hidden="true" />
         </Button>

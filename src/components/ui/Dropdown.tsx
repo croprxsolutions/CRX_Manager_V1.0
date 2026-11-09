@@ -72,12 +72,11 @@ export default function Dropdown({
         ref={triggerRef}
         className={`
           ${height} w-full flex items-center justify-between gap-2 px-3 text-sm text-nav-dark bg-white
-          border border-gray-300 rounded-lg text-left
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20 focus-visible:border-crx-green
+          border rounded-lg text-left focus:outline-none focus-visible:ring-2
           data-[pressed]:border-crx-green
           disabled:opacity-50 disabled:bg-gray-50
           transition-colors duration-150
-          ${error ? 'border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600' : ''}
+          ${error ? 'border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600' : 'border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green'}
         `}
       >
         <SelectValue className="truncate data-[placeholder]:text-gray-500" />
@@ -97,7 +96,7 @@ export default function Dropdown({
               key={o.value}
               id={o.value}
               textValue={o.label}
-              className="group flex items-center justify-between gap-3 px-2.5 py-2 rounded-md text-sm text-nav-dark cursor-pointer outline-none data-[hovered]:bg-crx-green-tint data-[focused]:bg-crx-green-tint data-[selected]:text-crx-green data-[selected]:font-medium data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+              className="group flex items-center justify-between gap-3 px-2.5 py-3 md:py-2 rounded-md text-sm text-nav-dark cursor-pointer outline-none data-[hovered]:bg-crx-green-tint data-[focused]:bg-crx-green-tint data-[selected]:text-crx-green data-[selected]:font-medium data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
             >
               <span className="flex flex-col min-w-0">
                 <Text slot="label" className="truncate">{o.label}</Text>

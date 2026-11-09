@@ -28,7 +28,7 @@ const icons: Record<ToastType, ReactNode> = {
 };
 
 const iconCircle: Record<ToastType, string> = {
-  success: 'bg-crx-green-light text-crx-green',
+  success: 'bg-emerald-50 text-emerald-700',
   error: 'bg-red-50 text-red-700',
   info: 'bg-sky-50 text-sky-800',
   warning: 'bg-amber-50 text-amber-800',
@@ -96,7 +96,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <button
               onClick={() => removeToast(t.id)}
               aria-label="Dismiss notification"
-              className="ml-auto text-gray-400 hover:text-gray-600"
+              className="ml-auto inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 md:h-8 md:w-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
             >
               <X className="w-4 h-4" />
             </button>

@@ -333,7 +333,7 @@ Rules for new pages and for any page a screen-cleanup PR touches. Existing pages
 The rules for screens built or redesigned with the kit in `src/components/ui/`. Colours, tokens and the full component list are in `DESIGN.md`. Behaviour is fixed: UI work never changes what a button does, what is saved or when, permissions, totals or rounding.
 
 ### Choice lists and dates
-- Use `Dropdown` and never a browser `<select>` on any redesigned screen. It calls `onChange(value)` with the value, not a native change event. The old `Select.tsx` stays for now because 9 callers read native change events; each screen moves over in its own module round.
+- Use `Dropdown` and never a browser `<select>` on any redesigned screen. `size="sm"` is 36px, for dense desktop use only and never on phone screens. It calls `onChange(value)` with the value, not a native change event. The old `Select.tsx` stays for now because its callers read native change events; each screen moves over in its own module round.
 - Use `DatePicker` and never `<input type="date">`. Values are plain `'YYYY-MM-DD'` strings (or null) with no JS `Date`. The field shows typeable numeric segments (for example 9/30/2027). Presets such as "Season end" appear as chips in the calendar and as a pill in the field when the value matches.
 - Every field keeps a fixed helper line for help, a warning or an error, so nothing below it moves when a message appears.
 - Touch targets are 44px below 768px and 40px above (`h-11 md:h-10` and similar). Everything is reachable by keyboard with a visible focus ring.
@@ -351,7 +351,7 @@ The rules for screens built or redesigned with the kit in `src/components/ui/`. 
 ### Status badges
 - `Badge` capitalises its label by default. Pass `normalCase` when the label is already written as it should appear ("Closed short").
 - Status labels on redesigned screens are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)". Stored status values do not change.
-- A badge is a soft pill with a dot and a word, never colour alone, and never brand green.
+- A badge is a soft pill with a word, never colour alone, and never brand green. The status dot arrives with the quote screens (PR 2).
 
 ### Confirming, saving and results
 - Confirm before costly actions (removing a line with data, declining, cancelling, closing a booking, deleting) with `ConfirmModal`. The title is a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK").

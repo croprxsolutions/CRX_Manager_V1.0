@@ -24,4 +24,11 @@ describe('HelpTip', () => {
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Help' }), { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Hello tip')).not.toBeInTheDocument());
   });
+
+  it('uses the strong focus ring, not the 20% one', () => {
+    render(<HelpTip text="Tip" />);
+    const cls = screen.getByRole('button', { name: 'More info' }).className;
+    expect(cls).toMatch(/data-\[focus-visible\]:ring-crx-green(\s|$)/);
+    expect(cls).not.toContain('ring-crx-green/20');
+  });
 });

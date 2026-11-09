@@ -144,8 +144,8 @@ A warm neutral base carrying a single deep green.
 - **Field Edge** (gray-300): input and secondary-button borders. There is no `field-border` token in `src/index.css`; use `border-gray-300`, as `Input.tsx` does.
 
 ### Status (Tailwind stock, not brand)
-Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a `50` fill with a `200` border and a `500` icon. Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`.
-- **Danger Red** (red-600, hover red-700): destructive buttons, error text and danger menu items. There is no `danger` token in `src/index.css`; use `red-600` / `red-700` as `Input.tsx` does.
+Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a white card with a gray hairline border and a 24px round icon chip (success emerald-50 fill with an emerald-700 icon, error red-50/red-700, info sky-50/sky-800, warning amber-50/amber-800). Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`.
+- **Danger Red** (red-600, hover red-700): destructive buttons, error text and danger menu items (red-700 text in `ActionMenu`). There is no `danger` token in `src/index.css`; use `red-600` / `red-700` as `Input.tsx` does.
 
 ### Named Rules
 **The One Green Rule.** The brand green is the crx-green token family and nothing else. Never use raw Tailwind `green-*` or `emerald-*` classes to mean "brand" or "primary". Emerald is reserved for the success status colour.
@@ -165,7 +165,7 @@ Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed
 
 ### Hierarchy
 - **Page title** (Barlow 600, 1.5rem): one per page through `PageHeader`; the phone top bar uses 1.125rem rising to 1.25rem on desktop.
-- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles.
+- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles (`text-xl`, `md:text-2xl`).
 - **Accent word** (Barlow 300, crx-green): the second half of a split heading.
 - **Body** (Inter 400, 0.875rem): almost all UI text, tables included.
 - **Label** (Inter 500, 0.875rem, Slate Ink): form labels, tabs, buttons.
@@ -192,11 +192,11 @@ Mostly flat, with soft ambient shadows that separate white surfaces from the cre
 - **Card** (`shadow-card`): resting cards.
 - **Card hover** (`shadow-card-hover`): only on cards that are clickable (`Card hover`).
 - **Small** (`shadow-sm`, pinned to Tailwind 3): filled buttons.
-- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a 40% black, lightly blurred backdrop.
+- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
 
 ## Shapes
 
-Gently rounded, never sharp and never bubbly. Buttons, inputs, toasts and icon buttons use 0.5rem corners; cards and desktop modals use 0.75rem; badges, count bubbles and workspace link pills are fully round. Borders are 1px hairlines.
+Gently rounded, never sharp and never bubbly. Buttons, inputs and icon buttons use 0.5rem corners; cards and toasts use 0.75rem (`rounded-xl`); desktop modals use 1rem (`rounded-2xl`); badges, count bubbles and workspace link pills are fully round. Borders are 1px hairlines.
 
 ## Components
 
@@ -207,16 +207,16 @@ All shared pieces live in `src/components/ui/` and `src/components/layout/`. Use
 - **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron` only on a button that goes to another page or the next step; Save and other in-place actions never show the › arrow.
 
 ### Status badges (`Badge`)
-Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a dot and a word, never colour alone. Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
+Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a word, never colour alone; the status dot arrives with the quote screens (PR 2). Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
 
 ### Cards (`Card`, `CardHeader`)
 White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off with `padding={false}` for tables). `CardHeader` gives a section title with an optional accent word and a right-aligned action.
 
 ### Inputs (`Input`, `Select`, `Combobox`, `SearchableSelect`)
-On redesigned screens, choice lists use `Dropdown` and dates use `DatePicker` (below); the old `Select` stays for now because 9 callers read native change events, and each screen moves over in its own module round. White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500. Each field keeps a fixed helper line (`min-h-5`) for help, a warning or an error, so nothing below it moves when a message appears. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order, not the order in the string, decides which one wins.
+On redesigned screens, choice lists use `Dropdown` and dates use `DatePicker` (below); the old `Select` stays for now because its callers read native change events, and each screen moves over in its own module round. White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500. Each field keeps a fixed helper line (`min-h-5`) for help, a warning or an error, so nothing below it moves when a message appears. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order, not the order in the string, decides which one wins.
 
 ### Dropdown (`Dropdown`)
-The one choice list, built on React Aria Components. Props: `value` (string or null), `onChange(value)`, `options` (`{ value, label, description?, disabled? }`), `label` or `aria-label`, `placeholder`, `helper`, `error`, `disabled`, `size` (`md` default, `sm`). It gives an `onChange` with the value, not a native change event. Use it on any redesigned screen; never a browser `<select>`. The trigger is 44px below 768px and 40px above (`h-11 md:h-10`).
+The one choice list, built on React Aria Components. Props: `value` (string or null), `onChange(value)`, `options` (`{ value, label, description?, disabled? }`), `label` or `aria-label`, `placeholder`, `helper`, `error`, `disabled`, `size` (`md` default, `sm`). It gives an `onChange` with the value, not a native change event. Use it on any redesigned screen; never a browser `<select>`. The trigger is 44px below 768px and 40px above (`h-11 md:h-10`). `size="sm"` is 36px and for dense desktop use only, never on phone screens.
 
 ### Date picker (`DatePicker`)
 The one date field. `value` and `onChange` are plain `'YYYY-MM-DD'` strings (or null), with no JS `Date`; "today" is Chicago time. The field shows React Aria's typeable numeric segments (for example 9/30/2027) and opens a calendar. Pass `presets` (`{ label, value }`, such as "Season end") to show them as chips in the calendar and as a pill in the field when the value matches. Also takes `minValue`, `label` or `aria-label`, `helper`, `error` and `disabled`. Use it for every date; never `<input type="date">`.

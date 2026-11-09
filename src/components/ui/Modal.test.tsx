@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import Modal from './Modal';
+import Dropdown from './Dropdown';
 
 describe('Modal', () => {
   it('renders nothing when open is false', () => {
@@ -135,5 +136,27 @@ describe('Modal', () => {
     );
 
     expect(document.body.style.overflow).toBe('');
+  });
+
+  it('close button uses the strong focus ring', () => {
+    render(<Modal open onClose={() => {}} title="T">x</Modal>);
+    const cls = screen.getByRole('button', { name: 'Close' }).className;
+    expect(cls).toMatch(/focus-visible:ring-crx-green(\s|$)/);
+    expect(cls).not.toContain('ring-crx-green/20');
+  });
+
+  it('focus trap ignores the hidden select a Dropdown renders', () => {
+    render(
+      <Modal open onClose={() => {}} title="T">
+        <Dropdown aria-label="Pick" value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]} />
+      </Modal>,
+    );
+    const dialog = screen.getByRole('dialog');
+    const trigger = screen.getByRole('button', { name: /pick|A/ , hidden: false });
+    const close = screen.getByRole('button', { name: 'Close' });
+    const last = dialog.querySelector('[aria-haspopup]') as HTMLElement ?? trigger;
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
   });
 });

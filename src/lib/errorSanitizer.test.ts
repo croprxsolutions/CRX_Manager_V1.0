@@ -302,6 +302,9 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_FINE: delivery D-1 delivered 1.23456')).toBe(
       "Nothing was billed. A delivered amount has more than 4 decimal places, which an invoice line can't hold. Correct it with Fix Delivery, then choose Create Invoice"
     );
+    expect(sanitizeError('RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places')).toBe(
+      'Nothing was returned. A return holds 2 decimal places. Enter a quantity like 0.70'
+    );
     expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
     );

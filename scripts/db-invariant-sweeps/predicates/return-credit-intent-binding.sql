@@ -7,7 +7,7 @@
 
 WITH expected(signature, body_sha256) AS (
   VALUES
-    ('create_return(jsonb,jsonb,text)', 'ce29f6ff02f49923aca668dd497bededb9e82fdee2d0470efc535ec701e61251'),
+    ('create_return(jsonb,jsonb,text)', 'eb84b8abe9ca1fe1c02ff17afd686b4b33ce024c4dae1136ca533b8e997b2998'),
     ('approve_return(uuid,uuid,text)', '20c75d49ff570c03ca1c9216cfaf9d5a7beb26f2be07ae50c7304afda758a5f8'),
     ('reject_return(uuid,uuid,text)', '77ab212fd0df5796c22994b6b520b4efd327f53d188d62885ec1c768eb103af4'),
     ('cancel_return(uuid,text,uuid,text)', '7207a20de54e00922daeedc13b3ade2526df381f29e4736078e9401be101c53b'),

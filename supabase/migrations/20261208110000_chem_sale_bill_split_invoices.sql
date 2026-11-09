@@ -39,8 +39,11 @@
 --   - A line bills in the order line's unit, as the return checks compare it, so every payer can return it.
 --   - A Bill Split bills the real delivered amount, as a plain sale does (Mason, 2026-11-09). Only a delivered
 --     amount finer than an invoice line holds (more than 4 places) refuses (BILL_SPLIT_QUANTITY_TOO_FINE), since
---     it couldn't be split exactly. Returns hold 2 places, so as on a plain sale a sliver under 0.01 may not be
---     returnable. A one-customer sale is unchanged.
+--     it couldn't be split exactly. A one-customer sale is unchanged.
+--   - A return holds 2 places (return_items.quantity). create_return now refuses a finer quantity
+--     (RETURN_QUANTITY_TOO_FINE): stored rounded but priced in full, it was refused at receive and left stuck, on
+--     a plain 2.125 line too. A payer returns their share to 2 places, so as on a plain sale a sliver under 0.01
+--     isn't returnable.
 --   - Dates (Mason, 2026-11-09): completing a delivery dates the payers by the completion, as a plain sale. Create
 --     Invoice dates them the day it runs, as a plain Create Invoice does, so a rush sale billed after pricing
 --     lands in the month it was billed. Nothing is ever dated into a closed month (check_period_open).
@@ -109,7 +112,8 @@ BEGIN
     ('public._validate_order_shares_total()', '5afa7599d7d9b60b90f626a8781a17e3', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.prevent_order_shares_edit_after_post()', 'f21012312edbc966076a3318a3214abb', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.delete_invoices(uuid[],uuid,text)', '24c271164caa2369c57c3bdc5d88c50a', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.unpost_invoice(uuid,uuid,text)', '1d886fac647db1ac12e0972ff26664c2', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public.unpost_invoice(uuid,uuid,text)', '1d886fac647db1ac12e0972ff26664c2', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
+    ('public.create_return(jsonb,jsonb,text)', 'd535f68ffd3ee478d0516a0eb65830f9', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, body_md5, acl)
   LOOP
     IF NOT EXISTS (
@@ -1887,6 +1891,60 @@ BEGIN
 END;
 $function$;
 
+-- create_return: the 20260812130145 wrapper, plus a refusal of a quantity finer than a return holds.
+CREATE OR REPLACE FUNCTION public.create_return(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_fingerprint text;
+  v_replay jsonb;
+  v_result jsonb;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
+  END IF;
+  -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill Split
+  -- payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
+  -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09).
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) e
+     WHERE (e ->> 'quantity') ~ '^\s*[0-9]*\.[0-9]+\s*$'
+       AND (e ->> 'quantity')::numeric <> round((e ->> 'quantity')::numeric, 2)
+  ) THEN
+    RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_return requires p_idempotency_key';
+  END IF;
+
+  v_fingerprint := encode(extensions.digest(convert_to(jsonb_build_object(
+    'actor_id', v_actor,
+    'return', p_return,
+    'items', p_items
+  )::text, 'UTF8'), 'sha256'), 'hex');
+  v_replay := public.check_idempotency_intent(p_idempotency_key, 'create_return', v_actor, v_fingerprint);
+  IF v_replay IS NOT NULL THEN
+    IF v_replay -> 'result' IS NULL OR jsonb_typeof(v_replay -> 'result') = 'null' THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+    END IF;
+    RETURN v_replay -> 'result';
+  END IF;
+
+  v_result := public._create_return_intent_impl_20260812(p_return, p_items, p_idempotency_key);
+  UPDATE public.idempotency_keys
+     SET request_actor_id = v_actor, request_fingerprint = v_fingerprint
+   WHERE idempotency_key = p_idempotency_key AND operation = 'create_return';
+  IF NOT FOUND THEN RAISE EXCEPTION 'IDEMPOTENCY_RECEIPT_MISSING'; END IF;
+  RETURN v_result;
+END;
+$function$;
+
 DO $postflight$
 DECLARE
   r record;
@@ -1899,7 +1957,8 @@ BEGIN
     ('public._validate_order_shares_total()', 'v_total > 100 THEN', ARRAY['postgres=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.prevent_order_shares_edit_after_post()', '_refuse_bill_split_change', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.delete_invoices(uuid[],uuid,text)', 'BILL_SPLIT_GROUP_DELETE_PARTIAL', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.unpost_invoice(uuid,uuid,text)', 'GROUP_UNPOST_REQUIRED', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public.unpost_invoice(uuid,uuid,text)', 'GROUP_UNPOST_REQUIRED', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
+    ('public.create_return(jsonb,jsonb,text)', 'RETURN_QUANTITY_TOO_FINE', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
   ) AS v(sig, marker, acl)
   LOOP
     IF NOT EXISTS (

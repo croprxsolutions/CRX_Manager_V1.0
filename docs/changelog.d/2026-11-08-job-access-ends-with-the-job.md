@@ -53,8 +53,8 @@ Admin and sales rep: identical before and after.
 ### Not changed
 
 Customer addresses (row 11.7) stay readable by every active account: Mason, 2026-11-08, drivers keep
-the delivery address on FieldStop even when a delivery runs past its date; applicators do not need
-addresses, so narrowing them for applicators is a separate change.
+the delivery address on FieldStop even when a delivery runs past its date; applicators keep
+theirs as is too (Mason, 2026-11-08), with no later change planned.
 
 What office staff read or write; `application_records` (an applicator's own spray records); every
 billing, invoice, quote, sale and commission function. No existing row changes (the new column starts empty). `customers_select` keeps its own rule: an

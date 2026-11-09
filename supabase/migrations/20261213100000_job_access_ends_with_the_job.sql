@@ -4,7 +4,7 @@
 -- WHAT (KI-01 part C and KI-73 in docs/manual/KNOWN_ISSUES.md; To-Do row 11.4): field access
 -- ends when the job ends, and an applicator sent to a job by dispatch reads the rest of that job.
 -- Customer addresses are left as they are (Mason, 2026-11-08: drivers keep the delivery address on
--- FieldStop; narrowing addresses for applicators is its own change). Live before this file (read-only, 2026-11-08):
+-- FieldStop, and applicators keep theirs as is). Live before this file (read-only, 2026-11-08):
 --   jobs_select and every job-table policy that looks the job up through `jobs`
 --                     the whole-job applicator (jobs.applicator_id) reads the job, its fields,
 --                     chemicals, shares, completion records, attachments and photos FOREVER:

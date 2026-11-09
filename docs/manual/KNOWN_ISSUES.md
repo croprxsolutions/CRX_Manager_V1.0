@@ -880,8 +880,8 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
   to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
   Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
-- Every active account reads every `customer_addresses` row (To-Do row 11.7; HIGH). OPEN. Mason, 2026-11-08: drivers
-  keep the delivery address (FieldStop) even past the delivery date; applicators do not need addresses. Taken out of
+- Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
+  keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
   part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
   billing splits and spray-record field/acres data through `field_billing_defaults` and

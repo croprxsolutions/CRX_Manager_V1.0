@@ -110,7 +110,8 @@ Why this is the smallest complete design: the copy-down, the grouped-size guard,
 - `ADD CONSTRAINT product_use_timing_options_crop_fkey FOREIGN KEY (crop) REFERENCES product_crop_options(code)`.
 - `ADD CONSTRAINT product_use_timing_options_pair_key UNIQUE NULLS NOT DISTINCT (category, timing_code, crop)`.
 - `ADD CONSTRAINT … CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
-- `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, so each admin add or turn-off records who and when. The 9 seeded rows keep null.
+- `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, `ADD COLUMN option_version bigint NOT NULL DEFAULT 1`. With the existing `created_at` (default `now()`), each admin add records who and when, and each turn-off or turn-on records who and when and moves `option_version`. The 9 seeded rows keep null `created_by`.
+- **Volunteer Corn (question 2):** only if Mason answers "any crop", the migration sets that one option's `crop` to null. Products store the code, not the crop, and the label stays "Volunteer Corn", so no product row changes (the postflight md5s prove it). If he answers "keep", the row is left as it is.
 - **No grant, revoke or policy change** on this existing table (so no Mason permission approval is needed for it).
 
 ### 3.3 RPCs (both new, both mutating)
@@ -122,17 +123,17 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 2. Category must be `Herbicide` or `Foliar Fertilizer` (the existing CHECK; Mason, 2026-10-28) — `USE_TIMING_CATEGORY`.
 3. Timing code matches the code pattern — `USE_TIMING_CODE_INVALID`. A new timing code is allowed (for example `burndown`); the label is what people see.
 4. Crop null, or an **active** `product_crop_options` code — `USE_TIMING_CROP_UNKNOWN`.
-5. Label trimmed, 1–60 characters, no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
+5. Label trimmed, 1–60 characters, starting with a letter (so its generated code always matches the code pattern), no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
 6. Pair not already present (active or not) — `USE_TIMING_PAIR_EXISTS`, naming the existing label (an admin turns that one back on instead).
 7. Code: a slug of the label (`lower`, non-letters to `_`, trimmed of `_`), with `_2`, `_3` added if taken. Sort order: the category's current largest plus 10.
 8. Insert with `created_by`; return `{code, label, timing_code, crop, category, sort_order}`.
 
-**`set_use_timing_option_active(p_code text, p_is_active boolean, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
+**`set_use_timing_option_active(p_code text, p_is_active boolean, p_expected_option_version bigint, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
 1. Admin, key, replay.
-2. Option must exist — `USE_TIMING_NOT_FOUND`. Same value already — `USE_TIMING_NO_CHANGE`.
+2. Option must exist — `USE_TIMING_NOT_FOUND`. Locked `FOR UPDATE`; `option_version` must equal `p_expected_option_version` — `USE_TIMING_STALE` (so an earlier click that arrives late cannot undo a later one). Same value already — `USE_TIMING_NO_CHANGE`.
 3. Turning **off**: allowed even while products hold it (they keep it). The result reports how many sizes and parents still hold it, so the screen can say so.
 4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`.
-5. Update `is_active`, `changed_by`, `changed_at`; return the row and the holder counts.
+5. Update `is_active`, `changed_by`, `changed_at`, `option_version + 1`; return the row (with its new version) and the holder counts.
 
 No change to `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once.
 
@@ -157,7 +158,7 @@ Section 3.2's table and constraints, section 3.3's two functions. RLS on `produc
 ### 4.C What the migration does not touch
 - No `products` or `product_parents` column, trigger, grant or row.
 - None of the five functions named in 4.A.
-- No option row is added, changed or turned off. The only new rows are the 7 crop options.
+- No option row is added or turned off. The only option change is Volunteer Corn's crop, and only if Mason answers question 2 "any crop". The only new rows are the 7 crop options.
 
 ### 4.D Rollback (its own reviewed migration)
 Drop the two functions, the two constraints and the three new option columns, then `product_crop_options`. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
@@ -189,7 +190,7 @@ Drop the two functions, the two constraints and the three new option columns, th
 | A crop typed two ways (`soybean` vs `soybeans`) | Crop must be a `product_crop_options` code (foreign key). |
 | The picker grows long | The screen groups options by crop (section 5); turned-off options hide. |
 | Fungicides or insecticides need crop uses later | Out of scope: Mason's rule is timings only on Herbicide and Foliar Fertilizer (2026-10-28). Widening it is a category-CHECK change in its own package. |
-| `volunteer_corn` stored with crop `corn` reads oddly as a pair | Kept exactly as is unless Mason answers question 2 otherwise; changing it is a data step with its own proof. |
+| `volunteer_corn` stored with crop `corn` shows under **Corn** in the grouped picker | Question 2. The recommended answer moves it to "Any crop" in this migration (one option row, no product rows). |
 
 ---
 
@@ -200,7 +201,7 @@ Lands after the database PR is applied (`docs/workflows/DATABASE_CHANGE_CHECKLIS
 **Files:**
 - `src/lib/productUseTimings.ts`: `listProductCropOptions()`, `addUseTimingOption(...)`, `setUseTimingOptionActive(...)`, each through `src/lib/db.ts` with `assertRpcResult()` and a retry key per intent (the existing `getCreateKeyFor` pattern).
 - `src/pages/ProductDetail.tsx` and `src/components/products/ProductParentPanel.tsx`: the existing multi-select shows options **grouped by crop** ("Any crop", "Corn", "Soybeans", …) with the timing label in each group. Admins get an **"Add a crop and timing"** link under the picker: a small modal (category fixed to the product's, timing chosen from existing timing codes or typed new, crop from the crop list or "Any crop", label pre-filled as "<Timing> <Crop>", editable). A turned-off option a product still holds shows with "(retired)", as today.
-- A **"Manage crop and timing choices"** list for admins (the same modal file) to turn a choice off or back on, showing how many products hold it. `ConfirmModal` before turning one off.
+- A **"Manage crop and timing choices"** list for admins (the same modal file) to turn a choice off or back on, showing how many products hold it. `ConfirmModal` before turning one off. The button is disabled while its request is in flight, sends the version it was loaded with, and reloads the list after every answer (a `USE_TIMING_STALE` refusal says "someone else just changed this; refreshed").
 - `src/lib/productSetupWorkbook.ts` and `src/components/products/ProductSetupWorkbookModal.tsx`: a fourth visible tab, **Crop Uses**, one row per parent: `parent_id`, `parent_version` (hidden), `parent_name`, `category` (read-only), `sizes` (read-only), `use_timings` (editable labels, `;`-separated, the same format as the Setup tab). Saving it calls `update_product_parent` once per changed row with `{use_timings: [...]}`, the reason `"Setup workbook: crop uses"`, the downloaded `parent_version` and a per-row retry key derived from the upload. The format version moves to `crx-product-setup-v3`; a v2 file is refused whole (the existing old-version rule), because it has no Crop Uses tab.
   - **Why per row and not one batch RPC:** `update_product_parent` already does the lock, stale check, copy-down and event. A batch RPC would need a new private helper re-emitted from that live function, a larger and riskier change for a non-money field. The cost: if row 40 of 100 is refused (stale), rows 1–39 have saved. The result screen lists exactly which rows saved and which were refused and why, as the grand plan requires ("the result screen shows exactly which rows saved"), and a re-upload skips saved rows because they no longer differ.
   - The tab is empty until PAR-2 grouping runs (0 parents today). Ungrouped sizes keep using the Setup tab's `use_timings` column, unchanged.
@@ -300,7 +301,7 @@ Every PR stays open at least 4 hours before merge (Taha, 2026-11-08). None of th
 The app needs a fixed crop list so "soybean" and "soybeans" can't both appear. **Recommend:** start with the same list your customer records already use: Corn, Soybeans, Wheat, Milo, Cotton, Alfalfa, Pasture/Hay (plus "any crop"). Adding one later is a small change. Reply "yes" or name the crops to add or drop.
 
 **NEEDS MASON - DECISION REQUIRED (2 of 3): what does "Volunteer Corn" mean as a crop and timing?**
-Today the "Volunteer Corn" choice (on 7 products) is stored as crop **corn**. As a pair, that reads "used on corn", but volunteer corn is usually killed in another crop, such as soybeans. **Recommend:** keep it exactly as it is now (no change to those 7 products), and treat it as "controls volunteer corn, any crop" on screen. Reply "keep" or tell me which crop it should be.
+Today the "Volunteer Corn" choice (on 7 products) is stored as crop **corn**, so the new picker would list it under Corn, as if it were used on corn. Volunteer corn is usually killed in another crop, such as soybeans. **Recommend:** list it under "Any crop". The 7 products keep the choice and its name; only the crop it is filed under changes. Reply "yes", "keep it under corn", or name the crop.
 
 **NEEDS MASON - DECISION REQUIRED (3 of 3): what goes into the customer quote notes?**
 Today no product has a quote note, so 442 products put their general description onto every new quote line. **Recommend:** an agent drafts a short customer-facing note for each product from its description and label, you approve them in batches in your private notes, and each approved batch is uploaded from the setup spreadsheet. Products without an approved note keep showing their description, as today. Existing quotes never change. Reply "yes" or say what the notes should contain.
@@ -311,4 +312,9 @@ Today no product has a quote note, so 442 products put their general description
 
 ## 10. Review record
 
-Luna review rounds of this sheet are recorded here when run.
+**Luna round 1** (gpt-6-luna xhigh, head `580b7abbe`): 5 findings (3 MED, 2 LOW), no BLOCKER or HIGH.
+- MED Volunteer Corn would show under Corn while the sheet recommended "any crop": fixed; the recommendation now moves its crop to "Any crop" in the USE-1 migration, products untouched (3.2, 4.C, 4.H, question 2).
+- MED turn-off then quick turn-on could land out of order: fixed with `option_version` and a stale refusal, plus a disabled button while in flight (3.2, 3.3, section 5).
+- MED no time recorded for an added option: refuted; `product_use_timing_options` already has `created_at timestamptz NOT NULL DEFAULT now()` (`20261103210000`); the sheet now says so (3.2).
+- LOW crop options have no `updated_at`: refuted; crop rows change only by migration, which the migration history and git record. No app writer exists.
+- LOW a label like `123` would make an invalid code: fixed, the label must start with a letter (3.3 step 5).

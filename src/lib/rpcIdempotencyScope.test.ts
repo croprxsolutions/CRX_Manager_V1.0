@@ -487,9 +487,6 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // 20261210100000 re-emits both only to record each new draft's label_draft_targets row.
   _create_label_draft_replay_impl_20261015: ['create_label_draft'],
   _bulk_create_label_drafts_replay_impl_20261015: ['bulk_create_label_drafts'],
-  // Renamed behind its public wrapper by 20261114200000 (body unchanged, same literal); REG-1 20261218110000
-  // re-issues it from its live body so a commit also updates the EPA registration record.
-  _commit_label_draft_replay_impl_20261015: ['commit_label_draft'],
   // Restore the Wave A alias exemption when its drafts are promoted from
   // scripts/.staging-migrations/.
 };

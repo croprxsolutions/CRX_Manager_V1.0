@@ -6,33 +6,32 @@
 -- docs/reference/migrations.d/20261218100000_epa_registration_tools.md.
 -- Re-read the live ledger before applying.
 --
--- WHY: REG-1 Step 2 (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md, sections 3, 4.A and 5; Mason's answers
---   in 11.1). Step 1 (20261210100000, live) added the registration storage and stub tools that refuse
---   EPA_REGISTRATION_NOT_SEEDED. This file is part A of Step 2: the private seed-run and pass tables, the shared
---   helpers, and the working bodies of set_epa_registration, preview_epa_assignment and assign_epa_registration.
---   Every tool still refuses EPA_REGISTRATION_NOT_SEEDED until Mason runs the one-time seed (part D,
---   20261218130000), so applying this file changes no live behaviour.
+-- WHY: REG-1 Step 2 (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md; cut down 2026-11-09, Mason: "Drop them"
+--   (the product-master guards), after "Yes, simplify"). Step 1 (20261210100000, live) added the registration
+--   storage and stub tools that refuse EPA_REGISTRATION_NOT_SEEDED. This file adds the private seed-run record,
+--   the small shared helpers and a working set_epa_registration: a plain edit of one registration (plus its
+--   event). Nothing copies a registration's facts to sizes or brands, and no product edit is refused.
+--   Every tool still refuses EPA_REGISTRATION_NOT_SEEDED until Mason runs the one-time seed (20261218130000),
+--   so applying this file changes no live behaviour.
 --
 -- WHAT:
 --   - epa_registration_seed_run: private one-row record of the seed (who, when, Q1's RUP default, the
 --     preview fingerprint). Its row existing is what "seeded" means (_epa_registrations_seeded()).
---   - epa_registration_copy_passes: private one-row permission slips (transaction ID plus target), the same
---     mechanism as PAR-1's product_parent_copy_passes. Targets: products, product_brands,
---     product_parent_brands, and invoices (part C's sale capture carry).
---   - Helpers (no grants): the lock, passes, facts checker, create/update/event/copy, assignment, draft re-base.
---   - set_epa_registration, preview_epa_assignment, assign_epa_registration: working bodies, same signatures
---     and grants as Step 1.
+--   - Helpers (no grants): the REG-1 lock, facts checker, create, update, event, unrecorded posted lines.
+--   - set_epa_registration: working body, same signature and grants as Step 1. p_label_draft_id is kept for
+--     that signature and is not used (drafts are not re-based).
 --
--- NOT CHANGED: products, brands, invoices, invoice lines (parts B to D do those). No live row is written.
+-- NOT CHANGED: products, brands, invoices, invoice lines, and Step 1's preview_epa_assignment and
+--   assign_epa_registration stubs (they keep refusing EPA_REGISTRATION_NOT_SEEDED / not built). No live row
+--   is written.
 --
--- LOCKS: the REG-1 advisory lock pair (20261210, hashtext('crx_epa_registration')), exclusive for writers of
---   numbers or label facts, shared for readers that save what they read (sheet 3.2). Row order after it:
---   registrations (number order) -> products (ID) -> legacy brands (ID) -> parent brands (ID).
+-- LOCKS: the REG-1 advisory lock pair (20261210, hashtext('crx_epa_registration')): exclusive for registration
+--   writers, shared for posting (which saves what it reads).
 --
--- ROLLBACK (its own reviewed migration): re-emit Step 1's three stub bodies (md5 pinned below), drop the
---   helpers and the two private tables (both empty until the seed).
+-- ROLLBACK (its own reviewed migration): re-emit Step 1's set_epa_registration stub (md5 pinned below), drop
+--   the helpers and the private table (empty until the seed).
 --
--- ORDERING: after 20261210100000_epa_registrations and every older pending migration; before 20261218110000.
+-- ORDERING: after 20261210100000_epa_registrations and every older pending migration; before 20261218120000.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -56,25 +55,22 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.epa_registrations) OR EXISTS (SELECT 1 FROM public.epa_registration_events) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_TOOLS_PREFLIGHT: a registration exists before the seed';
   END IF;
-  -- The three replaced bodies must still be Step 1's stubs.
+  -- The replaced body must still be Step 1's stub.
   IF (SELECT count(*) FROM pg_proc p
        WHERE (p.oid, md5(replace(p.prosrc, chr(13), ''))) IN (
-         (to_regprocedure('public.set_epa_registration(text,bigint,jsonb,text,uuid,text)'), '8f57c7c93fcd25c893352fda5d34d91a'),
-         (to_regprocedure('public.preview_epa_assignment(text,uuid,text)'), '7a79f8eb54954b4805dd48d06116d21c'),
-         (to_regprocedure('public.assign_epa_registration(text,uuid,text,jsonb,text,bigint,text,uuid,text)'), '1dcb2c11bb997d99e66c2c8df0a8a887'))
-         AND p.proowner = 'postgres'::regrole AND p.prosecdef) <> 3 THEN
+         (to_regprocedure('public.set_epa_registration(text,bigint,jsonb,text,uuid,text)'), '8f57c7c93fcd25c893352fda5d34d91a'))
+         AND p.proowner = 'postgres'::regrole AND p.prosecdef) <> 1 THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_TOOLS_PREFLIGHT: a replaced function drifted from the body this file was written from';
   END IF;
   IF to_regprocedure('public._product_parent_replay(text,text,text)') IS NULL
-     OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL
-     OR to_regclass('public.product_parent_members') IS NULL THEN
+     OR to_regprocedure('public.save_idempotency(text,text,jsonb)') IS NULL THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_TOOLS_PREFLIGHT: PAR-1 helpers missing';
   END IF;
 END
 $preflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 1. Private tables
+-- 1. Private table
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE public.epa_registration_seed_run (
@@ -86,25 +82,12 @@ CREATE TABLE public.epa_registration_seed_run (
 );
 ALTER TABLE public.epa_registration_seed_run OWNER TO postgres;
 COMMENT ON TABLE public.epa_registration_seed_run IS
-  'Internal (REG-1): the one-time seed. Its row existing switches the registration guards on; rup_default is Mason''s Q1 answer.';
-
-CREATE TABLE public.epa_registration_copy_passes (
-  txid bigint NOT NULL,
-  target_table text NOT NULL CHECK (target_table IN ('products', 'product_brands', 'product_parent_brands', 'invoices')),
-  target_id uuid NOT NULL,
-  PRIMARY KEY (txid, target_table, target_id)
-);
-ALTER TABLE public.epa_registration_copy_passes OWNER TO postgres;
-COMMENT ON TABLE public.epa_registration_copy_passes IS
-  'Internal (REG-1): a registration write in progress, one row for the life of one write. Only REG-1 functions write it.';
+  'Internal (REG-1): the one-time seed. Its row existing switches the registration tools and posting by registration on; rup_default is Mason''s Q1 answer.';
 
 ALTER TABLE public.epa_registration_seed_run ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.epa_registration_copy_passes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY epa_registration_seed_run_none ON public.epa_registration_seed_run
   FOR ALL TO authenticated USING (false) WITH CHECK (false);
-CREATE POLICY epa_registration_copy_passes_none ON public.epa_registration_copy_passes
-  FOR ALL TO authenticated USING (false) WITH CHECK (false);
-REVOKE ALL ON TABLE public.epa_registration_seed_run, public.epa_registration_copy_passes
+REVOKE ALL ON TABLE public.epa_registration_seed_run
   FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------------------------
@@ -116,12 +99,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
   SELECT EXISTS (SELECT 1 FROM public.epa_registration_seed_run);
 $function$;
 
--- Q1's answer, stored by the seed; NULL before it.
-CREATE FUNCTION public._epa_rup_default() RETURNS text
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT rup_default FROM public.epa_registration_seed_run;
-$function$;
-
 CREATE FUNCTION public._epa_registration_lock(p_exclusive boolean) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 BEGIN
@@ -131,24 +108,6 @@ BEGIN
     PERFORM pg_advisory_xact_lock_shared(20261210, hashtext('crx_epa_registration'));
   END IF;
 END;
-$function$;
-
-CREATE FUNCTION public._epa_registration_pass(p_table text, p_id uuid) RETURNS void
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  INSERT INTO public.epa_registration_copy_passes (txid, target_table, target_id)
-  VALUES (txid_current(), p_table, p_id) ON CONFLICT DO NOTHING;
-$function$;
-
-CREATE FUNCTION public._epa_registration_pass_clear(p_table text, p_id uuid) RETURNS void
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  DELETE FROM public.epa_registration_copy_passes
-   WHERE txid = txid_current() AND target_table = p_table AND target_id = p_id;
-$function$;
-
-CREATE FUNCTION public._epa_registration_has_pass(p_table text, p_id uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT EXISTS (SELECT 1 FROM public.epa_registration_copy_passes
-                  WHERE txid = txid_current() AND target_table = p_table AND target_id = p_id);
 $function$;
 
 -- Checks a registration facts object (keys and JSON types; the table CHECKs check the values).
@@ -265,95 +224,8 @@ BEGIN
 END;
 $function$;
 
--- Makes every size and brand carrying p_number match its registration, under passes, in sheet 3.2 row
--- order. Writes only rows that differ. Returns what it wrote. Sizes carry the RUP answer as a mirror
--- (true only for yes); brands as true / false / null.
-CREATE FUNCTION public._epa_registration_copy_to_targets(p_number text) RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-DECLARE
-  r public.epa_registrations;
-  v_row record;
-  v_aff jsonb := '[]'::jsonb;
-  v_brand_rup boolean;
-BEGIN
-  SELECT * INTO STRICT r FROM public.epa_registrations WHERE epa_registration = p_number;
-  v_brand_rup := CASE r.rup_status WHEN 'yes' THEN true WHEN 'no' THEN false END;
-  FOR v_row IN
-    SELECT p.id, p.signal_word, p.is_rup, p.rei_hours, p.phi_days, p.max_label_rate, p.max_label_rate_unit
-      FROM public.products p
-     WHERE public._normalize_epa_registration(p.epa_registration) = p_number
-     ORDER BY p.id FOR UPDATE
-  LOOP
-    IF (v_row.signal_word, v_row.is_rup, v_row.rei_hours, v_row.phi_days, v_row.max_label_rate, v_row.max_label_rate_unit)
-       IS DISTINCT FROM (r.signal_word, r.rup_status = 'yes', r.rei_hours, r.phi_days, r.max_label_rate, r.max_label_rate_unit) THEN
-      PERFORM public._epa_registration_pass('products', v_row.id);
-      UPDATE public.products SET signal_word = r.signal_word, is_rup = (r.rup_status = 'yes'), rei_hours = r.rei_hours,
-             phi_days = r.phi_days, max_label_rate = r.max_label_rate, max_label_rate_unit = r.max_label_rate_unit,
-             updated_at = now()
-       WHERE id = v_row.id;
-      PERFORM public._epa_registration_pass_clear('products', v_row.id);
-      v_aff := v_aff || jsonb_build_object('table', 'products', 'id', v_row.id,
-        'before', jsonb_build_object('signal_word', v_row.signal_word, 'is_rup', v_row.is_rup, 'rei_hours', v_row.rei_hours,
-          'phi_days', v_row.phi_days, 'max_label_rate', v_row.max_label_rate, 'max_label_rate_unit', v_row.max_label_rate_unit),
-        'after', jsonb_build_object('signal_word', r.signal_word, 'is_rup', r.rup_status = 'yes', 'rei_hours', r.rei_hours,
-          'phi_days', r.phi_days, 'max_label_rate', r.max_label_rate, 'max_label_rate_unit', r.max_label_rate_unit));
-    END IF;
-  END LOOP;
-  FOR v_row IN
-    SELECT b.id, b.signal_word, b.is_rup FROM public.product_brands b
-     WHERE public._normalize_epa_registration(b.epa_registration) = p_number ORDER BY b.id FOR UPDATE
-  LOOP
-    IF (v_row.signal_word, v_row.is_rup) IS DISTINCT FROM (r.signal_word, v_brand_rup) THEN
-      PERFORM public._epa_registration_pass('product_brands', v_row.id);
-      UPDATE public.product_brands SET signal_word = r.signal_word, is_rup = v_brand_rup,
-             row_version = row_version + 1, updated_by = auth.uid(), updated_at = now()
-       WHERE id = v_row.id;
-      PERFORM public._epa_registration_pass_clear('product_brands', v_row.id);
-      v_aff := v_aff || jsonb_build_object('table', 'product_brands', 'id', v_row.id,
-        'before', jsonb_build_object('signal_word', v_row.signal_word, 'is_rup', v_row.is_rup),
-        'after', jsonb_build_object('signal_word', r.signal_word, 'is_rup', v_brand_rup));
-    END IF;
-  END LOOP;
-  FOR v_row IN
-    SELECT b.id, b.signal_word, b.is_rup FROM public.product_parent_brands b
-     WHERE public._normalize_epa_registration(b.epa_registration) = p_number ORDER BY b.id FOR UPDATE
-  LOOP
-    IF (v_row.signal_word, v_row.is_rup) IS DISTINCT FROM (r.signal_word, v_brand_rup) THEN
-      PERFORM public._epa_registration_pass('product_parent_brands', v_row.id);
-      UPDATE public.product_parent_brands SET signal_word = r.signal_word, is_rup = v_brand_rup,
-             row_version = row_version + 1, updated_by = auth.uid(), updated_at = now()
-       WHERE id = v_row.id;
-      PERFORM public._epa_registration_pass_clear('product_parent_brands', v_row.id);
-      v_aff := v_aff || jsonb_build_object('table', 'product_parent_brands', 'id', v_row.id,
-        'before', jsonb_build_object('signal_word', v_row.signal_word, 'is_rup', v_row.is_rup),
-        'after', jsonb_build_object('signal_word', r.signal_word, 'is_rup', v_brand_rup));
-    END IF;
-  END LOOP;
-  RETURN v_aff;
-END;
-$function$;
-
--- What Change EPA number checks between its preview and its save.
-CREATE FUNCTION public._epa_registration_target_fingerprint(p_table text, p_id uuid) RETURNS text
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-BEGIN
-  IF p_table = 'products' THEN
-    RETURN public._product_label_fingerprint(p_id);
-  ELSIF p_table = 'product_brands' THEN
-    RETURN (SELECT md5(jsonb_build_object('epa_registration', public._normalize_epa_registration(b.epa_registration),
-              'signal_word', b.signal_word, 'is_rup', b.is_rup, 'row_version', b.row_version)::text)
-              FROM public.product_brands b WHERE b.id = p_id);
-  ELSIF p_table = 'product_parent_brands' THEN
-    RETURN (SELECT md5(jsonb_build_object('epa_registration', public._normalize_epa_registration(b.epa_registration),
-              'signal_word', b.signal_word, 'is_rup', b.is_rup, 'row_version', b.row_version)::text)
-              FROM public.product_parent_brands b WHERE b.id = p_id);
-  END IF;
-  RETURN NULL;
-END;
-$function$;
-
 -- Posted invoice lines sold under p_number with no active RUP record (shown when a label turns Yes).
--- 20261218120000 re-issues it with the one coverage rule once the capture columns exist.
+-- 20261218120000 re-issues it with the one coverage rule (which also matches the sold number).
 CREATE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
@@ -367,102 +239,16 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                         AND rs.unit IS NOT DISTINCT FROM ii.unit_size AND rs.unit_price_cents IS NOT DISTINCT FROM ii.unit_price_cents);
 $function$;
 
--- Moves one size or brand to p_new (whose registration exists and is locked by the caller, who also holds
--- the exclusive lock and the target's row lock). Writes the number and the registration's facts under a
--- pass and one 'assigned' event on each of the old and new registrations. No grouped-size check: callers
--- that are not parent functions check that first.
-CREATE FUNCTION public._epa_registration_assign_internal(p_table text, p_id uuid, p_new text, p_reason text)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-DECLARE
-  r public.epa_registrations;
-  v_old text;
-  v_before jsonb;
-  v_after jsonb;
-  v_aff jsonb;
-  v_brand_rup boolean;
-BEGIN
-  SELECT * INTO STRICT r FROM public.epa_registrations WHERE epa_registration = p_new;
-  v_brand_rup := CASE r.rup_status WHEN 'yes' THEN true WHEN 'no' THEN false END;
-  PERFORM public._epa_registration_pass(p_table, p_id);
-  IF p_table = 'products' THEN
-    SELECT public._normalize_epa_registration(p.epa_registration),
-           jsonb_build_object('epa_registration', p.epa_registration, 'signal_word', p.signal_word, 'is_rup', p.is_rup,
-             'rei_hours', p.rei_hours, 'phi_days', p.phi_days, 'max_label_rate', p.max_label_rate,
-             'max_label_rate_unit', p.max_label_rate_unit)
-      INTO STRICT v_old, v_before FROM public.products p WHERE p.id = p_id;
-    UPDATE public.products SET epa_registration = p_new, signal_word = r.signal_word, is_rup = (r.rup_status = 'yes'),
-           rei_hours = r.rei_hours, phi_days = r.phi_days, max_label_rate = r.max_label_rate,
-           max_label_rate_unit = r.max_label_rate_unit, updated_at = now()
-     WHERE id = p_id;
-    v_after := jsonb_build_object('epa_registration', p_new, 'signal_word', r.signal_word, 'is_rup', r.rup_status = 'yes',
-      'rei_hours', r.rei_hours, 'phi_days', r.phi_days, 'max_label_rate', r.max_label_rate,
-      'max_label_rate_unit', r.max_label_rate_unit);
-  ELSIF p_table = 'product_brands' THEN
-    SELECT public._normalize_epa_registration(b.epa_registration),
-           jsonb_build_object('epa_registration', b.epa_registration, 'signal_word', b.signal_word, 'is_rup', b.is_rup)
-      INTO STRICT v_old, v_before FROM public.product_brands b WHERE b.id = p_id;
-    UPDATE public.product_brands SET epa_registration = p_new, signal_word = r.signal_word, is_rup = v_brand_rup,
-           row_version = row_version + 1, updated_by = auth.uid(), updated_at = now()
-     WHERE id = p_id;
-    v_after := jsonb_build_object('epa_registration', p_new, 'signal_word', r.signal_word, 'is_rup', v_brand_rup);
-  ELSIF p_table = 'product_parent_brands' THEN
-    SELECT public._normalize_epa_registration(b.epa_registration),
-           jsonb_build_object('epa_registration', b.epa_registration, 'signal_word', b.signal_word, 'is_rup', b.is_rup)
-      INTO STRICT v_old, v_before FROM public.product_parent_brands b WHERE b.id = p_id;
-    UPDATE public.product_parent_brands SET epa_registration = p_new, signal_word = r.signal_word, is_rup = v_brand_rup,
-           row_version = row_version + 1, updated_by = auth.uid(), updated_at = now()
-     WHERE id = p_id;
-    v_after := jsonb_build_object('epa_registration', p_new, 'signal_word', r.signal_word, 'is_rup', v_brand_rup);
-  ELSE
-    RAISE EXCEPTION 'EPA_REGISTRATION_TARGET_TABLE: target must be products, product_brands or product_parent_brands';
-  END IF;
-  PERFORM public._epa_registration_pass_clear(p_table, p_id);
-  v_aff := jsonb_build_array(jsonb_build_object('table', p_table, 'id', p_id, 'before', v_before, 'after', v_after));
-  IF v_old IS NOT NULL THEN
-    PERFORM public._epa_registration_event(v_old, 'assigned', p_reason, jsonb_build_object('epa_registration', v_old),
-      jsonb_build_object('epa_registration', p_new), v_aff);
-  END IF;
-  PERFORM public._epa_registration_event(p_new, 'assigned', p_reason, jsonb_build_object('epa_registration', v_old),
-    jsonb_build_object('epa_registration', p_new), v_aff);
-  RETURN v_aff;
-END;
-$function$;
-
--- Refreshes a pending draft's private target to the state just written (sheet 4.B "recovery re-bases").
--- Only a draft whose size now carries the number just written: an unrelated draft keeps its staleness check.
-CREATE FUNCTION public._epa_registration_rebase_draft(p_draft_id uuid, p_number text) RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-BEGIN
-  UPDATE public.label_draft_targets t
-     SET product_epa_registration = public._normalize_epa_registration(p.epa_registration),
-         product_label_fingerprint = public._product_label_fingerprint(t.product_id),
-         registration_version = (SELECT r.registration_version FROM public.epa_registrations r
-                                  WHERE r.epa_registration = public._normalize_epa_registration(p.epa_registration)),
-         updated_at = now()
-    FROM public.product_label_drafts d, public.products p
-   WHERE t.draft_id = p_draft_id AND d.id = t.draft_id AND p.id = t.product_id
-     AND d.status NOT IN ('accepted', 'edited', 'rejected')
-     AND public._normalize_epa_registration(p.epa_registration) = p_number;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'LABEL_DRAFT_NOT_PENDING: label draft % is not an open draft for EPA number %', p_draft_id, p_number;
-  END IF;
-END;
-$function$;
-
 DO $owners$
 DECLARE
   f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
-    'public._epa_registrations_seeded()', 'public._epa_rup_default()', 'public._epa_registration_lock(boolean)',
-    'public._epa_registration_pass(text,uuid)', 'public._epa_registration_pass_clear(text,uuid)',
-    'public._epa_registration_has_pass(text,uuid)', 'public._epa_registration_facts(jsonb,boolean)',
+    'public._epa_registrations_seeded()', 'public._epa_registration_lock(boolean)',
+    'public._epa_registration_facts(jsonb,boolean)',
     'public._epa_registration_insert(text,jsonb)', 'public._epa_registration_update(text,jsonb)',
     'public._epa_registration_event(text,text,text,jsonb,jsonb,jsonb)',
-    'public._epa_registration_copy_to_targets(text)', 'public._epa_registration_target_fingerprint(text,uuid)',
-    'public._epa_registration_unrecorded_posted_lines(text)',
-    'public._epa_registration_assign_internal(text,uuid,text,text)', 'public._epa_registration_rebase_draft(uuid,text)']
+    'public._epa_registration_unrecorded_posted_lines(text)']
   LOOP
     EXECUTE format('ALTER FUNCTION %s OWNER TO postgres', f);
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated, service_role', f);
@@ -471,11 +257,11 @@ END
 $owners$;
 
 -- ---------------------------------------------------------------------------------------------
--- 3. Registration tools (same signatures and grants as Step 1)
+-- 3. Registration edit (same signature and grants as Step 1)
 -- ---------------------------------------------------------------------------------------------
 
--- Edits one registration, or creates it when p_expected_version is NULL and none exists, then copies its
--- facts to every size and brand carrying the number. Admin only.
+-- Edits one registration, or creates it when p_expected_version is NULL and none exists. Admin only.
+-- Sizes and brands keep their own facts (no copy); posting reads the registration by the sold number.
 CREATE OR REPLACE FUNCTION public.set_epa_registration(p_epa_registration text, p_expected_version bigint, p_changes jsonb,
   p_reason text, p_label_draft_id uuid DEFAULT NULL, p_idempotency_key text DEFAULT NULL)
 RETURNS jsonb
@@ -489,7 +275,6 @@ DECLARE
   v_before jsonb;
   v_type text;
   v_was_yes boolean := false;
-  v_aff jsonb;
   v_event bigint;
   v_result jsonb;
 BEGIN
@@ -525,12 +310,10 @@ BEGIN
     v_reg := public._epa_registration_update(v_n, p_changes);
     v_type := 'updated';
   END IF;
-  v_aff := public._epa_registration_copy_to_targets(v_n);
-  v_event := public._epa_registration_event(v_n, v_type, p_reason, v_before, to_jsonb(v_reg), v_aff);
-  IF p_label_draft_id IS NOT NULL THEN PERFORM public._epa_registration_rebase_draft(p_label_draft_id, v_n); END IF;
+  v_event := public._epa_registration_event(v_n, v_type, p_reason, v_before, to_jsonb(v_reg), '[]'::jsonb);
 
   v_result := jsonb_build_object('epa_registration', v_n, 'registration_version', v_reg.registration_version,
-    'event_id', v_event, 'event_type', v_type, 'affected_count', jsonb_array_length(v_aff),
+    'event_id', v_event, 'event_type', v_type,
     'posted_sales_to_record', CASE WHEN v_reg.rup_status = 'yes' AND NOT v_was_yes
                                    THEN public._epa_registration_unrecorded_posted_lines(v_n) ELSE '[]'::jsonb END);
   PERFORM public.save_idempotency(p_idempotency_key, 'set_epa_registration',
@@ -539,150 +322,17 @@ BEGIN
 END;
 $function$;
 
--- What Change EPA number would do to one ungrouped size or one brand. Admin only; writes nothing.
-CREATE OR REPLACE FUNCTION public.preview_epa_assignment(p_target_table text, p_target_id uuid, p_new_number text)
-RETURNS jsonb
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-DECLARE
-  v_actor uuid := public._product_parent_require_admin();
-  v_n text;
-  v_old text;
-  v_parent text;
-BEGIN
-  PERFORM public._epa_registration_target_table(p_target_table);
-  IF NOT public._epa_registrations_seeded() THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_NOT_SEEDED: EPA registrations are not set up yet';
-  END IF;
-  v_n := public._normalize_epa_registration(p_new_number);
-  IF v_n IS NULL OR v_n !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_NUMBER_INVALID: % is not an EPA registration number', COALESCE(p_new_number, '(blank)');
-  END IF;
-  IF p_target_table = 'products' THEN
-    SELECT public._normalize_epa_registration(p.epa_registration), pp.name INTO v_old, v_parent
-      FROM public.products p
-      LEFT JOIN public.product_parent_members m ON m.product_id = p.id
-      LEFT JOIN public.product_parents pp ON pp.id = m.parent_id
-     WHERE p.id = p_target_id;
-  ELSIF p_target_table = 'product_brands' THEN
-    SELECT public._normalize_epa_registration(b.epa_registration) INTO v_old FROM public.product_brands b WHERE b.id = p_target_id;
-  ELSE
-    SELECT public._normalize_epa_registration(b.epa_registration) INTO v_old FROM public.product_parent_brands b WHERE b.id = p_target_id;
-  END IF;
-  IF NOT FOUND THEN RAISE EXCEPTION 'EPA_REGISTRATION_TARGET_NOT_FOUND: that size or brand no longer exists'; END IF;
-  RETURN jsonb_build_object(
-    'target_table', p_target_table, 'target_id', p_target_id,
-    'current_number', v_old, 'new_number', v_n, 'same_number', v_old IS NOT DISTINCT FROM v_n,
-    'grouped_parent', v_parent,
-    'target_fingerprint', public._epa_registration_target_fingerprint(p_target_table, p_target_id),
-    'current_registration', (SELECT to_jsonb(r) FROM public.epa_registrations r WHERE r.epa_registration = v_old),
-    'new_registration', (SELECT to_jsonb(r) FROM public.epa_registrations r WHERE r.epa_registration = v_n),
-    'new_version', (SELECT r.registration_version FROM public.epa_registrations r WHERE r.epa_registration = v_n));
-END;
-$function$;
-
--- Change EPA number on one ungrouped size or one brand. A new number with no registration needs
--- p_new_registration (from the new label; the old facts are never copied). Admin only.
-CREATE OR REPLACE FUNCTION public.assign_epa_registration(p_target_table text, p_target_id uuid, p_new_number text,
-  p_new_registration jsonb, p_expected_target_fingerprint text, p_expected_new_version bigint, p_reason text,
-  p_label_draft_id uuid DEFAULT NULL, p_idempotency_key text DEFAULT NULL)
-RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-DECLARE
-  v_actor uuid := public._product_parent_require_admin();
-  v_n text;
-  v_old text;
-  v_fp text;
-  v_existing jsonb;
-  v_new_version bigint;
-  v_reg public.epa_registrations;
-  v_aff jsonb;
-  v_result jsonb;
-BEGIN
-  PERFORM public._epa_registration_target_table(p_target_table);
-  IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED'; END IF;
-  IF NOT public._epa_registrations_seeded() THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_NOT_SEEDED: EPA registrations are not set up yet';
-  END IF;
-  v_n := public._normalize_epa_registration(p_new_number);
-  IF v_n IS NULL OR v_n !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_NUMBER_INVALID: % is not an EPA registration number', COALESCE(p_new_number, '(blank)');
-  END IF;
-  v_fp := md5(jsonb_build_array(p_target_table, p_target_id, v_n, p_new_registration, p_expected_target_fingerprint,
-    p_expected_new_version, p_reason, p_label_draft_id)::text);
-  v_existing := public._product_parent_replay(p_idempotency_key, 'assign_epa_registration', v_fp);
-  IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
-
-  PERFORM public._epa_registration_lock(true);
-  -- Nothing changes a number without the exclusive lock, so this read holds until the row locks below.
-  IF p_target_table = 'products' THEN
-    SELECT public._normalize_epa_registration(epa_registration) INTO v_old FROM public.products WHERE id = p_target_id;
-  ELSIF p_target_table = 'product_brands' THEN
-    SELECT public._normalize_epa_registration(epa_registration) INTO v_old FROM public.product_brands WHERE id = p_target_id;
-  ELSE
-    SELECT public._normalize_epa_registration(epa_registration) INTO v_old FROM public.product_parent_brands WHERE id = p_target_id;
-  END IF;
-  IF NOT FOUND THEN RAISE EXCEPTION 'EPA_REGISTRATION_TARGET_NOT_FOUND: that size or brand no longer exists'; END IF;
-  PERFORM 1 FROM public.epa_registrations WHERE epa_registration IN (v_old, v_n) ORDER BY epa_registration FOR UPDATE;
-  IF p_target_table = 'products' THEN
-    PERFORM 1 FROM public.products WHERE id = p_target_id FOR UPDATE;
-    IF EXISTS (SELECT 1 FROM public.product_parent_members WHERE product_id = p_target_id) THEN
-      RAISE EXCEPTION 'EPA_REGISTRATION_GROUPED_USE_PARENT: this size belongs to a parent; correct the number on the parent';
-    END IF;
-  ELSIF p_target_table = 'product_brands' THEN
-    PERFORM 1 FROM public.product_brands WHERE id = p_target_id FOR UPDATE;
-  ELSE
-    PERFORM 1 FROM public.product_parent_brands WHERE id = p_target_id FOR UPDATE;
-  END IF;
-  IF public._epa_registration_target_fingerprint(p_target_table, p_target_id) IS DISTINCT FROM p_expected_target_fingerprint THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_STALE: this size or brand changed since the preview; reload and try again';
-  END IF;
-  IF v_old IS NOT DISTINCT FROM v_n THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_SAME_NUMBER: it already carries EPA number %', v_n;
-  END IF;
-  SELECT registration_version INTO v_new_version FROM public.epa_registrations WHERE epa_registration = v_n;
-  IF v_new_version IS DISTINCT FROM p_expected_new_version THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_STALE: EPA registration % changed since the preview; reload and try again', v_n;
-  END IF;
-  IF v_new_version IS NULL THEN
-    IF p_new_registration IS NULL THEN
-      RAISE EXCEPTION 'EPA_REGISTRATION_FACTS_REQUIRED: EPA number % has no registration yet; enter its label facts', v_n;
-    END IF;
-    PERFORM public._epa_registration_facts(p_new_registration, true);
-    v_reg := public._epa_registration_insert(v_n, p_new_registration);
-    PERFORM public._epa_registration_event(v_n, 'created', p_reason, NULL, to_jsonb(v_reg), '[]'::jsonb);
-  END IF;
-  v_aff := public._epa_registration_assign_internal(p_target_table, p_target_id, v_n, p_reason);
-  IF p_label_draft_id IS NOT NULL THEN PERFORM public._epa_registration_rebase_draft(p_label_draft_id, v_n); END IF;
-
-  v_result := jsonb_build_object('target_table', p_target_table, 'target_id', p_target_id, 'old_number', v_old,
-    'new_number', v_n, 'registration_version', (SELECT registration_version FROM public.epa_registrations WHERE epa_registration = v_n),
-    'affected', v_aff);
-  PERFORM public.save_idempotency(p_idempotency_key, 'assign_epa_registration',
-    jsonb_build_object('actor_id', v_actor, 'request_fingerprint', v_fp, 'response', v_result));
-  RETURN v_result;
-END;
-$function$;
-
 ALTER FUNCTION public.set_epa_registration(text, bigint, jsonb, text, uuid, text) OWNER TO postgres;
-ALTER FUNCTION public.preview_epa_assignment(text, uuid, text) OWNER TO postgres;
-ALTER FUNCTION public.assign_epa_registration(text, uuid, text, jsonb, text, bigint, text, uuid, text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.set_epa_registration(text, bigint, jsonb, text, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.preview_epa_assignment(text, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.assign_epa_registration(text, uuid, text, jsonb, text, bigint, text, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.set_epa_registration(text, bigint, jsonb, text, uuid, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.preview_epa_assignment(text, uuid, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.assign_epa_registration(text, uuid, text, jsonb, text, bigint, text, uuid, text) TO authenticated;
 
 DO $postflight$
 DECLARE
   v_bad text;
 BEGIN
   IF has_table_privilege('authenticated', 'public.epa_registration_seed_run', 'SELECT,INSERT,UPDATE,DELETE')
-     OR has_table_privilege('authenticated', 'public.epa_registration_copy_passes', 'SELECT,INSERT,UPDATE,DELETE')
-     OR has_table_privilege('anon', 'public.epa_registration_copy_passes', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('anon', 'public.epa_registration_seed_run', 'SELECT,INSERT,UPDATE,DELETE')
      OR NOT has_function_privilege('authenticated', 'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.preview_epa_assignment(text,uuid,text)', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.assign_epa_registration(text,uuid,text,jsonb,text,bigint,text,uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_EPA_REGISTRATION_TOOLS_GRANTS_WRONG';
   END IF;

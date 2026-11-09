@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — EPA registrations: no sale capture and no product-master guards (REG-1 Step 2, PR #1688)
+
+**Decision (Mason, in session, 2026-11-09: "epa numbers are not a big deal and do not wan tover complicated system to manage", then "Yes, simplify", then "Drop them"):** REG-1 Step 2 keeps only the registration list, its plain edit tool, the one-time seed, and restricted-use posting by the number each line was sold under. No per-line capture of label facts, no guards on sizes or brands, no copying of facts from a registration to sizes or brands, no registration-driven assign, label drafts or product setup. Posting records a sale when the sold number's registration or the product's own restricted-use tick says Yes.
+**Why:** the capture and the guards drove twelve Luna rounds of new HIGHs on the same mechanism (passes, triggers, wrappers). The SQL fell from about 2,800 lines to about 1,000 with nothing on the posting path depending on what was removed.
+**What this forbids/implies:** sizes and brands keep their own label facts and can differ from their registration; don't add guards, passes or fact-copying to bring them back into line without re-deciding this. Accepted: a label corrected between saving and posting posts by the registration as it is at posting; a registration turned from No to Yes lists its old unrecorded posted sales on Sales to check; a re-saved split-billed field-application invoice takes its product's current number (KI-113).
+
 ## 2026-11-09 — Email Confirmation stays a hand send from the screen; two rare duplicates are accepted (KI-25 follow-up)
 
 **Decision (Mason, in session, 2026-11-09: "Yes, allow it"; widened the same morning: "Yes, accept it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Three rare cases are accepted: two office users pressing it for the same delivery within seconds can both email the customer; a void in the seconds between the go-ahead and the hand send does not stop that send; and a second office user may mark the paused receipt handled while a hand send is still going, so if that send then fails the receipt is off the list (the sender sees the failure and can press Email Confirmation again).

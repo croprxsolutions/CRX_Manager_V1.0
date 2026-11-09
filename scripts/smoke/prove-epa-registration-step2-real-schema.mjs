@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for REG-1 Step 2 (20261218100000 to 20261218130000): the registration tools, label-draft
- * commits and product setup through registrations, invoice-line sale capture and restricted-use posting,
- * the size and brand guards, the seed preview and the one-time seed, and the Q7 grant removals.
+ * Real-schema proof for REG-1 Step 2 (20261218100000, 20261218120000, 20261218130000), cut down 2026-11-09
+ * (Mason: "Yes, simplify", then "Drop them"): the registration edit tool, restricted-use posting by the number each
+ * line was sold under (either the registration or the product's tick says Yes), Sales to check, the seed preview
+ * and the one-time seed, and the invoice-line grant check. No guard: sizes and brands stay directly editable.
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
- * migration before the four files, seeds invented rows (live-shaped: disagreeing sizes, a brand-only and a
- * parent-only number, open and posted invoice lines), applies the four files and checks each case.
+ * migration before the three files, seeds invented rows (live-shaped: disagreeing sizes, a brand-only and a
+ * parent-only number, open and posted invoice lines), applies the three files and checks each case.
  *
  * Run: node scripts/smoke/prove-epa-registration-step2-real-schema.mjs   (needs local Docker image)
  * Prints EPA_REGISTRATION_STEP2_PROOF_PASS on success.
@@ -28,8 +29,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261218100000_epa_registration_tools.sql');
-const FOLLOW_UPS = ['20261218110000_epa_registration_draft_setup.sql', '20261218120000_invoice_line_sale_capture.sql',
-  '20261218130000_epa_registration_guards.sql'].map((f) => path.join(MIGRATIONS, f));
+const FOLLOW_UPS = ['20261218120000_rup_records_by_sold_number.sql', '20261218130000_epa_registration_seed.sql']
+  .map((f) => path.join(MIGRATIONS, f));
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
@@ -237,7 +238,7 @@ const ADMIN = id('a1'), REP = id('a2');
 const P1 = id('f1'), P2 = id('f2'), P3 = id('f3'), P4 = id('f4'), P5 = id('f5'), P6 = id('f6');
 const B1 = id('b1'), PP1 = id('c1');
 const CUST = id('d1'), ORD = id('e1'), INV1 = id('11'), INV2 = id('12'), INV3 = id('13'), INV4 = id('15'), L8 = id('28');
-const L1 = id('21'), L2 = id('22'), L3 = id('23'), L4 = id('24'), L5 = id('25'), L6 = id('26'), L7 = id('27');
+const L1 = id('21'), L2 = id('22'), L3 = id('23'), L4 = id('24'), L5 = id('25'), L6 = id('26'), L7 = id('27'), L9 = id('29');
 const N1 = '524-475', N2 = '100-1', N3 = '200-2', N4 = '300-3';
 
 function asOwner(sql) { psql(sql, { user: 'supabase_admin' }); }
@@ -308,33 +309,29 @@ function seed() {
     ${line(L1, INV1, P1, 2)}
     ${line(L2, INV1, P2, 1)}
     ${line(L3, INV2, P4, 1)}
+    UPDATE public.invoice_items SET epa_registration = '${N1}' WHERE id = '${L1}';  -- live fill trigger's work (seeded with triggers off)
     UPDATE public.invoice_items SET epa_registration = '${N2}' WHERE id = '${L3}';`);
   console.log('[prover] seeded: two sizes on one number that disagree, a restricted-use size, a numberless size, a brand-only number, a parent-only number, a draft invoice with two lines and a posted one');
 }
 
 const SIG = {
-  A: '20261218100000_epa_registration_tools.sql', B: '20261218110000_epa_registration_draft_setup.sql',
-  C: '20261218120000_invoice_line_sale_capture.sql', D: '20261218130000_epa_registration_guards.sql',
+  A: '20261218100000_epa_registration_tools.sql',
+  C: '20261218120000_rup_records_by_sold_number.sql', D: '20261218130000_epa_registration_seed.sql',
 };
 const PUBLIC_FNS = [
-  'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)', 'public.preview_epa_assignment(text,uuid,text)',
-  'public.assign_epa_registration(text,uuid,text,jsonb,text,bigint,text,uuid,text)', 'public.apply_product_setup(jsonb,uuid,text)',
+  'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)',
   'public.preview_epa_registration_seed(text)', 'public.seed_epa_registrations(jsonb,text,text,text)', 'public.get_epa_sales_to_check()',
-  'public.add_product_size(uuid,bigint,jsonb,text)', 'public.move_product_size(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)',
-  'public.create_product_with_parent(jsonb,jsonb,text)',
 ];
 const PRIVATE_FNS = [
-  'public._capture_invoice_line_sale()', 'public.guard_product_registration()', 'public.guard_brand_registration()',
-  'public._epa_registration_seed_plan(text)', 'public._epa_registration_ensure(text,jsonb,text)', 'public._apply_product_setup_reg1_impl(jsonb,uuid,text)',
-  'public._add_product_size_reg1_impl(uuid,bigint,jsonb,text)', 'public._move_product_size_reg1_impl(uuid,uuid,bigint,bigint,text,text,text,jsonb,text)',
-  'public._create_product_with_parent_reg1_impl(jsonb,jsonb,text)', 'public._epa_registration_copy_to_targets(text)',
+  'public._rup_record_covers_line(public.invoice_items)', 'public._epa_registration_seed_plan(text)',
+  'public._epa_registration_unrecorded_posted_lines(text)', 'public._epa_registration_lock(boolean)',
 ];
 const SET = (n, v, changes, key, draft = null) => `SELECT public.set_epa_registration('${n}', ${v ?? 'NULL'}, ${J(changes)}, 'label checked', ${draft ? `'${draft}'` : 'NULL'}, ${q(key)});`;
 const PREVIEW_SEED = (d) => `SELECT public.preview_epa_registration_seed(${q(d)});`;
 const SEED = (picks, d, fp, key) => `SELECT public.seed_epa_registrations(${J(picks)}, ${q(d)}, ${q(fp)}, ${q(key)});`;
 const product = (pid) => JSON.parse(scalar(`SELECT jsonb_build_object('n', btrim(epa_registration), 'sw', signal_word, 'rup', is_rup, 'rei', rei_hours, 'phi', phi_days) FROM public.products WHERE id = '${pid}';`));
 const reg = (n) => JSON.parse(scalar(`SELECT COALESCE((SELECT to_jsonb(r) FROM public.epa_registrations r WHERE epa_registration = '${n}'), 'null');`));
-const capture = (lid) => scalar(`SELECT concat_ws('|', epa_registration, sale_rup_status, sale_signal_word, sale_facts_source, (sale_facts_captured_at IS NOT NULL)::text) FROM public.invoice_items WHERE id = '${lid}';`);
+const num = (lid) => scalar(`SELECT coalesce(epa_registration, '') FROM public.invoice_items WHERE id = '${lid}';`);
 
 // Copies a database inside the throwaway container (the copy needs its source idle). A used copy is renamed
 // aside, never removed.
@@ -373,39 +370,38 @@ async function main() {
   for (const [k, f] of Object.entries(SIG)) stageText(`${k}.sql`, lf(path.join(MIGRATIONS, f)));
 
   // 1. Order, one transaction, once.
-  for (const k of ['B', 'C', 'D']) { const r = apply(`${k}.sql`); assert.notEqual(r.status, 0); assert.match(r.output, /PREFLIGHT/); }
+  for (const k of ['C', 'D']) { const r = apply(`${k}.sql`); assert.notEqual(r.status, 0); assert.match(r.output, /PREFLIGHT/); }
   let r = docker([...psqlArgs(), '-f', '/tmp/A.sql'], { allowFailure: true });
   assert.match(`${r.stdout}\n${r.stderr}`, /EPA_REGISTRATION_TOOLS_NOT_IN_TRANSACTION/);
-  for (const k of ['A', 'B', 'C', 'D']) {
+  for (const k of ['A', 'C', 'D']) {
     r = apply(`${k}.sql`); assert.equal(r.status, 0, `${k}: ${r.output}`);
     r = apply(`${k}.sql`); assert.notEqual(r.status, 0); assert.match(r.output, /already applied|PREFLIGHT/);
   }
-  console.log('[prover] case 1: the four files apply only in order, each as one transaction, each once');
+  console.log('[prover] case 1: the three files apply only in order, each as one transaction, each once');
 
-  // 2. Grants and ownership.
+  // 2. Grants and ownership; no guard trigger, no wrapped size function, the products INSERT grants untouched.
   for (const sig of [...PUBLIC_FNS, ...PRIVATE_FNS]) {
     const row = scalar(`SELECT p.prosecdef || '|' || array_to_string(p.proconfig, ',') || '|' || pg_get_userbyid(p.proowner) || '|'
       || has_function_privilege('authenticated', p.oid, 'EXECUTE') || '|' || has_function_privilege('anon', p.oid, 'EXECUTE')
       FROM pg_proc p WHERE p.oid = '${sig}'::regprocedure;`);
     assert.equal(row, `true|search_path=public, pg_temp|postgres|${PUBLIC_FNS.includes(sig)}|false`, sig);
   }
-  for (const w of ['add_product_size', 'move_product_size', 'create_product_with_parent', 'apply_product_setup']) {
-    assert.match(scalar(`SELECT replace(prosrc, E'\n', ' ') FROM pg_proc WHERE proname = '${w}' AND pronamespace = 'public'::regnamespace;`), /_epa_registration_lock\(true\)/, w);
-  }
-  refused(ADMIN, `INSERT INTO public.products (product_name, sku) VALUES ('[PROVER] direct', 'E2-X');`, /permission denied/);
+  assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%registration%' AND tgrelid <> 'public.epa_registration_events'::regclass;`), '0');
+  assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname LIKE '%reg1%';`), '0');
+  assert.equal(scalar(`SELECT to_regclass('public.epa_registration_copy_passes') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT has_any_column_privilege('authenticated', 'public.products', 'INSERT');`), 't');
   refused(ADMIN, `${line(id('99'), INV1, P1, 1)}`, /permission denied/);
   refused(ADMIN, `UPDATE public.invoice_items SET quantity = 9 WHERE id = '${L1}';`, /permission denied/);
-  assert.equal(scalar(`SELECT string_agg(tgname, ',' ORDER BY tgname) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid = 'public.invoice_items'::regclass AND tgname >= 'zzz_capture';`), 'zzz_capture_invoice_line_sale');
-  console.log('[prover] case 2: every new or wrapped function is owned by postgres, pins search_path, and only the public ones run for signed-in users; the size writers take the exclusive lock; nobody signed in inserts products or writes invoice lines; the capture trigger fires last');
+  console.log('[prover] case 2: every new function is owned by postgres, pins search_path, and only the public ones run for signed-in users; no guard trigger, wrapper or pass table exists; nobody signed in writes invoice lines');
 
-  // 3. Before the seed nothing changes: guards and capture are off, the tools refuse.
+  // 3. Before the seed nothing changes: the guards are off, the tools refuse.
   ownerOk(`UPDATE public.products SET rei_hours = 6 WHERE id = '${P3}';`);
   ownerOk(line(L4, INV1, P5, 1));
-  assert.equal(capture(L4), 'false');
+  assert.equal(num(L4), '');
   refused(ADMIN, SET(N1, null, { rup_status: 'no' }, 'k0'), /EPA_REGISTRATION_NOT_SEEDED/);
   refused(ADMIN, 'SELECT public.get_epa_sales_to_check();', /EPA_REGISTRATION_NOT_SEEDED/);
   assert.equal(regCount(), '0');
-  console.log('[prover] case 3: before the seed a size\'s facts still edit directly, a new line is not captured, and the tools refuse');
+  console.log('[prover] case 3: before the seed a size\'s facts still edit directly, a new line saves as today, and the tools refuse');
 
   // 4. Preview.
   refused(REP, PREVIEW_SEED('no'), /ADMIN_REQUIRED/);
@@ -419,10 +415,10 @@ async function main() {
   assert.deepEqual(byN[N2].facts, { rup_status: 'yes', signal_word: 'Danger', rei_hours: 12 });
   assert.deepEqual(byN[N3].facts, { rup_status: 'no', signal_word: 'Caution' });
   assert.deepEqual(byN[N4], { epa_registration: N4, number_valid: true, carried: false, facts: { rup_status: 'unknown' }, disagreements: {} });
-  assert.deepEqual(pv.open_lines.map((x) => x.invoice_item_id).sort(), [L1, L2, L4].sort());
-  assert.deepEqual([pv.registration_count, pv.disagreement_count, pv.invalid_numbers, pv.blocked_lines], [4, 1, [], []]);
+  assert.deepEqual([pv.registration_count, pv.disagreement_count, pv.invalid_numbers], [4, 1, []]);
+  assert.equal(pv.open_lines, undefined);
   assert.notEqual(okJ(ADMIN, PREVIEW_SEED('unknown')).fingerprint, pv.fingerprint);
-  console.log('[prover] case 4: the preview lists each number with its agreed facts and disagreements, the open lines, and a fingerprint that depends on the default');
+  console.log('[prover] case 4: the preview lists each number with its agreed facts and disagreements, and a fingerprint that depends on the default');
 
   // 5. Seed refusals, then the seed.
   const PICKS = { [N1]: { signal_word: 'Warning', rei_hours: 4 } };
@@ -440,158 +436,78 @@ async function main() {
   ownerOk(`UPDATE public.products SET phi_days = NULL WHERE id = '${P5}';`);
   assert.equal(regCount(), '0');
   const seeded = okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1'));
-  assert.deepEqual(seeded, { registrations: 4, sizes_and_brands_updated: 2, lines_captured: 3, rup_default: 'no', fingerprint: pv.fingerprint });
+  assert.deepEqual(seeded, { registrations: 4, rup_default: 'no', fingerprint: pv.fingerprint });
   assert.deepEqual(okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1')), seeded);
   refused(ADMIN, SEED({}, 'no', pv.fingerprint, 's1'), /IDEMPOTENCY|mismatch|another request/i);
   refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's2'), /EPA_REGISTRATION_SEED_DONE/);
   refused(ADMIN, PREVIEW_SEED('no'), /EPA_REGISTRATION_SEED_DONE/);
   assert.equal(reg(N1).signal_word, 'Warning'); assert.equal(reg(N1).rei_hours, 4); assert.equal(reg(N1).rup_status, 'no');
-  assert.equal(reg(N4).rup_status, 'unknown');
-  assert.deepEqual(product(P1), { n: N1, sw: 'Warning', rup: false, rei: 4, phi: null });
-  assert.deepEqual(product(P3), { n: N1, sw: 'Warning', rup: false, rei: 4, phi: null });
+  assert.equal(reg(N2).rup_status, 'yes'); assert.equal(reg(N4).rup_status, 'unknown');
+  // Sizes, brands and invoice lines are not touched.
+  assert.deepEqual(product(P1), { n: N1, sw: 'Caution', rup: false, rei: 4, phi: null });
+  assert.deepEqual(product(P3), { n: N1, sw: 'Warning', rup: false, rei: 6, phi: null });
   assert.deepEqual(product(P4), { n: N2, sw: 'Danger', rup: true, rei: 12, phi: null });
   assert.equal(scalar(`SELECT signal_word || '|' || is_rup FROM public.product_brands WHERE id = '${B1}';`), 'Caution|false');
   assert.equal(scalar("SELECT count(*) FROM public.epa_registration_events WHERE event_type = 'seeded';"), '4');
-  assert.equal(capture(L1), `${N1}|no|Warning|seed-assumed:registration:${N1}@1|true`);
-  assert.equal(capture(L2), `no|seed-assumed:product:${P2}|true`);
-  assert.equal(capture(L4), `no|seed-assumed:product:${P5}|true`);
-  assert.equal(capture(L3), `${N2}|false`);  // posted before the seed: left alone
-  assert.equal(scalar('SELECT count(*) FROM public.epa_registration_copy_passes;'), '0');
-  console.log('[prover] case 5: the seed refuses a non-admin, a missing key, a stale preview, a missing, wrong or extra pick; then makes 4 registrations, copies their facts to sizes and brands, captures the 3 open lines as seed-assumed, replays under its key, and never runs twice');
+  assert.deepEqual([num(L1), num(L2), num(L3), num(L4)], [N1, '', N2, '']);
+  console.log('[prover] case 5: the seed refuses a non-admin, a missing key, a stale preview, a missing, wrong or extra pick; then makes 4 registrations, changes no size, brand or invoice line, replays under its key, and never runs twice');
 
-  // 6. Product and brand guards.
-  ownerRefused(`UPDATE public.products SET signal_word = 'Danger' WHERE id = '${P1}';`, /EPA_REGISTRATION_FACT: signal_word/);
-  ownerRefused(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';`, /EPA_REGISTRATION_FACT: is_rup/);
-  ownerRefused(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P1}';`, /EPA_REGISTRATION_ASSIGN/);
-  ownerRefused(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P1}';`, /EPA_REGISTRATION_ASSIGN/);
-  ownerRefused(`UPDATE public.products SET epa_registration = '${N1}' WHERE id = '${P5}';`, /EPA_REGISTRATION_ASSIGN/);
-  ownerOk(`UPDATE public.products SET product_name = '[PROVER] Gly 2.5 gal' WHERE id = '${P1}';`);
-  ownerOk(`UPDATE public.products SET signal_word = 'Caution' WHERE id = '${P5}';`);
-  ownerRefused(`INSERT INTO public.products (${NEW_COLS}) VALUES ('${P6}', '[PROVER] New', 'E2-6', 'liquid', 'Gal', 'Herbicide', '999-9', NULL, NULL, false, true);`, /EPA_REGISTRATION_NEW_NUMBER/);
-  ownerRefused(`INSERT INTO public.products (${NEW_COLS}) VALUES ('${P6}', '[PROVER] New', 'E2-6', 'liquid', 'Gal', 'Herbicide', '${N1}', 'Caution', NULL, false, true);`, /EPA_REGISTRATION_FACT_CONFLICT: signal_word/);
-  ownerRefused(`INSERT INTO public.products (${NEW_COLS}) VALUES ('${P6}', '[PROVER] New', 'E2-6', 'liquid', 'Gal', 'Herbicide', '${N1}', NULL, NULL, true, true);`, /EPA_REGISTRATION_FACT_CONFLICT: is_rup/);
-  ownerOk(`INSERT INTO public.products (${NEW_COLS}) VALUES ('${P6}', '[PROVER] New', 'E2-6', 'liquid', 'Gal', 'Herbicide', '${N1}', NULL, NULL, false, true);`);
-  assert.deepEqual(product(P6), { n: N1, sw: 'Warning', rup: false, rei: 4, phi: null });
-  ownerRefused(`UPDATE public.product_brands SET signal_word = 'Danger' WHERE id = '${B1}';`, /EPA_REGISTRATION_FACT_CONFLICT/);
-  ownerRefused(`UPDATE public.product_brands SET epa_registration = '${N1}' WHERE id = '${B1}';`, /EPA_REGISTRATION_ASSIGN/);
-  ownerRefused(`INSERT INTO public.product_brands (product_id, brand_name, epa_registration, is_rup, created_by, updated_by) VALUES ('${P5}', '[PROVER] X', '${N2}', false, '${ADMIN}', '${ADMIN}');`, /EPA_REGISTRATION_FACT_CONFLICT: restricted use/);
-  ownerOk(`INSERT INTO public.product_brands (product_id, brand_name, epa_registration, created_by, updated_by) VALUES ('${P5}', '[PROVER] Y', '${N2}', '${ADMIN}', '${ADMIN}');`);
-  assert.equal(scalar(`SELECT signal_word || '|' || is_rup FROM public.product_brands WHERE brand_name = '[PROVER] Y';`), 'Danger|true');
-  ownerOk(`INSERT INTO public.product_brands (product_id, brand_name, epa_registration, created_by, updated_by) VALUES ('${P5}', '[PROVER] Z', '${N4}', '${ADMIN}', '${ADMIN}');`);
-  assert.equal(scalar(`SELECT COALESCE(is_rup::text, 'null') FROM public.product_brands WHERE brand_name = '[PROVER] Z';`), 'null');
-  console.log('[prover] case 6: after the seed a registered size\'s or brand\'s facts and number cannot be edited directly, a numberless size can, and a new size or brand takes its number\'s facts (a conflicting one or an unregistered number is refused)');
+  // 6. No guards (Mason, 2026-11-09, "Drop them"): sizes and brands stay directly editable after the seed.
+  ownerOk(`UPDATE public.products SET signal_word = 'Danger', rei_hours = 5 WHERE id = '${P1}';`);
+  ownerOk(`UPDATE public.products SET signal_word = 'Caution', rei_hours = 4 WHERE id = '${P1}';`);
+  ownerOk(`UPDATE public.products SET is_rup = true WHERE id = '${P5}';`);
+  ownerOk(`INSERT INTO public.products (${NEW_COLS}) VALUES ('${P6}', '[PROVER] New', 'E2-6', 'liquid', 'Gal', 'Herbicide', '999-9', NULL, NULL, false, true);`);
+  ownerOk(`UPDATE public.product_brands SET signal_word = 'Danger', epa_registration = '${N1}' WHERE id = '${B1}';`);
+  assert.equal(reg('999-9'), null);
+  console.log('[prover] case 6: after the seed a size\'s or brand\'s facts and number still edit directly, and a new size may carry an unregistered number');
 
   // 7. set_epa_registration.
   refused(REP, SET(N1, 1, { phi_days: 30 }, 'k-rep'), /ADMIN_REQUIRED/);
   refused(ADMIN, SET(N1, 7, { phi_days: 30 }, 'k-st'), /EPA_REGISTRATION_STALE/);
   refused(ADMIN, SET(N1, 1, {}, 'k-empty'), /EPA_REGISTRATION_NO_CHANGES/);
   const set1 = okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1'));
-  assert.equal(set1.registration_version, 2); assert.equal(set1.event_type, 'updated'); assert.equal(set1.affected_count, 3);
+  assert.equal(set1.registration_version, 2); assert.equal(set1.event_type, 'updated'); assert.equal(set1.affected_count, undefined);
   assert.deepEqual(okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1')), set1);
-  for (const pid of [P1, P3, P6]) assert.deepEqual(product(pid), { n: N1, sw: 'Caution', rup: false, rei: 4, phi: 30 });
+  assert.equal(reg(N1).phi_days, 30);
+  assert.deepEqual(product(P3), { n: N1, sw: 'Warning', rup: false, rei: 6, phi: null });  // nothing copied to sizes
   const set2 = okJ(ADMIN, SET('400-4', null, { rup_status: 'no', signal_word: 'Caution' }, 'k-set2'));
   assert.equal(set2.event_type, 'created');
   refused(ADMIN, SET('0400-4', null, { rup_status: 'no' }, 'k-set3'), /EPA_REGISTRATION_NUMBER_INVALID/);
-  console.log('[prover] case 7: Edit registration refuses a non-admin, an old version and no change; it bumps the version, copies the facts to every size, replays under its key, and creates a new number');
+  refused(ADMIN, `SELECT public.assign_epa_registration('products', '${P5}', '400-4', NULL, 'x', 1, 'r', NULL, 'k-a1');`, /EPA_REGISTRATION/);
+  console.log('[prover] case 7: Edit registration refuses a non-admin, an old version and no change; it bumps the version, replays under its key, creates a new number and copies nothing to sizes; Change EPA number stays Step 1\'s stub');
 
-  // 8. Change EPA number (size and brand).
-  let ap = okJ(ADMIN, `SELECT public.preview_epa_assignment('products', '${P5}', '400-4');`);
-  assert.equal(ap.current_number, null); assert.equal(ap.new_version, 1);
-  const ASSIGN = (t, tid, n, facts, fp, v, key) => `SELECT public.assign_epa_registration('${t}', '${tid}', '${n}', ${facts ? J(facts) : 'NULL'}, ${q(fp)}, ${v ?? 'NULL'}, 'label says so', NULL, ${q(key)});`;
-  refused(ADMIN, ASSIGN('products', P5, '400-4', null, 'old', 1, 'k-a0'), /EPA_REGISTRATION_STALE/);
-  const a1 = okJ(ADMIN, ASSIGN('products', P5, '400-4', null, ap.target_fingerprint, 1, 'k-a1'));
-  assert.equal(a1.new_number, '400-4');
-  assert.deepEqual(product(P5), { n: '400-4', sw: 'Caution', rup: false, rei: null, phi: null });
-  ap = okJ(ADMIN, `SELECT public.preview_epa_assignment('products', '${P5}', '500-5');`);
-  refused(ADMIN, ASSIGN('products', P5, '500-5', null, ap.target_fingerprint, null, 'k-a2'), /EPA_REGISTRATION_FACTS_REQUIRED/);
-  okJ(ADMIN, ASSIGN('products', P5, '500-5', { rup_status: 'yes', signal_word: 'Danger' }, ap.target_fingerprint, null, 'k-a3'));
-  assert.deepEqual(product(P5), { n: '500-5', sw: 'Danger', rup: true, rei: null, phi: null });
-  ap = okJ(ADMIN, `SELECT public.preview_epa_assignment('product_brands', '${B1}', '${N1}');`);
-  okJ(ADMIN, ASSIGN('product_brands', B1, N1, null, ap.target_fingerprint, 2, 'k-a4'));
-  assert.equal(scalar(`SELECT epa_registration || '|' || signal_word || '|' || is_rup FROM public.product_brands WHERE id = '${B1}';`), `${N1}|Caution|false`);
-  console.log('[prover] case 8: Change EPA number moves a size or brand to a registered number (taking its facts), requires the new label\'s facts for an unregistered one, and refuses a stale preview');
-
-  // 9. New product through the product tools: a new number needs its facts and becomes a registration.
+  // 8. Product tools and label drafts work as today: no registration is made or changed by them.
   const NEW_PARENT = { name: '[PROVER] Brand new', product_form: 'liquid', generic_epa_registration: '600-6', category: 'Herbicide' };
-  const NEW_SIZE = { product_name: '[PROVER] Brand new 1 gal', sku: 'E2-NW', inventory_unit: 'Gal' };
-  refused(ADMIN, `SELECT public.create_product_with_parent(${J(NEW_PARENT)}, ${J(NEW_SIZE)}, 'k-np1');`, /EPA_REGISTRATION_FACTS_REQUIRED/);
-  ok(ADMIN, `SELECT public.create_product_with_parent(${J(NEW_PARENT)}, ${J({ ...NEW_SIZE, is_rup: false, signal_word: 'Caution' })}, 'k-np2');`);
-  assert.equal(reg('600-6').rup_status, 'no'); assert.equal(reg('600-6').signal_word, 'Caution');
-  assert.equal(scalar("SELECT signal_word FROM public.products WHERE sku = 'E2-NW';"), 'Caution');
-  console.log('[prover] case 9: creating a product with a new EPA number needs its label facts and records the registration in the same step');
+  const NEW_SIZE = { product_name: '[PROVER] Brand new 1 gal', sku: 'E2-NW', inventory_unit: 'Gal', is_rup: false, signal_word: 'Caution' };
+  ok(ADMIN, `SELECT public.create_product_with_parent(${J(NEW_PARENT)}, ${J(NEW_SIZE)}, 'k-np2');`);
+  assert.equal(reg('600-6'), null);
+  const d1 = ok(ADMIN, `SELECT public.create_label_draft('${P1}', NULL, NULL, 21, ${q(N1)}, NULL, NULL, 'label pdf', 'high', 'pending', 'dk1');`);
+  ok(ADMIN, `SELECT public.commit_label_draft('${d1}', 'accepted', NULL, NULL, 21, NULL, NULL, NULL, true, 'ck1');`);
+  assert.equal(product(P1).phi, 21);
+  assert.equal(reg(N1).phi_days, 30); assert.equal(reg(N1).registration_version, 2);
+  console.log('[prover] case 8: creating a product with a new number and committing a label draft work as today and leave the registrations alone');
 
-  // 10. Label drafts commit through the registration.
-  const draft = (phi, n, key) => ok(ADMIN, `SELECT public.create_label_draft('${P1}', NULL, NULL, ${phi}, ${q(n)}, NULL, NULL, 'label pdf', 'high', 'pending', '${key}');`);
-  const COMMIT = (d, key, force = true, phi = 'NULL') => `SELECT public.commit_label_draft('${d}', 'accepted', NULL, NULL, ${phi}, NULL, NULL, NULL, ${force}, '${key}');`;
-  const d1 = draft(21, N1, 'dk1');
-  refused(ADMIN, COMMIT(d1, 'ck0', true, 22), /LABEL_DRAFT_CHANGED/);
-  ok(ADMIN, COMMIT(d1, 'ck1'));
-  assert.equal(reg(N1).phi_days, 21); assert.equal(reg(N1).registration_version, 3);
-  assert.equal(product(P3).phi, 21);
-  assert.equal(scalar(`SELECT count(*) FROM public.epa_registration_events WHERE epa_registration = '${N1}' AND event_type = 'draft_committed';`), '1');
-  const d2 = draft(25, '100-1', 'dk2');
-  refused(ADMIN, COMMIT(d2, 'ck2'), /LABEL_DRAFT_EPA_CHANGE/);
-  const d3 = draft(28, N1, 'dk3');
-  okJ(ADMIN, SET(N1, 3, { rei_hours: 8 }, 'k-set4'));
-  refused(ADMIN, COMMIT(d3, 'ck3', false), /LABEL_DRAFT_STALE/);
-  // An edit of a different registration cannot refresh this draft and clear its staleness.
-  refused(ADMIN, SET(N2, 1, { rei_hours: 13 }, 'k-set5', d3), /LABEL_DRAFT_NOT_PENDING/);
-  console.log('[prover] case 10: an accepted label draft updates the registration (and so every size), refuses edited values, a different number and a stale draft, and only an edit of its own number refreshes a draft');
-
-  // 11. Invoice line capture.
+  // 11. Invoice lines after the seed: today's number rules, nothing copied onto the line.
   ownerOk(line(L5, INV1, P4, 3));
-  assert.equal(capture(L5), `${N2}|yes|Danger|registration:${N2}@1|true`);
-  ownerRefused(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, sale_rup_status, sale_facts_captured_at, sale_facts_source)
-    VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, 'no', now(), 'product:${P1}');`, /INVOICE_LINE_SALE_CAPTURE/);
-  // A capture with no source is never whole (a NULL in the CHECK must not pass it).
-  {
-    const r = psql(`SET session_replication_role = replica; UPDATE public.invoice_items SET sale_facts_source = NULL WHERE id = '${L5}';`,
-      { allowFailure: true, user: 'supabase_admin' });
-    assert.notEqual(r.status, 0, 'a capture with no source was accepted');
-    assert.match(`${r.stdout}
-${r.stderr}`, /invoice_items_sale_capture_whole/);
-  }
-  ownerRefused(`UPDATE public.invoice_items SET sale_rup_status = 'no' WHERE id = '${L5}';`, /INVOICE_LINE_SALE_CAPTURE/);
-  // Never block a sale (Mason, 2026-11-09). A size whose number has no registration (guards prevent it; forced
-  // here) still saves: it keeps the number and captures from the product.
+  assert.equal(num(L5), N2);
+  // Never block a sale (Mason, 2026-11-09): a size whose number has no registration still saves.
   raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${P2}';`);
   ownerOk(line(L6, INV1, P2, 1));
-  assert.equal(capture(L6), `999-9|no|product:${P2}|true`);
+  assert.equal(num(L6), '999-9');
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}'; UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}';`);
-  // A numberless size's line cannot borrow a registered number (its brand's or any other): the number is dropped.
-  ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
-    VALUES ('${L6}', '${INV1}', '${P2}', 'x', 1, 'Gal', 1500, 1500, '${N3}');`);
-  assert.equal(capture(L6), `no|product:${P2}|true`);
-  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
-  // Decision (a): a line sells under its size's number; another writer's number is replaced, not refused.
-  ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
-    VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, '${N2}');`);
-  assert.ok(capture(L6).startsWith(`${N1}|`), capture(L6));
-  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
-  ownerOk(`UPDATE public.invoice_items SET unit_price_cents = 1600, extended_cents = 3200 WHERE id = '${L1}';`);
-  assert.equal(capture(L1), `${N1}|no|Warning|seed-assumed:registration:${N1}@1|true`);
-  ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4800 WHERE id = '${L1}';`);
-  assert.equal(capture(L1), `${N1}|no|Caution|registration:${N1}@4|true`);
-  ownerOk(`UPDATE public.invoice_items SET quantity = 2, extended_cents = 3000 WHERE id = '${L2}';`);
-  assert.equal(capture(L2), `no|product:${P2}|true`);
-  // A quantity change on a Yes line takes today's facts but never lowers the Yes.
-  raw(`UPDATE public.epa_registrations SET signal_word = 'Warning', rup_status = 'no' WHERE epa_registration = '${N2}';`);
-  ownerOk(`UPDATE public.invoice_items SET quantity = 4, extended_cents = 6000 WHERE id = '${L5}';`);
-  assert.equal(capture(L5), `${N2}|yes|Warning|registration:${N2}@1|true`);
-  raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
-  ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
-  assert.equal(capture(L5), `${N2}|yes|Danger|registration:${N2}@1|true`);
-  // A Yes line keeps the number it was sold under on a quantity change, even after its size moved to another number.
+  // Price and quantity edits keep the number the line was sold under, even after its size moved to another number.
   raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id = '${P4}';`);
+  ownerOk(`UPDATE public.invoice_items SET unit_price_cents = 1600, extended_cents = 3200 WHERE id = '${L1}';`);
   ownerOk(`UPDATE public.invoice_items SET quantity = 5, extended_cents = 7500 WHERE id = '${L5}';`);
-  assert.ok(capture(L5).startsWith(`${N2}|yes|`), capture(L5));
+  assert.equal(num(L1), N1);
+  assert.equal(num(L5), N2);
   raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}'; UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
-  console.log('[prover] case 11: a new line captures its number\'s registration; a sent capture is refused; an unregistered or different number never blocks the line; a price edit keeps the capture and a quantity edit re-captures');
+  console.log('[prover] case 11: after the seed a new line takes its size\'s number, an unregistered number never blocks the line, and price or quantity edits keep the number it was sold under');
 
-  // 12. Posting writes the restricted-use record once.
+  // 12. Posting writes the restricted-use record once, under the line's stored number.
   raw(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV1}';`);
   const GEN = (key) => `SELECT public.generate_rup_sales_records('${INV1}', '${key}');`;
-  // L4 has no number and its product became restricted-use in case 8: posting goes through, with no blank-number record.
+  // L4 has no number and its product was ticked restricted-use in case 6: posting goes through, with no blank-number record.
   assert.equal(ok(ADMIN, GEN('g0')), '1');
   assert.equal(scalar(`SELECT count(*) || '|' || count(*) FILTER (WHERE epa_registration IS NULL) FROM public.rup_sales_records WHERE invoice_id = '${INV1}';`), '1|0');
   raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by)
@@ -604,13 +520,30 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   refused(ADMIN, GEN('g3'), /RUP_RECORD_CONFLICT/);
   raw(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4400 WHERE id = '${L5}';`);
   refused(ADMIN, GEN('g3b'), /RUP_RECORD_CONFLICT/);
-  raw(`UPDATE public.invoice_items SET extended_cents = 4500 WHERE id = '${L5}';
+  raw(`UPDATE public.invoice_items SET extended_cents = 4500 WHERE id = '${L5}';`);
+  // The record names the number the line was sold under, not its size's current one.
+  raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id = '${P4}';
     INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 1600, 1600, '${N2}');`);
-  // A line with no capture (posted before the seed, unposted after) never blocks posting: it records under its stored number
-  // with that number's registration facts, and Sales to check lists it (Codex App P2 on #1688: a split group cannot be re-saved).
   assert.equal(ok(ADMIN, GEN('g4')), '1');
   assert.equal(scalar(`SELECT epa_registration || '|' || quantity || '|' || signal_word FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1600;`), `${N2}|1.0000|Danger`);
-  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1600; DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1600; DELETE FROM public.invoice_items WHERE id = '${L6}';
+    UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
+  // A number with no registration falls back to the product's restricted-use tick and signal word.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 1800, 1800, '999-9');`);
+  assert.equal(ok(ADMIN, GEN('g4b')), '1');
+  assert.equal(scalar(`SELECT epa_registration || '|' || signal_word FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1800;`), '999-9|Danger');
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1800; DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  // Either Yes records it: the product's tick when its number's registration says No (N1 on P1), and the number's
+  // registration when its product is not ticked (N2 on P3). Ticking P1 also brings in L1 (P1, N1, at 1600).
+  raw(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';
+    INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES
+      ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1900, 1900, '${N1}'),
+      ('${id('2a')}', '${INV1}', '${P3}', 'x', 1, 'Gal', 2000, 2000, '${N2}');`);
+  assert.equal(ok(ADMIN, GEN('g4c')), '3');
+  assert.equal(scalar(`SELECT string_agg(epa_registration || '|' || signal_word, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);`),
+    `${N1}|Caution,${N1}|Caution,${N2}|Danger`);
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);
+    DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2a')}'); UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
   // The same product and number sold at a second price gets its own record; neither merges price nor total.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L7}', '${INV1}', '${P4}', 'x', 2, 'Gal', 1700, 3400);`);
@@ -619,64 +552,62 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.equal(scalar(`SELECT string_agg(quantity || '@' || unit_price_cents || '=' || total_cents, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`),
     '3.0000@1500=4500,2.0000@1700=3400');
   assert.equal(ok(ADMIN, GEN('g6')), '0');
-  console.log('[prover] case 12: posting never refuses a numberless restricted-use line (it gets no record), writes one restricted-use record per sold number, unit and price, skips it on a repeat, refuses a record that disagrees, and posts a line with no capture from its stored number');
+  console.log('[prover] case 12: posting never refuses a numberless restricted-use line (it gets no record), records under the line\'s stored number when its registration or its product\'s tick says Yes, one record per number, unit and price, skips a repeat and refuses a record that disagrees');
 
   // 13. Sales to check.
   refused(REP, 'SELECT public.get_epa_sales_to_check();', /ADMIN_REQUIRED/);
   assert.equal(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').some((x) => x.line_id === L4), false);  // drafts are not listed
   raw(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV3}';`);
-  const check = Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]));
-  assert.deepEqual(check[L3], ['restricted_use_to_record', 'posted_before_seed']);
-  assert.deepEqual(check[L2], ['no_epa_number']);
-  assert.deepEqual(check[L4], ['seed_assumed', 'no_epa_number']);
-  assert.equal(check[L5], undefined);
-  assert.equal(check[L7], undefined);
-  // A posted line under a number with no registration is listed for follow-up.
-  raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${P2}'; UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV3}';`);
-  ownerOk(line(L6, INV3, P2, 1));
-  raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}'; UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV3}';`);
-  assert.deepEqual(Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]))[L6], ['no_registration']);
+  const reasons = () => Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reason]));
+  const check = reasons();
+  assert.equal(check[L3], 'restricted_use_to_record');  // posted before the seed, never recorded
+  assert.equal(check[L4], 'no_epa_number');             // restricted-use product, no number
+  for (const lid of [L1, L2, L5, L7]) assert.equal(check[lid], undefined, lid);
+  // A posted line under a number with no registration, on a restricted-use product, is listed.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '999-9');`);
+  assert.equal(reasons()[L6], 'restricted_use_to_record');
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   // A record covers only its own price: with the second-price record voided, that line is listed and L5 is not.
   raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV1}' AND unit_price_cents = 1700;`);
-  const check2 = Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]));
-  assert.ok(check2[L7]?.includes('restricted_use_to_record'), JSON.stringify(check2[L7]));
+  const check2 = reasons();
+  assert.equal(check2[L7], 'restricted_use_to_record');
   assert.equal(check2[L5], undefined);
-  // A sale captured Yes stays on the list after its registration turns No.
+  // A registration corrected to No still lists the sale while its product is ticked restricted-use (either Yes).
   raw(`UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N2}';`);
-  const check3 = Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]));
-  assert.ok(check3[L7]?.includes('restricted_use_to_record'), JSON.stringify(check3[L7]));
+  assert.equal(reasons()[L7], 'restricted_use_to_record');
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L7}"}]' AND NOT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L5}"}]';`), 't');
-  // 14. save_invoice: a quantity change on a kept Yes line takes today's facts and keeps the Yes.
+  console.log('[prover] case 13: Sales to check lists an unrecorded restricted-use sale (by number or product tick) and a numberless restricted-use sale, and not a recorded one');
+
+  // 14. Keep as sold (Mason, 2026-11-09): a re-saved line keeps the number it was sold under, through save_invoice and any
+  // writer that deletes and rebuilds the lines and sends each line's number back (the screens do), a quantity change included.
   raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by)
       VALUES ('${INV4}', '${CUST}', '${ORD}', 'E2-I4', 'draft', current_date, '${ADMIN}');`);
   ownerOk(line(L8, INV4, P4, 2));
-  raw(`UPDATE public.epa_registrations SET signal_word = 'Warning', rup_status = 'no' WHERE epa_registration = '${N2}';`);
-  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
-    ${J([{ id: L8, product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500 }])}, 'k-save14');`);
-  assert.equal(scalar(`SELECT quantity || '|' || sale_rup_status || '|' || sale_signal_word || '|' || sale_facts_source FROM public.invoice_items WHERE invoice_id = '${INV4}';`),
-    `5.0000|yes|Warning|registration:${N2}@1`);
-  // A kept line ignores a different number from the screen and keeps its sold number (never refused).
-  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
-    ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}';`), product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500, epa_registration: N3 }])}, 'k-save14b');`);
-  assert.equal(scalar(`SELECT epa_registration || '|' || sale_rup_status FROM public.invoice_items WHERE invoice_id = '${INV4}';`), `${N2}|yes`);
-  // A legacy (uncaptured) kept line keeps the number it was stored under, not its product's current one.
-  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
-    VALUES ('${L6}', '${INV4}', '${P4}', '[PROVER] legacy', 1, 'Gal', 1500, 1500, '${N1}');`);
-  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
-    ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] line';`), product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500 },
-         { id: L6, product_id: P4, description: '[PROVER] legacy', quantity: 1, unit_size: 'Gal', unit_price_cents: 1500, epa_registration: N1 }])}, 'k-save14c');`);
-  assert.equal(scalar(`SELECT epa_registration FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] legacy';`), N1);
-  // save_invoice: a kept Yes line keeps its sold number on a quantity change after its size moved number.
-  raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id = '${P4}';`);
-  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
-    ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] line';`), product_id: P4, description: '[PROVER] line', quantity: 6, unit_size: 'Gal', unit_price_cents: 1500 }])}, 'k-save14d');`);
-  assert.equal(scalar(`SELECT epa_registration || '|' || sale_rup_status FROM public.invoice_items WHERE invoice_id = '${INV4}';`), `${N2}|yes`);
-  raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
-  raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
-  console.log('[prover] case 14: save_invoice re-captures a kept Yes line on a quantity change with the current facts and keeps the Yes');
-  console.log('[prover] case 13: Sales to check lists a restricted-use sale posted before the seed, a numberless sale and a seed-assumed one, and not a recorded one');
+  ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents)
+    VALUES ('${L9}', '${INV4}', '${P2}', '[PROVER] blank', 1, 'Gal', 1500, 1500);`);
+  const numD = (d) => scalar(`SELECT coalesce(epa_registration, '-') FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '${d}';`);
+  const items = () => JSON.parse(scalar(`SELECT jsonb_agg(jsonb_build_object('id', id, 'product_id', product_id, 'description', description, 'quantity', quantity, 'unit_size', unit_size, 'unit_price_cents', unit_price_cents, 'epa_registration', epa_registration) ORDER BY description) FROM public.invoice_items WHERE invoice_id = '${INV4}';`));
+  const HDR = J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') });
+  assert.deepEqual([numD('[PROVER] line'), numD('[PROVER] blank')], [N2, '-']);
+  // The labels move on: both sizes move to N3.
+  raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id IN ('${P2}', '${P4}');`);
+  ok(ADMIN, `SELECT public.save_invoice(${HDR}, ${J(items())}, 'k-save14');`);
+  assert.equal(numD('[PROVER] line'), N2);
+  ownerOk(`BEGIN;
+    DELETE FROM public.invoice_items WHERE invoice_id = '${INV4}';
+    INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
+    SELECT '${INV4}', (x->>'product_id')::uuid, x->>'description', (x->>'quantity')::numeric, x->>'unit_size',
+           (x->>'unit_price_cents')::bigint, round((x->>'unit_price_cents')::numeric * (x->>'quantity')::numeric)::bigint, x->>'epa_registration'
+      FROM jsonb_array_elements(${J(items())}) x;
+    COMMIT;`);
+  assert.equal(numD('[PROVER] line'), N2);
+  ok(ADMIN, `SELECT public.save_invoice(${HDR}, ${J(items().map((x) => (x.description === '[PROVER] line' ? { ...x, quantity: 6 } : x)))}, 'k-save14b');`);
+  assert.equal(numD('[PROVER] line'), N2);
+  // Accepted (Mason, 2026-11-09): a draft line with no number takes its size's number when re-saved (today's rule).
+  assert.equal(numD('[PROVER] blank'), N3);
+  raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}'; UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
+  console.log('[prover] case 14: a re-saved line keeps the number it was sold under (save_invoice, a delete-and-rebuild writer, a quantity change); a numberless draft line takes its size\'s number');
   console.log('EPA_REGISTRATION_STEP2_PROOF_PASS');
 }
 try { await main(); }

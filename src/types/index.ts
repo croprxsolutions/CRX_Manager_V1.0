@@ -2617,13 +2617,6 @@ export interface InvoiceItem {
   // Goal 3 charge line (mig 20261021050000): set only on a line with no product, quantity 1 and
   // no cost. Every line of an invoice made from scratch carries one.
   charge_type?: InvoiceChargeType | null;
-  /** REG-1 sale capture (mig 20261218120000): what the line's EPA number's registration (else its product)
-   * said when the line was sold. Set only by the database, after the registration seed; NULL on older lines.
-   * Optional until the screens select it. */
-  sale_rup_status?: 'yes' | 'no' | 'unknown' | null;
-  sale_signal_word?: 'Danger' | 'Warning' | 'Caution' | null;
-  sale_facts_captured_at?: string | null;
-  sale_facts_source?: string | null;
   created_at: string;
   updated_at: string;
   product?: Product;

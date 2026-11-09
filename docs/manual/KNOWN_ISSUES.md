@@ -508,6 +508,14 @@ this number is fixed and live (archive, 2026-11-05).
 
 ---
 
+### KI-113 — A re-saved split-billed field-application invoice takes its product's current EPA number
+**LOW · OPEN, parked for Mason · field-app billing / restricted-use records · found 2026-11-09 (review of #1688)**
+`_save_field_app_split_invoice_impl` (latest body in `20261204100000`) rebuilds invoice lines without
+`epa_registration`, so `_fill_invoice_line_epa` gives each rebuilt line its product's current number. If a split
+invoice is un-posted, edited and re-posted after its size's number changed, the restricted-use record uses the new
+number, not the one it was sold under. Live behavior today; REG-1 step 2 (#1688) does not change it. The fix is to
+send each kept line's stored number in that function (a large money function re-issue), so it waits for Mason's call.
+
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried

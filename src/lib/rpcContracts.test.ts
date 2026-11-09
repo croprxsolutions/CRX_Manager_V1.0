@@ -3113,12 +3113,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'set_parent_cost_reference',
   // 20261218100000 (REG-1 step 2, local candidate): admin-only registration writers; each replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
-  'assign_epa_registration',
   'seed_epa_registrations',
   'set_epa_registration',
-  // 20261218110000 re-issues this renamed body so a commit also updates the registration record; it keeps
-  // p_idempotency_key behind its required-key public wrapper and never reaches the generated types.
-  '_commit_label_draft_replay_impl_20261015',
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
@@ -3210,21 +3206,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
-  // 20261218100000 (REG-1 step 2, local candidate): private helpers and the products guard trigger.
+  // 20261218100000 (REG-1 step 2, local candidate): private helpers.
   // Prune once applied and the registry high-water moves past it.
-  _epa_registration_assign_internal: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_copy_to_targets: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_ensure: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_event: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_rebase_draft: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261218100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_pass:
-    'internal REG-1 helper (20261218100000): inserts one pass row for the current transaction ON CONFLICT DO NOTHING so the calling keyed writer may copy registration facts, so a replay inserts nothing; every API-role EXECUTE is revoked',
-  _epa_registration_pass_clear:
-    'internal REG-1 helper (20261218100000): deletes the current transaction pass row the calling keyed writer set, so a replay matches no row; every API-role EXECUTE is revoked',
-  guard_product_registration:
-    'BEFORE INSERT/UPDATE row trigger on products (20261218130000): refuses an unknown EPA number and fills the row label facts from its registration, writing only the row being saved, so a replay sets the same values; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

@@ -2203,6 +2203,11 @@ not json
     [{ name, sha256: sha }],
     "applied history: only line endings differ, still identical",
   );
+  assert.deepEqual(
+    match([{ name, statements: [sql.replace(/\n/g, "\r")] }]),
+    [{ name, sha256: sha }],
+    "applied history: bare CR line endings are line endings too",
+  );
   assert.deepEqual(match([{ name, statements: [sql] }], sql.replace("1", "2")), [], "applied history: one byte different is reviewed in full");
   assert.deepEqual(match([{ name, statements: [`${sql} `] }]), [], "applied history: one extra byte live is reviewed in full");
   assert.deepEqual(match([]), [], "applied history: no live row with that name is reviewed in full");

@@ -933,7 +933,7 @@ function writeCodexPushProof({ root, headSha, baseSha, verdict, appliedHistory =
 const MIGRATION_FILE_RE = /^supabase\/migrations\/(\d{14}_[a-z0-9_]+)\.sql$/;
 
 function sha256Lf(text) {
-  return createHash("sha256").update(String(text).replace(/\r\n/g, "\n"), "utf8").digest("hex");
+  return createHash("sha256").update(String(text).replace(/\r\n?/g, "\n"), "utf8").digest("hex");
 }
 
 export function appliedHistoryMatches({ addedFiles, readFile, ledgerRows }) {

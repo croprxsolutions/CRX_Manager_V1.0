@@ -118,14 +118,14 @@
 
 ### 3.3 Locking
 
-**One order for everyone: REG-DB's** (REG-1 sheet §3.2: invoices first, then the registration lock, then the rest). No writer ever takes an invoice lock after the registration lock, so delivery work and posting cannot wait on each other in a cycle.
+**One order for everyone: REG-DB's** (REG-1 sheet §3.2): REG-DB's shared registration lock (`pg_advisory_xact_lock(hashtext('crx_epa_registration'))`, shared) as the **first statement**, then invoices (ID order), then registrations, parents, products, brands, then lines and records. The seed and number changes take that lock exclusive before anything else, so no writer ever holds an invoice or delivery lock while waiting for the seed, and nothing waits in a cycle.
 - **Delivery-side writers** (`set_delivery_brands`, `edit_delivery`, completion, `correct_delivery_brands`, `review_typed_brand`). Every writer of a delivery's brand events holds that delivery row `FOR UPDATE` (step 3) before writing its event, so one delivery's events commit one at a time and their `seq` order is their commit order:
-  1. read, without locking, the **draft or unposted** invoices whose lines they may re-copy (4.D), then lock them `FOR UPDATE` in ID order and drop any that is no longer draft or unposted;
-  2. REG-DB's shared registration lock;
+  1. REG-DB's shared registration lock, as the first statement;
+  2. read, without locking, the **draft or unposted** invoices whose lines they may re-copy (4.D), then lock them `FOR UPDATE` in ID order and drop any that is no longer draft or unposted;
   3. the delivery row `FOR UPDATE`, its lines (ID order), brand rows `FOR SHARE` (legacy, then parent, ID order), picks.
-  Invoices the writer creates itself (completion's drafts) are new rows and need no prior lock. An invoice created by someone else after step 1 is not re-copied by that writer; the posting check below catches it.
-- **Posting** keeps REG-DB's order. It never locks picks, deliveries or brand rows.
-- **Read-only staleness check at posting:** before the line hash is taken, posting recomputes each delivery-made line's expected `brand_lines` from the current picks (a plain read) and refuses with `BRAND_LINES_STALE: reload and save the invoice` if the stored copy differs. Nothing is rewritten, so the posting hash check is unaffected. Re-saving the draft (`save_invoice`, 4.D) refreshes it. Because `brand_lines` is part of the lines `post_invoice` hashes, any brand change after the office loaded the invoice (a re-copy or a save) makes posting refuse with the existing `INVOICE_CHANGED_SINCE_LOADED`, so the office always posts the brands it saw; the screen reloads and shows them.
+  Invoices the writer creates itself (completion's drafts) are new rows and need no prior lock. An invoice created by someone else after step 2 is not re-copied by that writer; the posting step below catches it.
+- **Posting** keeps REG-DB's order (shared lock, then its invoice). It never locks picks or brand rows. After its invoice lock, it takes the delivery row of each delivery-made line `FOR SHARE` (ID order). A brand writer that is mid-flight holds that row `FOR UPDATE`, so posting waits for it to commit and then reads its picks; a writer that starts later waits for posting's invoice lock (if it re-copies that invoice) or sees the invoice posted and skips it. Either way posting never checks against picks that are about to change underneath it. This cannot cycle: the writer takes the delivery row only after any invoice lock it needs, and posting holds no delivery row while waiting for an invoice.
+- **Read-only staleness check at posting:** after the delivery rows are held, and before the line hash is taken, posting recomputes each delivery-made line's expected `brand_lines` from the current picks (a plain read) and refuses with `BRAND_LINES_STALE: reload and save the invoice` if the stored copy differs. Nothing is rewritten, so the posting hash check is unaffected. Re-saving the draft (`save_invoice`, 4.D) refreshes it. Because `brand_lines` is part of the lines `post_invoice` hashes, any brand change after the office loaded the invoice (a re-copy or a save) makes posting refuse with the existing `INVOICE_CHANGED_SINCE_LOADED`, so the office always posts the brands it saw; the screen reloads and shows them.
 
 ### 3.4 Retry safety and authorization (every public RPC)
 
@@ -378,6 +378,8 @@ Removed by Question 5 (Mason, 2026-11-09: "do not be strict on RUP license don't
 - P30. A line whose picks do not add up to delivered is on the missing-brands report until corrected. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
 - P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
 - P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
+- P36a. The seed (exclusive registration lock) runs while a completion is in progress: whichever takes the registration lock first finishes; the other waits and then succeeds. Neither holds an invoice or delivery lock while waiting, so there is no deadlock.
+- P36b. A brand save is mid-flight (holding the delivery row) on a delivery whose invoice was created after the save read its invoices; posting that invoice waits for the save, then refuses with `BRAND_LINES_STALE`. Posting started first: the save waits for posting to commit, then finds the invoice posted and leaves it alone (it is listed if its brands differ, 4.H).
 - P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. A list loaded with no brand events (sends `0`), then a first save, then Mark Delivered: refused.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
@@ -585,3 +587,7 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - HIGH, "registration says yes at posting" and "unknown is not recorded" conflicted: an unknown entry is recorded when its registration says yes at posting (4.E, P20, P16b).
 - MED, a reprint after a correction silently differed from the sent receipt: it prints "Corrected <date>: was ..." (4.F, P16b).
 - MED, an unbranded restricted-use line with no EPA number had no follow-up once the refusal goes: it is on the RUP brand gaps list (4.H, P16b).
+
+**Codex GitHub review** (head `be75a7dc1`): 2 P2, both **fixed**.
+- The lock order put invoices before REG-DB's registration lock, the reverse of REG-1 §3.2, so a seed could deadlock with completion: every writer now takes the shared registration lock first, then invoices, then the delivery (3.3, P36a).
+- Posting's read-only check could read picks while a brand writer that missed the new invoice was still uncommitted: posting now holds each delivery-made line's delivery row `FOR SHARE` before the check, so it waits for that writer (3.3, P36b).

@@ -61,10 +61,12 @@ export function followUpsProblem(pullRequest) {
   const lines = followUpLines(pullRequest.body);
   if (lines === null) return "the PR description has no `## Follow-ups` section.";
   if (lines.length === 0) return "the `## Follow-ups` section is empty; write `- None` if nothing was put off.";
-  if (lines.some((line) => /^none\b/i.test(line)) && lines.length > 1) {
+  // Only a bare "None" is the sentinel; "None yet, fix later" is untracked work (Codex App P2, #1696).
+  const isNone = (line) => /^none[.!]?$/i.test(line);
+  if (lines.some(isNone) && lines.length > 1) {
     return "the `## Follow-ups` section says None but also lists items; keep one or the other.";
   }
-  const homeless = lines.filter((line) => !/^none\b/i.test(line) && !HOME.test(line));
+  const homeless = lines.filter((line) => !isNone(line) && !HOME.test(line));
   if (homeless.length) {
     return `these Follow-ups lines name no issue (#123) or known issue (KI-12) to hold the work: ${homeless.map((l) => JSON.stringify(l.slice(0, 80))).join("; ")}.`;
   }

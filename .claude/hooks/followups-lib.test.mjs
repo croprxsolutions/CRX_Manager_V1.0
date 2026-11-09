@@ -44,6 +44,10 @@ assert.equal(followUpsProblem(pr("## Follow-ups\n- #1 a\n\n- #2 b\n\nfooter")), 
 assert.deepEqual(followUpLines("## Follow-ups\n- #1 a\n\n- #2 b\n\nfooter"), ["#1 a", "#2 b"]);
 assert.match(followUpsProblem(pr("## Follow-ups\n- #1 a\n- fix later\n\nfooter")), /name no issue/);
 
+// Only a bare None is the sentinel (Codex App P2 on #1696).
+assert.match(followUpsProblem(pr("## Follow-ups\n- None yet — create an issue for the guard fix later.")), /name no issue/);
+assert.equal(followUpsProblem(pr("## Follow-ups\n- none!")), null);
+
 // Taha's PRs are his.
 assert.equal(followUpsProblem(pr("no section", "TahaKhanAbdalli")), null);
 

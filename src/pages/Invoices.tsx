@@ -935,8 +935,8 @@ export default function Invoices() {
   // Determine if batch print dialog needs any shares info
   const anySelectedIsFieldApp = selectedInvoices.some((i) => i.invoice_type === 'field_application');
   // A Bill Split chemical sale prints its payers too (the misc charge layout has no share table).
-  const anySelectedHasShares = anySelectedIsFieldApp
-    || selectedInvoices.some((i) => i.invoice_type === 'chemical_sale' && isBillSplitInvoice(i));
+  const anySelectedIsBillSplit = selectedInvoices.some((i) => i.invoice_type === 'chemical_sale' && isBillSplitInvoice(i));
+  const anySelectedHasShares = anySelectedIsFieldApp || anySelectedIsBillSplit;
 
   if (loading) {
     return (
@@ -1266,6 +1266,8 @@ export default function Invoices() {
         onClose={() => setShowBatchPrintDialog(false)}
         invoiceType={anySelectedIsFieldApp ? 'field_application' : 'chemical_sale'}
         hasShares={anySelectedHasShares}
+        // Mason, 9 Nov: a Bill Split payer's invoice shows every payer, so the table is on unless unticked.
+        sharesOnByDefault={anySelectedIsBillSplit}
         onPrint={handleBatchPrint}
         loading={printing}
       />

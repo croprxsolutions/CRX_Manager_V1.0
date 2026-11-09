@@ -15,6 +15,7 @@ const H = vi.hoisted(() => ({
   failing: new Map<string, FailMode>(),
   toast: vi.fn(),
   printed: vi.fn(),
+  dialogProps: {} as Record<string, unknown>,
 }));
 
 function replyFor(table: string): { data: unknown; error: unknown; count: number | null } {
@@ -59,8 +60,10 @@ vi.mock('../lib/invoicePdf', async (importOriginal) => ({
   generateBatchInvoicePdf: async (list: unknown[]) => { H.printed(list); return { doc: {}, failures: [] }; },
 }));
 vi.mock('../components/invoices/InvoicePrintDialog', () => ({
-  default: ({ open, onPrint }: { open: boolean; onPrint: (options: Record<string, never>) => void }) =>
-    (open ? <button type="button" onClick={() => onPrint({})}>Print with defaults</button> : null),
+  default: (props: { open: boolean; onPrint: (options: Record<string, never>) => void }) => {
+    if (props.open) H.dialogProps = props;
+    return props.open ? <button type="button" onClick={() => props.onPrint({})}>Print with defaults</button> : null;
+  },
 }));
 
 import Invoices from './Invoices';
@@ -117,6 +120,8 @@ describe('Invoices — Print Selected', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
     await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
+    // Mason, 9 Nov (A): every payer's invoice shows every payer, so batch print ticks the table by default.
+    expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
     expect(H.printed.mock.calls[0][0][0].shares).toMatchObject([
       { invoice_number: 'CS-1001-1', customer_name: 'Farmer', split_percentage: 60, amount_cents: 6000 },
       { invoice_number: 'CS-1001-2', customer_name: 'Landlord', split_percentage: 40, amount_cents: 4000 },

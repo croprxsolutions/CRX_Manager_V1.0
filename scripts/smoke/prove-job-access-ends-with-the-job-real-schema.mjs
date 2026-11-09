@@ -4,7 +4,10 @@
  *
  * Builds the checked-in production baseline plus every post-baseline migration BEFORE the candidate in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), turns row security on for
- * storage.objects as live has it, seeds one job per case and one row per job in every job table, then,
+ * storage.objects as live has it, seeds one job per case and one row per job in each table read below
+ * (job_chemicals, job_tag_assignments and job_loader_worksheets are not seeded: their select policies
+ * use the same subquery on jobs and the migration's preflight pins their text; get_jobs_billed_customers
+ * is checked only by the BODIES diff), then,
  * each read or call made as that signed-in user (role authenticated, JWT claims, row security on) and
  * rolled back:
  *   1. BEFORE: what each role reads (jobs, fields, job fields, customers, addresses, shares, completion

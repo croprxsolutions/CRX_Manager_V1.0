@@ -45,7 +45,9 @@
 --     through a subquery on `jobs` (job_fields, job_chemicals, job_tag_assignments,
 --     job_loader_worksheets, job_location_dispatches, customers, the job_applied_* and job_attachments
 --     writes, the storage job-attachments insert/delete) runs that subquery under jobs' row security,
---     so it inherits the window without being edited (the prover checks each one).
+--     so it inherits the window without being edited (the prover reads job_fields, customers, the
+--     job_applied_* and attachment tables directly; job_chemicals, job_tag_assignments and
+--     job_loader_worksheets use the same subquery and the preflight pins their exact policy text).
 --   * _is_dispatched_to_me, _can_see_field's dispatch leg and get_dispatched_list: the job must also not be
 --     soft-deleted or cancelled (a dispatch completed before an office cancel no longer keeps it open).
 --   * job_location_dispatches_select: its two dispatchee legs (the assigned applicator, an active crew

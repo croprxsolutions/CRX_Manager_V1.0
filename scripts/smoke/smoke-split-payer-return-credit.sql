@@ -9,7 +9,8 @@
 --      (line 1: 4 GL at 10.00; line 2: 1 GL at 10.01, whose cents split unevenly), delivered in full
 --      through complete_delivery, split into two governed invoices and posted;
 --   1. B returns 1 GL of line 1: the return is B's, priced 10.00 from B's own billed cents;
---   2. refusals: B returning more than its open share (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE); A
+--   2. refusals: B returning more than its open share (RETURN_QUANTITY_EXCEEDS_BILLED_SHARE), or a quantity
+--      finer than 2 decimal places (RETURN_QUANTITY_TOO_FINE); A
 --      returning more than A was billed although the goods were delivered (same code); customer D,
 --      billed nothing on the order (RETURN_ORDER_CUSTOMER_MISMATCH);
 --   3. B's return is approved, received (restocked) and credited: one posted credit memo for B on
@@ -281,6 +282,38 @@ BEGIN
     IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF position('RETURN_QUANTITY_EXCEEDS_BILLED_SHARE' IN v_err) = 0 THEN
       RAISE EXCEPTION 'SMOKE_FAIL: A''s over-share return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
+  -- 2a2. A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, as a
+  -- 4-place Bill Split share offers (Mason, 2026-11-09), is refused up front instead of being stored rounded,
+  -- priced at the full amount and then stuck at receive (RETURN_SPLIT_SHARE_REPRICED).
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_b, 'order_id', v_order, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line1, 'quantity', 0.125)),
+      'e2e-split-return-create-b-fine-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: a return finer than 2 decimal places was created';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_QUANTITY_TOO_FINE' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: a 3-place return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
+  -- The same quantity sent as exponent text ("0.125e0") is refused too, not stored rounded.
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_b, 'order_id', v_order, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line1, 'quantity', '0.125e0')),
+      'e2e-split-return-create-b-fine-exp-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: a return finer than 2 decimal places, sent as exponent text, was created';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_QUANTITY_TOO_FINE' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: an exponent-text return failed for the wrong reason: %', v_err;
     END IF;
   END;
   -- 2c. D, billed nothing on the order, cannot return from it.

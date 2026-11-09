@@ -3,10 +3,13 @@
 // One read-only block per PR for the merge captain: merge state, checks, whether
 // the Codex GitHub App reviewed the exact head, open review threads, and the
 // sol-needed verdict. It never pushes, comments or merges; the merge gates still
-// decide (`.claude/commands/ship.md` Step 8).
+// decide (`.claude/commands/ship.md` Step 8). There is deliberately no overall
+// READY line: this script does not check everything the gates do (Sol, 2026-11-08).
+// Exit 0 means every PR was read, not that any is ready.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isCodexBotLogin } from "../.claude/hooks/codex-bot-review-lib.mjs";
+import { readTeammateComments } from "../.claude/hooks/teammate-comments-lib.mjs";
 
 const REPO = "croprxsolutions/CRX_Manager_V1.0";
 const THREADS_QUERY = `query($n:Int!,$after:String){repository(owner:"croprxsolutions",name:"CRX_Manager_V1.0"){pullRequest(number:$n){
@@ -44,12 +47,25 @@ export function openThreads(threadsNode) {
     .map((t) => `${t.comments?.nodes?.[0]?.author?.login || "?"} ${t.comments?.nodes?.[0]?.path || "?"}`);
 }
 
-export function formatBlock(n, view, threadsNode, sol) {
+// Issue-level PR comments are invisible to "open threads"; #1650's apply missed one
+// (2026-11-08). `teammates` is readTeammateComments' result: null = unreadable.
+export function teammateLines(n, teammates) {
+  const label = "  unanswered teammate comments";
+  if (!teammates) return `${label}: UNREADABLE - NOT READY: read them by hand (gh pr view ${n} --comments)`;
+  const { comments, truncated } = teammates;
+  const list = comments.map(({ login, url }) => `\n    - @${login} ${url}`).join("");
+  if (truncated) return `${label}: ${comments.length} seen, list TRUNCATED - NOT READY: read them by hand (gh pr view ${n} --comments)${list}`;
+  if (!comments.length) return `${label}: 0`;
+  return `${label}: ${comments.length} - NOT READY: answer each on the PR with its link (gh pr comment ${n} --body "<link> <answer>")${list}`;
+}
+
+export function formatBlock(n, view, threadsNode, sol, teammates) {
   const { total, pending, bad } = checkCounts(view.statusCheckRollup);
   const threads = openThreads(threadsNode);
   return [
     `#${n} ${view.title}`,
     `  head=${view.headRefOid} author=${view.author?.login} draft=${view.isDraft} mergeState=${view.mergeStateStatus}`,
+    teammateLines(n, teammates),
     `  checks: ${total} total, ${pending} pending, ${bad.length} bad${bad.length ? ` (${bad.join("; ")})` : ""}`,
     `  codex App on head: ${codexReviewedHead(view) ? "yes" : "NO"}`,
     `  open threads: ${threads.length}${threads.map((t) => `\n    - ${t}`).join("")}`,
@@ -87,7 +103,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       if (![0, 1].includes(solRun.status) || !/^(NO )?SOL NEEDED: /.test(sol)) {
         throw new Error(`sol-needed gave no verdict: ${(solRun.stderr || solRun.error?.message || "no output").trim()}`);
       }
-      console.log(formatBlock(n, view, threads, sol) + "\n");
+      let teammates = null;
+      try {
+        teammates = readTeammateComments(gh, { owner: "croprxsolutions", name: "CRX_Manager_V1.0", number: Number(n) });
+      } catch {} // stays null: printed as UNREADABLE, never as 0
+      console.log(formatBlock(n, view, threads, sol, teammates) + "\n");
     } catch (error) {
       failed = true;
       console.log(`#${n} UNREADABLE: ${String(error.message).split(/\r?\n/)[0]}\n`);

@@ -290,10 +290,11 @@ function segmentsHitStateDir(value) {
 // the literal-basename proof-path matcher misses (Opus review 2026-08-19, round
 // 5). The wrappers write internally via Node fs and never shell-redirect into the
 // state dir, so any such redirect is illegitimate; fail closed.
-// The guard inputs that live directly in the repo's `.claude` folder — every one a
-// hook reads: without `schema-registry.json` three schema checks allow every edit,
-// without `caller-graph.json` grant-change-guard denies every risky REVOKE, and
-// `active-areas.json` drives active-area-guard. main denied deleting, moving or
+// The guard inputs that live directly in the repo's `.claude` folder: without
+// `schema-registry.json` three schema checks allow every edit, and without
+// `caller-graph.json` grant-change-guard denies every risky REVOKE.
+// `active-areas.json` stays listed though no hook reads it since active-area-guard
+// was deleted (KI-96 part 2): keeping it protected costs nothing. main denied deleting, moving or
 // overwriting them through the broad `.claude` rule (Codex connector, PR #956).
 // (The settings files are covered by ENFORCEMENT_SURFACE_RE; `launch.json` is a
 // dev-server config no guard reads.) Reads and the regenerate scripts (which write

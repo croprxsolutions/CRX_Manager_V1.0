@@ -2,6 +2,7 @@
 // Tests for the Codex push-proof wrapper (scripts/write-codex-push-proof.mjs).
 // Run: node scripts/write-codex-push-proof.test.mjs
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -9,6 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  appliedHistoryMatches,
+  findAppliedHistory,
   buildCarryForwardProof,
   codeHealthBeforeSol,
   docsCheckBeforeSol,
@@ -27,6 +30,8 @@ import {
   recentPushedHeads,
   countSolRounds,
   solRoundLine,
+  solRoundGate,
+  centralDate,
   cleanMainMergeParent,
   readSolPreflightFacts,
   solReviewBase,
@@ -1810,6 +1815,29 @@ not json
 `, [h1, h2]), 2, "rounds: only this branch's heads count");
     assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
     assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
+    // Hard stop from round 5 (Mason, 2026-11-09, after PR 1653 reached round 8).
+    const today = "2026-11-09";
+    const logWith = (heading, body) => `# Decision Log\n\n## ${heading}\n\n${body}\n\n## 2026-11-01 — older\n\nPR #1653 old note.\n`;
+    const named = logWith("2026-11-09 — Rounding stays per line on #1653", "**Decision (Mason):** keep it.");
+    const r5 = solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Something else", "No PR here."), today });
+    assert.equal(r5.refuse, true, "round stop: round 5 without a decision entry refuses");
+    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*DECISION_LOG\.md.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: named, today }).refuse, false, "round stop: round 5 with today's entry naming #1653 proceeds");
+    assert.equal(solRoundGate({ round: 8, prNumber: 1653, decisionLog: logWith("2026-11-09 — Trade-off", "**Decision (Mason):** loss over duplicate for PR #1653."), today }).refuse, false, "round stop: 'PR #n' in the body counts");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** Mason keeps #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-08 — Yesterday", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an older entry naming the PR does not count");
+    assert.equal(solRoundGate({ round: 5, prNumber: 165, decisionLog: named, today }).refuse, true, "round stop: #1653 does not name #165");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Pending", "PR #1653; decision pending"), today }).refuse, true, "round stop: a mention with no **Decision line does not count (Luna MED)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Placeholder", "**Decision:** pending; no trade-off chosen yet. PR #1653"), today }).refuse, true, "round stop: a **Decision line that does not name Mason does not count (Luna HIGH r2)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-99-99 — Bad date", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an impossible date does not count (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Token", "**Decision (Mason):** #1653abc"), today }).refuse, true, "round stop: #1653abc does not name #1653 (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: "", today }).refuse, true, "round stop: an unreadable decision log refuses");
+    assert.match(solRoundGate({ round: 5, prNumber: null, decisionLog: named, today }).message, /open the PR/, "round stop: no PR yet says open it first");
+    assert.deepEqual(solRoundGate({ round: 4, prNumber: 1653, decisionLog: "", today }), { refuse: false, message: null }, "round stop: round 4 proceeds");
+    const dry = solRoundGate({ round: 5, prNumber: 1653, decisionLog: "", today, dryRun: true });
+    assert.equal(dry.refuse, false, "round stop: --dry-run never refuses");
+    assert.match(dry.message, /Sol round 5/, "round stop: --dry-run still reports the stop");
+    assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
   }
   assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
   assert.equal(check({ headContainsBase: null }).ok, false, "preflight: an unreadable containment check refuses");
@@ -2182,6 +2210,105 @@ not json
   assert.equal(passed.ok, true, "docs check: a passing check lets Sol run");
   const crashed = docsCheckBeforeSol("root", "b", { spawn: () => ({ status: null, stdout: "", stderr: "boom" }) });
   assert.deepEqual([crashed.ok, crashed.output], [false, "boom"], "docs check: a check that cannot run refuses");
+}
+
+// Applied history (Mason, 2026-11-08): only an ADDED migration whose text equals the one SQL text the
+// live ledger stored under the same name is named to Sol as history; everything else gets the full review.
+{
+  const name = "20261214100000_ki30_fix";
+  const file = `supabase/migrations/${name}.sql`;
+  const sql = "UPDATE public.products SET x = 1;\n";
+  const sha = createHash("sha256").update(sql, "utf8").digest("hex");
+  const match = (ledgerRows, text = sql, addedFiles = [file]) =>
+    appliedHistoryMatches({ addedFiles, readFile: () => text, ledgerRows });
+
+  assert.deepEqual(match([{ name, statements: [sql] }]), [{ name, sha256: sha }], "applied history: identical text is history");
+  assert.deepEqual(
+    match([{ name, statements: [sql.replace(/\n/g, "\r\n")] }]),
+    [{ name, sha256: sha }],
+    "applied history: only line endings differ, still identical",
+  );
+  assert.deepEqual(
+    match([{ name, statements: [sql.replace(/\n/g, "\r")] }]),
+    [{ name, sha256: sha }],
+    "applied history: bare CR line endings are line endings too",
+  );
+  assert.deepEqual(match([{ name, statements: [sql] }], sql.replace("1", "2")), [], "applied history: one byte different is reviewed in full");
+  assert.deepEqual(match([{ name, statements: [`${sql} `] }]), [], "applied history: one extra byte live is reviewed in full");
+  assert.deepEqual(match([]), [], "applied history: no live row with that name is reviewed in full");
+  assert.deepEqual(match([{ name: `${name}_x`, statements: [sql] }]), [], "applied history: a different name never matches");
+  assert.deepEqual(match([{ name, statements: [sql] }, { name, statements: [sql] }]), [], "applied history: two live rows are reviewed in full");
+  assert.deepEqual(match([{ name, statements: [sql, ""] }]), [], "applied history: SQL split in two is reviewed in full");
+  assert.deepEqual(match([{ name, statements: null }]), [], "applied history: no stored SQL is reviewed in full");
+  assert.deepEqual(match(null), [], "applied history: a failed live read is reviewed in full");
+  assert.deepEqual(match([{ name, statements: [sql] }], null), [], "applied history: an unreadable file is reviewed in full");
+  assert.deepEqual(
+    match([{ name: "x", statements: [sql] }], sql, ["supabase/migrations/notes.md"]),
+    [],
+    "applied history: only migration .sql files qualify",
+  );
+
+  // Only ADDED files qualify: an edit to a migration already on the base is reviewed in full.
+  const repo = tempDir("crx-applied-history-");
+  const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+  const commit = (message) => git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", message);
+  git("init", "-q", "-b", "main");
+  mkdirSync(path.join(repo, "supabase", "migrations"), { recursive: true });
+  const oldName = "20261101100000_old_fix";
+  writeFileSync(path.join(repo, "supabase", "migrations", `${oldName}.sql`), sql);
+  git("add", ".");
+  commit("base");
+  const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const revParse = () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const migPath = (n) => path.join(repo, "supabase", "migrations", `${n}.sql`);
+  writeFileSync(migPath(name), sql);
+  git("add", ".");
+  commit("candidate");
+  const head = revParse();
+  const asked = [];
+  const ledger = (names) => {
+    asked.push(...names);
+    return [{ name, statements: [sql] }, { name: oldName, statements: [`${sql}-- edited\n`] }];
+  };
+  assert.deepEqual(findAppliedHistory(repo, base, head, { readLedger: ledger }), [{ name, sha256: sha }], "applied history: a purely added file matches");
+  assert.deepEqual(asked, [name], "applied history: only added migration names are looked up live");
+  assert.deepEqual(findAppliedHistory(repo, base, head, { readLedger: () => null }), [], "applied history: a failed live read gives none");
+
+  // Any edited or deleted migration (a rename is a delete plus an add) means no applied history at all.
+  writeFileSync(migPath(oldName), `${sql}-- edited\n`);
+  git("add", ".");
+  commit("edit an existing migration");
+  assert.deepEqual(findAppliedHistory(repo, base, revParse(), { readLedger: ledger }), [], "applied history: an edited migration voids it, even when live has its new text");
+  git("reset", "-q", "--hard", head);
+  const renamed = "20261101100001_old_fix_renamed";
+  git("mv", `supabase/migrations/${oldName}.sql`, `supabase/migrations/${renamed}.sql`);
+  writeFileSync(migPath(renamed), `${sql}-- edited\n`);
+  git("add", ".");
+  commit("rename and edit");
+  assert.deepEqual(
+    findAppliedHistory(repo, base, revParse(), { readLedger: () => [{ name, statements: [sql] }, { name: renamed, statements: [`${sql}-- edited\n`] }] }),
+    [],
+    "applied history: a renamed and edited migration is not history even when live has it under the new name",
+  );
+
+  // A file with invalid UTF-8 never matches, even against a ledger text holding the replacement character.
+  git("reset", "-q", "--hard", head);
+  const badName = "20261216100000_bad_bytes";
+  writeFileSync(migPath(badName), Buffer.concat([Buffer.from("select 1; -- "), Buffer.from([0xff]), Buffer.from("\n")]));
+  git("add", ".");
+  commit("invalid utf8");
+  assert.deepEqual(
+    findAppliedHistory(repo, base, revParse(), { readLedger: () => [{ name, statements: [sql] }, { name: badName, statements: ["select 1; -- �\n"] }] }),
+    [{ name, sha256: sha }],
+    "applied history: an invalid UTF-8 file is not history; the valid one still is",
+  );
+
+  const prompt = buildCodexReviewPrompt({ appliedHistory: [{ name, sha256: sha }] });
+  assert.equal(prompt.includes(`supabase/migrations/${name}.sql (sha256 ${sha})`), true, "applied history: the prompt names the file and hash");
+  assert.equal(buildCodexReviewPrompt().includes("APPLIED HISTORY"), false, "applied history: no section when nothing matched");
+  const proof = buildCodexPushProof({ headSha: "a".repeat(40), baseSha: "b".repeat(40), verdict: "clean", appliedHistory: [{ name, sha256: sha }] });
+  assert.deepEqual(proof.applied_history, [{ name, sha256: sha }], "applied history: the proof records what was treated as history");
+  assert.equal("applied_history" in buildCodexPushProof({ headSha: "a", baseSha: "b", verdict: "clean" }), false, "applied history: unchanged proof shape otherwise");
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

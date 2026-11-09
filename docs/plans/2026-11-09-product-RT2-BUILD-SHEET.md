@@ -1,6 +1,6 @@
 # Product Master Stage 4: RT-2 build sheet (unit spellings)
 
-**Status (2026-11-09):** this is a plan only. No code and no migration have been written. It was written against `main` (`44ff56ec0`) and the live database, using read-only SQL only (latest live migration `20261222100000_document_restore_and_photo_uploader`). For building, this sheet replaces the RT-2 outline in `docs/plans/2026-10-29-product-GRAND-PLAN.md` Stage 4. Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "overlap 3" points to the grand plan's section 4.
+**Status (2026-11-09):** this is a plan only. No code and no migration have been written. It was written against `main` (`44ff56ec0`) and the live database, using read-only SQL only (latest live migration `20261222100000_document_restore_and_photo_uploader`, applied live on 2026-11-09 per `supabase_migrations.schema_migrations`; this repo's migration stamps run ahead of the calendar by convention, so a stamp orders files and is not an apply date). For building, this sheet replaces the RT-2 outline in `docs/plans/2026-10-29-product-GRAND-PLAN.md` Stage 4. Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "overlap 3" points to the grand plan's section 4.
 
 **What RT-2 is.** The same unit is spelled two ways in `unit_conversions` (`oz`/`Oz`, `qt`/`Qt`, `Lb`/`LB`). RT-2 picks one spelling for each, moves every product to it, and then deletes the other row. It is August To-Do items 2.7, 2.7a, 2.7b and 2.8 (PRD `2026-08-18-product-data-model-PRD.md` lines 354-357; master record A-4, B-12, C-26, T-13).
 
@@ -161,6 +161,7 @@ What changes on paper: the 11 `Oz` and 8 `Qt` products show `oz` / `qt` as their
 One migration, `<stamp>_unit_spellings_remap.sql` (stamp claimed in the notes folder at build time; RT-1 holds `20261223100000`).
 
 ### 4.A Preflight (refuses and changes nothing if any check fails)
+- **First**, `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE ROW EXCLUSIVE MODE` (with the repo's usual `lock_timeout`). This waits for any product save already in flight to commit and blocks new ones until the migration commits, so no save can add an `Oz`, `Qt` or `LB` product between the check below and the remap.
 - The 14 `unit_conversions` rows exactly as in 1.1 (spelling, factor, type).
 - `product_rate_lock.is_locked = false`.
 - The products to move are exactly the listed ids (pinned in the migration by id **and** current spelling): 11 with `inventory_unit = unit_size = 'Oz'`, 8 with `'Qt'`, 1 with `rate_unit = 'LB'` (and the 2 dry `oz` rows if question 3 is yes). Any other product found with `Oz`, `Qt` or `LB` in any product unit column refuses (it would be left behind).
@@ -190,6 +191,8 @@ A reverse script (kept beside the harness, not in `supabase/migrations/`) puts e
 One migration, `<stamp>_unit_spellings_delete_aliases.sql`. **It deletes rows, so it is destructive: Mason's explicit approval is required for the live apply.** It is built and proven only after step 1 is live and the live check in section 7 has passed.
 
 ### 5.A Preflight
+- **First**, `LOCK TABLE public.unit_conversions IN ACCESS EXCLUSIVE MODE` and `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE MODE` (with `lock_timeout`). A product save checks its unit against `unit_conversions` in a trigger, not a foreign key, so without these locks an uncommitted save could validate `Oz` against the alias, the delete could run and pass postflight, and the save could then commit pointing at a deleted unit. With them, every in-flight save commits before the checks read, and no save runs until the delete has committed (after which `validate_product_units` refuses the old spelling).
+- If a product was given `Oz`, `Qt` or `LB` between step 1 and step 2 (the dropdowns still offer them until step 2), the check below refuses and that product is remapped first, through a small follow-up to step 1 with Mason's yes.
 - Step 1's migration is in the live ledger.
 - `product_rate_lock.is_locked = false`.
 - No product unit column, no `product_parents.rate_unit` and no `product_form_units.unit` holds `Oz`, `Qt` or `LB`.
@@ -237,6 +240,7 @@ Step-specific cases:
 | U8 | Step 1 with a stray `Oz` product not in the pinned list | Refused at preflight |
 | U9 | Step 1 with a remapped product put in a parent group | Refused at preflight |
 | U10 | Step 2 before step 1 (aliases deleted while products still use them) | Refused at preflight. Then, as `postgres` only, delete `Qt` directly to show what the order prevents: saving a `Qt` product now fails (`inventory_unit "Qt" is not valid`) |
+| U10b | **Race:** session A updates a product to `Oz` and holds its transaction open; session B starts step 2 | B waits on the lock; when A commits, B's preflight sees the `Oz` product and refuses. Same test for step 1 with a new `Qt` product |
 | U11 | Step 2 with the lock on | Refused (preflight, and `guard_unit_conversions_rate_lock` as backstop) |
 | U12 | After step 2, insert a `unit_conversions` row `QT` | Refused by the lower-case unique index |
 | U13 | Setup trigger after step 1 | Enabled; a stock-unit change on a saved product is still refused |
@@ -316,4 +320,6 @@ No screen PR: dropdowns read the live table (1.5). No `src/types/index.ts` chang
 
 ## 12. Review record
 
-*(filled in as reviews run)*
+**Luna round 1** (gpt-6-luna xhigh, head `16e3aab9c`): 2 findings.
+- HIGH: an uncommitted product save could validate an alias spelling while step 2 deletes it (units are checked by a trigger, not a foreign key). Fixed: both steps lock `products`, `product_parents` and `product_form_units` (and step 2 `unit_conversions`) before their preflight; race case U10b added (4.A, 5.A, section 6).
+- MED: the "latest live migration" stamp is later than the check date. Refuted: this repo's stamps run ahead of the calendar by convention; `20261222100000` is in the live ledger (applied 2026-11-09), as RT-1's sheet also records. Note added to the status line.

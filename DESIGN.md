@@ -165,7 +165,8 @@ Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed
 
 ### Hierarchy
 - **Page title** (Barlow 600, 1.5rem): one per page through `PageHeader`; the phone top bar uses 1.125rem rising to 1.25rem on desktop.
-- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles (`text-xl`, `md:text-2xl`).
+- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`).
+- **Modal title** (Barlow 600, `text-xl` rising to `md:text-2xl`): the `Modal` heading.
 - **Accent word** (Barlow 300, crx-green): the second half of a split heading.
 - **Body** (Inter 400, 0.875rem): almost all UI text, tables included.
 - **Label** (Inter 500, 0.875rem, Slate Ink): form labels, tabs, buttons.
@@ -192,7 +193,7 @@ Mostly flat, with soft ambient shadows that separate white surfaces from the cre
 - **Card** (`shadow-card`): resting cards.
 - **Card hover** (`shadow-card-hover`): only on cards that are clickable (`Card hover`).
 - **Small** (`shadow-sm`, pinned to Tailwind 3): filled buttons.
-- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
+- **Large / extra large** (`shadow-lg`, `shadow-2xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
 
 ## Shapes
 
@@ -207,7 +208,7 @@ All shared pieces live in `src/components/ui/` and `src/components/layout/`. Use
 - **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron` only on a button that goes to another page or the next step; Save and other in-place actions never show the › arrow.
 
 ### Status badges (`Badge`)
-Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a word, never colour alone; the status dot arrives with the quote screens (PR 2). Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
+Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a word, never colour alone. Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
 
 ### Cards (`Card`, `CardHeader`)
 White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off with `padding={false}` for tables). `CardHeader` gives a section title with an optional accent word and a right-aligned action.

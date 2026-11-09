@@ -351,7 +351,7 @@ The rules for screens built or redesigned with the kit in `src/components/ui/`. 
 ### Status badges
 - `Badge` capitalises its label by default. Pass `normalCase` when the label is already written as it should appear ("Closed short").
 - Status labels on redesigned screens are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)". Stored status values do not change.
-- A badge is a soft pill with a word, never colour alone, and never brand green. The status dot arrives with the quote screens (PR 2).
+- A badge is a soft pill with a word, never colour alone, and never brand green.
 
 ### Confirming, saving and results
 - Confirm before costly actions (removing a line with data, declining, cancelling, closing a booking, deleting) with `ConfirmModal`. The title is a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK").

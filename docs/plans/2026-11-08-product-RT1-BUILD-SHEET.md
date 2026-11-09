@@ -38,7 +38,7 @@
 | `product_rate_lock.is_locked` | false (WP-PM-11a-1 live, lock off) |
 | `product_rate_events` rows | 0 |
 | `product_rates` table | does not exist |
-| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` |
+| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` (this repo's migration stamps run ahead of the calendar by convention; the stamp orders files, it is not the apply date) |
 
 **MSO XL today:** two sizes, `MSO XL - 2.5 Gal` and `MSO XL - Bulk`, both liquid, stock unit `Gal`, `rate_per_acre = 9.6`, `rate_unit = 'oz'`, `suggested_rate = '2 qt/100 Gal'`, no label maximum. Note 2 qt/100 gal at a 15 gal/acre spray volume is exactly 9.6 fl oz/acre (64 × 15 / 100).
 
@@ -65,7 +65,7 @@
 | Thing | Where | What RT-1 relies on |
 |---|---|---|
 | The factor-1 fallback (the reason for the unit rules) | `src/lib/quoteCalc.ts:77-86` `getConversionFactor`; live `_save_quote_below_cost_impl_20260810` (`COALESCE(rate_conv.factor_oz, 1)`); live `product_price_per_acre` (`… LIMIT 1`) | A blank or unlisted unit silently becomes 1 oz. RT-1 never calls these and never changes them. Its own unit table has no fallback. |
-| `unit_conversions` | live, 14 rows | Factors RT-1's unit table must equal (postflight check, section 4.G): `fl oz`, `oz`, `Oz` = 1; `Pt` = 16; `qt`, `Qt` = 32; `Gal` = 128; `Dry oz` = 1; `Lb`, `LB` = 16; `g` = 0.03527396; `MG` = 0.00003527396; `Ea`, `Unit` = 1. |
+| `unit_conversions` | live, 14 rows | Factors RT-1's unit table must match (postflight check, section 4.G; weight units match after dividing RT-1's milligram factor by 28349.523125 and rounding to the `unit_conversions` factor's own decimals): `fl oz`, `oz`, `Oz` = 1; `Pt` = 16; `qt`, `Qt` = 32; `Gal` = 128; `Dry oz` = 1; `Lb`, `LB` = 16; `g` = 0.03527396; `MG` = 0.00003527396; `Ea`, `Unit` = 1. |
 | `_unit_factor_oz(unit, unit_type)` | live | Returns null for an unknown or ambiguous unit (no fallback). RT-1 does not use it, because its own table is the authority, but it is the model. |
 | `normalize_rate_unit(text)` | live (`20260630170000`) | Strips `/acre`, `per acre`; maps spellings to `oz`, `pt`, `qt`, `gal`, `lb`, `g`, `kg`, `l`, `ml`, `ton`; keeps any other `/…` string whole. RT-1's label-maximum parser uses it (section 3.5). |
 | Rate readers | `src/` | `rate_per_acre` appears in 122 files; 53 outside tests and `src/types/`. (The grand plan's "93 / 42" was the 2026-10-29 count.) `rate_unit` appears in 118 files. RT-1 touches none of them. |
@@ -106,9 +106,10 @@
 - `low numeric(18,6)`, `recommended numeric(18,6)`, `high numeric(18,6)`, each `CHECK (x IS NULL OR x >= 0)` (WP-PM-8's rate ≥ 0, overlap 4). The precision matches `_product_rate_value_ok` (12 digits, 6 decimals).
 - `unit text NOT NULL` FK `product_rate_units(code)`. So a blank or unknown unit cannot be stored at all.
 - `is_quoting_default boolean NOT NULL DEFAULT false`.
-- `status text NOT NULL DEFAULT 'draft'` CHECK in (`draft`, `approved`). RT-1 writes only `draft`; `approved` is there so RT-3 needs no constraint change. `approved_by uuid`, `approved_at timestamptz`, with `CHECK ((status = 'approved') = (approved_by IS NOT NULL AND approved_at IS NOT NULL))`.
+- `status text NOT NULL DEFAULT 'draft'` CHECK in (`draft`, `approved`). RT-1 writes only `draft`; `approved` is there so RT-3 needs no constraint change. `approved_by uuid`, `approved_at timestamptz`, with `CHECK ((status = 'draft' AND approved_by IS NULL AND approved_at IS NULL) OR (status = 'approved' AND approved_by IS NOT NULL AND approved_at IS NOT NULL))`, so a draft can carry neither approval field and an approved row must carry both.
 - `origin text NOT NULL` CHECK in (`derived_house`, `derived_text`, `manual`).
-- `source_text text` (≤ 200 characters): the exact text a derived row came from (`suggested_rate`, or `"<rate_per_acre> <rate_unit>"`), kept for RT-3 (grand plan RT-3: "its source text kept").
+- `basis_confirmed boolean NOT NULL DEFAULT true`. False only on a derived house row with a basis doubt (section 5, `basis_suspect`). While false the label check never compares (3.5 step 4), so a per-seed-unit number stored as per acre can never read "within". A save through 4.A (an admin choosing the basis) sets it true; RT-3 must not approve a row while it is false.
+- `source_text text` (≤ 200 characters): the exact text a derived row came from (`suggested_rate`, or `"<rate_per_acre> <rate_unit>"`), kept for RT-3 (grand plan RT-3: "its source text kept"). Derivation checks the length first: text longer than 200 characters makes no row and is noted `text_unparsed` (the note keeps the first 200 characters), so the limit can never fail a derivation write.
 - `over_label_reason text` (≤ 500 characters, trimmed non-empty when present).
 - `row_version bigint NOT NULL DEFAULT 1`, `created_by uuid NOT NULL`, `created_at timestamptz NOT NULL DEFAULT now()`, `updated_by uuid NOT NULL`, `updated_at timestamptz NOT NULL DEFAULT now()`.
 
@@ -121,11 +122,11 @@ Constraints and indexes (these **are** the database rules; section 3.4 lists the
 - `CHECK (NOT is_quoting_default OR recommended IS NOT NULL)` (a quote line needs one number).
 - `UNIQUE (parent_id, source, basis)`. One label row and one house row per basis per parent. **Room for crops:** a later optional `crop` column widens this key and the default index to include it; nothing else changes (grand plan, "Per-crop rates stay parked").
 - Unique partial index `uq_product_rates_one_default ON (parent_id) WHERE is_quoting_default`. Zero or one default per parent.
-- **Unit fits basis and form:** a constraint trigger (`BEFORE INSERT OR UPDATE`, function `_product_rates_check_unit`) reads the parent's `product_form` and the unit's kind and refuses anything outside the section 3.3 table with `PRODUCT_RATE_UNIT_NOT_FOR_BASIS: <unit> is not allowed for <basis> on a <form> product`. (A CHECK cannot read another table, so this is a trigger; it also covers a direct write by a future definer function.)
-- An update trigger refuses changing `parent_id`, `origin` or `created_*`, and refuses any change to an `approved` row except by RT-3's future pass (RT-1 ships no such pass, so an approved row cannot change at all yet).
+- **Unit fits basis and form:** an ordinary row trigger (`BEFORE INSERT OR UPDATE … FOR EACH ROW`, function `_product_rates_check_unit`; not a constraint trigger, because PostgreSQL allows those only `AFTER`) reads the parent's `product_form` and the unit's kind and refuses anything outside the section 3.3 table with `PRODUCT_RATE_UNIT_NOT_FOR_BASIS: <unit> is not allowed for <basis> on a <form> product`. (A CHECK cannot read another table, so this is a trigger; it also covers a direct write by a future definer function.)
+- An update trigger sets `updated_at = now()` on every update (the RPCs also set `updated_by` and `row_version + 1`, so the version and the timestamp always move together), refuses changing `parent_id`, `origin` or `created_*`, and refuses any change to an `approved` row except by RT-3's future pass (RT-1 ships no such pass, so an approved row cannot change at all yet).
 
 **`product_rate_units`** (reference data, seeded in the migration, never edited by the app)
-- `code text` PK, `kind text NOT NULL` CHECK in (`volume`, `weight`, `each`), `factor numeric NOT NULL CHECK (factor > 0)`: fluid ounces per unit for volume, dry (avoirdupois) ounces per unit for weight, 1 for each.
+- `code text` PK, `kind text NOT NULL` CHECK in (`volume`, `weight`, `each`), `factor numeric NOT NULL CHECK (factor > 0)`: fluid ounces per unit for volume, **milligrams** per unit for weight, 1 for each. Weight uses milligrams because every weight factor is then an exact, finite decimal (the avoirdupois ounce is defined as exactly 28.349523125 g); a grams-to-ounces factor would have to be cut short and could flip a borderline label check.
 - `label text NOT NULL` (what screens show), `legacy_spellings text[] NOT NULL` (today's `rate_unit` spellings that mean this unit; used only by the derivation and, later, by RT-4's write-back).
 
 | `code` | kind | factor | label | legacy spellings |
@@ -134,10 +135,10 @@ Constraints and indexes (these **are** the database rules; section 3.4 lists the
 | `pt` | volume | 16 | pt | `Pt` |
 | `qt` | volume | 32 | qt | `qt`, `Qt` |
 | `gal` | volume | 128 | gal | `Gal` |
-| `dry_oz` | weight | 1 | dry oz | `Dry oz` |
-| `lb` | weight | 16 | lb | `Lb`, `LB` |
-| `g` | weight | 0.03527396 | g | `g` |
-| `mg` | weight | 0.00003527396 | mg | `MG` |
+| `dry_oz` | weight | 28349.523125 | dry oz | `Dry oz` |
+| `lb` | weight | 453592.37 | lb | `Lb`, `LB` |
+| `g` | weight | 1000 | g | `g` |
+| `mg` | weight | 1 | mg | `MG` |
 | `each` | each | 1 | each | `Ea`, `Unit` |
 
 `oz`/`Oz` map to fluid ounces, because `unit_conversions` lists them as liquid. A dry product whose rate unit is `oz` therefore fails the form check and is reported (section 5), never guessed.
@@ -166,7 +167,7 @@ Refused cells raise `PRODUCT_RATE_UNIT_NOT_FOR_BASIS`. A weight rate on a liquid
 
 **Conversion and rounding.**
 - RT-1 **stores no converted value.** A row keeps the number and unit it was given.
-- Conversions happen only inside the label check (3.5), within one kind: `value × factor` gives fluid ounces (volume) or dry ounces (weight). They are done in exact PostgreSQL `numeric` with no rounding at any step; "equal" is not "above".
+- Conversions happen only inside the label check (3.5), within one kind: `value × factor` gives fluid ounces (volume) or milligrams (weight). Every factor is exact, so nothing is ever truncated. They are done in exact PostgreSQL `numeric` with no rounding at any step; "equal" is not "above".
 - Values are entered with at most 6 decimals (`numeric(18,6)`); more decimals are refused (`PRODUCT_RATE_INVALID`, the existing `_product_rate_value_ok` rule), never rounded silently.
 - Converting **between** bases (per 100 gal → per acre needs a spray volume; per cwt → per acre needs a seeding rate) is **not** done by RT-1. The examples below that cross a basis are only to show what the numbers mean.
 - RT-4 note: when RT-4 fills the old columns from an approved default, it writes the row's own number and the unit's legacy spelling, so no rounding or factor ever enters a quote.
@@ -178,11 +179,12 @@ Refused cells raise `PRODUCT_RATE_UNIT_NOT_FOR_BASIS`. A weight rate on a liquid
 | `per_acre`, volume | 1.5 pt/acre against a label max of `24 oz/acre` | 1.5 × 16 = 24 fl oz; max 24 × 1 = 24 fl oz; 24 is not above 24 | within label |
 | `per_acre`, volume | 1.6 pt/acre against the same max | 1.6 × 16 = 25.6 fl oz > 24 | above label: needs a reason |
 | `per_acre`, volume | 0.25 gal/acre | 0.25 × 128 | 32 fl oz/acre |
-| `per_acre`, weight | 18 g/acre | 18 × 0.03527396 | 0.63493128 dry oz/acre |
-| `per_acre`, weight | 6 mg/acre | 6 × 0.00003527396 | 0.00021164376 dry oz/acre |
+| `per_acre`, weight | 18 g/acre | 18 × 1000 | 18000 mg/acre (about 0.635 dry oz) |
+| `per_acre`, weight | 1 g/acre against a label max of `0.035273961 oz/acre` (dry) | 1 × 1000 = 1000 mg; max 0.035273961 × 28349.523125 = 999.999973079848125 mg; 1000 > 999.99997… | above label (a truncated g→oz factor would wrongly say within) |
+| `per_acre`, weight | 6 mg/acre | 6 × 1 | 6 mg/acre (about 0.000212 dry oz) |
 | `per_acre`, each | 1 each/acre (an each product) | factor 1 | 1 each/acre |
 | `per_100_gal`, volume | MSO XL label 2 qt/100 gal | 2 × 32 | 64 fl oz per 100 gal. (Meaning only: at 15 gal/acre that is 64 × 15 / 100 = 9.6 fl oz/acre, MSO XL's house rate.) |
-| `per_100_gal`, weight | 17 lb/100 gal | 17 × 16 | 272 dry oz per 100 gal |
+| `per_100_gal`, weight | 17 lb/100 gal | 17 × 453592.37 | 7711070.29 mg per 100 gal (exactly 272 dry oz) |
 | `per_unit` | 2 fl oz per each | factor 1 | 2 fl oz per each |
 | `per_cwt_seed` | 1.5 fl oz/cwt | factor 1 | 1.5 fl oz per 100 lb of seed. (Meaning only: 2,000 lb of seed is 20 cwt, so 30 fl oz.) |
 | `per_seed_unit` | Ilevo label 1.18 fl oz per seed unit | factor 1 | 1.18 fl oz per seed unit. (Meaning only: 40 units take 47.2 fl oz = 0.36875 gal.) |
@@ -212,7 +214,7 @@ The named refusals are raised by the RPCs before the constraint would fire, so t
 2. Collect the parent's EPA numbers from the four places `_parent_chemistry_epa_refusal` reads (trimmed, non-blank, distinct).
 3. If none, or REG-1's seed function is missing or reports unseeded (`to_regprocedure('public._epa_registrations_seeded()')` is null, or it returns false), return `{status: 'not_checked', why: 'no_registration' | 'registrations_not_seeded'}`.
 4. For each number, read `epa_registrations.max_label_rate` and `max_label_rate_unit`. A maximum is **comparable** only when:
-   - the row's basis is `per_acre`;
+   - the row's basis is `per_acre` **and** `basis_confirmed` is true (otherwise the result is `not_checked`, why `basis_unconfirmed`);
    - the max unit, through `normalize_rate_unit`, ends with an acre denominator or has none (a bare unit is read as per acre, as `compareToMaxRate` does), and its base maps to a `product_rate_units` code of the row's kind (`oz` → `fl_oz` for liquid, `dry_oz` for dry; `pt`, `qt`, `gal`, `lb`, `g`, and `mg` map directly; anything else, such as `kg`, `l`, `ml`, `ton` or a `/100 gal` maximum, is not comparable).
 5. The highest value on the row is `greatest(low, recommended, high)` (nulls ignored). Compare `highest × row factor` with `max × max factor` in exact numeric.
 6. Result:
@@ -248,7 +250,7 @@ Functions:
 
 Every mutating RPC:
 - takes `p_idempotency_key text DEFAULT NULL` and refuses a missing key (`IDEMPOTENCY_KEY_REQUIRED`);
-- calls `_product_parent_replay(p_idempotency_key, '<rpc name>', v_fp)` before any lock, where `v_fp` is the md5 of a jsonb of every argument plus `actor_id`;
+- calls `_product_parent_replay(p_idempotency_key, '<rpc name>', v_fp)` before any other lock. The helper itself first takes `pg_advisory_xact_lock(hashtext('crx.product_parent:' || scope || ':' || key))` (`20261108120000_product_parents.sql:499`), so two requests with the same key run one after the other and the second finds the first's receipt; no extra key lock is needed, where `v_fp` is the md5 of a jsonb of every argument plus `actor_id`;
 - ends with `save_idempotency(p_idempotency_key, '<rpc name>', v_result)`.
 
 ---
@@ -308,7 +310,7 @@ No other `src/` file changes. The PR description lists its file list against thi
 
 - Every new table has RLS on, the policies named in 3.7, and exactly the grants named there (read from `information_schema.role_table_grants`).
 - Every new function is owned by `postgres`, is `SECURITY DEFINER` with the stated `search_path`, and has `EXECUTE` only where 3.7 says.
-- For every `product_rate_units` row and each of its `legacy_spellings`, `unit_conversions` has that exact spelling with the same factor, and every distinct non-blank `products.rate_unit` spelling (all rows, active or not: today `oz`, `Dry oz`, `qt`, `Unit`, `MG`, `Lb`, `Gal`, `Ea`, `LB`, `Pt`) appears in exactly one `legacy_spellings` array. Blank and null units (5 rows today) are allowed; derivation notes them as `unit_unknown` only when the parent has a rate.
+- For every `product_rate_units` row and each of its `legacy_spellings`, `unit_conversions` has that exact spelling with the same factor (volume and each: equal exactly; weight: `round(factor / 28349.523125, scale(unit_conversions factor))` equals the `unit_conversions` factor, so `g` 1000 → 0.03527396 and `MG` 1 → 0.00003527396 match today's rows, and `Lb` 453592.37 → 16 exactly), and every distinct non-blank `products.rate_unit` spelling (all rows, active or not: today `oz`, `Dry oz`, `qt`, `Unit`, `MG`, `Lb`, `Gal`, `Ea`, `LB`, `Pt`) appears in exactly one `legacy_spellings` array. Blank and null units (5 rows today) are allowed; derivation notes them as `unit_unknown` only when the parent has a rate.
 - The md5 of `pg_get_functiondef` for `product_price_per_acre`, `normalize_rate_unit`, `validate_product_units`, `guard_product_rate_lock` and `_apply_parent_rates` is unchanged from the preflight's reading in the same transaction.
 
 ### 4.H Risks
@@ -337,7 +339,7 @@ No other `src/` file changes. The PR description lists its file list against thi
 - `source = 'label'` (question 1), `origin = 'derived_text'`, `source_text = suggested_rate` exactly.
 - A strict parser, case-insensitive, after trimming and collapsing spaces. It reads only:
   - `NUM [UNIT] - NUM UNIT` or `NUM UNIT` (a range or one number; a unit after the low number must equal the one after the high number); `to` counts as `-`; a leading `.` is allowed (`.25`);
-  - followed by a denominator: `/acre`, `/ac`, `/a`, `per acre` → `per_acre`; `/100 gal` → `per_100_gal`; `/cwt` → `per_cwt_seed`; `/unit` → `per_seed_unit` (all 15 such rows are seed treatments; note `basis_from_text`); or the suffix `gpa` with no unit → `gal` per acre.
+  - followed by a denominator: `/acre`, `/ac`, `/a`, `per acre` → `per_acre`; `/100 gal` → `per_100_gal`; `/cwt` → `per_cwt_seed`; `/unit` → `per_seed_unit` (all 15 such rows are seed treatments; note `basis_from_text`; the 6 each-form ones then fail the unit check below); or the suffix `gpa` with no unit → `gal` per acre.
   - Units: the legacy spellings, plus `fl oz`, `pint(s)`, `quart(s)`, `gallon(s)`, `lb(s)`, `pound(s)`, `gram(s)`, `dry oz`. `oz` means `fl_oz` on a liquid parent and `dry_oz` on a dry one (in text, unlike the stored unit, "oz" on a dry label means dry ounces).
 - One number → `recommended`. A range → `low` and `high`, `recommended` null.
 - Anything else (`1.5 qt/ton`, `1-3lb`, `Beans 5 oz/acre -- Corn 14oz/acre`, `Spray on`, `2 products`): no row, note `text_unparsed` with the text. A unit that fails 3.3 for the parent's form (the each-form seed treatments' `oz/unit`): no row, note `unit_not_for_form`.
@@ -351,9 +353,9 @@ No other `src/` file changes. The PR description lists its file list against thi
 - Text row: `2 qt/100 Gal` → one number 2, unit `qt`, denominator `/100 gal` → `label`, `per_100_gal`, `recommended 2`, `qt`.
 - House row: `9.6 oz` → `oz` is in `fl_oz`'s spellings, volume fits liquid → `house_standard`, `per_acre`, `recommended 9.6`, `fl_oz`; the text parsed to `per_100_gal`, so no doubt → `is_quoting_default = true`.
 
-**Ilevo Seed Treatment, worked:** parent values `1.18`, `oz`, `1.18 oz/unit`, liquid. Text row → `label`, `per_seed_unit`, `recommended 1.18`, `fl_oz`, note `basis_from_text`. House row → `house_standard`, `per_acre`, `1.18 fl_oz`, `is_quoting_default = false`, note `basis_suspect`.
+**Ilevo Seed Treatment, worked:** parent values `1.18`, `oz`, `1.18 oz/unit`, liquid. Text row → `label`, `per_seed_unit`, `recommended 1.18`, `fl_oz`, note `basis_from_text`. House row → `house_standard`, `per_acre`, `1.18 fl_oz`, `is_quoting_default = false`, `basis_confirmed = false`, note `basis_suspect`; its label check is `not_checked` (`basis_unconfirmed`) even against a `1.18 oz/acre` maximum.
 
-**Expected scale** (from the section 1 shapes; re-counted by the harness's dry run against a live snapshot before the real run): about 380 size rows' text parses per acre, 34 per 100 gal, 15 per seed unit; about 140 size rows' text is unparsed or does not fit; roughly 15 to 20 house rows lose the default flag. Parent counts are lower, because sizes share a parent.
+**Expected scale** (from the section 1 shapes; re-counted by the harness's dry run against a live snapshot before the real run): about 380 size rows' text parses per acre, 34 per 100 gal, 9 per seed unit (the 9 liquid seed treatments; the other 6 are each-form with `oz/unit`, which 3.3 refuses, so they are noted `unit_not_for_form`); about 140 size rows' text is unparsed or does not fit; roughly 15 to 20 house rows lose the default flag. Parent counts are lower, because sizes share a parent.
 
 **Running it live** is a data change outside a migration, so it needs Mason's explicit yes in the session that runs it (AGENTS.md). It runs after PAR-2 grouping, in batches of at most 500 parents, through the RPC under an admin session, with each batch's returned report saved to the notes folder. A parent grouped later is derived later with the same call.
 
@@ -378,7 +380,7 @@ The harness is `scripts/smoke/prove-product-rates-draft-real-schema.mjs`, run ag
 | R11 | Two sessions: a draft save and a REG-1 registration write (or `set_parent_rates`) on the same parent | One waits; no deadlock |
 | R12 | **No reader changed:** before migration and derivation, snapshot every fixture product's and parent's rate columns, `product_price_per_acre` for every fixture product and tier, a fixture quote's saved lines, and the md5 of the five function bodies in 4.G | All identical after the migration, after derivation, and after every R-case |
 | R13 | Rate lock on | Drafts save, edit, delete and derive normally; a live-rate write on the same parent is still refused `PRODUCT_RATES_LOCKED` |
-| R14 | Seed treatment, each-form seed treatment, dry `oz` product, `1.5 qt/ton`, free text, sizes that disagree (forced past the guard in the fixture) | Rows and notes exactly as section 5 says, including no default and `basis_suspect` |
+| R14 | Seed treatment, each-form seed treatment, dry `oz` product, `1.5 qt/ton`, free text, sizes that disagree (forced past the guard in the fixture) | Rows and notes exactly as section 5 says, including no default, `basis_suspect`, `basis_confirmed = false` and a `not_checked`/`basis_unconfirmed` label check against a per-acre max; a 4.A save of that row sets `basis_confirmed = true` |
 | R15 | Re-run derive on a derived parent | `skipped_has_rows`; no row or version changes |
 | R16 | Grants and replay | Non-admin refused on all four RPCs; anon has no execute; a non-admin reads 0 rows from `product_rates` and the events table; the same key replays the same result; the same key with other arguments refuses `IDEMPOTENCY_PAYLOAD_MISMATCH` |
 | R17 | Stale and approved | Wrong `p_expected_row_version` refused `PRODUCT_RATE_STALE`; a fixture row set to `approved` (as `postgres`) cannot be edited or deleted (`PRODUCT_RATE_APPROVED`) |
@@ -449,11 +451,20 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 ## 11. Questions for Mason
 
 1. **Is today's "suggested rate" text the label rate?** The plan files it as the **label** rate in the draft (MSO XL's `2 qt/100 Gal`, as the grand plan says). Recommended: yes, because RT-3 has you confirm every row anyway. The alternative is filing it as "unknown source", which adds a third source value for you to sort later.
-2. **Seed treatments:** their "per acre" number is really an amount per seed unit (for example Ilevo, 1.18 oz). The plan copies it as a house per-acre draft but does **not** make it the quoting default, and flags it for your review. Recommended. The alternative (file it as a per-seed-unit house rate) is cleaner but means the draft no longer matches what quotes do today, which makes RT-3's comparison harder.
+2. **Seed treatments:** their "per acre" number is really an amount per seed unit (for example Ilevo, 1.18 oz). The plan copies it as a house per-acre draft but does **not** make it the quoting default, marks its basis unconfirmed (so it is never checked against a per-acre label maximum), and flags it for your review. Recommended. The alternative (file it as a per-seed-unit house rate) is cleaner but means the draft no longer matches what quotes do today, which makes RT-3's comparison harder.
 3. **Which label maximum counts** when a product has more than one EPA number (a generic and a brand): the plan warns if the house rate is above **any** of them. Recommended, because it never misses a warning. The alternative (only the parent's own generic number) gives fewer warnings but could miss a brand's lower maximum.
 
 ---
 
 ## 12. Review record
 
-(Luna rounds are recorded here as they run.)
+**Luna round 1** (gpt-6-luna xhigh, head `fa6655015`): 9 findings, all addressed.
+- BLOCKER constraint trigger cannot be `BEFORE`: fixed, ordinary `BEFORE … FOR EACH ROW` trigger (3.1).
+- HIGH seed-treatment per-acre house row could read "within" against a per-acre max: fixed with `basis_confirmed` (3.1, 3.5 step 4, section 5, R14, question 2).
+- MED future-dated "latest live migration": refuted; this repo's stamps run ahead of the calendar by convention (`20261215110000` is live per `supabase_migrations`); note added in section 1.
+- MED replay before locks races on the same key: refuted; `_product_parent_replay` takes a per-key advisory lock before reading the receipt (`20261108120000_product_parents.sql:499`); sentence added in 3.7.
+- MED approval CHECK let a draft carry one approval field: fixed, both-or-neither per status (3.1).
+- MED `updated_at` not moved on edit: fixed, update trigger sets it (3.1).
+- MED truncated g/mg factors could flip a borderline check: fixed, weight factors are exact milligrams; boundary example added (3.2 table, 3.3, 4.G).
+- LOW seed-unit estimate 15 vs 9: fixed (section 5).
+- LOW `source_text` over 200 characters would fail a derivation write: fixed, length checked first and noted (3.1).

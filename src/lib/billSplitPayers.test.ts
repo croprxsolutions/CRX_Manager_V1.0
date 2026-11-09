@@ -84,10 +84,11 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
     const client = {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
-        const q = read({ data: null, error: new Error('down') });
+        const q = read({ data: [], error: null });
         q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: 'd1' }, error: null });
         return q;
       },
+      rpc: () => Promise.resolve({ data: null, error: new Error('down'), count: null }),
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await expect(buildInvoicePdfDataFromRow(client as any, inv as any)).rejects.toThrow('Could not load the invoice details');
@@ -97,10 +98,14 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
     const client = {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
-        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null, count: 2 });
+        const q = read({ data: [], error: null });
         q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: 'd1' }, error: null });
         return q;
       },
+      rpc: (fn: string) => Promise.resolve(fn === 'get_bill_split_payers'
+        ? { data: [{ id: '1', invoice_number: 'CS-2026-0412-1', total_amount_cents: 6000, farm_name: 'Farmer' },
+                   { id: '2', invoice_number: 'CS-2026-0412-2', total_amount_cents: 4000, farm_name: 'Landlord' }], error: null, count: 2 }
+        : { data: null, error: new Error(`unexpected ${fn}`) }),
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = await buildInvoicePdfDataFromRow(client as any, inv as any);
@@ -133,18 +138,23 @@ describe('billSplitCompletion', () => {
 });
 
 describe('loadBillSplitPayers', () => {
-  // A chain that answers like PostgREST: rows plus the exact count asked for.
-  const db = (data: unknown[], count: number | null) => {
-    const q: Record<string, unknown> = {};
-    for (const m of ['select', 'eq', 'is', 'not', 'order']) q[m] = () => q;
-    q.then = (resolve: (v: unknown) => unknown) => resolve({ data, error: null, count });
-    return { from: () => q } as never;
+  // The sale's payers come from get_bill_split_payers for the invoice the user opened, so a rep who can't
+  // see another payer's invoice still gets the whole table (Sol HIGH on a6aaa21f2).
+  const flat = (id: string, name: string, cents: number) => ({ id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, farm_name: name });
+  const db = (data: unknown[] | null, count: number | null, error: unknown = null) => {
+    const calls: unknown[][] = [];
+    return { calls, client: { rpc: (...a: unknown[]) => { calls.push(a); return Promise.resolve({ data, error, count }); } } as never };
   };
-  it('reads every payer', async () => {
-    const payers = await loadBillSplitPayers(db([row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], 2), 'g1');
-    expect(payers).toHaveLength(2);
+  it('reads every payer of the sale through get_bill_split_payers, for the invoice opened', async () => {
+    const { calls, client } = db([flat('1', 'Farmer', 6000), flat('2', 'Landlord', 4000)], 2);
+    const payers = await loadBillSplitPayers(client, 'inv-1');
+    expect(calls[0].slice(0, 2)).toEqual(['get_bill_split_payers', { p_invoice_id: 'inv-1' }]);
+    expect(payers.map((p) => [p.customer_name, p.split_percentage, p.amount_cents])).toEqual([['Farmer', 60, 6000], ['Landlord', 40, 4000]]);
   });
   it('refuses a read that came back short of the count, rather than print a partial payer table', async () => {
-    await expect(loadBillSplitPayers(db([row('1', 'Farmer', 6000)], 2), 'g1')).rejects.toThrow();
+    await expect(loadBillSplitPayers(db([flat('1', 'Farmer', 6000)], 2).client, 'inv-1')).rejects.toThrow();
+  });
+  it('refuses when the read fails', async () => {
+    await expect(loadBillSplitPayers(db(null, null, new Error('INVOICE_NOT_VISIBLE')).client, 'inv-1')).rejects.toThrow();
   });
 });

@@ -145,7 +145,7 @@ function invoicePdfShares(shares: InvoiceShareRow[]) {
 async function batchPdfShares(inv: InvoiceRow, shares: InvoiceShareRow[]): Promise<InvoicePdfData['shares']> {
   if (shares.length > 0) return invoicePdfShares(shares);
   if (!isBillSplitInvoice(inv) || !inv.invoice_group_id) return undefined;
-  const payers = await loadBillSplitPayers(supabase, inv.invoice_group_id)
+  const payers = await loadBillSplitPayers(supabase, inv.id)
     .catch(() => { throw new InvoiceDetailsUnavailableError(); });
   return payers.length > 0 ? payers : undefined;
 }
@@ -934,8 +934,8 @@ export default function Invoices() {
 
   // Determine if batch print dialog needs any shares info
   const anySelectedIsFieldApp = selectedInvoices.some((i) => i.invoice_type === 'field_application');
-  // A Bill Split chemical sale prints its payers too (the misc charge layout has no share table).
-  const anySelectedIsBillSplit = selectedInvoices.some((i) => i.invoice_type === 'chemical_sale' && isBillSplitInvoice(i));
+  // A payer's draft switched to misc charge is still in the split and prints the payer table too.
+  const anySelectedIsBillSplit = selectedInvoices.some((i) => isBillSplitInvoice(i));
   const anySelectedHasShares = anySelectedIsFieldApp || anySelectedIsBillSplit;
 
   if (loading) {

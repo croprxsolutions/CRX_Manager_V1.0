@@ -46,8 +46,11 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       toast('error', sanitizeError(err));
     }
     // Refresh either way: a failed reply may still have committed, and a retry should see it.
-    try { await onChanged(); } catch { /* the order page reports its own load failure */ }
-    setSaving(false);
+    // If the order couldn't be reloaded (false), stay locked: the page shows its load failure, and
+    // nothing is added against a stale list.
+    let reloaded: unknown = true;
+    try { reloaded = await onChanged(); } catch { reloaded = false; }
+    if (reloaded !== false) setSaving(false);
   };
 
   const handleAdd = (itemId: string, ownPercents: number[]) => {

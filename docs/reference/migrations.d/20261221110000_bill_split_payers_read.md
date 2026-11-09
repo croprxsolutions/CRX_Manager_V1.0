@@ -1,0 +1,7 @@
+**LOCAL CANDIDATE — NOT APPLIED.** PR #1534 (billing plan M2 screens): `20261221110000_bill_split_payers_read.sql` (SQL sha256: `acb6337c643a0070cd736fd9d53f0dda3b7c6d013b405c39f2ce1e884dc791cb`). Adds the read `get_bill_split_payers(p_invoice_id)`: every live invoice in the Bill Split group of an invoice the caller may read (id, number, total, customer name), so each payer's invoice page, print and batch print show every payer (Mason, 2026-11-09, option A).
+
+**Why.** The screens read the group with the caller's row security. A rep who can see only some payers' invoices (an admin moved one payer's draft to another rep) got a partial payer table that looked complete (Sol HIGH on a6aaa21f2). The email sender already read the full group with the service role.
+
+**Who may call.** The invoice's own read rule, mirrored: an admin, the invoice's creator or its sales rep; or the service role. The apply refuses if `invoices_select` has drifted from that rule. Anyone else gets `INVOICE_NOT_VISIBLE`, never another invoice's payers. Read only, STABLE, SECURITY DEFINER, owner postgres, `search_path = public, pg_temp`, EXECUTE for authenticated and service_role only.
+
+Proof: `scripts/smoke/smoke-bill-split-payers-read.sql` (one statement, ends in `SMOKE_PASS_ROLLBACK`). Apply notes: one new function and its grants; no table, policy or data change. Rollback (its own reviewed migration): `DROP FUNCTION public.get_bill_split_payers(uuid)` and ship the screens' old direct read with it.

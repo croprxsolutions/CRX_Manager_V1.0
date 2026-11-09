@@ -122,6 +122,20 @@ describe('LineBillSplit', () => {
     await waitFor(() => expect(screen.getByLabelText('Line split percent')).not.toBeDisabled());
   });
 
+  it('stays locked when the order could not be reloaded after a save, so nothing is added against a stale list', async () => {
+    const onChanged = vi.fn(() => Promise.resolve(false));
+    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ data: [{}], error: null }) })) });
+    render(<LineBillSplit {...props} onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByLabelText('Line split percent')).toBeDisabled();
+  });
+
   it('refuses a line total over 100% before saving', () => {
     render(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 60, customer: { farm_name: 'Farmer' } }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));

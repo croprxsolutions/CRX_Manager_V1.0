@@ -6,3 +6,7 @@
 - Builds on `20261215110000` (#1524), live since 2026-11-09. The email PDF comes from the shared Edge Function module, so emailed invoices show the table once `send-email` is deployed.
 - Not here: each payer's invoice listing the whole sale's lines. That's the Chem Man PDF layout (M10).
 - Completing a delivery names the payers' draft invoices, and warns when the split couldn't be drafted. A field split's invoices don't show the payer table.
+- Each payer's invoice lists every payer of the sale, on the page, in print, in batch print and in email,
+  including a payer's draft switched to misc charge (Mason, 9 Nov, option A). The payers are read through the
+  new `get_bill_split_payers` (migration `20261221110000`, not applied), so a rep who can see only some of the
+  payers' invoices still gets the whole table.

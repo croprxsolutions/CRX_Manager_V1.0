@@ -46,7 +46,16 @@ function query(table: string): Record<string, unknown> {
 
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
-  const client = { from: (table: string) => query(table === 'invoices_postable' ? 'invoices' : table), rpc: vi.fn() };
+  // get_bill_split_payers answers with every invoice in the selected invoice's group, as the database does.
+  const rpc = (fn: string, args: { p_invoice_id?: string }) => {
+    if (fn !== 'get_bill_split_payers') return Promise.resolve({ data: null, error: { message: `unexpected ${fn}` } });
+    const all = (H.tables.invoices as Array<Record<string, unknown>>) ?? [];
+    const group = all.find((i) => i.id === args.p_invoice_id)?.invoice_group_id;
+    const rows = all.filter((i) => group && i.invoice_group_id === group).map((i) => ({ id: i.id, invoice_number: i.invoice_number,
+      total_amount_cents: i.total_amount_cents, farm_name: (i.customer as { farm_name?: string } | null)?.farm_name ?? null }));
+    return Promise.resolve({ data: rows, error: null, count: rows.length });
+  };
+  const client = { from: (table: string) => query(table === 'invoices_postable' ? 'invoices' : table), rpc };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), captureMessage: vi.fn() } }));
@@ -130,6 +139,20 @@ describe('Invoices — Print Selected', () => {
       { invoice_number: 'CS-1001-1', customer_name: 'Farmer', split_percentage: 60, amount_cents: 6000 },
       { invoice_number: 'CS-1001-2', customer_name: 'Landlord', split_percentage: 40, amount_cents: 4000 },
     ]);
+  });
+
+  it("a payer's misc charge invoice in a Bill Split is printed with the payer table on too", async () => {
+    const split = { ...posted, invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
+    H.tables.invoices = [
+      { ...split, invoice_number: 'CS-1001-1', total_amount_cents: 6000 },
+      { ...split, id: 'inv-2', invoice_number: 'CS-1001-2', total_amount_cents: 4000, customer: { farm_name: 'Landlord' } },
+    ];
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+    expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    await screen.findByRole('button', { name: 'Print with defaults' });
+    expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
   });
 
   const cases: Array<[string, FailMode]> = [

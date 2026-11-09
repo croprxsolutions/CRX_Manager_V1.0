@@ -13957,6 +13957,17 @@ export type Database = {
         Returns: Json
       }
       get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
+      get_bill_split_payers: {
+        Args: {
+          p_invoice_id: string
+        }
+        Returns: {
+          farm_name: string | null
+          id: string
+          invoice_number: string | null
+          total_amount_cents: number | null
+        }[]
+      }
       get_bottom_line_pnl: {
         Args: { p_end_date: string; p_start_date: string }
         Returns: {

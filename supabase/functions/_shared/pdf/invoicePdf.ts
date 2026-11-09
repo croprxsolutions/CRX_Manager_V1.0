@@ -235,18 +235,17 @@ export function billSplitPayerShares(rows: Array<{
   }));
 }
 
-/** Read from each group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it. */
-export async function loadBillSplitPayers(db: SupabaseClient, invoiceGroupId: string): Promise<BillSplitPayer[]> {
-  // Counted, so a read cut short by the row cap is refused rather than printed as a partial payer table.
-  const { data, error, count } = await db
-    .from('invoices')
-    .select('id, invoice_number, total_amount_cents, customer:customers!invoices_customer_id_fkey(farm_name)', { count: 'exact' })
-    .eq('invoice_group_id', invoiceGroupId)
-    .is('deleted_at', null)
-    .not('status', 'in', '("voided","cancelled")')
-    .order('invoice_number');
+/**
+ * Every payer of the Bill Split sale this invoice belongs to, read through get_bill_split_payers (anyone who may
+ * read the invoice gets the whole group, so a rep who can't see another payer's invoice still gets the full table).
+ * Read from the group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it.
+ * Counted, so a read cut short by the row cap is refused rather than printed as a partial payer table.
+ */
+export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string): Promise<BillSplitPayer[]> {
+  const { data, error, count } = await db.rpc('get_bill_split_payers', { p_invoice_id: invoiceId }, { count: 'exact' });
   if (error || !Array.isArray(data) || count !== data.length) throw new InvoiceDetailsUnavailableError();
-  return billSplitPayerShares(data as unknown as Parameters<typeof billSplitPayerShares>[0]);
+  return billSplitPayerShares((data as Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>)
+    .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })));
 }
 
 export interface InvoicePdfData {
@@ -487,7 +486,7 @@ export async function buildInvoicePdfDataFromRow(
   } | null;
   const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
       && isBillSplitInvoice({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id })
-    ? await loadBillSplitPayers(db, billingRow.invoice_group_id)
+    ? await loadBillSplitPayers(db, inv.id)
     : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;
   const pickTerms = inv.payment_terms !== undefined ? inv.payment_terms : billingRow?.payment_terms;

@@ -819,7 +819,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
     // A chemical sale split across payers: each payer's invoice shows that delivery's payers.
     const payers = isBillSplitInvoice(data) && data.invoice_group_id && shareData.length === 0
-      ? await loadBillSplitPayers(supabase, data.invoice_group_id)
+      ? await loadBillSplitPayers(supabase, invoiceId)
       : [];
     if (isStale()) return;
     setBillSplitPayers(payers);
@@ -1747,7 +1747,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     // Re-read the payers: another payer's invoice may have gained a charge since this page loaded
     // (the email path reads them fresh too).
     const printPayers = billSplitPayers.length > 0 && invoice?.invoice_group_id
-      ? await loadBillSplitPayers(supabase, invoice.invoice_group_id)
+      ? await loadBillSplitPayers(supabase, id!)
       : billSplitPayers;
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')

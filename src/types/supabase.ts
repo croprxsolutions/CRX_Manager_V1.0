@@ -2172,6 +2172,44 @@ export type Database = {
           },
         ]
       }
+      customer_document_restores: {
+        Row: {
+          customer_id: string
+          document_id: string
+          id: string
+          removed_at: string
+          removed_by: string | null
+          restored_at: string
+          restored_by: string
+        }
+        Insert: {
+          customer_id: string
+          document_id: string
+          id?: string
+          removed_at: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by: string
+        }
+        Update: {
+          customer_id?: string
+          document_id?: string
+          id?: string
+          removed_at?: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_document_restores_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "customer_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_facts: {
         Row: {
           category: string
@@ -6761,6 +6799,48 @@ export type Database = {
           },
           {
             foreignKeyName: "order_item_field_allocations_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_item_shares: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          order_item_id: string
+          split_percentage: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          order_item_id: string
+          split_percentage: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          order_item_id?: string
+          split_percentage?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_shares_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_shares_order_item_id_fkey"
             columns: ["order_item_id"]
             isOneToOne: false
             referencedRelation: "order_items"
@@ -13915,6 +13995,17 @@ export type Database = {
         Returns: Json
       }
       get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
+      get_bill_split_payers: {
+        Args: {
+          p_invoice_id: string
+        }
+        Returns: {
+          farm_name: string | null
+          id: string
+          invoice_number: string | null
+          total_amount_cents: number | null
+        }[]
+      }
       get_bottom_line_pnl: {
         Args: { p_end_date: string; p_start_date: string }
         Returns: {

@@ -58,19 +58,19 @@ describe('ConfirmModal', () => {
 
   it('applies danger variant styles by default', () => {
     render(<ConfirmModal {...defaultProps} />);
-    const messageContainer = screen.getByText(defaultProps.message).closest('div');
+    const messageContainer = screen.getByText(defaultProps.message).previousElementSibling;
     expect(messageContainer?.className).toContain('bg-red-50');
   });
 
   it('applies warning variant styles', () => {
     render(<ConfirmModal {...defaultProps} variant="warning" />);
-    const messageContainer = screen.getByText(defaultProps.message).closest('div');
+    const messageContainer = screen.getByText(defaultProps.message).previousElementSibling;
     expect(messageContainer?.className).toContain('bg-amber-50');
   });
 
   it('applies info variant styles', () => {
     render(<ConfirmModal {...defaultProps} variant="info" />);
-    const messageContainer = screen.getByText(defaultProps.message).closest('div');
-    expect(messageContainer?.className).toContain('bg-blue-50');
+    const messageContainer = screen.getByText(defaultProps.message).previousElementSibling;
+    expect(messageContainer?.className).toContain('bg-crx-green-light');
   });
 });

@@ -7098,6 +7098,18 @@
         "created_at"
       ]
     },
+    "order_item_shares": {
+      "no_default": [
+        "order_item_id",
+        "customer_id",
+        "split_percentage"
+      ],
+      "with_default": [
+        "id",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "order_items": {
       "no_default": [
         "order_id",
@@ -10038,6 +10050,14 @@
       "field_id",
       "acres",
       "created_at"
+    ],
+    "order_item_shares": [
+      "id",
+      "order_item_id",
+      "customer_id",
+      "split_percentage",
+      "created_at",
+      "updated_at"
     ],
     "order_items": [
       "id",

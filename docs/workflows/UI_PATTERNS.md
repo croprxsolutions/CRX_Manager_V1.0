@@ -328,6 +328,51 @@ Rules for new pages and for any page a screen-cleanup PR touches. Existing pages
 
 ---
 
+## Controls and feedback
+
+The rules for screens built or redesigned with the kit in `src/components/ui/`. Colours, tokens and the full component list are in `DESIGN.md`. Behaviour is fixed: UI work never changes what a button does, what is saved or when, permissions, totals or rounding.
+
+### Choice lists and dates
+- Use `Dropdown` and never a browser `<select>` on any redesigned screen. `size="sm"` is 36px, for dense desktop use only and never on phone screens. It calls `onChange(value)` with the value, not a native change event. The old `Select.tsx` stays for now because its callers read native change events; each screen moves over in its own module round.
+- Use `DatePicker` and never `<input type="date">`. Values are plain `'YYYY-MM-DD'` strings (or null) with no JS `Date`. The field shows typeable numeric segments (for example 9/30/2027). Presets such as "Season end" appear as chips in the calendar and as a pill in the field when the value matches.
+- Every field keeps a fixed helper line for help, a warning or an error, so nothing below it moves when a message appears.
+- Touch targets are 44px below 768px and 40px above (`h-11 md:h-10` and similar). Everything is reachable by keyboard with a visible focus ring.
+- There are no field-border or danger tokens in `src/index.css`. Use `border-gray-300` and `red-600` / `red-700`, as `Input.tsx` does. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order decides which wins.
+
+### Actions and menus
+- One green button per screen: the next step for the record's status. At most two or three secondary buttons. The rest go in `ActionMenu` (the ⋯ "More actions" menu).
+- In `ActionMenu`, danger items go last, after a divider, in red. A disabled item shows its reason as a description (`disabledReason`).
+- Header: title, status badge and save status on the left, actions on the right, wrapping cleanly. On a phone the actions move to a sticky bottom bar (primary and secondary) and the ⋯ menu goes in the top bar.
+
+### Help
+- `HelpTip` is an info button labelled "More info" that opens on press. Never put it inside another button, link or clickable header. Place it beside the control. For a sortable `DataTable` column, use the column's `headerExtra`.
+- No explanatory paragraphs on the page. One short line under a field is fine.
+
+### Status badges
+- `Badge` capitalises its label by default. Pass `normalCase` when the label is already written as it should appear ("Closed short").
+- Status labels on redesigned screens are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)". Stored status values do not change.
+- A badge is a soft pill with a word, never colour alone, and never brand green. The status dot arrives with the quote screens (PR 2).
+
+### Confirming, saving and results
+- Confirm before costly actions (removing a line with data, declining, cancelling, closing a booking, deleting) with `ConfirmModal`. The title is a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK").
+- Every server action shows progress (spinner and "Saving…" on the button) and then a toast that says what happened, including "nothing changed".
+- Auto-save screens keep auto-saving and show a status next to the title: "Saving…", "All changes saved · 2:41 pm", "Couldn't save. Retry". Screens with a Save button show "Unsaved changes" until saved.
+
+### Empty, loading, numbers, copy
+- Empty state: `EmptyState` with a Lucide icon in a soft green circle, one bold line, one helpful line and the next action. Inline empties ("First time for this customer") use a small muted icon and text.
+- Loading: skeleton rows shaped like the content, never a lone spinner in the middle of a page.
+- Numbers: Inter with tabular figures, right-aligned in tables. No monospace for money.
+- Copy: plain American English, no em dashes, no internal codes.
+
+### Filters, tables, headings, PDFs, checks
+- Filters: search, dropdowns and toggle chips. An active chip is green-tinted with a check, never amber. "Clear" appears only when something is filtered, in a reserved spot.
+- Tables: priority columns stay at 1024px and wider; below 768px rows become cards. The page never scrolls sideways.
+- Headings: the two-tone accent word is for the page title only, not every card title.
+- PDFs follow the layout the owner knows from the old billing software: company block left, logo centred with the document name, document details right, a bill-to block where a window envelope shows it, plain grey table headers, totals right, terms and page number in the footer. No full-width colour banners.
+- Check at 360, 390, 768, 1024, 1280, 1366, 1440 and 1920px before calling a screen done.
+
+---
+
 ## Style D: Compact and Bold
 
 The app-wide look Mason chose on 2026-11-02. It joins packed, label-left rows with bold headings and section icons. Every new screen follows it, and every screen rebuilt in the look-and-feel program moves to it. The mockups (Settings on desktop, a field stop on a phone) are reference pictures, not code. Name every colour by its token; the hex codes below are only there so you can match the mockups.

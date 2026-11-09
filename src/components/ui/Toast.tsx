@@ -21,17 +21,17 @@ export function useToast() {
 }
 
 const icons: Record<ToastType, ReactNode> = {
-  success: <CheckCircle2 className="w-5 h-5 text-emerald-500" />,
-  error: <AlertCircle className="w-5 h-5 text-red-500" />,
-  info: <Info className="w-5 h-5 text-blue-500" />,
-  warning: <AlertTriangle className="w-5 h-5 text-amber-500" />,
+  success: <CheckCircle2 className="w-4 h-4" />,
+  error: <AlertCircle className="w-4 h-4" />,
+  info: <Info className="w-4 h-4" />,
+  warning: <AlertTriangle className="w-4 h-4" />,
 };
 
-const bgClasses: Record<ToastType, string> = {
-  success: 'border-emerald-200 bg-emerald-50',
-  error: 'border-red-200 bg-red-50',
-  info: 'border-blue-200 bg-blue-50',
-  warning: 'border-amber-200 bg-amber-50',
+const iconCircle: Record<ToastType, string> = {
+  success: 'bg-emerald-50 text-emerald-700',
+  error: 'bg-red-50 text-red-700',
+  info: 'bg-sky-50 text-sky-800',
+  warning: 'bg-amber-50 text-amber-800',
 };
 
 let nextId = 0;
@@ -87,17 +87,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             role={t.type === 'error' ? 'alert' : 'status'}
             aria-live={t.type === 'error' ? 'assertive' : 'polite'}
             className={`
-              flex min-w-0 w-full items-center gap-3 rounded-lg border px-4 py-3 shadow-lg md:w-auto md:max-w-sm
-              ${bgClasses[t.type]}
+              flex min-w-0 w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3 shadow-lg md:w-auto md:max-w-sm
               animate-in slide-in-from-right
             `}
           >
-            <span aria-hidden="true">{icons[t.type]}</span>
-            <p className="min-w-0 break-words text-sm text-nav-dark font-medium">{t.message}</p>
+            <span aria-hidden="true" className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${iconCircle[t.type]}`}>{icons[t.type]}</span>
+            <p className="min-w-0 break-words text-sm text-nav-dark">{t.message}</p>
             <button
               onClick={() => removeToast(t.id)}
               aria-label="Dismiss notification"
-              className="ml-2 text-gray-400 hover:text-gray-600"
+              className="ml-auto inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 md:h-8 md:w-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
             >
               <X className="w-4 h-4" />
             </button>

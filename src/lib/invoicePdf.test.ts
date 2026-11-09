@@ -245,6 +245,30 @@ describe('generateInvoicePdf', () => {
     expect(doc).toBe(mockDoc);
   });
 
+  it('Old Print names a share table with no acres "Customer", fitting a Bill Split payer and a legacy grower alike', async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      options: { format: 'legacy', show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Smith Farm', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && !h.includes('Acres'))).toBe(true);
+    expect(heads.some((h) => h.includes('"Payer"'))).toBe(false);
+  });
+
+  it("a Bill Split payer's misc charge invoice prints the payer table too (Mason, 9 Nov: every payer's invoice shows every payer)", async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'misc_charge',
+      options: { show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Farmer', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && h.includes('"Shares"'))).toBe(true);
+  });
+
   it('handles field_application with finance charges', async () => {
     const doc = await generateInvoicePdf(makeInvoiceData({
       finance_charge_cents: 1500,
@@ -480,6 +504,38 @@ describe('generateInvoicePdf', () => {
 });
 
 // ── Legacy "Old Print" format (field-app parity #30) ─────────────────────────
+
+describe('generateInvoicePdf — Bill Split payers on a chemical sale', () => {
+  const payers = [
+    { ...makeShare({ customer_name: 'Farmer', split_percentage: 70.6672, amount_cents: 35588, price_per_acre_cents: null, pricing_note: null }), invoice_number: 'CS-2026-0060-1' },
+    { ...makeShare({ customer_name: 'Landlord', split_percentage: 29.3328, amount_cents: 14772, price_per_acre_cents: null, pricing_note: null }), invoice_number: 'CS-2026-0060-2' },
+  ];
+  const tableBodies = async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    return vi.mocked(autoTable).mock.calls.map(([, opts]) => (opts as { body?: unknown[][] }).body ?? []);
+  };
+
+  it('prints each payer with their share and total', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    vi.mocked(autoTable).mockClear();
+    await generateInvoicePdf(makeInvoiceData({ invoice_type: 'chemical_sale', shares: payers }));
+    const body = (await tableBodies()).find((b) => JSON.stringify(b).includes('Landlord'));
+    expect(body?.[1]).toEqual(['Landlord', expect.stringContaining('29.3328'), expect.stringContaining('147.72')]);
+  });
+
+  it('labels each payer by their real invoice number on Old Print', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    vi.mocked(autoTable).mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'chemical_sale',
+      invoice_number: 'CS-2026-0060-2',
+      shares: payers,
+      options: { show_shares: true, show_price_per_acre: false, show_epa_registration: false, format: 'legacy' },
+    }));
+    const body = (await tableBodies()).find((b) => JSON.stringify(b).includes('Landlord'));
+    expect(body?.map((row) => row[0])).toEqual(['CS-2026-0060-1', 'CS-2026-0060-2']);
+  });
+});
 
 describe('generateInvoicePdf — legacy "Old Print" format', () => {
   beforeEach(() => {

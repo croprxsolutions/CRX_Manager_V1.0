@@ -67,6 +67,7 @@ import {
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
 import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "./sol-risk-lib.mjs";
+import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -490,7 +491,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits");
+    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -530,6 +531,10 @@ function gateRequest(request) {
       "a one-line reason in the thread. Merge only after that."
     );
   }
+
+  // Every PR names what it put off, so the close-out can tell Mason what remains (Mason, 2026-11-09).
+  const followUps = followUpsProblem(pr);
+  if (followUps) deny(followUpsDenial("PR MERGE GATE", request.selector, followUps));
 
   // The Codex GitHub App's review is read at the ALLOW point below, not here.
   // @speed-bump — advisory; deferring it protects the hard gates, it is not one.

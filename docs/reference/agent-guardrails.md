@@ -51,6 +51,12 @@
 > over 100 comments refuses and needs Mason's decision. A merge outside the local hooks, such as GitHub's button, skips this.
 > The live migration apply refuses the same way (`migration-landing-gate-lib.mjs`, Mason, 2026-11-08), since it runs before the merge.
 >
+> **Every PR names what it put off (Mason, 2026-11-09).** Both merge gates refuse a merge into `main` or `staging` whose
+> description has no `## Follow-ups` section, an empty one, or a line that is not `None` and names no issue (`#123`)
+> or known issue (`KI-12`) to hold the work (`.claude/hooks/followups-lib.mjs`). Taha's PRs are exempt. `/ship` Step 8
+> item 8 reads the section after the deploy check to give Mason SAFE TO ARCHIVE or NOT YET. The gate checks only that
+> each line has a home, not that the list is complete; a merge through GitHub's button skips it.
+>
 > **CodeRabbit is optional (Mason, 2026-10-19, 2026-10-29, 2026-10-30).** It only comments, makes no automatic reviews
 > (`auto_review.enabled: false`), and no PR needs it unless it carries the `needs-coderabbit` label; then one completed
 > review on any commit satisfies the gates (`evaluateCodeRabbitRequirement()` in `codex-bot-review-lib.mjs`). Both merge

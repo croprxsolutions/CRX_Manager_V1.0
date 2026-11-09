@@ -1,0 +1,63 @@
+// PR Follow-ups section (Mason, 2026-11-09).
+//
+// Mason could never tell, after a merge, whether work had been put off. Reading the
+// conversation afterwards misses deferrals made in another session or lost to a
+// summary (Sol, 2026-11-09), so each PR records them when they are decided: a
+// "## Follow-ups" section whose every line is "None" or names the durable home of
+// the deferred work (a GitHub issue `#123` or a known issue `KI-12`). Both merge
+// gates refuse a PR into a gated base without it; the /ship close-out reads it.
+// Taha's own PRs are his (.claude/commands/ship.md › Taha's PRs).
+
+// Same login as migration-landing-gate-lib's TAHA_LOGIN; not imported, so the Codex
+// guard does not load that whole lib (and its imports) at startup.
+const TAHA_LOGIN = "tahakhanabdalli";
+
+const HEADING = /^#{2,4}\s*follow-?ups\s*:?\s*$/i;
+const ANY_HEADING = /^#{1,6}\s/;
+const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|\/issues\/\d+\b/i;
+
+// The section's lines, or null when the body has no Follow-ups heading.
+export function followUpLines(body) {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const start = lines.findIndex((line) => HEADING.test(line.trim()));
+  if (start < 0) return null;
+  const out = [];
+  for (const raw of lines.slice(start + 1)) {
+    const line = raw.trim();
+    if (ANY_HEADING.test(line)) break;
+    const text = line.replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "").trim();
+    if (text && !text.startsWith("<!--")) out.push(text);
+  }
+  return out;
+}
+
+// null when the PR may merge; otherwise the reason it may not.
+export function followUpsProblem(pullRequest) {
+  if (String(pullRequest?.author?.login ?? "").trim().toLowerCase() === TAHA_LOGIN) return null;
+  if (typeof pullRequest?.body !== "string") return "GitHub did not return the PR description, so its Follow-ups section cannot be checked (fail closed).";
+  const lines = followUpLines(pullRequest.body);
+  if (lines === null) return "the PR description has no `## Follow-ups` section.";
+  if (lines.length === 0) return "the `## Follow-ups` section is empty; write `- None` if nothing was put off.";
+  if (lines.some((line) => /^none\b/i.test(line)) && lines.length > 1) {
+    return "the `## Follow-ups` section says None but also lists items; keep one or the other.";
+  }
+  const homeless = lines.filter((line) => !/^none\b/i.test(line) && !HOME.test(line));
+  if (homeless.length) {
+    return `these Follow-ups lines name no issue (#123) or known issue (KI-12) to hold the work: ${homeless.map((l) => JSON.stringify(l.slice(0, 80))).join("; ")}.`;
+  }
+  return null;
+}
+
+export function followUpsDenial(prefix, selector, problem) {
+  const n = selector || "<number>";
+  return (
+    `${prefix}: PR ${n} cannot merge yet: ${problem}\n\n` +
+    "Every PR lists what it put off, so the close-out after merge can tell Mason whether work remains " +
+    "(.claude/commands/ship.md Step 8 item 8). Add to the PR description:\n" +
+    "  ## Follow-ups\n" +
+    "  - None\n" +
+    "or one line per deferred item naming where it lives, e.g. `- #1700 tighten the X check` or `- KI-104 ...`. " +
+    "Open the issue first (`gh issue create`) if it has no home yet. Then: " +
+    `\`gh pr edit ${n} --body-file <file>\` and retry the merge.`
+  );
+}

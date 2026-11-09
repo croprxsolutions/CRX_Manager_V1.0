@@ -6,6 +6,7 @@ name: Release flow
 on:
   pull_request:
     branches: [main, staging]
+    types: [opened, synchronize, reopened, edited] # edited = base changed (retargeted to main)
   push:
     branches: [main, staging]
   schedule:
@@ -28,30 +29,39 @@ jobs:
       - run: node --test .github/scripts/release-flow.test.mjs
 
   guard:
-    name: Release flow guard
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    # One check per base, so a run on a staging PR can never satisfy the one required on main.
+    name: Release flow guard (${{ github.base_ref }})
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      BASE_REF: ${{ github.base_ref }}
       HEAD_REF: ${{ github.head_ref }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Only release/next and hotfix/<name> into main, and the PR must contain main
+      - name: Only release/next and hotfix/<name> from this repository into main, containing main
         run: |
+          if [ "$BASE_REF" != "main" ]; then echo "Not a PR into main; nothing to check."; exit 0; fi
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; nothing enforced."; exit 0; fi
-          node .github/scripts/release-flow.mjs check-head "$HEAD_REF"
+          if [ "$HEAD_REPO" != "$REPO" ]; then echo "::error::PRs into main must come from a branch in $REPO, not a fork."; exit 1; fi
+          # The rule comes from main's copy of the script, never the PR's own (a PR can't vote for itself).
+          git show origin/main:.github/scripts/release-flow.mjs > "$RUNNER_TEMP/release-flow.mjs"
+          node "$RUNNER_TEMP/release-flow.mjs" check-head "$HEAD_REF"
           if ! git merge-base --is-ancestor origin/main "$HEAD_SHA"; then
             echo "::error::This branch is missing commits that are on main. Merge main into it (merge commit), then push."
             exit 1
           fi
 
   main-inside-staging:
+    # Never make this a required check: it is skipped on PRs, and a skipped required job counts as passed.
     name: Main inside staging
     if: github.event_name != 'pull_request' && !(github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
@@ -79,22 +89,38 @@ jobs:
       group: release-flow-back-merge
     permissions:
       contents: read
-      pull-requests: write
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
-      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      OWNER: ${{ github.repository_owner }}
       SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Open the back-merge PR if staging is missing main's commits
+      - name: Is a back-merge needed?
+        id: need
         run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no back-merge PR."; exit 0; fi
           if git merge-base --is-ancestor origin/main origin/staging; then echo "staging already contains main"; exit 0; fi
-          open=$(gh pr list --base staging --head main --state open --json number --jq '.[0].number // empty')
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      # The release bot App, not GITHUB_TOKEN: this repo doesn't let Actions open PRs, and a PR the
+      # built-in token opens gets no CI runs of its own.
+      - name: Release bot token
+        if: steps.need.outputs.yes
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+      - name: Open the back-merge PR
+        if: steps.need.outputs.yes
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          # Owner-qualified, so a fork's own "main" branch PR doesn't count as the back-merge.
+          open=$(gh api "repos/$GH_REPO/pulls?state=open&base=staging&head=$OWNER:main" --jq '.[0].number // empty')
           if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; exit 0; fi
           gh pr create --base staging --head main \
             --title "chore(staging): back-merge main after ${SHA:0:9}" \

@@ -92,6 +92,14 @@ describe('statement PDF real renderer', () => {
     expect(pageCommands).not.toContain('Page 2');
   });
 
+  it('labels the oldest aging bucket "120+ Days" like the AR Aging page (KI-18 batch 3 ranges)', async () => {
+    const doc = await generateStatementPdf(renderedStatement);
+    const pageCommands = doc.internal.pages.flat().join('\n');
+
+    expect(pageCommands.split('120+ Days').length - 1).toBe(2);
+    expect(pageCommands).not.toContain('Over 120');
+  });
+
   it('prints the Settings address in the letterhead only; the remit-to block keeps its own address', async () => {
     companyInfo.load.mockResolvedValueOnce({
       name: 'Test Ag Co', phone: '555-0199', email: '', address: '4400 Example Rd, Settingstown, IL 62999',

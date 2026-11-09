@@ -7,8 +7,8 @@
 - Not in this change: the app still emails the receipt from the phone. The switch to the server sender
   (completions ask for it with `p_email_receipt`) is a separate follow-up PR that lands only after this function is
   deployed, so the app can never stop sending before the server starts.
-- New "Customer receipts to check" card on Deliveries (admins and sales reps): receipts not confirmed as emailed
-  in the last 14 days, each linking to its delivery for Email Confirmation.
+- New "Customer receipts to check" card on Deliveries (admins and sales reps): every receipt not confirmed as emailed
+  (no age cut-off; 50 at a time with Show more), each linking to its delivery for Email Confirmation.
 - The receipt email template moved to `supabase/functions/_shared/deliveryReceiptHtml.ts` so the app and the
   sender render the same email.
 - Proof: `scripts/smoke/prove-delivery-receipt-queue-real-schema.mjs` now runs the sender's own code against the

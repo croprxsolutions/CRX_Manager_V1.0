@@ -7,6 +7,7 @@ import {
 import {
   fetchSignedBlendImage,
   MAX_BLEND_IMAGE_BYTES,
+  readAllById,
   readBodyWithLimit,
   startSerializedLeaseHeartbeat,
   validateBlendImageRecords,
@@ -318,4 +319,73 @@ Deno.test("serialized heartbeat stop aborts timers and awaits an in-flight refre
   assertEquals(stopFinished, true);
   assertEquals(clock.pending(), 0);
   await assertRejects(() => heartbeat.refreshNow(), Error, "stopped");
+});
+
+// A fake products table answering like PostgREST: id order, "id > after",
+// and never more than `serverCap` rows per request, whatever was asked.
+function fakeProductsTable(count: number, serverCap: number) {
+  const rows = Array.from({ length: count }, (_, i) => ({
+    id: `p-${String(i + 1).padStart(5, "0")}`,
+    product_name: `Product ${i + 1}`,
+  }));
+  let requests = 0;
+  const fetchPage = (afterId: string | null, limit: number) => {
+    requests += 1;
+    const after = afterId === null ? rows : rows.filter((r) => r.id > afterId);
+    return Promise.resolve({
+      data: after.slice(0, Math.min(limit, serverCap)),
+      error: null,
+    });
+  };
+  return { fetchPage, requests: () => requests };
+}
+
+Deno.test("readAllById reads the 1,053rd product past the 1,000-row cap (KI-32)", async () => {
+  const table = fakeProductsTable(1053, 1000);
+  const rows = await readAllById(table.fetchPage);
+  assertEquals(rows.length, 1053);
+  assertEquals(new Set(rows.map((r) => r.id)).size, 1053);
+  assert(rows.some((r) => r.product_name === "Product 1053"));
+  assertEquals(table.requests(), 3);
+});
+
+Deno.test("readAllById still reads every row when the server caps below the page size", async () => {
+  const rows = await readAllById(fakeProductsTable(1053, 250).fetchPage);
+  assertEquals(rows.length, 1053);
+});
+
+Deno.test("readAllById fails the whole read when any page fails", async () => {
+  let calls = 0;
+  await assertRejects(
+    () =>
+      readAllById<{ id: string }>(() => {
+        calls += 1;
+        return Promise.resolve(
+          calls === 1
+            ? { data: [{ id: "a" }], error: null }
+            : { data: null, error: { message: "boom" } },
+        );
+      }),
+    Error,
+    "boom",
+  );
+});
+
+Deno.test("readAllById refuses a page that does not move past the last id", async () => {
+  await assertRejects(
+    () =>
+      readAllById<{ id: string }>(() =>
+        Promise.resolve({ data: [{ id: "a" }], error: null })
+      ),
+    Error,
+    "did not advance",
+  );
+});
+
+Deno.test("readAllById fails loudly past the row ceiling instead of reading forever", async () => {
+  await assertRejects(
+    () => readAllById(fakeProductsTable(50_001, 1000).fetchPage),
+    Error,
+    "passed 50000 rows",
+  );
 });

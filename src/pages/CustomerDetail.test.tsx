@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { buildInMemoryQuery, SERVER_ROW_CAP } from '../test-utils/inMemoryQuery';
 
@@ -108,6 +108,9 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: (dirty: boolean) => { dirtyStates.push(dirty); return { state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }; } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
+// KI-77's duplicate check: finds nothing unless a test holds it open.
+const duplicateCheck = vi.hoisted(() => ({ find: vi.fn(async (..._args: unknown[]) => [] as unknown[]) }));
+vi.mock('../lib/customerDuplicates', () => ({ findLikelyDuplicateCustomers: (...args: unknown[]) => duplicateCheck.find(...args) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 // Controlled, like the real editor: the create form seeds one split row with an
 // empty recipient, and saving is blocked until it is filled. A `<div />` mock
@@ -1289,5 +1292,65 @@ describe("CustomerDetail Financials tab uses Chicago's date for the aging", () =
     fireEvent.click(screen.getByRole('button', { name: 'Financials', expanded: false }));
     expect(await screen.findByText('$1,234.00')).toBeInTheDocument();
     expect(agingDates).toEqual(['2026-10-20']);
+  });
+});
+
+describe('CustomerDetail save paused on the duplicate check (KI-77)', () => {
+  function RouteButtons() {
+    const navigate = useNavigate();
+    return (
+      <>
+        <button type="button" onClick={() => navigate('/customers/customer-2')}>Jump to customer 2</button>
+        <button type="button" onClick={() => navigate('/customers/customer-1')}>Back to customer 1</button>
+      </>
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    customerIdempotencyState.reset();
+    const record = (customerId: string) => (customerId === 'customer-2'
+      ? { id: 'customer-2', farm_name: 'Second Farm', row_version: 3, crops: [], default_commission_split: null }
+      : { id: 'customer-1', farm_name: 'Original Farm', row_version: 1, crops: [], default_commission_split: null });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      const chain: Record<string, unknown> = {};
+      let requested = 'customer-1';
+      const self = (..._args: unknown[]) => chain;
+      for (const name of ['neq', 'is', 'in', 'order', 'limit', 'single', 'insert', 'update', 'delete', 'select']) chain[name] = self;
+      chain.eq = (_column: unknown, value: unknown) => { requested = String(value); return chain; };
+      const settle = async (): Promise<QueryResult> => ({ data: record(requested), error: null });
+      chain.maybeSingle = () => settle();
+      chain.then = (resolve: (value: QueryResult) => unknown, reject?: (reason: unknown) => unknown) => settle().then(resolve, reject);
+      chain.catch = (reject: (reason: unknown) => unknown) => settle().catch(reject);
+      chain.finally = (callback: () => void) => settle().finally(callback);
+      return chain;
+    });
+    mockRpc.mockResolvedValue({ data: { customer_id: 'customer-1' }, error: null });
+  });
+
+  it('does not resume a save the user left, even after coming back to the same customer', async () => {
+    let finishCheck: (matches: unknown[]) => void = () => {};
+    duplicateCheck.find.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { finishCheck = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/customers/customer-1']}>
+        <RouteButtons />
+        <Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.change(await screen.findByDisplayValue('Original Farm'), { target: { value: 'Abandoned edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(duplicateCheck.find).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText('Jump to customer 2'));
+    expect(await screen.findByDisplayValue('Second Farm')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Back to customer 1'));
+    expect(await screen.findByDisplayValue('Original Farm')).toBeInTheDocument();
+
+    await act(async () => { finishCheck([]); });
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'save_customer'), 'the abandoned edit must never be written').toEqual([]);
+    expect(screen.getByRole('button', { name: 'Save Changes' })).not.toBeDisabled();
   });
 });

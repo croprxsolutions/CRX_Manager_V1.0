@@ -111,9 +111,9 @@ BEGIN
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'delivery_id', p_delivery_id, 'reason', p_reason));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'close_delivery_receipt', v_actor, v_fingerprint);
-  -- A replay returns the first answer even if the row moved since. That grants nothing a fresh call would not: the
-  -- screen resets its key after every confirmed answer, and a fresh Email Confirmation on a closed row answers 'none'
-  -- and sends too, because each press is a deliberate send (Sol MED, PR #1678, refuted).
+  -- A replay returns the first answer even if the row moved since. 'paused' is a go-ahead, not an exclusive permission:
+  -- two office users pressing Email Confirmation at once may both send, and a void after the go-ahead does not stop the
+  -- hand send. Mason accepted both on 2026-11-09 (DECISION_LOG.md, "Email Confirmation stays a hand send").
   IF v_replay IS NOT NULL THEN
     RETURN v_replay -> 'result';
   END IF;

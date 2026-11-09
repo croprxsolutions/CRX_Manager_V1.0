@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo , useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { parseLocalDate, localDatePlusDays, localToday } from '../lib/dateUtils';
-import { Plus, Upload, Copy, Download, FileText, Trash2, Layers, ChevronDown, ChevronUp, PackageCheck, AlertTriangle } from 'lucide-react';
+import { Plus, Upload, Copy, Download, FileText, Trash2, ChevronDown, ChevronUp, PackageCheck, AlertTriangle, Check } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import Dropdown from '../components/ui/Dropdown';
+import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
@@ -20,6 +22,7 @@ import { resendRequiredMessage } from '../lib/quotePriceLock';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { QUOTE_COLUMNS } from '../lib/costFields';
 import { quoteStatusLabel } from '../lib/quoteStatusLabel';
+import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -37,11 +40,36 @@ import { trackBusinessEvent } from '../lib/metrics';
 import type { Quote, BookingRolloverRow } from '../types';
 
 const DELETABLE = ['draft', 'sent', 'revised'];
+const STATUSES = ['draft', 'sent', 'revised', 'accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short'];
+// The Dropdown needs a real key for "no status filter"; it maps back to ''.
+const ALL = 'all';
+const STATUS_OPTIONS = [{ value: ALL, label: 'All' }, ...STATUSES.map((s) => ({ value: s, label: quoteStatusLabel(s) }))];
+const SEARCH_KEYS = ['quote_number', 'customer_name', 'product_names'];
+
+const shortDate = (d: Date, withYear = true) =>
+  d.toLocaleDateString('en-US', withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
 
 // Row shape with denormalized, searchable strings (F1: search by product/customer).
 interface QuoteRow extends Quote {
   customer_name: string;
   product_names: string;
+}
+
+// Today's row actions and conditions: Convert to order only for sent and revised.
+// A component (not an inline items list) so the handlers stay event props, never render-time calls.
+function RowMenu({ row, onConvert, onDuplicate }: { row: QuoteRow; onConvert: (row: QuoteRow) => void; onDuplicate: (id: string) => void }) {
+  const items: ActionMenuItem[] = [
+    ...(row.status === 'sent' || row.status === 'revised'
+      ? [{ id: 'convert', label: 'Convert to order', icon: <PackageCheck className="w-4 h-4" />, onAction: () => onConvert(row) }]
+      : []),
+    { id: 'duplicate', label: 'Duplicate', icon: <Copy className="w-4 h-4" />, onAction: () => onDuplicate(row.id) },
+  ];
+  return (
+    // The menu's clicks and keys bubble (through its portal) to the row, which would open the quote.
+    <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <ActionMenu label={`Actions for ${row.quote_number}`} items={items} />
+    </div>
+  );
 }
 
 export default function Quotes() {
@@ -53,6 +81,8 @@ export default function Quotes() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [plannedFilter, setPlannedFilter] = useState(false);
+  // Held here (not inside the table) so the result count matches the rows shown.
+  const [search, setSearch] = useState('');
   const [importModalOpen, setImportModalOpen] = useState(false);
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -128,8 +158,7 @@ export default function Quotes() {
   };
 
   // === GAP FIX #7: Duplicate a quote ===
-  const handleDuplicate = async (quoteId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDuplicate = async (quoteId: string) => {
     try {
       // Keyed per source quote: a retry reuses it, duplicating another quote gets its own.
       const key = duplicateQuoteIdem.getKeyFor(quoteId);
@@ -219,7 +248,7 @@ export default function Quotes() {
       convertQuoteIdem.resetKey();
       const result = data;
       if (result.status === 'already_converted') {
-        toast('info', 'This booking was already converted — opening the order.');
+        toast('info', 'This booking was already converted. Opening the order.');
       } else {
         toast('success', `Order ${result.order_number || ''} created`);
       }
@@ -260,9 +289,9 @@ export default function Quotes() {
     } catch (err: unknown) {
       if (isBelowCostApprovalHandledError(err)) return;
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_PARTIALLY_DRAWN)) {
-        toast('warning', 'This booking has partial draw-downs — draw the remaining balance from the quote instead of converting.');
+        toast('warning', 'This booking has partial draw-downs. Draw the remaining balance from the quote instead of converting.');
       } else if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
+        toast('error', 'This booking is closed. Only sent or revised quotes can be converted.');
       } else if (hasRpcCode(err, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         // The sent-price lock (20261027040000): an expected refusal with a plain-English instruction.
         toast('error', resendRequiredMessage(err));
@@ -386,10 +415,30 @@ export default function Quotes() {
       isSelectable: (q) => DELETABLE.includes(q.status),
     });
 
+  const hasSelectable = filtered.some((q) => DELETABLE.includes(q.status));
+  const someSelected = selectedCount > 0 && !allSelected;
+  // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
   const checkboxCol = useMemo(
-    () => createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status)),
-    [selected, toggleSelect]
+    () => ({
+      ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`),
+      header: (
+        <input
+          type="checkbox"
+          aria-label="Select all quotes"
+          checked={allSelected}
+          ref={(el) => { if (el) el.indeterminate = someSelected; }}
+          onChange={toggleAll}
+          disabled={!hasSelectable}
+          className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+        />
+      ),
+    }),
+    [selected, toggleSelect, allSelected, someSelected, toggleAll, hasSelectable]
   );
+
+  const filtersActive = !!statusFilter || plannedFilter;
+  const clearFilters = () => { setStatusFilter(''); setPlannedFilter(false); };
+  const shownCount = applyTableSearchSort(filtered, SEARCH_KEYS, search, null, 'asc').length;
 
   // ─── Bulk action handlers ───────────────────────────────────
   const handleExportCSV = () => {
@@ -465,7 +514,7 @@ export default function Quotes() {
       ]);
       if (drawnIds.size > 0) {
         const blocked = selectedRows.filter((q) => drawnIds.has(q.id));
-        toast('warning', `${blocked.length} booking(s) with draw-downs or job reservations skipped — close the booking (draw/cancel the remainder or the job) before deleting: ${blocked.map((q) => q.quote_number).join(', ')}`);
+        toast('warning', `${blocked.length} booking(s) with draw-downs or job reservations skipped. Close the booking (draw or cancel the remainder or the job) before deleting them: ${blocked.map((q) => q.quote_number).join(', ')}`);
         ids = ids.filter((id) => !drawnIds.has(id));
         if (ids.length === 0) {
           setDeleting(false);
@@ -492,55 +541,65 @@ export default function Quotes() {
   const bulkActions = [
     { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
     { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
-    { key: 'delete', label: 'Delete Quotes', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    { key: 'delete', label: 'Delete quotes', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
   ];
+
+  const customerName = (row: QuoteRow) => (row.customer as unknown as { farm_name: string })?.farm_name || '-';
+  const isPastDue = (row: QuoteRow) =>
+    !!row.expires_at && (row.status === 'sent' || row.status === 'revised') && row.expires_at.slice(0, 10) < localToday();
+  const statusBadge = (row: QuoteRow) => (
+    <Badge variant={statusToBadgeVariant[row.status] || 'default'} normalCase dot>
+      {quoteStatusLabel(row.status)}
+    </Badge>
+  );
+
+  const rowMenu = (row: QuoteRow) => <RowMenu row={row} onConvert={openConvert} onDuplicate={handleDuplicate} />;
 
   const dataColumns: Column<QuoteRow>[] = [
     {
       key: 'quote_number',
-      header: 'Quote #',
+      header: 'Quote',
       sortable: true,
-      render: (row) => <span className="font-medium text-nav-dark">{row.quote_number}</span>,
+      render: (row) => <span className="font-semibold text-crx-green whitespace-nowrap">{row.quote_number}</span>,
     },
     {
       key: 'customer',
       header: 'Customer',
-      render: (row) => (row.customer as unknown as { farm_name: string })?.farm_name || '-',
+      render: (row) => <span className="block max-w-64 truncate" title={customerName(row)}>{customerName(row)}</span>,
     },
     {
       key: 'status',
       header: 'Status',
       sortable: true,
       render: (row) => (
-        <>
-          <Badge variant={statusToBadgeVariant[row.status] || 'default'} normalCase>
-            {quoteStatusLabel(row.status)}
-          </Badge>
+        <span className="inline-flex flex-wrap items-center gap-1">
+          {statusBadge(row)}
           {row.is_planned && (
-            <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded">
+            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">
               Planned
             </span>
           )}
-        </>
+        </span>
       ),
     },
     {
       key: 'tier',
       header: 'Tier',
       sortable: true,
-      render: (row) => <span>Tier {row.tier}</span>,
+      render: (row) => <span className="text-secondary whitespace-nowrap">Tier {row.tier}</span>,
     },
     {
       key: 'total_price',
       header: 'Total',
       sortable: true,
-      render: (row) => <span className="font-mono text-sm">{fmt(row.total_price)}</span>,
+      className: 'text-right',
+      render: (row) => <span className="font-medium tabular-nums whitespace-nowrap">{fmt(row.total_price)}</span>,
     },
     {
       key: 'created_at',
       header: 'Created',
       sortable: true,
-      render: (row) => new Date(row.created_at).toLocaleDateString(),
+      render: (row) => <span className="text-secondary whitespace-nowrap">{shortDate(new Date(row.created_at))}</span>,
     },
     {
       key: 'expires_at',
@@ -548,42 +607,64 @@ export default function Quotes() {
       sortable: true,
       render: (row) => {
         if (!row.expires_at) return '-';
-        const isPastDue = (row.status === 'sent' || row.status === 'revised') && row.expires_at.slice(0, 10) < localToday();
-        const date = parseLocalDate(row.expires_at).toLocaleDateString();
-        return isPastDue ? (
+        const date = shortDate(parseLocalDate(row.expires_at));
+        return isPastDue(row) ? (
           <span className="text-red-600 font-medium">{date} (past due)</span>
-        ) : date;
+        ) : <span className="text-secondary whitespace-nowrap">{date}</span>;
       },
     },
     {
       key: 'id',
-      header: '',
-      render: (row) => (
-        <div className="flex items-center gap-1">
-          {(row.status === 'sent' || row.status === 'revised') && (
-            <button
-              onClick={(e) => { e.stopPropagation(); openConvert(row); }}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
-              title="Convert to order"
-              aria-label={`Convert quote ${row.quote_number} to an order`}
-            >
-              <PackageCheck className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={(e) => handleDuplicate(row.id, e)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-crx-green-light transition-colors"
-            title="Duplicate this quote"
-            aria-label="Duplicate this quote"
-          >
-            <Copy className="w-4 h-4" />
-          </button>
-        </div>
-      ),
+      header: <span className="sr-only">Actions</span>,
+      // relative: keeps the absolutely placed sr-only label inside the table's scroll box (else the page scrolls sideways).
+      className: 'relative w-14',
+      render: rowMenu,
     },
   ];
 
   const columns = canBulkAction ? [checkboxCol, ...dataColumns] : dataColumns;
+
+  // Phone card (Style D list row): number and status, customer, then tier, planned and expiry beside the total.
+  const mobileRow = (row: QuoteRow) => {
+    const pastDue = isPastDue(row);
+    return (
+      // The quote-number button stretches over the whole card (after:inset-0); the checkbox and menu sit above it.
+      <div className="relative flex flex-col gap-1.5 px-3.5 py-2.5">
+        <div className="flex items-center gap-2">
+          {canBulkAction && DELETABLE.includes(row.status) && (
+            <label className="relative z-10 -ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkboxCol.render?.(row)}</label>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate(`/quotes/${row.id}`)}
+            className="font-semibold text-crx-green text-left focus:outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-crx-green/30"
+          >
+            {row.quote_number}
+          </button>
+          <span className="ml-auto">{statusBadge(row)}</span>
+          <span className="relative z-10 -mr-1.5">{rowMenu(row)}</span>
+        </div>
+        <span className="truncate text-[15px] font-medium text-nav-dark" title={customerName(row)}>{customerName(row)}</span>
+        <span className="flex items-baseline justify-between gap-2 tabular-nums">
+          <span className="min-w-0 text-[13px] text-secondary">
+            Tier {row.tier}
+            {row.is_planned && ' · Planned'}
+            {row.expires_at && (
+              <>
+                {' · '}
+                <span className={pastDue ? 'text-red-600 font-medium' : undefined}>
+                  Expires {shortDate(parseLocalDate(row.expires_at), false)}{pastDue && ' (past due)'}
+                </span>
+              </>
+            )}
+          </span>
+          <span className="shrink-0 text-base font-semibold text-nav-dark">{fmt(row.total_price)}</span>
+        </span>
+      </div>
+    );
+  };
+
+  const showPrepaid = rolloverRows.some((b) => (b.prepay_remaining_cents ?? 0) > 0 || (b.prepay_earmarked_cents ?? 0) > 0);
 
   if (loading) {
     return (
@@ -594,9 +675,11 @@ export default function Quotes() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
         title="Quotes"
+        accent="& Bookings"
+        subtitle="Build quotes, send them to growers and track booked product."
         actions={
           <>
             {canBulkAction && (
@@ -606,16 +689,16 @@ export default function Quotes() {
                 onDeselectAll={clearSelection}
               />
             )}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="secondary"
                 icon={<Upload className="w-4 h-4" />}
                 onClick={() => setImportModalOpen(true)}
               >
-                Bulk Import
+                Import quotes
               </Button>
               <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
-                New Quote
+                New quote
               </Button>
             </div>
           </>
@@ -630,133 +713,169 @@ export default function Quotes() {
 
       {canBulkAction && (
         <Card padding={false}>
-          <div className="p-5">
-            <div className="flex items-center justify-between gap-2">
-              <button onClick={toggleRollover} className="flex flex-1 items-center justify-between text-left">
-                <span className="flex items-center gap-2">
-                  <Layers className="w-5 h-5 text-crx-green" />
-                  <h3 className="font-semibold text-nav-dark">Open booking rollover</h3>
-                </span>
-                {showRollover ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
+          <section aria-labelledby="open-bookings-title">
+            <div className="flex items-center justify-between gap-3 px-4 py-2 md:px-5">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 id="open-bookings-title" className="font-heading text-lg font-semibold text-nav-dark">Open bookings</h2>
+                {/* The count is unknown until the panel's first read (it still loads on first expand). */}
+                {rolloverLoaded && (
+                  <span className="inline-flex h-5.5 min-w-5.5 items-center justify-center rounded-full bg-crx-green-light px-1.5 text-xs font-semibold text-crx-green tabular-nums">
+                    {rolloverRows.length}
+                  </span>
+                )}
+                <HelpTip text="Every open booking (a sent or revised quote) with what was booked, what has been drawn and what is left. Use it at season end to see what is still outstanding. A Prepaid left column shows when a booking has prepayment set aside." />
+              </div>
+              <button
+                type="button"
+                onClick={toggleRollover}
+                aria-expanded={showRollover}
+                aria-controls="open-bookings-panel"
+                aria-label={`${showRollover ? 'Hide' : 'Show'} open bookings`}
+                className="inline-flex h-11 md:h-10 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-secondary hover:bg-gray-50 hover:text-nav-dark transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
+              >
+                {showRollover ? 'Hide' : 'Show'}
+                {showRollover ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
               </button>
-              <HelpTip text="Every open booking (sent/revised quote) with its booked / drawn / remaining value. Use it at season-end to see what's still outstanding. (Prepay-earmarked columns return when the booking-prepay engine ships.)" className="ml-2.5" />
             </div>
             {showRollover && (
-              <div className="mt-4 overflow-x-auto">
+              <div id="open-bookings-panel" className="border-t border-cream-dark">
                 {rolloverLoading ? (
-                  <p className="text-sm text-secondary">Loading…</p>
+                  <div className="p-4 md:p-5"><SkeletonTable rows={3} /></div>
                 ) : rolloverFailed ? (
                   <LoadFailedState title="The booking rollover could not be loaded" onRetry={loadRollover} />
                 ) : rolloverRows.length === 0 ? (
-                  <p className="text-sm text-secondary">No open bookings.</p>
+                  <p className="px-4 py-6 text-sm text-secondary md:px-5">No open bookings.</p>
                 ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100 text-secondary">
-                        <th className="px-3 py-2 text-left font-medium">Customer</th>
-                        <th className="px-3 py-2 text-left font-medium">Booking</th>
-                        <th className="px-3 py-2 text-right font-medium">Booked</th>
-                        <th className="px-3 py-2 text-right font-medium">Drawn</th>
-                        <th className="px-3 py-2 text-right font-medium">Remaining</th>
-                        {/* Prepaid column hidden while no booking has earmarked prepay — the
-                            earmark engine is shelved (docs/roadmap/shelved-earmark-engine/),
-                            so this is 0 for now and returns automatically when the engine ships. */}
-                        {rolloverRows.some((b) => (b.prepay_remaining_cents ?? 0) > 0 || (b.prepay_earmarked_cents ?? 0) > 0) && (
-                          <th className="px-3 py-2 text-right font-medium">Prepaid left</th>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rolloverRows.map((b) => (
-                        <tr
-                          key={b.quote_id}
-                          className="border-b border-gray-50 hover:bg-gray-50/50 cursor-pointer"
-                          onClick={() => navigate(`/quotes/${b.quote_id}`)}
-                        >
-                          <td className="px-3 py-2">{b.customer_name || '—'}</td>
-                          <td className="px-3 py-2 font-medium text-crx-green">{b.quote_number}</td>
-                          <td className="px-3 py-2 text-right font-mono">{fmt(b.booked_cents / 100)}</td>
-                          <td className="px-3 py-2 text-right font-mono">{fmt(b.drawn_cents / 100)}</td>
-                          <td className="px-3 py-2 text-right font-mono">{fmt(b.remaining_cents / 100)}</td>
-                          {rolloverRows.some((r) => (r.prepay_remaining_cents ?? 0) > 0 || (r.prepay_earmarked_cents ?? 0) > 0) && (
-                            <td className="px-3 py-2 text-right font-mono text-crx-green">{fmt(b.prepay_remaining_cents / 100)}</td>
-                          )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm tabular-nums">
+                      <thead>
+                        <tr className="text-left text-xs text-secondary">
+                          <th scope="col" className="px-4 py-2.5 font-medium md:pl-5">Customer</th>
+                          <th scope="col" className="px-3 py-2.5 font-medium">Booking</th>
+                          <th scope="col" className="px-3 py-2.5 text-right font-medium">Booked</th>
+                          <th scope="col" className="px-3 py-2.5 text-right font-medium">Drawn</th>
+                          <th scope="col" className="px-3 py-2.5 text-right font-medium">Remaining</th>
+                          {/* Prepaid column hidden while no booking has earmarked prepay: the
+                              earmark engine is shelved (docs/roadmap/shelved-earmark-engine/),
+                              so this is 0 for now and returns automatically when the engine ships. */}
+                          {showPrepaid && <th scope="col" className="px-3 py-2.5 text-right font-medium">Prepaid left</th>}
+                          <th scope="col" className="w-48 px-4 py-2.5 font-medium md:pr-5">Progress</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {rolloverRows.map((b) => {
+                          // Display only: the bar never changes a figure shown beside it.
+                          const pct = b.booked_cents > 0 ? Math.min(100, Math.max(0, Math.round((b.drawn_cents / b.booked_cents) * 100))) : 0;
+                          return (
+                            <tr
+                              key={b.quote_id}
+                              className="border-t border-cream-dark hover:bg-crx-green-tint cursor-pointer"
+                              onClick={() => navigate(`/quotes/${b.quote_id}`)}
+                            >
+                              <td className="px-4 py-3 font-medium md:pl-5"><span className="block max-w-56 truncate" title={b.customer_name || undefined}>{b.customer_name || '-'}</span></td>
+                              <td className="px-3 py-3 font-medium text-crx-green whitespace-nowrap">{b.quote_number}</td>
+                              <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(b.booked_cents / 100)}</td>
+                              <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(b.drawn_cents / 100)}</td>
+                              <td className="px-3 py-3 text-right font-semibold whitespace-nowrap">{fmt(b.remaining_cents / 100)}</td>
+                              {showPrepaid && (
+                                <td className="px-3 py-3 text-right text-crx-green whitespace-nowrap">{fmt(b.prepay_remaining_cents / 100)}</td>
+                              )}
+                              <td className="px-4 py-3 md:pr-5">
+                                <div className="flex items-center gap-2.5">
+                                  <div role="img" aria-label={`${pct} percent drawn`} className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-cream-dark">
+                                    <div className="h-full rounded-full bg-crx-green" style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <span className="w-9 text-right text-xs text-secondary">{pct}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}
-          </div>
+          </section>
         </Card>
       )}
 
-      <Card padding={false}>
-        <div className="p-5">
+      <Card padding={false} className="max-md:border-0 max-md:bg-transparent max-md:shadow-none">
+        <section aria-label="All quotes" className="md:p-5">
           <DataTable<QuoteRow>
             data={filtered}
             columns={columns}
             searchable
-            searchPlaceholder="Search quotes, customers, or products…"
-            searchKeys={['quote_number', 'customer_name', 'product_names']}
+            searchPlaceholder="Search by quote number, customer or product"
+            searchKeys={SEARCH_KEYS}
+            searchValue={search}
+            onSearchChange={setSearch}
             onRowClick={(row) => navigate(`/quotes/${row.id}`)}
-            emptyTitle="No quotes yet"
-            emptyDescription="Quotes are the first step — build a quote, send it to your customer, then convert it to an order."
-            emptyAction={
+            mobileRow={mobileRow}
+            emptyTitle={filtersActive || search ? 'No matching quotes' : 'No quotes yet'}
+            emptyDescription={filtersActive || search
+              ? 'Try a different search or clear the filters.'
+              : 'Quotes are the first step. Build a quote, send it to your customer, then convert it to an order.'}
+            emptyAction={filtersActive ? (
+              <Button variant="secondary" onClick={clearFilters}>Clear filters</Button>
+            ) : search ? undefined : (
               <Button icon={<FileText className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
-                Create Your First Quote
+                Create your first quote
               </Button>
-            }
+            )}
             loading={loading}
             loadError={loadFailed}
             onRetry={() => { setLoading(true); fetchQuotes(); }}
             filters={
-              <div className="flex gap-2 items-center flex-wrap">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  aria-label="Filter by quote status"
-                  className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="draft">Draft</option>
-                  <option value="sent">Sent</option>
-                  <option value="revised">Revised</option>
-                  <option value="accepted">Accepted</option>
-                  <option value="declined">Declined</option>
-                  <option value="expired">Expired</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="closed_by_application">{quoteStatusLabel('closed_by_application')}</option>
-                  <option value="closed_short">{quoteStatusLabel('closed_short')}</option>
-                </select>
+              <div className="flex flex-wrap items-center gap-2">
+                <Dropdown
+                  inline
+                  label="Status"
+                  value={statusFilter || ALL}
+                  onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
+                  options={STATUS_OPTIONS}
+                />
                 <button
+                  type="button"
+                  aria-label="Planned programs"
+                  aria-pressed={plannedFilter}
                   onClick={() => setPlannedFilter(!plannedFilter)}
-                  className={`px-3 py-2 text-sm rounded-lg transition-colors ${plannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
+                  className={`inline-flex h-11 md:h-10 items-center gap-2 rounded-full px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border border-crx-green bg-crx-green-light text-crx-green' : 'border border-dashed border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
                 >
-                  Planned Programs
+                  {plannedFilter ? <Check className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
+                  <span className="md:hidden">Planned</span>
+                  <span className="hidden md:inline">Planned programs</span>
                 </button>
-                <HelpTip text="Planned quotes reserve inventory but aren't committed orders yet. Use the Planned Programs filter to see all of them." className="ml-1" />
-                {(statusFilter || plannedFilter) && (
+                <HelpTip text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />
+                {filtersActive && (
                   <button
-                    onClick={() => { setStatusFilter(''); setPlannedFilter(false); }}
-                    className="text-xs text-crx-green hover:underline"
+                    type="button"
+                    onClick={clearFilters}
+                    className="h-11 md:h-10 rounded-lg px-2 text-sm font-medium text-crx-green hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
                   >
                     Clear
                   </button>
                 )}
-                {canBulkAction && filtered.length > 0 && (
-                  <button
-                    onClick={toggleAll}
-                    className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"
-                  >
-                    {allSelected ? 'Deselect All' : 'Select All'}
-                  </button>
+                <span className="whitespace-nowrap text-[13px] text-secondary">
+                  {shownCount} {shownCount === 1 ? 'quote' : 'quotes'}
+                </span>
+                {canBulkAction && hasSelectable && (
+                  // Phones have no table header, so the select-all box sits here (md+ uses the header one).
+                  <label className="inline-flex h-11 items-center gap-2 px-1 text-sm text-secondary md:hidden">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+                    />
+                    Select all
+                  </label>
                 )}
               </div>
             }
           />
-        </div>
+        </section>
       </Card>
 
       <BulkDeleteConfirmModal
@@ -772,7 +891,7 @@ export default function Quotes() {
         open={!!convertTarget}
         onClose={closeConvert}
         onConfirm={handleConvertConfirm}
-        title="Convert to Order?"
+        title="Convert to order?"
         message={
           convertTarget
             ? [
@@ -782,7 +901,7 @@ export default function Quotes() {
               ].filter(Boolean).join('  ')
             : ''
         }
-        confirmLabel={convertChecking ? 'Checking...' : (convertStaleMsg || convertDupMsg ? 'Convert Anyway' : 'Convert to Order')}
+        confirmLabel={convertChecking ? 'Checking…' : (convertStaleMsg || convertDupMsg ? 'Convert anyway' : 'Convert to order')}
         variant={convertStaleMsg || convertDupMsg ? 'warning' : 'info'}
         icon={convertStaleMsg || convertDupMsg ? AlertTriangle : PackageCheck}
         loading={converting || convertChecking}

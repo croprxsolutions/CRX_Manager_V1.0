@@ -115,7 +115,7 @@ describe('Quotes list', () => {
 
   it('the rollover help tip is not nested inside the toggle button', async () => {
     at('/quotes', <Quotes />);
-    const toggle = await screen.findByRole('button', { name: /Open booking rollover/ });
+    const toggle = await screen.findByRole('button', { name: /open bookings/i });
     const help = within(toggle.parentElement as HTMLElement).getByRole('button', { name: 'More info' });
     expect(toggle.contains(help)).toBe(false);
   });
@@ -123,7 +123,7 @@ describe('Quotes list', () => {
   it('a failed booking rollover says so instead of "No open bookings."', async () => {
     H.failing.set('get_open_booking_rollover', 'error');
     at('/quotes', <Quotes />);
-    fireEvent.click(await screen.findByRole('button', { name: /Open booking rollover/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /open bookings/i }));
     expect(await screen.findByText('The booking rollover could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('No open bookings.')).not.toBeInTheDocument();
 
@@ -141,7 +141,7 @@ describe('Quotes list', () => {
       new Promise((r) => { releaseSecond = r; }),
     ]);
     at('/quotes', <Quotes />);
-    const toggle = await screen.findByRole('button', { name: /Open booking rollover/ });
+    const toggle = await screen.findByRole('button', { name: /open bookings/i });
     fireEvent.click(toggle); // first read starts
     fireEvent.click(toggle); // close
     fireEvent.click(toggle); // reopen: a second read starts (nothing loaded yet)
@@ -157,7 +157,7 @@ describe('Quotes list', () => {
   it('a rollover reply with no bookings list counts as failed', async () => {
     H.functions.get_open_booking_rollover = { success: true };
     at('/quotes', <Quotes />);
-    fireEvent.click(await screen.findByRole('button', { name: /Open booking rollover/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /open bookings/i }));
     expect(await screen.findByText('The booking rollover could not be loaded')).toBeInTheDocument();
   });
 });

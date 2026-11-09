@@ -37,7 +37,7 @@
 | `internal_notes` filled | 443 |
 | Active products whose new quote line today auto-fills from the **description** (quoting note blank, description set) | **442** |
 | A crop table or crop-use table | none. The only fixed crop list in the database is the `customers.crops` CHECK: `corn`, `soybeans`, `wheat`, `milo`, `cotton`, `alfalfa`, `pasture_hay`, `other` |
-| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` |
+| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` (this repo's migration stamps run ahead of the calendar by convention; it is live per `supabase_migrations.schema_migrations`, ledger version `20261109032913`) |
 | `20261202110000_product_size_notes_in_one_step` (notes saved with "New product" in one step) | **not applied** (local candidate) |
 
 **Where Use Timing lives today (code):**
@@ -91,7 +91,7 @@
 
 Keep `products.use_timings` and `product_parents.use_timings` exactly as they are. Make the pair explicit and safe on the options table:
 - **A crop list.** New table `product_crop_options` (code, label, sort order, active). Each option's `crop` must be one of its codes, or blank for "any crop".
-- **One option per pair.** A unique rule on (category, timing code, crop), with blank crop counted as a value, so "Pre-Emerge" + corn cannot exist twice under two labels. The 9 live options already satisfy it.
+- **One active option per pair.** A unique rule on (category, timing code, crop) among **active** options, with blank crop counted as a value, so "Pre-Emerge" + corn cannot be offered twice under two labels. A turned-off option does not count, so a wrong label can be retired and replaced. The 9 live options already satisfy it.
 - **An admin can add a pair** and turn one off, through two RPCs. A product keeps a turned-off option it already has (the existing trigger rule); it just stops appearing in the picker.
 - **No renaming.** Each size stores the joined labels in `use_timing`, written at save time, so renaming an option would leave every existing product showing the old label. To fix a wrong label, turn it off and add a new one. (Rename is out of scope; if Mason later wants it, it is its own package that rewrites the joined text.)
 
@@ -108,8 +108,8 @@ Why this is the smallest complete design: the copy-down, the grouped-size guard,
 
 **`product_use_timing_options`** (existing; constraints and two columns added, nothing dropped)
 - `ADD CONSTRAINT product_use_timing_options_crop_fkey FOREIGN KEY (crop) REFERENCES product_crop_options(code)`.
-- `ADD CONSTRAINT product_use_timing_options_pair_key UNIQUE NULLS NOT DISTINCT (category, timing_code, crop)`.
-- `ADD CONSTRAINT … CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
+- `CREATE UNIQUE INDEX product_use_timing_options_active_pair_key ON product_use_timing_options (category, timing_code, crop) NULLS NOT DISTINCT WHERE is_active` (live is Postgres 17).
+- `ADD CONSTRAINT product_use_timing_options_timing_code_check CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
 - `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, `ADD COLUMN option_version bigint NOT NULL DEFAULT 1`. With the existing `created_at` (default `now()`), each admin add records who and when, and each turn-off or turn-on records who and when and moves `option_version`. The 9 seeded rows keep null `created_by`.
 - **Volunteer Corn (question 2):** only if Mason answers "any crop", the migration sets that one option's `crop` to null. Products store the code, not the crop, and the label stays "Volunteer Corn", so no product row changes (the postflight md5s prove it). If he answers "keep", the row is left as it is.
 - **No grant, revoke or policy change** on this existing table (so no Mason permission approval is needed for it).
@@ -124,7 +124,7 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 3. Timing code matches the code pattern — `USE_TIMING_CODE_INVALID`. A new timing code is allowed (for example `burndown`); the label is what people see.
 4. Crop null, or an **active** `product_crop_options` code — `USE_TIMING_CROP_UNKNOWN`.
 5. Label trimmed, 1–60 characters, starting with a letter (so its generated code always matches the code pattern), no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
-6. Pair not already present (active or not) — `USE_TIMING_PAIR_EXISTS`, naming the existing label (an admin turns that one back on instead).
+6. No **active** option already has this pair — `USE_TIMING_PAIR_EXISTS`, naming its label. A turned-off option with the same pair is allowed, so a misspelled label is fixed by turning it off and adding the corrected one.
 7. Code: a slug of the label (`lower`, non-letters to `_`, trimmed of `_`), with `_2`, `_3` added if taken. Sort order: the category's current largest plus 10.
 8. Insert with `created_by`; return `{code, label, timing_code, crop, category, sort_order}`.
 
@@ -132,7 +132,7 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 1. Admin, key, replay.
 2. Option must exist — `USE_TIMING_NOT_FOUND`. Locked `FOR UPDATE`; `option_version` must equal `p_expected_option_version` — `USE_TIMING_STALE` (so an earlier click that arrives late cannot undo a later one). Same value already — `USE_TIMING_NO_CHANGE`.
 3. Turning **off**: allowed even while products hold it (they keep it). The result reports how many sizes and parents still hold it, so the screen can say so.
-4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`.
+4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`; turning on a pair another active option already has — `USE_TIMING_PAIR_EXISTS`, naming it.
 5. Update `is_active`, `changed_by`, `changed_at`, `option_version + 1`; return the row (with its new version) and the holder counts.
 
 No change to `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once.
@@ -145,7 +145,7 @@ No change to `sync_product_use_timings`, `_product_parent_timings`, `update_prod
 
 ### 4.A Preflight (refuse to run unless all hold)
 - Inside one transaction (the temp-table pattern of `20261103210000`).
-- `product_crop_options` does not exist; the two new constraints do not exist.
+- `product_crop_options` does not exist; none of the three new rules exists (`product_use_timing_options_crop_fkey`, `product_use_timing_options_active_pair_key`, `product_use_timing_options_timing_code_check`).
 - The 9 options have exactly the codes, labels, timing codes, crops and categories in section 1.
 - Every `crop` on the options is null or one of the seeded crop codes; every `timing_code` matches the code pattern.
 - `_product_parent_require_admin`, `_product_parent_replay`, `save_idempotency` exist.
@@ -161,7 +161,7 @@ Section 3.2's table and constraints, section 3.3's two functions. RLS on `produc
 - No option row is added or turned off. The only option change is Volunteer Corn's crop, and only if Mason answers question 2 "any crop". The only new rows are the 7 crop options.
 
 ### 4.D Rollback (its own reviewed migration)
-Drop the two functions, the two constraints and the three new option columns, then `product_crop_options`. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
+Drop the two functions, then the three new rules named in 4.A (the crop foreign key first), then the four new option columns, then `product_crop_options`. If question 2 moved Volunteer Corn to "Any crop", set its crop back to `corn`. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
 
 ### 4.E Lock and timing
 `SET LOCAL lock_timeout = '5s'`. The `ALTER TABLE` takes a short lock on the 9-row options table; product saves read it, so apply outside busy hours (no fixed window needed; the lock lasts milliseconds).
@@ -202,8 +202,9 @@ Lands after the database PR is applied (`docs/workflows/DATABASE_CHANGE_CHECKLIS
 - `src/lib/productUseTimings.ts`: `listProductCropOptions()`, `addUseTimingOption(...)`, `setUseTimingOptionActive(...)`, each through `src/lib/db.ts` with `assertRpcResult()` and a retry key per intent (the existing `getCreateKeyFor` pattern).
 - `src/pages/ProductDetail.tsx` and `src/components/products/ProductParentPanel.tsx`: the existing multi-select shows options **grouped by crop** ("Any crop", "Corn", "Soybeans", …) with the timing label in each group. Admins get an **"Add a crop and timing"** link under the picker: a small modal (category fixed to the product's, timing chosen from existing timing codes or typed new, crop from the crop list or "Any crop", label pre-filled as "<Timing> <Crop>", editable). A turned-off option a product still holds shows with "(retired)", as today.
 - A **"Manage crop and timing choices"** list for admins (the same modal file) to turn a choice off or back on, showing how many products hold it. `ConfirmModal` before turning one off. The button is disabled while its request is in flight, sends the version it was loaded with, and reloads the list after every answer (a `USE_TIMING_STALE` refusal says "someone else just changed this; refreshed").
-- `src/lib/productSetupWorkbook.ts` and `src/components/products/ProductSetupWorkbookModal.tsx`: a fourth visible tab, **Crop Uses**, one row per parent: `parent_id`, `parent_version` (hidden), `parent_name`, `category` (read-only), `sizes` (read-only), `use_timings` (editable labels, `;`-separated, the same format as the Setup tab). Saving it calls `update_product_parent` once per changed row with `{use_timings: [...]}`, the reason `"Setup workbook: crop uses"`, the downloaded `parent_version` and a per-row retry key derived from the upload. The format version moves to `crx-product-setup-v3`; a v2 file is refused whole (the existing old-version rule), because it has no Crop Uses tab.
+- `src/lib/productSetupWorkbook.ts` and `src/components/products/ProductSetupWorkbookModal.tsx`: a fourth visible tab, **Crop Uses**, one row per parent: `parent_id`, `parent_version` (hidden), `parent_name`, `category` (read-only), `sizes` (read-only), `use_timings` (editable labels, `;`-separated, the same format as the Setup tab). On upload, each row's labels are turned into option codes with the same parser the Setup tab uses (`parseSetupValue('use_timings', …)`, matching labels ignoring case); an unknown label, or one the parent's category does not take, makes that row invalid in the preview, as on the Setup tab. Saving calls `update_product_parent` once per changed row, one at a time, with `{use_timings: [<codes>]}`, the reason `"Setup workbook: crop uses"`, the downloaded `parent_version` and a per-row retry key derived from the upload. The format version moves to `crx-product-setup-v3`; a v2 file is refused whole (the existing old-version rule), because it has no Crop Uses tab.
   - **Why per row and not one batch RPC:** `update_product_parent` already does the lock, stale check, copy-down and event. A batch RPC would need a new private helper re-emitted from that live function, a larger and riskier change for a non-money field. The cost: if row 40 of 100 is refused (stale), rows 1–39 have saved. The result screen lists exactly which rows saved and which were refused and why, as the grand plan requires ("the result screen shows exactly which rows saved"), and a re-upload skips saved rows because they no longer differ.
+  - **One save at a time.** While a Crop Uses save runs, the modal cannot be closed and no other upload or tab save can start; every result is tagged with its upload's ID and only that upload's result screen shows it. If the page is reloaded mid-save, each row already sent is saved or refused by the database on its own; re-uploading the same file skips rows that already match and refuses stale ones by name.
   - The tab is empty until PAR-2 grouping runs (0 parents today). Ungrouped sizes keep using the Setup tab's `use_timings` column, unchanged.
 - Tests: component tests for the grouped picker, the add modal (refusals shown in plain words), turning off; `productSetupWorkbook.test.ts` cases for the Crop Uses tab round trip, a v2 file refused, a stale parent row refused by name, a category that does not take timings refused before upload.
 
@@ -224,9 +225,10 @@ Filling quoting notes from the setup workbook works today. What the preview does
 - `src/lib/productSetupWorkbook.ts` `buildSetupPreview`: for every row where `quoting_notes` or `notes` changes, compute `preferredQuoteNotes(before)` and `preferredQuoteNotes(after)`. When they differ, add one display line **"New quote lines show"** with before and after, and mark the row **customer-visible**. When they are the same (for example a description edit on a product that has a quoting note), add nothing.
 - `src/components/products/ProductSetupWorkbookModal.tsx`: a count at the top of the Setup tab's preview — "N products change what new quote lines show. Existing quotes keep their notes." — and a filter to list only those rows. The confirm button's text names the count. Nothing else in the save path changes (`apply_product_setup`, its retry key, stale refusal and 2000-row limit are reused).
 - `src/components/products/PricingChangePreviewModal.tsx` (the price workbook's preview, the second writer of `quoting_notes`): the same "New quote lines show" line, from the same helper, so either spreadsheet tells the truth.
+- `src/pages/ProductDetail.tsx` (the one-product editor): when the description changes on a product whose quoting note is blank, or the quoting note changes, a one-line hint under the field says "New quote lines will show: <text>" before saving. The build lists every other editor of `notes` or `quoting_notes` with a fresh search and gives each the same hint or names why it needs none.
 - Bulk import (WP-PM-10) writes `notes` only on **new** products, which have no existing quotes; no change there.
 
-**Why no database change:** the save path already has the admin check, retry key, stale-row refusal and one-transaction save; quote lines already copy the note when the line is made, so existing quotes cannot change. The missing piece is honest wording in two previews.
+**Why no database change:** the save path already has the admin check, retry key, stale-row refusal and one-transaction save; quote lines already copy the note when the line is made, so existing quotes cannot change. The missing piece is honest wording in the two spreadsheet previews and the product page.
 
 ### 6.3 Filling the notes (the data step, not code)
 This is catalog work under the grand plan's data rules, after Mason answers question 3:
@@ -238,8 +240,8 @@ This is catalog work under the grand plan's data rules, after Mason answers ques
 Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11): each batch needs his go at the time.
 
 ### 6.4 Files and gates
-- `src/lib/productSetupWorkbook.ts`, `src/components/products/ProductSetupWorkbookModal.tsx`, `src/components/products/PricingChangePreviewModal.tsx`, their tests (`productSetupWorkbook.test.ts`, `PricingChangePreviewModal.test.tsx`), and `src/lib/quoteNotes.test.ts` if a case is added.
-- `PricingChangePreviewModal.tsx` carries a money word ("Pricing"), so the PR needs Sol (section 8). If Sol is not wanted for a notes-only wording change, the price-workbook half can be split into its own PR; the setup-workbook half alone is off the Sol list (re-check with the classifier at build: the money-word match is a substring check).
+- `src/lib/productSetupWorkbook.ts`, `src/components/products/ProductSetupWorkbookModal.tsx`, `src/components/products/PricingChangePreviewModal.tsx`, `src/pages/ProductDetail.tsx`, their tests (`productSetupWorkbook.test.ts`, `PricingChangePreviewModal.test.tsx`), and `src/lib/quoteNotes.test.ts` if a case is added.
+- `PricingChangePreviewModal.tsx` (money word "Pricing") and `ProductDetail.tsx` are on the Sol list, so the PR needs Sol (section 8).
 
 ### 6.5 Risks
 
@@ -258,7 +260,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 **USE-1, in the harness (`prove-product-crop-use-pairs-real-schema.mjs`, against the schema-matched copy):**
 1. **Counts match:** before and after the migration, 317 products hold timings with the same per-code counts as section 1, every product's `use_timings`, `use_timing` and `pricing_version` unchanged (postflight, re-run by the script).
 2. An admin adds "Post-Emerge Wheat" (Herbicide, `post_emergence`, `wheat`); a non-admin and a direct table insert are refused and write nothing; a repeat with the same key returns the first result and writes once; the same key with a different label is refused.
-3. Adding a second label for an existing pair is refused, naming the existing label; a crop not on the list is refused; a label with `;` is refused.
+3. Adding a second label for an existing active pair is refused, naming the existing label; after that option is turned off, the corrected label is accepted, and turning the old one back on is refused while the new one is active; a crop not on the list is refused; a label with `;` or not starting with a letter is refused.
 4. A product with "Pre-Emerge Corn" and "Post-Emerge Soybeans" keeps both after save and reload (ungrouped size, then a grouped parent).
 5. Two sizes of one parent show the same pairs after a parent edit; editing one size's timings directly is refused, naming the parent.
 6. A category change on a parent with timings is refused until timings are cleared; the screen's confirm then clears them on every size in one event.
@@ -273,6 +275,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 3. An **existing** saved quote with those products still shows its old notes, and its PDF prints them; "Reset" on one of its lines pulls the new text.
 4. A description edit on a product that has a quoting note shows no "New quote lines show" line.
 5. The price workbook preview shows the same line for a `quoting_notes` change.
+6. On the product page, editing the description of a product with no quoting note shows the "New quote lines will show" hint before saving.
 
 ---
 
@@ -282,7 +285,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 |---|---|---|---|
 | **USE-1 DB** | Section 4 | Yes (`supabase/`) | Luna until clean → Sol on the exact head → apply live before merge through the migration-apply proof gate (routine grants on new objects only; non-destructive) → merge |
 | **USE-1 Screens** | Section 5 | Yes (`ProductDetail.tsx`) | After USE-1 DB is applied. Luna → Sol → green checks |
-| **USE-3 Screens** | Section 6 | Yes while it touches `PricingChangePreviewModal.tsx` | Independent of USE-1; may land first. Luna → Sol → green checks |
+| **USE-3 Screens** | Section 6 | Yes (`ProductDetail.tsx`, `PricingChangePreviewModal.tsx`) | Independent of USE-1; may land first. Luna → Sol → green checks |
 | **USE-3 data** | Section 6.3 | — | After USE-3 Screens; each batch with Mason's go |
 
 Every PR stays open at least 4 hours before merge (Taha, 2026-11-08). None of these touch the files of Taha's open PRs; re-check `gh pr list --author TahaKhanAbdalli` at build time.
@@ -318,3 +321,12 @@ Today no product has a quote note, so 442 products put their general description
 - MED no time recorded for an added option: refuted; `product_use_timing_options` already has `created_at timestamptz NOT NULL DEFAULT now()` (`20261103210000`); the sheet now says so (3.2).
 - LOW crop options have no `updated_at`: refuted; crop rows change only by migration, which the migration history and git record. No app writer exists.
 - LOW a label like `123` would make an invalid code: fixed, the label must start with a letter (3.3 step 5).
+
+**Luna round 2** (gpt-6-luna xhigh, head `a13c1d8e0`): 7 findings (2 HIGH, 4 MED, 1 LOW).
+- HIGH "latest live migration" dated after the sheet: refuted; this repo's stamps run ahead of the calendar by convention, and `20261215110000` is live (ledger version `20261109032913`). Note added in section 1.
+- HIGH Crop Uses tab holds labels but `update_product_parent` takes codes: fixed; labels are parsed to codes with the Setup tab's parser, unknown labels invalid in the preview (section 5).
+- MED a retired wrong label could not be replaced (pair unique even when inactive): fixed; the pair rule now covers active options only, and turning an old one back on is refused while a duplicate is active (3.1, 3.2, 3.3, case 3).
+- MED preflight and rollback named two of three new rules: fixed; all three named, rollback order given (4.A, 4.D).
+- MED overlapping Crop Uses saves: fixed; one save at a time, results tied to their upload, re-upload safe (section 5).
+- MED a description edit on the product page changes new quote lines with no warning: fixed; product-page hint and a search for every other notes editor (6.2, 6.4, USE-3 case 6).
+- LOW crop options have no `updated_at`: refuted, as in round 1 (migration-only writer).

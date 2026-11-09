@@ -60,8 +60,9 @@ export function parseNameBrands(productName: string): NameBrands {
         result.notes.push(name);
         continue;
       }
-      lastBrand = name;
+      // A repeat of a brand already read whole is not a possible cut-off.
       if (seen.has(normal)) continue;
+      lastBrand = name;
       seen.add(normal);
       result.brands.push(name);
     }

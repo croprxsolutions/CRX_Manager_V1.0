@@ -55,6 +55,7 @@ describe('suggestBrandNamesFromProductName', () => {
 
   it('never suggests a brand the name may have cut off', () => {
     expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, Cha')).toEqual(['Alpha', 'Bravo']);
+    expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, Alpha')).toEqual(['Alpha', 'Bravo']);
   });
 });
 

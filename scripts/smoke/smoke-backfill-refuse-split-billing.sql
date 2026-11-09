@@ -325,9 +325,24 @@ BEGIN
   -- than a missing-row check: insert the exact field-acre audit payload the old
   -- guard trusted. The fixed guard ignores audit history entirely and requires
   -- an immutable row in the private canonical-RPC provenance table.
+  -- A draft joins a group only inside a split claim (20261215110000), so first prove a bare
+  -- assign is refused, then open a claim by hand to reach the provenance check behind it.
+  BEGIN
+    UPDATE public.invoices SET invoice_group_id = v_fake_group WHERE id = v_invoice;
+    RAISE EXCEPTION 'SMOKE_FAIL: a draft took a made-up group id outside a split claim';
+  EXCEPTION WHEN OTHERS THEN
+    v_err := SQLERRM;
+    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+    IF v_err NOT LIKE 'INVOICE_GROUP_ASSIGN_REQUIRES_SPLIT:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: fake-group assign raised unexpected error: %', v_err;
+    END IF;
+  END;
+  INSERT INTO public.split_invoice_creation_claims (transaction_id, order_id)
+    SELECT pg_current_xact_id(), order_id FROM public.invoices WHERE id = v_invoice;
   UPDATE public.invoices
      SET invoice_group_id = v_fake_group
    WHERE id = v_invoice;
+  DELETE FROM public.split_invoice_creation_claims WHERE transaction_id = pg_current_xact_id();
 
   INSERT INTO public.financial_audit_log (
     operation_type,

@@ -36,7 +36,7 @@ TABLES = [
     "invoice_items", "invoice_line_allocations", "invoice_shares", "invoices",
     "job_applied_info", "job_chemicals", "job_fields", "jobs",
     "note_activity_log", "note_tags", "notifications", "ocr_processing_queue",
-    "order_items", "order_line_allocations", "order_shares", "orders",
+    "order_item_shares", "order_items", "order_line_allocations", "order_shares", "orders",
     "payments", "prepay_applications", "prepay_credits", "products", "profiles",
     "purchase_order_items", "purchase_orders", "quote_items",
     "quote_pdf_templates", "quote_sections", "quote_templates",

@@ -1,7 +1,6 @@
 {
   "note": "Grandfathered guard claims as of the ratchet's introduction. A NEW claim must carry @proven-by, @unproven, or @speed-bump. Shrinking this list is the point; do not grow it without a reason. Re-baselined 2026-09-01 after four reviewer-reported scanner defects were fixed (truncated identity, whole-line negation, single-line-only scanning, and a two-line wrap window that a three-line claim still escaped): the identity now uses the complete claim text, so every key changed, and widening the wrap window changed it again for the handful of claims that actually wrap. Six entries are newly DETECTED rather than newly written — pre-existing claims in codex-push-lib, idempotency-body-check, migration-apply-lib, and production-action-guard that the old scanner could not see. The three the fixes surfaced in review-proof-guard.mjs were annotated instead of grandfathered.",
   "claims": [
-    ".claude/hooks/active-area-guard.mjs::fail-open::FAIL-OPEN: any error → allow.",
     ".claude/hooks/actor-binding-check.mjs::fail-open::FAIL-OPEN, but loud: a broken hook must never brick the session.",
     ".claude/hooks/applied-snapshot-invalidate.mjs::fail-closed::the correct fail-closed behaviour.",
     ".claude/hooks/applied-snapshot-invalidate.mjs::fail-open::fail-open on — silently disarming the guard.",

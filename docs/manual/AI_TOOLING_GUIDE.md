@@ -84,7 +84,7 @@ Several read `.claude/schema-registry.json`, a snapshot of the live schema. For 
 are the same rules as `docs/reference/coding-guidelines.md` and `docs/workflows/SAFE_DEVELOPMENT_RULES.md`;
 the CI job `SQL Migration Validation` and `scripts/check-migration-hard-rules.mjs` check some of
 them on GitHub too, and the latter is the only check for a new table without Row Level Security
-(the `rls-on-new-tables` hook that duplicated it was unwired on 2026-10-27).
+(the `rls-on-new-tables` hook that duplicated it was unwired on 2026-10-27 and deleted on 2026-11-08).
 
 **2. Command safety (before an agent runs a shell or tool command).** `bash-safety`,
 `mcp-tool-guard`, `live-testdata-guard`. They refuse force pushes,

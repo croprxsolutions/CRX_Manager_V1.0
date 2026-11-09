@@ -30,6 +30,7 @@ import { ReturnDetailItems } from '../components/returns/ReturnDetailItems';
 import { mapReturnPolicyRpcError, RETURN_POLICY_NO_RETURN_CODE } from '../lib/returnPolicyError';
 import type { Return, ReturnItem, Customer, Order, ReturnStatus, ReturnReason, ReturnItemCondition } from '../types';
 import type { Json } from '../types/supabase';
+import { returnableHundredths } from '../lib/returnQuantity';
 
 type ReturnRow = Return & {
   customer_name: string;
@@ -340,7 +341,8 @@ export default function Returns() {
         const allowance = allowanceByLine.get(item.id);
         return {
           ...item,
-          quantity_returnable: allowance ? Number(allowance.returnable_qty) : 0,
+          // A return holds 2 places; a payer's 4-place share is offered rounded down (create_return refuses finer).
+          quantity_returnable: allowance ? returnableHundredths(Number(allowance.returnable_qty)) : 0,
           share_left_qty: allowance?.share_left_qty != null ? Number(allowance.share_left_qty) : null,
           share_left_cents: allowance?.share_left_cents ?? null,
         };

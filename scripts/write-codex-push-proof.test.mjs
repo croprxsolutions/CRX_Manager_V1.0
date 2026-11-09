@@ -2,6 +2,7 @@
 // Tests for the Codex push-proof wrapper (scripts/write-codex-push-proof.mjs).
 // Run: node scripts/write-codex-push-proof.test.mjs
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -9,6 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  appliedHistoryMatches,
+  findAppliedHistory,
   buildCarryForwardProof,
   codeHealthBeforeSol,
   docsCheckBeforeSol,
@@ -2182,6 +2185,105 @@ not json
   assert.equal(passed.ok, true, "docs check: a passing check lets Sol run");
   const crashed = docsCheckBeforeSol("root", "b", { spawn: () => ({ status: null, stdout: "", stderr: "boom" }) });
   assert.deepEqual([crashed.ok, crashed.output], [false, "boom"], "docs check: a check that cannot run refuses");
+}
+
+// Applied history (Mason, 2026-11-08): only an ADDED migration whose text equals the one SQL text the
+// live ledger stored under the same name is named to Sol as history; everything else gets the full review.
+{
+  const name = "20261214100000_ki30_fix";
+  const file = `supabase/migrations/${name}.sql`;
+  const sql = "UPDATE public.products SET x = 1;\n";
+  const sha = createHash("sha256").update(sql, "utf8").digest("hex");
+  const match = (ledgerRows, text = sql, addedFiles = [file]) =>
+    appliedHistoryMatches({ addedFiles, readFile: () => text, ledgerRows });
+
+  assert.deepEqual(match([{ name, statements: [sql] }]), [{ name, sha256: sha }], "applied history: identical text is history");
+  assert.deepEqual(
+    match([{ name, statements: [sql.replace(/\n/g, "\r\n")] }]),
+    [{ name, sha256: sha }],
+    "applied history: only line endings differ, still identical",
+  );
+  assert.deepEqual(
+    match([{ name, statements: [sql.replace(/\n/g, "\r")] }]),
+    [{ name, sha256: sha }],
+    "applied history: bare CR line endings are line endings too",
+  );
+  assert.deepEqual(match([{ name, statements: [sql] }], sql.replace("1", "2")), [], "applied history: one byte different is reviewed in full");
+  assert.deepEqual(match([{ name, statements: [`${sql} `] }]), [], "applied history: one extra byte live is reviewed in full");
+  assert.deepEqual(match([]), [], "applied history: no live row with that name is reviewed in full");
+  assert.deepEqual(match([{ name: `${name}_x`, statements: [sql] }]), [], "applied history: a different name never matches");
+  assert.deepEqual(match([{ name, statements: [sql] }, { name, statements: [sql] }]), [], "applied history: two live rows are reviewed in full");
+  assert.deepEqual(match([{ name, statements: [sql, ""] }]), [], "applied history: SQL split in two is reviewed in full");
+  assert.deepEqual(match([{ name, statements: null }]), [], "applied history: no stored SQL is reviewed in full");
+  assert.deepEqual(match(null), [], "applied history: a failed live read is reviewed in full");
+  assert.deepEqual(match([{ name, statements: [sql] }], null), [], "applied history: an unreadable file is reviewed in full");
+  assert.deepEqual(
+    match([{ name: "x", statements: [sql] }], sql, ["supabase/migrations/notes.md"]),
+    [],
+    "applied history: only migration .sql files qualify",
+  );
+
+  // Only ADDED files qualify: an edit to a migration already on the base is reviewed in full.
+  const repo = tempDir("crx-applied-history-");
+  const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+  const commit = (message) => git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", message);
+  git("init", "-q", "-b", "main");
+  mkdirSync(path.join(repo, "supabase", "migrations"), { recursive: true });
+  const oldName = "20261101100000_old_fix";
+  writeFileSync(path.join(repo, "supabase", "migrations", `${oldName}.sql`), sql);
+  git("add", ".");
+  commit("base");
+  const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const revParse = () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const migPath = (n) => path.join(repo, "supabase", "migrations", `${n}.sql`);
+  writeFileSync(migPath(name), sql);
+  git("add", ".");
+  commit("candidate");
+  const head = revParse();
+  const asked = [];
+  const ledger = (names) => {
+    asked.push(...names);
+    return [{ name, statements: [sql] }, { name: oldName, statements: [`${sql}-- edited\n`] }];
+  };
+  assert.deepEqual(findAppliedHistory(repo, base, head, { readLedger: ledger }), [{ name, sha256: sha }], "applied history: a purely added file matches");
+  assert.deepEqual(asked, [name], "applied history: only added migration names are looked up live");
+  assert.deepEqual(findAppliedHistory(repo, base, head, { readLedger: () => null }), [], "applied history: a failed live read gives none");
+
+  // Any edited or deleted migration (a rename is a delete plus an add) means no applied history at all.
+  writeFileSync(migPath(oldName), `${sql}-- edited\n`);
+  git("add", ".");
+  commit("edit an existing migration");
+  assert.deepEqual(findAppliedHistory(repo, base, revParse(), { readLedger: ledger }), [], "applied history: an edited migration voids it, even when live has its new text");
+  git("reset", "-q", "--hard", head);
+  const renamed = "20261101100001_old_fix_renamed";
+  git("mv", `supabase/migrations/${oldName}.sql`, `supabase/migrations/${renamed}.sql`);
+  writeFileSync(migPath(renamed), `${sql}-- edited\n`);
+  git("add", ".");
+  commit("rename and edit");
+  assert.deepEqual(
+    findAppliedHistory(repo, base, revParse(), { readLedger: () => [{ name, statements: [sql] }, { name: renamed, statements: [`${sql}-- edited\n`] }] }),
+    [],
+    "applied history: a renamed and edited migration is not history even when live has it under the new name",
+  );
+
+  // A file with invalid UTF-8 never matches, even against a ledger text holding the replacement character.
+  git("reset", "-q", "--hard", head);
+  const badName = "20261216100000_bad_bytes";
+  writeFileSync(migPath(badName), Buffer.concat([Buffer.from("select 1; -- "), Buffer.from([0xff]), Buffer.from("\n")]));
+  git("add", ".");
+  commit("invalid utf8");
+  assert.deepEqual(
+    findAppliedHistory(repo, base, revParse(), { readLedger: () => [{ name, statements: [sql] }, { name: badName, statements: ["select 1; -- �\n"] }] }),
+    [{ name, sha256: sha }],
+    "applied history: an invalid UTF-8 file is not history; the valid one still is",
+  );
+
+  const prompt = buildCodexReviewPrompt({ appliedHistory: [{ name, sha256: sha }] });
+  assert.equal(prompt.includes(`supabase/migrations/${name}.sql (sha256 ${sha})`), true, "applied history: the prompt names the file and hash");
+  assert.equal(buildCodexReviewPrompt().includes("APPLIED HISTORY"), false, "applied history: no section when nothing matched");
+  const proof = buildCodexPushProof({ headSha: "a".repeat(40), baseSha: "b".repeat(40), verdict: "clean", appliedHistory: [{ name, sha256: sha }] });
+  assert.deepEqual(proof.applied_history, [{ name, sha256: sha }], "applied history: the proof records what was treated as history");
+  assert.equal("applied_history" in buildCodexPushProof({ headSha: "a", baseSha: "b", verdict: "clean" }), false, "applied history: unchanged proof shape otherwise");
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

@@ -1,8 +1,8 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
-**WP-PM-3 local candidate source review: 2026-11-02.** KI-89–KI-92 below describe unapplied branch behavior or checks still owed; no live behavior was verified.
+**WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -36,14 +36,14 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)) | 61 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
-| Closed as FIXED, with proof (bottom of file and archive) | 15 |
-| WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
+| Closed as FIXED, with proof (bottom of file and archive) | 18 |
+| WP-PM-3 checks still owed (KI-92) | 1 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
-Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
-part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
+Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
+2026-10-27 UTC, part C, access ending with the job, 2026-11-09 UTC), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone).
@@ -53,13 +53,13 @@ key alone).
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · Mason approval needed to narrow permissions; parts A and B applied live, part C not started**
+**HIGH · PARTIAL · security · parts A, B and C applied live; the related lows below stay open**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
-C (the job route); A and B are applied live and merged; part C has no PR. Related lows: dispatched
+C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
@@ -475,6 +475,37 @@ file previews "ready" and then the whole save is refused with nothing written. T
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
 this number is fixed and live (archive, 2026-11-05).
 
+### KI-109 — Product Master follow-ups named in the Wave 2 report but never filed
+**LOW · UNVERIFIED (not re-checked since 2026-11-03) · products · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- No cancel for a previewed price change set: every live test leaves one behind (WP-PM-7's live check left
+  `a27b2386` in "previewed" on a test product; prices did not change).
+- No product-page list of open jobs still on old label values.
+- `save_job` does not itself refuse edits to a completed job. Partly covered since: `20261204120000` freezes a
+  completed or invoiced job's EPA numbers.
+- WP-PM-7 deferred LOWs: emoji character count, older `toFixed` displays, the raw select in the cost modal.
+- "Piksi Dust Plus - 1800G Jar" is stocked in milligrams but billed by dry ounces on jobs; check its price before it
+  goes on a job. Its cost basis is still an open question for Mason.
+
+### KI-110 — Three small invoicing findings from the October admin-only invoicing review
+**LOW · UNVERIFIED (seen 2026-10-09 to 2026-10-13, never re-checked) · invoicing · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- `_update_order_items_impl` sets `invoice_items.order_item_id = NULL` on draft invoices without locking the
+  `invoices` row, so a rep's order-line edit can change that link after an admin's versioned post compared the
+  invoice. No amount changes. Fix: lock the affected draft invoices `FOR UPDATE` (by id) first.
+- `cancel_delivery` refused an admin's quick delivery whose draft invoice was still open
+  (`ORDER_INVOICE_TERMINAL`), for an admin and a rep alike, in a container replay of the live schema. Not checked
+  live.
+- `finance_charges` still grants table writes to `authenticated`. Its policy is admin-only, so RLS refuses them;
+  this is clean-up debt, not a hole.
+
+### KI-111 — Field-acre billing: the real boundary-file import check is still owed
+**MED · UNVERIFIED (listed as open in code on 2026-09-30) · field app · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- The one check left open at the June field-acre billing go-live: import one real John Deere, FieldView or .zip
+  boundary export (a test customer is fine). Confirm it bills on the file's acres, the ±10% difference flag
+  appears, and redrawing the map does not change the billed acres.
+- Field boundary bulk import has no Skip / Replace / Import-as-new choice at preview.
+- Split draft invoices created automatically when a delivery completes raise no bell notification.
+- The guided map-drawing tool has no "undo last point".
+
 ---
 
 ## Inventory and deliveries
@@ -510,14 +541,20 @@ any already waiting (board splits and undispatched locations left alone; a job a
 same instant waits for the activation instead of being missed; proof
 `scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
+Taha's review: a job reassigned to an inactive applicator keeps the old applicator's dispatch row after re-activation.
+Kept as designed (Mason, DECISION_LOG 2026-11-08): both sprayers can see and start it, proved in the same script.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
-**LOW-MED · UNVERIFIED · inventory/process · Mason**
-Five products still flag until counted (Mason chose not to count); returns/voids on Chem Man-billed deliveries stay
-allowed; six partially fulfilled orders and three stuck deliveries need a business call; 19 negative inventory rows
-must only be fixed from physical counts; the Order page still offers whole-order invoicing on 33 orders (server
-refuses, no double bill); live-data cleanups (eight SEED commission batches, PO-2026-0008/0015, an E2E zero-item
-invoice, five empty deliveries). Counts are older records' claims, not re-measured.
+**LOW-MED · PARTLY RE-MEASURED 2026-11-08 · inventory/process · Mason**
+Re-measured live, read-only, 2026-11-08 (no data changed): five products still flag until counted (Mason chose not to
+count; no stock movement since 2026-10-07); six partially fulfilled orders (0161/0162/0172/0176/0331/0343) still
+hold stock for unfilled lines; the same three deliveries are stuck (DEL-00075/00077/00082) plus nine more past their
+date on confirmed orders; 19 negative inventory rows (not the same 19 as June: two are new, one is deeper) must only be
+fixed from physical counts; PO-2026-0008 is a real fully-received PO with 7 short and 10 over lines, PO-2026-0015's
+receipt gap no longer shows; 10 deliveries have no items (5 completed, 2 voided, 3 cancelled); one cancelled
+zero-item invoice. Not re-measured (sales/billing): whole-order invoicing on 33 orders, eight SEED commission
+batches. Returns/voids on Chem Man-billed deliveries stay allowed. Yes/no sheet in the side-session notes (not in
+this repo).
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
@@ -564,18 +601,6 @@ sent, but every outbound path uses Main Warehouse only and no transfer exists, s
 ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
-
-### KI-89 — Inventory position uses UTC dates
-**LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
-The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
-
-### KI-90 — Reopen race needs proof
-**MED · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
-The reopen race through `set_product_active` has no automated real-schema proof.
-
-### KI-91 — Retired negative stock needs proof
-**MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
-A retired product with a negative balance in the position report was checked by hand only.
 
 ### KI-92 — Accepted quote with live order needs proof
 **LOW · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
@@ -647,6 +672,23 @@ rep gets an account: the database must refuse a different tier from reps (admins
 also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
 changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
 quote changes the tier label without repricing its locked lines.
+
+### KI-108 — Five products' stored stock did not match their transaction history on 2026-11-01
+**MED · UNVERIFIED (snapshot 2026-11-01 12:11 UTC, not re-checked) · inventory · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The monthly integrity report (closed PR #1230) found `inventory.quantity_available` different from the
+`inventory_transactions` ledger for five products. The other nine checks passed.
+
+| Product | Ledger says | Stored | Gap |
+|---|---|---|---|
+| Black Strap Molasses Sugar - Tote | 675 | 2,000 | 1,325 |
+| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | 530 |
+| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | 95 |
+| 2, 4D Amine 4# - Bulk | 0 | 55 | 55 |
+| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | 10 |
+
+Next step: re-run the check (the `/integrity-report` admin page shows the same check). For any product still off,
+read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
+(`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
 
 ## Database and release process
 
@@ -783,14 +825,16 @@ then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenanc
 
 ### KI-52 — Tests and tooling hygiene
 **LOW · OPEN · tooling-guards · unassigned**
-Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `scripts/fleet-status.mjs` lacks
-the fsmonitor override; `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction;
-`scripts/land-pr.mjs:167` prints a `gh pr merge --squash --auto` command the merge guard refuses;
-`src/lib/rlsContracts.test.ts:148-160` comment still says "NOT APPLIED" for `20260813080000`; the Phase 3
+**Fixed 2026-11-08 (`claude/ki52-tooling-hygiene`):** `scripts/land-pr.mjs` now prints the pinned, immediate
+`gh pr merge … --match-head-commit <head>` the merge guard accepts (no `--auto`); `scripts/fleet-status.mjs` runs
+every Git command with `core.fsmonitor=false`; `src/lib/rlsContracts.test.ts` records `20260813080000` as applied
+(live 2026-08-16, ledger `20260816174353`) with `quote_versions` INSERT `none`; `docs/reference/gotchas.md` has the
+"gross margin means markup" note. **Still open:**
+Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction; the Phase 3
 return-policy concurrency prover can't reach its chain (UNVERIFIED; PR #1110 repaired three different provers and does not establish this one's result); no static guard catches invoice-type leaks or
 direct-URL edit-lock bypasses (MED, UI); extra live-sweep predicates (concurrency hotspot, more money identities)
 not written; Gauntlet V2 Phase 2 unfinished (no staging database, E2E switched off, 44 page-render skips,
-counts not re-measured); `docs/reference/gotchas.md` has no "gross margin means markup" note.
+counts not re-measured).
 Further small LOW notes from the 2026-10-13 branch salvage, carried from the archive and not re-checked: invoices
 created through the order functions would be numbered INV- instead of CS-/MC- (latent; 0 of 12 live order
 invoices affected); on the bulk order import,
@@ -832,6 +876,25 @@ never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpcla
 the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
 deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
 them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
+**Part 2 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-part2-delete-unused-hooks.md`): the two unwired hooks
+and one August proof are gone. The October/November proofs stay (recent work still runs them by hand), as does
+`scripts/smoke/undo-paths/` (eight proofs import it). Still open: the two Edge Functions and the helper and
+page-split work.
+
+### KI-107 — Review-proof guard refuses a delete after `cd` into a worktree when any part of the command has `..` or a variable
+**LOW · OPEN (rule read on `main` 2026-11-08) · tooling-guards · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+`review-proof-guard.mjs` refuses `cd <worktree> && <delete or move>` when any later part of the command climbs out
+(for example a harmless `ls ../wt-b`), and cannot see `S=<path>; rm -rf "$S"` as a literal path. Closed PR #1536
+(branch `claude/review-proof-guard-worktree-path-7639d0`, tip `b8ae8bf6e0`, two Luna rounds) judges each delete on
+its own and reads such variables: of 19 real refusals on 2026-11-05, 6 pass and 13 stay refused. Mason closed it
+on 2026-11-05 because that narrowing kept leaking the same class of hole; the branch is kept for its pinned test
+cases only. Workaround: run a delete or cleanup as its own command, not in one that `cd`s into a worktree.
+
+### KI-112 — A draft return-credit prover failed just after midnight UTC
+**LOW · UNVERIFIED · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.mjs` (closed PR #1319) failed just
+after midnight UTC with "fractional credit A PNL COGS delta=-1251". Not checked whether `main`'s live-dump version
+fails the same way; it fits the known pattern of live checks that fail between 6 PM and midnight Central.
 
 ---
 
@@ -882,14 +945,25 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
   to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
   Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
-- Every active account reads every `customer_addresses` row (To-Do row 11.7; HIGH).
+- Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
+  keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
+  part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
+- DEFERRED (LOW, Sol 2026-11-08, part C): `start_job` and `complete_job` return a matching idempotency result before
+  the job-access check, so a former applicator replaying their own key gets back the earlier result (ids they already
+  had). Nothing new is written. Fix: check access before the replay lookup.
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
   billing splits and spray-record field/acres data through `field_billing_defaults` and
   `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
 - Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
-  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH; part C, not
-  started). Part A's `_can_see_field` already ends whole-job access when `jobs.deleted_at` is set, for the
-  field-map lookups only.
+  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). FIXED LIVE 2026-11-09
+  05:29 UTC (11:29 PM Central, 2026-11-08) by part C (PR #1650, ledger `20261109052957`, `20261217100000`), which ends the whole-job applicator's access when
+  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
+  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
+  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
+  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
+  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
   `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
@@ -906,7 +980,8 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   whose role is driver keeps the crew job and its map but not the field tables (by design).
 - Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
   details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
-  ticket) means these should be widened to the dispatch route too; not built.
+  ticket) means these should be widened to the dispatch route too. Part C (live 2026-11-09 UTC, PR #1650)
+  gives them read-only access to those rows of the job they are dispatched to.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
 **MED · PARTIAL · security/money · Mason**
@@ -980,9 +1055,17 @@ service-role tools (LOW).
   stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
   approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
   advisory).
-- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
-  `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
-  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
+- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables` and `generated-column-check`
+  still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
+  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching, `.env` aliases in
+  `env-guard` included (LOW). Revisit trigger: if Claude Code regains a MultiEdit tool, reopen the 2026-11-02
+  acceptance for these three content guards.
+- `env-guard` service-role scan: FIXED 2026-11-08 (branch `claude/guard-port-envguard-ki107-7aecfa`). An Edit is
+  judged as the whole file after the edit, comments are scanned like code, and a repo-relative or upper-case `src/`
+  path counts. `*.test.ts(x)` files may quote `'service_role'` (several assert database grants) but still may not
+  name the key or hold a JWT-shaped literal. Still not caught (LOW): frontend files with other extensions (`.mjs`,
+  `.vue`, `.html`), a key name or role built at run time from pieces, keys not shaped like a JWT, and the `.env`
+  path aliases accepted above.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).
@@ -1041,6 +1124,9 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 12. **KI-87, a refused turn-off said "Product details changed"** — closed 2026-11-05: already fixed by PR #1321, which shows the database's blocker text. Proven on the local test app: a draft purchase order added after the review made Confirm show "purchase order TEST-KI87-PO" and reopen the review naming it.
 13. **KI-88, Inventory loaded the whole catalog on mount** — closed 2026-11-05 by branch `claude/ki86-88-product-turnoff`: on mount the page reads only the ids of turned-off products (`select=id&is_active=eq.false`) for the Inactive label; the full catalog loads only when the Add Inventory or Create Hold picker opens. No migration. Proven on the local test app's network log (2,116 products: no catalog read until a picker opened) and by a component test.
 14. **KI-05, RUP register rows for an unposted invoice** — closed 2026-11-05: `20261110140000_rup_records_require_posted_invoice` (PR #1513) applied live 2026-11-05 21:32:09 UTC (3:32 PM Central), ledger `20261105213209`. `generate_rup_sales_records` refuses an invoice that is not posted, paid or overdue (`RUP_INVOICE_NOT_POSTED`), and a trigger on `rup_sales_records` applies the same rule to a direct insert. Proven by the real-schema prover and, after the apply, the live smoke chain (`SMOKE_PASS_ROLLBACK`: a real draft invoice is refused, posting still writes one register row); live body, trigger and guard re-read after the apply.
+15. **KI-89, inventory position used UTC dates** — closed 2026-11-08: already fixed by `20261204100000_ki18_batch1_chicago_today` (applied live 2026-11-06, ledger `20261107041703`), which re-emitted `_get_inventory_position_cost_impl_20261019` after WP-PM-3 with the Chicago date for season start and both hold-expiry checks. A read-only live query on 2026-11-08 found no `CURRENT_DATE` in that body or `get_inventory_position`, and the body's md5 (`6a74347a…`) is the one that migration's postflight expects. No new migration was needed.
+16. **KI-90, reopen race through `set_product_active` had no automated proof** — closed 2026-11-08: `scripts/smoke/prove-product-retire-race-and-negative-stock-real-schema.mjs` replays every migration on `main` and races an order reopen against the real preview-and-confirm turn-off in both arrival orders on separate connections, with an observed row-lock wait. Reopen first: the stale preview's Confirm is refused (`PRODUCT_DEACTIVATION_BLOCKED`) and the product stays on. Turn-off first: the reopen is refused (`PRODUCT_INACTIVE`) and the order stays closed. Neither leaves an open order holding a turned-off product.
+17. **KI-91, retired product with negative stock was checked by hand only** — closed 2026-11-08 by the same prover: a product at −2.5 on hand is turned off through `set_product_active` (one "stock" warning, no blocker), then stays in the inventory position report at −2.5, not flagged low, and in the admin cost report at −2.50 value; the same balance on an active product is flagged low.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

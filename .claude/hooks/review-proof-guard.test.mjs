@@ -1124,6 +1124,38 @@ for (const command of [
 ]) {
   assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /./, `still denied: ${command}`);
 }
+// KI-107 (open): deletes inside a worktree that a per-part narrowing must keep refusing.
+// Carried from closed PR #1536 so any future narrowing has to pass them; all refused today.
+for (const command of [
+  // The delete's own words, a pipe, a heredoc, a climbing cd, and a variable that is not provably one literal.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && echo .. | xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && xargs rm -rf <<EOF\n..\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && printf ../../wt-b | xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && xargs rm -rf <<EOF\n../../wt-b\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && cat <<EOF | xargs rm -rf\n../../wt-b\nEOF",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd src && cd ../.. && rm -rf wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && printf '../wt-b' |\n xargs rm -rf",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && printf ../wt-b |&\nxargs rm -rf",
+  "S=\"x; ../wt-b\"; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf $S",
+  "S='x\"'; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$S;/../wt-b\"",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && timeout 5 rm -rf ..",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && cd .. && rm -rf wt-b",
+  "D=..; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$D\"",
+  "D=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$D\" && rm -rf .",
+  "D=/tmp/x; D=C:/CRX_Manager/.claude/worktrees/wt-a; cd \"$D\" && rm -rf .",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a && D=..; rm -rf \"$D\"",
+  "R='$(echo ..)'; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf $R",
+  "S=/tmp/x; cd C:/CRX_Manager/.claude/worktrees/wt-a && rm -rf \"$S\" ../wt-b",
+  // A separator the shell reads as text must not split the delete's argument.
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p 'safe;' && rm -rf 'safe;/../../../../../.claude'",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p \"s;\" && rm -rf \"s;/../../wt-b\"",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && mkdir -p s\\; && rm -rf s\\;/../../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && rm -rf $'s\\x3b'/../../wt-b",
+  "cd C:/CRX_Manager/.claude/worktrees/wt-a/src && rm -rf 's\n/../../wt-b'",
+]) {
+  assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } },
+    /after cd into the repo's \.claude folder|touching the \.claude review state directory/, `KI-107 still denied: ${command}`);
+}
 // KNOWN OVER-BLOCK kept on purpose: a command that names the state dir ITSELF
 // and also contains a destructive word anywhere still denies, even as a read.
 // Telling a read from a write there needs the verb-to-target parser this file

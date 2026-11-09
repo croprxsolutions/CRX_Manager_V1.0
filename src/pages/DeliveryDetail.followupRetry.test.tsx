@@ -71,7 +71,7 @@ vi.mock('../lib/deliveryPdf', () => ({ downloadDeliveryPdf: vi.fn() }));
 vi.mock('../lib/emailService', () => ({ sendEmail: vi.fn(), buildEmailHtml: vi.fn() }));
 vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => ({ compliant: true, issues: [] }) }));
 vi.mock('../lib/deliverySplitBilling', () => ({
-  fetchSplitBillingOrderIds: () => Promise.resolve(new Set()), SPLIT_BILLING_BLOCK_REASON: '',
+  fetchSplitBillingOrderIds: () => Promise.resolve(new Set()), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
 }));
 vi.mock('../lib/offlineQueue', () => ({ queueAction: vi.fn(), getOfflineStorageErrorMessage: () => '' }));
 vi.mock('../lib/imageCompression', () => ({ compressImage: vi.fn() }));

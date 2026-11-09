@@ -5,9 +5,7 @@
 // CHECK constraints, enums, generated columns), the registry is now STALE — and
 // the 3 PreToolUse guards that actually read it (sql-safety, status-enum-check,
 // generated-column-check) all FAIL OPEN on stale data, so they could wave
-// through the exact bug class they exist to catch. (rls-on-new-tables.mjs does
-// NOT read the registry — it checks migration content directly — so it is not
-// in this list.)
+// through the exact bug class they exist to catch.
 //
 // On match:
 //   1. Writes .claude/session-state/REGISTRY-STALE.flag  ({ created, migration_hint })

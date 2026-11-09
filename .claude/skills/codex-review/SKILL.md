@@ -259,6 +259,13 @@ skips it. Merge main in before this point, not after Sol alongside fixes (ship.m
 (a lock, timer, guard or rounding rule) comes back for a 3rd round, stop patching and ask Mason the business
 trade-off that would delete it (`AGENTS.md`, Operating Contract); the wrapper says so from round 3.
 
+**Applied history (Mason, 2026-11-08).** A full run reads the live migration ledger (read-only) for each
+migration file the PR adds. A file whose text, line endings aside, is exactly the one SQL text the live ledger
+stored under the same name is named to Sol as applied history: Sol still reads it and reviews how everything
+else uses it, but not its own design, since it already ran and can never be edited (PR #1653 failed rounds 3-7
+on exactly that). Anything short of an exact match, an edited (not added) file, or a failed live read means the
+ordinary full review. The proof lists matched files under `applied_history`.
+
 **Main moved after a clean Sol pass? Usually nothing to do (Mason, 2026-10-26).** The merge gates accept
 a head behind main when the head contains the base its proof reviewed and main only moved forward, so
 merge as it is. If GitHub reports a conflict, resolving it changes the PR, so it needs a fresh full

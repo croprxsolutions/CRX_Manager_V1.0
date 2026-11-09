@@ -5,6 +5,8 @@
  * dispatch row get one, so the job reaches the Dispatch Board, whatever their license (Mason, 2026-11-08). The
  * apply backfills any such location already waiting. Locations that already have any dispatch row and finished
  * or soft-deleted jobs are left alone. Same-instant location adds and assignments are proved in both orders.
+ * A job reassigned from an active applicator to an inactive one (Taha's #1652 review) stays on the old
+ * applicator's board after the new one is re-activated, and both can see and start it (Mason, 2026-11-08).
  *
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays every
  * migration before the candidate, seeds invented rows and checks each case.
@@ -228,6 +230,7 @@ const APP_E = id('b5');   // inactive applicator: a no-user re-activation is ref
 const APP_G = id('b7');   // inactive applicator assigned a job at the same instant as the activation
 const APP_I = id('b9');   // reverse order: activation in progress while a job is assigned to I
 const APP_K = id('ba');   // reverse order: activation in progress while a location is added to K's job
+const APP_S = id('bb');   // Taha's #1652 review: inactive applicator a dispatched job is reassigned to
 const CUST = id('c1');
 const F = (n) => id(`f${n}`);
 const J = (n) => id(`d${n}`);
@@ -314,6 +317,53 @@ function seed() {
       ('${JF(3)}', '${J(1)}', '${APP_D}', 'dispatched', '${ADMIN}');`);
   console.log('[prover] seeded an admin, five people, seven jobs (open, finished, soft-deleted) and nine locations;'
     + ' e2 was undispatched and e3 split to applicator D on the board');
+}
+
+// Taha's #1652 review (MED): a job already on D's board is reassigned to S while S is inactive, either straight
+// (job 13: D's row stays 'dispatched') or after the applicator was cleared (job 14: D's row was 'cancelled').
+// Mason, 2026-11-08: "any sprayer should be able to just pick up field and start spraying, not wait on someone
+// from office", and two sprayers sometimes spray the same field. So re-activating S must not take the field off
+// D's board; it is enough that S, now the job's applicator, sees both jobs and can start them, and D keeps job 13.
+async function reassignedToInactive() {
+  psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+    ('${APP_S}', 'ki28-11@example.invalid', '{"full_name":"[PROVER] applicator 11","role":"applicator"}'::jsonb);`);
+  asOwner(`UPDATE public.profiles SET role = 'applicator', is_active = false WHERE id = '${APP_S}';
+    INSERT INTO public.applicator_licenses (profile_id, license_number, holder_name, expiry_date, is_active)
+      VALUES ('${APP_S}', 'PROVER-S', '[PROVER] S', current_date + 300, true);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES
+      ('${F(16)}', '${CUST}', '[PROVER] Field 16'), ('${F(17)}', '${CUST}', '[PROVER] Field 17');
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, created_by) VALUES
+      ('${J(13)}', 'PRV-KI28-13', '${CUST}', current_date, 'scheduled', '${APP_D}', '${ADMIN}'),
+      ('${J(14)}', 'PRV-KI28-14', '${CUST}', current_date, 'scheduled', '${APP_D}', '${ADMIN}');
+    INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF(16)}', '${J(13)}', '${F(16)}'), ('${JF(17)}', '${J(14)}', '${F(17)}');
+    INSERT INTO public.job_location_dispatches (job_field_id, job_id, applicator_id, dispatch_status, dispatched_by) VALUES
+      ('${JF(16)}', '${J(13)}', '${APP_D}', 'dispatched', '${ADMIN}'),
+      ('${JF(17)}', '${J(14)}', '${APP_D}', 'dispatched', '${ADMIN}');`);
+  const row = (jf) => scalar(`SELECT ${short('applicator_id')} || '|' || dispatch_status FROM public.job_location_dispatches WHERE job_field_id = '${jf}';`);
+  ok(ADMIN, `UPDATE public.jobs SET applicator_id = '${APP_S}' WHERE id = '${J(13)}';`);
+  ok(ADMIN, `UPDATE public.jobs SET applicator_id = NULL WHERE id = '${J(14)}';`);
+  ok(ADMIN, `UPDATE public.jobs SET applicator_id = '${APP_S}' WHERE id = '${J(14)}';`);
+  assert.deepEqual([row(JF(16)), row(JF(17))], ['b4|dispatched', 'b4|cancelled']);
+  ok(ADMIN, `UPDATE public.profiles SET is_active = true WHERE id = '${APP_S}';`);
+  assert.deepEqual([row(JF(16)), row(JF(17))], ['b4|dispatched', 'b4|cancelled'], 're-activating S must not take a field off D');
+  console.log("[prover] REASSIGNED TO INACTIVE (Taha #1652): S re-activated; job 13 stays on D's board (dispatched), job 14 keeps D's cancelled row");
+
+  // What S's field app loads (FieldView): get_dispatched_list, then S's own open whole-job assignments for any job
+  // that list did not cover. Job 13 comes through the list (S is the job's applicator), job 14 through the second read.
+  const listed = ok(APP_S, "SELECT coalesce(string_agg(x::text, ' '), '') FROM public.get_dispatched_list() x;");
+  assert.ok(listed.includes(J(13)), "S's dispatched list must include job 13");
+  assert.ok(!listed.includes(J(14)), "job 14 has no active dispatch row, so it reaches S through the whole-job read");
+  assert.equal(ok(APP_S, `SELECT string_agg(right(id::text, 2), ' ' ORDER BY id) FROM public.jobs
+     WHERE applicator_id = '${APP_S}' AND deleted_at IS NULL AND status IN ('scheduled', 'in_progress');`), '13 14');
+  const dList = ok(APP_D, "SELECT coalesce(string_agg(x::text, ' '), '') FROM public.get_dispatched_list() x;");
+  assert.ok(dList.includes(J(13)) && !dList.includes(J(14)), "D still sees job 13, not job 14");
+  console.log("[prover] S's field app lists both jobs (13 via the dispatched list, 14 as a whole-job card); D's still lists job 13");
+
+  // Both sprayers can pick the work up themselves: S starts job 14, D starts job 13 (still on D's board).
+  ok(APP_S, `SELECT public.start_job('${J(14)}', '${APP_S}', 'prover-ki28-s-14');`);
+  ok(APP_D, `SELECT public.start_job('${J(13)}', '${APP_D}', 'prover-ki28-d-13');`);
+  assert.equal(scalar(`SELECT string_agg(status, ' ' ORDER BY id) FROM public.jobs WHERE id IN ('${J(13)}', '${J(14)}');`), 'in_progress in_progress');
+  console.log('[prover] S starts job 14 and D starts job 13 from the field app, with no office step');
 }
 
 async function main() {
@@ -439,6 +489,8 @@ ${blocked.stderr}`, /PROFILE_ROLE_LOCK/);
   assert.equal(board(), `${afterRevAssign} 15|ba|dispatched|a1`);
   assert.equal(scalar('SELECT count(*) FROM public.job_location_dispatches;'), '11');
   console.log(`[prover] REVERSE LOCATION: a location added to K's job during K's activation waited ${wField} ms (no deadlock) and reached the board`);
+
+  await reassignedToInactive();
 
   assert.equal(sweepRows(), '-');
   console.log('[prover] after: the KI-28 sweep finds nothing (the applicator A of e6 now qualifies; the soft-deleted job itself stays undispatched)');

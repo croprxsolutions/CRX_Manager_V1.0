@@ -953,20 +953,30 @@ export function appliedHistoryMatches({ addedFiles, readFile, ledgerRows }) {
   return matches;
 }
 
+// Only a branch that purely ADDS migration files qualifies: any deleted or edited migration
+// (a rename shows as a delete plus an add) means no applied history, so the full review runs.
 function addedMigrationFiles(root, baseSha, headSha) {
   const result = runTrustedGit(
-    ["diff", "--no-renames", "--name-only", "--diff-filter=A", baseSha, headSha, "--", "supabase/migrations/"],
+    ["diff", "--no-renames", "--name-status", baseSha, headSha, "--", "supabase/migrations/"],
     { cwd: root },
   );
   if (result.error || result.status !== 0) return [];
-  return String(result.stdout).split(/\r?\n/).filter((file) => MIGRATION_FILE_RE.test(file));
+  const rows = String(result.stdout).split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
+  if (rows.some(([status]) => status !== "A")) return [];
+  return rows.map(([, file]) => file).filter((file) => MIGRATION_FILE_RE.test(file));
 }
 
+// Invalid UTF-8 returns null (no match) instead of being silently replaced before the compare.
 function gitBlobUtf8(root, sha, file) {
   const result = runTrustedGit(["cat-file", "blob", `${sha}:${file}`], {
-    cwd: root, encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "ignore"],
+    cwd: root, encoding: "buffer", timeout: 60_000, stdio: ["ignore", "pipe", "ignore"],
   });
-  return result.error || result.status !== 0 ? null : String(result.stdout);
+  if (result.error || result.status !== 0) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
+  } catch {
+    return null;
+  }
 }
 
 // Read-only live ledger read through scripts/lib/read-applied-migration-sql.mjs (hard-wired path).

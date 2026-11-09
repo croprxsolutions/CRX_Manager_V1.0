@@ -21,6 +21,13 @@ describe('billSplitPayerShares', () => {
     expect(payers.reduce((s, p) => s + p.amount_cents, 0)).toBe(10000);
   });
 
+  it('equal payers print to two places and still add up to 100%', () => {
+    // 100 / 300 each is 33.3333...; printed at two places that was 99.99%.
+    const payers = billSplitPayerShares([row('1', 'A', 100), row('2', 'B', 100), row('3', 'C', 100)]);
+    expect(payers.map((p) => p.split_percentage)).toEqual([33.34, 33.33, 33.33]);
+    expect(payers.reduce((s, p) => s + Math.round(p.split_percentage * 100), 0)).toBe(10000);
+  });
+
   it('lists payers in number order, so -10 comes after -2', () => {
     const payers = billSplitPayerShares([row('10', 'J', 100), row('2', 'B', 100), row('1', 'A', 100)]);
     expect(payers.map((p) => p.invoice_number)).toEqual(['CS-2026-0412-1', 'CS-2026-0412-2', 'CS-2026-0412-10']);
@@ -110,6 +117,9 @@ describe('isBillSplitInvoice', () => {
     expect(isBillSplitInvoice({ invoice_type: 'chemical_sale', invoice_group_id: 'g1', delivery_id: null })).toBe(false);
     expect(isBillSplitInvoice({ invoice_type: 'chemical_sale', invoice_group_id: null, delivery_id: 'd1' })).toBe(false);
     expect(isBillSplitInvoice({ invoice_type: 'field_application', invoice_group_id: 'g1', delivery_id: 'd1' })).toBe(false);
+    // A payer's draft may switch to misc charge (guard_invoice_terminal_order); the payer table stays.
+    expect(isBillSplitInvoice({ invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: 'd1' })).toBe(true);
+    expect(isBillSplitInvoice({ invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: null })).toBe(false);
   });
 });
 

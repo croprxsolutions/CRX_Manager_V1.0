@@ -1744,6 +1744,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Build PDF data object (shared by print + email)
   // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
   const buildInvoicePdfData = async (options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
+    // Re-read the payers: another payer's invoice may have gained a charge since this page loaded
+    // (the email path reads them fresh too).
+    const printPayers = billSplitPayers.length > 0 && invoice?.invoice_group_id
+      ? await loadBillSplitPayers(supabase, invoice.invoice_group_id)
+      : billSplitPayers;
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')
       .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
@@ -1819,7 +1824,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         split_percentage: s.split_percentage,
         acres: s.acres,
         amount_cents: s.amount_cents,
-      })) : billSplitPayers.length > 0 ? billSplitPayers : undefined,
+      })) : printPayers.length > 0 ? printPayers : undefined,
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
       total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),

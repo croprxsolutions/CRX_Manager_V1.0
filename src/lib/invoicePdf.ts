@@ -355,15 +355,19 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   if (opts.show_shares && data.shares && data.shares.length > 1) {
     const base = data.job_number || data.invoice_number;
     const hasPerAcre = data.shares.some((s) => s.price_per_acre_cents != null);
+    // A Bill Split's payers have no acres, and a landlord isn't a grower.
+    const hasAcres = data.shares.some((s) => s.acres != null);
     const shareHead = hasPerAcre
       ? [['Ref', 'Grower', '$/Acre', 'Share', 'Acres', 'Amount']]
-      : [['Ref', 'Grower', 'Share', 'Acres', 'Amount']];
+      : hasAcres ? [['Ref', 'Grower', 'Share', 'Acres', 'Amount']] : [['Ref', 'Payer', 'Share', 'Amount']];
     const shareBody = data.shares.map((s, idx) => {
       const ref = s.invoice_number || deriveSplitRef(base, idx, true);
       const name = s.pricing_note ? `${s.customer_name} (${s.pricing_note})` : s.customer_name;
       return hasPerAcre
         ? [ref, name, s.price_per_acre_cents != null ? fmt(s.price_per_acre_cents) : '', `${fmtNum(s.split_percentage, 2)}%`, s.acres != null ? fmtNum(s.acres, 2) : '', fmt(s.amount_cents)]
-        : [ref, name, `${fmtNum(s.split_percentage, 2)}%`, s.acres != null ? fmtNum(s.acres, 2) : '', fmt(s.amount_cents)];
+        : hasAcres
+          ? [ref, name, `${fmtNum(s.split_percentage, 2)}%`, s.acres != null ? fmtNum(s.acres, 2) : '', fmt(s.amount_cents)]
+          : [ref, name, `${fmtNum(s.split_percentage, 2)}%`, fmt(s.amount_cents)];
     });
     autoTable(doc, {
       startY: y,
@@ -375,7 +379,9 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
       headStyles: { fillColor: [255, 255, 255], textColor: black, fontStyle: 'bold', fontSize: 7.5, lineColor: black, lineWidth: 0.6 },
       columnStyles: hasPerAcre
         ? { 0: { cellWidth: 62 }, 1: { cellWidth: 'auto' }, 2: { halign: 'right', cellWidth: 52 }, 3: { halign: 'right', cellWidth: 46 }, 4: { halign: 'right', cellWidth: 46 }, 5: { halign: 'right', cellWidth: 60, fontStyle: 'bold' } }
-        : { 0: { cellWidth: 62 }, 1: { cellWidth: 'auto' }, 2: { halign: 'right', cellWidth: 52 }, 3: { halign: 'right', cellWidth: 52 }, 4: { halign: 'right', cellWidth: 62, fontStyle: 'bold' } },
+        : hasAcres
+          ? { 0: { cellWidth: 62 }, 1: { cellWidth: 'auto' }, 2: { halign: 'right', cellWidth: 52 }, 3: { halign: 'right', cellWidth: 52 }, 4: { halign: 'right', cellWidth: 62, fontStyle: 'bold' } }
+          : { 0: { cellWidth: 62 }, 1: { cellWidth: 'auto' }, 2: { halign: 'right', cellWidth: 52 }, 3: { halign: 'right', cellWidth: 62, fontStyle: 'bold' } },
       didDrawPage: drawLegacyFooter,
     });
     y = doc.lastAutoTable.finalY + 8;

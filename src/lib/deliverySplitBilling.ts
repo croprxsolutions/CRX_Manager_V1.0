@@ -175,9 +175,5 @@ async function fetchBillSplitOrderIds(
 export const BILL_SPLIT_FAILED_MESSAGE =
   'Delivery completed, but its Bill Split invoices could not be drafted (admins were notified). Fix the shares, prices, or delivered amounts (Fix Delivery; amounts must be in hundredths), then use Create Invoice on this delivery.';
 
-export function billSplitFailed(result: unknown): boolean {
-  return (result as { bill_split_failed?: boolean } | null)?.bill_split_failed === true;
-}
-
 export const SPLIT_BILLING_BLOCK_REASON =
   'This order uses split billing (field/acre allocations). A single invoice would mono-bill it and mis-attribute AR — create the split invoices from the order instead.';

@@ -203,9 +203,12 @@ export interface BillSplitPayer extends InvoicePdfShare {
   invoice_id: string;
 }
 
-/** A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery. */
+/**
+ * A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery.
+ * A payer's draft may be switched to misc charge (guard_invoice_terminal_order) and stays in the group.
+ */
 export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null }): boolean {
-  return row.invoice_type === 'chemical_sale' && !!row.invoice_group_id && !!row.delivery_id;
+  return (row.invoice_type === 'chemical_sale' || row.invoice_type === 'misc_charge') && !!row.invoice_group_id && !!row.delivery_id;
 }
 
 export function billSplitPayerShares(rows: Array<{
@@ -217,11 +220,16 @@ export function billSplitPayerShares(rows: Array<{
   const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
   // Numeric, so -10 follows -2. The database sorts the suffix as text.
   const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
-  return ordered.map((r) => ({
+  // Hundredths of a percent, largest remainder first, so the printed column adds up to exactly 100%.
+  const raw = ordered.map((r) => (total > 0 ? ((r.total_amount_cents ?? 0) * 10000) / total : 0));
+  const bp = raw.map(Math.floor);
+  const short = total > 0 ? 10000 - bp.reduce((s, v) => s + v, 0) : 0;
+  raw.map((v, i) => [v - bp[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).slice(0, short).forEach(([, i]) => { bp[i] += 1; });
+  return ordered.map((r, i) => ({
     invoice_id: r.id,
     invoice_number: r.invoice_number,
     customer_name: r.customer?.farm_name || 'Unknown',
-    split_percentage: total > 0 ? Math.round(((r.total_amount_cents ?? 0) / total) * 1000000) / 10000 : 0,
+    split_percentage: bp[i] / 100,
     acres: null,
     amount_cents: r.total_amount_cents ?? 0,
   }));

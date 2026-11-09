@@ -48,6 +48,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
+import { billSplitLock, cardPayerLiveCents } from '../lib/billSplitLock';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
@@ -1344,10 +1345,11 @@ export default function OrderDetail() {
   // editing the order_shares row would drift from the invoice's historical
   // invoice_shares snapshot. Enforced at DB level by the
   // prevent_order_shares_edit_after_post() trigger; this is just the UI half.
-  const lockingInvoice = invoices.find((inv) => ['posted', 'paid', 'overdue'].includes(inv.status)) ?? null;
-  // The split also freezes at the first completed delivery (BILL_SPLIT_FROZEN), so what's billed can't move.
-  const lockingDelivery = deliveries.find((d) => d.status === 'completed' && !d.deleted_at) ?? null;
-  const sharesLocked = !!lockingInvoice || !!lockingDelivery;
+  // Also frozen once a completed delivery is billed (BILL_SPLIT_FROZEN) or a draft bills the sale to one
+  // customer (BILL_SPLIT_HAS_DRAFT), in the database's order.
+  const splitLock = billSplitLock(invoices, deliveries);
+  const sharesLocked = !!splitLock;
+  const linesWithOwnSplit = new Set(lineShares.map((ls) => ls.order_item_id));
 
   return (
     <div className="space-y-4">
@@ -2028,15 +2030,22 @@ export default function OrderDetail() {
           {sharesLocked && (
             <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              {lockingInvoice ? (
+              {splitLock?.kind === 'posted' && (
                 <span>
-                  Bill split is locked because invoice <strong>{lockingInvoice.invoice_number}</strong> is already posted.
+                  Bill split is locked because invoice <strong>{splitLock.number}</strong> is already posted.
                   Void the invoice first to change the split.
                 </span>
-              ) : (
+              )}
+              {splitLock?.kind === 'delivery' && (
                 <span>
-                  Bill split is locked because delivery <strong>{lockingDelivery?.delivery_number}</strong> is complete.
-                  Void the delivery to change the split.
+                  Bill split is locked because delivery <strong>{splitLock.number}</strong> is complete and billed.
+                  Void its invoices or the delivery to change the split.
+                </span>
+              )}
+              {splitLock?.kind === 'draft' && (
+                <span>
+                  Bill split is locked because draft invoice <strong>{splitLock.number}</strong> bills this sale to one customer.
+                  Remove that draft to change the split.
                 </span>
               )}
             </div>
@@ -2064,7 +2073,10 @@ export default function OrderDetail() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-nav-dark">{share.customer_name}</p>
-                      <p className="text-xs text-secondary">{fmt(share.amount_cents / 100)}</p>
+                      {/* Live, not the amount saved when the share was added: it follows price edits and line splits. */}
+                      <p className="text-xs text-secondary">
+                        about {fmt(cardPayerLiveCents(items, linesWithOwnSplit, share.split_percentage) / 100)} of the products
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -2131,7 +2143,8 @@ export default function OrderDetail() {
             </div>
           )}
 
-          {!hasAllocations && items.length > 0 && (
+          {/* Not when the field split failed to load: its lines would show an editor whose shares don't bill. */}
+          {!hasAllocations && !allocLoadFailed && items.length > 0 && (
             <LineBillSplit
               items={items}
               lineShares={lineShares}

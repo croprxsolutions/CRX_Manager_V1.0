@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.
 **Why:** Mason's EPA, docs and field work was waiting 4 hours with nothing of Taha's at stake. Taha asked to keep the database, orders, deliveries, customers, products and shared plumbing on the list, because billing reads them or depends on them.
 **What this forbids/implies:** when unsure whether a PR is on the list, hold it. Rule: `.claude/commands/ship.md` Step 8 item 4a. The merge hold is still a written rule only; the apply hold is enforced by `tahaHoldProblem` in `.claude/hooks/migration-landing-gate-lib.mjs`.
+## 2026-11-09 — KI-30 EPA corrections: the restore check reads history, not today's number; no follow-up check
+
+**Decision (Mason, in chat, 2026-11-09: "drop the check").** The check-only follow-up migration `20261215120000_ki30_epa_followup_checks` (never applied) is dropped from PR #1653. The restore data proof in `supabase/baselines/README.md` keeps requiring a change-history row that set each of the 48 corrected numbers; it does not compare each product's current number.
+**Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
+**What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
 
 ## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
 

@@ -17,13 +17,18 @@
 --     record whose applicator is the caller.
 --
 -- NOT CHANGED: _can_see_field and every other policy that uses it (field_crop_history, field_obstacles,
---   field_billing_defaults keep the 7-day window: Record Book needs only the field's name); what an admin
+--   field_billing_defaults keep the 7-day window); what an admin
 --   or sales rep reads; every write; job access (#1650's whole-job window, which already runs from the
 --   server's completion stamp, jobs.completed_at, with or without a dispatch row: Taha's LOW is proven by
 --   the prover, not changed). No row changes.
 --
--- WIDENING (by design): an active applicator reads, forever, the field row and application_record_fields
---   rows of spray records they performed. Nothing else.
+-- WIDENING (by design): an active applicator reads, forever, the field row (name and boundary) and the
+--   application_record_fields rows of spray records they performed. field_polygons_select is
+--   `field_id IN (SELECT id FROM fields)` under the caller's row security, so the field's boundary parts
+--   follow (reads only; their writes are office-only). Until 20261217100000 the whole-job applicator read
+--   all of this, forever, for every field of every job they held; this gives back only the fields they
+--   actually sprayed. A deactivated applicator, a driver or a crew member who is not the record's
+--   applicator gains nothing.
 --
 -- ROLLBACK: ALTER POLICY fields_select ON public.fields USING (is_admin() OR is_sales_rep() OR
 --   (is_applicator() AND _can_see_field(id))); ALTER POLICY arf_select ON public.application_record_fields
@@ -54,9 +59,11 @@ BEGIN
   IF to_regprocedure('public._is_job_applicator(uuid)') IS NULL THEN
     RAISE EXCEPTION 'OWN_RECORD_FIELDS_BASELINE_DRIFT: 20261217100000_job_access_ends_with_the_job is not applied';
   END IF;
-  -- The two policies exactly as live has them (2026-11-08).
+  -- The two policies exactly as live has them (2026-11-08), plus app_records_select, which arf_select's
+  -- new leg runs under (it must not read application_record_fields, or the two policies would recurse).
   FOR v_pol IN
     SELECT * FROM (VALUES
+      ('application_records', 'app_records_select', '{public}', '(is_admin() OR is_sales_rep() OR (is_applicator() AND (applicator_id = ( SELECT auth.uid() AS uid))))'),
       ('fields', 'fields_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR (is_applicator() AND _can_see_field(id)))'),
       ('application_record_fields', 'arf_select', '{public}', '(is_admin() OR is_sales_rep() OR (is_applicator() AND _can_see_field(field_id)))')
     ) AS t(tbl, pol, roles, qual)
@@ -82,13 +89,13 @@ AS $function$
   -- Taha's review of #1650: an applicator always sees the field of a spray record they performed
   -- (Record Book), after the job's 7-day window ends. is_applicator() requires an ACTIVE applicator.
   -- Answers only for the caller.
-  SELECT public.is_applicator() AND EXISTS (
-    SELECT 1
-      FROM public.application_records ar
-     WHERE ar.applicator_id = (SELECT auth.uid())
-       AND (ar.field_id = p_field_id
-            OR EXISTS (SELECT 1 FROM public.application_record_fields arf
-                        WHERE arf.application_record_id = ar.id AND arf.field_id = p_field_id))
+  -- Driven from the field (idx_app_records_field, idx_arf_field): runs once per fields row scanned.
+  SELECT public.is_applicator() AND (
+    EXISTS (SELECT 1 FROM public.application_records ar
+             WHERE ar.field_id = p_field_id AND ar.applicator_id = (SELECT auth.uid()))
+    OR EXISTS (SELECT 1 FROM public.application_record_fields arf
+                 JOIN public.application_records ar ON ar.id = arf.application_record_id
+                WHERE arf.field_id = p_field_id AND ar.applicator_id = (SELECT auth.uid()))
   );
 $function$;
 

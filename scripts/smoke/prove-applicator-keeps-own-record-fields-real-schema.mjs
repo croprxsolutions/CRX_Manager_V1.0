@@ -9,7 +9,8 @@
  *   MED  W's own spray record on job 1, completed 30 days ago, covering fields 1 and 2: BEFORE W reads the
  *        record but not its fields or field rows (Record Book shows "-"); AFTER W reads both. W never reads
  *        X's record field (3); D, not on the record, reads none; admin and rep read exactly what they did.
- *        Billing defaults, crop history and obstacles keep the 7-day window.
+ *        A deactivated applicator who performed a record (6) and a driver gain nothing. Boundary parts
+ *        (field_polygons) follow fields; billing defaults keep the 7-day window.
  *   LOW  job 2: W is the whole-job applicator, its field is dispatched to D only (W holds no dispatch row),
  *        dated 20 days ago, in progress. W reads it, completes it (real status update, the server stamps
  *        jobs.completed_at), and still reads it and its job field; job 4, same shape but completed 8 days
@@ -33,7 +34,8 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const W = USERS.applicator; // whole-job applicator, performed record 1
 const D = id('c1');         // applicator dispatched to jobs 2 and 4
 const X = id('c2');         // applicator who performed record 3
-const ROLES = { admin: USERS.admin, rep: USERS.rep, W, D, X };
+const OFF = id('c3');       // deactivated applicator who performed record 6
+const ROLES = { admin: USERS.admin, rep: USERS.rep, W, D, X, OFF, driver: USERS.driver };
 const uid = (n) => id(String(n));
 const today = "((now() AT TIME ZONE 'America/Chicago')::date)";
 const run = (sql) => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', ...sql.flags], { input: candidate, allowFailure: true });
@@ -44,7 +46,8 @@ function seed() {
   if (scalar(`SELECT count(*) FROM auth.users WHERE id = '${USERS.admin}';`) === '0') seedUsers();
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${D}', 'own-d@example.invalid', '{"full_name":"[OWN] Dispatch","role":"applicator"}'::jsonb),
-    ('${X}', 'own-x@example.invalid', '{"full_name":"[OWN] Other","role":"applicator"}'::jsonb)
+    ('${X}', 'own-x@example.invalid', '{"full_name":"[OWN] Other","role":"applicator"}'::jsonb),
+    ('${OFF}', 'own-off@example.invalid', '{"full_name":"[OWN] Off","role":"applicator"}'::jsonb)
     ON CONFLICT DO NOTHING;`);
   const job = (n, who, status, days, doneDays, fields) => `
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, applicator_id, completed_at)
@@ -58,18 +61,22 @@ function seed() {
   // Fixtures only: replica skips foreign keys and triggers (the jobs' completed_at is written as the trigger would have).
   psql(`BEGIN; SET LOCAL session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name) VALUES ('${uid(201)}', '[OWN] Farm');
-    ${[1, 2, 3, 4, 5].map((f) => `INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${uid(300 + f)}', '${uid(201)}', 'F${f}');
+    UPDATE public.profiles SET is_active = false WHERE id = '${OFF}';
+    ${[1, 2, 3, 4, 5, 6].map((f) => `INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${uid(300 + f)}', '${uid(201)}', 'F${f}');
+      INSERT INTO public.field_polygons (field_id, polygon_geojson) VALUES ('${uid(300 + f)}', '{"type":"Polygon","coordinates":[]}'::jsonb);
       INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct) VALUES ('${uid(300 + f)}', '${uid(201)}', 100);`).join('\n')}
     ${job(1, W, 'completed', -30, 30, [1, 2])}
     ${record(1, W, [1, 2])}
     ${job(3, X, 'completed', -30, 30, [3])}
     ${record(3, X, [3])}
+    ${job(6, OFF, 'completed', -30, 30, [6])}
+    ${record(6, OFF, [6])}
     ${job(2, W, 'in_progress', -20, null, [4])}
     INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status) VALUES ('${uid(1202)}', '${uid(404)}', '${uid(102)}', '${D}', 'dispatched');
     ${job(4, W, 'completed', -20, 8, [5])}
     INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1204)}', '${uid(405)}', '${uid(104)}', '${D}', 'completed', now() - interval '8 days');
     COMMIT;`);
-  assert.equal(scalar(`SELECT string_agg(role || ':' || is_active, ',' ORDER BY id) FROM public.profiles WHERE id IN ('${D}','${X}');`), 'applicator:true,applicator:true');
+  assert.equal(scalar(`SELECT string_agg(role || ':' || is_active, ',' ORDER BY id) FROM public.profiles WHERE id IN ('${D}','${X}','${OFF}');`), 'applicator:true,applicator:true,applicator:false');
 }
 
 const probe = (who, body) => {
@@ -82,6 +89,7 @@ const TABLES = {
   fields: 'SELECT right(id::text, 4)::int - 300 FROM public.fields',
   record_fields: 'SELECT right(field_id::text, 4)::int - 300 FROM public.application_record_fields',
   billing_defaults: 'SELECT right(field_id::text, 4)::int - 300 FROM public.field_billing_defaults',
+  boundaries: 'SELECT right(field_id::text, 4)::int - 300 FROM public.field_polygons',
   jobs: 'SELECT right(id::text, 4)::int - 100 FROM public.jobs',
   job_fields: 'SELECT right(field_id::text, 4)::int - 300 FROM public.job_fields',
 };
@@ -95,7 +103,7 @@ const recordBook = (who) => probe(who, `SET LOCAL ROLE authenticated;
   RESET ROLE;`);
 const snapshot = () => ({
   reads: Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)])),
-  book: Object.fromEntries(['W', 'X', 'D'].map((r) => [r, recordBook(ROLES[r])])),
+  book: Object.fromEntries(['W', 'X', 'D', 'OFF'].map((r) => [r, recordBook(ROLES[r])])),
 });
 
 try {
@@ -135,15 +143,20 @@ try {
   const after = snapshot();
   console.log('AFTER', JSON.stringify(after, null, 1));
   for (const r of ['admin', 'rep']) assert.deepEqual(after.reads[r], before.reads[r], `${r} reads must not change`);
-  assert.deepEqual(after.reads.admin, { records: '1,3', fields: '1,2,3,4,5', record_fields: '1,2,3', billing_defaults: '1,2,3,4,5', jobs: '1,2,3,4', job_fields: '1,2,3,4,5' });
+  assert.deepEqual(after.reads.admin, { records: '1,3,6', fields: '1,2,3,4,5,6', record_fields: '1,2,3,6', billing_defaults: '1,2,3,4,5,6', boundaries: '1,2,3,4,5,6', jobs: '1,2,3,4,6', job_fields: '1,2,3,4,5,6' });
   // MED fixed: W reads the fields and field rows of their own 30-day-old record, nothing of X's, and the
-  // other field tables keep the 7-day window (only job 2's field 4 is current).
-  assert.deepEqual(after.reads.W, { records: '1', fields: '1,2,4', record_fields: '1,2', billing_defaults: '4', jobs: '2', job_fields: '4' });
+  // other field tables keep the 7-day window (only job 2's field 4 is current). Boundary parts follow fields
+  // (field_polygons_select reads fields under row security), as the header says.
+  assert.deepEqual(after.reads.W, { records: '1', fields: '1,2,4', record_fields: '1,2', billing_defaults: '4', boundaries: '1,2,4', jobs: '2', job_fields: '4' });
   assert.equal(after.book.W, 'OWN-R1=F1');
-  assert.deepEqual(after.reads.X, { records: '3', fields: '3', record_fields: '3', billing_defaults: '-', jobs: '-', job_fields: '-' });
+  assert.deepEqual(after.reads.X, { records: '3', fields: '3', record_fields: '3', billing_defaults: '-', boundaries: '3', jobs: '-', job_fields: '-' });
+  // A deactivated applicator who performed a record, and a driver, gain nothing.
+  for (const r of ['OFF', 'driver']) assert.deepEqual(after.reads[r], before.reads[r], `${r} gains nothing`);
+  assert.equal(after.reads.OFF.fields, '-');
+  assert.equal(after.reads.driver.fields, '-');
   assert.equal(after.book.X, 'OWN-R3=F3');
   assert.deepEqual(after.reads.D, before.reads.D, 'an applicator on no record gains nothing');
-  assert.deepEqual(after.reads.D, { records: '-', fields: '4', record_fields: '-', billing_defaults: '4', jobs: '2', job_fields: '4' });
+  assert.deepEqual(after.reads.D, { records: '-', fields: '4', record_fields: '-', billing_defaults: '4', boundaries: '4', jobs: '2', job_fields: '4' });
   console.log('MED: the applicator keeps the field of their own 30-day-old spray record; nobody else gains anything');
 
   // LOW: complete job 2 for real (triggers on); W, the whole-job applicator without a dispatch row, keeps it.

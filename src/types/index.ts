@@ -65,6 +65,14 @@ export interface UseTimingOption {
   is_active: boolean;
 }
 
+/** A crop a use-timing option can name (`product_crop_options`, USE-1). */
+export interface CropOption {
+  code: string;
+  label: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 export interface Product {
   id: string;
   product_name: string;

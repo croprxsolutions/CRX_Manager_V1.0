@@ -17,8 +17,25 @@ const ANY_HEADING = /^#{1,6}\s/;
 const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|\/issues\/\d+\b/i;
 
 // The section's lines, or null when the body has no Follow-ups heading.
+// Only what GitHub renders counts: hidden HTML comments and fenced code blocks are dropped (Luna, 2026-11-09).
+function renderedLines(body) {
+  const out = [];
+  let fence = null;
+  for (const line of String(body ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/)) {
+    const marker = line.trim().match(/^(`{3,}|~{3,})/);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+    } else if (marker) {
+      fence = marker[1];
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
 export function followUpLines(body) {
-  const lines = String(body ?? "").split(/\r?\n/);
+  const lines = renderedLines(body);
   const start = lines.findIndex((line) => HEADING.test(line.trim()));
   if (start < 0) return null;
   const out = [];
@@ -26,7 +43,7 @@ export function followUpLines(body) {
     const line = raw.trim();
     if (ANY_HEADING.test(line)) break;
     const text = line.replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "").trim();
-    if (text && !text.startsWith("<!--")) out.push(text);
+    if (text) out.push(text);
   }
   return out;
 }

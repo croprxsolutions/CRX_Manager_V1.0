@@ -22,6 +22,14 @@ assert.match(followUpsProblem(null), /fail closed/);
 // A heading inside prose or deeper text is not the section.
 assert.match(followUpsProblem(pr("We have no Follow-ups section.\n- None")), /no `## Follow-ups` section/);
 
+// Only rendered text counts (Luna, 2026-11-09): a fenced example is not the section,
+// and an issue number inside a hidden comment is not a home.
+assert.match(followUpsProblem(pr("Example:\n```md\n## Follow-ups\n- None\n```\n")), /no `## Follow-ups` section/);
+assert.match(followUpsProblem(pr("~~~\n## Follow-ups\n- None\n~~~")), /no `## Follow-ups` section/);
+assert.match(followUpsProblem(pr("## Follow-ups\n- tighten the check <!-- #123 -->")), /name no issue/);
+assert.match(followUpsProblem(pr("## Follow-ups\n<!--\n- #12 hidden\n-->\n")), /empty/);
+assert.equal(followUpsProblem(pr("```\nx\n```\n## Follow-ups\n- #12 real")), null);
+
 // Taha's PRs are his.
 assert.equal(followUpsProblem(pr("no section", "TahaKhanAbdalli")), null);
 

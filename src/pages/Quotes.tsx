@@ -6,7 +6,6 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
-import { quoteStatusLabel } from '../lib/quoteStatusLabel';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
@@ -20,6 +19,7 @@ import { convertQuoteToOrderWithRowVersion } from '../lib/quoteLifecycleRpc';
 import { resendRequiredMessage } from '../lib/quotePriceLock';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { QUOTE_COLUMNS } from '../lib/costFields';
+import { quoteStatusLabel } from '../lib/quoteStatusLabel';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -513,7 +513,7 @@ export default function Quotes() {
       sortable: true,
       render: (row) => (
         <>
-          <Badge variant={statusToBadgeVariant[row.status] || 'default'}>
+          <Badge variant={statusToBadgeVariant[row.status] || 'default'} normalCase>
             {quoteStatusLabel(row.status)}
           </Badge>
           {row.is_planned && (

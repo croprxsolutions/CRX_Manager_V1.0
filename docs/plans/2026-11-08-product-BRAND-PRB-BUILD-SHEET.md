@@ -94,11 +94,11 @@
 - `quantity numeric NOT NULL CHECK (quantity > 0)`, in the line's own unit.
 - **Sale facts, captured at completion** (4.C): `rup_status text` in (`yes`, `no`, `unknown`), `signal_word text`, `facts_source text` (`registration:<number>@<version>` once seeded, `brand:<id>@<row_version>` before the seed, `typed`), `captured_at timestamptz`. All are NULL before completion.
 - **Review (typed picks only):** `review_state text` in (`pending`, `added`, `dismissed`), `reviewed_by`, `reviewed_at`, `review_brand_ref uuid` (the brand it was added as).
-- **Who and history:** `entered_by`, `entered_at`; `superseded_at`, `superseded_by`, `supersede_reason`, `superseded_by_event_id`. A row is **current** when `superseded_at IS NULL`.
+- **Who and history:** `entered_by`, `entered_at`, `updated_at` (set by the shared `update_updated_at` trigger on every change); `superseded_at`, `superseded_by`, `supersede_reason`, `superseded_by_event_id` (foreign key to `delivery_brand_events(id)`). A row is **current** when `superseded_at IS NULL`.
 - **Unique current pick:** at most one current row per `(delivery_item_id, lower(brand_name), coalesce(epa_registration, ''))`.
 - **Read policy:** the same rule as `del_items_select` (admin, sales rep, or the delivery's assigned driver), written against `delivery_id`. `GRANT SELECT` to `authenticated` only; `REVOKE ALL` from `PUBLIC`, `anon` and `service_role`. Server code never reads the table directly: the receipt worker gets brands through its own service_role RPC (3.5).
 
-**`delivery_brand_events`** (new, append-only; update and delete refused by trigger). One row per save, correction or review, with `event_type` in (`set`, `completed`, `corrected`, `reviewed`), `delivery_id`, `reason`, `invoice_ids uuid[]` (the invoices a correction touched), `before_rows jsonb`, `after_rows jsonb`, `actor`, `actor_name`, `created_at`. Readable by the same rule as `delivery_item_brands`. No client write grant.
+**`delivery_brand_events`** (new, append-only; update and delete refused by trigger). One row per save, correction or review, keyed by `id uuid` primary key, with `event_type` in (`set`, `completed`, `corrected`, `reviewed`), `delivery_id`, `reason`, `invoice_ids uuid[]` (the invoices a correction touched), `before_rows jsonb`, `after_rows jsonb`, `actor`, `actor_name`, `created_at`. Readable by the same rule as `delivery_item_brands`. No client write grant.
 
 **`invoice_items.brand_lines jsonb`** (new column; NULL by default). Meaning:
 - `NULL`: the line has no delivered-brand information (an unbranded product, or a line not made from a delivery). It behaves exactly as today and as REG-DB.
@@ -132,7 +132,8 @@ PR B keeps REG-DB's lock order (REG-1 sheet §3.2), and every writer takes its l
 - Every replay lookup is scoped by **operation name** as well as key and fingerprint (`set_delivery_brands`, `correct_delivery_brands`, `review_typed_brand`), so one key reused across two RPCs never returns the other's result. A key reused with a different payload is refused (`IDEMPOTENCY_KEY_REUSED`).
 - Authorization runs **before** the replay lookup (the `20260716173342` rule), so a stranger cannot read someone else's cached result.
 - `SECURITY DEFINER`, `SET search_path = public, pg_temp`, `REVOKE ALL … FROM PUBLIC, anon`, `GRANT EXECUTE … TO authenticated` for public RPCs.
-- **Internal helpers** (`_delivery_line_brand_list`, `_delivery_brand_lines_json` and any other `_`-prefixed function) get `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` explicitly, because PostgreSQL grants `EXECUTE` to `PUBLIC` by default. The migration's postflight check fails if any of them is executable by those roles.
+- **Every** `SECURITY DEFINER` function in PR B, public or internal, has `SET search_path = public, pg_temp` and schema-qualifies its references; the postflight check reads `proconfig` and fails on any without it.
+- **Internal helpers** (`_delivery_line_brand_list`, `_delivery_brand_lines_json`, `_invoice_line_brand_entries` and any other `_`-prefixed function) get `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role` explicitly, because PostgreSQL grants `EXECUTE` to `PUBLIC` by default. The migration's postflight check fails if any of them is executable by those roles.
 
 ### 3.5 Receipt worker access
 
@@ -204,11 +205,12 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 
 ### 4.E RUP register (re-issue of REG-DB's `generate_rup_sales_records`)
 - **A line with `brand_lines` NULL:** exactly REG-DB's behaviour.
+- **Where the entries come from:** for a line made from a delivery, from that line's **current picks** through the internal helper `_invoice_line_brand_entries(invoice_item_id)` (same shape as `brand_lines`), never from the stored `brand_lines`. At posting the two are identical, because posting re-copies `brand_lines` in the same transaction; after a posted-invoice correction (4.F) only the picks have changed, so the rebuilt records follow the corrected brand while the issued invoice keeps its snapshot.
 - **A line with brand entries:** one candidate record per entry.
   - **Quantity:** the line's quantity divided across the entries in proportion to `delivered_quantity`.
   - **Cents:** `extended_cents` divided the same way in whole cents.
   - **Remainders:** the last entry in the fixed order takes the remainder of both, so the records add up to the line exactly. A Bill Split payer's line therefore records its share of each brand, and a line whose quantity the office changed is divided in the delivered proportion. The draft invoice warns before posting when a non-Bill-Split line's quantity no longer matches the delivered total.
-  - **Which entries need a record:** the entry's `rup_status` is `yes`, or REG-DB's posting rule finds the number's registration `yes` at posting; when the entry is `unknown` **and** the generic product is restricted-use, it is recorded too (Question 2), with the note "RUP status of delivered brand not confirmed".
+  - **Which entries need a record:** the entry's `rup_status` is `yes`, or REG-DB's posting rule finds the number's registration `yes` at posting; when the entry is `unknown` **and** either the generic product is restricted-use or the entry is a **typed** brand, it is recorded too, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed brand whose status is unknown under a non-RUP generic is not recorded; its brand row is the place to fix that.
   - **What each record holds:** the entry's EPA number, signal word and `brand_name`.
 - **A line with `brand_lines = []` on a restricted-use product:** one record with a blank EPA number, `compliance_status = 'warning'` and note "Brand not recorded at delivery" (Question 3). The sale is never silently dropped.
 - **Grouping:** REG-DB's key `(invoice, product, sold number, signal word)`, with each brand entry treated as its own sold number. Entries sharing a key are added into one record, and their brand names joined. REG-DB's "an existing active record that disagrees is an error" rule and its posting lock stay.
@@ -260,6 +262,8 @@ Every insert path gets this through the helper, including `_create_bill_split_de
   - a line with no pick asks for one;
   - a short split line asks how much of each brand went off the truck, pre-filled with what was loaded, then saves it (`set_delivery_brands`) before calling completion;
   - the refusal codes from 4.C are shown as plain sentences naming the line.
+- **Screen state is keyed by delivery:** the picks, the pending save and its request number belong to one delivery ID and are cleared when the screen opens another delivery, closes, or reloads after a reopen; a reply whose delivery ID or request number is not the current one is ignored.
+- **Retries reuse their key:** each save intent gets one retry key when the user saves, kept with the pending save (in the offline queue when offline) and reused on every retry until a reply confirms it. Changing the choices makes a new save with a new key, which supersedes the older one on screen; an older save that still lands is overwritten by the newer one, because saves are applied in queue order.
 - **One save at a time per delivery:** while a brand save is in flight, the picker and the Complete button are disabled; each save carries a request number and a reply for an older number is ignored. Completion is offered only after the latest save has come back, and it sends nothing about brands (the database reads the saved picks). A failed save leaves the screen's choices in place, shows the error, and keeps Complete disabled until a save succeeds.
 - **Offline (`src/lib/offlineQueue.ts`, `src/lib/offlineSync.ts`):** `set_delivery_brands` is its own queued action, ordered before that delivery's completion action, with its own retry key. A queued completion that is refused after the switch went on is shown for office follow-up, as other refused replays are today.
 - **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
@@ -334,6 +338,9 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - P29. A correction naming a brand from another parent, or from another size's legacy list, is refused (`BRAND_NOT_FOR_PRODUCT`).
 - P30. One key and payload sent to `set_delivery_brands` and then `correct_delivery_brands` runs both; the same key with a changed payload is refused.
 - P31. The receipt worker's service_role RPC returns a delivery's brand lines (single, split, typed, none) while service_role still has no table privilege on `delivery_item_brands`.
+- P32. A typed restricted-use brand delivered under a non-RUP generic, before the seed, gets a warning RUP record.
+- P33. After a posted-invoice correction, the rebuilt records name the corrected brand and the invoice's `brand_lines` is unchanged.
+- P34. Every PR B `SECURITY DEFINER` function has the pinned `search_path`; every superseded pick points at an existing event.
 
 ---
 
@@ -384,7 +391,7 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 ## 11. Questions for Mason
 
 1. **A typed brand whose EPA number cannot be read** (smudged jug, no label): the plan lets the delivery finish with the number blank, and flags it on the review list, the draft invoice and the RUP record. **Recommended.** The alternative is to require a number, which would stop the truck.
-2. **A delivered brand whose restricted-use status is unknown, under a restricted-use generic:** the plan records it on the RUP register, with a note to confirm. **Recommended.** The alternative skips it, which risks a missing regulated record.
+2. **A delivered brand whose restricted-use status is unknown, under a restricted-use generic, or any typed brand whose status is unknown:** the plan records it on the RUP register with a warning to confirm. **Recommended.** The alternative skips it, which risks a missing regulated record.
 3. **A restricted-use line delivered with no brand recorded** (only while the switch is off): the plan writes an RUP record with a blank number and a warning, to be fixed by the admin correction. **Recommended.** The alternative is no record until corrected.
 4. **A brand corrected after the invoice was sent:** the plan keeps the sent invoice unchanged, fixes the RUP register, and prints a "brand corrected on <date>" note on the invoice screen and any reprint. **Recommended.** The alternative is to void and reissue the invoice, which changes paperwork the customer already has.
 
@@ -400,3 +407,12 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - MED, a correction could record another parent's brand: **fixed** (4.F checks the current brand list).
 - MED, replay lookup not scoped by operation: **fixed** (3.4).
 - MED, overlapping saves on the capture screen: **fixed** (section 5, one save at a time with stale replies ignored).
+
+**Luna round 2** (head `ef8e0722c`): 7 findings, all **fixed**.
+- HIGH, a typed RUP brand under a non-RUP generic was not recorded: typed unknowns now get a warning record (4.E, Question 2, P32).
+- HIGH, regeneration after a posted correction read the frozen `brand_lines`: 4.E now reads current picks through `_invoice_line_brand_entries` (P33).
+- HIGH, the receipt helper had no pinned `search_path`: every `SECURITY DEFINER` function pins it, checked in postflight (3.4, P34).
+- MED, events had no ID for `superseded_by_event_id`: `id` primary key and a foreign key added (3.1).
+- MED, screen state not isolated by delivery: keyed by delivery and cleared on switch (section 5).
+- MED, retries could mint new keys: one key per save intent until confirmed (section 5).
+- LOW, no `updated_at` on picks: added with the shared trigger (3.1).

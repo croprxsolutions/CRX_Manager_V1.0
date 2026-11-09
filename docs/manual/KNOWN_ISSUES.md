@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)) | 61 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 15 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
@@ -475,6 +475,37 @@ file previews "ready" and then the whole save is refused with nothing written. T
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
 this number is fixed and live (archive, 2026-11-05).
 
+### KI-109 — Product Master follow-ups named in the Wave 2 report but never filed
+**LOW · UNVERIFIED (not re-checked since 2026-11-03) · products · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- No cancel for a previewed price change set: every live test leaves one behind (WP-PM-7's live check left
+  `a27b2386` in "previewed" on a test product; prices did not change).
+- No product-page list of open jobs still on old label values.
+- `save_job` does not itself refuse edits to a completed job. Partly covered since: `20261204120000` freezes a
+  completed or invoiced job's EPA numbers.
+- WP-PM-7 deferred LOWs: emoji character count, older `toFixed` displays, the raw select in the cost modal.
+- "Piksi Dust Plus - 1800G Jar" is stocked in milligrams but billed by dry ounces on jobs; check its price before it
+  goes on a job. Its cost basis is still an open question for Mason.
+
+### KI-110 — Three small invoicing findings from the October admin-only invoicing review
+**LOW · UNVERIFIED (seen 2026-10-09 to 2026-10-13, never re-checked) · invoicing · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- `_update_order_items_impl` sets `invoice_items.order_item_id = NULL` on draft invoices without locking the
+  `invoices` row, so a rep's order-line edit can change that link after an admin's versioned post compared the
+  invoice. No amount changes. Fix: lock the affected draft invoices `FOR UPDATE` (by id) first.
+- `cancel_delivery` refused an admin's quick delivery whose draft invoice was still open
+  (`ORDER_INVOICE_TERMINAL`), for an admin and a rep alike, in a container replay of the live schema. Not checked
+  live.
+- `finance_charges` still grants table writes to `authenticated`. Its policy is admin-only, so RLS refuses them;
+  this is clean-up debt, not a hole.
+
+### KI-111 — Field-acre billing: the real boundary-file import check is still owed
+**MED · UNVERIFIED (listed as open in code on 2026-09-30) · field app · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- The one check left open at the June field-acre billing go-live: import one real John Deere, FieldView or .zip
+  boundary export (a test customer is fine). Confirm it bills on the file's acres, the ±10% difference flag
+  appears, and redrawing the map does not change the billed acres.
+- Field boundary bulk import has no Skip / Replace / Import-as-new choice at preview.
+- Split draft invoices created automatically when a delivery completes raise no bell notification.
+- The guided map-drawing tool has no "undo last point".
+
 ---
 
 ## Inventory and deliveries
@@ -512,12 +543,16 @@ same instant waits for the activation instead of being missed; proof
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
-**LOW-MED · UNVERIFIED · inventory/process · Mason**
-Five products still flag until counted (Mason chose not to count); returns/voids on Chem Man-billed deliveries stay
-allowed; six partially fulfilled orders and three stuck deliveries need a business call; 19 negative inventory rows
-must only be fixed from physical counts; the Order page still offers whole-order invoicing on 33 orders (server
-refuses, no double bill); live-data cleanups (eight SEED commission batches, PO-2026-0008/0015, an E2E zero-item
-invoice, five empty deliveries). Counts are older records' claims, not re-measured.
+**LOW-MED · PARTLY RE-MEASURED 2026-11-08 · inventory/process · Mason**
+Re-measured live, read-only, 2026-11-08 (no data changed): five products still flag until counted (Mason chose not to
+count; no stock movement since 2026-10-07); six partially fulfilled orders (0161/0162/0172/0176/0331/0343) still
+hold stock for unfilled lines; the same three deliveries are stuck (DEL-00075/00077/00082) plus nine more past their
+date on confirmed orders; 19 negative inventory rows (not the same 19 as June: two are new, one is deeper) must only be
+fixed from physical counts; PO-2026-0008 is a real fully-received PO with 7 short and 10 over lines, PO-2026-0015's
+receipt gap no longer shows; 10 deliveries have no items (5 completed, 2 voided, 3 cancelled); one cancelled
+zero-item invoice. Not re-measured (sales/billing): whole-order invoicing on 33 orders, eight SEED commission
+batches. Returns/voids on Chem Man-billed deliveries stay allowed. Yes/no sheet in the side-session notes (not in
+this repo).
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
@@ -528,8 +563,9 @@ registry) and 4 are unconfirmed until a person reads the jug; 8 products with no
 proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
 changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
 lookup error instead of the new number, and a three-part distributor number returns "not found" even when
-valid. CRM has no data entered; 146 of 150 customers lack a
-sales rep (older counts).
+valid. CRM has no data entered; 146 of 151 active customers lack a
+sales rep (live read-only count, 2026-11-08). The tool exists: an admin ticks customers on the Customers list and uses
+**Assign sales rep** (PR #381), so what remains is Mason choosing each customer's rep.
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
@@ -545,8 +581,9 @@ Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1
 PO/Order/Quote Import read every product and match names against all of them (PR #1441); Label Data Quality, Product
 Detail vendor/maker choices and the Invoice Detail customer picker read every row (PR #1512); the Field Customer
 Assignment dropdown lists an exact or starting-with name first and says "Showing 20 of N" (2026-11-06). Each was shown
-in the local test copy with 1,053 products and 26 customers. Still capped: the blend-ticket scanner Edge Function
-(needs a deploy).
+in the local test copy with 1,053 products and 26 customers. The blend-ticket scanner Edge Function
+(`process-blend-ticket`) now reads every active product and customer in id-ordered pages, so a scanned line can match
+product 1,001 and beyond (2026-11-08; live only once the function is redeployed, which needs Mason's approval).
 
 ---
 
@@ -645,6 +682,23 @@ rep gets an account: the database must refuse a different tier from reps (admins
 also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
 changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
 quote changes the tier label without repricing its locked lines.
+
+### KI-108 — Five products' stored stock did not match their transaction history on 2026-11-01
+**MED · UNVERIFIED (snapshot 2026-11-01 12:11 UTC, not re-checked) · inventory · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The monthly integrity report (closed PR #1230) found `inventory.quantity_available` different from the
+`inventory_transactions` ledger for five products. The other nine checks passed.
+
+| Product | Ledger says | Stored | Gap |
+|---|---|---|---|
+| Black Strap Molasses Sugar - Tote | 675 | 2,000 | 1,325 |
+| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | 530 |
+| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | 95 |
+| 2, 4D Amine 4# - Bulk | 0 | 55 | 55 |
+| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | 10 |
+
+Next step: re-run the check (the `/integrity-report` admin page shows the same check). For any product still off,
+read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
+(`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
 
 ## Database and release process
 
@@ -781,14 +835,16 @@ then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenanc
 
 ### KI-52 — Tests and tooling hygiene
 **LOW · OPEN · tooling-guards · unassigned**
-Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `scripts/fleet-status.mjs` lacks
-the fsmonitor override; `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction;
-`scripts/land-pr.mjs:167` prints a `gh pr merge --squash --auto` command the merge guard refuses;
-`src/lib/rlsContracts.test.ts:148-160` comment still says "NOT APPLIED" for `20260813080000`; the Phase 3
+**Fixed 2026-11-08 (`claude/ki52-tooling-hygiene`):** `scripts/land-pr.mjs` now prints the pinned, immediate
+`gh pr merge … --match-head-commit <head>` the merge guard accepts (no `--auto`); `scripts/fleet-status.mjs` runs
+every Git command with `core.fsmonitor=false`; `src/lib/rlsContracts.test.ts` records `20260813080000` as applied
+(live 2026-08-16, ledger `20260816174353`) with `quote_versions` INSERT `none`; `docs/reference/gotchas.md` has the
+"gross margin means markup" note. **Still open:**
+Page-render tests flake in the full suite (latest fix #1062; fixed case by case); `live-testdata-lib.mjs` read-side false positives were addressed by PR #1143 (merged 2026-10-27), which keeps executable DML guarded; new instances still need individual reproduction; the Phase 3
 return-policy concurrency prover can't reach its chain (UNVERIFIED; PR #1110 repaired three different provers and does not establish this one's result); no static guard catches invoice-type leaks or
 direct-URL edit-lock bypasses (MED, UI); extra live-sweep predicates (concurrency hotspot, more money identities)
 not written; Gauntlet V2 Phase 2 unfinished (no staging database, E2E switched off, 44 page-render skips,
-counts not re-measured); `docs/reference/gotchas.md` has no "gross margin means markup" note.
+counts not re-measured).
 Further small LOW notes from the 2026-10-13 branch salvage, carried from the archive and not re-checked: invoices
 created through the order functions would be numbered INV- instead of CS-/MC- (latent; 0 of 12 live order
 invoices affected); on the bulk order import,
@@ -830,6 +886,25 @@ never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpcla
 the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
 deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
 them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
+**Part 2 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-part2-delete-unused-hooks.md`): the two unwired hooks
+and one August proof are gone. The October/November proofs stay (recent work still runs them by hand), as does
+`scripts/smoke/undo-paths/` (eight proofs import it). Still open: the two Edge Functions and the helper and
+page-split work.
+
+### KI-107 — Review-proof guard refuses a delete after `cd` into a worktree when any part of the command has `..` or a variable
+**LOW · OPEN (rule read on `main` 2026-11-08) · tooling-guards · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+`review-proof-guard.mjs` refuses `cd <worktree> && <delete or move>` when any later part of the command climbs out
+(for example a harmless `ls ../wt-b`), and cannot see `S=<path>; rm -rf "$S"` as a literal path. Closed PR #1536
+(branch `claude/review-proof-guard-worktree-path-7639d0`, tip `b8ae8bf6e0`, two Luna rounds) judges each delete on
+its own and reads such variables: of 19 real refusals on 2026-11-05, 6 pass and 13 stay refused. Mason closed it
+on 2026-11-05 because that narrowing kept leaking the same class of hole; the branch is kept for its pinned test
+cases only. Workaround: run a delete or cleanup as its own command, not in one that `cd`s into a worktree.
+
+### KI-112 — A draft return-credit prover failed just after midnight UTC
+**LOW · UNVERIFIED · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.mjs` (closed PR #1319) failed just
+after midnight UTC with "fractional credit A PNL COGS delta=-1251". Not checked whether `main`'s live-dump version
+fails the same way; it fits the known pattern of live checks that fail between 6 PM and midnight Central.
 
 ---
 
@@ -964,8 +1039,10 @@ concurrent changes, load/count cost grows on large tables (the Orders list now r
 still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
-visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk
-import/assignment of sales reps, outbound-email logging (MED). Offline recovery also lacks notification replay,
+visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate detection in the bulk customer
+import, bulk import of sales reps from a file, outbound-email logging (MED). Bulk rep assignment exists on the Customers
+list (PR #381); the customer form warns, without blocking, when a new or renamed customer has a similar name or the
+same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
 evidence: photo proof is not tied to who took it, and storage-rule guarantees do not cover dashboard or
@@ -980,6 +1057,9 @@ service-role tools (LOW).
 - PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
   `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
   Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
+  Still open, not covered by that acceptance: a separate gap in `env-guard`'s frontend secret-key checks (LOW;
+  confirmed on `main` 2026-11-08; details withheld until the fix ships). PR #605's branch
+  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has the fix.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

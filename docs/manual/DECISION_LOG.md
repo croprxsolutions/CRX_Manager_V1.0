@@ -31,6 +31,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
 **Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
 **What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
+## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
+
+**Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.
+**Why.** The only gap is a race: an invoice whose season changes between the screen's check and the posting step. It needs two people editing the same invoice at the same moment and had not happened.
+**What this implies:** the gap stays recorded in `docs/changelog.d/2026-10-12-invoice-lists-season.md`. A later small change may add the check. This entry was only on the unmerged `pra-work` branch until the [2026-11-08 branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md).
 
 ## 2026-11-08 — A re-activated applicator's open jobs go straight onto the Dispatch Board (KI-28)
 

@@ -77,3 +77,11 @@
 35. 💲 **Nothing proves a split invoice works after posting** (Sol round 2): payer PDFs, balances, aging, payments, statements, return credits and commission records have no split-invoice test. Readers include `src/pages/InvoiceDetail.tsx`, `src/lib/invoiceBatchPosting.ts`, `src/lib/splitGroupPostChecks.ts` and `supabase/functions/_shared/pdf/invoicePdf.ts` (build sheet FP-5c).
 36. 💲 **The per-line engine's money math is already sound and should be the base** (`20260720214000`): signed largest-remainder that mirrors credits, 4-decimal quantities and acres, per-payer override prices. Only its leftover-cent step changes, to Mason's "primary payer" rule.
 37. 💲 **CONFIRMED in code: a job whose fields have different payers is over-billed** (Astra review, 2026-11-08). On the shared-invoice path the job transfer works out each payer's percentage only over the fields that payer is on (`20261120100000:839-862`, grouped by customer), so field A billed 100% to the grower and field B billed 100% to a landlord gives each 100%, and the header becomes the sum (:878). Live check 2026-11-08: no job has fields with different payers and no field invoice has shares above 100%, so nobody has been over-billed. `derive_customer_shares_from_fields` (location and blend-ticket invoices) uses one denominator over all fields and is not affected. Fixed in build sheet FP-4 (the old transfer refuses such a job).
+
+## H. From the industry comparison (2026-11-08, evening)
+
+38. 🧑💲 **One percentage split per field cannot give application and product different shares** (Agvance and co-ops split by product group). Decided: an application share and a product share per payer (build sheet §0, Q8).
+39. 🧑 **A payer's invoice does not say who else shares it.** Decided: print "Shared with" (build sheet §0, Q9).
+40. 🧑💲 **No stated rule for editing a posted field-application invoice.** Decided: allowed until money is applied or the month is closed (build sheet §0, Q10).
+41. 💲 **No proven credit-and-rebill path for a paid invoice with the wrong split**, and the job's "already invoiced" check may block the rebill (build sheet §0).
+42. 💲 **Prepay applied to one payer's split invoice is untested** (build sheet §0).

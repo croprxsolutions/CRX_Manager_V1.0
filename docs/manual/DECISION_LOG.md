@@ -20,6 +20,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
 **What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
 
+## 2026-11-08 — Field splits: separate application and product shares; "shared with" on bills; posted field invoices editable until money or month close
+
+**Decision (Mason, in chat, 2026-11-08 evening, after the plan was compared with other ag retail software):** each payer on a field's split has an application share and a product share, set on the field; application and fuel-surcharge lines start from the application shares, product lines from the product shares, and any one line can still be changed by hand before posting. Each payer's invoice shows who else shares it. A posted field-application invoice can be edited (unpost, change, re-post, whole payer set) while no payment, prepay, credit or write-off is applied to any invoice in the set and its accounting month is open; after that, only a credit and a new bill.
+**Why:** matches how other ag retail systems split landlord and tenant bills by product group, with only the two groups CRX needs, and lets the office fix a bill before money or the month makes it final.
+**What this forbids/implies:** replaces the yes/no "pays application" flag in the fields-and-who-pays plan (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §0); no edit of a posted field invoice once money touches it or its month closes.
+
 ## 2026-11-08 — Field splits: any start date from the start; fuel surcharge follows who pays application
 
 **Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.

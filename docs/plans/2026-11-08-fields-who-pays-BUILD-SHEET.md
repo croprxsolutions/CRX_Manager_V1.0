@@ -17,6 +17,19 @@
 
 ---
 
+## 0. Decided on the evening of 2026-11-08: not yet folded into the packages
+
+Mason answered these after comparing the plan with the industry research (`docs/research/2026-11-03-ag-retail-software/`). They change parts of §1a, FP-1, FP-5a and FP-5c; the packages below still read as before until they are folded in at the next session. Where a package below disagrees with this section, **this section wins**.
+
+- **Q8. Two shares per payer on a field: an application share and a product share.** (Mason: "set the application split share on a field and then the product split share, we dont need to edit anything else, in one off cases i can edit the individual line item split before posting".) Each payer on a field's split has an **application %** and a **product %**, each set adding to exactly 100%. Application and fuel-surcharge lines start from the application shares; chemical and other product lines start from the product shares; any single line can still be changed by hand before posting. This **replaces the yes/no "pays application" flag** (a payer who does not pay application is simply 0% on the application side). It matches the industry norm (Agvance ties splits to product groups, e.g. "50/50, but custom application 100% tenant"), but keeps only the two groups Mason needs. Folds into: §1a application and other-line-kind rules, FP-1 tables and Field Setup, FP-4 job snapshot, and the conversion of the 5 existing rows (each becomes 100% on both sides). **Open for the fold-in:** which side flat fees start from (recommended: product shares).
+- **Q9. Each payer's invoice shows who else shares the bill.** (Mason: "yes i agree show who shared the bill with you".) Each payer's PDF and invoice detail prints a "Shared with" area naming the other payers on that invoice and their shares, like Agvance's "This invoice is shared with". Each payer's amounts still show only their own part. Folds into FP-5c (PDF and invoice detail), with a test that a single-payer invoice shows no such area.
+- **Q10. A posted field-application invoice can be edited while no money has touched it and its month is still open.** (Mason: "I want to be able to edit posted field application invoices as long as no money has been applied to the invoice or we havent closed the month out".) Editing means the existing unpost, change, re-post step, applied to the whole payer set (§1a "invoice sets move together"). It is refused when any invoice in the set has a payment, prepay, credit or write-off applied, or when the invoice's accounting month is closed (`accounting_periods`, the existing month close). After that, the only correction is a credit and a new bill. Each re-post keeps its own posted record (§1a post revisions). Folds into FP-5a, which must first check what today's `unpost_invoice` already refuses (it is wrapped by Taha's chemical-sale split work, `20261215110000`, and Taha's #1576 sets who may unpost) and add only what is missing.
+- **Credit and rebill, after money has been applied** (industry gap: Levridge automates it). When a paid invoice had the wrong split, the office credits it and bills the same work again with the right split. FP-5c must prove this in the ledger journey, including that the work's "billed once" link (§1a "one bill per piece of work"; a job's `invoiced` status today) allows the new bill only after the full credit.
+- **Prepay on split bills** (industry gap: Levridge applies each payer's prepay to their own share). CRX already applies prepay one invoice at a time, and each payer has their own invoice, so no new design is expected; FP-5c's ledger journey adds one step applying one payer's prepay to their own payer invoice only.
+- **Mason's current software (Chem Man) documentation** will be uploaded for review at the next session; check the plan against it before folding these in.
+
+---
+
 ## 1. Rules for every package
 
 1. One package is one pull request, delivered through `.claude/commands/ship.md`. Every package below touches the database, money or permissions, so each needs a clean Sol review before merge, and every PR stays open 4 hours (Taha's rule, 2026-11-08), including before any live migration apply.
@@ -286,6 +299,8 @@ No new business questions came out of the second review; the edge cases it raise
 
 6. **Fuel surcharge and flat fees: who pays them by default?** (Astra 20) **DECIDED** (Mason: "fuel surcharge follows who pays application"): a payer excused from application also starts at 0% on fuel surcharge lines. Flat fees were not covered by his answer; the plan uses the recommended default, the full field split, until he says otherwise. The office can change any line before posting.
 7. **May the office pick a split's start date from the start, or only today until February?** (Astra 3) **DECIDED** (Mason: "no i want split fields now"): any start date, past or future, from FP-1. The old invoice screens are not made date-aware; Mason keeps them on for testing only until the new screens replace them (no real orders or field invoices entered there), and each cutover inventory checks that. Mason also confirmed field application invoices start in February and the feature is used from about March (2026-11-08), so that refusal costs nothing in practice.
+
+**Three more, after the industry comparison, answered by Mason in chat on 2026-11-08 (evening):** Q8 two shares per payer (application and product), Q9 "shared with" on each payer's invoice, Q10 posted field-application invoices editable until money is applied or the month is closed. Details and what they change: §0.
 
 ## 6. Sol review record
 

@@ -511,16 +511,15 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+**MED · OPEN (sender live; app switch in PR #1649) · UI/database/Edge Function · Claude**
 The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
-check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
-that waits on Mason's approval to
-deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
+2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
+that asks for the server receipt is PR #1649; it must not land before the sender's secrets are stored. Not built:
 provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
 card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
-Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
-and should land before the app switch.
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
+chose (2026-11-08) to land the app switch first; the close action is a follow-up migration PR.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**

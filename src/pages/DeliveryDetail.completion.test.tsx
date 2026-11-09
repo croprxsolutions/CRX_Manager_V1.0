@@ -245,7 +245,9 @@ describe('completion paths', () => {
     const [first, replay] = completeRpcCalls().map(([, params]) => params);
     expect(replay).toEqual(first);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Delivery completed/)));
-    await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+    // KI-25: the receipt is asked for in the completion itself (the replay too); the screen emails nothing.
+    expect(first.p_email_receipt).toBe(true);
+    expect(mockSendEmail).not.toHaveBeenCalled();
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
   });
 
@@ -261,7 +263,40 @@ describe('completion paths', () => {
     await completeAndConfirm();
 
     await waitFor(() => expect(completeRpcCalls()).toHaveLength(2));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/an earlier attempt went through\). No receipt was emailed from here; use Email Confirmation/)));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/an earlier attempt went through\)\. If that attempt asked for a receipt, the server sends it/)));
     expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('receipt opt-out when this screen cannot see the customer email (Sol, PR #1649)', () => {
+  beforeEach(() => {
+    // The customer row is hidden and the recipient lookup fails: the screen knows no address.
+    tables.data.customers = [];
+    mockRpc.mockImplementation((name: string) => name === 'get_delivery_receipt_recipient'
+      ? Promise.resolve({ data: null, error: { message: 'lookup failed' } })
+      : Promise.resolve({ data: COMPLETE_RESULT, error: null }));
+  });
+
+  it('still shows the receipt box, and unticking it asks for no receipt', async () => {
+    await renderPage();
+    const box = await screen.findByLabelText(/Email delivery receipt to customer/i);
+    fireEvent.click(box);
+    await signAndFillSigner();
+    await completeAndConfirm();
+
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1]).not.toHaveProperty('p_email_receipt');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Delivery completed/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.anything());
+  });
+
+  it('left ticked, asks for the receipt and warns that no email was found here', async () => {
+    await renderPage();
+    await signAndFillSigner();
+    await completeAndConfirm();
+
+    await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+    expect(completeRpcCalls()[0][1].p_email_receipt).toBe(true);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/No customer email was found here/)));
   });
 });

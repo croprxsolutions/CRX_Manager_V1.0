@@ -42,8 +42,12 @@ export function followUpLines(body) {
   const start = lines.findIndex((line) => HEADING.test(line));
   if (start < 0) return null;
   const out = [];
+  let blank = false;
   for (const raw of lines.slice(start + 1)) {
     if (ANY_HEADING.test(raw)) break;
+    if (!raw.trim()) { blank = true; continue; }
+    // A paragraph after a blank line (e.g. the "Generated with" footer) is not part of the list.
+    if (blank && out.length && !/^\s*(?:[-*+]|\d+[.)])\s/.test(raw)) break;
     const text = raw.trim().replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "").trim();
     if (text) out.push(text);
   }

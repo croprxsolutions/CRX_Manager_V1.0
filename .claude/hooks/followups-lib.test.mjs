@@ -38,6 +38,12 @@ assert.match(followUpsProblem(pr("## Follow-ups\n- https://tracker.example/issue
 assert.equal(followUpsProblem(pr("## Follow-ups\n- https://github.com/o/n/issues/42 later")), null);
 assert.equal(followUpsProblem(pr("  ## Follow-ups ##\n- None")), null);
 
+// The attribution footer after the list is not a follow-up (found live on #1696).
+assert.equal(followUpsProblem(pr("## Follow-ups\n- None\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n")), null);
+assert.equal(followUpsProblem(pr("## Follow-ups\n- #1 a\n\n- #2 b\n\nfooter")), null);
+assert.deepEqual(followUpLines("## Follow-ups\n- #1 a\n\n- #2 b\n\nfooter"), ["#1 a", "#2 b"]);
+assert.match(followUpsProblem(pr("## Follow-ups\n- #1 a\n- fix later\n\nfooter")), /name no issue/);
+
 // Taha's PRs are his.
 assert.equal(followUpsProblem(pr("no section", "TahaKhanAbdalli")), null);
 

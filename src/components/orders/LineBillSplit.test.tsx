@@ -11,8 +11,8 @@ vi.mock('../../lib/db', () => ({
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: mocks.captureException } }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../customers/CustomerSearchPicker', () => ({
-  default: ({ onSelect, ariaLabel }: { onSelect: (c: { id: string; farm_name: string }) => void; ariaLabel: string }) => (
-    <button aria-label={ariaLabel} onClick={() => onSelect({ id: 'c9', farm_name: 'Landlord' })}>pick</button>
+  default: ({ onSelect, ariaLabel, disabled }: { onSelect: (c: { id: string; farm_name: string }) => void; ariaLabel: string; disabled?: boolean }) => (
+    <button aria-label={ariaLabel} disabled={disabled} onClick={() => onSelect({ id: 'c9', farm_name: 'Landlord' })}>pick</button>
   ),
 }));
 
@@ -76,6 +76,22 @@ describe('LineBillSplit', () => {
     await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
     expect(mocks.from).toHaveBeenCalledWith('order_item_shares');
     expect(insert).toHaveBeenCalledWith({ order_item_id: 'l1', customer_id: 'c9', split_percentage: 100 });
+  });
+
+  it('locks the picker and percent while a share saves, so the reply cannot clear newer edits', async () => {
+    let finish: (v: { data: unknown[]; error: null }) => void = () => {};
+    const select = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select })) });
+    render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.getByLabelText('Line split percent')).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Line split customer' })).toBeDisabled();
+    finish({ data: [{}], error: null });
+    await waitFor(() => expect(screen.getByLabelText('Line split percent')).not.toBeDisabled());
   });
 
   it('refuses a line total over 100% before saving', () => {

@@ -49,7 +49,9 @@ export function cardPayerLiveCents(
   let total = 0n;
   for (const it of items) {
     if (it.total_price == null || linesWithOwnSplit.has(it.id)) continue;
-    total += (BigInt(Math.round(it.total_price * 100)) * micro) / 100_000_000n;
+    // toPrecision first: 1.005 * 100 is 100.49999999999999 in floating point, and the database rounds it to 101.
+    const cents = Math.round(Number((it.total_price * 100).toPrecision(12)));
+    total += (BigInt(cents) * micro) / 100_000_000n;
   }
   return Number(total);
 }

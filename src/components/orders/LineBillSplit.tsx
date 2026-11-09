@@ -127,9 +127,11 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                       excludeIds={own.map((s) => s.customer_id)}
                       placeholder="Search customer..."
                       ariaLabel="Line split customer"
+                      disabled={saving}
                     />
                   </div>
-                  <input type="number" aria-label="Line split percent" value={pct} onChange={(e) => setPct(e.target.value)}
+                  {/* Locked while saving: the save's reply clears these, which would wipe a newer edit. */}
+                  <input type="number" aria-label="Line split percent" value={pct} onChange={(e) => setPct(e.target.value)} disabled={saving}
                     placeholder="%" min="0.01" max="100" step="0.01"
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20" />
                   <Button size="sm" showChevron={false} loading={saving} onClick={() => handleAdd(item.id, used)}>Add</Button>

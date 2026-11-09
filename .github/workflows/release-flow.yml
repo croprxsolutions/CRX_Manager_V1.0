@@ -1,0 +1,104 @@
+# Staging-first release flow (Taha, 2026-11-10). Feature PRs go to staging; only release/next and
+# hotfix/<name> go to main; main always stays inside staging's history.
+# Everything that enforces is inert until the repository variable RELEASE_FLOW is "on".
+name: Release flow
+
+on:
+  pull_request:
+    branches: [main, staging]
+  push:
+    branches: [main, staging]
+  schedule:
+    - cron: '30 3 * * *' # nightly, 07:30 Dubai
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  scripts:
+    name: Release flow scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test .github/scripts/release-flow.test.mjs
+
+  guard:
+    name: Release flow guard
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      HEAD_REF: ${{ github.head_ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Only release/next and hotfix/<name> into main, and the PR must contain main
+        run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; nothing enforced."; exit 0; fi
+          node .github/scripts/release-flow.mjs check-head "$HEAD_REF"
+          if ! git merge-base --is-ancestor origin/main "$HEAD_SHA"; then
+            echo "::error::This branch is missing commits that are on main. Merge main into it (merge commit), then push."
+            exit 1
+          fi
+
+  main-inside-staging:
+    name: Main inside staging
+    if: github.event_name != 'pull_request' && !(github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; nothing enforced."; exit 0; fi
+          if ! git merge-base --is-ancestor origin/main origin/staging; then
+            echo "::error::main has commits that staging lacks. Merge the open back-merge PR (main -> staging) with a merge commit, not squash."
+            exit 1
+          fi
+
+  back-merge:
+    name: Back-merge main into staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-flow-back-merge
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open the back-merge PR if staging is missing main's commits
+        run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no back-merge PR."; exit 0; fi
+          if git merge-base --is-ancestor origin/main origin/staging; then echo "staging already contains main"; exit 0; fi
+          open=$(gh pr list --base staging --head main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; exit 0; fi
+          gh pr create --base staging --head main \
+            --title "chore(staging): back-merge main after ${SHA:0:9}" \
+            --body "$(printf '%s\n' \
+              'Brings what just landed on main (a release or a hotfix) back into staging, so main stays inside staging.' '' \
+              '**Merge with "Create a merge commit", never squash.** Same day, please: the "Main inside staging" check stays red until this lands.' '' \
+              'Opened by the release flow workflow.' '' '## Follow-ups' '- None')"

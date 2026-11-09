@@ -59,7 +59,7 @@ returned every customer's field boundaries, owners, billing splits, balances and
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
-C (the job route); A and B are applied live and merged; part C is written and not applied (`20261213100000`, see KI-73). Related lows: dispatched
+C (the job route); A and B are applied live and merged; part C is written and not applied (`20261217100000`, see KI-73). Related lows: dispatched
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
@@ -954,7 +954,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
 - Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
   can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). Part C (written
-  2026-11-08, NOT APPLIED, needs Mason's approval: `20261213100000`) ends the whole-job applicator's access when
+  2026-11-08, NOT APPLIED, needs Mason's approval: `20261217100000`) ends the whole-job applicator's access when
   the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
   `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
   the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable

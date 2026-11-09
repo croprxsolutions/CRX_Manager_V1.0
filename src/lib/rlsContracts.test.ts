@@ -114,7 +114,7 @@ const RLS_ACCESS_MATRIX: TableRLSContract[] = [
       sales_rep: { SELECT: 'all', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
       driver:    { SELECT: 'scoped', INSERT: 'none', UPDATE: 'none', DELETE: 'none' },
     },
-    notes: 'An address is readable exactly when its customer is (20261213100000, To-Do 11.7): drivers see the addresses of their delivery customers only. Writes are RPC-only through save_customer since 20260730201230.',
+    notes: 'An address is readable exactly when its customer is (20261217100000, To-Do 11.7): drivers see the addresses of their delivery customers only. Writes are RPC-only through save_customer since 20260730201230.',
   },
 
   // ─── Quotes ─────────────────────────────────────────────────────────

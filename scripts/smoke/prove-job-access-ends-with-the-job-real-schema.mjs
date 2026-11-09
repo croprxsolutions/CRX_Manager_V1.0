@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261213100000_job_access_ends_with_the_job.sql (KI-01 part C / KI-73).
+ * Real-schema proof for 20261217100000_job_access_ends_with_the_job.sql (KI-01 part C / KI-73).
  *
  * Builds the checked-in production baseline plus every post-baseline migration BEFORE the candidate in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), turns row security on for
@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, psql, attempt, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20261213100000_job_access_ends_with_the_job.sql';
+const CANDIDATE = '20261217100000_job_access_ends_with_the_job.sql';
 const reuse = process.env.JOB_ACCESS_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 

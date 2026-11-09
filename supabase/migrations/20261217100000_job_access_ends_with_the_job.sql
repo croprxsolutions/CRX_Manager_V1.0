@@ -1,5 +1,5 @@
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261213100000_job_access_ends_with_the_job.md.
+-- docs/reference/migrations.d/20261217100000_job_access_ends_with_the_job.md.
 --
 -- WHAT (KI-01 part C and KI-73 in docs/manual/KNOWN_ISSUES.md; To-Do row 11.4): field access
 -- ends when the job ends, and an applicator sent to a job by dispatch reads the rest of that job.

@@ -1,6 +1,6 @@
 ## 2026-11-08 — The office can close a queued customer receipt (KI-25 follow-up, database part)
 
-- New migration `20261221100000_close_delivery_receipt.sql` (record in `docs/reference/migrations.d/`). Adds
+- New migration `20261221100000_close_delivery_receipt.sql` (applied live 2026-11-09, ledger `20261109152447`) (record in `docs/reference/migrations.d/`). Adds
   `close_delivery_receipt`: the office marks a receipt on "Customer receipts to check" as handled, and Email
   Confirmation pauses a queued receipt on that list before emailing it by hand (then marks it handled once the email
   went out), so the server sender cannot send the customer a second copy afterwards and a failed hand send still

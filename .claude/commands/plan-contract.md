@@ -6,9 +6,9 @@ Settle how a risky change must behave BEFORE the production implementation: a sh
 
 Use it when a change can alter **money, stock, stored data, who may do what, or a record's lifecycle**, or the enforcement that protects them. Judge by behavior, not file path or label: a shared helper, status list, Edge Function, test expectation or guard that changes a money or permission outcome counts. Skip it only when neither business behavior nor its enforcement changes. Other substantial work keeps `ship.md`'s short plan, and trivial work keeps the light path.
 
-Decide this before implementing, and again if the scope grows. If code already exists, say so: the contract is then a review aid, not a pre-code plan.
+Decide this before implementing, and again if the scope grows. If risky code already exists, stop adding to it, say so, write the contract, and continue only once it is settled.
 
-This replaces only the short-plan part of `ship.md` › Step 0.5. Sizing, the Sol file check, scaffolds, Luna, Sol, CI, hooks, migration gates and the three-round stop rule all still apply.
+This replaces only the short plan in `ship.md` › Step 0.5 (its steps 2–3); Step 4 below is the message to Mason that replaces "post it and proceed". Sizing, the Sol file check, scaffolds, Luna, Sol, CI, hooks, migration gates and the three-round stop rule all still apply.
 
 ## Step 1: Establish the facts
 
@@ -27,7 +27,7 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
 
 1. **Outcome and authority.**
    - The business result.
-   - The smallest change that delivers it, and the existing path it reuses. Any new table, lock, timer, queue, flag or job needs a reason why the existing path cannot do it.
+   - The smallest change that delivers it, the existing path it reuses, and the files you expect to touch (for the Sol file check). Any new table, lock, timer, queue, flag or job needs a reason why the existing path cannot do it.
    - Who may act, on which records. Every action the screen offers must be allowed by the server; the screen may offer less than the server allows.
    - How the server enforces this, including `SECURITY DEFINER` functions that bypass RLS.
    - Which values the screen sends are only locators, and what the server derives or checks itself: the actor, scope, price, status, and that supplied records belong together, per record for bulk actions.
@@ -51,26 +51,26 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
 Give the other model the contract plus its sources: the relevant schema lines, RPC bodies, policies and screen code, with file paths. Include brief, evidence-backed reasons for key constraints. Leave out the author, any self-assessment, and any request to approve.
 
 - **From Claude:** use the `codex` skill with `gpt-6-astra` at `high` and its packet method.
-- **From Codex:** while the contract is the only uncommitted change, run `node scripts/run-claude-review.mjs --scope uncommitted --topic plan-contract --prompt-file <packet>`.
+- **From Codex:** save the prompt, contract and sources as one packet file in a scratch folder outside the repo, then run `node scripts/run-claude-review.mjs --scope uncommitted --topic plan-contract --prompt-file` followed by that file's path. The packet is what gets challenged; any uncommitted code in the diff is extra context.
 
 Prompt: "Assume this behavior contract is wrong. Report every counterexample (who does what, and the wrong result), missing decision, missing evidence you would need, screen/server/RLS mismatch, legacy-row gap, timing, undo or rollout hole, and a smaller design that still meets the outcome. Label each finding DEFECT, DECISION, MISSING-EVIDENCE or SUGGESTION, with severity. End with FINDINGS <n>." There is no approve verdict. When a change reuses an already-settled contract unchanged, challenge only what is new.
 
 A failed, cut-off or evidence-starved run is not a clean result: fix the packet and run it again.
 
-Settle every DEFECT, DECISION and MISSING-EVIDENCE finding by doing one of the following:
+Every DECISION finding goes to Mason (Step 4); the agent never settles a business choice itself. Settle every DEFECT and MISSING-EVIDENCE finding by doing one of the following:
 - **Correct the contract** so that it is consistent.
 - **Disprove it with evidence that answers that exact counterexample.** That evidence is a code or schema line, a test, or a read-only query. Another model's opinion is not evidence, and a business decision settles what is wanted, not whether a mechanism delivers it.
-- **Send it to Mason** as a business decision.
+- **Re-label it DECISION** if it turns out to hinge on a business choice. A technical question is never sent to Mason.
 
-SUGGESTIONs may be declined with a one-line reason.
+MISSING-EVIDENCE that can only be produced after the migration exists becomes a named proof case that must pass before anything is built on it. SUGGESTIONs may be declined with a one-line reason.
 
-If a fix changes behavior, authority, data handling, timing, undo or rollout, challenge only that change again. If the design will not converge after that, simplify it or name the business choice that is blocking it. Do not loop.
+If a fix changes behavior, authority, data handling, timing, undo or rollout, challenge only that change again, once. If the design still does not converge, simplify it or name the business choice that is blocking it. Do not loop: the plan gets at most one challenge plus one targeted re-check, apart from re-running a failed run.
 
 ## Step 4: Mason
 
 If any business decisions remain, send one message starting `NEEDS MASON - DECISION REQUIRED`. Number the questions, each with a recommendation and its consequence in one line. Bundle only independent choices; describe interacting ones as one combined outcome. Wait only on the work that depends on an answer, and record his answers in the contract with the date. A later question is allowed when new evidence raises a real decision.
 
-Then post the settled outcome and the key proof cases to Mason in plain English, and continue (`AGENTS.md` › Operating Contract).
+Then post the settled outcome and the key proof cases to Mason in plain English, and continue (`AGENTS.md` › Operating Contract). If he says stop or redirects, stop at once.
 
 ## Step 5: Build and prove
 
@@ -80,7 +80,7 @@ Then post the settled outcome and the key proof cases to Mason in plain English,
   - Run the permission cases as the effective caller, including the denied ones.
   - Check screen races and receipts through the real screen.
   - A mocked test does not prove a query.
-- If `main` or a dependency PR changes something the contract relied on, refresh only the evidence it affects.
+- If `main` or a dependency PR changes something the contract relied on, refresh the evidence it affects. If it changes the behavior the contract settled, treat it as a material change (first bullet).
 - Luna and Sol review the code against the contract **and** the current code, because an agreed contract can still be wrong.
 - When repeated HIGH findings trace to the same design assumption, re-examine that assumption before the next patch. The `AGENTS.md` stop rule still applies, and Mason is asked only about a real business trade-off.
 

@@ -2,7 +2,7 @@
 
 **Question (Mason):** we spend too long finding holes after branches are pushed. Should agents plan, test and deliberate (Claude with Codex) before any code, and push for simplicity?
 
-**Decision:** pilot `plan-contract` (`.claude/commands/plan-contract.md`) on the next five changes that can affect money, stock, stored data, permissions or a lifecycle. It replaces the short plan in `ship.md` › Step 0.5 for that work and keeps every existing gate. Results go in `pilot-log.md`. After five, keep, change or delete it.
+**Decision:** pilot `plan-contract` (`.claude/commands/plan-contract.md`) on the next five changes that can affect money, stock, stored data, permissions or a lifecycle, or the enforcement protecting them. It replaces the short plan in `ship.md` › Step 0.5 for that work and keeps every existing gate. Results go in `pilot-log.md`. After five, keep, change or delete it.
 
 ## What our own history showed
 

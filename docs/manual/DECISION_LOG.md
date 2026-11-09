@@ -13,7 +13,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 ## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
 
 **Decision (Mason, in chat, 2026-11-09: "yes do it").** Sol round 5 on PR #1705 found that a label maximum written in a counted unit (`each`, `ea`, `unit`, for example "1 each/acre") was reported "not comparable", so a house rate above it needed no reason. The build sheet (section 3.5 step 4) had listed only ounce, pint, quart, gallon, pound, gram and milligram as comparable. Counted units now compare too, with an each-kind row only, and the suggested-rate reader also reads `each`. Sol round 6 may run on the fixed head.
-**What this implies:** this widens the build sheet's comparable-unit list; if round 6 is not clean, stop and bring the finding to Mason.
+**What this implies:** this widens the build sheet's comparable-unit list. Mason's rule for this PR: a round-6 finding goes to him before any further fix. (Round 6 was clean at `a3b9b5a8d`.)
 
 ## 2026-11-09 — #1705 (RT-1 draft rates) gets one more Sol round (round 5) after the fluid-ounce fix
 

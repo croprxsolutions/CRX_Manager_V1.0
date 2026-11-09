@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { billSplitCompletion } from './billSplitCompletion';
-import { billSplitPayerShares, buildInvoicePdfDataFromRow, isBillSplitInvoice, loadBillSplitPayers } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { billSplitPayerShares, buildInvoicePdfDataFromRow, isBillSplitInvoice, loadBillSplitPayers, readsBillSplitPayers } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 const row = (id: string, name: string | null, cents: number) => ({
   id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, customer: name ? { farm_name: name } : null,
@@ -162,5 +162,21 @@ describe('loadBillSplitPayers', () => {
   });
   it('refuses when the read fails', async () => {
     await expect(loadBillSplitPayers(db(null, null, new Error('INVOICE_NOT_VISIBLE')).client, 'inv-1')).rejects.toThrow();
+  });
+});
+
+describe('readsBillSplitPayers', () => {
+  // get_bill_split_payers refuses a voided, cancelled or deleted invoice as its key, so the screens must not ask:
+  // a voided payer invoice would fail to open at all (Sol HIGH on c610d52ce).
+  const split = { invoice_type: 'chemical_sale', invoice_group_id: 'g1', delivery_id: 'd1' };
+  it('is a live Bill Split payer invoice', () => {
+    expect(readsBillSplitPayers({ ...split, status: 'draft', deleted_at: null })).toBe(true);
+    expect(readsBillSplitPayers({ ...split, status: 'posted' })).toBe(true);
+  });
+  it('is not a voided, cancelled or deleted one, nor anything that is not a Bill Split', () => {
+    expect(readsBillSplitPayers({ ...split, status: 'voided' })).toBe(false);
+    expect(readsBillSplitPayers({ ...split, status: 'cancelled' })).toBe(false);
+    expect(readsBillSplitPayers({ ...split, status: 'draft', deleted_at: '2026-11-09' })).toBe(false);
+    expect(readsBillSplitPayers({ ...split, delivery_id: null, status: 'draft' })).toBe(false);
   });
 });

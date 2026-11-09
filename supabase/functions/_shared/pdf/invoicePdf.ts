@@ -211,6 +211,17 @@ export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_
   return (row.invoice_type === 'chemical_sale' || row.invoice_type === 'misc_charge') && !!row.invoice_group_id && !!row.delivery_id;
 }
 
+/**
+ * Whether this invoice shows the sale's payer table: a live Bill Split payer invoice. get_bill_split_payers refuses a
+ * voided, cancelled or deleted invoice as its key, so those show no table rather than failing to open.
+ */
+export function readsBillSplitPayers(row: {
+  invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null;
+  status?: string | null; deleted_at?: string | null;
+}): boolean {
+  return isBillSplitInvoice(row) && !['voided', 'cancelled'].includes(row.status ?? '') && !row.deleted_at;
+}
+
 export function billSplitPayerShares(rows: Array<{
   id: string;
   invoice_number: string | null;
@@ -496,7 +507,7 @@ export async function buildInvoicePdfDataFromRow(
     diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
   } | null;
   const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
-      && isBillSplitInvoice({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id })
+      && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
     ? await loadBillSplitPayers(db, inv.id)
     : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;

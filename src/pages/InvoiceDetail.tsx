@@ -29,7 +29,7 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyM
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, isBillSplitInvoice, loadBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -818,7 +818,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     setShares(shareData as InvoiceShare[]);
 
     // A chemical sale split across payers: each payer's invoice shows that delivery's payers.
-    const payers = isBillSplitInvoice(data) && data.invoice_group_id && shareData.length === 0
+    const payers = readsBillSplitPayers(data) && data.invoice_group_id && shareData.length === 0
       ? await loadBillSplitPayers(supabase, invoiceId)
       : [];
     if (isStale()) return;

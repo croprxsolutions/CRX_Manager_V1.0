@@ -1,4 +1,4 @@
--- Written 2026-11-08. Apply status is tracked only in
+-- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migrations.d/20261220100000_applicator_keeps_own_record_fields.md.
 --
 -- WHY (Taha's review of #1650, MED): 20261217100000_job_access_ends_with_the_job ended a whole-job

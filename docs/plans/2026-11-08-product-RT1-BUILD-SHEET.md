@@ -38,7 +38,7 @@
 | `product_rate_lock.is_locked` | false (WP-PM-11a-1 live, lock off) |
 | `product_rate_events` rows | 0 |
 | `product_rates` table | does not exist |
-| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` (this repo's migration stamps run ahead of the calendar by convention; the stamp orders files, it is not the apply date) |
+| Latest live migration | `20261217100000_job_access_ends_with_the_job` (re-checked 2026-11-09; this repo's migration stamps run ahead of the calendar by convention; the stamp orders files, it is not the apply date) |
 
 **MSO XL today:** two sizes, `MSO XL - 2.5 Gal` and `MSO XL - Bulk`, both liquid, stock unit `Gal`, `rate_per_acre = 9.6`, `rate_unit = 'oz'`, `suggested_rate = '2 qt/100 Gal'`, no label maximum. Note 2 qt/100 gal at a 15 gal/acre spray volume is exactly 9.6 fl oz/acre (64 × 15 / 100).
 
@@ -258,7 +258,7 @@ Every mutating RPC:
 
 ## 4. RT-1 DB · The database PR
 
-**File:** `supabase/migrations/<stamp>_product_rates_draft.sql`. The stamp is chosen at build. It must sort after `20261215110000` (latest live) and after any stamp claimed in `docs/changelog.d/` or the sibling notes folder.
+**File:** `supabase/migrations/<stamp>_product_rates_draft.sql`. The stamp is chosen at build. It must sort after `20261217100000` (latest live on 2026-11-09; re-check `supabase_migrations` at build) and after any stamp claimed in `docs/changelog.d/` or the sibling notes folder.
 
 **Preflight block:** refuse to run unless `product_parents`, `product_parent_members`, `_product_parent_require_admin`, `_product_parent_replay`, `normalize_rate_unit` and `epa_registrations` exist, and every `unit_conversions` factor named in section 1 is as listed.
 

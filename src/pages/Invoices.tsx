@@ -141,6 +141,15 @@ function invoicePdfShares(shares: InvoiceShareRow[]) {
   }));
 }
 
+/** The PDF's share table: an invoice's own shares, else a Bill Split payer's sale payers (as its own page prints). */
+async function batchPdfShares(inv: InvoiceRow, shares: InvoiceShareRow[]): Promise<InvoicePdfData['shares']> {
+  if (shares.length > 0) return invoicePdfShares(shares);
+  if (!isBillSplitInvoice(inv) || !inv.invoice_group_id) return undefined;
+  const payers = await loadBillSplitPayers(supabase, inv.invoice_group_id)
+    .catch(() => { throw new InvoiceDetailsUnavailableError(); });
+  return payers.length > 0 ? payers : undefined;
+}
+
 // Re-read the server-owned gate and the version the retry key names: an invoice unposted or
 // edited since the list loaded is refused, never sent under its old key.
 async function assertStillSendable(inv: InvoiceRow): Promise<void> {
@@ -522,10 +531,7 @@ export default function Invoices() {
       .then((r) => r, detailsUnavailable);
     // A split invoice printed without its shares would hide who owes what.
     if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
-    // A Bill Split payer's invoice prints the sale's payers, as its own page does.
-    const payers = shares.length === 0 && isBillSplitInvoice(inv) && inv.invoice_group_id
-      ? await loadBillSplitPayers(supabase, inv.invoice_group_id).then((r) => r, detailsUnavailable)
-      : [];
+    const pdfShares = await batchPdfShares(inv, shares as InvoiceShareRow[]);
 
     return {
       ...invoiceRowPdfFields(inv),
@@ -536,7 +542,7 @@ export default function Invoices() {
       customer_zip: cust.zip || undefined,
       account_number: cust.account_number || undefined,
       payment_terms: inv.payment_terms || cust.payment_terms || undefined,
-      shares: shares.length > 0 ? invoicePdfShares(shares as InvoiceShareRow[]) : payers.length > 0 ? payers : undefined,
+      shares: pdfShares,
       items: groupReturnCreditDisplayItems(inv.invoice_type, (items || []).map(mapInvoicePdfItem)),
       options,
     };

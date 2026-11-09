@@ -8,7 +8,10 @@ One build-time variable drives it: `VITE_APP_ENV` (`staging` on the Vercel stagi
 the Vite dev server counts as local; unset or anything else is production). `src/lib/appEnv.ts`
 reads it, `src/components/ui/EnvBanner.tsx` draws it from `RootLayout`, and `src/main.tsx` sets the
 title prefix. `.env.example` and `.env.staging.example` list the variable. The strip scrolls with the
-page on purpose, so the sticky top bar and the pages' sticky offsets don't move.
+page on purpose, so the sticky top bar and the pages' sticky offsets don't move; the cost is that
+staging and local pages scroll by the strip's ~20px even when short. If a staging build is ever pointed
+at the live database, the strip says "STAGING · LIVE DATABASE" instead of claiming test data. It is a
+plain label, not a live region, so screen readers don't announce it on every load.
 
 Tests: `src/lib/appEnv.test.ts`, `src/components/ui/EnvBanner.test.tsx`. Part of the staging-first
 release flow (Taha, 2026-11-10).

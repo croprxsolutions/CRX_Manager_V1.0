@@ -244,3 +244,42 @@ export async function fetchSignedBlendImage(
   }
   return readBodyWithLimit(response, MAX_BLEND_IMAGE_BYTES);
 }
+
+export const REFERENCE_PAGE_SIZE = 1000;
+// Live has about 1,050 active products. A list 50 times that is not a real
+// catalog, so the scan fails loudly instead of running out of time or memory.
+export const REFERENCE_MAX_ROWS = 50_000;
+
+/**
+ * Read every row of a reference list in id order, one page after another.
+ * A single read stops at the PostgREST row cap (1,000), which silently hid
+ * every product past it from OCR matching (KI-32). Paging on "id greater than
+ * the last id read" never repeats or skips a row that exists for the whole
+ * read, and stops only on an empty page, so a server cap below the requested
+ * page size still reads everything. Any failed page throws: never a partial list.
+ */
+export async function readAllById<T extends { id: string }>(
+  fetchPage: (
+    afterId: string | null,
+    limit: number,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let afterId: string | null = null;
+  for (;;) {
+    const { data, error } = await fetchPage(afterId, REFERENCE_PAGE_SIZE);
+    if (error) throw new Error(error.message);
+    if (!Array.isArray(data)) throw new Error("Reference read returned no list");
+    if (data.length === 0) return rows;
+    const lastId = data[data.length - 1].id;
+    // A page that does not move past the last id would loop forever.
+    if (typeof lastId !== "string" || (afterId !== null && lastId <= afterId)) {
+      throw new Error("Reference read did not advance");
+    }
+    for (const row of data) rows.push(row);
+    if (rows.length > REFERENCE_MAX_ROWS) {
+      throw new Error(`Reference read passed ${REFERENCE_MAX_ROWS} rows`);
+    }
+    afterId = lastId;
+  }
+}

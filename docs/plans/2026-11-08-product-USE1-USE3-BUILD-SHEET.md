@@ -9,7 +9,7 @@
 - **USE-3:** lets Mason fill the customer-facing "quoting notes" for many products at once from the setup spreadsheet, and shows, before saving, exactly what a new quote line will show before and after.
 
 **Words used here.**
-- **Pair:** one crop with one timing, such as corn + pre-emergence. "Any crop" is allowed.
+- **Pair:** one crop with one timing, such as corn + pre-emergence, within one product category (a Herbicide timing and a Foliar Fertilizer timing are different things even with the same crop). "Any crop" is allowed.
 - **Option:** one row of `product_use_timing_options`. Each option already has a label ("Pre-Emerge Corn"), a timing code (`pre_emergence`) and an optional crop (`corn`). **An option is a pair** (section 3.1).
 - **Parent / size:** as in the Stage 2 sheet. A parent is one formulation; each size is a product row. Use timings belong to the parent and are copied down to every size by the database (PAR-1).
 - **Quoting note:** `products.quoting_notes`, the text that auto-fills into a new quote line's notes.
@@ -145,7 +145,7 @@ No change to `sync_product_use_timings`, `_product_parent_timings`, `update_prod
 
 ### 4.A Preflight (refuse to run unless all hold)
 - Inside one transaction (the temp-table pattern of `20261103210000`).
-- `product_crop_options` does not exist; none of the three new rules exists (`product_use_timing_options_crop_fkey`, `product_use_timing_options_active_pair_key`, `product_use_timing_options_timing_code_check`).
+- `product_crop_options` does not exist; no function named `add_use_timing_option` or `set_use_timing_option_active` exists with **any** argument list (`pg_proc` by name, so no overload can be created); none of the three new rules exists (`product_use_timing_options_crop_fkey`, `product_use_timing_options_active_pair_key`, `product_use_timing_options_timing_code_check`).
 - The 9 options have exactly the codes, labels, timing codes, crops and categories in section 1.
 - Every `crop` on the options is null or one of the seeded crop codes; every `timing_code` matches the code pattern.
 - `_product_parent_require_admin`, `_product_parent_replay`, `save_idempotency` exist.
@@ -264,7 +264,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 4. A product with "Pre-Emerge Corn" and "Post-Emerge Soybeans" keeps both after save and reload (ungrouped size, then a grouped parent).
 5. Two sizes of one parent show the same pairs after a parent edit; editing one size's timings directly is refused, naming the parent.
 6. A category change on a parent with timings is refused until timings are cleared; the screen's confirm then clears them on every size in one event.
-7. Turning an option off: it disappears from the picker; a product holding it keeps it and can still save other fields; a new product cannot pick it; turning it back on works; the result reports holder counts.
+7. Turning an option off: it disappears from the picker; a product holding it keeps it and can still save other fields; assigning it to a product that does not hold it is refused on **every** write path (product page, setup workbook, bulk import, a parent edit — the parent's copy-down hits the same size trigger and the whole parent edit is refused); turning it back on works; the result reports holder counts.
 8. A setup workbook export and re-import with no edits saves nothing; a Crop Uses row edit saves through `update_product_parent` with one parent event and one copy per size; a stale parent row is refused by name while other rows save, and the result lists both.
 
 **USE-1, observed in the app against the private test copy (`scripts/local-app/`):** add a pair from the product page as an admin; pick it on a product; see it grouped under its crop; download and re-upload the setup workbook with a Crop Uses edit. A flow the test copy cannot run is recorded as owed, not passed.
@@ -348,3 +348,9 @@ Today no product has a quote note, so 442 products put their general description
 - LOW the add modal had no in-flight rule: fixed; submit and close disabled, one key per form, late replies ignored (section 5).
 - LOW options had `changed_at` but no `updated_at`: fixed by naming the columns `updated_by` and `updated_at` (3.2, 3.3).
 - LOW a label starting with a non-ASCII letter could produce an empty code: fixed; the label must start with an ASCII letter (3.3, case 3).
+
+**Luna round 5** (gpt-6-luna xhigh, head `cc9f8dffe`): 4 findings (2 MED, 2 LOW), no BLOCKER or HIGH.
+- MED a retired option could be newly assigned through an import, workbook or parent edit: refuted. `sync_product_use_timings` runs on every insert and update of `products` and refuses an inactive code the row did not already hold (`20261103210000`: `NOT v_option.is_active AND NOT (v_code = ANY(v_old_codes))`). A parent edit reaches each size through `_copy_parent_to_size`, an ordinary update, so the same trigger refuses it and the parent edit rolls back. Harness case 7 now proves each path.
+- MED preflight did not check for same-name functions: fixed; preflight refuses any existing function with either name and any argument list (4.A).
+- LOW the pair rule includes category: clarified, not changed; a pair is defined within one category (Words used here).
+- LOW a reactivation could race an add and hit a raw unique error: refuted; both RPCs take the same `crx_use_timing_options` advisory lock (3.3), so the duplicate check and the write cannot interleave.

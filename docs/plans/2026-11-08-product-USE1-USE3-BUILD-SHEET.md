@@ -102,8 +102,8 @@ Why this is the smallest complete design: the copy-down, the grouped-size guard,
 **`product_crop_options`** (new)
 - `code text PRIMARY KEY CHECK (code ~ '^[a-z][a-z0-9_]*$')`.
 - `label text NOT NULL` (trimmed, non-empty, ≤ 60 characters), unique on `lower(label)`.
-- `sort_order integer NOT NULL`, `is_active boolean NOT NULL DEFAULT true`, `created_at timestamptz NOT NULL DEFAULT now()`.
-- Seed (question 1): `corn` Corn, `soybeans` Soybeans, `wheat` Wheat, `milo` Milo, `cotton` Cotton, `alfalfa` Alfalfa, `pasture_hay` Pasture/Hay. These are the codes the `customers.crops` list already uses (without `other`), so a later "products for this grower's crops" view needs no translation. `corn` and `soybeans` cover every crop the live options use today.
+- `sort_order integer NOT NULL`, `is_active boolean NOT NULL DEFAULT true`, `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz NOT NULL DEFAULT now()` (any later migration that changes a crop row sets it).
+- Seed (question 1): `corn` Corn, `soybeans` Soybeans, `wheat` Wheat, `milo` Milo, `cotton` Cotton, `alfalfa` Alfalfa, `pasture_hay` Pasture/Hay, plus `range_pasture_turf` Range/Pasture/Turf (a use site, not a field crop; question 2). The first seven are the codes the `customers.crops` list already uses (without `other`), so a later "products for this grower's crops" view needs no translation. `corn` and `soybeans` cover every crop the live options use today.
 - New crops are added by a small migration (rare). No crop-writing RPC in USE-1.
 
 **`product_use_timing_options`** (existing; constraints and two columns added, nothing dropped)
@@ -111,7 +111,7 @@ Why this is the smallest complete design: the copy-down, the grouped-size guard,
 - `CREATE UNIQUE INDEX product_use_timing_options_active_pair_key ON product_use_timing_options (category, timing_code, crop) NULLS NOT DISTINCT WHERE is_active` (live is Postgres 17).
 - `ADD CONSTRAINT product_use_timing_options_timing_code_check CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
 - `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, `ADD COLUMN option_version bigint NOT NULL DEFAULT 1`. With the existing `created_at` (default `now()`), each admin add records who and when, and each turn-off or turn-on records who and when and moves `option_version`. The 9 seeded rows keep null `created_by`.
-- **Volunteer Corn (question 2):** only if Mason answers "any crop", the migration sets that one option's `crop` to null. Products store the code, not the crop, and the label stays "Volunteer Corn", so no product row changes (the postflight md5s prove it). If he answers "keep", the row is left as it is.
+- **Two options re-filed (question 2), only as Mason answers:** Volunteer Corn's `crop` set to null ("Any crop"), and Range/Pasture/Turf's `crop` set to `range_pasture_turf`, so it is not shown as "Any crop". Products store the code, not the crop, and both labels stay, so no product row changes (the postflight md5s prove it). Any option Mason says to keep is left as it is.
 - **No grant, revoke or policy change** on this existing table (so no Mason permission approval is needed for it).
 
 ### 3.3 RPCs (both new, both mutating)
@@ -130,7 +130,7 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 
 **`set_use_timing_option_active(p_code text, p_is_active boolean, p_expected_option_version bigint, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
 1. Admin, key, replay.
-2. Option must exist — `USE_TIMING_NOT_FOUND`. Locked `FOR UPDATE`; `option_version` must equal `p_expected_option_version` — `USE_TIMING_STALE` (so an earlier click that arrives late cannot undo a later one). Same value already — `USE_TIMING_NO_CHANGE`.
+2. `p_code`, `p_is_active` and `p_expected_option_version` are all required (not null) — `USE_TIMING_INVALID`. Option must exist — `USE_TIMING_NOT_FOUND`. Locked `FOR UPDATE`; `option_version` must equal `p_expected_option_version` — `USE_TIMING_STALE` (so an earlier click that arrives late cannot undo a later one). Same value already — `USE_TIMING_NO_CHANGE`.
 3. Turning **off**: allowed even while products hold it (they keep it). The result reports how many sizes and parents still hold it, so the screen can say so.
 4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`; turning on a pair another active option already has — `USE_TIMING_PAIR_EXISTS`, naming it.
 5. Update `is_active`, `changed_by`, `changed_at`, `option_version + 1`; return the row (with its new version) and the holder counts.
@@ -158,10 +158,10 @@ Section 3.2's table and constraints, section 3.3's two functions. RLS on `produc
 ### 4.C What the migration does not touch
 - No `products` or `product_parents` column, trigger, grant or row.
 - None of the five functions named in 4.A.
-- No option row is added or turned off. The only option change is Volunteer Corn's crop, and only if Mason answers question 2 "any crop". The only new rows are the 7 crop options.
+- No option row is added or turned off. The only option changes are the crops of Volunteer Corn and Range/Pasture/Turf, and only as Mason answers question 2. The only new rows are the 8 crop options.
 
 ### 4.D Rollback (its own reviewed migration)
-Drop the two functions, then the three new rules named in 4.A (the crop foreign key first), then the four new option columns, then `product_crop_options`. If question 2 moved Volunteer Corn to "Any crop", set its crop back to `corn`. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
+Drop the two functions, then the three new rules named in 4.A (the crop foreign key first), then the four new option columns, then `product_crop_options`. If question 2 re-filed Volunteer Corn or Range/Pasture/Turf, set each crop back (`corn`, null) before dropping the crop table. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
 
 ### 4.E Lock and timing
 `SET LOCAL lock_timeout = '5s'`. The `ALTER TABLE` takes a short lock on the 9-row options table; product saves read it, so apply outside busy hours (no fixed window needed; the lock lasts milliseconds).
@@ -190,7 +190,7 @@ Drop the two functions, then the three new rules named in 4.A (the crop foreign 
 | A crop typed two ways (`soybean` vs `soybeans`) | Crop must be a `product_crop_options` code (foreign key). |
 | The picker grows long | The screen groups options by crop (section 5); turned-off options hide. |
 | Fungicides or insecticides need crop uses later | Out of scope: Mason's rule is timings only on Herbicide and Foliar Fertilizer (2026-10-28). Widening it is a category-CHECK change in its own package. |
-| `volunteer_corn` stored with crop `corn` shows under **Corn** in the grouped picker | Question 2. The recommended answer moves it to "Any crop" in this migration (one option row, no product rows). |
+| `volunteer_corn` (crop corn) shows under **Corn**, and `range_pasture_turf` (no crop) shows under **Any crop**, in the grouped picker | Question 2. The recommended answer re-files both in this migration (two option rows, no product rows). |
 
 ---
 
@@ -232,7 +232,7 @@ Filling quoting notes from the setup workbook works today. What the preview does
 
 ### 6.3 Filling the notes (the data step, not code)
 This is catalog work under the grand plan's data rules, after Mason answers question 3:
-1. An agent drafts the quoting note for each product into a private review list in `C:\Users\mason\Documents\Obsidian Vault\Products\Product Master review\` (never into this repo or a PR; repo carries counts only).
+1. An agent drafts the quoting note for each product into a private review list kept **outside this repo**, in the private review location the Stage 2 sheet §3 rule 8 names. The repo's code and agents working from it only read Mason's private vault; the list is filed there through the `brain` skill's own Ingest workflow with Mason's go, or, if he prefers, handed to him as a file in the session's scratchpad. Never into this repo or a PR; the repo carries counts only.
 2. Mason reviews and approves a batch.
 3. The approved batch is pasted into a fresh setup workbook download's `quoting_notes` column and uploaded. The preview's count must equal the batch size; then Mason (or an admin, with Mason's go for that batch) confirms the Setup tab.
 4. The repo records only the batch count and date in `docs/manual/CURRENT_STATE.md`.
@@ -301,10 +301,13 @@ Every PR stays open at least 4 hours before merge (Taha, 2026-11-08). None of th
 ## 9. Questions for Mason
 
 **NEEDS MASON - DECISION REQUIRED (1 of 3): which crops can a product be marked for?**
-The app needs a fixed crop list so "soybean" and "soybeans" can't both appear. **Recommend:** start with the same list your customer records already use: Corn, Soybeans, Wheat, Milo, Cotton, Alfalfa, Pasture/Hay (plus "any crop"). Adding one later is a small change. Reply "yes" or name the crops to add or drop.
+The app needs a fixed crop list so "soybean" and "soybeans" can't both appear. **Recommend:** start with the same list your customer records already use: Corn, Soybeans, Wheat, Milo, Cotton, Alfalfa, Pasture/Hay, plus Range/Pasture/Turf (see question 2) and "any crop". Adding one later is a small change. Reply "yes" or name the crops to add or drop.
 
-**NEEDS MASON - DECISION REQUIRED (2 of 3): what does "Volunteer Corn" mean as a crop and timing?**
-Today the "Volunteer Corn" choice (on 7 products) is stored as crop **corn**, so the new picker would list it under Corn, as if it were used on corn. Volunteer corn is usually killed in another crop, such as soybeans. **Recommend:** list it under "Any crop". The 7 products keep the choice and its name; only the crop it is filed under changes. Reply "yes", "keep it under corn", or name the crop.
+**NEEDS MASON - DECISION REQUIRED (2 of 3): where should two old choices be filed?**
+- **Volunteer Corn** (7 products) is stored as crop **corn**, so the new picker would list it under Corn, as if it were used on corn. Volunteer corn is usually killed in another crop, such as soybeans. **Recommend:** list it under "Any crop".
+- **Range/Pasture/Turf** (25 products) has no crop, so the new picker would list it under "Any crop", which reads broader than the label. **Recommend:** its own "Range/Pasture/Turf" group.
+
+The products keep their choice and its name either way; only the group it is filed under changes. Reply "yes to both", or say which to keep as it is.
 
 **NEEDS MASON - DECISION REQUIRED (3 of 3): what goes into the customer quote notes?**
 Today no product has a quote note, so 442 products put their general description onto every new quote line. **Recommend:** an agent drafts a short customer-facing note for each product from its description and label, you approve them in batches in your private notes, and each approved batch is uploaded from the setup spreadsheet. Products without an approved note keep showing their description, as today. Existing quotes never change. Reply "yes" or say what the notes should contain.
@@ -330,3 +333,10 @@ Today no product has a quote note, so 442 products put their general description
 - MED overlapping Crop Uses saves: fixed; one save at a time, results tied to their upload, re-upload safe (section 5).
 - MED a description edit on the product page changes new quote lines with no warning: fixed; product-page hint and a search for every other notes editor (6.2, 6.4, USE-3 case 6).
 - LOW crop options have no `updated_at`: refuted, as in round 1 (migration-only writer).
+
+**Luna round 3** (gpt-6-luna xhigh, head `cfe689e65`): 5 findings (1 BLOCKER, 1 HIGH, 1 MED, 2 LOW).
+- BLOCKER the data step had an agent write into Mason's private vault, which is read-only from this repo: fixed; the list goes to the private review location only through the `brain` skill with Mason's go, or to him as a scratchpad file (6.3).
+- HIGH Range/Pasture/Turf (no crop) would show as "Any crop": fixed; a `range_pasture_turf` crop entry and re-filing it, both under question 2 (3.2, 4.D, 4.H, questions 1 and 2).
+- MED a null expected version could slip past the stale check: fixed; all three arguments required (3.3).
+- LOW a null `p_is_active` would fail with a raw database error: fixed by the same rule.
+- LOW `updated_at` on crop options: added this time (3.2), ending the repeat finding.

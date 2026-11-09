@@ -1,0 +1,40 @@
+# Release labels (Taha, 2026-11-10): on-staging is added when a PR merges into staging;
+# verified-on-staging needs a "Staging proof: <link>" line and held-off a "Held off: <reason>" line,
+# or the bot removes them with a comment. Rules live in .github/scripts/release-flow.mjs.
+name: Release labels
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [closed, labeled]
+
+permissions: {}
+
+jobs:
+  labels:
+    name: Release labels
+    # Fork PRs get a read-only token; labels are only managed on this repository's branches.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.action == 'closed' && github.event.pull_request.merged) ||
+       (github.event.action == 'labeled' &&
+        contains(fromJSON('["verified-on-staging","held-off"]'), github.event.label.name)))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-labels-${{ github.event.pull_request.number }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      ACTION: ${{ github.event.action }}
+    steps:
+      # The rules come from staging's copy of the script, never from the PR under review.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: staging
+          persist-credentials: false
+      - run: |
+          if [ "$ACTION" = "closed" ]; then node .github/scripts/release-flow.mjs mark-on-staging
+          else node .github/scripts/release-flow.mjs check-label; fi

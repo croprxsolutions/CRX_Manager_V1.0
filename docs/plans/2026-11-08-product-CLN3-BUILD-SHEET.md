@@ -132,7 +132,7 @@ One table, admin only (the page is already admin only: `src/appPages.tsx:411`). 
 | Group | Meaning | Shown |
 |---|---|---|
 | **Disagrees** | The name has brands and the brand list has brands, and they differ | Name, active or not, in name only, on list only, spelled-differently pairs, and where the list comes from (this size, or parent "<name>") |
-| **Brands in the name, no brand list yet** | The name has brands; the brand list is empty | Name and the name brands. This is a worklist for brand entry. On 2026-11-08 every bracketed product falls here, because live has 0 brand rows. |
+| **Brands in the name, no brand list yet** | The name has brands; the brand list is empty | Name and the name brands. This is a worklist for brand entry. On 2026-11-08 the 107 products whose brackets hold brand names fall here, because live has 0 brand rows; the other 29 bracketed names hold notes only and appear in no group. |
 | **Brand list, no brands in the name** | The name has no brand brackets; the brand list has brands | Name and the list |
 | **Bracket not closed** | `unclosed` | A flag on whichever group the row is in; a product in no other group is still listed here, so no unclosed name is hidden |
 
@@ -148,11 +148,11 @@ All of these, observed, not only tested:
      ```sql
      BEGIN READ ONLY;
      WITH items AS (
-       SELECT p.id, lower(btrim(regexp_replace(regexp_replace(it, '[®™©]', '', 'g'), '[\s_-]+', ' ', 'g'))) AS item
+       SELECT p.id, lower(btrim(regexp_replace(regexp_replace(it, '[®™©]', '', 'g'), '[\s_–—-]+', ' ', 'g'))) AS item
        FROM products p,
             regexp_matches(p.product_name, '\(([^)]*)(\)|$)', 'g') g,
             regexp_split_to_table(
-              regexp_replace(g[1], '\s+-\s+([0-9]+(\.[0-9]*)?|\.[0-9]+) ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)\s*$', '', 'i'),
+              regexp_replace(g[1], '\s+[–—-]\s+([0-9]+(\.[0-9]*)?|\.[0-9]+) ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)\s*$', '', 'i'),
               '[,;]') it)
      SELECT count(DISTINCT id) FROM items
       WHERE item <> '' AND item ~ '[a-z]'
@@ -209,3 +209,4 @@ The report lists every product whose name has brand names in brackets that do no
 | 6 (`ac1912221`) | Luna, xhigh | 1 finding. MED (refuted): "strip a size like `4L` from a brand". In crop chemical names `4L`, `2EC`, `3.6F` are formulation codes that belong to the brand name; stripping them would match two different products. Rule 6 now says so. |
 | 7 (`577f2bcb5`) | Luna, xhigh | 1 finding. LOW: a stray closing bracket after the unit list (removed). No BLOCKER or HIGH in any round; this last commit only fixes that typo. |
 | 8 (`82d3dff85`) | Independent Opus review (read-only, checked code and live) | 17 findings, none blocking; it confirmed every table, column grant, the rule and the 107 count. Fixed: reuse the existing bracket reader `suggestBrandNamesFromProductName` so suggestions and the report share rules; done-when 5 now checks the section's own requests (an RPC is a POST); `2,4-D` is not split; the live-data run is a local build that reads production; local seeding steps spelled out; `pagedReadCallSites.test.ts` added to the files; PR B wording corrected and its `_delivery_line_brand_list` added to risk 1; the `4L`-as-size limit, percent-with-letters notes, en dashes, typo pairing, inactive parents and the list side are now stated and tested; one docs file named; Decision 1 dropped (a technical choice, now made). Refuted: "there is no changelog file" (it is `docs/CHANGELOG.md`; the citation now names it). Not acted on: "rebase on current main" (the PR changes one new file, and the merge is pinned to its head). |
+| 9 (`8d9c464ed`) | Luna, xhigh | 2 findings. LOW: "every bracketed product" overstated the worklist (now 107 of 136; 29 are notes only). LOW: the sample SQL did not treat en and em dashes like the parser (added; the live count stayed 107). |

@@ -40,28 +40,20 @@ describe('lineNeedsRemoveConfirm', () => {
 });
 
 describe('todaysPricesMessage', () => {
-  const before = [
-    { price: 10, total: 5000 }, { price: 20, total: 4000 },
-    { price: 30, total: 3000 }, { price: 40, total: 2380 },
-  ];
-  it('counts changed lines and formats totals', () => {
-    const after = [
-      { price: 11, total: 5000 }, { price: 21, total: 4000 },
-      { price: 31, total: 3042.5 }, { price: 40, total: 2380 },
-    ];
-    expect(todaysPricesMessage(before, after, 1)).toEqual({
+  const t = { beforeTotal: 14380, afterTotal: 14422.5, tier: 1 };
+  it('counts changed lines and formats the given totals', () => {
+    expect(todaysPricesMessage({ ...t, changedCount: 3 })).toEqual({
       title: "3 lines now use today's Tier 1 prices",
       body: 'Total went from $14,380.00 to $14,422.50. Save draft to keep it.',
     });
   });
   it('says nothing changed', () => {
-    expect(todaysPricesMessage(before, before, 1)).toEqual({
+    expect(todaysPricesMessage({ ...t, changedCount: 0 })).toEqual({
       title: "Prices already match today's Tier 1 prices",
       body: 'Nothing changed.',
     });
   });
   it('uses singular for one line', () => {
-    const after = [{ ...before[0], price: 12 }, ...before.slice(1)];
-    expect(todaysPricesMessage(before, after, 2).title).toBe("1 line now uses today's Tier 2 prices");
+    expect(todaysPricesMessage({ ...t, changedCount: 1, tier: 2 }).title).toBe("1 line now uses today's Tier 2 prices");
   });
 });

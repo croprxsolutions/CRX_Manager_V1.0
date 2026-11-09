@@ -29,15 +29,12 @@ export function lineNeedsRemoveConfirm(item: { product_id: string | null; units_
   return !!item.product_id || (item.units_needed ?? 0) > 0;
 }
 
-type PricedLine = { price: number; total: number };
-
-/** Toast copy after "Use today's prices". Lines are paired by index. */
-export function todaysPricesMessage(before: PricedLine[], after: PricedLine[], tier: number): { title: string; body: string } {
-  const changed = after.filter((l, i) => l.price !== before[i]?.price).length;
-  if (changed === 0) return { title: `Prices already match today's Tier ${tier} prices`, body: 'Nothing changed.' };
-  const sum = (ls: PricedLine[]) => ls.reduce((t, l) => t + l.total, 0);
+/** Toast copy after "Use today's prices". Totals are the page's own rounded totals; only formatted here. */
+export function todaysPricesMessage(a: { changedCount: number; beforeTotal: number; afterTotal: number; tier: number }): { title: string; body: string } {
+  const { changedCount: n, beforeTotal, afterTotal, tier } = a;
+  if (n === 0) return { title: `Prices already match today's Tier ${tier} prices`, body: 'Nothing changed.' };
   return {
-    title: `${changed} ${changed === 1 ? 'line now uses' : 'lines now use'} today's Tier ${tier} prices`,
-    body: `Total went from ${formatUSD(sum(before))} to ${formatUSD(sum(after))}. Save draft to keep it.`,
+    title: `${n} ${n === 1 ? 'line now uses' : 'lines now use'} today's Tier ${tier} prices`,
+    body: `Total went from ${formatUSD(beforeTotal)} to ${formatUSD(afterTotal)}. Save draft to keep it.`,
   };
 }

@@ -231,7 +231,7 @@ const noteCodes = (report) => report.notes.map((n) => n.note_code).sort();
 // ---------------------------------------------------------------------------------------------
 
 function session(app, uid, sql) {
-  const child = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -252,6 +252,7 @@ async function holdThenWait(name, holder, waiter) {
   waitUntil("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = 'rt1_wait' AND wait_event_type = 'Lock');", `${name}: waiter blocked on a lock`);
   const [ra, rb] = await Promise.all([a, b]);
   assert.equal(ra.status, 0, `${name} holder: ${ra.out}`);
+  assert.doesNotMatch(ra.out, /ERROR/, `${name} holder: ${ra.out}`);
   assert.doesNotMatch(ra.out + rb.out, /deadlock/i);
   console.log(`R11 ${name}: the second session waited on a lock; no deadlock`);
   return rb;
@@ -266,6 +267,13 @@ const setParentRatesSql = (parent, rate, unit) => `SELECT public.set_parent_rate
 // ---------------------------------------------------------------------------------------------
 
 try {
+  if (reuse) {
+    // Reuse drops tables and rewrites rows, so it only runs on a harness-built scratch container: the pinned image,
+    // no network and a tmpfs data directory (nothing it holds outlives the container).
+    const info = docker(['inspect', '--format', '{{.Config.Image}}|{{.HostConfig.NetworkMode}}|{{json .HostConfig.Tmpfs}}', NAME]).stdout.trim();
+    assert.match(info, /^public\.ecr\.aws\/supabase\/postgres:17\.6\.1\.143\|none\|.*"\/var\/lib\/postgresql\/data"/,
+      `RT1_PROOF_REUSE refuses ${NAME}: not a scratch proof container (${info})`);
+  }
   if (!reuse) buildContainer({ stopBefore: PARENT_MIGRATION });
   if (scalar("SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '20261217100000_job_access_ends_with_the_job';") === '0') {
     // 20261217100000's preflight needs row security on storage.objects, as live has it (the container's stub has it off).
@@ -585,17 +593,20 @@ try {
     asAuth(`SELECT ${save(r11, { basis: 'per_acre', source: 'label', rec: 1, unit: 'qt' })};`),
     asAuth(setParentRatesSql(r11, 1, 'qt')));
   assert.equal(waiter.status, 0, waiter.out);
+  assert.doesNotMatch(waiter.out, /ERROR/, waiter.out);
   // (b) a REG-1 writer (exclusive advisory pair) lowers the maximum; a save waits, then sees the new maximum.
   waiter = await holdThenWait('REG-1 writer holds, save waits',
     `SELECT pg_advisory_xact_lock(20261210, hashtext('crx_epa_registration'));
      UPDATE public.epa_registrations SET max_label_rate = 20, registration_version = registration_version + 1 WHERE epa_registration = '100-9';`,
     asAuth(`SELECT ${save(r11, { basis: 'per_acre', source: 'house_standard', rec: 1.5, unit: 'pt' })};`));
+  assert.notEqual(waiter.status, 0, 'the save must be refused');
   assert.match(waiter.out, /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED: 1\.5 pt is above the label maximum 20 oz\/acre on EPA 100-9/);
   // (c) set_parent_rates holds the parent; a draft save waits, then finishes.
   waiter = await holdThenWait('set_parent_rates holds, save waits',
     asAuth(setParentRatesSql(r11, 1, 'qt')),
     asAuth(`SELECT ${save(r11, { basis: 'per_100_gal', source: 'label', rec: 2, unit: 'qt' })};`));
   assert.equal(waiter.status, 0, waiter.out);
+  assert.doesNotMatch(waiter.out, /ERROR/, waiter.out);
   assert.deepEqual(rates(r11).map((x) => `${x.source}/${x.basis}`), ['label/per_100_gal', 'label/per_acre']);
 
   // R12 at the end: R11's set_parent_rates rewrote the same values, so nothing a reader shows changed.

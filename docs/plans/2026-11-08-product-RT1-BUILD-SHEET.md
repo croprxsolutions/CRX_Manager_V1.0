@@ -252,7 +252,7 @@ Functions:
 Every mutating RPC:
 - takes `p_idempotency_key text DEFAULT NULL` and refuses a missing key (`IDEMPOTENCY_KEY_REQUIRED`);
 - calls `_product_parent_replay(p_idempotency_key, '<rpc name>', v_fp)` before any other lock. The helper itself first takes `pg_advisory_xact_lock(hashtext('crx.product_parent:' || scope || ':' || key))` (`20261108120000_product_parents.sql:499`), so two requests with the same key run one after the other and the second finds the first's receipt; no extra key lock is needed, where `v_fp` is the md5 of a jsonb of every argument plus `actor_id`;
-- ends with `save_idempotency(p_idempotency_key, '<rpc name>', v_result)`.
+- ends with `save_idempotency(p_idempotency_key, '<rpc name>', jsonb_build_object('actor_id', v_actor, 'request_fingerprint', v_fp, 'response', v_result))` and then `RETURN v_result` (unwrapped). The envelope is required: `_product_parent_replay` compares `actor_id` and `request_fingerprint` and returns `response` (`20261108120000_product_parents.sql:502-506`), and `save_idempotency` stores its argument unchanged. This matches `create_product_with_parent` (same file, lines 797-800). Saving `v_result` bare would make every identical retry fail `IDEMPOTENCY_PAYLOAD_MISMATCH` instead of replaying; R16 proves the replay.
 
 ---
 

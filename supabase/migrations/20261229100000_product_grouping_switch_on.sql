@@ -57,6 +57,14 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a function this switch opens changed since review; re-review it first';
   END IF;
+  -- The helpers those six reach (every _product_parent_* and _product_name_* function except the switch): one
+  -- fingerprint over their 19 bodies (read from live 2026-11-09), so a changed, added or dropped helper refuses too.
+  IF (SELECT md5(string_agg(md5(replace(p.prosrc, chr(13), '')), ',' ORDER BY md5(replace(p.prosrc, chr(13), ''))))
+        FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace AND p.proname ~ '^_product_(parent|name)_'
+         AND p.proname <> '_product_parent_grouping_open') IS DISTINCT FROM 'bccbc3ae6d108ff1ff61bf812cfcd906' THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping helper changed since review; re-review it first';
+  END IF;
   IF (SELECT count(*) FROM pg_proc WHERE proname IN ('upsert_parent_brand', 'approve_product_parent_groups')
         AND pronamespace = 'public'::regnamespace) <> 2 THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: expected exactly one upsert_parent_brand and one approve_product_parent_groups';

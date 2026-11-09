@@ -7,7 +7,8 @@
 -- without this they would lose the pound figure they show today. Mason, 2026-11-09: these products are
 -- priced by the pound, so the figure must be pounds.
 --
--- WHAT: one new case in the dry branch, 'DRY OZ' -> value / 16, unit 'LB'. Every other input returns exactly
+-- WHAT: one new case in the dry branch, 'DRY OZ' -> value / 16, unit 'LB', and the unit is trimmed before matching
+-- (as the screen preview already does, so ' Dry oz ' previews and saves alike). Every other input returns exactly
 -- what it returned before. The liquid branch is unchanged, so "Dry oz" on a liquid product stays NULL (a unit
 -- of the wrong form is never guessed). Callers only store the returned pair (no branch, no money math):
 -- _transfer_job_to_invoice_intent_impl_20260908 and _save_field_app_invoice_impl_20260714. Saved invoice and
@@ -39,14 +40,14 @@ BEGIN
 
   IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;
   IF p_product_form = 'dry' THEN
-    CASE upper(p_rate_unit)
+    CASE upper(btrim(p_rate_unit))
       WHEN 'OZ', 'DRY OZ', 'OUNCE', 'OUNCES' THEN converted_value := p_total_applied / 16.0; converted_unit := 'LB';
       WHEN 'LB', 'LBS', 'POUND', 'POUNDS' THEN converted_value := p_total_applied;  converted_unit := 'LB';
       WHEN 'TON', 'TONS' THEN converted_value := p_total_applied * 2000.0;          converted_unit := 'LB';
       ELSE converted_value := NULL; converted_unit := NULL;
     END CASE;
   ELSE
-    CASE upper(p_rate_unit)
+    CASE upper(btrim(p_rate_unit))
       WHEN 'OZ', 'FL OZ', 'FLOZ', 'FLUID OUNCE' THEN converted_value := p_total_applied / 128.0; converted_unit := 'GL';
       WHEN 'PT', 'PINT', 'PINTS' THEN converted_value := p_total_applied / 8.0;   converted_unit := 'GL';
       WHEN 'QT', 'QUART', 'QUARTS' THEN converted_value := p_total_applied / 4.0;   converted_unit := 'GL';
@@ -72,6 +73,10 @@ BEGIN
   SELECT * INTO r FROM public.convert_to_gl_lb(16, 'Dry oz', 'dry');
   IF r.converted_value IS DISTINCT FROM 1 OR r.converted_unit IS DISTINCT FROM 'LB' THEN
     RAISE EXCEPTION 'GLLB_DRY_OZ_POSTFLIGHT: 16 Dry oz on a dry product is not 1 LB';
+  END IF;
+  SELECT * INTO r FROM public.convert_to_gl_lb(16, ' Dry oz ', 'dry');
+  IF r.converted_value IS DISTINCT FROM 1 OR r.converted_unit IS DISTINCT FROM 'LB' THEN
+    RAISE EXCEPTION 'GLLB_DRY_OZ_POSTFLIGHT: a padded unit does not convert as the preview does';
   END IF;
   SELECT * INTO r FROM public.convert_to_gl_lb(16, 'oz', 'dry');
   IF r.converted_value IS DISTINCT FROM 1 OR r.converted_unit IS DISTINCT FROM 'LB' THEN

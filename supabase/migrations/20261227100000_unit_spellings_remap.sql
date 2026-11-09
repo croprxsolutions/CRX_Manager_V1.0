@@ -135,6 +135,15 @@ BEGIN
     RAISE EXCEPTION 'RT2A_UNLISTED_SPELLING: these products, families or form units use Oz, Qt or LB but are not in the reviewed list, nothing was changed: %', v_bad;
   END IF;
 
+  -- A rate-unit move must not split a product's label maximum from its rate (the label check compares unit
+  -- names, so "2 oz" against a "Dry oz" rate would stop being checked). Live 2026-11-09: none of the three has one.
+  SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad
+    FROM rt2a_map m JOIN public.products p ON p.id = m.id
+   WHERE m.kind = 'rate' AND (p.max_label_rate IS NOT NULL OR NULLIF(btrim(p.max_label_rate_unit), '') IS NOT NULL);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'RT2A_LABEL_RATE: these products have a label maximum, nothing was changed: %', v_bad;
+  END IF;
+
   -- No listed product may be in a family (its rate is the family's) or carry a net weight (a stock-unit change
   -- would send it back to draft).
   SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad

@@ -399,6 +399,13 @@ async function main() {
   raw("DELETE FROM public.product_form_units WHERE product_form = 'seed' AND unit = 'LB';");
   console.log('[prover] U8: an unlisted product, or a form-unit entry, using LB refuses');
 
+  // Sol round 2 HIGH: a product whose rate unit moves must not carry a label maximum (it would stop being checked).
+  const dryRow = rows.find((r) => r.neu === 'Dry oz');
+  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'oz' WHERE id = '${dryRow.id}';`);
+  refused('cand.sql', new RegExp(`RT2A_LABEL_RATE[^\\n]*${esc(dryRow.name)}`));
+  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${dryRow.id}';`);
+  console.log('[prover] label: a moving rate unit with a label maximum refuses');
+
   // The remap refuses until 20261227090000 is live (put the old converter back, refuse, re-apply the new one).
   assert.equal(apply('gllb-old.sql').status, 0);
   refused('cand.sql', /RT2A_GLLB_FIRST/);
@@ -470,6 +477,8 @@ async function main() {
     assert.equal(scalar(`SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.products p,
         public.convert_to_gl_lb(16, p.rate_unit, p.product_form) c WHERE p.id = '${row.id}';`), '1.00000000000000000000 LB', `${row.name} pound equivalent`);
   }
+  // Sol round 2 LOW: the saved figure trims the unit, as the screen preview does.
+  assert.equal(scalar("SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.convert_to_gl_lb(16, ' Dry oz ', 'dry') c;"), '1.00000000000000000000 LB');
   console.log('[prover] gl/lb: 16 Dry oz of each moved dry product is 1 LB');
   console.log('[prover] U13: after the apply a stock-unit change is still refused');
 

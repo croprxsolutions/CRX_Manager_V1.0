@@ -23,7 +23,7 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261214100000_ki30_epa_registration_corrections.sql');
-const FOLLOW_UP = path.join(MIGRATIONS, '20261214100100_ki30_epa_followup_checks.sql');
+const FOLLOW_UP = path.join(MIGRATIONS, '20261215120000_ki30_epa_followup_checks.sql');
 const FOLLOW_UPS = [FOLLOW_UP];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();

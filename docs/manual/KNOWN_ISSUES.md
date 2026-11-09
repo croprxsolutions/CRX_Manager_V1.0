@@ -510,6 +510,8 @@ any already waiting (board splits and undispatched locations left alone; a job a
 same instant waits for the activation instead of being missed; proof
 `scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
+Taha's review: a job reassigned to an inactive applicator keeps the old applicator's dispatch row after re-activation.
+Kept as designed (Mason, DECISION_LOG 2026-11-08): both sprayers can see and start it, proved in the same script.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**

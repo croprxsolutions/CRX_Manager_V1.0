@@ -355,11 +355,12 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   if (opts.show_shares && data.shares && data.shares.length > 1) {
     const base = data.job_number || data.invoice_number;
     const hasPerAcre = data.shares.some((s) => s.price_per_acre_cents != null);
-    // A Bill Split's payers have no acres, and a landlord isn't a grower.
+    // With no acres anywhere, drop the empty column and say Customer (Chem Man's word), which fits a Bill Split
+    // payer (a landlord isn't a grower) and a legacy grower split alike.
     const hasAcres = data.shares.some((s) => s.acres != null);
     const shareHead = hasPerAcre
       ? [['Ref', 'Grower', '$/Acre', 'Share', 'Acres', 'Amount']]
-      : hasAcres ? [['Ref', 'Grower', 'Share', 'Acres', 'Amount']] : [['Ref', 'Payer', 'Share', 'Amount']];
+      : hasAcres ? [['Ref', 'Grower', 'Share', 'Acres', 'Amount']] : [['Ref', 'Customer', 'Share', 'Amount']];
     const shareBody = data.shares.map((s, idx) => {
       const ref = s.invoice_number || deriveSplitRef(base, idx, true);
       const name = s.pricing_note ? `${s.customer_name} (${s.pricing_note})` : s.customer_name;

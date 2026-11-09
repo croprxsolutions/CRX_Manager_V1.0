@@ -2160,7 +2160,7 @@ export default function OrderDetail() {
               mainCustomerName={customer?.farm_name || 'the main customer'}
               canEdit={canEditSplit}
               locked={sharesLocked}
-              onChanged={() => void fetchOrder()}
+              onChanged={() => fetchOrder()}
             />
           )}
         </Card>

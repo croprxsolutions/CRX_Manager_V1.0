@@ -22,7 +22,8 @@ interface Props {
   mainCustomerName: string;
   canEdit: boolean;
   locked: boolean;
-  onChanged: () => void;
+  /** Reloads the order; the editor stays locked until it resolves, so the next add checks the new shares. */
+  onChanged: () => void | Promise<unknown>;
 }
 
 /** A line's own payers, overriding the Bill Split card for that line (billing plan M2). */
@@ -40,11 +41,12 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       checkMutationResult(await run() as never, context);
       setCustomer(null);
       setPct('');
-      onChanged();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context } });
       toast('error', sanitizeError(err));
     }
+    // Refresh either way: a failed reply may still have committed, and a retry should see it.
+    try { await onChanged(); } catch { /* the order page reports its own load failure */ }
     setSaving(false);
   };
 

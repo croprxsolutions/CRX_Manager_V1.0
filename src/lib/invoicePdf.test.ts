@@ -245,6 +245,18 @@ describe('generateInvoicePdf', () => {
     expect(doc).toBe(mockDoc);
   });
 
+  it('Old Print names a share table with no acres "Customer", fitting a Bill Split payer and a legacy grower alike', async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      options: { format: 'legacy', show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Smith Farm', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && !h.includes('Acres'))).toBe(true);
+    expect(heads.some((h) => h.includes('"Payer"'))).toBe(false);
+  });
+
   it('handles field_application with finance charges', async () => {
     const doc = await generateInvoicePdf(makeInvoiceData({
       finance_charge_cents: 1500,

@@ -94,6 +94,34 @@ describe('LineBillSplit', () => {
     await waitFor(() => expect(screen.getByLabelText('Line split percent')).not.toBeDisabled());
   });
 
+  it('refreshes the shares even when a save fails, since the insert may have committed', async () => {
+    const select = vi.fn().mockResolvedValue({ data: null, error: new Error('network') });
+    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select })) });
+    render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(props.onChanged).toHaveBeenCalled());
+  });
+
+  it('stays locked until the refreshed shares arrive, so a second add checks the new list', async () => {
+    let refreshed: () => void = () => {};
+    const onChanged = vi.fn(() => new Promise<void>((resolve) => { refreshed = resolve; }));
+    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ data: [{}], error: null }) })) });
+    render(<LineBillSplit {...props} onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(screen.getByLabelText('Line split percent')).toBeDisabled();
+    refreshed();
+    await waitFor(() => expect(screen.getByLabelText('Line split percent')).not.toBeDisabled());
+  });
+
   it('refuses a line total over 100% before saving', () => {
     render(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 60, customer: { farm_name: 'Farmer' } }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
@@ -104,7 +132,7 @@ describe('LineBillSplit', () => {
     expect(mocks.from).not.toHaveBeenCalled();
   });
 
-  it('shows the database refusal when a save fails, and stays unchanged', async () => {
+  it('shows the database refusal when a save fails, and keeps what was typed', async () => {
     mocks.from.mockReturnValue({ insert: () => ({ select: () => Promise.resolve({ data: null, error: new Error('BILL_SPLIT_FROZEN') }) }) });
     render(<LineBillSplit {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
@@ -113,7 +141,7 @@ describe('LineBillSplit', () => {
     fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '100' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringContaining('BILL_SPLIT_FROZEN')));
-    expect(props.onChanged).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Line split percent')).toHaveValue(100);
   });
 
   it('removes a line share', async () => {

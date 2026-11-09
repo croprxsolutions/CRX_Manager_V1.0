@@ -6,6 +6,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
+import { quoteStatusLabel } from '../lib/quoteStatusLabel';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
@@ -513,7 +514,7 @@ export default function Quotes() {
       render: (row) => (
         <>
           <Badge variant={statusToBadgeVariant[row.status] || 'default'}>
-            {row.status === 'closed_by_application' ? 'Fulfilled (Applied)' : row.status === 'closed_short' ? 'Closed — Short' : row.status.replace('_', ' ')}
+            {quoteStatusLabel(row.status)}
           </Badge>
           {row.is_planned && (
             <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded">
@@ -726,8 +727,8 @@ export default function Quotes() {
                   <option value="declined">Declined</option>
                   <option value="expired">Expired</option>
                   <option value="cancelled">Cancelled</option>
-                  <option value="closed_by_application">Fulfilled (Applied)</option>
-                  <option value="closed_short">{'Closed — Short'}</option>
+                  <option value="closed_by_application">{quoteStatusLabel('closed_by_application')}</option>
+                  <option value="closed_short">{quoteStatusLabel('closed_short')}</option>
                 </select>
                 <button
                   onClick={() => setPlannedFilter(!plannedFilter)}

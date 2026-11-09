@@ -481,6 +481,18 @@ async function main() {
   assert.deepEqual(closed(REP, 7, 'handled', 'k-7rh').outcome, 'closed');
   console.log('[prover] no row answers none; drivers are refused even on their own delivery; the office may pause and close');
 
+  // A delivery that is no longer completed (removed here) gives no go-ahead for a hand send, not even on a replayed key;
+  // closing it is still allowed (Sol HIGH, #1678).
+  psql(`SET session_replication_role = replica; UPDATE public.deliveries SET deleted_at = now() WHERE id = '${D(7)}';`);
+  refused(close(REP, 7, 'manual_send', 'k-7r'), /DELIVERY_NOT_COMPLETED/);  // its earlier answer was 'paused'
+  refused(close(ADMIN, 7, 'manual_send', 'k-7n'), /DELIVERY_NOT_COMPLETED/);
+  // Closing it is still allowed, and a long earlier message is kept whole under the new note (Sol LOW).
+  const long = 'x'.repeat(499) + 'Z';
+  psql(`SET session_replication_role = replica; UPDATE public.delivery_receipt_queue SET status = 'needs_check', last_error = '${long}' WHERE delivery_id = '${D(7)}';`);
+  assert.equal(closed(ADMIN, 7, 'handled', 'k-7h2').outcome, 'closed');
+  assert.match(row(7, 'last_error'), /^Marked handled by .* Was: x{499}Z$/);
+  console.log('[prover] a removed delivery gives no hand-send go-ahead, even on a replay; a long earlier message is kept whole');
+
   // Same instant, close first: the worker's confirm waits for the close, then sees it and says stale.
   due(8);
   const c8 = claim().find((c) => c.delivery_id === D(8));

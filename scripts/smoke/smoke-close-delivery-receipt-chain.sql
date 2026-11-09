@@ -4,10 +4,11 @@
 -- Live-safe, rolled back by design. Plants no rows: it calls the RPC as a real active admin on a delivery id that
 -- does not exist, and (when one exists) on a real receipt the server already sent, then rolls everything back.
 --   1. no signed-in user -> AUTH_REQUIRED; no key -> IDEMPOTENCY_KEY_REQUIRED; bad reason -> RECEIPT_CLOSE_INVALID
---   2. admin, unknown delivery, 'handled' -> outcome none; same key replays the same answer; same key with
---      'manual_send' -> IDEMPOTENCY_INTENT_MISMATCH
+--   2. admin, unknown delivery, 'handled' -> outcome none; same key replays the same answer; 'manual_send' on a
+--      delivery that is not completed -> DELIVERY_NOT_COMPLETED (checked before any replay)
 --   3. an active driver -> INSUFFICIENT_ROLE (office only)
---   4. admin, a real sent receipt, 'manual_send' -> outcome sent with sent_at, row unchanged, no address returned
+--   4. admin, a real sent receipt of a completed delivery, 'manual_send' -> outcome sent with sent_at, row unchanged,
+--      no address returned; the same key with 'handled' -> IDEMPOTENCY_INTENT_MISMATCH
 --   5. grants: authenticated EXECUTE; anon and service_role none
 -- The full behaviour (pause, close, in-flight refusal, races with the worker) needs seeded deliveries and is proved
 -- in scripts/smoke/prove-close-delivery-receipt-real-schema.mjs.
@@ -67,10 +68,10 @@ BEGIN
   IF v_res2 IS DISTINCT FROM v_res THEN RAISE EXCEPTION 'SMOKE_FAIL: replay answered % not %', v_res2, v_res; END IF;
   BEGIN
     PERFORM public.close_delivery_receipt(v_nowhere, 'manual_send', 'smk-cdr-' || v_suffix || '-1');
-    RAISE EXCEPTION 'SMOKE_FAIL: a reused key with another reason was not refused';
+    RAISE EXCEPTION 'SMOKE_FAIL: manual_send on a delivery that is not completed was not refused';
   EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
-    IF v_msg NOT LIKE 'IDEMPOTENCY_INTENT_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: reused key: %', v_msg; END IF;
+    IF v_msg NOT LIKE 'DELIVERY_NOT_COMPLETED%' THEN RAISE EXCEPTION 'SMOKE_FAIL: not completed: %', v_msg; END IF;
   END;
 
   -- 3. A driver is refused: the call is office only.
@@ -88,7 +89,8 @@ BEGIN
   END IF;
 
   -- 4. A real receipt the server already sent: answered 'sent', unchanged, no address in the answer.
-  SELECT * INTO v_sent FROM public.delivery_receipt_queue WHERE status = 'sent' ORDER BY sent_at DESC LIMIT 1;
+  SELECT q.* INTO v_sent FROM public.delivery_receipt_queue q JOIN public.deliveries d ON d.id = q.delivery_id
+   WHERE q.status = 'sent' AND d.status = 'completed' AND d.deleted_at IS NULL ORDER BY q.sent_at DESC LIMIT 1;
   IF v_sent.id IS NOT NULL THEN
     v_res := public.close_delivery_receipt(v_sent.delivery_id, 'manual_send', 'smk-cdr-' || v_suffix || '-sent');
     IF v_res ->> 'outcome' IS DISTINCT FROM 'sent' OR v_res ->> 'sent_at' IS NULL OR v_res ? 'sent_to' THEN
@@ -98,6 +100,13 @@ BEGIN
     IF v_after.status IS DISTINCT FROM 'sent' OR v_after.updated_at IS DISTINCT FROM v_sent.updated_at THEN
       RAISE EXCEPTION 'SMOKE_FAIL: a sent receipt was changed';
     END IF;
+    BEGIN
+      PERFORM public.close_delivery_receipt(v_sent.delivery_id, 'handled', 'smk-cdr-' || v_suffix || '-sent');
+      RAISE EXCEPTION 'SMOKE_FAIL: a reused key with another reason was not refused';
+    EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      IF v_msg NOT LIKE 'IDEMPOTENCY_INTENT_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: reused key: %', v_msg; END IF;
+    END;
   END IF;
 
   -- 5. Grants.

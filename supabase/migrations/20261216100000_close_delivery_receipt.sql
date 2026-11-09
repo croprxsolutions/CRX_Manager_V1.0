@@ -97,6 +97,16 @@ BEGIN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE: only the office (admin or sales rep) can close a delivery receipt'
       USING ERRCODE = '42501';
   END IF;
+  -- A hand send is only for a completed, not deleted delivery (the server sender's own rule). Checked before a replay,
+  -- so a retry after a void cannot reuse an earlier go-ahead; FOR SHARE holds off a void until this call ends (Sol HIGH, #1678).
+  IF p_reason = 'manual_send' THEN
+    PERFORM 1 FROM public.deliveries d
+     WHERE d.id = p_delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt'
+        USING ERRCODE = '55000';
+    END IF;
+  END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'delivery_id', p_delivery_id, 'reason', p_reason));
@@ -125,15 +135,15 @@ BEGIN
        SET status = CASE WHEN p_reason = 'handled' THEN 'cancelled' ELSE 'needs_check' END,
            claim_token = NULL, claimed_at = NULL,
            last_error = left(CASE WHEN p_reason = 'handled'
-                                  THEN 'Marked handled by ' || COALESCE(v_name, 'staff') || '; the server will not send it.'
-                                  ELSE 'Email Confirmation started by ' || COALESCE(v_name, 'staff')
+                                  THEN 'Marked handled by ' || left(COALESCE(v_name, 'staff'), 60) || '; the server will not send it.'
+                                  ELSE 'Email Confirmation started by ' || left(COALESCE(v_name, 'staff'), 60)
                                        || '; the server will not send it. If the customer did not get it, send it again.' END
                              -- Keep why it was listed: an earlier Email Confirmation note passes on its own "Was:" part (Taha, LOW).
                              || CASE WHEN v_row.status <> 'needs_check' OR v_row.last_error IS NULL THEN ''
                                      WHEN v_row.last_error NOT LIKE 'Email Confirmation started by %' THEN ' Was: ' || v_row.last_error
                                      WHEN strpos(v_row.last_error, ' Was: ') > 0
                                      THEN substr(v_row.last_error, strpos(v_row.last_error, ' Was: '))
-                                     ELSE '' END, 500)
+                                     ELSE '' END, 800)  -- room for the note plus a whole 500-character earlier message (Sol LOW)
      WHERE id = v_row.id;
   END IF;
   v_result := jsonb_build_object('delivery_id', p_delivery_id, 'outcome', v_outcome, 'previous_status', v_row.status,

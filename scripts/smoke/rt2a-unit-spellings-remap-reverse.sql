@@ -44,6 +44,20 @@ BEGIN
   IF (SELECT count(*) FROM public.unit_conversions WHERE unit IN ('Oz', 'Qt', 'LB')) <> 3 THEN
     RAISE EXCEPTION 'RT2A_REVERSE_ALIASES_GONE: Oz, Qt or LB is no longer a unit; recover step 2 first. Nothing was changed.';
   END IF;
+  -- Each old spelling must still price exactly like its winner, or restoring it would change later quotes.
+  IF EXISTS (SELECT 1 FROM (VALUES ('Oz', 'oz'), ('Qt', 'qt'), ('LB', 'Lb')) v(old_unit, new_unit)
+              WHERE (SELECT (factor_oz, unit_type) FROM public.unit_conversions WHERE unit = v.old_unit)
+                    IS DISTINCT FROM (SELECT (factor_oz, unit_type) FROM public.unit_conversions WHERE unit = v.new_unit)
+                 OR NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = v.new_unit)) THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_UNITS_DRIFT: Oz, Qt or LB no longer matches oz, qt or Lb. Nothing was changed.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
+              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')
+              AND tgenabled <> 'O')
+     OR (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
+              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')) <> 2 THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_GUARD_STATE: a product guard is missing or not in its normal on state. Nothing was changed.';
+  END IF;
   SELECT string_agg(r.product_name, ', ' ORDER BY r.product_name) INTO v_bad
     FROM rt2a_rev r LEFT JOIN public.products p ON p.id = r.id
    WHERE p.id IS NULL

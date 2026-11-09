@@ -471,6 +471,12 @@ async function main() {
 
   // U15. A second run is refused; the recovery script restores every unit column; re-apply works.
   refused('cand.sql', /RT2A_ROW_MOVED/);
+  raw("UPDATE public.unit_conversions SET factor_oz = 33 WHERE unit = 'Qt';");
+  refused('reverse.sql', /RT2A_REVERSE_UNITS_DRIFT/);
+  raw("UPDATE public.unit_conversions SET factor_oz = 32 WHERE unit = 'Qt';");
+  raw('ALTER TABLE public.products DISABLE TRIGGER trigger_zzz_guard_product_rate_lock;');
+  refused('reverse.sql', /RT2A_REVERSE_GUARD_STATE/);
+  raw('ALTER TABLE public.products ENABLE TRIGGER trigger_zzz_guard_product_rate_lock;');
   const rv = apply('reverse.sql');
   assert.equal(rv.status, 0, rv.output);
   assert.equal(units(), s0.units, 'U15: recovery restored every unit column');

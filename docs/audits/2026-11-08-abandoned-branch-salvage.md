@@ -15,14 +15,14 @@ Restore one with `git fetch <bundle> refs/heads/<branch>:refs/heads/<branch>`.
 
 | Branch | Tip | Why kept |
 |---|---|---|
-| `claude/loosen-claude-permissions-20260905` (PR #605) | `d5cc21353e` | Holds the env-guard comment fix (tooling-guards entry, PR #605 bullet); port it to current `main`, then delete |
+| `claude/loosen-claude-permissions-20260905` (PR #605) | `d5cc21353e` | Holds the env-guard fix (tooling-guards entry, PR #605 bullet); port it to current `main`, then delete |
 | `claude/review-proof-guard-worktree-path-7639d0` (PR #1536) | `b8ae8bf6e0` | Holds the false-refusal fix in KI-107; port it to current `main`, then delete |
 
 ## Recorded in KNOWN_ISSUES.md
 
 | KI | What | Source branch (tip) |
 |---|---|---|
-| tooling-guards entry, PR #605 bullet | A code comment that mentions `service_role` switches off part of `env-guard`'s secret-key check. (The MultiEdit gap on the same branch was already recorded and ACCEPTED on 2026-11-02.) | `claude/loosen-claude-permissions-20260905` (`d5cc21353e`) |
+| tooling-guards entry, PR #605 bullet | A gap in `env-guard`'s frontend secret-key checks (details withheld until the fix ships). (The MultiEdit gap on the same branch was already recorded and ACCEPTED on 2026-11-02.) | `claude/loosen-claude-permissions-20260905` (`d5cc21353e`) |
 | KI-107 | Review-proof guard refuses a delete after `cd` into a worktree when any part of the command has `..` or a variable | `claude/review-proof-guard-worktree-path-7639d0` (`b8ae8bf6e0`) |
 | KI-108 | Five products' stored stock did not match their transaction history on 2026-11-01 | `ops/integrity-report-2026-11-01` (`54cc6398b2`, PR #1230) |
 | KI-109 | Product Master follow-ups named in the Wave 2 report, never filed | `pm-w2-report-tmp` (`eea6cbc139`) |

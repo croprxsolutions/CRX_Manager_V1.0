@@ -1041,11 +1041,9 @@ service-role tools (LOW).
 - PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
   `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
   Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
-  Still open, not covered by that acceptance: `env-guard` skips its `SUPABASE_SERVICE_ROLE_KEY` check when the
-  written text also has a `//` comment with "never … service_role", and its `'service_role'` literal check when
-  it has any `//` comment mentioning `service_role`, so one comment lets a real key lookup through (LOW; read on
-  `main` 2026-11-08). PR #605's branch
-  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has a fix that scans comment-stripped code.
+  Still open, not covered by that acceptance: a separate gap in `env-guard`'s frontend secret-key checks (LOW;
+  confirmed on `main` 2026-11-08; details withheld until the fix ships). PR #605's branch
+  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has the fix.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

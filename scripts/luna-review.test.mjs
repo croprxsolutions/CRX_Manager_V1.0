@@ -247,8 +247,12 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const sol = lunaRoundsOn("docs/a.md", seeded, ["sol"]);
   assert.deepEqual([sol.spawned, sol.counter["feature luna-rounds"]], [1, 6]);
   // A damaged whole-branch count fails closed too.
-  const damaged = lunaRoundsOn("docs/a.md", JSON.stringify({ "feature luna-rounds": "six" }), ["luna"]);
-  assert.deepEqual([damaged.spawned, damaged.exits], [0, [EXIT_DID_NOT_RUN]]);
+  for (const bad of [{ "feature luna-rounds": "six" }, { "feature luna-rounds": -100 }, { "feature luna-unlocks": [null, null] },
+    { "feature luna-unlocks": [{ step: "simplify", reason: " " }] }, { "feature luna-unlocks": [{ step: "other", reason: "x" }] }]) {
+    const damaged = lunaRoundsOn("docs/a.md", JSON.stringify(bad), ["luna"]);
+    assert.deepEqual([damaged.spawned, damaged.exits], [0, [EXIT_DID_NOT_RUN]], JSON.stringify(bad));
+  }
+  assert.throws(() => parseArgs(["--after-simplify", "   "]), /needs a one-line reason/);
 }
 
 // Code health runs before the model when src/ changed: its FAIL stops the round with no model

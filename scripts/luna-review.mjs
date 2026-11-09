@@ -82,6 +82,7 @@ export function parseArgs(argv) {
     else if (AFTER_FLAGS[arg]) {
       if (opts.after) throw new Error("Give one --after-* flag per run: the one step you actually took.");
       opts.after = { step: AFTER_FLAGS[arg], reason: value(arg, ++i).trim() };
+      if (!opts.after.reason) throw new Error(`${arg} needs a one-line reason.`);
     }
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -375,8 +376,9 @@ function branchRounds(git, root) {
       counts = null;
     }
     const bad = !counts || typeof counts !== "object" || Array.isArray(counts)
-      || [branch, lunaKey].some((key) => counts[key] !== undefined && !Number.isSafeInteger(counts[key]))
-      || (counts[unlockKey] !== undefined && !Array.isArray(counts[unlockKey]));
+      || [branch, lunaKey].some((key) => counts[key] !== undefined && !(Number.isSafeInteger(counts[key]) && counts[key] >= 0))
+      || (counts[unlockKey] !== undefined && !(Array.isArray(counts[unlockKey])
+        && counts[unlockKey].every((entry) => typeof entry?.reason === "string" && entry.reason.trim() && Object.values(AFTER_FLAGS).includes(entry.step))));
     if (bad) throw new Error(`Luna round counter is unreadable: ${file}. Check it by hand; do not delete it to get another round.`);
   }
   const save = (key, value, what) => {

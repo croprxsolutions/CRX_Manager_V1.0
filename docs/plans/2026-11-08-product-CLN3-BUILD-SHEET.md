@@ -63,7 +63,7 @@ Typing slips seen in the lists: a double comma (an empty item), a leading space,
 
 | # | Grand plan | Today | This sheet |
 |---|---|---|---|
-| 1 | CLN-3 comes after brand PR B (section 8, item 7) | PR B does not change brand storage or `get_product_brands` (section 1) | No technical dependency on PR B. The check is equally correct before and after it. It depends only on the brand tables, which are live. Order is Mason's call (section 9). |
+| 1 | CLN-3 comes after brand PR B (section 8, item 7) | PR B does not change brand storage or `get_product_brands` (section 1) | No technical dependency on PR B. The check is equally correct before and after it. It depends only on the brand tables, which are live. Mason chose to build it before brand entry (section 9). |
 | 2 | "brand rows" | A grouped size's rows are its parent's, once the grouping switch is on; its own legacy rows are frozen history | Compare with the brand list (the `get_product_brands` rule), never with legacy rows of a grouped size |
 | 3 | "a report" (form not given) | The owner cannot run scripts (the EPA-check precedent) | An admin-only section on the existing Label Data Quality page (section 3 gives the reasons; a technical choice, not one for Mason) |
 
@@ -178,22 +178,20 @@ All of these, observed, not only tested:
 6. **The reads are not one snapshot.** If an admin changes brands or turns grouping on while the section is loading, one row can briefly show a false disagreement. The report is advisory and changes nothing, so this is accepted: the section shows the time it loaded and a Reload button, and a row is trusted only after a reload. A single database snapshot would need a new function and a migration (risk 1's upgrade path covers both).
 7. **Overlapping edits to `LabelDataQuality.tsx`.** REG-1's screen PR (2b) and PAR-1's screen PR also edit this page. CLN-3 adds one import and one line, so a clash is a trivial merge; build it in whichever order they land.
 
-**Sol list:** no (no listed path; no migration). Lands on green checks after Luna, held open 4 hours under Taha's rule. **Mason-gated:** no live action (no live write, no permission change). The one planning question, build order, is in section 9.
+**Sol list:** no (no listed path; no migration). Lands on green checks after Luna, held open 4 hours under Taha's rule. **Mason-gated:** no live action (no live write, no permission change). Build order is decided: before brand entry (section 9).
 
 ## 8. Order and dependencies
 
 - **Can be built now.** Every table and function it reads is live on `main`. It does not depend on PR B (section 2, row 1).
 - **Useful from** the first brand rows: Mason's brand entry for ungrouped sizes, or PAR-2's grouping data step for grouped ones. Before then it is a worklist of names that carry brands.
-- **The grand plan's order** puts it after PR B. Section 9 asks Mason whether to keep that or build it early as a brand-entry worklist.
+- **The grand plan's order** put it after PR B. Mason chose to build it early instead, as a brand-entry worklist (section 9).
 
 ## 9. Questions for Mason
 
 **Decided, no answer needed:** the report is a section on the existing admin page **Label Data Quality**, so you can open it yourself any time, with no database change (section 3 gives the reasons).
 
-**NEEDS MASON - DECISION REQUIRED: when should it be built?**
-The report lists every product whose name has brand names in brackets that do not match the brands saved for that product. It changes nothing.
-- **Recommended:** build it **before** you start typing brands in, so it works as your worklist (today it would show about 100 products whose names carry brands that are not entered yet; a few of those are notes, not brands) and then as the check that the two stay in step.
-- The other choice: keep the grand plan's order and build it after brand PR B. Nothing breaks either way; PR B does not change what this report reads.
+**Decided (Mason, 2026-11-09: "I agree build report before typing in brands"): build it before brand entry starts.**
+The report lists every product whose name has brand names in brackets that do not match the brands saved for that product. It changes nothing. Built first, it works as Mason's brand-entry worklist (today about 100 products whose names carry brands not entered yet; a few of those are notes, not brands), then as the check that the two stay in step. This replaces the grand plan's after-PR-B order; PR B does not change what this report reads, so nothing waits on it.
 
 **No decision needed, but Mason should know:** when the report shows a disagreement, it does not say which side is right. You fix each one yourself, by renaming the product or by editing its brand list on the product page, as today.
 

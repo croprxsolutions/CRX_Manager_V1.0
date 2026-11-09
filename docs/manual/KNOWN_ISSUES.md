@@ -883,6 +883,9 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 - Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
   keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
   part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
+- DEFERRED (LOW, Sol 2026-11-08, part C): `start_job` and `complete_job` return a matching idempotency result before
+  the job-access check, so a former applicator replaying their own key gets back the earlier result (ids they already
+  had). Nothing new is written. Fix: check access before the replay lookup.
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
   billing splits and spray-record field/acres data through `field_billing_defaults` and
   `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.

@@ -182,7 +182,7 @@ function snapshot() {
   const reads = Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)]));
   const fns = {};
   for (const [r, cases] of Object.entries(FIELD_CASES)) for (const n of cases) fns[`${r} job ${n}`] = calls(ROLES[r], n);
-  const dispatchLists = Object.fromEntries(['W', 'D'].map((r) => [r, lists(ROLES[r])]));
+  const dispatchLists = Object.fromEntries(['W', 'D', 'admin'].map((r) => [r, lists(ROLES[r])]));
   const attach = { 'W job 1': canAttach(W, 1), 'W job 4': canAttach(W, 4), 'D job 9': canAttach(D, 9) };
   return { reads, fns, dispatchLists, attach };
 }
@@ -282,8 +282,8 @@ try {
     'D job 9': yes, 'D job 10': no, 'D job 14': no, 'D job 17': no, 'D job 18': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
   });
   // "<dispatched list> <dispatch board>" per applicator; the board never showed deleted jobs.
-  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,15,16,2,3,4,6', D: '14,17,18,9 17,9' }); // text order
-  assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,16,2,6', D: '9 9' }, 'the board drops the ended jobs');
+  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,15,16,2,3,4,6', D: '14,17,18,9 17,9', admin: '1,13,14,17,18,2,6,8,9 -' }); // text order
+  assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,16,2,6', D: '9 9', admin: '1,13,17,18,2,6,8,9 -' }, 'the board drops the ended jobs; office staff still list a dispatch left open on an old invoiced job (17)');
   assert.deepEqual(before.attach, { 'W job 1': 'yes', 'W job 4': 'yes', 'D job 9': 'no' }, 'before: the whole-job applicator writes to a cancelled job');
   assert.deepEqual(after.attach, { 'W job 1': 'yes', 'W job 4': 'no', 'D job 9': 'no' }, 'writes reaching the job through jobs inherit the window; dispatch stays read-only');
 

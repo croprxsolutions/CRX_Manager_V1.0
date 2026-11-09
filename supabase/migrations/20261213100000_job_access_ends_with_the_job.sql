@@ -1933,7 +1933,7 @@ AS $function$
   )
     FROM public.job_location_dispatches d
     JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL AND j.status <> 'cancelled'  -- KI-73 part C
-                             AND (j.status IN ('scheduled', 'in_progress') OR j.completed_at >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
+                             AND (is_admin() OR is_sales_rep() OR j.status IN ('scheduled', 'in_progress') OR j.completed_at >= now() - interval '7 days')  -- KI-73 part C: for field callers, a finished job's dispatch ends 7 days after the job (office staff still see a row left open)
     JOIN public.job_fields jf ON jf.id = d.job_field_id
     JOIN public.customers c   ON c.id = j.customer_id
    WHERE (
@@ -2075,7 +2075,7 @@ BEGIN
       ('public.get_jobs_billed_customers(uuid[])',                                                                         '42bb182795a3a5cbbcf3106eaab97625'),
       ('public.get_job_billed_customers(uuid)',                                                                            '316d0eb63b76ef9a640a70db22b4f40c'),
       ('public.get_dispatch_board_jobs(uuid,text,date,date)',                                                              'cc849915c479a72bc391f359ccd1fa8f'),
-      ('public.get_dispatched_list(uuid,uuid)',                                                                            'da281bd439301e58ea97f669c5324e5e')
+      ('public.get_dispatched_list(uuid,uuid)',                                                                            '4aa483b79727c0cafd883ba8ec73fb4b')
       ) AS t(sig, new_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(t.sig)
       -- CREATE OR REPLACE keeps each OID, so the preflight snapshot is matched by OID.

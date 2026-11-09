@@ -65,6 +65,14 @@ Rollout: a whole-job applicator of a job finished in the week before the apply t
 loses it at once, not 7 days later (no `completed_at` yet). Live on 2026-11-08 there is no such job (the
 only finished job, invoiced in August, has a dispatch row); re-check right before the apply.
 
+Office staff still see, in the dispatched list, a dispatch row left open on a job invoiced more than 7 days
+ago (Sol MED), so it can be cleaned up; the 7-day clock there applies to field callers only.
+
+Deferred (Sol LOW, 2026-11-08): `start_job` and `complete_job` answer a repeated request (same
+idempotency key) with their earlier result before the access check, so a former applicator replaying
+their own key still gets back that result (job or record ids they already had). Nothing new is written.
+Tracked in KI-73.
+
 ### Doc stamps
 
 `CURRENT_STATE.md` and `KNOWN_ISSUES.md` re-stamped 2026-11-08 for the live ledger only: a read-only

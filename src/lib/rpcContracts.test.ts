@@ -3144,13 +3144,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
-  // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
-  _record_customer_document_restore:
-    'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
-  guard_invoice_terminal_order:
-    'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
-  _create_bill_split_delivery_invoices:
-    'private writer of Bill Split drafts (billing plan M2); complete_delivery and create_invoice_for_unbilled_delivery own idempotency and every application-role EXECUTE is revoked',
+  // Pruned 2026-11-09 when the registry high-water moved to 20261222100000 (all live):
+  // _record_customer_document_restore (20261222100000), guard_invoice_terminal_order and
+  // _create_bill_split_delivery_invoices (20261215110000), _sync_job_location_dispatch_on_applicator_qualify (20261215100000).
   // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.
   _snapshot_financial_hard_delete:
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
@@ -3205,10 +3201,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
-  // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
-  // Prune once applied and the registry high-water moves past it.
-  _sync_job_location_dispatch_on_applicator_qualify:
-    'AFTER UPDATE OF is_active, role row trigger on profiles: when a person becomes an active applicator it inserts dispatch rows only for their open-job locations with none, ON CONFLICT (job_field_id) DO NOTHING, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // 20261207100000 (DM-2, local candidate): private helpers and trigger functions. Prune once applied
   // and the registry high-water moves past it.
   _write_parent_density: 'internal DM-2 helper (20261207100000): called only by the keyed weight writers after their own replay check; every API-role EXECUTE is revoked',

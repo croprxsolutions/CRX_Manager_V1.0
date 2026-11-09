@@ -6147,6 +6147,7 @@ export type Database = {
           call_date: string | null
           carrier_rate_gpa: number | null
           commission_split: Json | null
+          completed_at: string | null
           consultant_id: string | null
           created_at: string
           created_by: string | null
@@ -6194,6 +6195,7 @@ export type Database = {
           call_date?: string | null
           carrier_rate_gpa?: number | null
           commission_split?: Json | null
+          completed_at?: string | null
           consultant_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -6241,6 +6243,7 @@ export type Database = {
           call_date?: string | null
           carrier_rate_gpa?: number | null
           commission_split?: Json | null
+          completed_at?: string | null
           consultant_id?: string | null
           created_at?: string
           created_by?: string | null

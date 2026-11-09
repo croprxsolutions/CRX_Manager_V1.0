@@ -72,6 +72,9 @@ test.describe('Quotes list width guard', () => {
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+    // The name wraps rather than truncating: all of it is shown, nothing is clipped.
+    await expect(label).toHaveText(name);
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)).toBe(true);
     await expectNoSideScroll(page);
     await page.screenshot({ path: 'test-results/ui-widths/quotes-360-long-name.png', fullPage: true });
   });

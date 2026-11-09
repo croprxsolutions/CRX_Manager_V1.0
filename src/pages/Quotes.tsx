@@ -429,7 +429,7 @@ export default function Quotes() {
         disabled={!hasSelectable}
         className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
       />
-      ),
+    ),
   };
 
   const filtersActive = !!statusFilter || plannedFilter;
@@ -640,7 +640,8 @@ export default function Quotes() {
           <span className="ml-auto">{statusBadge(row)}</span>
           <span className="relative z-10 -mr-1.5">{rowMenu(row)}</span>
         </div>
-        <span className="truncate text-base font-medium text-nav-dark" title={customerName(row)}>{customerName(row)}</span>
+        {/* Wraps instead of truncating: a phone has no hover to read a cut-off name. */}
+        <span className="break-words text-base font-medium text-nav-dark">{customerName(row)}</span>
         <span className="flex items-baseline justify-between gap-2 tabular-nums">
           <span className="min-w-0 text-sm text-secondary">
             Tier {row.tier}
@@ -649,7 +650,7 @@ export default function Quotes() {
               <>
                 {' · '}
                 <span className={pastDue ? 'text-red-600 font-medium' : undefined}>
-                  Expires {shortDate(parseLocalDate(row.expires_at), false)}{pastDue && ' (past due)'}
+                  Expires {shortDate(parseLocalDate(row.expires_at), row.expires_at.slice(0, 4) !== localToday().slice(0, 4))}{pastDue && ' (past due)'}
                 </span>
               </>
             )}
@@ -769,7 +770,7 @@ export default function Quotes() {
                               className="border-t border-cream-dark hover:bg-crx-green-tint cursor-pointer"
                               onClick={() => navigate(`/quotes/${b.quote_id}`)}
                             >
-                              <td className="px-4 py-3 font-medium md:pl-5"><span className="block max-w-56 truncate" title={b.customer_name || undefined}>{b.customer_name || '-'}</span></td>
+                              <td className="px-4 py-3 font-medium md:pl-5"><span className="block min-w-32 max-w-56 break-words">{b.customer_name || '-'}</span></td>
                               <td className="px-3 py-3 font-medium text-crx-green whitespace-nowrap">{b.quote_number}</td>
                               <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(b.booked_cents / 100)}</td>
                               <td className="px-3 py-3 text-right whitespace-nowrap">{fmt(b.drawn_cents / 100)}</td>
@@ -809,8 +810,8 @@ export default function Quotes() {
             data={filtered}
             columns={columns}
             searchable
-            searchPlaceholder="Quote, customer or product"
-            searchLabel="Search by quote number, customer or product"
+            searchPlaceholder="Search by quote number, customer or product"
+            phoneSearchPlaceholder="Quote, customer or product"
             searchKeys={SEARCH_KEYS}
             searchValue={search}
             onSearchChange={setSearch}
@@ -861,9 +862,12 @@ export default function Quotes() {
                     Clear
                   </button>
                 )}
-                <span className="whitespace-nowrap text-sm text-secondary">
-                  {shownCount} {shownCount === 1 ? 'quote' : 'quotes'}
-                </span>
+                {/* A failed read shows no count: "0 quotes" would read as an empty list. */}
+                {!loadFailed && (
+                  <span className="whitespace-nowrap text-sm text-secondary">
+                    {shownCount} {shownCount === 1 ? 'quote' : 'quotes'}
+                  </span>
+                )}
                 {canBulkAction && hasSelectable && (
                   // Phones have no table header, so the select-all box sits here (md+ uses the header one).
                   <label className="inline-flex h-11 items-center gap-2 px-1 text-sm text-secondary md:hidden">

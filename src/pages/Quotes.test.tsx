@@ -153,11 +153,11 @@ describe('Quotes list', () => {
     expect(options).toEqual(['All', 'Draft', 'Sent', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
   });
 
-  it('search keeps its long accessible name with the short board placeholder, and Import quotes is reachable on phone too', async () => {
+  it('desktop search uses the long board placeholder, and Import quotes is reachable on phone too', async () => {
     H.tables.quotes = [quote(1, 'draft')];
     at('/quotes');
     await screen.findByText('Q-TEST-1');
-    expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' })).toHaveAttribute('placeholder', 'Quote, customer or product');
+    expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' })).toHaveAttribute('placeholder', 'Search by quote number, customer or product');
     // Desktop button, plus a ⋯ next to New quote for phones (CSS picks one).
     expect(screen.getByRole('button', { name: 'Import quotes' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More quote actions' }));
@@ -219,5 +219,22 @@ describe('Quotes list on a phone', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Q-TEST-1' }));
     expect(await screen.findByText('Quote page')).toBeInTheDocument();
+  });
+
+  it('phone search has the short placeholder, long names wrap, and expiry shows a year only when it differs', async () => {
+    const thisYear = new Date().getFullYear();
+    const longName = 'Synthetic Extraordinarily Long Farm Name Partnership Holdings';
+    H.tables.quotes = [
+      quote(1, 'sent', { expires_at: `${thisYear}-12-31`, customer: { farm_name: longName } }),
+      quote(2, 'sent', { expires_at: `${thisYear + 1}-09-30` }),
+    ];
+    atWithQuotePage('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' })).toHaveAttribute('placeholder', 'Quote, customer or product');
+    const name = screen.getByText(longName);
+    expect(name).not.toHaveClass('truncate');
+    expect(name).toHaveClass('break-words');
+    expect(screen.getByText('Expires Dec 31')).toBeInTheDocument();
+    expect(screen.getByText(`Expires Sep 30, ${thisYear + 1}`)).toBeInTheDocument();
   });
 });

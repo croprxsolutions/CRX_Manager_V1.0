@@ -98,6 +98,7 @@ describe('Quotes list', () => {
     at('/quotes', <Quotes />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('No quotes yet')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^0 quotes$/)).not.toBeInTheDocument();
 
     H.failing.delete('quotes');
     H.tables.quotes = [quote];

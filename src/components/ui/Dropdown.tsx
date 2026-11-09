@@ -32,6 +32,8 @@ interface DropdownProps {
   className?: string;
   /** Filter bars: the label sits inside the trigger as a muted prefix, the control sizes to its content, and there is no helper line. */
   inline?: boolean;
+  /** Inline filter is narrowing the list: green-tinted like an active filter chip. */
+  active?: boolean;
 }
 
 export default function Dropdown({
@@ -47,6 +49,7 @@ export default function Dropdown({
   size = 'md',
   className = '',
   inline = false,
+  active = false,
 }: DropdownProps) {
   // RAC's Button drops aria-invalid (it only sets data-invalid on the Select root), so set it directly.
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -74,16 +77,20 @@ export default function Dropdown({
       <Button
         ref={triggerRef}
         className={`
-          ${height} ${inline ? 'w-auto' : 'w-full'} flex items-center justify-between gap-2 px-3 text-sm text-nav-dark bg-white
+          ${height} ${inline ? 'w-auto' : 'w-full'} flex items-center justify-between gap-2 px-3 text-sm
           border rounded-lg text-left focus:outline-none focus-visible:ring-2
           disabled:opacity-50 disabled:bg-gray-50
           transition-colors duration-150
-          ${error ? 'border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600 data-[pressed]:border-red-600' : 'border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green data-[pressed]:border-crx-green'}
+          ${error
+            ? 'bg-white text-nav-dark border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600 data-[pressed]:border-red-600'
+            : active
+              ? 'bg-crx-green-light text-crx-green font-medium border-crx-green focus-visible:ring-crx-green/20'
+              : 'bg-white text-nav-dark border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green data-[pressed]:border-crx-green'}
         `}
       >
-        {inline && label && <span className="text-secondary" aria-hidden="true">{label}</span>}
+        {inline && label && <span className={active ? 'font-normal' : 'text-secondary'} aria-hidden="true">{label}</span>}
         <SelectValue className="truncate data-[placeholder]:text-gray-500" />
-        <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" aria-hidden="true" />
+        <ChevronDown className={`h-4 w-4 shrink-0 ${active ? '' : 'text-gray-500'}`} aria-hidden="true" />
       </Button>
       {!inline && (
         <div className="min-h-5 mt-1 text-xs">

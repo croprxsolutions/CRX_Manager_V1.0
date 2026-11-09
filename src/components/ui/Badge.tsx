@@ -11,7 +11,14 @@ export type BadgeVariant =
   | 'accepted'
   | 'declined'
   | 'expired'
-  | 'danger';
+  | 'danger'
+  // Hue variants for the quote screens' status palette (quoteBadgeVariant in src/lib/quoteStatusLabel.ts).
+  | 'slate'
+  | 'sky'
+  | 'violet'
+  | 'rose'
+  | 'teal'
+  | 'orange';
 
 export interface BadgeProps {
   variant?: BadgeVariant;
@@ -35,6 +42,12 @@ const variantClasses: Record<BadgeVariant, string> = {
   declined: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
   expired: 'bg-orange-100 text-orange-800 ring-1 ring-inset ring-orange-200',
   danger: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
+  slate: 'bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200',
+  sky: 'bg-sky-100 text-sky-800 ring-1 ring-inset ring-sky-200',
+  violet: 'bg-violet-100 text-violet-800 ring-1 ring-inset ring-violet-200',
+  rose: 'bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-200',
+  teal: 'bg-teal-100 text-teal-800 ring-1 ring-inset ring-teal-200',
+  orange: 'bg-orange-100 text-orange-800 ring-1 ring-inset ring-orange-200',
 };
 
 const dotClasses: Record<BadgeVariant, string> = {
@@ -49,6 +62,12 @@ const dotClasses: Record<BadgeVariant, string> = {
   declined: 'bg-red-600',
   expired: 'bg-orange-600',
   danger: 'bg-red-600',
+  slate: 'bg-slate-500',
+  sky: 'bg-sky-600',
+  violet: 'bg-violet-600',
+  rose: 'bg-rose-600',
+  teal: 'bg-teal-600',
+  orange: 'bg-orange-600',
 };
 
 // eslint-disable-next-line react-refresh/only-export-components

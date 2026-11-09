@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { quoteStatusLabel } from './quoteStatusLabel';
+import { quoteStatusLabel, quoteBadgeVariant } from './quoteStatusLabel';
 
 describe('quoteStatusLabel', () => {
   it.each([
@@ -18,5 +18,25 @@ describe('quoteStatusLabel', () => {
 
   it('turns every underscore into a space and capitalizes the first letter', () => {
     expect(quoteStatusLabel('pending_review_now')).toBe('Pending review now');
+  });
+});
+
+describe('quoteBadgeVariant', () => {
+  it.each([
+    ['draft', 'slate'],
+    ['sent', 'sky'],
+    ['revised', 'violet'],
+    ['accepted', 'accepted'],
+    ['declined', 'rose'],
+    ['expired', 'warning'],
+    ['cancelled', 'default'],
+    ['closed_by_application', 'teal'],
+    ['closed_short', 'orange'],
+  ])('%s -> %s (the quote boards palette)', (status, variant) => {
+    expect(quoteBadgeVariant(status)).toBe(variant);
+  });
+
+  it('falls back to default for an unknown status', () => {
+    expect(quoteBadgeVariant('something_new')).toBe('default');
   });
 });

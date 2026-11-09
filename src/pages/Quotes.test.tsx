@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
 
@@ -151,5 +151,62 @@ describe('Quotes list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
     const options = screen.getAllByRole('option').map((el) => el.textContent);
     expect(options).toEqual(['All', 'Draft', 'Sent', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
+  });
+
+  it('the status filter is green-tinted only while a status is picked', async () => {
+    H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent')];
+    at('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.getByRole('button', { name: 'All Status' })).not.toHaveClass('bg-crx-green-light');
+    fireEvent.click(screen.getByRole('button', { name: 'All Status' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    expect(screen.getByRole('button', { name: 'Sent Status' })).toHaveClass('bg-crx-green-light');
+  });
+
+  it('row badges use the quote palette (Revised violet, Fulfilled teal, Closed short orange)', async () => {
+    H.tables.quotes = [quote(1, 'revised'), quote(2, 'closed_by_application'), quote(3, 'closed_short')];
+    at('/quotes');
+    expect(await screen.findByText('Revised', { selector: 'span' })).toHaveClass('bg-violet-100');
+    expect(screen.getByText('Fulfilled', { selector: 'span' })).toHaveClass('bg-teal-100');
+    expect(screen.getByText('Closed short', { selector: 'span' })).toHaveClass('bg-orange-100');
+  });
+});
+
+describe('Quotes list on a phone', () => {
+  beforeEach(() => {
+    // DataTable switches to mobileRow cards below 768px.
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 767px)', media: query, onchange: null,
+      addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+    }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const atWithQuotePage = (path: string) => render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/quotes" element={<Quotes />} />
+        <Route path="/quotes/:id" element={<p>Quote page</p>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  it('a card checkbox tap selects without opening the quote, the menu opens, and the card opens the quote', async () => {
+    H.tables.quotes = [quote(1, 'sent')];
+    atWithQuotePage('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.queryByRole('columnheader')).not.toBeInTheDocument(); // the card layout, not the table
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' }));
+    expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' })).toBeChecked();
+    expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Q-TEST-1' }));
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Convert to order', 'Duplicate']);
+    expect(screen.queryByText('Quote page')).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q-TEST-1' }));
+    expect(await screen.findByText('Quote page')).toBeInTheDocument();
   });
 });

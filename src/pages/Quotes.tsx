@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo , useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { parseLocalDate, localDatePlusDays, localToday } from '../lib/dateUtils';
 import { Plus, Upload, Copy, Download, FileText, Trash2, ChevronDown, ChevronUp, PackageCheck, AlertTriangle, Check } from 'lucide-react';
@@ -8,7 +8,7 @@ import Dropdown from '../components/ui/Dropdown';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { LoadFailedState } from '../components/ui/EmptyState';
-import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
+import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
 import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -21,7 +21,7 @@ import { convertQuoteToOrderWithRowVersion } from '../lib/quoteLifecycleRpc';
 import { resendRequiredMessage } from '../lib/quotePriceLock';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { QUOTE_COLUMNS } from '../lib/costFields';
-import { quoteStatusLabel } from '../lib/quoteStatusLabel';
+import { quoteStatusLabel, quoteBadgeVariant } from '../lib/quoteStatusLabel';
 import { applyTableSearchSort } from '../lib/tableSearchSort';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
@@ -418,23 +418,20 @@ export default function Quotes() {
   const hasSelectable = filtered.some((q) => DELETABLE.includes(q.status));
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
-  const checkboxCol = useMemo(
-    () => ({
-      ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`),
-      header: (
-        <input
-          type="checkbox"
-          aria-label="Select all quotes"
-          checked={allSelected}
-          ref={(el) => { if (el) el.indeterminate = someSelected; }}
-          onChange={toggleAll}
-          disabled={!hasSelectable}
-          className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-        />
+  const checkboxCol: Column<QuoteRow> = {
+    ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`),
+    header: (
+      <input
+        type="checkbox"
+        aria-label="Select all quotes"
+        checked={allSelected}
+        ref={(el) => { if (el) el.indeterminate = someSelected; }}
+        onChange={toggleAll}
+        disabled={!hasSelectable}
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+      />
       ),
-    }),
-    [selected, toggleSelect, allSelected, someSelected, toggleAll, hasSelectable]
-  );
+  };
 
   const filtersActive = !!statusFilter || plannedFilter;
   const clearFilters = () => { setStatusFilter(''); setPlannedFilter(false); };
@@ -548,7 +545,7 @@ export default function Quotes() {
   const isPastDue = (row: QuoteRow) =>
     !!row.expires_at && (row.status === 'sent' || row.status === 'revised') && row.expires_at.slice(0, 10) < localToday();
   const statusBadge = (row: QuoteRow) => (
-    <Badge variant={statusToBadgeVariant[row.status] || 'default'} normalCase dot>
+    <Badge variant={quoteBadgeVariant(row.status)} normalCase dot>
       {quoteStatusLabel(row.status)}
     </Badge>
   );
@@ -644,9 +641,9 @@ export default function Quotes() {
           <span className="ml-auto">{statusBadge(row)}</span>
           <span className="relative z-10 -mr-1.5">{rowMenu(row)}</span>
         </div>
-        <span className="truncate text-[15px] font-medium text-nav-dark" title={customerName(row)}>{customerName(row)}</span>
+        <span className="truncate text-base font-medium text-nav-dark" title={customerName(row)}>{customerName(row)}</span>
         <span className="flex items-baseline justify-between gap-2 tabular-nums">
-          <span className="min-w-0 text-[13px] text-secondary">
+          <span className="min-w-0 text-sm text-secondary">
             Tier {row.tier}
             {row.is_planned && ' · Planned'}
             {row.expires_at && (
@@ -682,13 +679,6 @@ export default function Quotes() {
         subtitle="Build quotes, send them to growers and track booked product."
         actions={
           <>
-            {canBulkAction && (
-              <BulkActionBar
-                selectedCount={selectedCount}
-                actions={bulkActions}
-                onDeselectAll={clearSelection}
-              />
-            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="secondary"
@@ -803,6 +793,11 @@ export default function Quotes() {
 
       <Card padding={false} className="max-md:border-0 max-md:bg-transparent max-md:shadow-none">
         <section aria-label="All quotes" className="md:p-5">
+          {canBulkAction && selectedCount > 0 && (
+            <div className="mb-3">
+              <BulkActionBar bar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
+            </div>
+          )}
           <DataTable<QuoteRow>
             data={filtered}
             columns={columns}
@@ -833,6 +828,7 @@ export default function Quotes() {
                   inline
                   label="Status"
                   value={statusFilter || ALL}
+                  active={!!statusFilter}
                   onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
                   options={STATUS_OPTIONS}
                 />
@@ -857,7 +853,7 @@ export default function Quotes() {
                     Clear
                   </button>
                 )}
-                <span className="whitespace-nowrap text-[13px] text-secondary">
+                <span className="whitespace-nowrap text-sm text-secondary">
                   {shownCount} {shownCount === 1 ? 'quote' : 'quotes'}
                 </span>
                 {canBulkAction && hasSelectable && (

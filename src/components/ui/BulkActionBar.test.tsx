@@ -55,4 +55,14 @@ describe('BulkActionBar', () => {
     );
     expect(screen.getByText('1 selected')).toBeInTheDocument();
   });
+
+  it('bar mode keeps the same count, actions and Deselect in a labelled strip', () => {
+    const onDeselect = vi.fn();
+    render(<BulkActionBar bar selectedCount={2} actions={mockActions} onDeselectAll={onDeselect} />);
+    const region = screen.getByRole('region', { name: 'Bulk actions' });
+    expect(region).toHaveTextContent('2 selected');
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Deselect', 'Export CSV', 'Download PDF', 'Delete']);
+    fireEvent.click(screen.getByText('Deselect'));
+    expect(onDeselect).toHaveBeenCalledTimes(1);
+  });
 });

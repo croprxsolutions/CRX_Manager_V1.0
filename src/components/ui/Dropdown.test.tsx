@@ -54,6 +54,15 @@ describe('Dropdown', () => {
     expect(onChange).toHaveBeenCalledWith('sent');
   });
 
+  it('active inline filter is green-tinted; inactive is plain', () => {
+    const { rerender } = render(<Dropdown inline label="Status" value="draft" onChange={() => {}} options={options} />);
+    expect(screen.getByRole('button', { name: /Status/ })).toHaveClass('bg-white', 'border-gray-300');
+    rerender(<Dropdown inline active label="Status" value="sent" onChange={() => {}} options={options} />);
+    const trigger = screen.getByRole('button', { name: /Status/ });
+    expect(trigger).toHaveClass('bg-crx-green-light', 'border-crx-green');
+    expect(trigger).not.toHaveClass('bg-white');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

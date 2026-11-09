@@ -161,7 +161,7 @@ What changes on paper: the 11 `Oz` and 8 `Qt` products show `oz` / `qt` as their
 One migration, `<stamp>_unit_spellings_remap.sql` (stamp claimed in the notes folder at build time; RT-1 holds `20261223100000`).
 
 ### 4.A Preflight (refuses and changes nothing if any check fails)
-- **First**, `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE ROW EXCLUSIVE MODE` (with the repo's usual `lock_timeout`). This waits for any product save already in flight to commit and blocks new ones until the migration commits, so no save can add an `Oz`, `Qt` or `LB` product between the check below and the remap.
+- **First**, `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE ROW EXCLUSIVE MODE`, then `LOCK TABLE public.unit_conversions IN SHARE MODE` (products first, the same order as step 2; with the repo's usual `lock_timeout`). The second lock stops any unit row or factor changing while step 1 runs. This waits for any product save already in flight to commit and blocks new ones until the migration commits, so no save can add an `Oz`, `Qt` or `LB` product between the check below and the remap.
 - The 14 `unit_conversions` rows exactly as in 1.1 (spelling, factor, type).
 - `product_rate_lock.is_locked = false`.
 - The products to move are exactly the listed ids (pinned in the migration by id **and** current spelling): 11 with `inventory_unit = unit_size = 'Oz'`, 8 with `'Qt'`, 1 with `rate_unit = 'LB'` (and the 2 dry `oz` rows if question 3 is yes). Any other product found with `Oz`, `Qt` or `LB` in any product unit column refuses (it would be left behind).
@@ -179,7 +179,7 @@ One migration, `<stamp>_unit_spellings_remap.sql` (stamp claimed in the notes fo
 - Every product's `inventory_unit` and `container_unit` exact-matches a `unit_conversions` row of its form (or `product_form_units` for seed/each): the `validate_product_units` rule, checked for all 604 rows.
 - The price md5 from 4.A is unchanged, apart from Imazuron's `pricing_version` bump.
 - The 14 function bodies are unchanged.
-- The aliases are all **still there** (14 rows): after step 1, both old and new spellings work.
+- `unit_conversions` is **exactly** the 14 rows of 1.1 (id, spelling, factor, type, note): no factor moved and the aliases are still there, so both old and new spellings work.
 
 ### 4.D Recovery for step 1
 A reverse script (kept beside the harness, not in `supabase/migrations/`) puts each pinned id back to its old spelling with the same trigger handling. The harness runs it once (section 6). If it were ever needed live, it would be copied into a new migration and go through the normal gates.
@@ -191,7 +191,7 @@ A reverse script (kept beside the harness, not in `supabase/migrations/`) puts e
 One migration, `<stamp>_unit_spellings_delete_aliases.sql`. **It deletes rows, so it is destructive: Mason's explicit approval is required for the live apply.** It is built and proven only after step 1 is live and the live check in section 7 has passed.
 
 ### 5.A Preflight
-- **First**, `LOCK TABLE public.unit_conversions IN ACCESS EXCLUSIVE MODE` and `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE MODE` (with `lock_timeout`). A product save checks its unit against `unit_conversions` in a trigger, not a foreign key, so without these locks an uncommitted save could validate `Oz` against the alias, the delete could run and pass postflight, and the save could then commit pointing at a deleted unit. With them, every in-flight save commits before the checks read, and no save runs until the delete has committed (after which `validate_product_units` refuses the old spelling).
+- **First**, `LOCK TABLE public.products, public.product_parents, public.product_form_units IN SHARE MODE`, **then** `LOCK TABLE public.unit_conversions IN ACCESS EXCLUSIVE MODE` (with `lock_timeout`). Product tables come first so the migration never holds the units table while waiting on a product save that is about to read it (that order could deadlock); by the time it asks for the units table, every product save has finished and no new one can start. A product save checks its unit against `unit_conversions` in a trigger, not a foreign key, so without these locks an uncommitted save could validate `Oz` against the alias, the delete could run and pass postflight, and the save could then commit pointing at a deleted unit. With them, every in-flight save commits before the checks read, and no save runs until the delete has committed (after which `validate_product_units` refuses the old spelling).
 - If a product was given `Oz`, `Qt` or `LB` between step 1 and step 2 (the dropdowns still offer them until step 2), the check below refuses and that product is remapped first, through a small follow-up to step 1 with Mason's yes.
 - Step 1's migration is in the live ledger.
 - `product_rate_lock.is_locked = false`.
@@ -201,7 +201,7 @@ One migration, `<stamp>_unit_spellings_delete_aliases.sql`. **It deletes rows, s
 
 ### 5.B The change
 - `DELETE FROM unit_conversions WHERE id IN (<3 pinned ids>)`.
-- `CREATE UNIQUE INDEX unit_conversions_unit_lower_key ON unit_conversions (lower(unit));` so a case duplicate can never be added again (WP-PM-9's "no aliases" becomes a database rule).
+- `ALTER TABLE unit_conversions ADD CONSTRAINT unit_conversions_unit_trimmed CHECK (unit = btrim(unit) AND unit <> '')` and `CREATE UNIQUE INDEX unit_conversions_unit_lower_key ON unit_conversions (lower(unit));`. Together they refuse a case or space duplicate (`QT`, `oz `), matching how `_weight_unit_factors` folds spellings (`lower(btrim(unit))`). All 14 live rows are already trimmed. This blocks spelling duplicates only; a differently worded alias (`fl oz` beside `oz`) is still possible and stays WP-PM-9's review rule.
 - **If RT-1 is already live** (`to_regclass('public.product_rate_units') IS NOT NULL`): remove `Oz`, `Qt`, `LB` from `product_rate_units.legacy_spellings` in the same transaction (RT-1 sheet 3.2 asks for exactly this).
 - Fixture updates in the harness files listed in 1.5.
 
@@ -242,7 +242,8 @@ Step-specific cases:
 | U10 | Step 2 before step 1 (aliases deleted while products still use them) | Refused at preflight. Then, as `postgres` only, delete `Qt` directly to show what the order prevents: saving a `Qt` product now fails (`inventory_unit "Qt" is not valid`) |
 | U10b | **Race:** session A updates a product to `Oz` and holds its transaction open; session B starts step 2 | B waits on the lock; when A commits, B's preflight sees the `Oz` product and refuses. Same test for step 1 with a new `Qt` product |
 | U11 | Step 2 with the lock on | Refused (preflight, and `guard_unit_conversions_rate_lock` as backstop) |
-| U12 | After step 2, insert a `unit_conversions` row `QT` | Refused by the lower-case unique index |
+| U12 | After step 2, insert `unit_conversions` rows `QT` and `oz ` | `QT` refused by the lower-case unique index; `oz ` refused by the trimmed CHECK |
+| U12b | Step 1 while a second session tries to change `oz`'s factor | The factor change waits for step 1 and then runs; step 1's postflight (run before commit) saw the exact 14 rows. Step 2 with a product save in flight: no deadlock, the save finishes first |
 | U13 | Setup trigger after step 1 | Enabled; a stock-unit change on a saved product is still refused |
 | U14 | Both orders with RT-1 (run once with RT-1's migration applied first, once with it absent) | Step 2 updates `legacy_spellings` only when the table exists; RT-1's postflight rule holds at S2 |
 | U15 | Recovery: S1r and S0r | Data exactly as S1 and S0 (row-by-row compare of `products` unit columns and `unit_conversions`) |
@@ -323,3 +324,8 @@ No screen PR: dropdowns read the live table (1.5). No `src/types/index.ts` chang
 **Luna round 1** (gpt-6-luna xhigh, head `16e3aab9c`): 2 findings.
 - HIGH: an uncommitted product save could validate an alias spelling while step 2 deletes it (units are checked by a trigger, not a foreign key). Fixed: both steps lock `products`, `product_parents` and `product_form_units` (and step 2 `unit_conversions`) before their preflight; race case U10b added (4.A, 5.A, section 6).
 - MED: the "latest live migration" stamp is later than the check date. Refuted: this repo's stamps run ahead of the calendar by convention; `20261222100000` is in the live ledger (applied 2026-11-09), as RT-1's sheet also records. Note added to the status line.
+
+**Luna round 2** (head `4a47bac68`): no BLOCKER or HIGH; 3 MED, all fixed in one fix-only commit (no rerun needed under ship.md).
+- Step 2's lock order (units table before products) could deadlock with a product save: fixed, product tables first (5.A, U12b).
+- Step 1 did not lock `unit_conversions`, and its postflight did not compare the rows: fixed, `SHARE` lock and an exact 14-row compare (4.A, 4.C).
+- The lower-case index missed space variants that `_weight_unit_factors` folds together: fixed, a trimmed CHECK beside the index; the sheet now says it blocks spelling duplicates only (5.B, U12).

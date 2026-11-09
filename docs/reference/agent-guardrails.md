@@ -124,6 +124,12 @@
 > `--carry-forward` does not run it. **Docs check before Sol (2026-11-08 retro):** after the pre-flight and code health it
 > runs `scripts/check-doc-drift.mjs` (about a second) against the reviewed base and refuses on any `FAIL`, so a stale
 > "Last verified" stamp is fixed before Sol instead of voiding its proof (PR #1650, the sixth time).
+> **Sol round hard stop (Mason, 2026-11-09).** Every full run prints "Sol round N" (ledger `sol-rounds.jsonl`, counted
+> per branch commit); rounds 3–4 add the AGENTS.md stop-rule reminder. From round 5 the run refuses with no Codex call
+> and nothing recorded (`solRoundGate()`), unless `docs/manual/DECISION_LOG.md` at the reviewed head has an entry whose
+> heading carries a real date of today (Central) or later, with a `**Decision` line naming Mason, that names the PR as `#<n>`. So: ask Mason the business
+> trade-off, record his answer naming the PR, commit, re-run. `--dry-run` prints the would-be refusal and exits 0;
+> the carries never count rounds. Why: PR #1653 reached round 8 past a warning-only line before Mason was asked.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they
 > differ.** (1) `pr-merge-guard.mjs` and the Codex `production-action-guard.mjs` merge route now deny any merge into

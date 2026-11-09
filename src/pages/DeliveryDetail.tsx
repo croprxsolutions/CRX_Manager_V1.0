@@ -45,7 +45,7 @@ import { formatCents as fmtCents } from '../lib/money';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
-import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
+import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed, fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -1319,6 +1319,7 @@ export default function DeliveryDetail() {
       } else {
         toast('success', isPartialDelivery ? 'Delivery completed (partial quantities)' : 'Delivery completed');
       }
+      if (billSplitFailed(completeResult)) toast('warning', BILL_SPLIT_FAILED_MESSAGE);
       const proofText = submittedEvidence === 'no_proof'
         ? ` (recorded without proof: ${await storedNoProofReason(deliveryId, noProofReason)})`
         : usePaperTicket ? ' (signed paper ticket photo)' : ' (on-screen signature)';

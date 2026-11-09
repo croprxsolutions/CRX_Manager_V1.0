@@ -3137,6 +3137,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  guard_invoice_terminal_order:
+    'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
+  _create_bill_split_delivery_invoices:
+    'private writer of Bill Split drafts (billing plan M2); complete_delivery and create_invoice_for_unbilled_delivery own idempotency and every application-role EXECUTE is revoked',
   // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.
   _snapshot_financial_hard_delete:
     'AFTER DELETE row trigger on invoices, allocation_sets and payments: appends one audit snapshot per row a delete really erased, so a replayed delete matches no row and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',

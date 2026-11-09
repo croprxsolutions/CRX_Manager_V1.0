@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
+
+**Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.
+**Why.** The only gap is a race: an invoice whose season changes between the screen's check and the posting step. It needs two people editing the same invoice at the same moment and had not happened.
+**What this implies:** the gap stays recorded in `docs/changelog.d/2026-10-12-invoice-lists-season.md`. A later small change may add the check. This entry was only on the unmerged `pra-work` branch until the [2026-11-08 branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md).
+
 ## 2026-11-08 — A re-activated applicator's open jobs go straight onto the Dispatch Board (KI-28)
 
 **Decision (Mason, in session, 2026-11-08: "A: show them right away" / "Yes do the recomended option"):** when a person is re-activated or made an applicator, their already-assigned open jobs go straight onto the Dispatch Board even if their license has expired, the same as adding a location to their job today. The license is checked when a job is assigned, and the Expiring Licenses card warns.

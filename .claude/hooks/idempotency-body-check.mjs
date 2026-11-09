@@ -11,6 +11,11 @@
 //      20260210000000_tier3_idempotency_and_triggers.sql):
 //        check_idempotency(p_idempotency_key, '<op>')    (check, at top)
 //        save_idempotency(p_idempotency_key, '<op>', v)  (record, at end)
+//   3. Intent helper + bound receipt (the house shape since 20260811130000):
+//        check_idempotency_intent(p_idempotency_key, '<op>', actor, fp) (check)
+//        INSERT INTO idempotency_keys ... '<op>' ...                     (record)
+//        or save_idempotency(p_idempotency_key, '<op>', v)               (record)
+//   The table may be schema-qualified (public.idempotency_keys) in any pattern.
 //
 // BOTH halves of ONE pattern are required. A body with only check_idempotency()
 // or only save_idempotency() is HALF-WIRED — exactly the bug class this hook
@@ -679,8 +684,8 @@ while (masked !== null && (head = fnHeadRe.exec(masked)) !== null) {
   if (!hasMutation) continue;
 
   // Pattern 1: direct idempotency_keys access (check + record).
-  const readsKey = /FROM\s+idempotency_keys\s+WHERE\s+idempotency_key\s*=\s*p_idempotency_key/i.test(body);
-  const writesKey = /INSERT\s+INTO\s+idempotency_keys/i.test(body);
+  const readsKey = /FROM\s+(?:public\.)?idempotency_keys\s+WHERE\s+idempotency_key\s*=\s*p_idempotency_key/i.test(body);
+  const writesKey = /INSERT\s+INTO\s+(?:public\.)?idempotency_keys/i.test(body);
   const directWired = readsKey && writesKey;
 
   // Pattern 2: canonical helper calls. BOTH are required — half-wired fails.
@@ -688,11 +693,80 @@ while (masked !== null && (head = fnHeadRe.exec(masked)) !== null) {
   const callsSaveHelper = /\bsave_idempotency\s*\(/i.test(body);
   const helperWired = callsCheckHelper && callsSaveHelper;
 
+  // Pattern 3: check_idempotency_intent() + a receipt (direct INSERT or save_idempotency()).
+  const intentCalls = [...body.matchAll(/\bcheck_idempotency_intent\s*\(([^)]*)\)/gi)];
+  const intentWired = intentCalls.length > 0 && (writesKey || callsSaveHelper);
+
+  if (intentWired && !directWired && !helperWired) {
+    // FIX 6 for pattern 3: the check must name an operation, and each literal
+    // operation it checks needs a receipt written under that exact operation
+    // AND bound to actor + fingerprint — check_idempotency_intent() rejects an
+    // unbound receipt, so every honest retry would fail (Codex P2, PR #1666).
+    const literal = (arg) => {
+      const m = /^\s*'((?:[^']|'')*)'\s*$/.exec(arg || "");
+      return m ? m[1] : null;
+    };
+    const callArgs = (re) => [...body.matchAll(re)].map((m) => {
+      const p = readBalancedParens(body, m.index + m[0].length - 1);
+      return p ? splitTopLevelArgs(p.params) : [];
+    });
+    const bindOps = callArgs(/\b_bind_replay_receipt\w*\s*\(/gi).map((a) => literal(a[1]));
+    const updateBinds = [...body.matchAll(/UPDATE\s+(?:public\.)?idempotency_keys\b[^;]*/gi)]
+      .filter((m) => /\brequest_fingerprint\b/i.test(m[0]))
+      .map((m) => (/\boperation\s*=\s*'((?:[^']|'')*)'/i.exec(m[0]) || [])[1] ?? null);
+    const boundLater = (op) => op !== null && (bindOps.includes(op) || updateBinds.includes(op));
+    const receipts = []; // { op: string|null, bound: boolean }
+    for (const m of body.matchAll(/INSERT\s+INTO\s+(?:public\.)?idempotency_keys\s*\(/gi)) {
+      const cols = readBalancedParens(body, m.index + m[0].length - 1);
+      const valsHead = cols && /^\s*VALUES\s*\(/i.exec(body.slice(cols.end));
+      const vals = valsHead && readBalancedParens(body, cols.end + valsHead[0].length - 1);
+      const names = cols ? splitTopLevelArgs(cols.params).map((c) => c.toLowerCase()) : [];
+      const values = vals ? splitTopLevelArgs(vals.params) : [];
+      const opIdx = names.indexOf("operation");
+      const op = opIdx >= 0 ? literal(values[opIdx]) : null;
+      receipts.push({
+        op,
+        bound: (names.includes("request_actor_id") && names.includes("request_fingerprint")) || boundLater(op),
+      });
+    }
+    for (const args of callArgs(/\bsave_idempotency\s*\(/gi)) {
+      const op = literal(args[1]);
+      receipts.push({ op, bound: boundLater(op) });
+    }
+    for (const call of intentCalls) {
+      const parts = splitTopLevelArgs(call[1]);
+      if (parts.length < 2) {
+        violations.push(
+          `Function ${fnName}: check_idempotency_intent() is called with no operation argument — ` +
+          `this is the restore_quote_version bug class (Codex 2026-06-08, fixed at scale by migration 20260611211058). ` +
+          `Call check_idempotency_intent(p_idempotency_key, '${fnName}', actor, fingerprint).`
+        );
+        continue;
+      }
+      const op = literal(parts[1]);
+      if (op === null) continue; // parameterized operation: left to the reviewers
+      const same = receipts.filter((r) => r.op === op);
+      if (same.length === 0) {
+        violations.push(
+          `Function ${fnName}: mismatched idempotency operation keys — check_idempotency_intent() checks '${op}' ` +
+          `but no INSERT INTO idempotency_keys or save_idempotency() records that operation, so every retry replays the mutation.`
+        );
+      } else if (!same.some((r) => r.bound)) {
+        violations.push(
+          `Function ${fnName}: the '${op}' receipt is not bound to the request — check_idempotency_intent() rejects a ` +
+          `receipt without request_actor_id and request_fingerprint, so every identical retry fails. Write both columns ` +
+          `in the INSERT, or call _bind_replay_receipt_<stamp>(key, '${op}', fingerprint) after save_idempotency().`
+        );
+      }
+    }
+    continue;
+  }
+
   if (directWired || helperWired) {
     // FIX 6: wired is not the same as SCOPED. Check the lookup itself for an
     // operation reference before accepting this function as correctly guarded.
     if (directWired) {
-      const stmtRe = /FROM\s+idempotency_keys\s+WHERE\s+idempotency_key\s*=\s*p_idempotency_key([\s\S]*?);/i;
+      const stmtRe = /FROM\s+(?:public\.)?idempotency_keys\s+WHERE\s+idempotency_key\s*=\s*p_idempotency_key([\s\S]*?);/i;
       const stmtMatch = stmtRe.exec(body);
       const clause = stmtMatch ? stmtMatch[1] : "";
       if (!/\boperation\b/i.test(clause)) {
@@ -756,7 +830,7 @@ while (masked !== null && (head = fnHeadRe.exec(masked)) !== null) {
       ? "calls check_idempotency() but never save_idempotency() — half-wired, the result is never recorded so retries replay the mutation"
       : "calls save_idempotency() but never check_idempotency() — half-wired, existing keys are never checked so retries replay the mutation");
   } else {
-    if (!readsKey) missing.push("does not check idempotency before mutating (no direct idempotency_keys lookup, no check_idempotency() call)");
+    if (!readsKey && intentCalls.length === 0) missing.push("does not check idempotency before mutating (no direct idempotency_keys lookup, no check_idempotency() or check_idempotency_intent() call)");
     if (!writesKey) missing.push("does not record the key after mutating (no INSERT INTO idempotency_keys, no save_idempotency() call)");
   }
   violations.push(`Function ${fnName}: ${missing.join("; ")}.`);

@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
 - **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
-- **Split changes:** a new split starts on a date the office picks; work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Split changes:** a new split starts on a date the office picks (while the build is in progress, only today's date, until the last old billing path is replaced; build sheet FP-1 and FP-7); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
 - **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
 - **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
 **Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.

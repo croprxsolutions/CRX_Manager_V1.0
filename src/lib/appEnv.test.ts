@@ -27,6 +27,8 @@ describe('appEnv', () => {
     expect(appEnv('stagin', false, LIVE)).toBe('staging');
     expect(appEnv(undefined, false, STAGING)).toBe('staging');
     expect(appEnv('production', false, STAGING)).toBe('staging');
+    expect(appEnv(undefined, false, 'http://127.0.0.1:54321')).toBe('local');
+    expect(appEnv('production', false, 'http://localhost:54321')).toBe('local');
   });
 });
 

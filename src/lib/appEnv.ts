@@ -2,8 +2,8 @@
  * Which environment this build runs in, from one build-time variable.
  * VITE_APP_ENV=staging on the Vercel staging environment; the Vite dev server counts as local;
  * unset or "production" is production, which shows no banner. Two safety nets: an unknown value
- * shows the staging banner rather than nothing, and a build pointed at the staging database is
- * staging even if the variable is missing.
+ * shows the staging banner rather than nothing, and a build pointed at the staging or a local
+ * database is staging or local even if the variable is missing (e.g. `npm run preview`).
  */
 export type AppEnv = 'production' | 'staging' | 'local';
 
@@ -32,8 +32,9 @@ export function appEnv(
   const value = raw?.trim().toLowerCase();
   if (value === 'staging' || value === 'local') return value;
   if (value && value !== 'production') return 'staging';
-  if (dev) return 'local';
-  return supabaseHost(supabaseUrl) === STAGING_SUPABASE_HOST ? 'staging' : 'production';
+  const host = supabaseHost(supabaseUrl);
+  if (dev || LOCAL_HOSTS.has(host)) return 'local';
+  return host === STAGING_SUPABASE_HOST ? 'staging' : 'production';
 }
 
 export function envTitlePrefix(env: AppEnv): string {

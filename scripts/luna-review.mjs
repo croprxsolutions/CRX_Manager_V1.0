@@ -7,6 +7,8 @@
 //   node scripts/luna-review.mjs --uncommitted        working tree, including untracked files
 //   node scripts/luna-review.mjs --sol --reason "..." advisory Sol escalation (never a gate pass)
 //   node scripts/luna-review.mjs --settled <file>     findings already refuted or deferred (Luna only)
+//   node scripts/luna-review.mjs --after-simplify "..."   past the 6-round cap (also --after-rebase,
+//                                                         --after-new-approach); see "round caps"
 //
 // Exit codes: 0 clean, 1 findings, 2 DID NOT RUN (never a verdict).
 //
@@ -62,7 +64,7 @@ const OPAQUE_CHANGE_RE = /^(?:Binary files .* differ|GIT binary patch)$/m;
 export const SETTLED_MAX_BYTES = 8 * 1024;
 
 export function parseArgs(argv) {
-  const opts = { base: null, commit: null, uncommitted: false, sol: false, reason: "", settled: null };
+  const opts = { base: null, commit: null, uncommitted: false, sol: false, reason: "", settled: null, after: null };
   const value = (flag, index) => {
     const next = argv[index];
     // A leading dash would reach git as an option, and an option is not a reason.
@@ -77,6 +79,10 @@ export function parseArgs(argv) {
     else if (arg === "--settled") opts.settled = value(arg, ++i);
     else if (arg === "--uncommitted") opts.uncommitted = true;
     else if (arg === "--sol") opts.sol = true;
+    else if (AFTER_FLAGS[arg]) {
+      if (opts.after) throw new Error("Give one --after-* flag per run: the one step you actually took.");
+      opts.after = { step: AFTER_FLAGS[arg], reason: value(arg, ++i).trim() };
+    }
     else throw new Error(`Unknown argument: ${arg}`);
   }
   if ([opts.base, opts.commit, opts.uncommitted].filter(Boolean).length > 1) {
@@ -86,6 +92,9 @@ export function parseArgs(argv) {
   if (opts.reason && !opts.sol) throw new Error("--reason only applies to --sol.");
   // Sol stays independent: it never sees what an earlier round decided (retro, Mason, 2026-11-09).
   if (opts.settled && opts.sol) throw new Error("--settled is for Luna rounds only; Sol never sees the settled list.");
+  if (opts.after && (opts.sol || opts.commit || opts.uncommitted)) {
+    throw new Error("--after-* only lifts the cap on whole-branch Luna rounds; drop --sol, --commit and --uncommitted.");
+  }
   return opts;
 }
 
@@ -342,15 +351,21 @@ function freezeDiff(git, opts) {
   };
 }
 
-// ── guard-change round cap ───────────────────────────────────────────────────
-// A third round on a command-text carve-out means the design is wrong (PR #1375 ran ~8). The count
-// lives in the shared git dir, written only here and read by nothing else; it is not a proof.
+// ── round caps ───────────────────────────────────────────────────────────────
+// A third round on a command-text carve-out means the design is wrong (PR #1375 ran ~8). A seventh
+// whole-branch round on anything means the same (PR #1688 ran ~12, Brand PR B 26): Mason, 2026-11-09.
+// One per-branch counter file in the shared git dir, written only here and read by nothing else;
+// it is not a proof. Keys: "<branch>" guard-change rounds, "<branch> luna-rounds" whole-branch
+// rounds, "<branch> luna-unlocks" each recorded --after-* step, worth LUNA_ROUND_LIMIT more rounds.
 export const GUARD_ROUND_LIMIT = 2;
+export const LUNA_ROUND_LIMIT = 6;
 const GUARD_DIFF_RE = /^diff --git (?:"?a\/\.(?:claude|codex)\/hooks\/|.* "?b\/\.(?:claude|codex)\/hooks\/)/m;
 
-function guardRounds(git, root) {
+function branchRounds(git, root) {
   const file = path.join(path.resolve(root, gitOutput(git, ["rev-parse", "--git-common-dir"]).trim()), "crx-luna-guard-rounds.json");
   const branch = gitOutput(git, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const lunaKey = `${branch} luna-rounds`;
+  const unlockKey = `${branch} luna-unlocks`;
   let counts = {};
   if (existsSync(file)) {
     // A damaged count fails closed: resetting it would reopen the cap.
@@ -359,22 +374,44 @@ function guardRounds(git, root) {
     } catch {
       counts = null;
     }
-    const saved = counts?.[branch];
-    if (!counts || typeof counts !== "object" || Array.isArray(counts) || (saved !== undefined && !Number.isSafeInteger(saved))) {
-      throw new Error(`Guard-round counter is unreadable: ${file}. Check it by hand; do not delete it to get another round.`);
-    }
+    const bad = !counts || typeof counts !== "object" || Array.isArray(counts)
+      || [branch, lunaKey].some((key) => counts[key] !== undefined && !Number.isSafeInteger(counts[key]))
+      || (counts[unlockKey] !== undefined && !Array.isArray(counts[unlockKey]));
+    if (bad) throw new Error(`Luna round counter is unreadable: ${file}. Check it by hand; do not delete it to get another round.`);
   }
-  const count = Number(counts[branch]) || 0;
-  return {
-    count,
-    record: () => {
-      try {
-        writeFileSync(file, JSON.stringify({ ...counts, [branch]: count + 1 }, null, 2));
-      } catch (error) {
-        console.error(`[luna-review] WARNING: guard-round count not saved (${error.message}).`);
-      }
-    },
+  const save = (key, value, what) => {
+    counts = { ...counts, [key]: value };
+    try {
+      writeFileSync(file, JSON.stringify(counts, null, 2));
+    } catch (error) {
+      console.error(`[luna-review] WARNING: ${what} not saved (${error.message}).`);
+    }
   };
+  const guard = Number(counts[branch]) || 0;
+  const luna = Number(counts[lunaKey]) || 0;
+  const unlocks = counts[unlockKey] ?? [];
+  return {
+    branch,
+    guard,
+    luna,
+    lunaLimit: LUNA_ROUND_LIMIT * (1 + unlocks.length),
+    recordGuard: () => save(branch, guard + 1, "guard-round count"),
+    recordLuna: () => save(lunaKey, luna + 1, "whole-branch round count"),
+    unlock: (entry) => save(unlockKey, [...unlocks, entry], "round-cap unlock"),
+  };
+}
+
+const AFTER_FLAGS = { "--after-simplify": "simplify", "--after-rebase": "rebase", "--after-new-approach": "new-approach" };
+
+function lunaCapStop(rounds) {
+  console.log(`STOP: ${rounds.luna} whole-branch Luna rounds on this branch and the design keeps drawing findings `
+    + "(AGENTS.md stop rule). Another patch round is the loop this cap exists to break.");
+  console.log("Next: do ONE of these, then run Luna again with the matching flag and a one-line reason:");
+  console.log('  (a) simplify: run a fresh "attack this plan for simplicity" session      --after-simplify "<session or reason>"');
+  console.log('  (b) merge or rebase onto current main, then re-plan                      --after-rebase "<what changed>"');
+  console.log('  (c) change approach: ask Mason the business rule behind the mechanism   --after-new-approach "<his answer>"');
+  console.log(`LUNA RESULT: STOPPED after ${rounds.luna} whole-branch Luna rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+  return EXIT_FINDINGS;
 }
 
 // ── code-health ratchet ──────────────────────────────────────────────────────
@@ -493,12 +530,25 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
       );
     }
 
-    // Luna rounds only: the advisory Sol escalation is the documented way past the cap.
-    const rounds = !opts.sol && GUARD_DIFF_RE.test(frozen.diff) ? guardRounds(git, rootDir) : null;
-    if (rounds && rounds.count >= GUARD_ROUND_LIMIT) {
+    // Luna rounds only: the advisory Sol escalation is the documented way past the guard cap.
+    const guardChange = !opts.sol && GUARD_DIFF_RE.test(frozen.diff);
+    const wholeBranch = !opts.sol && Boolean(frozen.baseSha);
+    const rounds = guardChange || wholeBranch ? branchRounds(git, rootDir) : null;
+    if (guardChange && rounds.guard >= GUARD_ROUND_LIMIT) {
       console.log("STOP: third review round on a guard change — drop the carve-out or hand the decision to Mason (AGENTS.md stop rule).");
-      console.log(`LUNA RESULT: STOPPED after ${rounds.count} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
+      console.log(`LUNA RESULT: STOPPED after ${rounds.guard} guard-change rounds on this branch (exit ${EXIT_FINDINGS}). Codex was not called.`);
       return EXIT_FINDINGS;
+    }
+    // shortcut: a detached HEAD has no branch to count against, so it is not capped; check out a branch to be capped.
+    const lunaCapped = wholeBranch && rounds.branch !== "HEAD";
+    if (lunaCapped && rounds.luna >= rounds.lunaLimit) {
+      if (!opts.after) return lunaCapStop(rounds);
+      rounds.unlock({ step: opts.after.step, reason: opts.after.reason, afterRound: rounds.luna, at: new Date().toISOString() });
+      console.log(`Round cap lifted after ${opts.after.step}: ${opts.after.reason}. ${LUNA_ROUND_LIMIT} more whole-branch rounds allowed; recorded.`);
+    } else if (opts.after) {
+      return reportDidNotRun(lunaCapped
+        ? `--after-${opts.after.step} is only accepted once the round cap stops a run; this branch has run ${rounds.luna} of ${rounds.lunaLimit} whole-branch rounds.`
+        : `--after-${opts.after.step} is only accepted once the round cap stops a run; a detached HEAD is not capped.`);
     }
 
     const health = codeHealth(frozen.diff, rootDir);
@@ -518,7 +568,10 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     console.error(`[luna-review] ${model} at ${effort} reviewing ${frozen.label}: ${files} file(s), ${diffLines} diff lines.`);
     const run = runLunaReview({ diff: frozen.diff, settled, model, effort, ...codexDeps });
     // Only a round that reached a verdict counts; a broken run is retried for free.
-    if (rounds && run.outcome !== "void") rounds.record();
+    if (run.outcome !== "void") {
+      if (guardChange) rounds.recordGuard();
+      if (lunaCapped) rounds.recordLuna();
+    }
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
     const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
     const settledNote = settled

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -156,6 +156,7 @@ function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"], health = (
   if (counter !== undefined) writeFileSync(path.join(dir, ".git", "crx-luna-guard-rounds.json"), counter);
   const out = [];
   let spawned = 0;
+  let savedCounter = null;
   const savedLog = console.log;
   const savedErr = console.error;
   console.log = (line = "") => out.push(line);
@@ -164,7 +165,8 @@ function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"], health = (
   const exits = [];
   try {
     for (const run of runs) {
-      exits.push(main(run === "sol" ? ["--base", base, "--sol", "--reason", "test"] : ["--base", base], {
+      const args = run === "sol" ? ["--base", base, "--sol", "--reason", "test"] : ["--base", base, ...(Array.isArray(run) ? run : [])];
+      exits.push(main(args, {
         resolveCodex: () => "codex-stub",
         spawn: (bin, spawnArgs, options) => {
           spawned += 1;
@@ -178,9 +180,11 @@ function lunaRoundsOn(file, counter, runs = ["luna", "luna", "luna"], health = (
     process.chdir(realCwd);
     console.log = savedLog;
     console.error = savedErr;
+    const counterFile = path.join(dir, ".git", "crx-luna-guard-rounds.json");
+    try { savedCounter = JSON.parse(readFileSync(counterFile, "utf8")); } catch { savedCounter = null; }
     rmSync(dir, { recursive: true, force: true });
   }
-  return { exits, spawned, printed: out.join("\n") };
+  return { exits, spawned, printed: out.join("\n"), counter: savedCounter };
 }
 for (const hook of [".claude/hooks/x.mjs", ".codex/hooks/y.mjs"]) {
   const capped = lunaRoundsOn(hook);
@@ -202,6 +206,49 @@ for (const counter of ["{\"feature\": 2", "null", "{\"feature\": \"bad\"}"]) {
   const damaged = lunaRoundsOn(".claude/hooks/x.mjs", counter);
   assert.equal(damaged.spawned, 0, counter);
   assert.deepEqual(damaged.exits, [EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN, EXIT_DID_NOT_RUN], counter);
+}
+
+// Whole-branch round cap: after 6 Luna rounds on any branch the 7th is a STOP that names the three
+// ways forward and never reaches Codex. One --after-* flag with a reason buys 6 more and is recorded.
+{
+  const seven = lunaRoundsOn("src/a.ts", undefined, Array(7).fill("luna"));
+  assert.equal(seven.spawned, 6);
+  assert.deepEqual(seven.exits, [...Array(6).fill(EXIT_FINDINGS), EXIT_FINDINGS]);
+  assert.match(seven.printed, /LUNA RESULT: STOPPED after 6 whole-branch Luna rounds on this branch \(exit 1\)\. Codex was not called\./);
+  assert.match(seven.printed, /--after-simplify[\s\S]*--after-rebase[\s\S]*--after-new-approach/);
+  assert.equal(seven.counter["feature luna-rounds"], 6);
+
+  const seeded = JSON.stringify({ "feature luna-rounds": 6 });
+  const stopped = lunaRoundsOn("docs/a.md", seeded, ["luna"]);
+  assert.deepEqual([stopped.spawned, stopped.exits], [0, [EXIT_FINDINGS]]);
+  assert.match(stopped.printed, /LUNA RESULT: STOPPED/);
+
+  const unlocked = lunaRoundsOn("docs/a.md", seeded, [["--after-simplify", "attack session cut the retry table"], "luna"]);
+  assert.deepEqual([unlocked.spawned, unlocked.exits], [2, [EXIT_FINDINGS, EXIT_FINDINGS]]);
+  assert.match(unlocked.printed, /Round cap lifted after simplify: attack session cut the retry table/);
+  assert.equal(unlocked.counter["feature luna-rounds"], 8);
+  assert.deepEqual(unlocked.counter["feature luna-unlocks"].map(({ step, reason, afterRound }) => [step, reason, afterRound]),
+    [["simplify", "attack session cut the retry table", 6]]);
+  // 6 more and it stops again; the next flag buys another 6.
+  const again = lunaRoundsOn("docs/a.md", JSON.stringify({ "feature luna-rounds": 12, "feature luna-unlocks": unlocked.counter["feature luna-unlocks"] }),
+    ["luna", ["--after-rebase", "merged main, re-planned"]]);
+  assert.deepEqual([again.spawned, again.exits], [1, [EXIT_FINDINGS, EXIT_FINDINGS]]);
+  assert.equal(again.counter["feature luna-unlocks"].length, 2);
+
+  // A flag before the cap stops anything is refused, so nobody pre-buys rounds.
+  const early = lunaRoundsOn("docs/a.md", undefined, [["--after-new-approach", "Mason: block, not warn"]]);
+  assert.deepEqual([early.spawned, early.exits], [0, [EXIT_DID_NOT_RUN]]);
+  assert.match(early.printed, /only accepted once the round cap stops a run/);
+  assert.throws(() => parseArgs(["--after-simplify"]), /needs a value/);
+  assert.throws(() => parseArgs(["--after-simplify", "a", "--after-rebase", "b"]), /one --after-/);
+  assert.throws(() => parseArgs(["--commit", "HEAD", "--after-simplify", "a"]), /whole-branch/);
+  assert.throws(() => parseArgs(["--sol", "--reason", "r", "--after-simplify", "a"]), /whole-branch/);
+  // Commit-scoped and Sol runs are not whole-branch rounds: never counted, never stopped.
+  const sol = lunaRoundsOn("docs/a.md", seeded, ["sol"]);
+  assert.deepEqual([sol.spawned, sol.counter["feature luna-rounds"]], [1, 6]);
+  // A damaged whole-branch count fails closed too.
+  const damaged = lunaRoundsOn("docs/a.md", JSON.stringify({ "feature luna-rounds": "six" }), ["luna"]);
+  assert.deepEqual([damaged.spawned, damaged.exits], [0, [EXIT_DID_NOT_RUN]]);
 }
 
 // Code health runs before the model when src/ changed: its FAIL stops the round with no model

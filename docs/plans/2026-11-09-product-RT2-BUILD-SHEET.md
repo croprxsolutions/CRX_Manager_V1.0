@@ -58,7 +58,7 @@ So the order is fixed (remap first, delete second), no conversion factor changes
 | `product_parents.rate_unit` | no rows (0 parents) |
 | `product_form_units.unit` | Unit 2, Lb 1, Ea 1 |
 
-**Every row a product with a two-way spelling sits on (41 products):**
+**Every product on an affected or nearby spelling (48 listed below; 38 sit on a two-way spelling: 11 + 8 + 18 + 1):**
 - `Oz` stock (11, all liquid, active): Armezon 32 oz, Drive XLR8 64 oz, Endura 104 oz, Evito 128 oz, Impact 128 oz, Nurizma 64 Oz, Panoflex 20 oz, Sefina 140 oz, Status 125 oz, Steadfast Q 60 oz, Trivence 200 Oz. Rate unit `oz`. None on any quote, order or job; no stock rows.
 - `Qt` stock (8, all liquid, active): AIM 2EC, Cadet, Effect-GC, Elevore, Make Foam, Milestone, Prevent Foam, Tordon RTU (each "1 Qt"). Rate unit `oz`. None on any quote, order or job; no stock rows.
 - `qt` rate (18 liquid, 17 active, stock `Gal`): Bio-Health ×2, BoostMax-D ×2, BoostMax-M ×2, Carbon RX ×2, Concept N-25B ×2, Concept-B-10 ×2, Concept-Z9 ×2, Foliar-K ×2, MicroNourish Tote, MicroNourish Tote (retired). Only MicroNourish Tote is used: 1 quote line, 4 order lines.
@@ -203,6 +203,7 @@ One migration, `<stamp>_unit_spellings_delete_aliases.sql`. **It deletes rows, s
 ### 5.B The change
 - `DELETE FROM unit_conversions WHERE id IN (<3 pinned ids>)`.
 - `ALTER TABLE unit_conversions ADD CONSTRAINT unit_conversions_unit_trimmed CHECK (unit = btrim(unit) AND unit <> '')` and `CREATE UNIQUE INDEX unit_conversions_unit_lower_key ON unit_conversions (lower(unit));`. Together they refuse a case or space duplicate (`QT`, `oz `), matching how `_weight_unit_factors` folds spellings (`lower(btrim(unit))`). All 14 live rows are already trimmed. This blocks spelling duplicates only; a differently worded alias (`fl oz` beside `oz`) is still possible and stays WP-PM-9's review rule.
+- **Rate units spelled exactly (Luna round 3):** `validate_product_units` checks only `inventory_unit` and `container_unit` exactly, and rate units are lower-matched, so after the delete a new product could still save `rate_unit = 'LB'`. Step 2 therefore adds one small new trigger, `trg_product_rate_unit_spelling` (function `_product_rate_unit_spelling`, `SET search_path = public, pg_temp`, no grants), `BEFORE INSERT OR UPDATE OF rate_unit` on `products` and `product_parents`: when the new `rate_unit` is non-blank and differs from the old value, it must equal a `unit_conversions.unit` exactly, else `PRODUCT_RATE_UNIT_SPELLING: <unit> is not a listed unit spelling`. Null and blank (5 live rows) and untouched rows pass, so no saved product is refused. It does not touch `validate_product_units` (PR #1688's md5 pin holds). Recovery (5.D) drops it first.
 - **If RT-1 is already live** (`to_regclass('public.product_rate_units') IS NOT NULL`): remove `Oz`, `Qt`, `LB` from `product_rate_units.legacy_spellings` in the same transaction (RT-1 sheet 3.2 asks for exactly this).
 - Fixture updates in the harness files listed in 1.5.
 
@@ -214,20 +215,20 @@ One migration, `<stamp>_unit_spellings_delete_aliases.sql`. **It deletes rows, s
 - If RT-1 is live: RT-1's own postflight rule holds again (every legacy spelling exists in `unit_conversions` with the same factor; every `products.rate_unit` maps to exactly one RT-1 unit).
 
 ### 5.D Recovery for step 2
-A reverse script re-inserts the 3 rows with their original id, spelling, factor, type and note, drops the lower index first, and (if RT-1 is live) puts the spellings back into `legacy_spellings`. The harness runs it once.
+A reverse script re-inserts the 3 rows with their original id, spelling, factor, type and note, drops the new rate-unit trigger and the lower index first, and (if RT-1 is live) puts the spellings back into `legacy_spellings`. The harness runs it once.
 
 ---
 
 ## 6. Done when (harness cases)
 
-Harness: `scripts/smoke/prove-unit-spellings-real-schema.mjs`, against a real-schema container with every migration applied. Fixtures copy the shape (units, forms, rates, prices) of the 41 products in 1.2 and of the 7 live quotes, without customer names. Quotes are saved through the real `save_quote` RPC as an admin.
+Harness: `scripts/smoke/prove-unit-spellings-real-schema.mjs`, against a real-schema container with every migration applied. Fixtures copy the shape (units, forms, rates, prices) of every product listed in 1.2 (48: the 38 duplicate-spelling rows, the 2 dry `oz` rows, the 7 `Unit`, the 1 `Ea`, and the 2 Powder Keg products with an `Ea` container unit) and of the 7 live quotes, without customer names. Quotes are saved through the real `save_quote` RPC as an admin.
 
 The harness walks five states: **S0** baseline → **S1** after step 1 → **S2** after step 2 → **S1r** after step 2's recovery → **S0r** after step 1's recovery. At **every** state it runs U1 to U6.
 
 | # | Check (every state) | Expect |
 |---|---|---|
 | U1 | **Quotes to the cent:** re-save each fixture quote (the 7 live shapes plus one line for every affected product at each tier) | Every line's `total_units_needed`, `price_per_acre`, `total_price`, `profit` and each quote's total equal S0's to the cent |
-| U2 | **The exact-match check:** an ordinary admin update (change `internal_notes`) on every fixture product, and an insert of a new product in each surviving spelling | All succeed. At S2, an insert with `Oz`, `Qt` or `LB` is refused by `validate_product_units` (proving the check is live, and that the old spelling is gone) |
+| U2 | **The exact-match check:** an ordinary admin update (change `internal_notes`) on every fixture product, and an insert of a new product in each surviving spelling | All succeed. At S2, an insert with stock unit `Oz` or `Qt` (or container unit `LB`) is refused by `validate_product_units`, and an insert or rate change to `rate_unit` `Oz`, `Qt` or `LB` on a product or parent is refused by `trg_product_rate_unit_spelling`; an unchanged old row and a null or blank rate unit still save |
 | U3 | **All 14 functions:** call each (directly, or through its RPC/trigger) with every spelling found in 1.2, including history spellings (`Qt`, `LB`, `qt`, `EA`, `Gall`, `pt/ac`) | Same results as S0: same factor, same per-acre price, same refusal or acceptance |
 | U4 | **One row per unit:** count the lower-match rows for each spelling | S0/S1/S1r/S0r: `oz`, `qt`, `Lb` find 2; S2: every spelling finds at most 1 |
 | U5 | **Per-acre prices:** md5 of every fixture product's price columns | Equal to S0 |
@@ -335,3 +336,7 @@ No screen PR: dropdowns read the live table (1.5). No `src/types/index.ts` chang
 
 **Codex GitHub App, PR #1703:** 1 P2 finding, fixed.
 - The 4.A price checksum included `lower(rate_unit)`, so an approved `oz`→`Dry oz` change (question 3) would fail postflight and roll back. Fixed: the checksum covers money fields only, and unit changes are checked separately against the pinned map (4.A, 4.C).
+
+**Luna round 3** (head `4b7de7270`): no BLOCKER or HIGH; 1 MED, 1 LOW, both fixed in one fix-only commit.
+- MED: U2 expected `validate_product_units` to refuse a `LB` rate unit, but that trigger checks only stock and container units; rate units are lower-matched, so `LB` could come back as a rate unit after step 2. Fixed: step 2 adds `trg_product_rate_unit_spelling` (exact spelling for a new or changed rate unit on products and parents; old, null and blank rows pass), U2 tests it, and recovery drops it (5.B, 5.D, section 6).
+- LOW: the "41 products" count did not match the listed groups. Fixed: 48 listed (38 on a two-way spelling + 2 dry `oz` + 7 `Unit` + 1 `Ea` + 2 Powder Keg), and the fixture scope names them (1.2, section 6).

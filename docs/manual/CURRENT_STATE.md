@@ -571,7 +571,8 @@ Grouped, one-liner summary of what is LIVE in production today (see
 - **Field Mode:** `/my-route` driver workspace for applicators/drivers.
 - **EPA label lookup + data quality:** Wave 1 per-product "Look up EPA"
   lookup, admin `/label-data-quality` bulk EPA registration-number
-  check-and-fix tool.
+  check-and-fix tool, and its read-only "Brands in product names" check
+  (CLN-3, 2026-11-09): bracketed brands in a name versus the brand list.
 - **Lot capture/trace:** lot numbers captured and traceable through the
   chemical supply chain.
 - **PDF outputs:** invoices, statements, quotes, and delivery slips.

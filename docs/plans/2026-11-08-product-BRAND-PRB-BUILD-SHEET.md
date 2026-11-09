@@ -11,7 +11,7 @@
 - **Snapshot:** the brand name and EPA number copied onto the pick (and later onto the invoice line) at the time, so later edits to the brand list never change history.
 - **Branded line:** a delivery line whose product has at least one brand on its list, or that carries a typed pick.
 - **Registration, sale capture, seeded:** as in the REG-1 sheet (`docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md`): the per-EPA-number record, the RUP and signal-word facts copied onto an invoice line when it is made, and whether the REG-1 seed has run.
-- **The switch:** `app_settings` row `delivery_brand_required` (column `setting_key`), off by default. While off, nothing is ever refused for a missing brand.
+- **The switch** (brand-required switch): `delivery_brand_settings.brand_required` (3.1), off by default. While off, nothing is ever refused for a missing brand.
 
 ---
 
@@ -112,7 +112,7 @@
 
 **`rup_sales_records.brand_name text`** (new, NULL for an unbranded record). Two brands with one EPA number in one record show both names, joined with "; ".
 
-**`app_settings` row `delivery_brand_required`** = `false`, inserted by the migration. This is a live data row, so the apply gate may not class the migration as "routine grants only" (section 10).
+**`delivery_brand_settings`** (new, one row, `id boolean PRIMARY KEY DEFAULT true CHECK (id)`): `brand_required boolean NOT NULL DEFAULT false`, `changed_by`, `changed_at`, `reason`. RLS on; `REVOKE ALL` from `PUBLIC`, `anon`, `authenticated`, `service_role`; `GRANT SELECT` to `authenticated`. No role can write it except through `set_delivery_brand_required` (4.J), and no other function writes it, so the switch is not in `app_settings` where the generic admin settings path could change it. The migration inserts the one row, a live data row, so the apply gate may not class the migration as "routine grants only" (section 10).
 
 ### 3.2 Brand-list resolution (one internal helper)
 
@@ -173,9 +173,11 @@ Today its body deletes and re-creates every line (`20260611211058…:1573-1585`)
 Cancel, void and restore leave picks alone. Picks go when `update_order_items` removes a cancelled delivery's lines (cascade); nothing was delivered, and the cancellation is already in the order's history.
 
 ### 4.C The completion rule (inside `_complete_delivery_authorized_impl`)
-It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. **An old offline replay is always treated as switch-off** (it was captured on a device with no brand picker, so refusing it would only strand it): it completes, and its branded lines appear on the missing-brands report. The database tells them apart by entry point, not by anything the client sends: `process_offline_action` is re-issued to call `_complete_delivery_authorized_impl` directly with an internal `p_offline_replay => true` argument (the impl has no client grant), while `complete_delivery` and `start_and_complete_delivery` always pass false. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
+It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. **No path is exempt**, old offline replays included: the database cannot prove a replay is old, so an exemption would be a way around the rule. An old queued completion refused after switch-on (`BRAND_REQUIRED`) shows on the existing offline work review page (`OfflineWorkReview`) for the office to pick the brand and complete, as other refused replays do today. Completion has been online only since 2026-10-15, so by switch-on very few, if any, such actions should remain. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
 
 1. **Delivered zero:** its picks are removed (one `completed` event keeps them).
+
+The `completed` event records, for every line, its delivered amount and the size of its brand list at that moment, for the missing-brands report (4.H).
 2. **One pick:** its amount is set to the delivered amount (same brand, smaller amount; nothing is guessed).
 3. **Several picks:** their sum must equal the delivered amount. When it does not:
    - brand-required switch on: refused with `BRAND_SPLIT_MISMATCH: line <product> delivered <n>, brands add up to <m>`;
@@ -259,13 +261,13 @@ A line the office adds by hand gets `brand_lines` NULL.
 ### 4.H Read RPCs
 - `get_delivery_brands(p_delivery_id)`: each line, its brand list (3.2), its current picks, and the delivery's highest event `seq`. Same read rule as the delivery.
 - `get_typed_brands_for_review()`: admin only; pending typed picks with delivery, product and line.
-- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed branded lines with no picks (the switch-on backlog report, section 10).
+- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed lines with `quantity_delivered > 0` that had a brand list **at completion** and have no current picks (the switch-on backlog report, section 10). Whether a line had a brand list is read from the `completed` event, which records each line's brand-list size at that moment (4.C), so retiring a brand later never hides an old gap.
 - `get_detailed_statement_data` is re-issued to return `brand_lines`.
 
 ### 4.J `set_delivery_brand_required(p_on boolean, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 - **Who:** admin only; the reason is required.
 - **Turning on is refused** (`BRAND_BACKLOG_OPEN`) while `get_deliveries_missing_brands` for the last 30 days is not empty, so the switch cannot go on before the backlog is cleared. A product with no brand rows has no brands by definition (3.2) and needs no pick; entering the lists is Mason's step 2 (section 10). As an advisory, the settings screen also shows the restricted-use products sold in the last 90 days that still have no brand list.
-- A trigger on `app_settings` refuses any insert, update or delete of the `delivery_brand_required` row unless `current_user` is the function owner role, which is true only inside this `SECURITY DEFINER` RPC (a client session runs as `authenticated` and cannot become the owner; no settable flag is trusted). So the generic admin settings path cannot flip it.
+- It is the only writer of `delivery_brand_settings` (3.1): no client role has a write grant, and the harness checks that no other function body writes the table.
 - Writes an activity log entry with the reason. It is added to the receipt-binding trigger's operation list with the other three (3.4).
 - Section 10 still keeps turning it on as Mason's call; this makes the readiness part a hard check.
 
@@ -306,7 +308,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
 - **Edit delivery:** the lines whose picks were dropped (4.B) are flagged.
 - **Products page** (`src/pages/Products.tsx`): a **Brands to review** tab (admin), using a new `src/components/products/TypedBrandReview.tsx`. "Add to list" calls the existing brand RPC, then `review_typed_brand('link')`. PR B-2 does **not** edit `ProductDetail.tsx` or `ProductBrandsSection.tsx`.
-- **Admin settings** (`src/pages/SettingsPage.tsx`): the `delivery_brand_required` switch, showing the count from `get_deliveries_missing_brands` beside it. It calls `set_delivery_brand_required` (4.H), never a direct table update.
+- **Admin settings** (`src/pages/SettingsPage.tsx`): the brand-required switch, showing the count from `get_deliveries_missing_brands` beside it. It calls `set_delivery_brand_required` (4.J), never a direct table update.
 - **Quick delivery:** no picker in the modal. It is completed on its delivery page, where the picker is (step 1 §5).
 - **New client helper:** `src/lib/deliveryBrands.ts`, which calls `assertRpcResult()` after each RPC.
 - **Sol list:** yes (`src/pages/Products.tsx`, `src/pages/SettingsPage.tsx`, plus "deliver" in file names).
@@ -372,10 +374,10 @@ A line the office adds by hand gets `brand_lines` NULL.
 - P26. Changing only a scheduled delivery's date keeps the picks under the new line IDs; changing one line's quantity or unit size drops only that line's picks; both write an `edited` event. An error in the brand step during a Bill Split completion fails the completion instead of falling back.
 - P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none) and service_role has no table privilege on the new tables.
 - P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the four new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
-- P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty; a direct `app_settings` update of the row is refused; an old offline completion replay after switch-on completes and lands on the report.
+- P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
 - P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
 - P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
-- P34. A direct `app_settings` update of `delivery_brand_required` from an `authenticated` session that first sets any custom setting is still refused. An online `complete_delivery` with no pick is refused with the switch on, while an old `process_offline_action` replay completes.
+- P34. A direct write to `delivery_brand_settings` from `authenticated` is refused, and no function other than `set_delivery_brand_required` writes it. With the switch on, a no-pick completion is refused through every entry point, `process_offline_action` included, and the refused replay appears on the offline work review page.
 - P35. A `yes` listed entry and a typed `unknown` entry sharing one record key give one record with `warning` and both notes.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
@@ -421,9 +423,9 @@ A line the office adds by hand gets `brand_lines` NULL.
 
 1. **Grouping and brand move (PAR-2):** his grouping data step, then the move switch-on. Both are already gated in PAR-2.
 2. **Brand lists:** entering each generic's brands with their EPA numbers (admin work; no code).
-3. **Apply B-1 live.** It is non-destructive, but it also inserts the `delivery_brand_required` setting row and recreates the receipt-binding trigger on `idempotency_keys`, so the apply gate may not class it as routine grants only. If so, it needs Mason's `approve <code>`.
+3. **Apply B-1 live.** It is non-destructive, but it also inserts the one `delivery_brand_settings` row and recreates the receipt-binding trigger on `idempotency_keys`, so the apply gate may not class it as routine grants only. If so, it needs Mason's `approve <code>`.
 4. **Deploy the `send-delivery-receipts` Edge Function change** (B-3). An Edge Function deploy always needs his explicit yes; it is downloaded and diffed after deploy.
-5. **Turn on `delivery_brand_required`** once B-2 and B-3 are live and proven and the missing-brands report is empty. It is a live setting change, so it needs his explicit yes in that session.
+5. **Turn on the brand-required switch** (`set_delivery_brand_required`) once B-2 and B-3 are live and proven and the missing-brands report is empty. It is a live setting change, so it needs his explicit yes in that session.
 
 ---
 ---
@@ -507,3 +509,9 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - MED, the cascade would delete picks before `edit_delivery` could carry them: **fixed**, copied first (4.B, P33).
 - MED, `edit_delivery` on a completed delivery: **fixed**, refused for a delivery with picks (4.B, P33).
 - MED, merging entries could drop a warning: **fixed**, the merged record keeps the most cautious status and all notes (4.E, P35).
+
+**Luna round 8** (head `b48930035`): 2 HIGH, 2 MED, all **fixed**.
+- HIGH, the old-offline-replay exemption could be used by a new call: **removed.** This exemption drew findings in rounds 6, 7 and 8, so it is deleted rather than patched again: no completion path is exempt, and a refused old replay goes to the existing offline work review page (4.C, P34). The cost is that a pre-October queued completion, if any is still on a phone at switch-on, needs an office follow-up.
+- HIGH, an owner-role check could not prove which function changed the switch: **fixed** by moving the switch to its own table that only `set_delivery_brand_required` writes (3.1, 4.J, P34).
+- MED, zero-delivered lines blocked switch-on: excluded from the report (4.H, P30).
+- MED, retiring a brand could hide an old gap: the report reads the brand-list size recorded at completion (4.C, 4.H, P30).

@@ -2078,10 +2078,13 @@ export default function OrderDetail() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-nav-dark">{share.customer_name}</p>
-                      {/* Live, not the amount saved when the share was added: it follows price edits and line splits. */}
-                      <p className="text-xs text-secondary">
-                        about {fmt((cardLive.get(share.customer_id) ?? 0) / 100)} of the products
-                      </p>
+                      {/* Live, not the amount saved when the share was added: it follows price edits and line splits.
+                          Not shown while a field split bills the order instead of this card. */}
+                      {!hasAllocations && (
+                        <p className="text-xs text-secondary">
+                          about {fmt((cardLive.get(share.customer_id) ?? 0) / 100)} of the products
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">

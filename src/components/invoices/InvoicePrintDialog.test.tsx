@@ -50,6 +50,7 @@ describe('InvoicePrintDialog', () => {
   it('calls a Bill Split table payer shares, since a landlord payer is not a grower', () => {
     render(<InvoicePrintDialog {...defaultProps} invoiceType="chemical_sale" hasShares sharesOnByDefault />);
     expect(screen.getByText('Show payer shares')).toBeInTheDocument();
+    expect(screen.getByText('Display each payer, their share and amount')).toBeInTheDocument();
     expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();
   });
 

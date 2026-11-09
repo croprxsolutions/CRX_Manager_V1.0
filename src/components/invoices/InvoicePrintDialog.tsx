@@ -88,7 +88,7 @@ export default function InvoicePrintDialog({
               <div>
                 {/* Only a Bill Split prints its shares by default; its payers may be landlords, not growers. */}
                 <div className="text-sm font-medium text-nav-dark">{sharesOnByDefault ? 'Show payer shares' : 'Show grower shares'}</div>
-                <div className="text-xs text-secondary">Display split percentages, acres, and amounts per grower</div>
+                <div className="text-xs text-secondary">{sharesOnByDefault ? 'Display each payer, their share and amount' : 'Display split percentages, acres, and amounts per grower'}</div>
               </div>
             </label>
           )}

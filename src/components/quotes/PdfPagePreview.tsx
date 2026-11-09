@@ -72,7 +72,7 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
     return () => {
       cancelled = true;
       renderTasks.forEach((t) => t.cancel());
-      void loadingTask?.destroy();
+      loadingTask?.destroy().catch(() => {});
       // Pages not yet shown are dropped; shown pages stay until the next blob's pages replace them.
       releaseCanvases(drawn.filter((c) => c.parentNode !== host));
     };

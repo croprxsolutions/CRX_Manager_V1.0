@@ -756,6 +756,7 @@ export default function QuoteBuilder() {
   const [markingPresented, setMarkingPresented] = useState(false);
   // The columns the shown preview was drawn with; the effect below redraws when the chips change.
   const previewColumnsKeyRef = useRef<string | null>(null);
+  const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
@@ -3437,16 +3438,22 @@ export default function QuoteBuilder() {
   const activePdfColumnsKey = activePdfColumns.join(',');
   const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
   useEffect(() => {
-    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) return;
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+      setPreviewRebuild('idle');
+      return;
+    }
     let stale = false;
     const timer = setTimeout(async () => {
+      setPreviewRebuild('updating');
       try {
         const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
         if (stale) return;
         previewColumnsKeyRef.current = activePdfColumnsKey;
         setPreviewPdfBlob(doc.output('blob'));
+        setPreviewRebuild('idle');
       } catch (err) {
         // Keep the last good preview; Download and Email build their own PDF.
+        if (!stale) setPreviewRebuild('failed');
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'read', action: 'preview_quote_pdf' } });
       }
     }, 200);
@@ -5836,6 +5843,12 @@ export default function QuoteBuilder() {
         <div className="-mx-6 -my-5 flex h-[calc(100%+2.5rem)] flex-col md:grid md:grid-cols-[minmax(0,1fr)_360px] md:grid-rows-[minmax(0,1fr)_auto]">
           <div className="min-h-0 flex-1 overflow-y-auto md:contents">
             <div className="bg-cream-dark p-4 md:row-span-2 md:overflow-y-auto md:p-7">
+              {previewRebuild === 'failed' && (
+                <p className="mb-3 text-sm text-secondary">Preview could not update. Download and email use the columns you picked.</p>
+              )}
+              <div role="status" aria-live="polite" className={previewRebuild === 'updating' ? 'mb-3 text-xs text-secondary' : 'sr-only'}>
+                {previewRebuild === 'updating' ? 'Updating preview…' : ''}
+              </div>
               {previewPdfBlob && <PdfPagePreview blob={previewPdfBlob} title={`Quote ${quoteNumber}`} />}
             </div>
             <div className="flex flex-col gap-5 p-4 md:overflow-y-auto md:border-l md:border-gray-200 md:px-6 md:py-5">

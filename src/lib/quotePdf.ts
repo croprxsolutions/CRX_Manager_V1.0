@@ -119,8 +119,12 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setTextColor(...QUOTE_TEXT);
   doc.setFont('helvetica', 'bold');
   fitCompanyNameFont(doc, company.name, colW, 9);
-  doc.text(company.name, margin, y + 9);
+  // A long name wraps inside its column instead of running into the logo.
   let companyY = y + 9;
+  (doc.splitTextToSize(company.name, colW) as string[]).forEach((line, i) => {
+    if (i) companyY += 11;
+    doc.text(line, margin, companyY);
+  });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.25);
   // Today's letterhead tagline, address and phone, one per line; the address prints as saved in Settings.
@@ -145,16 +149,20 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFontSize(8.25);
   const labelW = Math.max(...details.map(([label]) => doc.getTextWidth(label))) + 9;
   doc.setFont('helvetica', 'normal');
-  const valueW = Math.max(...details.map(([, value]) => doc.getTextWidth(value)));
+  // Values wrap inside the right-hand column, so a long rep name or quote number never reaches the logo.
+  const detailLines = details.map(([, value]) => doc.splitTextToSize(value, colW - labelW) as string[]);
+  const valueW = Math.max(...detailLines.flat().map((line) => doc.getTextWidth(line)));
   const detailsX = pageW - margin - labelW - valueW;
   let detailsY = y + 9;
-  for (const [label, value] of details) {
+  details.forEach(([label], i) => {
     doc.setFont('helvetica', 'bold');
     doc.text(label, detailsX, detailsY);
     doc.setFont('helvetica', 'normal');
-    doc.text(value, detailsX + labelW, detailsY);
-    detailsY += 12;
-  }
+    for (const line of detailLines[i]) {
+      doc.text(line, detailsX + labelW, detailsY);
+      detailsY += 12;
+    }
+  });
   y = Math.max(companyY, quoteWordY, detailsY - 12);
 
   // ─── Prepared for (where a window envelope shows it) ──────

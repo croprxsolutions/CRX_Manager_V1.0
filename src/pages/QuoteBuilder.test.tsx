@@ -297,6 +297,9 @@ vi.mock('../lib/dateUtils', () => ({
     return new Date(year, month - 1, day);
   },
 }));
+vi.mock('../components/quotes/PdfPagePreview', () => ({
+  default: ({ blob }: { blob: Blob & { tag?: string } }) => <div data-testid="pdf-preview" data-tag={blob.tag} />,
+}));
 vi.mock('../lib/quotePdf', () => ({ downloadQuotePdf: vi.fn(), generateQuotePdf: mockGenerateQuotePdf }));
 vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, pdfToBase64: vi.fn(), buildEmailHtml: vi.fn(() => '<p>test</p>') }));
 vi.mock('../lib/rupCompliance', () => ({
@@ -5752,6 +5755,72 @@ describe('QuoteBuilder', () => {
         expect.objectContaining({ created_at: RECENT_QUOTE_CREATED_AT, expires_at: new Date(2026, 10, 25).toISOString() }),
         [...defaults, 'category'],
       );
+    });
+
+    describe('preview rebuilds', () => {
+      const tagged = (tag: string) => ({ output: () => Object.assign(new Blob([tag]), { tag }) });
+      const deferred = () => {
+        let resolve!: (v: unknown) => void;
+        let reject!: (e: unknown) => void;
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+      };
+      const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      afterEach(() => { vi.useRealTimers(); });
+
+      it('shows only the latest columns when toggles overlap a build in flight', async () => {
+        serveAt('draft');
+        mockGenerateQuotePdf.mockImplementationOnce(() => tagged('A'));
+        const dialog = await openPreview();
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'A');
+        vi.useFakeTimers();
+        const category = within(dialog).getByRole('button', { name: 'Category' });
+        const container = within(dialog).getByRole('button', { name: 'Container' });
+
+        // A to B, build B in flight, then back to A: B's late result is dropped.
+        const b = deferred();
+        mockGenerateQuotePdf.mockImplementationOnce(() => b.promise as never);
+        fireEvent.click(category);
+        await advance(200);
+        expect(screen.getByText('Updating preview…')).toBeInTheDocument();
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'A');
+        fireEvent.click(category);
+        await act(async () => { b.resolve(tagged('B')); });
+        await advance(500);
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'A');
+        expect(screen.queryByText('Updating preview…')).not.toBeInTheDocument();
+
+        // A to B to C: B resolves after C was requested and is ignored.
+        const b2 = deferred();
+        const c = deferred();
+        mockGenerateQuotePdf.mockImplementationOnce(() => b2.promise as never).mockImplementationOnce(() => c.promise as never);
+        fireEvent.click(category);
+        await advance(200);
+        fireEvent.click(container);
+        await advance(200);
+        await act(async () => { c.resolve(tagged('C')); });
+        await act(async () => { b2.resolve(tagged('B2')); });
+        await advance(500);
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'C');
+      });
+
+      it('keeps the last good pages and says so when a rebuild fails, then clears on success', async () => {
+        serveAt('draft');
+        mockGenerateQuotePdf.mockImplementationOnce(() => tagged('A'));
+        const dialog = await openPreview();
+        vi.useFakeTimers();
+        mockGenerateQuotePdf.mockImplementationOnce(() => Promise.reject(new Error('boom')) as never);
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Category' }));
+        await advance(200);
+        expect(screen.getByText('Preview could not update. Download and email use the columns you picked.')).toBeInTheDocument();
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'A');
+
+        mockGenerateQuotePdf.mockImplementationOnce(() => tagged('D'));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Container' }));
+        await advance(200);
+        expect(screen.queryByText(/Preview could not update/)).not.toBeInTheDocument();
+        expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'D');
+      });
     });
 
     it("Email to grower is refused with today's messages when unsaved, unsaved changes, or no email", async () => {

@@ -283,6 +283,79 @@ describe('generateQuotePdf', () => {
     expect(autoTable.mock.calls[0][1].startY).toBeGreaterThan(ys[2]);
   });
 
+  describe('header wrapping and totals', () => {
+    // Wraps on spaces and, for an unbroken word, by character, at 4 pt per character.
+    const wrap = (text: string, width: number) => {
+      const max = Math.max(1, Math.floor(width / 4));
+      const lines: string[] = [];
+      let line = '';
+      for (const word of text.split(' ')) {
+        const next = line ? `${line} ${word}` : word;
+        if (next.length <= max) { line = next; continue; }
+        if (line) lines.push(line);
+        line = word;
+        while (line.length > max) { lines.push(line.slice(0, max)); line = line.slice(max); }
+      }
+      return [...lines, line];
+    };
+
+    it('wraps a long company name and a long rep name inside their columns', async () => {
+      const companyName = 'Northern Plains Agricultural Inputs and Crop Service Company';
+      expect(companyName).toHaveLength(60);
+      const repName = 'Alexandria Montgomery-Featherstonehaugh III';
+      companyInfo.load.mockResolvedValueOnce({ ...DEFAULT_COMPANY_INFO, name: companyName });
+      mockDoc.splitTextToSize.mockImplementation(wrap as never);
+      mockDoc.getTextWidth.mockImplementation(((t: string) => t.length * 4) as never);
+      const calls: { text: string; x: number }[] = [];
+      mockDoc.text.mockImplementation(((text: unknown, x: number) => {
+        calls.push(...[text].flat().map((t) => ({ text: String(t), x })));
+      }) as never);
+      await generateQuotePdf(makeQuoteData({ sales_rep_name: repName.slice(0, 40) }));
+
+      const pageW = 612;
+      const margin = 42;
+      const colW = (pageW - margin * 2 - 32) / 3;
+      const logoRight = pageW / 2 + 142.5 / 2;
+      const nameLines = calls.filter((c) => c.x === margin && companyName.includes(c.text) && c.text.length > 1);
+      expect(nameLines.length).toBeGreaterThan(1);
+      expect(nameLines.map((c) => c.text).join(' ').replace(/\s+/g, ' ')).toBe(companyName);
+      for (const c of nameLines) expect(c.x + c.text.length * 4).toBeLessThanOrEqual(margin + colW);
+
+      const repLines = calls.filter((c) => repName.slice(0, 40).includes(c.text) && c.text.length > 1);
+      expect(repLines.length).toBeGreaterThan(1);
+      for (const c of repLines) {
+        expect(c.x).toBeGreaterThan(logoRight);
+        expect(c.x + c.text.length * 4).toBeLessThanOrEqual(pageW - margin);
+      }
+      mockDoc.splitTextToSize.mockImplementation(((t: string) => [t]) as never);
+      mockDoc.getTextWidth.mockImplementation((() => 50) as never);
+    });
+
+    it('prints section rows that add up, in cents, to the printed quote total', async () => {
+      const item = (total_price: number) => ({ ...makeQuoteData().sections[0].items[0], total_price });
+      const fixtures = [
+        makeQuoteData(),
+        makeQuoteData({
+          sections: [
+            { section_name: 'North', section_notes: '', items: [item(33.33), item(33.33), item(33.34)] },
+            { section_name: 'South', section_notes: '', items: [item(0.1), item(0.2)] },
+          ],
+          totals: { totalPrice: 100.3, totalCost: 0, totalProfit: 0, avgMargin: 0 },
+        }),
+      ];
+      const cents = (money: string) => Math.round(Number(money.replace(/[$,]/g, '')) * 100);
+      for (const data of fixtures) {
+        resetDoc();
+        await generateQuotePdf(data);
+        const amounts = drawnText.map((d) => d.text).filter((t): t is string => typeof t === 'string' && /^\$[\d,]+\.\d\d$/.test(t));
+        const total = amounts[amounts.length - 1];
+        const rows = amounts.slice(0, -1);
+        expect(rows).toHaveLength(data.sections.length);
+        expect(rows.reduce((sum, a) => sum + cents(a), 0)).toBe(cents(total));
+      }
+    });
+  });
+
   describe('layout', () => {
     it('still prints every money string the old PDF printed, unchanged', async () => {
       const base = makeQuoteData();

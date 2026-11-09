@@ -95,7 +95,7 @@ Keep `products.use_timings` and `product_parents.use_timings` exactly as they ar
 - **An admin can add a pair** and turn one off, through two RPCs. A product keeps a turned-off option it already has (the existing trigger rule); it just stops appearing in the picker.
 - **No renaming.** Each size stores the joined labels in `use_timing`, written at save time, so renaming an option would leave every existing product showing the old label. To fix a wrong label, turn it off and add a new one. (Rename is out of scope; if Mason later wants it, it is its own package that rewrites the joined text.)
 
-Why this is the smallest complete design: the copy-down, the grouped-size guard, change history, the parent proposals, the workbook column, the category-clear rule and the picker all already work on option codes. USE-1 adds two small tables' worth of rules and two admin RPCs, and touches no existing function.
+Why this is the smallest complete design: the copy-down, the grouped-size guard, change history, the parent proposals, the workbook column, the category-clear rule and the picker all already work on option codes. USE-1 adds two small tables' worth of rules, two admin RPCs and one parent trigger, and changes one existing function by one rule (3.4: sizes inherit a retired option their parent already holds).
 
 ### 3.2 Tables
 
@@ -135,7 +135,16 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`; turning on a pair another active option already has — `USE_TIMING_PAIR_EXISTS`, naming it.
 5. Update `is_active`, `updated_by`, `updated_at = now()`, `option_version + 1`; return the row (with its new version) and the holder counts.
 
-No change to `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once.
+No change to `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once. The one change to `sync_product_use_timings` is 3.4.
+
+### 3.4 A retired option a parent already holds
+
+**The gap (Codex review, PR #1684):** `sync_product_use_timings` refuses an inactive code a size did not already hold. Two parent functions give a size its parent's timings starting from a size that does not hold them: `add_product_size` (the new size starts empty) and `move_product_size` (the size joins another parent). Both write the `product_parent_members` row first, then call `_copy_parent_to_size`. If the parent keeps a retired option, the copy is refused and the whole add or move rolls back, although the parent legitimately keeps that choice.
+
+**The rule:** a size inherits what its parent holds; a parent never newly takes a retired option.
+- **Size side:** re-emit `sync_product_use_timings` (`CREATE OR REPLACE`, same signature, owner, `search_path` and trigger) with one added allowance: an inactive code the size did not hold is accepted only when (a) a `product_parent_copy_passes` row exists for this size in this transaction (`txid_current()`), and (b) the size's parent in `product_parent_members` already holds that code in `product_parents.use_timings`. Every other line of the function stays byte-for-byte as in `20261103210000`. A direct size edit, the setup workbook, bulk import and the product page have no copy pass, so they are still refused.
+- **Parent side:** a new trigger `trg_guard_product_parent_retired_timings`, `BEFORE INSERT OR UPDATE OF use_timings ON product_parents`, function `guard_product_parent_retired_timings()` (plain, not `SECURITY DEFINER`, `SET search_path = public, pg_temp`, `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role`). It refuses any inactive code not in `OLD.use_timings` (on insert, any inactive code) with `PRODUCT_PARENT_TIMING_RETIRED`, naming the label. Before USE-1 this protection came for free from the size trigger (the parent's copy-down was refused); now that the size trigger trusts the parent, the parent needs its own check.
+- **Result:** adding a size to, or moving a size into, a parent that holds a retired option succeeds and the size holds it (shown "(retired)"); creating a parent with a retired option, or adding one to an existing parent, is refused; a parent edit that keeps a retired option it already holds still saves.
 
 ---
 
@@ -150,18 +159,19 @@ No change to `sync_product_use_timings`, `_product_parent_timings`, `update_prod
 - Every `crop` on the options is null or one of the seeded crop codes; every `timing_code` matches the code pattern.
 - `_product_parent_require_admin`, `_product_parent_replay`, `save_idempotency` exist.
 - Capture into a temp table: per-code counts of `products.use_timings` and `product_parents.use_timings`, the count of products with any timing, and an md5 of `(id, use_timings, use_timing, pricing_version)` for every product.
-- Capture the md5 of `pg_get_functiondef` for `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, `guard_product_parent_timings`, `guard_product_parent_values`.
+- Capture the md5 of `pg_get_functiondef` for `_product_parent_timings`, `update_product_parent`, `guard_product_parent_timings`, `guard_product_parent_values`, `add_product_size`, `move_product_size`, `_copy_parent_to_size`.
+- `sync_product_use_timings`'s `pg_get_functiondef` md5 equals the value recorded at build time from the live `20261103210000` body (refuse if it drifted, so the re-emit cannot overwrite an unknown version); `guard_product_parent_retired_timings` and its trigger do not exist.
 
 ### 4.B Body
-Section 3.2's table and constraints, section 3.3's two functions. RLS on `product_crop_options` with one policy `product_crop_options_select` FOR SELECT TO authenticated USING `(SELECT public.is_active_profile())`; `REVOKE ALL ON TABLE … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`; `GRANT SELECT … TO authenticated`. No write grant on either table to any app role.
+Section 3.2's table and constraints, section 3.3's two functions, section 3.4's re-emitted `sync_product_use_timings` and new parent trigger. RLS on `product_crop_options` with one policy `product_crop_options_select` FOR SELECT TO authenticated USING `(SELECT public.is_active_profile())`; `REVOKE ALL ON TABLE … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`; `GRANT SELECT … TO authenticated`. No write grant on either table to any app role.
 
 ### 4.C What the migration does not touch
-- No `products` or `product_parents` column, trigger, grant or row.
-- None of the five functions named in 4.A.
+- No `products` or `product_parents` column, grant or row; no `products` trigger is added or dropped (the one new trigger is on `product_parents`, 3.4).
+- None of the seven functions named in 4.A; `sync_product_use_timings` changes only by the 3.4 allowance.
 - No option row is added or turned off. The only option changes are the crops of Volunteer Corn and Range/Pasture/Turf, and only as Mason answers question 2. The only new rows are the 8 crop options.
 
 ### 4.D Rollback (its own reviewed migration)
-Drop the two functions, then the three new rules named in 4.A (the crop foreign key first), then the four new option columns, then `product_crop_options`. If question 2 re-filed Volunteer Corn or Range/Pasture/Turf, set each crop back (`corn`, null) before dropping the crop table. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
+Re-emit `sync_product_use_timings` from its `20261103210000` body and drop the parent trigger and its function; then drop the two RPCs, then the three new rules named in 4.A (the crop foreign key first), then the four new option columns, then `product_crop_options`. If question 2 re-filed Volunteer Corn or Range/Pasture/Turf, set each crop back (`corn`, null) before dropping the crop table. No product data to restore, because none changed. A size that inherited a retired option keeps it after rollback (the old trigger lets a row keep a code it holds). If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
 
 ### 4.E Lock and timing
 `SET LOCAL lock_timeout = '5s'`. The `ALTER TABLE` takes a short lock on the 9-row options table; product saves read it, so apply outside busy hours (no fixed window needed; the lock lasts milliseconds).
@@ -171,7 +181,7 @@ Drop the two functions, then the three new rules named in 4.A (the crop foreign 
 - Every option code in use resolves to exactly one (category, timing code, crop) pair.
 - RLS on, one policy, exact grants on `product_crop_options` (read from `has_table_privilege`, as `20261103210000` does), and no new privilege on `product_use_timing_options`.
 - Both functions owned by `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`, `EXECUTE` only for `authenticated` (not `PUBLIC`, `anon`, `service_role`).
-- The five function md5s equal the preflight capture.
+- The seven function md5s equal the preflight capture; `sync_product_use_timings` now differs from its captured md5, keeps owner, `search_path` and its trigger, and contains the copy-pass allowance; the parent trigger exists, is `BEFORE INSERT OR UPDATE OF use_timings`, and its function has no `EXECUTE` for `PUBLIC`, `anon`, `authenticated` or `service_role`.
 
 ### 4.G Files (the Stage 2 sheet §3 rule 9 checklist)
 - the migration;
@@ -190,6 +200,8 @@ Drop the two functions, then the three new rules named in 4.A (the crop foreign 
 | A crop typed two ways (`soybean` vs `soybeans`) | Crop must be a `product_crop_options` code (foreign key). |
 | The picker grows long | The screen groups options by crop (section 5); turned-off options hide. |
 | Fungicides or insecticides need crop uses later | Out of scope: Mason's rule is timings only on Herbicide and Foliar Fertilizer (2026-10-28). Widening it is a category-CHECK change in its own package. |
+| A parent keeps a retired option, so "Add a size" or a move into it fails | 3.4: a size inherits a retired code only during a parent copy and only if its parent holds it; a parent cannot newly take one (case 9). |
+| The re-emit of `sync_product_use_timings` drifts from live | Preflight refuses unless its md5 equals the recorded live body; the re-emit changes one condition. |
 | `volunteer_corn` (crop corn) shows under **Corn**, and `range_pasture_turf` (no crop) shows under **Any crop**, in the grouped picker | Question 2. The recommended answer re-files both in this migration (two option rows, no product rows). |
 
 ---
@@ -266,6 +278,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 6. A category change on a parent with timings is refused until timings are cleared; the screen's confirm then clears them on every size in one event.
 7. Turning an option off: it disappears from the picker; a product holding it keeps it and can still save other fields; assigning it to a product that does not hold it is refused on **every** write path (product page, setup workbook, bulk import, a parent edit — the parent's copy-down hits the same size trigger and the whole parent edit is refused); turning it back on works; the result reports holder counts.
 8. A setup workbook export and re-import with no edits saves nothing; a Crop Uses row edit saves through `update_product_parent` with one parent event and one copy per size; a stale parent row is refused by name while other rows save, and the result lists both.
+9. **Retired option held by a parent:** a parent with two sizes holds an option; turn the option off. Then: `add_product_size` succeeds and the new size holds it; `move_product_size` of a size from another parent into this one succeeds and the size holds it; a parent edit that changes the name or adds another active option keeps it and saves; `create_product_with_parent` with it, and `update_product_parent` adding it to a different parent, are refused `PRODUCT_PARENT_TIMING_RETIRED` and write nothing; a direct size edit, a setup workbook row and a bulk import adding it to an ungrouped size are still refused.
 
 **USE-1, observed in the app against the private test copy (`scripts/local-app/`):** add a pair from the product page as an admin; pick it on a product; see it grouped under its crop; download and re-upload the setup workbook with a Crop Uses edit. A flow the test copy cannot run is recorded as owed, not passed.
 
@@ -354,3 +367,6 @@ Today no product has a quote note, so 442 products put their general description
 - MED preflight did not check for same-name functions: fixed; preflight refuses any existing function with either name and any argument list (4.A).
 - LOW the pair rule includes category: clarified, not changed; a pair is defined within one category (Words used here).
 - LOW a reactivation could race an add and hit a raw unique error: refuted; both RPCs take the same `crx_use_timing_options` advisory lock (3.3), so the duplicate check and the write cannot interleave.
+
+**Codex GitHub review** (head `c39dc61d8`): 1 finding (P2).
+- P2 a parent holding a retired option would make "Add a size" (and moving a size into it) fail, because the size trigger refuses a retired code the new size did not hold: confirmed against `20261108120000` (`add_product_size` and `move_product_size` write the member row, then copy). Fixed: sizes inherit a retired code only during a parent copy and only when the parent holds it; a new parent trigger stops a parent newly taking a retired option (3.4, 4.A–4.F, case 9).

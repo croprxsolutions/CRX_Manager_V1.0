@@ -2529,7 +2529,7 @@ export default function QuoteBuilder() {
         // rolls back, and the retry is never sent — so unlike the lost-reply
         // case below, the outcome is known and the message may say so.
         if (reason !== null && editingSessionChanged()) {
-          toast('error', `Quote ${quoteNumberAtSend || 'you were editing'} was not saved. The below-cost approval finished after you left that quote, so it was not applied — reopen the quote and save again.`);
+          toast('error', `Quote ${quoteNumberAtSend || 'you were editing'} was not saved. The below-cost approval finished after you left that quote, so it was not applied. Reopen the quote and save again.`);
           throw new BelowCostApprovalHandledError();
         }
         return supabase.rpc('save_quote', withBelowCostReason('save_quote', {
@@ -2628,7 +2628,7 @@ export default function QuoteBuilder() {
         // resolution, and the reload path releases the key deliberately.
         if (!editingSessionChanged()) {
           toast('error', saveQuoteIntentScope === 'new'
-            ? 'The save came back without an ID, so it is unknown whether this quote was created. Press Save Draft again WITHOUT reloading — the retry replays the same request, so the server returns the original result instead of creating a second quote.'
+            ? 'The save came back without an ID, so it is unknown whether this quote was created. Press Save Draft again WITHOUT reloading. The retry replays the same request, so the server returns the original result instead of creating a second quote.'
             : 'The quote save came back without an ID, so its outcome is unknown. Reload the quote before making further changes.');
         }
         return null;
@@ -2853,7 +2853,7 @@ export default function QuoteBuilder() {
     });
     if (error) {
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_FULLY_DRAWN)) {
-        toast('error', 'This booking is fully drawn — all quantities are already on orders. Nothing left to roll over.');
+        toast('error', 'This booking is fully drawn. All quantities are already on orders. Nothing left to roll over.');
       } else {
         toast('error', 'Failed to roll over quote');
       }
@@ -2861,7 +2861,7 @@ export default function QuoteBuilder() {
     }
     const result = assertRpcResult<{ quote_id: string; quote_number: string; season: number; remainder_rollover: boolean }>(data, 'rollover_quote_to_season');
     rolloverIdem.resetKeyFor(rollScope);
-    toast('success', `Rolled over to season ${result.season} — ${result.quote_number}`);
+    toast('success', `Rolled over to season ${result.season}: ${result.quote_number}`);
     navigate(`/quotes/${result.quote_id}`);
   };
 
@@ -2925,7 +2925,7 @@ export default function QuoteBuilder() {
     if (savedId) {
       setStatus('revised');
       setIsDirty(false);
-      toast('success', 'Quote is now in revised mode — you can edit and re-send.');
+      toast('success', 'Quote is now in revised mode. You can edit and re-send.');
     }
     setRevising(false);
   };
@@ -2958,7 +2958,7 @@ export default function QuoteBuilder() {
       if (orderDrawsRes.error) throw orderDrawsRes.error;
       if (jobDrawsRes.error) throw jobDrawsRes.error;
       if ((orderDrawsRes.data && orderDrawsRes.data.length > 0) || (jobDrawsRes.data && jobDrawsRes.data.length > 0)) {
-        toast('warning', `This booking has partial draw-downs or job reservations — close it from its orders/jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
+        toast('warning', `This booking has partial draw-downs or job reservations. Close it from its orders or jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
         return;
       }
       const previousRowVersion = quoteRowVersionRef.current;
@@ -2982,7 +2982,7 @@ export default function QuoteBuilder() {
         entityType: 'quote',
         entityId: id,
       });
-      toast('success', `Quote ${newStatus} — any inventory holds were released.`);
+      toast('success', `Quote ${newStatus}. Any inventory holds were released.`);
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'mutation', action: `quote_${newStatus}` } });
       toast('error', sanitizeError(err));
@@ -3027,15 +3027,15 @@ export default function QuoteBuilder() {
       const warnings = result.warnings || [];
       if (rowVersionConfirmed) {
         toast('success', warnings.length > 0
-          ? `Booking closed — fulfilled by application. ${warnings.join('. ')}.`
-          : 'Booking closed — fulfilled by application.');
+          ? `Booking closed as fulfilled by application. ${warnings.join('. ')}.`
+          : 'Booking closed as fulfilled by application.');
       } else if (warnings.length > 0) {
         toast('warning', `Booking close warnings: ${warnings.join('. ')}.`);
       }
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'mutation', action: 'close_quote_as_applied' } });
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('warning', 'This booking is no longer open — refresh the page to see its current status.');
+        toast('warning', 'This booking is no longer open. Refresh the page to see its current status.');
       } else {
         toast('error', sanitizeError(err));
       }
@@ -3089,7 +3089,7 @@ export default function QuoteBuilder() {
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_HAS_ACTIVE_JOBS)) {
         toast('warning', 'This booking still has scheduled or in-progress jobs. Cancel or complete them first, then close the booking as short.');
       } else if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('warning', 'This booking is no longer open — refresh the page to see its current status.');
+        toast('warning', 'This booking is no longer open. Refresh the page to see its current status.');
       } else {
         toast('error', sanitizeError(err));
       }
@@ -3216,7 +3216,7 @@ export default function QuoteBuilder() {
     // Codex P1: an existing quote with unsaved edits still has quoteId, so the
     // emailed PDF would render local edits the DB + version history don't have —
     // the grower would get an unreproducible quote. Block until saved.
-    if (isDirty) { toast('warning', 'You have unsaved changes — save the quote before emailing it.'); return; }
+    if (isDirty) { toast('warning', 'You have unsaved changes. Save the quote before emailing it.'); return; }
     if (!selectedCustomer?.email) { toast('error', 'This customer has no email address on file.'); return; }
     if (!profile) { toast('error', 'You must be signed in to send a quote.'); return; }
     setEmailingGrower(true);
@@ -3418,7 +3418,7 @@ export default function QuoteBuilder() {
         Sentry.captureException(logError instanceof Error ? logError : new Error(String(logError)), { tags: { source: 'activity_log', action: 'quote_presented' } });
       }
       if (rowVersionConfirmed) {
-        toast('success', `Quote marked as presented (V${ver.version_number})`);
+        toast('success', `Quote marked as presented (version ${ver.version_number})`);
       }
       // Book-as-Order chains from this boolean. A committed sent transition
       // with an unconfirmed token must stop before customer/order conversion,
@@ -3538,7 +3538,7 @@ export default function QuoteBuilder() {
     }
     if (!data) return;
     resetRestoreVersionAttempt();
-    toast('success', `Restored from V${versionNumber ?? selectedVersion?.version_number ?? '?'}`);
+    toast('success', `Restored from version ${versionNumber ?? selectedVersion?.version_number ?? '?'}`);
     setConfirmRestore(null);
     setSelectedVersion(null);
     // The restore rewrote every line, so the held line ids no longer name them.
@@ -3558,7 +3558,7 @@ export default function QuoteBuilder() {
     // create a job with ZERO locations (no acres, nothing to apply chemicals on
     // or dispatch). Block here rather than let that job get created.
     if (!sec.field_id) {
-      toast('error', 'Select a Field for this section before scheduling a job — a job needs a location to apply chemicals on and to dispatch.');
+      toast('error', 'Select a Field for this section before scheduling a job. A job needs a location to apply chemicals on and to dispatch.');
       return;
     }
     setSchedulingJobSectionKey(sectionKey);
@@ -3742,7 +3742,7 @@ export default function QuoteBuilder() {
       drawDownIdem.resetKeyFor(drawScope);
       clearPendingRetry(drawPendingName);
       setPendingDraw(null);
-      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
+      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? '. Booking fully drawn' : '. Booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
         result.warnings.forEach((w) => toast('warning', `Inventory: ${w}`));
@@ -3803,7 +3803,7 @@ export default function QuoteBuilder() {
           clearPendingRetry(drawPendingName);
           setPendingDraw(null);
           setShowDrawModal(false);
-          toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made — opening that order now.');
+          toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made. Opening that order now.');
           navigate(`/orders/${committedOrderId}`);
           setDrawing(false);
           return;
@@ -3850,7 +3850,7 @@ export default function QuoteBuilder() {
         // (e.g. another draw landed from a second tab) — surface it as-is.
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed — only sent or revised quotes can be drawn down.');
+        toast('error', 'This booking is closed. Only sent or revised quotes can be drawn down.');
       } else if (hasRpcCode(error, RpcErrorCodes.EMPTY_DRAW)) {
         toast('warning', 'Enter a quantity for at least one product');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_QUANTITY_INVALID)) {
@@ -3875,7 +3875,7 @@ export default function QuoteBuilder() {
       } else if (hasRpcCode(error, RpcErrorCodes.DRAW_ALLOCATION_MISMATCH)) {
         // Safety net, not an operator mistake: the draw refused rather than
         // billing units it could not match to a booked price.
-        toast('error', `${errMsg} — nothing was drawn. Check the quote's booked quantities, then try again.`);
+        toast('error', `${errMsg}. Nothing was drawn. Check the quote's booked quantities, then try again.`);
       } else {
         toast('error', errMsg);
       }
@@ -3957,13 +3957,13 @@ export default function QuoteBuilder() {
         if (orderDrawRes.error) throw orderDrawRes.error;
         if (jobDrawRes.error) throw jobDrawRes.error;
         if ((orderDrawRes.data && orderDrawRes.data.length > 0) || (jobDrawRes.data && jobDrawRes.data.length > 0)) {
-          toast('warning', 'This booking has partial draw-downs or job reservations — use "Partial Order" to draw the remaining balance instead of converting.');
+          toast('warning', 'This booking has partial draw-downs or job reservations. Use "Partial Order" to draw the remaining balance instead of converting.');
           setConverting(false);
           return;
         }
       } catch (error: unknown) {
         Sentry.captureException(error, { tags: { source: 'critical_action', action: 'convert_quote_draw_check' } });
-        toast('error', 'Could not verify the booking balance — please try again');
+        toast('error', 'Could not verify the booking balance. Please try again');
         setConverting(false);
         return;
       }
@@ -4007,7 +4007,7 @@ export default function QuoteBuilder() {
       }
       const alreadyConverted = result.status === 'already_converted';
       if (alreadyConverted) {
-        toast('info', 'This booking was already converted — opening the existing order.');
+        toast('info', 'This booking was already converted. Opening the existing order.');
       } else {
         toast('success', `Order ${result.order_number || ''} created`);
       }
@@ -4106,12 +4106,12 @@ export default function QuoteBuilder() {
         }
 
         if (createdOrderId) {
-          toast('success', 'The order was created — opening it');
+          toast('success', 'The order was created. Opening it');
           setIsDirty(false);
           skipUnsavedPromptRef.current = true;
           navigate(`/orders/${createdOrderId}`);
         } else {
-          toast('warning', 'The quote was accepted, but its order could not be found — check the Orders page');
+          toast('warning', 'The quote was accepted, but its order could not be found. Check the Orders page');
           try {
             await fetchQuote(savedId);
           } catch (refetchError) {
@@ -4126,7 +4126,7 @@ export default function QuoteBuilder() {
         // The conversion RPC is transactional, so a genuine failure leaves the
         // status unchanged. A recovery write is only safe after a successful
         // read proves the quote was not accepted.
-        toast('warning', 'Could not verify the outcome — check the Orders page before retrying; the quote status was left unchanged.');
+        toast('warning', 'Could not verify the outcome. Check the Orders page before retrying. The quote status was left unchanged.');
         setConverting(false);
         return;
       }
@@ -4134,9 +4134,9 @@ export default function QuoteBuilder() {
       // Friendly mapping for the booking guards (server-side backstop for the
       // pre-check above — e.g. a draw landed from another tab mid-convert).
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_PARTIALLY_DRAWN)) {
-        toast('warning', 'This booking has partial draw-downs — use "Partial Order" to draw the remaining balance instead of converting.');
+        toast('warning', 'This booking has partial draw-downs. Use "Partial Order" to draw the remaining balance instead of converting.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
+        toast('error', 'This booking is closed. Only sent or revised quotes can be converted.');
       } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.COST_BASIS_REQUIRED)) {
@@ -5758,7 +5758,7 @@ export default function QuoteBuilder() {
               onChange={(e) => setKeepProductPickerOpen(e.target.checked)}
               className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
             />
-            Keep open &mdash; add several
+            Keep open to add several
           </label>
           <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
             {filteredProducts.length === 0 ? (
@@ -5799,8 +5799,28 @@ export default function QuoteBuilder() {
       <Modal
         open={confirmConvertOpen}
         onClose={() => { if (!converting) setConfirmConvertOpen(false); }}
-        title="Convert to"
-        accent="Order"
+        title="Convert to order?"
+        footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              showChevron={false}
+              onClick={() => setConfirmConvertOpen(false)}
+              disabled={converting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              icon={<ShoppingCart className="w-4 h-4" />}
+              onClick={handleConvertToOrder}
+              loading={converting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Create Order
+            </Button>
+          </div>
+        }
       >
         <div className="space-y-4">
           <GuardrailBanner warning={staleWarning} onDismiss={dismissStaleWarning} />
@@ -5809,23 +5829,6 @@ export default function QuoteBuilder() {
             {selectedCustomer?.farm_name || 'the customer'} with all line items. The
             quote status will be updated to accepted.
           </p>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              showChevron={false}
-              onClick={() => setConfirmConvertOpen(false)}
-              disabled={converting}
-            >
-              Cancel
-            </Button>
-            <Button
-              icon={<ShoppingCart className="w-4 h-4" />}
-              onClick={handleConvertToOrder}
-              loading={converting}
-            >
-              Create Order
-            </Button>
-          </div>
         </div>
       </Modal>
 
@@ -5896,7 +5899,7 @@ export default function QuoteBuilder() {
           >
             Mark as Presented
           </Button>
-          <HelpTip text="Marks the quote as sent WITHOUT emailing &mdash; use when you presented it in person" className="ml-1" />
+          <HelpTip text="Marks the quote as sent WITHOUT emailing. Use when you presented it in person" className="ml-1" />
           <Button
             variant="primary"
             icon={<Send className="w-4 h-4" />}
@@ -5922,7 +5925,16 @@ export default function QuoteBuilder() {
       />
 
       {showSaveTemplateModal && (
-        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as Template">
+        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as Template" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowSaveTemplateModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTemplate} disabled={!templateName.trim()} className="min-h-11 w-full sm:w-auto">
+              Save Template
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1">Template Name</label>
@@ -5943,27 +5955,25 @@ export default function QuoteBuilder() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
               />
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowSaveTemplateModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveTemplate}
-                disabled={!templateName.trim()}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                Save Template
-              </button>
-            </div>
           </div>
         </Modal>
       )}
 
       {showDrawModal && (
-        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create Order from Booking">
+        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create Order from Booking" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowDrawModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => handleDrawDown()}
+              disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              {drawing ? 'Creating…' : 'Create Order'}
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Enter how much of each booked product to send now. The quote keeps the
@@ -5976,15 +5986,16 @@ export default function QuoteBuilder() {
                   Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
                   and may have gone through, but it can no longer be finished safely. Check the orders on this booking before drawing again.
                 </p>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => {
                     clearPendingRetry(drawPendingName);
                     setPendingDraw(null);
                   }}
-                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg"
+                  className="shrink-0 min-h-11 md:min-h-10"
                 >
                   I checked
-                </button>
+                </Button>
               </div>
             )}
             {pendingDraw && !pendingDraw.expired && (
@@ -5993,13 +6004,14 @@ export default function QuoteBuilder() {
                   Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
                   so it may already have gone through. Finish it to get that order: it is made once, never twice.
                 </p>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => handleDrawDown(pendingDraw)}
                   disabled={drawing}
-                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg disabled:opacity-50"
+                  className="shrink-0 min-h-11 md:min-h-10"
                 >
                   Finish it
-                </button>
+                </Button>
               </div>
             )}
             {drawLoading ? (
@@ -6051,8 +6063,8 @@ export default function QuoteBuilder() {
                         <tr className="border-b last:border-0">
                           <td colSpan={5} className="pb-2 text-xs text-secondary">
                             <p>
-                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : '—'},
-                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : '—'}. The extra goes on its own order at:
+                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : 'not set'},
+                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : 'not set'}. The extra goes on its own order at:
                             </p>
                             <div className="mt-1 flex gap-4">
                               {(['today', 'booked'] as const).map((choice) => (
@@ -6078,27 +6090,21 @@ export default function QuoteBuilder() {
                 </table>
               </div>
             )}
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowDrawModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDrawDown()}
-                disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                {drawing ? 'Creating…' : 'Create Order'}
-              </button>
-            </div>
           </div>
         </Modal>
       )}
 
       {showRolloverModal && (
-        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll Over to New Season">
+        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll Over to New Season" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowRolloverModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button onClick={handleRollover} className="min-h-11 w-full sm:w-auto">
+              Roll Over
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Creates a new draft quote with the same products and program structure,
@@ -6113,20 +6119,6 @@ export default function QuoteBuilder() {
                 onChange={(e) => setRolloverSeason(parseInt(e.target.value))}
                 className="w-32 px-3 py-2 text-sm border border-gray-200 rounded-lg"
               />
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowRolloverModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRollover}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg"
-              >
-                Roll Over
-              </button>
             </div>
           </div>
         </Modal>
@@ -6153,9 +6145,9 @@ export default function QuoteBuilder() {
             setConfirmRewindOpen(false);
             await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
           }}
-          title={`Rewind to V${lastSentVersion.version_number}`}
-          message={`Put this quote back to V${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
-          confirmLabel={`Rewind to V${lastSentVersion.version_number}`}
+          title={`Rewind to version ${lastSentVersion.version_number}?`}
+          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          confirmLabel={`Rewind to version ${lastSentVersion.version_number}`}
           variant="info"
           icon={RotateCcw}
         />
@@ -6193,7 +6185,7 @@ export default function QuoteBuilder() {
         open={confirmBookAsOrderOpen}
         onClose={() => setConfirmBookAsOrderOpen(false)}
         onConfirm={handleBookAsOrder}
-        title="Book as Order"
+        title="Book as order?"
         message="Mark this quote as sent and convert it to an order now?"
         confirmLabel="Book as Order"
         variant="info"
@@ -6205,8 +6197,8 @@ export default function QuoteBuilder() {
         open={confirmDeclineOpen}
         onClose={() => setConfirmDeclineOpen(false)}
         onConfirm={() => setTerminalStatus('declined')}
-        title="Decline Quote"
-        message={`Mark quote ${quoteNumber} as declined? This releases any inventory holds and is terminal — an admin can reopen it later if needed.`}
+        title="Decline this quote?"
+        message={`Mark quote ${quoteNumber} as declined? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
         confirmLabel="Decline Quote"
         variant="danger"
         icon={XCircle}
@@ -6217,8 +6209,9 @@ export default function QuoteBuilder() {
         open={confirmCancelOpen}
         onClose={() => setConfirmCancelOpen(false)}
         onConfirm={() => setTerminalStatus('cancelled')}
-        title="Cancel Quote"
-        message={`Cancel quote ${quoteNumber}? This releases any inventory holds and is terminal — an admin can reopen it later if needed.`}
+        title="Cancel this quote?"
+        cancelLabel="Keep quote"
+        message={`Cancel quote ${quoteNumber}? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
         confirmLabel="Cancel Quote"
         variant="danger"
         icon={Ban}
@@ -6229,8 +6222,8 @@ export default function QuoteBuilder() {
         open={confirmCloseAppliedOpen}
         onClose={() => setConfirmCloseAppliedOpen(false)}
         onConfirm={handleCloseAsApplied}
-        title="Close — Fulfilled by Application"
-        message={`Close booking ${quoteNumber} as fulfilled by application (WE applied the product for the customer)? Any product still un-applied is released back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
+        title="Close booking as applied?"
+        message={`Close booking ${quoteNumber} as fulfilled by application? We applied the product for the customer. Any product still unapplied is released back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
         confirmLabel="Close Booking"
         icon={CheckCircle}
         loading={closingApplied}
@@ -6240,8 +6233,8 @@ export default function QuoteBuilder() {
         open={confirmCloseShortOpen}
         onClose={() => setConfirmCloseShortOpen(false)}
         onConfirm={handleCloseAsShort}
-        title="Close — Short (customer walked away)"
-        message={`Close booking ${quoteNumber} short? Use this when the customer won't take the rest of this booking. The un-fulfilled remainder is released back to free inventory. Any product already drawn was billed on its order, so this never bills again. This is terminal. (If jobs are still scheduled against this booking, cancel or complete them first.)`}
+        title="Close booking short?"
+        message={`Close booking ${quoteNumber} short? Use this when the customer won't take the rest of this booking (the customer walked away). The un-fulfilled remainder is released back to free inventory. Any product already drawn was billed on its order, so this never bills again. This is terminal. (If jobs are still scheduled against this booking, cancel or complete them first.)`}
         confirmLabel="Close Booking"
         icon={PackageOpen}
         loading={closingShort}
@@ -6252,13 +6245,31 @@ export default function QuoteBuilder() {
         onClose={() => setConfirmDraftScheduleKey(null)}
         onConfirm={() => { const k = confirmDraftScheduleKey; setConfirmDraftScheduleKey(null); if (k) handleScheduleJob(k); }}
         title="Schedule job from a draft booking?"
-        message="This booking is still a draft — it hasn't been sent to the customer yet. You can schedule a job now, but the booking and its pricing may still change before it's sent. Continue?"
+        message="This booking is still a draft and hasn't been sent to the customer yet. You can schedule a job now, but the booking and its pricing may still change before it's sent. Continue?"
         confirmLabel="Schedule Anyway"
         icon={CalendarClock}
       />
 
       {showRevertModal && (
-        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} Quote`}>
+        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} Quote`} footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => { setShowRevertModal(false); setRevertReason(''); }}
+              disabled={reverting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRevertStatus}
+              disabled={reverting || !revertReason.trim()}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              {reverting ? 'Reopening…' : revertLabel}
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Reopens quote {quoteNumber} back to <strong>sent</strong> so it can be edited,
@@ -6281,22 +6292,6 @@ export default function QuoteBuilder() {
                 {revertReason.length}/{MAX_REVERT_REASON_LENGTH}
               </p>
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setShowRevertModal(false); setRevertReason(''); }}
-                disabled={reverting}
-                className="px-4 py-2 text-sm border rounded-lg disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRevertStatus}
-                disabled={reverting || !revertReason.trim()}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                {reverting ? 'Reopening…' : revertLabel}
-              </button>
-            </div>
           </div>
         </Modal>
       )}
@@ -6305,7 +6300,7 @@ export default function QuoteBuilder() {
         open={duplicateOrderConfirmOpen}
         onClose={() => setDuplicateOrderConfirmOpen(false)}
         onConfirm={executeConvertToOrder}
-        title="Duplicate Order Warning"
+        title="Convert anyway?"
         message={duplicateOrderMsg}
         confirmLabel="Convert Anyway"
         variant="warning"

@@ -40,6 +40,8 @@ const PARKED = new Set([
   // Job access (#1650) refuses unless storage.objects carries live's policies, which the parked storage files above
   // would install; it changes job and storage access only, never what this proof covers (asserted below).
   '20261217100000_job_access_ends_with_the_job.sql',
+  // Its KI-73 follow-up (applicator spray-record fields) needs part C applied; same reason.
+  '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // Parked files whose only match is a read of products.epa_registration (complete_job copies it onto the
 // applied record); they redefine nothing this proof covers.
@@ -194,7 +196,7 @@ function buildContainer() {
   // has them: 20261022075000 (replayed before the candidate) checks that shape in its preflight.
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
     CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
-    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), UNIQUE (bucket_id, name));
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
@@ -555,6 +557,11 @@ async function main() {
   assert.equal(scalar(`SELECT string_agg(quantity || '@' || unit_price_cents || '=' || total_cents, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`),
     '3.0000@1500=4500,2.0000@1700=3400');
   assert.equal(ok(ADMIN, GEN('g6')), '0');
+  // Any one of several active records that disagrees is refused, not only the first by id (Luna r13 MED).
+  raw(`INSERT INTO public.rup_sales_records SELECT (jsonb_populate_record(r, '{"id": "ffffffff-ffff-ffff-ffff-ffffffffffff", "quantity": 9}')).*
+      FROM public.rup_sales_records r WHERE invoice_id = '${INV1}' AND unit_price_cents = 1500 AND voided_at IS NULL;`);
+  refused(ADMIN, GEN('g6b'), /RUP_RECORD_CONFLICT/);
+  raw(`DELETE FROM public.rup_sales_records WHERE id = 'ffffffff-ffff-ffff-ffff-ffffffffffff';`);
   console.log('[prover] case 12: posting never refuses a numberless restricted-use line (it gets no record), records under the line\'s stored number when its registration or its product\'s tick says Yes, one record per number, unit and price, skips a repeat and refuses a record that disagrees');
 
   // 13. Sales to check.
@@ -570,6 +577,13 @@ async function main() {
   raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '999-9');`);
   assert.equal(reasons()[L6], 'restricted_use_to_record');
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  // A number with no registration, or a Not reviewed one, is listed even when its product is not ticked (Luna r13 HIGH).
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P1}', 'x', 1, 'Gal', 1500, 1500, '999-9');`);
+  assert.equal(reasons()[L6], 'no_registration');
+  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}'; UPDATE public.epa_registrations SET rup_status = 'unknown' WHERE epa_registration = '${N1}';`);
+  assert.equal(reasons()[L1], 'not_reviewed');
+  raw(`UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N1}';`);
+  assert.equal(reasons()[L1], undefined);
   // A record covers a line only when it holds every line sharing its number, unit and price (Sol r1): a second
   // same-price line beside L5 makes L5's record short, so both are listed, and neither once it is removed.
   raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '${N2}');`);

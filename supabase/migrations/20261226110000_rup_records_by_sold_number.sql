@@ -257,7 +257,9 @@ BEGIN
          AND r.unit IS NOT DISTINCT FROM v_item.unit_size
          AND r.unit_price_cents IS NOT DISTINCT FROM v_item.unit_price_cents
          AND r.voided_at IS NULL
-       ORDER BY r.id LIMIT 1;
+       -- a disagreeing record sorts first, so any one of several active records that disagrees is refused
+       ORDER BY (r.quantity IS DISTINCT FROM v_item.quantity OR r.total_cents IS DISTINCT FROM v_item.extended_cents) DESC,
+                r.id LIMIT 1;
       IF FOUND THEN
         IF v_rec_qty IS DISTINCT FROM v_item.quantity OR v_rec_total IS DISTINCT FROM v_item.extended_cents THEN
           RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % under EPA number % with a different quantity or amount',
@@ -340,11 +342,16 @@ BEGIN
            'product_id', product_id, 'product_name', product_name, 'epa_registration', epa_registration,
            'quantity', quantity, 'registration_rup_status', registration_rup_status,
            'product_is_rup', product_is_rup, 'has_record', has_record,
-           'reason', CASE WHEN epa_registration IS NULL THEN 'no_epa_number' ELSE 'restricted_use_to_record' END)
+           'reason', CASE WHEN epa_registration IS NULL THEN 'no_epa_number'
+                          WHEN restricted_use THEN 'restricted_use_to_record'
+                          WHEN registration_rup_status IS NULL THEN 'no_registration'
+                          ELSE 'not_reviewed' END)
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
     FROM lines
-   WHERE (epa_registration IS NOT NULL AND restricted_use AND NOT has_record)
+   -- a number whose registration is missing or Not reviewed is listed too (sheet 4.C: unknown lines are findable)
+   WHERE (epa_registration IS NOT NULL AND NOT has_record
+          AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'))
       OR (epa_registration IS NULL AND product_is_rup);
   RETURN v_out;
 END;

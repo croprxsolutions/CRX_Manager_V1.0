@@ -171,7 +171,7 @@ Each guard first checks whether the seed has committed (a `seeded` event exists,
 - **`generate_rup_sales_records`** re-issued from KI-18 batch 1's body (shared lock first). Before the seed: today's rule. After it, a line needs a RUP record when its stored number's registration says `yes`, or, for a number with no registration, when its product is ticked restricted use; the signal word comes from the same place. A quantity change does not change the number, so a Yes is never lowered.
   - **Numberless lines (Mason, 2026-11-09: "we should never block a sale due to missing epa number"):** a line with no number posts with no record (a record never has a blank number).
   - **De-duplication:** one active record per invoice, product, sold number, unit and unit price (lines sold at different prices or units never merge). Posting locks the invoice row `FOR UPDATE`, so two postings run one after the other. An existing active record that disagrees is an error (`RUP_RECORD_CONFLICT`), not skipped.
-- **`get_epa_sales_to_check()`** (admin, read-only): posted lines that need a record and have none (`restricted_use_to_record`), and posted lines of a restricted-use product with no number (`no_epa_number`). How they get recorded is Q2 (by hand).
+- **`get_epa_sales_to_check()`** (admin, read-only): posted lines that need a record and have none (`restricted_use_to_record`), posted lines of a restricted-use product with no number (`no_epa_number`), and unrecorded posted lines whose number has no registration (`no_registration`) or a Not reviewed one (`not_reviewed`). How they get recorded is Q2 (by hand).
 - **Posted invoices** are never edited: a correction uses the existing void path and a replacement invoice.
 
 ### 4.D Guards and insert paths

@@ -32,6 +32,8 @@ If on `main`, create one: `git checkout -b ship/<short-slug>`. Tell Mason the br
 2. Write a short plain-English plan: what you'll build, the assumptions you're making, and the 2–4 files you'll touch.
 3. Post it to Mason, then proceed without waiting for his confirmation (Mason, 2026-10-03; Claude and Codex alike, `AGENTS.md` › Operating Contract). The plan is his chance to say "stop" and redirect; if he does, stop at once. Hard-gated actions still need his explicit approval.
 
+**If the change can affect money, stock, stored data, who may do what, or a record's lifecycle (or the enforcement protecting them)**, use `.claude/commands/plan-contract.md` instead of steps 2–3 (pilot, Mason 2026-11-09): a one-page behavior contract, Mason's business decisions before code, and one cold challenge from the other model.
+
 ## Step 1 — Implement the job to completion
 
 Do the work (you've already sized + planned it in Step 0.5). For a non-trivial feature, use the relevant scaffold skill (`/new-page`, `/new-rpc`, `/create-migration`) — those encode the correct patterns. Your PreToolUse hooks (sql-safety, money-safety, idempotency-body-check, status-enum-check, generated-column-check, env-guard) will refuse a bad write as you go — treat any hook block as a real defect to fix, not an obstacle to route around.

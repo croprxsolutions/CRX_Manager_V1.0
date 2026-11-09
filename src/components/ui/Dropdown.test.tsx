@@ -42,6 +42,18 @@ describe('Dropdown', () => {
     expect(screen.getByRole('button', { name: /Status/ })).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('inline mode puts the label inside the trigger and drops the helper line', () => {
+    const onChange = vi.fn();
+    const { container } = render(<Dropdown inline label="Status" value="draft" onChange={onChange} options={options} helper="Never shown" />);
+    const trigger = screen.getByRole('button', { name: /Status/ });
+    expect(trigger).toHaveTextContent('StatusDraft');
+    expect(screen.queryByText('Never shown')).not.toBeInTheDocument();
+    expect(container.querySelector('.min-h-5')).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    expect(onChange).toHaveBeenCalledWith('sent');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

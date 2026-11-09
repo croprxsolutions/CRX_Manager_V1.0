@@ -19,6 +19,8 @@ export interface BadgeProps {
   size?: 'sm' | 'md';
   className?: string;
   normalCase?: boolean;
+  /** A small status dot before the label (quote screens). */
+  dot?: boolean;
 }
 
 const variantClasses: Record<BadgeVariant, string> = {
@@ -33,6 +35,20 @@ const variantClasses: Record<BadgeVariant, string> = {
   declined: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
   expired: 'bg-orange-100 text-orange-800 ring-1 ring-inset ring-orange-200',
   danger: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
+};
+
+const dotClasses: Record<BadgeVariant, string> = {
+  default: 'bg-gray-500',
+  success: 'bg-emerald-600',
+  warning: 'bg-amber-600',
+  error: 'bg-red-600',
+  info: 'bg-blue-600',
+  draft: 'bg-gray-500',
+  sent: 'bg-blue-600',
+  accepted: 'bg-emerald-600',
+  declined: 'bg-red-600',
+  expired: 'bg-orange-600',
+  danger: 'bg-red-600',
 };
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -71,17 +87,18 @@ export const statusToBadgeVariant: Record<string, BadgeVariant> = {
   partially_paid: 'info',
 };
 
-export default function Badge({ variant = 'default', children, size = 'sm', className = '', normalCase = false }: BadgeProps) {
+export default function Badge({ variant = 'default', children, size = 'sm', className = '', normalCase = false, dot = false }: BadgeProps) {
   return (
     <span
       className={`
-        inline-flex items-center font-medium rounded-full
+        inline-flex items-center font-medium rounded-full ${dot ? 'gap-1.5' : ''}
         ${normalCase ? '' : 'capitalize'}
         ${variantClasses[variant]}
         ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm'}
         ${className}
       `}
     >
+      {dot && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClasses[variant]}`} aria-hidden="true" />}
       {children}
     </span>
   );

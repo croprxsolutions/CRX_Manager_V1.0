@@ -128,9 +128,12 @@ BEGIN
                                   THEN 'Marked handled by ' || COALESCE(v_name, 'staff') || '; the server will not send it.'
                                   ELSE 'Email Confirmation started by ' || COALESCE(v_name, 'staff')
                                        || '; the server will not send it. If the customer did not get it, send it again.' END
-                             || CASE WHEN v_row.status = 'needs_check' AND v_row.last_error IS NOT NULL
-                                          AND v_row.last_error NOT LIKE 'Email Confirmation started by %'
-                                     THEN ' Was: ' || v_row.last_error ELSE '' END, 500)
+                             -- Keep why it was listed: an earlier Email Confirmation note passes on its own "Was:" part (Taha, LOW).
+                             || CASE WHEN v_row.status <> 'needs_check' OR v_row.last_error IS NULL THEN ''
+                                     WHEN v_row.last_error NOT LIKE 'Email Confirmation started by %' THEN ' Was: ' || v_row.last_error
+                                     WHEN strpos(v_row.last_error, ' Was: ') > 0
+                                     THEN substr(v_row.last_error, strpos(v_row.last_error, ' Was: '))
+                                     ELSE '' END, 500)
      WHERE id = v_row.id;
   END IF;
   v_result := jsonb_build_object('delivery_id', p_delivery_id, 'outcome', v_outcome, 'previous_status', v_row.status,

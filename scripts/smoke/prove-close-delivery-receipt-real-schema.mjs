@@ -416,6 +416,11 @@ async function main() {
 
   // A needs_check receipt (no email on file) on the office list, marked handled by a sales rep: it leaves the list.
   assert.equal(listed(2), '1');
+  // Two Email Confirmations in a row keep the original reason, once (Taha, LOW).
+  assert.deepEqual(closed(REP, 2, 'manual_send', 'k-2a'), answer(2, 'paused', 'needs_check'));
+  assert.deepEqual(closed(REP, 2, 'manual_send', 'k-2b'), answer(2, 'paused', 'needs_check'));
+  assert.match(row(2, "status || '|' || last_error"), /^needs_check\|Email Confirmation started by \[PROVER\] sales_rep 2; the server will not send it\. If the customer did not get it, send it again\. Was: The customer has no email on file/);
+  assert.equal(row(2, "(length(last_error) - length(replace(last_error, ' Was: ', ''))) / 6"), '1');
   assert.deepEqual(closed(REP, 2, 'handled', 'k-2'), answer(2, 'closed', 'needs_check'));
   assert.equal(listed(2), '0');
   assert.match(row(2, "status || '|' || last_error"), /^cancelled\|Marked handled by \[PROVER\] sales_rep 2; the server will not send it\. Was: The customer has no email on file/);

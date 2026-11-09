@@ -451,7 +451,8 @@ BEGIN
   -- Nothing that reads or writes a number, a label fact or an invoice line runs beside the seed.
   PERFORM public._epa_registration_lock(true);
   LOCK TABLE public.products, public.product_brands, public.product_parent_brands, public.product_parents,
-    public.product_parent_members, public.invoices, public.invoice_items, public.job_product_epa
+    public.product_parent_members, public.invoices, public.invoice_items, public.job_product_epa,
+    public.orders, public.split_invoice_provenance
     IN SHARE ROW EXCLUSIVE MODE;
   IF public._epa_registrations_seeded() OR EXISTS (SELECT 1 FROM public.epa_registrations) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_DONE: EPA registrations are already set up';

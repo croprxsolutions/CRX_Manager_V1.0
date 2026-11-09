@@ -528,8 +528,9 @@ registry) and 4 are unconfirmed until a person reads the jug; 8 products with no
 proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
 changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
 lookup error instead of the new number, and a three-part distributor number returns "not found" even when
-valid. CRM has no data entered; 146 of 150 customers lack a
-sales rep (older counts).
+valid. CRM has no data entered; 146 of 151 active customers lack a
+sales rep (live read-only count, 2026-11-08). The tool exists: an admin ticks customers on the Customers list and uses
+**Assign sales rep** (PR #381), so what remains is Mason choosing each customer's rep.
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
@@ -964,8 +965,10 @@ concurrent changes, load/count cost grows on large tables (the Orders list now r
 still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
-visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk
-import/assignment of sales reps, outbound-email logging (MED). Offline recovery also lacks notification replay,
+visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate detection in the bulk customer
+import, bulk import of sales reps from a file, outbound-email logging (MED). Bulk rep assignment exists on the Customers
+list (PR #381); the customer form warns, without blocking, when a new or renamed customer has a similar name or the
+same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
 evidence: photo proof is not tied to who took it, and storage-rule guarantees do not cover dashboard or

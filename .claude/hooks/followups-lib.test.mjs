@@ -30,6 +30,14 @@ assert.match(followUpsProblem(pr("## Follow-ups\n- tighten the check <!-- #123 -
 assert.match(followUpsProblem(pr("## Follow-ups\n<!--\n- #12 hidden\n-->\n")), /empty/);
 assert.equal(followUpsProblem(pr("```\nx\n```\n## Follow-ups\n- #12 real")), null);
 
+// Luna round 2: only real Markdown headings, real closing fences, and GitHub issue links count.
+assert.match(followUpsProblem(pr("##Follow-ups\n- None")), /no `## Follow-ups` section/);
+assert.match(followUpsProblem(pr("    ## Follow-ups\n    - None")), /no `## Follow-ups` section/);
+assert.match(followUpsProblem(pr("```md\nexample\n```junk\n## Follow-ups\n- None\n```")), /no `## Follow-ups` section/);
+assert.match(followUpsProblem(pr("## Follow-ups\n- https://tracker.example/issues/42 later")), /name no issue/);
+assert.equal(followUpsProblem(pr("## Follow-ups\n- https://github.com/o/n/issues/42 later")), null);
+assert.equal(followUpsProblem(pr("  ## Follow-ups ##\n- None")), null);
+
 // Taha's PRs are his.
 assert.equal(followUpsProblem(pr("no section", "TahaKhanAbdalli")), null);
 

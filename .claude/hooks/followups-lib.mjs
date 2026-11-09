@@ -12,9 +12,11 @@
 // guard does not load that whole lib (and its imports) at startup.
 const TAHA_LOGIN = "tahakhanabdalli";
 
-const HEADING = /^#{2,4}\s*follow-?ups\s*:?\s*$/i;
-const ANY_HEADING = /^#{1,6}\s/;
-const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|\/issues\/\d+\b/i;
+// Matched on the raw line: up to 3 leading spaces, as Markdown renders a heading (4+ is code).
+const HEADING = /^ {0,3}#{2,4}[ \t]+follow-?ups[ \t]*:?[ \t]*#*[ \t]*$/i;
+const ANY_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+// Existence of the issue is checked by the /ship close-out, not here (no network in this rule).
+const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+\b/i;
 
 // The section's lines, or null when the body has no Follow-ups heading.
 // Only what GitHub renders counts: hidden HTML comments and fenced code blocks are dropped (Luna, 2026-11-09).
@@ -22,9 +24,10 @@ function renderedLines(body) {
   const out = [];
   let fence = null;
   for (const line of String(body ?? "").replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/)) {
-    const marker = line.trim().match(/^(`{3,}|~{3,})/);
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      // A closing fence is the marker alone, at least as long as the opener.
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
     } else if (marker) {
       fence = marker[1];
     } else {
@@ -36,13 +39,12 @@ function renderedLines(body) {
 
 export function followUpLines(body) {
   const lines = renderedLines(body);
-  const start = lines.findIndex((line) => HEADING.test(line.trim()));
+  const start = lines.findIndex((line) => HEADING.test(line));
   if (start < 0) return null;
   const out = [];
   for (const raw of lines.slice(start + 1)) {
-    const line = raw.trim();
-    if (ANY_HEADING.test(line)) break;
-    const text = line.replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "").trim();
+    if (ANY_HEADING.test(raw)) break;
+    const text = raw.trim().replace(/^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "").trim();
     if (text) out.push(text);
   }
   return out;

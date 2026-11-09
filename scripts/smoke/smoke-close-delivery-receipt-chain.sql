@@ -6,7 +6,7 @@
 --   1. no signed-in user -> AUTH_REQUIRED; no key -> IDEMPOTENCY_KEY_REQUIRED; bad reason -> RECEIPT_CLOSE_INVALID
 --   2. admin, unknown delivery, 'handled' -> outcome none; same key replays the same answer; same key with
 --      'manual_send' -> IDEMPOTENCY_INTENT_MISMATCH
---   3. an active driver on a delivery with no assigned driver -> INSUFFICIENT_ROLE
+--   3. an active driver -> INSUFFICIENT_ROLE (office only)
 --   4. admin, a real sent receipt, 'manual_send' -> outcome sent with sent_at, row unchanged, no address returned
 --   5. grants: authenticated EXECUTE; anon and service_role none
 -- The full behaviour (pause, close, in-flight refusal, races with the worker) needs seeded deliveries and is proved
@@ -73,13 +73,13 @@ BEGIN
     IF v_msg NOT LIKE 'IDEMPOTENCY_INTENT_MISMATCH%' THEN RAISE EXCEPTION 'SMOKE_FAIL: reused key: %', v_msg; END IF;
   END;
 
-  -- 3. A driver on a delivery with no assigned driver is refused.
+  -- 3. A driver is refused: the call is office only.
   SELECT id INTO v_driver FROM public.profiles WHERE role = 'driver' AND is_active = true ORDER BY created_at LIMIT 1;
   IF v_driver IS NOT NULL THEN
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
     BEGIN
       PERFORM public.close_delivery_receipt(v_nowhere, 'manual_send', 'smk-cdr-' || v_suffix || '-drv');
-      RAISE EXCEPTION 'SMOKE_FAIL: a driver on an unassigned delivery was not refused';
+      RAISE EXCEPTION 'SMOKE_FAIL: a driver was not refused';
     EXCEPTION WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
       IF v_msg NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: driver: %', v_msg; END IF;

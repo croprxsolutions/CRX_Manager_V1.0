@@ -17,7 +17,8 @@
 --   with DELIVERY_RECEIPT_SENDING (try again in a minute). A sent row is unchanged and answered 'sent'. No row, or a
 --   cancelled one: 'none'. Every answer carries sent_at and send_authorized_at (an email may already have gone out),
 --   so the screen can ask before sending another copy; never the address (the screen has it).
---   Who: an active admin or sales rep, or the delivery's assigned driver (the people who may complete it).
+--   Who: an active admin or sales rep only. Drivers never see Email Confirmation or the office list, so a driver
+--     cannot quietly cancel a receipt the office would never see (Sol HIGH, PR #1678).
 --   The worker's three calls, the queue table, its triggers and grants are not changed.
 --   A cancelled receipt whose delivery is later completed again, with no send ever authorized, gets a fresh receipt,
 --   as _enqueue_delivery_receipt already does for any cancelled row.
@@ -75,7 +76,6 @@ DECLARE
   v_actor uuid := auth.uid();
   v_role text;
   v_name text;
-  v_driver uuid;
   v_fingerprint text;
   v_replay jsonb;
   v_row public.delivery_receipt_queue%ROWTYPE;
@@ -91,19 +91,19 @@ BEGIN
   IF v_actor IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
   END IF;
-  -- FOR SHARE: a concurrent demotion, deactivation or reassignment waits until this call ends.
+  -- FOR SHARE: a concurrent demotion or deactivation waits until this call ends.
   SELECT p.role, p.full_name INTO v_role, v_name FROM public.profiles p WHERE p.id = v_actor AND p.is_active = true FOR SHARE;
-  SELECT d.assigned_driver INTO v_driver FROM public.deliveries d WHERE d.id = p_delivery_id FOR SHARE;
-  -- IS NOT DISTINCT FROM: an unassigned delivery (NULL driver) must refuse a driver, not slip through as NULL.
-  IF v_role IS NULL OR NOT (v_role IN ('admin', 'sales_rep')
-                            OR (v_role = 'driver' AND v_driver IS NOT DISTINCT FROM v_actor)) THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only the office or this delivery''s driver can close its receipt'
+  IF v_role IS NULL OR v_role NOT IN ('admin', 'sales_rep') THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only the office (admin or sales rep) can close a delivery receipt'
       USING ERRCODE = '42501';
   END IF;
 
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'delivery_id', p_delivery_id, 'reason', p_reason));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'close_delivery_receipt', v_actor, v_fingerprint);
+  -- A replay returns the first answer even if the row moved since. That grants nothing a fresh call would not: the
+  -- screen resets its key after every confirmed answer, and a fresh Email Confirmation on a closed row answers 'none'
+  -- and sends too, because each press is a deliberate send (Sol MED, PR #1678, refuted).
   IF v_replay IS NOT NULL THEN
     RETURN v_replay -> 'result';
   END IF;
@@ -148,7 +148,7 @@ ALTER FUNCTION public.close_delivery_receipt(uuid, text, text) OWNER TO postgres
 REVOKE ALL ON FUNCTION public.close_delivery_receipt(uuid, text, text) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.close_delivery_receipt(uuid, text, text) TO authenticated;
 COMMENT ON FUNCTION public.close_delivery_receipt(uuid, text, text) IS
-  'KI-25 office call: handled = cancel a queued customer receipt so the server never sends it; manual_send = pause it on the office list (needs_check) before Email Confirmation sends by hand. Outcome closed / paused / sent / none, with sent_at and send_authorized_at; refuses DELIVERY_RECEIPT_SENDING while a confirmed send may be in flight. Active admin, sales rep, or the assigned driver. Key required, bound to caller and request.';
+  'KI-25 office call: handled = cancel a queued customer receipt so the server never sends it; manual_send = pause it on the office list (needs_check) before Email Confirmation sends by hand. Outcome closed / paused / sent / none, with sent_at and send_authorized_at; refuses DELIVERY_RECEIPT_SENDING while a confirmed send may be in flight. Active admin or sales rep only. Key required, bound to caller and request.';
 
 DO $postflight$
 DECLARE

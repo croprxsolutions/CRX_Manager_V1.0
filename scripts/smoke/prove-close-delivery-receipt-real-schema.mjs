@@ -6,7 +6,7 @@
  * replays every migration before the candidate (the receipt queue 20261113140000 included), applies the candidate (a
  * second apply refuses), then on invented rows: pending, needs_check and claimed-but-unconfirmed rows pause or close
  * and the worker's confirm and finish then send nothing; a confirmed in-flight send is refused (and closes once its
- * lease is over, the answer saying a send was authorized); a driver on an unassigned delivery is refused;
+ * lease is over, the answer saying a send was authorized); every driver, assigned or not, is refused;
  * sent / cancelled / missing rows change nothing; who may call it; the key is bound to caller and request; and both
  * orders of a same-instant close and confirm wait for each other with no double send.
  *
@@ -470,12 +470,16 @@ async function main() {
   assert.deepEqual(closed(ADMIN, 5, 'manual_send', 'k-5'), { delivery_id: D(5), outcome: 'none', previous_status: null, sent_at: null, send_authorized_at: null });
   assert.equal(queued(5), '0');
 
-  // This delivery's own driver may pause it for Email Confirmation and mark it handled; another driver may not.
+  // Office only: even this delivery's own driver may not pause or close its receipt (Sol HIGH, PR #1678).
   psql(`SET session_replication_role = replica; UPDATE public.deliveries SET assigned_driver = '${DRIVER2}' WHERE id = '${D(7)}';`);
+  const before7 = row(7, "status || '|' || coalesce(last_error, '')");
   refused(close(DRIVER, 7, 'manual_send', 'k-7x'), /INSUFFICIENT_ROLE/);
-  assert.equal(closed(DRIVER2, 7, 'manual_send', 'k-7').outcome, 'paused');
-  assert.equal(closed(DRIVER2, 7, 'handled', 'k-7h').outcome, 'closed');
-  console.log('[prover] no row answers none; only the assigned driver may pause and close');
+  refused(close(DRIVER2, 7, 'manual_send', 'k-7'), /INSUFFICIENT_ROLE/);
+  refused(close(DRIVER2, 7, 'handled', 'k-7h'), /INSUFFICIENT_ROLE/);
+  assert.equal(row(7, "status || '|' || coalesce(last_error, '')"), before7);
+  assert.deepEqual(closed(REP, 7, 'manual_send', 'k-7r').outcome, 'paused');
+  assert.deepEqual(closed(REP, 7, 'handled', 'k-7rh').outcome, 'closed');
+  console.log('[prover] no row answers none; drivers are refused even on their own delivery; the office may pause and close');
 
   // Same instant, close first: the worker's confirm waits for the close, then sees it and says stale.
   due(8);

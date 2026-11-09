@@ -10,7 +10,7 @@ export type AppEnv = 'production' | 'staging' | 'local';
 const STAGING_SUPABASE_HOST = 'fsnjredpmakbmhwowjjt.supabase.co';
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
-export function supabaseHost(url: string | undefined): string {
+function supabaseHost(url: string | undefined): string {
   try {
     return new URL(url ?? '').hostname;
   } catch {

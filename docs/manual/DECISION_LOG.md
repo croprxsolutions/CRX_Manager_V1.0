@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — #1705 (RT-1 draft rates) gets one more Sol round (round 5) after the fluid-ounce fix
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1705 may run Sol round 5. Sol round 4 was clean at `6687055b5`; the Codex GitHub App then found that a label maximum written as "fluid ounce" lost its volume kind, fixed at `163e7e33e`. A label maximum whose unit spelling is not one the database recognizes is reported as "not comparable" rather than guessed. No finding keeps returning: each Sol round found a different issue, all fixed.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.

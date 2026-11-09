@@ -152,12 +152,12 @@ nothing is back-filled or deleted without his approval. A database owner who dis
   extension objects) cannot be changed by `postgres`; live sweep `browser-table-maintenance` watches for them; every app table is `postgres`-owned and the migration checks that. LOW-MED.
 - Customer-document post-apply check RECORDED 2026-11-08 on the local test copy (all migrations, `20260914100700`
   included): no browser storage policy names the `customer-documents` bucket, and the Documents tab uploads and
-  downloads through `customer-document-files` (served locally). Removed documents: BUILT, NOT LIVE —
+  downloads through `customer-document-files` (served locally). Removed documents: LIVE 2026-11-09 —
   `20261222100000_document_restore_and_photo_uploader.sql` lets an active admin restore one (both removal columns
   cleared, nothing else), and `customer-document-files` lets admins download a removed one; the Documents tab has an
   admin-only "Show removed documents" view with Restore. Proven in the local app (admin remove, view, download,
-  restore; activity recorded) and on a real-schema replay. Live needs the migration applied and the function
-  deployed. Each restore is kept in `customer_document_restores` (who removed it and when, who restored it), written
+  restore; activity recorded) and on a real-schema replay. Migration applied live 2026-11-09 (ledger
+  `20261109173810`); `customer-document-files` v6 live, byte-identical to the repo. Each restore is kept in `customer_document_restores` (who removed it and when, who restored it), written
   by the database; a retried removal after a restore is refused instead of reporting "removed". LOW.
 - Signed-in rep click-through of `customer-document-files` RECORDED 2026-11-08 (local test copy): a sales rep opens
   a customer document and sees no removed-documents view; after removing one, the download service answers "no
@@ -1050,7 +1050,7 @@ list (PR #381); the customer form warns, without blocking, when a new or renamed
 same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
-evidence: photo proof tied to who uploaded the file — BUILT, NOT LIVE (`20261222100000`): a signed-in user's new delivery
+evidence: photo proof tied to who uploaded the file — LIVE 2026-11-09 (`20261222100000`): a signed-in user's new delivery
 photo must name that user as uploader and a `delivery-photos` file that user owns (as signatures are checked), its
 upload time is the server clock, and its delivery, file, uploader and time never change. Older photo rows are not
 re-checked; storage-rule guarantees still do not cover dashboard or service-role tools (LOW). Not checked: a

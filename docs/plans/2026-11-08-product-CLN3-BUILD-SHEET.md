@@ -1,6 +1,6 @@
 # Product Stage 8 build sheet: CLN-3, the name-vs-brand check (B-16)
 
-**Status: PLAN, 2026-11-08. NOT STARTED.** This sheet turns CLN-3 of `docs/plans/2026-10-29-product-GRAND-PLAN.md` (Stage 8, section 6; order item 7 in section 8) into one package that can be built, in the format of `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md`. Nothing here authorizes building; the package starts when Mason says so.
+**Status: BUILT 2026-11-09 (Mason: "ok start the work"); decisions in section 9.** This sheet turns CLN-3 of `docs/plans/2026-10-29-product-GRAND-PLAN.md` (Stage 8, section 6; order item 7 in section 8) into one package that can be built, in the format of `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md`. Nothing here authorizes building; the package starts when Mason says so.
 
 **The grand plan's whole requirement:** "a report lists every product name whose brands in brackets disagree with its brand rows, and changes nothing." The problem it closes is B-16 (`docs/plans/2026-08-18-product-data-model-MASTER-RECORD.md`): one product name carries the acceptable brands in brackets, and since August the brand list also lives in rows (`docs/plans/2026-08-19-product-data-model-BUILD-PLAN.md`, B-16 row: "name↔row drift is unaddressed and needs its own check").
 
@@ -105,7 +105,7 @@ Five table reads and one switch read for the whole catalog, instead of 604 `get_
 
 1. **Only round brackets count.** Square brackets are a code at the front of three names, never brands.
 2. **Every bracket group is read**, left to right. Text outside the brackets (the `Gen` prefix, the formulation, ` - 2.5 Gal`) is ignored.
-3. **An opening bracket with no closing bracket** reads to the end of the name and sets `unclosed`, which the page shows as "bracket not closed in the name". Its last item is usually the size that ended up inside it: if the group ends in ` - ` (or an en or em dash) followed by a size (rule 6's size shape), that tail is cut off first, and a last item that is a size on its own is dropped by rule 6. So `(Brand A, Brand B - 2.5 Gal` and `(Brand A, Brand B, 2.5 Gal` both read as Brand A and Brand B.
+3. **An opening bracket with no closing bracket** reads to the end of the name and sets `unclosed`, which the page shows as "bracket not closed in the name". Its last item is usually the size that ended up inside it: if the group ends in ` - ` (or an en or em dash) followed by a size (rule 6's size shape), that tail is cut off first, and a last item that is a size on its own is dropped by rule 6. So `(Brand A, Brand B - 2.5 Gal` and `(Brand A, Brand B, 2.5 Gal` both read as Brand A and Brand B. When no size ends the group, the name was cut mid-word, so its last brand (`(Brand A, Bra`) is marked "may be cut off: fix the name rather than add it as a brand" (decision 2, section 9).
 4. **Split on commas and semicolons only.** Not on `/` (used in `50/50`), not on `&` or "and" (a brand name may contain them), and not on a comma between two digits (`2,4-D` is one name; live has 6 product names with that shape, none inside brackets today).
 5. **Normal form of each item:** remove `®`, `™` and `©`; turn every run of spaces, tabs, hyphens (`-`, `–`, `—`) and underscores into one space; trim; lower-case. Periods and digits stay (`5.4` and `54` are different products). So `Brand-X  4L`, `brand x 4l` and ` Brand X 4L` are one brand; an empty item from a double comma disappears.
 6. **Items that are notes, not brands,** go to `notes` and are never compared:
@@ -136,7 +136,7 @@ One table, admin only (the page is already admin only: `src/appPages.tsx:411`). 
 | **Brand list, no brands in the name** | The name has no brand brackets; the brand list has brands | Name and the list |
 | **Bracket not closed** | `unclosed` | A flag on whichever group the row is in; a product in no other group is still listed here, so no unclosed name is hidden |
 
-Products that agree, and products with neither, are counted at the top (for example "N products agree; M have no brands in the name or the list") but not listed. Inactive products are included and marked, because an inactive product's name can still disagree with its rows. The section shows when it loaded, has one Reload button (which only reads again) and writes nothing; each name links to the product page, where brands are edited as today.
+**Order:** the groups in the order above; inside a group, products in use first, inactive ones last, each A to Z (decision 3, section 9). Products that agree, and products with neither, are counted at the top (for example "N products agree; M have no brands in the name or the list") but not listed. Inactive products are included and marked, because an inactive product's name can still disagree with its rows. The section shows when it loaded, has one Reload button (which only reads again) and writes nothing; each name links to the product page, where brands are edited as today.
 
 ## 6. Done when
 
@@ -192,6 +192,13 @@ All of these, observed, not only tested:
 
 **Decided (Mason, 2026-11-09: "I agree build report before typing in brands"): build it before brand entry starts.**
 The report lists every product whose name has brand names in brackets that do not match the brands saved for that product. It changes nothing. Built first, it works as Mason's brand-entry worklist (today about 100 products whose names carry brands not entered yet; a few of those are notes, not brands), then as the check that the two stay in step. This replaces the grand plan's after-PR-B order; PR B does not change what this report reads, so nothing waits on it.
+
+**Decided 2026-11-09, at the brainstorm.** The agent walked Mason through the report with real examples and its recommended picks; Mason said "ok start the work", so the picks below are the build:
+1. **Brands are read from round brackets only.** The text before the colon (the product being matched) is never read as a brand.
+2. **A cut-off name's last brand is marked "may be cut off"** (rule 3), so a fragment such as `Bra` is fixed in the name, not typed in as a brand.
+3. **Order:** in use first, inactive last, A to Z inside each group (section 5).
+4. **Spelling hint on** (section 4), as a hint only.
+5. **Report only.** Each name links to its product page, where the Brands section already offers the bracket brands as suggestions (now from the same reader). No bulk "fill brand lists from names" button: that writes data and would be its own package if ever wanted.
 
 **No decision needed, but Mason should know:** when the report shows a disagreement, it does not say which side is right. You fix each one yourself, by renaming the product or by editing its brand list on the product page, as today.
 

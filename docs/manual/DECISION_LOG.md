@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — Taha's merge hold covers a fixed list, not every PR
+
+**Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.
+**Why:** Mason's EPA, docs and field work was waiting 4 hours with nothing of Taha's at stake. Taha asked to keep the database, orders, deliveries, customers, products and shared plumbing on the list, because billing reads them or depends on them.
+**What this forbids/implies:** when unsure whether a PR is on the list, hold it. Rule: `.claude/commands/ship.md` Step 8 item 4a. The merge hold is still a written rule only; the apply hold is enforced by `tahaHoldProblem` in `.claude/hooks/migration-landing-gate-lib.mjs`.
 ## 2026-11-09 — Email Confirmation stays a hand send from the screen; two rare duplicates are accepted (KI-25 follow-up)
 
 **Decision (Mason, in session, 2026-11-09: "Yes, allow it"; widened the same morning: "Yes, accept it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Three rare cases are accepted: two office users pressing it for the same delivery within seconds can both email the customer; a void in the seconds between the go-ahead and the hand send does not stop that send; and a second office user may mark the paused receipt handled while a hand send is still going, so if that send then fails the receipt is off the list (the sender sees the failure and can press Email Confirmation again).

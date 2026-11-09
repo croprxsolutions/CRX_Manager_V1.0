@@ -138,9 +138,9 @@ CREATE TABLE public.product_rates (
   basis text NOT NULL CHECK (basis IN ('per_acre', 'per_100_gal', 'per_unit', 'per_cwt_seed', 'per_seed_unit')),
   source text NOT NULL CHECK (source IN ('label', 'house_standard')),
   -- Unconstrained numeric: a numeric(18,6) column would round a seventh decimal before any CHECK saw it.
-  low numeric CHECK (low IS NULL OR (low >= 0 AND low < 1e12 AND low = round(low, 6))),
-  recommended numeric CHECK (recommended IS NULL OR (recommended >= 0 AND recommended < 1e12 AND recommended = round(recommended, 6))),
-  high numeric CHECK (high IS NULL OR (high >= 0 AND high < 1e12 AND high = round(high, 6))),
+  low numeric CHECK (low IS NULL OR (low >= 0 AND low < 1e9 AND low = round(low, 6))),
+  recommended numeric CHECK (recommended IS NULL OR (recommended >= 0 AND recommended < 1e9 AND recommended = round(recommended, 6))),
+  high numeric CHECK (high IS NULL OR (high >= 0 AND high < 1e9 AND high = round(high, 6))),
   unit text NOT NULL REFERENCES public.product_rate_units(code) ON UPDATE RESTRICT ON DELETE RESTRICT,
   is_quoting_default boolean NOT NULL DEFAULT false,
   status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved')),
@@ -282,10 +282,10 @@ CREATE TRIGGER trg_product_rate_draft_events_no_truncate BEFORE TRUNCATE ON publ
 -- 3. Helpers (no grants)
 -- ---------------------------------------------------------------------------------------------
 
--- The 3.1 value rule (not negative, below 1e12, at most 6 decimals), tested before any write.
+-- The 3.1 value rule (not negative, below 1e9, at most 6 decimals: 15 digits, so a JavaScript number keeps it exactly), tested before any write.
 CREATE FUNCTION public._product_rate_number_ok(p numeric) RETURNS boolean
 LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT p IS NULL OR (p >= 0 AND p < 1e12 AND p = round(p, 6));
+  SELECT p IS NULL OR (p >= 0 AND p < 1e9 AND p = round(p, 6));
 $function$;
 
 -- A rate denominator (sheet 3.5 and section 5): acre forms -> per_acre, '100 gal' -> per_100_gal,
@@ -724,7 +724,7 @@ BEGIN
   END IF;
   IF NOT (public._product_rate_number_ok(abs(p_low)) AND public._product_rate_number_ok(abs(p_recommended))
           AND public._product_rate_number_ok(abs(p_high))) THEN
-    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate must be a number below 1000000000000 with at most 6 decimals';
+    RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a rate must be a number below 1000000000 with at most 6 decimals';
   END IF;
   SELECT * INTO v_unit FROM public.product_rate_units u WHERE u.code = v_unit_text;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_RATE_UNIT_UNKNOWN: "%" is not a rate unit', v_unit_text; END IF;

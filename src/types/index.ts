@@ -2266,7 +2266,7 @@ export interface ProductRateUnit {
   legacy_spellings: string[];
 }
 
-/** product_rates row (admins only). Rates are exact numerics with at most 6 decimals, never converted. */
+/** product_rates row (admins only). Rates are below 1e9 with at most 6 decimals (15 digits), so a number holds them exactly; never converted. */
 export interface ProductRate {
   id: string;
   parent_id: string;

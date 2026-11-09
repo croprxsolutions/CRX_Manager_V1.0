@@ -425,13 +425,13 @@ try {
   for (const [low, rec, high] of [[2, 1, 3], [3, null, 2], [null, null, null], [-1, null, null], [null, -1, null]]) {
     expectCode(refused(save(P['No Rate'], { basis: 'per_acre', source: 'label', low, rec, high, unit: 'qt' })), 'PRODUCT_RATE_RANGE_INVALID');
   }
-  for (const v of ['1.1234567', '1000000000000', '-1.1234567']) {
+  for (const v of ['1.1234567', '1000000000', '-1.1234567']) {
     expectCode(refused(save(P['No Rate'], { basis: 'per_acre', source: 'label', rec: v, unit: 'qt' })), 'PRODUCT_RATE_INVALID');
   }
   res = call(save(P['No Rate'], { basis: 'per_acre', source: 'label', low: 1, rec: 1, high: 1, unit: 'qt' }));
   assert.ok(res.rate_id);
-  assert.ok(call(save(P['No Rate'], { basis: 'per_acre', source: 'label', rec: '999999999999.999999', unit: 'qt' })).rate_id);
-  console.log('R6: inverted, empty and negative ranges refused RANGE_INVALID; 7 decimals and 1e12 refused INVALID; 1/1/1 saved');
+  assert.ok(call(save(P['No Rate'], { basis: 'per_acre', source: 'label', rec: '999999999.999999', unit: 'qt' })).rate_id);
+  console.log('R6: inverted, empty and negative ranges refused RANGE_INVALID; 7 decimals and 1e9 refused INVALID; 1/1/1 saved');
 
   // R7: the sheet 3.3 hand-worked examples.
   const check = (parent, o) => call(save(P[parent], { source: 'house_standard', ...o })).label_check;

@@ -7,10 +7,12 @@ interface ModalProps {
   closeDisabled?: boolean;
   title: string;
   accent?: string;
+  subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
   maxWidth?: string;
-  size?: 'default' | 'large' | 'fullscreen';
+  /** wide: a fixed-height work dialog (preview and send) whose content manages its own scroll. */
+  size?: 'default' | 'large' | 'wide' | 'fullscreen';
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]):not([type="hidden"]), select:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
@@ -21,6 +23,7 @@ export default function Modal({
   closeDisabled = false,
   title,
   accent,
+  subtitle,
   children,
   footer,
   maxWidth,
@@ -32,7 +35,9 @@ export default function Modal({
       ? 'md:max-w-2xl'
       : size === 'large'
         ? 'md:max-w-4xl'
-        : 'md:max-w-lg'} md:mx-4 md:h-auto md:max-h-[90vh] md:rounded-2xl`;
+        : size === 'wide'
+          ? 'md:max-w-6xl'
+          : 'md:max-w-lg'} md:mx-4 ${size === 'wide' ? 'md:h-[90vh]' : 'md:h-auto'} md:max-h-[90vh] md:rounded-2xl`;
   const dialogRef = useRef<HTMLDivElement>(null);
   // useId gives every open modal a unique, render-stable id (a random id read from a ref is
   // impure during render and can collide).
@@ -121,10 +126,13 @@ export default function Modal({
         `}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4 pt-[calc(1rem+env(safe-area-inset-top))]">
-          <h2 id={titleId} className="text-xl md:text-2xl font-semibold font-heading text-nav-dark">
-            {title}
-            {accent && <span className="split-heading-accent"> {accent}</span>}
-          </h2>
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-xl md:text-2xl font-semibold font-heading text-nav-dark">
+              {title}
+              {accent && <span className="split-heading-accent"> {accent}</span>}
+            </h2>
+            {subtitle && <p className="truncate text-sm text-secondary">{subtitle}</p>}
+          </div>
           <button
             onClick={onClose}
             disabled={closeDisabled}

@@ -112,9 +112,9 @@ test.describe('Quote builder width and keyboard guard', () => {
     await page.getByRole('button', { name: /Save draft/i }).first().click();
     await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 30000 });
 
-    // Draft -> sent (Mark as Presented) -> revised (Revise quote).
+    // Draft -> sent (Mark as presented) -> revised (Revise quote).
     await page.getByRole('button', { name: /Preview & send/i }).first().click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Mark as Presented' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Mark as presented' }).click();
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Revise quote' }).first().click();
     await expect(page.getByText(/revised/i).first()).toBeVisible({ timeout: 15000 });

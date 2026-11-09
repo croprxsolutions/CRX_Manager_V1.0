@@ -318,6 +318,7 @@ vi.mock('../hooks/useLastChargedPrices', () => ({
 
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import QuoteBuilder from './QuoteBuilder';
+import { downloadQuotePdf } from '../lib/quotePdf';
 import { PRODUCT_COLUMNS, QUOTE_ITEM_COLUMNS } from '../lib/costFields';
 // The REAL provider, not a stand-in. The hazard these tests cover is a property
 // of the real one: it is mounted above the route, so its approval dialog — and
@@ -2886,7 +2887,7 @@ describe('QuoteBuilder', () => {
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:quote'), revokeObjectURL: vi.fn() });
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as presented' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({
       p_expected_row_version: 8,
     })));
@@ -2931,7 +2932,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'warning',
@@ -2942,7 +2943,7 @@ describe('QuoteBuilder', () => {
       expect.stringContaining('email was NOT sent'),
     );
     fireEvent.click(screen.getByRole('button', { name: /Keep editing/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('email was NOT sent'),
@@ -2963,7 +2964,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload Quote' }));
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
     recoveryReadMode = 'refrozen';
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'create_quote_version')).toHaveLength(2);
   });
@@ -2995,7 +2996,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
 
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
     expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({
@@ -3038,7 +3039,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('expiry date could not be read')));
     expect(mockSendEmail).not.toHaveBeenCalled();
@@ -3082,10 +3083,10 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'email transport failed'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(2));
 
     const versionCalls = mockRpc.mock.calls.filter(([name]) => name === 'create_quote_version');
@@ -3137,7 +3138,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
     // ASSERTION DELIBERATELY CHANGED (H5 follow-up). This waited on the canned
     // literal 'Failed to email the quote', which only appeared because the
     // create_quote_version failure — a PLAIN OBJECT from a non-throwing rpc, so
@@ -3151,7 +3152,7 @@ describe('QuoteBuilder', () => {
     const shownHere = mockToast.mock.calls.map((c) => String(c[1])).join(' | ');
     expect(shownHere).not.toMatch(/permission denied for|schema cache|relation "/i);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
 
     const versionCalls = mockRpc.mock.calls.filter(([name]) => name === 'create_quote_version');
@@ -3195,12 +3196,12 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Quote' })).toBeInTheDocument());
     expect(mockSendEmail).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /Keep editing/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     expect(createVersionCalls).toBe(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload Quote' }));
@@ -3213,7 +3214,7 @@ describe('QuoteBuilder', () => {
     // whose own reply was never validated.
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Email to Grower' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Email to grower' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
     expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({
       p_expected_row_version: 8,
@@ -3636,7 +3637,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
-      fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Mark as presented' }));
 
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
       expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything());
@@ -5641,6 +5642,89 @@ describe('QuoteBuilder', () => {
         expect(screen.queryByText(/Last charged \$|First time for this customer/)).not.toBeInTheDocument();
       } finally {
         mockUseLastCharged.mockReset();
+      }
+    });
+  });
+  describe('preview and send dialog (Quotes UI redesign)', () => {
+    function serveAt(status: string, customer: Record<string, unknown> = QUOTE_FIXTURE_CUSTOMER) {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quote = { ...fixture.quote, status, customer };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes'
+          ? quote
+          : table === 'quote_sections'
+            ? [fixture.section]
+            : table === 'quote_items'
+              ? [fixture.item]
+              : table === 'customers'
+                ? [customer]
+                : table === 'products'
+                  ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      renderQuoteBuilder(quote.id);
+    }
+
+    async function openPreview() {
+      fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
+      return screen.findByRole('dialog', { name: 'Preview and send' });
+    }
+
+    it("column chips keep today's defaults and toggle the same 12 columns", async () => {
+      serveAt('draft');
+      const dialog = await openPreview();
+      const chips = within(within(dialog).getByRole('group', { name: 'Columns on the PDF' })).getAllByRole('button');
+      expect(chips.map((c) => c.textContent)).toEqual([
+        'Product', 'Category', 'Notes', 'Suggested rate', 'Rate', 'Unit', 'Acres', 'Quantity', 'Container', 'Price', '$/Acre', 'Total',
+      ]);
+      expect(chips.filter((c) => c.getAttribute('aria-pressed') === 'true').map((c) => c.textContent))
+        .toEqual(['Product', 'Rate', 'Acres', 'Quantity', 'Price', 'Total']);
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Category' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Total' }));
+      expect(within(dialog).getByRole('button', { name: 'Category' })).toHaveAttribute('aria-pressed', 'true');
+      expect(within(dialog).getByRole('button', { name: 'Total' })).toHaveAttribute('aria-pressed', 'false');
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Download' }));
+      await waitFor(() => expect(vi.mocked(downloadQuotePdf)).toHaveBeenCalledWith(
+        expect.anything(),
+        ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'category'],
+      ));
+    });
+
+    it("Email to grower is refused with today's messages when unsaved, unsaved changes, or no email", async () => {
+      renderQuoteBuilder();
+      let dialog = await openPreview();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
+      expect(mockToast).toHaveBeenCalledWith('warning', 'Save the quote before emailing it.');
+      cleanup();
+
+      serveAt('draft');
+      await screen.findByRole('heading', { level: 1, name: 'Q-version-test' });
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote/i), { target: { value: 'Changed' } });
+      dialog = await openPreview();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
+      expect(mockToast).toHaveBeenCalledWith('warning', 'You have unsaved changes. Save the quote before emailing it.');
+      cleanup();
+
+      serveAt('draft', { ...QUOTE_FIXTURE_CUSTOMER, email: null });
+      dialog = await openPreview();
+      expect(within(dialog).getByText('No email address on file')).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
+      expect(mockToast).toHaveBeenCalledWith('error', 'This customer has no email address on file.');
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it('Mark as presented is enabled only for draft and revised', async () => {
+      for (const [status, enabled] of [['draft', true], ['revised', true], ['sent', false]] as const) {
+        serveAt(status);
+        const dialog = await openPreview();
+        const button = within(dialog).getByRole('button', { name: 'Mark as presented' });
+        if (enabled) expect(button).toBeEnabled();
+        else expect(button).toBeDisabled();
+        cleanup();
       }
     });
   });

@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
+  Check,
   CheckCircle,
   Copy,
   CalendarClock,
@@ -29,6 +30,7 @@ import {
 import Card from '../components/ui/Card';
 import Tabs from '../components/ui/Tabs';
 import { LastChargedPricesCard } from '../components/quotes/LastChargedPrices';
+import PdfPagePreview from '../components/quotes/PdfPagePreview';
 import { useLastChargedPrices } from '../hooks/useLastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
@@ -748,11 +750,11 @@ export default function QuoteBuilder() {
 
   // Transaction thread: related orders, deliveries, invoices from this quote
   const [threadOrders, setThreadOrders] = useState<{ id: string; order_number: string; deliveries: { id: string; delivery_number: string }[]; invoices: { id: string; invoice_number: string }[] }[]>([]);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
+  const [markingPresented, setMarkingPresented] = useState(false);
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
 
   // Quote template state
   const [quoteTemplates, setQuoteTemplates] = useState<QuoteTemplate[]>([]);
@@ -3192,10 +3194,7 @@ export default function QuoteBuilder() {
           },
         };
         const doc = await generateQuotePdf(pdfData);
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-        setPreviewPdfUrl(url);
+        setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
       toast,
@@ -3406,8 +3405,7 @@ export default function QuoteBuilder() {
       );
       resetCreateVersionAttempt();
       setShowPreviewModal(false);
-      if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-      setPreviewPdfUrl(null);
+      setPreviewPdfBlob(null);
       setIsDirty(false);
       fetchVersions();
       try {
@@ -3444,13 +3442,13 @@ export default function QuoteBuilder() {
     { key: 'product', label: 'Product' },
     { key: 'category', label: 'Category' },
     { key: 'notes', label: 'Notes' },
-    { key: 'sug_rate', label: 'Sug. Rate' },
-    { key: 'actual_rate', label: 'Actual Rate' },
+    { key: 'sug_rate', label: 'Suggested rate' },
+    { key: 'actual_rate', label: 'Rate' },
     { key: 'rate_unit', label: 'Unit' },
     { key: 'acres', label: 'Acres' },
-    { key: 'qty', label: 'Qty' },
+    { key: 'qty', label: 'Quantity' },
     { key: 'unit_size', label: 'Container' },
-    { key: 'price_unit', label: 'Price/Unit' },
+    { key: 'price_unit', label: 'Price' },
     { key: 'price_per_acre', label: '$/Acre' },
     { key: 'total_price', label: 'Total' },
   ] as const;
@@ -5834,87 +5832,100 @@ export default function QuoteBuilder() {
 
       <Modal
         open={showPreviewModal}
-        onClose={() => { setShowPreviewModal(false); if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl); }}
-        title="Quote"
-        accent="Preview"
+        onClose={() => { setShowPreviewModal(false); setPreviewPdfBlob(null); }}
+        title="Preview and send"
+        subtitle={selectedCustomer?.farm_name ? `${quoteNumber} for ${selectedCustomer.farm_name}` : quoteNumber}
+        size="wide"
       >
-        {/* PDF Column Template Picker */}
-        <div className="flex items-center gap-3 mb-3">
-          <select
-            value={selectedTemplateId || ''}
-            onChange={(e) => { setSelectedTemplateId(e.target.value); setCustomColumns(null); }}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
-          >
-            {pdfTemplates.map((t) => (
-              <option key={t.id} value={t.id}>{t.template_name}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowColumnPicker(!showColumnPicker)}
-            className="text-sm text-crx-green hover:underline"
-          >
-            {showColumnPicker ? 'Hide columns' : 'Customize columns'}
-          </button>
-        </div>
-        {showColumnPicker && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
-            {AVAILABLE_PDF_COLUMNS.map((col) => {
-              const activeColumns = customColumns || getTemplateColumns(selectedTemplateId);
-              const isActive = activeColumns.includes(col.key);
-              return (
-                <label key={col.key} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isActive}
-                    onChange={() => {
-                      const cols = [...activeColumns];
-                      if (isActive) cols.splice(cols.indexOf(col.key), 1);
-                      else cols.push(col.key);
-                      setCustomColumns(cols);
-                    }}
-                  />
-                  {col.label}
-                </label>
-              );
-            })}
+        {/* Phone: pages, then options, with the actions pinned at the bottom. md+: pages left, options and actions in a 360px side panel. */}
+        <div className="-mx-6 -my-5 flex h-[calc(100%+2.5rem)] flex-col md:grid md:grid-cols-[minmax(0,1fr)_360px] md:grid-rows-[minmax(0,1fr)_auto]">
+          <div className="min-h-0 flex-1 overflow-y-auto md:contents">
+            <div className="bg-cream-dark p-4 md:row-span-2 md:overflow-y-auto md:p-7">
+              {previewPdfBlob && <PdfPagePreview blob={previewPdfBlob} title={`Quote ${quoteNumber}`} />}
+            </div>
+            <div className="flex flex-col gap-5 p-4 md:overflow-y-auto md:border-l md:border-gray-200 md:px-6 md:py-5">
+              <Dropdown
+                label="PDF layout"
+                value={selectedTemplateId}
+                placeholder="Default layout"
+                onChange={(v) => { setSelectedTemplateId(v); setCustomColumns(null); }}
+                options={pdfTemplates.map((t) => ({ value: t.id, label: t.template_name }))}
+                noHelperRow
+              />
+              <fieldset className="flex min-w-0 flex-col gap-2.5">
+                <legend className="mb-2.5 text-sm font-medium text-secondary">Columns on the PDF</legend>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_PDF_COLUMNS.map((col) => {
+                    const activeColumns = customColumns || getTemplateColumns(selectedTemplateId);
+                    const isActive = activeColumns.includes(col.key);
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => {
+                          const cols = [...activeColumns];
+                          if (isActive) cols.splice(cols.indexOf(col.key), 1);
+                          else cols.push(col.key);
+                          setCustomColumns(cols);
+                        }}
+                        className={`inline-flex h-11 items-center rounded-full border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:h-10 ${isActive ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
+                      >
+                        {col.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-sm text-secondary">Applies to the emailed and downloaded PDF.</p>
+              </fieldset>
+              <div className="flex flex-col gap-1.5 rounded-lg border border-cream-dark bg-cream p-3.5 text-sm">
+                <span className="font-medium text-nav-dark">Sending to</span>
+                <span className="break-all text-nav-dark">{selectedCustomer?.email || 'No email address on file'}</span>
+                {lastQuoteEmailAt && (
+                  <span className="inline-flex items-center gap-1.5 text-crx-green">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Last emailed {new Date(lastQuoteEmailAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-        <div className="h-[60vh]">
-          <iframe src={previewPdfUrl || ''} className="w-full h-full border rounded-lg" title="Quote PDF Preview" />
-        </div>
-        <div className="flex justify-end gap-3 mt-4 pt-4 border-t">
-          <Button
-            variant="secondary"
-            icon={<Download className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleDownloadPdf}
-          >
-            Download PDF
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<CheckCircle className="w-4 h-4" />}
-            onClick={handleMarkPresented}
-            disabled={status !== 'draft' && status !== 'revised'}
-          >
-            Mark as Presented
-          </Button>
-          <HelpTip text="Marks the quote as sent WITHOUT emailing. Use when you presented it in person" className="ml-1" />
-          <Button
-            variant="primary"
-            icon={<Send className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleEmailToGrower}
-            loading={emailingGrower}
-          >
-            Email to Grower
-          </Button>
-          {lastQuoteEmailAt && (
-            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-              Emailed {new Date(lastQuoteEmailAt).toLocaleDateString()} ✓
-            </span>
-          )}
-          <HelpTip text="Emails the quote PDF to the grower and logs it" className="ml-1" />
+          <div className="flex shrink-0 flex-col gap-2.5 border-t border-gray-200 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:border-l md:px-6 md:pb-5">
+            <Button
+              variant="primary"
+              icon={<Send className="w-4 h-4" />}
+              onClick={handleEmailToGrower}
+              loading={emailingGrower}
+              className="h-11 w-full"
+            >
+              {emailingGrower ? 'Sending…' : 'Email to grower'}
+            </Button>
+            <div className="flex gap-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  setMarkingPresented(true);
+                  try { await handleMarkPresented(); } finally { setMarkingPresented(false); }
+                }}
+                loading={markingPresented}
+                disabled={status !== 'draft' && status !== 'revised'}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                {markingPresented ? 'Marking…' : 'Mark as presented'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Download className="w-4 h-4" />}
+                onClick={handleDownloadPdf}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                Download
+              </Button>
+            </div>
+            <p className="text-xs text-secondary">Mark as presented records the quote as sent without emailing, for quotes you hand over in person.</p>
+          </div>
         </div>
       </Modal>
 

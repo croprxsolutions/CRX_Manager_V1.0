@@ -2266,7 +2266,7 @@ export interface ProductRateUnit {
   legacy_spellings: string[];
 }
 
-/** product_rates row (admins only). Rates are below 1e9 with at most 6 decimals (15 digits), so a number holds them exactly; never converted. */
+/** product_rates row (admins only). Rates are below 1e9 with at most 6 decimals (15 significant digits), so the JSON number reads back as the same 6-decimal value; for arithmetic or comparisons convert to exact integer micro-units first, never compute on the raw float. */
 export interface ProductRate {
   id: string;
   parent_id: string;

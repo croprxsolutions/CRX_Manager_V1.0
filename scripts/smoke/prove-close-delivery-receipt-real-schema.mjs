@@ -339,7 +339,14 @@ async function race(name, holderSql, second) {
   holder.stdout.on('data', (d) => { out += d; });
   holder.stderr.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => holder.on('close', resolve));
-  wait(1500);
+  // Session 1 has taken its lock once it reaches its pg_sleep (the statement after the locking call), however slow
+  // Docker is; wait for that rather than for a fixed delay (Luna LOW).
+  let sleeping = false;
+  for (let i = 0; i < 100 && !sleeping; i += 1) {
+    sleeping = scalar("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(4)%' AND pid <> pg_backend_pid();") === '1';
+    if (!sleeping) wait(100);
+  }
+  assert.ok(sleeping, `${name}: session 1 never reached its sleep`);
   const started = Date.now();
   const result = second();
   const waited = Date.now() - started;

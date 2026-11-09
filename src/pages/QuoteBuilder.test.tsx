@@ -470,10 +470,10 @@ async function submitOneUnitDraw(quoteId: string) {
   fireEvent.click(createOrderButton);
   fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
   expect(mockToast).not.toHaveBeenCalledWith('warning', 'Save the quote before drawing down the booking');
-  const dialog = await screen.findByRole('dialog', { name: 'Create Order from Booking' });
+  const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
   const quantity = await within(dialog).findByRole('spinbutton');
   fireEvent.change(quantity, { target: { value: '1' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
 }
 
 // The by-id read of a saved quote's section fields, held open until the test releases it.
@@ -1255,7 +1255,7 @@ describe('QuoteBuilder', () => {
       'warning',
       expect.stringContaining('already created an order'),
     );
-    expect(screen.queryByRole('dialog', { name: 'Create Order from Booking' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create order from booking' })).not.toBeInTheDocument();
   });
 
   it('sends the operator to Orders when a changed-intent receipt cannot be opened', async () => {
@@ -1280,7 +1280,7 @@ describe('QuoteBuilder', () => {
     );
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/orders\//));
-    expect(screen.queryByRole('dialog', { name: 'Create Order from Booking' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create order from booking' })).not.toBeInTheDocument();
   });
 
   // S14 (KI-11): the reply to Partial Order is lost after the server made the order, and the rep
@@ -1301,7 +1301,7 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
       fireEvent.click(createOrderButton);
       fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
-      return screen.findByRole('dialog', { name: 'Create Order from Booking' });
+      return screen.findByRole('dialog', { name: 'Create order from booking' });
     }
 
     it('finishes the unconfirmed draw with its original key, so it is made once', async () => {
@@ -1400,12 +1400,12 @@ describe('QuoteBuilder', () => {
 
       // A new draw is refused too, until the rep says they checked the booking's orders.
       fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: '1' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(mockToast.mock.calls.filter(([, text]) => String(text).includes('can no longer be finished safely'))).toHaveLength(2));
       expect(drawCalls()).toHaveLength(1);
       fireEvent.click(within(dialog).getByRole('button', { name: 'I checked' }));
       expect(sessionStorage.length).toBe(0);
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(drawCalls()).toHaveLength(2));
       expect(drawCalls()[1].p_idempotency_key).not.toBe(drawCalls()[0].p_idempotency_key);
     });
@@ -1444,7 +1444,7 @@ describe('QuoteBuilder', () => {
     ));
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
     expect(fixture.quoteItemReads()).toBeGreaterThanOrEqual(3);
-    const dialog = screen.getByRole('dialog', { name: 'Create Order from Booking' });
+    const dialog = screen.getByRole('dialog', { name: 'Create order from booking' });
     expect(within(dialog).getByRole('spinbutton')).toHaveValue(null);
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/orders\//));
   });
@@ -1466,7 +1466,7 @@ describe('QuoteBuilder', () => {
       expect.stringContaining('booking balance was reloaded'),
     );
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('dialog', { name: 'Create Order from Booking' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Create order from booking' })).not.toBeInTheDocument();
   });
 
   // Item 10 (Mason 2026-10-26/27): a customer may take more than is left on a booking. The rep
@@ -1497,7 +1497,7 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
       fireEvent.click(createOrderButton);
       fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
-      const dialog = await screen.findByRole('dialog', { name: 'Create Order from Booking' });
+      const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
       fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: qty } });
       return dialog;
     }
@@ -1513,7 +1513,7 @@ describe('QuoteBuilder', () => {
       expect(within(dialog).getByText(/today \$11\.00/)).toBeInTheDocument();
       expect(within(dialog).getByRole('radio', { name: /Today's price/ })).toBeChecked();
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'today' }]));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('ORD-2')));
     });
@@ -1521,21 +1521,21 @@ describe('QuoteBuilder', () => {
     it('sends the booked price when the rep picks it', async () => {
       const dialog = await openDrawAndEnter('3');
       fireEvent.click(within(dialog).getByRole('radio', { name: /Booked price/ }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'booked' }]));
     });
 
     // S02: bookings are saved to 0.01, so a draw of 333.333 would leave 0.001 that nothing can draw.
     it('refuses a quantity with more than 2 decimal places before sending', async () => {
       const dialog = await openDrawAndEnter('1.555');
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('at most 2 decimal places')));
       expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
     });
 
     it('sends a quantity in whole hundredths', async () => {
       const dialog = await openDrawAndEnter('1.55');
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 1.55 }]));
     });
 
@@ -1545,14 +1545,14 @@ describe('QuoteBuilder', () => {
       const dialog = await openDrawAndEnter('16.66', { booked: 50, drawn: 33.34 });
       expect(within(dialog).getByText('16.66 gal')).toBeInTheDocument();
       expect(within(dialog).queryByText(/over the booking/)).not.toBeInTheDocument();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 16.66 }]));
     });
 
     it('a draw within what is left sends no price choice and shows no over line', async () => {
       const dialog = await openDrawAndEnter('1');
       expect(within(dialog).queryByText(/over the booking/)).not.toBeInTheDocument();
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Order' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 1 }]));
     });
   });
@@ -2364,7 +2364,7 @@ describe('QuoteBuilder', () => {
     await screen.findByDisplayValue('Local note');
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Decline quote' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Decline Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline quote' }));
 
     fireEvent.click(await screen.findByText('Reload Quote'));
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
@@ -2748,7 +2748,7 @@ describe('QuoteBuilder', () => {
     fireEvent.change(await screen.findByDisplayValue('Keep this local note'), { target: { value: 'Keep this local edit' } });
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Decline quote' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Decline Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline quote' }));
 
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
     expect(screen.getAllByText('Declined')).not.toHaveLength(0);
@@ -3242,7 +3242,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
 
@@ -3287,7 +3287,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
 
@@ -3893,7 +3893,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
 
@@ -3929,7 +3929,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
 
@@ -3971,7 +3971,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(bookAsOrderOpener);
       expect(screen.getByRole('dialog', { name: 'Book as order?' })).toBeInTheDocument();
     });
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Book as order?' })).getByRole('button', { name: 'Book as Order' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Book as order?' })).getByRole('button', { name: 'Book as order' }));
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-5'));
     const saveStatuses = mockRpc.mock.calls
@@ -4085,7 +4085,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
 
@@ -4126,7 +4126,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to order/ });
-    const convertButton = within(dialog).getByRole('button', { name: 'Create Order' });
+    const convertButton = within(dialog).getByRole('button', { name: 'Create order' });
     await waitFor(() => expect(convertButton).toBeEnabled());
     fireEvent.click(convertButton);
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('convert_quote_to_order', expect.anything()));
@@ -4173,7 +4173,7 @@ describe('QuoteBuilder', () => {
       expect(screen.getByRole('dialog', { name: 'Book as order?' })).toBeInTheDocument();
     });
     const initialBookDialog = screen.getByRole('dialog', { name: 'Book as order?' });
-    fireEvent.click(within(initialBookDialog).getByRole('button', { name: 'Book as Order' }));
+    fireEvent.click(within(initialBookDialog).getByRole('button', { name: 'Book as order' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'warning',
@@ -4183,7 +4183,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByRole('button', { name: /Keep editing/i }));
     const retryBookDialog = await screen.findByRole('dialog', { name: 'Book as order?' });
     expect(within(retryBookDialog).getByText('Mark this quote as sent and convert it to an order now?')).toBeInTheDocument();
-    fireEvent.click(within(retryBookDialog).getByRole('button', { name: 'Book as Order' }));
+    fireEvent.click(within(retryBookDialog).getByRole('button', { name: 'Book as order' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'error',
       expect.stringContaining('Reload the quote, then try Book as Order again'),
@@ -5476,7 +5476,7 @@ describe('QuoteBuilder', () => {
       await loaded();
       expect(quoteTotal()).toBe('$50.00');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1 in Products' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
       let dialog = await screen.findByRole('dialog', { name: 'Remove this line?' });
       expect(dialog).toHaveTextContent('Product, 2 gal, $20.00. The quote total drops to $30.00.');
@@ -5486,7 +5486,7 @@ describe('QuoteBuilder', () => {
       expect(priceInputs()).toHaveLength(2);
       expect(quoteTotal()).toBe('$50.00');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1 in Products' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
       dialog = await screen.findByRole('dialog', { name: 'Remove this line?' });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove line' }));
@@ -5505,7 +5505,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
       expect(await screen.findByRole('button', { name: /Select Product/ })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1 in Section 1' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
       expect(screen.queryByRole('dialog', { name: 'Remove this line?' })).not.toBeInTheDocument();
       await waitFor(() => expect(screen.queryByRole('button', { name: /Select Product/ })).not.toBeInTheDocument());
@@ -5568,7 +5568,7 @@ describe('QuoteBuilder', () => {
     it('Edit note opens the line note, Done shows it, and Save draft sends it', async () => {
       serveLines();
       await loaded();
-      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1 in Products' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /note$/ }));
       const note = await screen.findByRole('textbox', { name: 'Line note' });
       fireEvent.change(note, { target: { value: 'Apply before rain' } });

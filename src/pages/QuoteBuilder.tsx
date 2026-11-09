@@ -4324,7 +4324,7 @@ export default function QuoteBuilder() {
       disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
       className={`${tall} ${className}`}
     >
-      Save draft
+      {saving ? 'Saving…' : 'Save draft'}
     </Button>
   );
   const previewButton = (variant: 'primary' | 'secondary') => (
@@ -4433,7 +4433,7 @@ export default function QuoteBuilder() {
   return (
     // Scroll margins keep a focused control clear of the sticky bars: TopBar + quote header above
     // (about 112 px on a phone, up to about 210 px on desktop), MobileBottomNav + bottom bar below (about 115 px).
-    <div className="space-y-4 [&_:is(a,button,input,select,textarea)]:scroll-mt-32 md:[&_:is(a,button,input,select,textarea)]:scroll-mt-56 max-md:[&_:is(a,button,input,select,textarea)]:scroll-mb-32">
+    <div className="space-y-4 [&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mt-32 md:[&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mt-56 max-md:[&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mb-32">
       {isPhone ? (
         <>
           {/* top-14 = TopBar phone height (h-14); -mx-4 -mt-4 undo AppLayout main padding (p-4). */}
@@ -4851,7 +4851,7 @@ export default function QuoteBuilder() {
                   type="button"
                   onClick={() => updateItem(sec._key, item._key, { notes: defaultNote })}
                   title="Reset to default"
-                  className={`${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
+                  className={`mt-2 ${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
                 >
                   Reset note
                 </button>
@@ -5007,7 +5007,7 @@ export default function QuoteBuilder() {
                       ? 'Reset to the price saved on this line'
                       : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
                     aria-label="Reset the manual price"
-                    className={`${LINK_HIT} font-semibold text-crx-green hover:underline`}
+                    className={`${LINK_HIT} md:after:h-8 font-semibold text-crx-green hover:underline`}
                   >
                     Reset
                   </button>
@@ -5060,7 +5060,7 @@ export default function QuoteBuilder() {
                           });
                         }}
                         disabled={formLocked}
-                        className={`${LINK_HIT} font-semibold text-crx-green hover:underline disabled:opacity-50`}
+                        className={`${LINK_HIT} md:after:h-8 font-semibold text-crx-green hover:underline disabled:opacity-50`}
                       >
                         Use today {fmt(todayPriceOffer)}
                       </button>
@@ -5091,7 +5091,7 @@ export default function QuoteBuilder() {
 
           const menu = (
             <ActionMenu
-              label={`Actions for line ${n}`}
+              label={`Actions for line ${n} in ${sec.section_name || 'Untitled section'}`}
               disabled={formLocked}
               items={[
                 ...(prod ? [{ id: 'change', label: 'Change product', onAction: openPicker }] : []),
@@ -5181,7 +5181,7 @@ export default function QuoteBuilder() {
               </span>
               {sections.length > 1 && (
                 <ActionMenu
-                  label="Section actions"
+                  label={`Actions for section ${sec.section_name || 'Untitled section'}`}
                   disabled={formLocked}
                   items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
                 />
@@ -5424,7 +5424,7 @@ export default function QuoteBuilder() {
                       const suffix = unit ? ` ${unit}` : '';
                       return (
                         <tr key={ln.product_id} className="border-b border-gray-50">
-                          <td className="px-2 py-1">{ln.product_name ?? '—'}</td>
+                          <td className="px-2 py-1">{ln.product_name ?? '–'}</td>
                           <td className="px-2 py-1 text-right">{ln.booked_qty}{suffix}</td>
                           <td className="px-2 py-1 text-right">{ln.drawn_qty}{suffix}</td>
                           <td className="px-2 py-1 text-right">{ln.remaining_qty}{suffix}</td>
@@ -5689,9 +5689,9 @@ export default function QuoteBuilder() {
                         <tr className="border-b border-gray-200 text-secondary">
                           <th className="text-left py-1 pr-2">Product</th>
                           <th className="text-right py-1 px-2">V{selectedVersion.version_number} Price</th>
-                          <th className="text-right py-1 px-2">Current Price</th>
+                          <th className="text-right py-1 px-2">Current price</th>
                           <th className="text-right py-1 px-2">V{selectedVersion.version_number} Total</th>
-                          <th className="text-right py-1 pl-2">Current Total</th>
+                          <th className="text-right py-1 pl-2">Current total</th>
                           <th className="text-right py-1 pl-2">Status</th>
                         </tr>
                       </thead>
@@ -5817,7 +5817,7 @@ export default function QuoteBuilder() {
               loading={converting}
               className="min-h-11 w-full sm:w-auto"
             >
-              Create Order
+              {converting ? 'Creating order…' : 'Create order'}
             </Button>
           </div>
         }
@@ -5853,7 +5853,7 @@ export default function QuoteBuilder() {
             onClick={() => setShowColumnPicker(!showColumnPicker)}
             className="text-sm text-crx-green hover:underline"
           >
-            {showColumnPicker ? 'Hide Columns' : 'Customize Columns'}
+            {showColumnPicker ? 'Hide columns' : 'Customize columns'}
           </button>
         </div>
         {showColumnPicker && (
@@ -5925,19 +5925,19 @@ export default function QuoteBuilder() {
       />
 
       {showSaveTemplateModal && (
-        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as Template" footer={
+        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as template" footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={() => setShowSaveTemplateModal(false)} className="min-h-11 w-full sm:w-auto">
               Cancel
             </Button>
             <Button onClick={handleSaveTemplate} disabled={!templateName.trim()} className="min-h-11 w-full sm:w-auto">
-              Save Template
+              Save template
             </Button>
           </div>
         }>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Template Name</label>
+              <label className="block text-sm font-medium mb-1">Template name</label>
               <input
                 value={templateName}
                 onChange={(e) => setTemplateName(e.target.value)}
@@ -5960,7 +5960,7 @@ export default function QuoteBuilder() {
       )}
 
       {showDrawModal && (
-        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create Order from Booking" footer={
+        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create order from booking" footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={() => setShowDrawModal(false)} className="min-h-11 w-full sm:w-auto">
               Cancel
@@ -5970,7 +5970,7 @@ export default function QuoteBuilder() {
               disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
               className="min-h-11 w-full sm:w-auto"
             >
-              {drawing ? 'Creating…' : 'Create Order'}
+              {drawing ? 'Creating…' : 'Create order'}
             </Button>
           </div>
         }>
@@ -6095,7 +6095,7 @@ export default function QuoteBuilder() {
       )}
 
       {showRolloverModal && (
-        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll Over to New Season" footer={
+        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll over to new season" footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={() => setShowRolloverModal(false)} className="min-h-11 w-full sm:w-auto">
               Cancel
@@ -6112,7 +6112,7 @@ export default function QuoteBuilder() {
               Need dates will be reset.
             </p>
             <div>
-              <label className="block text-sm font-medium mb-1">Target Season</label>
+              <label className="block text-sm font-medium mb-1">Target season</label>
               <input
                 type="number"
                 value={rolloverSeason}
@@ -6187,7 +6187,7 @@ export default function QuoteBuilder() {
         onConfirm={handleBookAsOrder}
         title="Book as order?"
         message="Mark this quote as sent and convert it to an order now?"
-        confirmLabel="Book as Order"
+        confirmLabel="Book as order"
         variant="info"
         icon={ShoppingCart}
         loading={bookingAsOrder || converting}
@@ -6199,7 +6199,7 @@ export default function QuoteBuilder() {
         onConfirm={() => setTerminalStatus('declined')}
         title="Decline this quote?"
         message={`Mark quote ${quoteNumber} as declined? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
-        confirmLabel="Decline Quote"
+        confirmLabel="Decline quote"
         variant="danger"
         icon={XCircle}
         loading={statusActionLoading}
@@ -6212,7 +6212,7 @@ export default function QuoteBuilder() {
         title="Cancel this quote?"
         cancelLabel="Keep quote"
         message={`Cancel quote ${quoteNumber}? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
-        confirmLabel="Cancel Quote"
+        confirmLabel="Cancel quote"
         variant="danger"
         icon={Ban}
         loading={statusActionLoading}
@@ -6223,8 +6223,8 @@ export default function QuoteBuilder() {
         onClose={() => setConfirmCloseAppliedOpen(false)}
         onConfirm={handleCloseAsApplied}
         title="Close booking as applied?"
-        message={`Close booking ${quoteNumber} as fulfilled by application? We applied the product for the customer. Any product still unapplied is released back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
-        confirmLabel="Close Booking"
+        message={`Close booking ${quoteNumber} as fulfilled by application. We applied the product for the customer. Any product still unapplied goes back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
+        confirmLabel="Close booking"
         icon={CheckCircle}
         loading={closingApplied}
       />
@@ -6235,7 +6235,7 @@ export default function QuoteBuilder() {
         onConfirm={handleCloseAsShort}
         title="Close booking short?"
         message={`Close booking ${quoteNumber} short? Use this when the customer won't take the rest of this booking (the customer walked away). The un-fulfilled remainder is released back to free inventory. Any product already drawn was billed on its order, so this never bills again. This is terminal. (If jobs are still scheduled against this booking, cancel or complete them first.)`}
-        confirmLabel="Close Booking"
+        confirmLabel="Close booking"
         icon={PackageOpen}
         loading={closingShort}
       />
@@ -6246,12 +6246,12 @@ export default function QuoteBuilder() {
         onConfirm={() => { const k = confirmDraftScheduleKey; setConfirmDraftScheduleKey(null); if (k) handleScheduleJob(k); }}
         title="Schedule job from a draft booking?"
         message="This booking is still a draft and hasn't been sent to the customer yet. You can schedule a job now, but the booking and its pricing may still change before it's sent. Continue?"
-        confirmLabel="Schedule Anyway"
+        confirmLabel="Schedule anyway"
         icon={CalendarClock}
       />
 
       {showRevertModal && (
-        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} Quote`} footer={
+        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} quote`} footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button
               variant="secondary"
@@ -6302,7 +6302,7 @@ export default function QuoteBuilder() {
         onConfirm={executeConvertToOrder}
         title="Convert anyway?"
         message={duplicateOrderMsg}
-        confirmLabel="Convert Anyway"
+        confirmLabel="Convert anyway"
         variant="warning"
       />
 

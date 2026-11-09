@@ -545,7 +545,6 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
     await nav(page, `/quotes/${S.quoteId}`);
 
     // Look for the Planned program switch (Details card)
-    const plannedCheckbox = page.locator('input[type="checkbox"]').filter({ hasText: /planned/i }).first();
     const plannedSwitch = page.getByRole('switch', { name: /Planned program/ });
     if (await plannedSwitch.isVisible({ timeout: 3000 }).catch(() => false)) {
       if (!(await plannedSwitch.isChecked())) {
@@ -554,14 +553,6 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
         await waitForPageStable(page, 1000);
         expect(await plannedSwitch.isChecked()).toBe(true);
         // Save
-        await btnIfVisible(page, /Save Draft/i);
-        await waitForPageStable(page, 2000);
-      }
-    } else if (await plannedCheckbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const isChecked = await plannedCheckbox.isChecked();
-      if (!isChecked) {
-        await plannedCheckbox.click();
-        await waitForPageStable(page, 1000);
         await btnIfVisible(page, /Save Draft/i);
         await waitForPageStable(page, 2000);
       }

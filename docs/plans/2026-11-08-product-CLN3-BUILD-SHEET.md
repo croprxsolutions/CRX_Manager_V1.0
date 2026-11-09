@@ -85,10 +85,11 @@ Why, against the other two options:
 - `products`: `id, product_name, is_active`, ordered by `product_name, id`;
 - `product_brands`: `id, product_id, brand_name, is_currently_sourced`, ordered by `id`;
 - `product_parent_members`: `product_id, parent_id`, ordered by `product_id` (the table has no `id` column);
+- `product_parents`: `id, name`, ordered by `id`, so a grouped size's row can name the parent its list comes from;
 - `product_parent_brands`: `id, parent_id, brand_name, status, is_currently_sourced`, ordered by `id`;
 - `get_product_grouping_open()` once. If it fails, the section shows an error and no rows; it never guesses the switch.
 
-Six reads for the whole catalog, instead of 604 `get_product_brands` calls. The cost is that the rule is copied (risk 1).
+Five table reads and one switch read for the whole catalog, instead of 604 `get_product_brands` calls. The cost is that the rule is copied (risk 1).
 
 ## 4. How the brackets are read
 
@@ -101,7 +102,7 @@ Six reads for the whole catalog, instead of 604 `get_product_brands` calls. The 
 5. **Normal form of each item:** remove `®`, `™` and `©`; turn every run of spaces, tabs, hyphens and underscores into one space; trim; lower-case. Periods and digits stay (`5.4` and `54` are different products). So `Brand-X  4L`, `brand x 4l` and ` Brand X 4L` are one brand; an empty item from a double comma disappears.
 6. **Items that are notes, not brands,** go to `notes` and are never compared:
    - an item with no letters at all (percent, ratio, fertilizer analysis);
-   - a size: a number followed by a unit (`gal`, `g`, `#`, `lb`, `lbs`, `oz`, `qt`, `pt`, `l`, `ml`, `kg`, `ton`, `tote`, `bulk`, `case`);
+   - a size: the whole item is a number and a unit, nothing more (`2.5 gal`, `265g`, `12#`; an item like `4L Shield` stays a brand). Units: `gal`, `g`, `#`, `lb`, `lbs`, `oz`, `qt`, `pt`, `l`, `ml`, `kg`, `ton`, `tote`, `bulk`, `case`);
    - a short fixed list: `retired`, `no return`, `full tote`, `full pallets`, `full pallet`. The list is in one constant with a comment; adding a word is a one-line change plus a test.
    Notes that are words but not on the list (an ingredient code, for example) are treated as brands. On a product with no brand list they only appear in the "no brand list yet" group; on a product with one they show as "in the name, not on the list", which is the truth. The page never hides a row to look cleaner.
 7. **Several brands, one name:** each is compared on its own; order does not matter; a brand repeated in the name counts once.
@@ -141,7 +142,7 @@ All of these, observed, not only tested:
             regexp_split_to_table(g[1], '[,;]') it)
      SELECT count(DISTINCT id) FROM items
       WHERE item <> '' AND item ~ '[a-z]'
-        AND item !~ '^[0-9.]+ ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)\M'
+        AND item !~ '^[0-9.]+ ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)$'
         AND item NOT IN ('retired', 'no return', 'full tote', 'full pallets', 'full pallet');
      ```
    - "Disagrees" and "Brand list, no brands in the name" are empty, because live has 0 brand rows.
@@ -156,7 +157,7 @@ All of these, observed, not only tested:
 2. **Non-brand words in brackets show as brands.** Some fertilizer and adjuvant names hold a note that is a word. They show up in the "no brand list yet" group forever unless Mason enters brands or renames them. Accepted: hiding them would need guessing, and the grand plan says the report changes nothing.
 3. **Typo hints can pair the wrong two brands** when two real brands differ by two letters. It is only a hint and never counts as a match.
 4. **Names in a public repo.** Tests and this sheet use made-up names only; screenshots stay out of the PR.
-5. **Size of the catalog.** Six paged reads of about 600 rows each is small. If the catalog grows tenfold it is still a few seconds on one admin page.
+5. **Size of the catalog.** Five paged reads of about 600 rows each is small. If the catalog grows tenfold it is still a few seconds on one admin page.
 6. **Overlapping edits to `LabelDataQuality.tsx`.** REG-1's screen PR (2b) and PAR-1's screen PR also edit this page. CLN-3 adds one import and one line, so a clash is a trivial merge; build it in whichever order they land.
 
 **Sol list:** no (no listed path; no migration). Lands on green checks after Luna, held open 4 hours under Taha's rule. **Mason-gated:** nothing; no live write, no permission change.
@@ -184,4 +185,4 @@ The report lists every product whose name has brand names in brackets that do no
 
 | Round | Reviewer | Result |
 |---|---|---|
-| (filled at delivery) | Luna | |
+| 1 (`d1afedcac`) | Luna, xhigh | 2 findings. MED: the read list lacked `product_parents`, so the page could not name a grouped size's parent (added; read count corrected). LOW: the sample SQL's size rule had no end anchor (anchored here and in rule 6; the live count stayed 107). |

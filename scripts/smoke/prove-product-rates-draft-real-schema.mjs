@@ -448,6 +448,14 @@ try {
   assert.equal(check('Liquid A', { rate: pick(rates(P['Liquid A']), 'house_standard', 'per_acre').id, ver: 1, basis: 'per_acre', rec: 1.6, unit: 'pt', reason: 'r7' }).status, 'above');
   assert.equal(check('Dry A', { basis: 'per_acre', rec: 1, unit: 'g', reason: 'r7' }).status, 'above', '1 g is above 0.035273961 dry oz');
   assert.equal(check('Dry A', { basis: 'per_acre', rec: 0.999999, unit: 'g' }).status, 'within');
+  // A maximum written "Dry oz" compares (1 lb = 16 dry oz > 1); "fl oz" never compares with a weight.
+  const dryOzMax = "UPDATE public.epa_registrations SET max_label_rate = 1, max_label_rate_unit = 'Dry oz/acre' WHERE epa_registration = '100-7';";
+  expectCode(refused(save(P['Dry A'], { basis: 'per_acre', source: 'house_standard', rec: 1, unit: 'lb' }), { before: dryOzMax }),
+    'PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED');
+  assert.equal(call(save(P['Dry A'], { basis: 'per_acre', source: 'house_standard', rec: 1, unit: 'dry_oz' }), { before: dryOzMax }).label_check.status, 'within');
+  assert.equal(scalar(`SELECT concat_ws(',', public._product_rate_max_unit('Dry oz/acre', 'weight')->>'unit', public._product_rate_max_unit('fl oz/acre', 'volume')->>'unit',
+    COALESCE(public._product_rate_max_unit('fl oz/acre', 'weight')->>'unit', '-'), COALESCE(public._product_rate_max_unit('Dry oz', 'volume')->>'unit', '-'));`),
+  'dry_oz,fl_oz,-,-');
   assert.equal(scalar(`SELECT (0.25 * 128 = 32 AND 18 * 1000 = 18000 AND 6 * 1 = 6 AND 2 * 32 = 64
     AND 17 * 453592.37 = 7711070.29 AND 17 * 453592.37 / 28349.523125 = 272
     AND 0.035273961 * 28349.523125 = 999.999973079848125)::text;`), 'true');

@@ -383,8 +383,14 @@ BEGIN
     v_base := v;
     v_basis := 'per_acre';
   END IF;
+  -- "dry oz" and "fl oz" name their kind; normalize_rate_unit would drop "fl" and keep "dry oz" unknown.
+  v_code := CASE
+    WHEN v_base ~ '^dry\.? ?oz\.?$' THEN 'dry_oz'
+    WHEN v_base ~ '^fl\.? ?oz\.?$' THEN 'fl_oz'
+  END;
   v_base := public.normalize_rate_unit(v_base);
   v_code := CASE
+    WHEN v_code IS NOT NULL THEN v_code
     WHEN v_base = 'oz' THEN CASE p_kind WHEN 'volume' THEN 'fl_oz' WHEN 'weight' THEN 'dry_oz' END
     WHEN v_base IN ('pt', 'qt', 'gal', 'lb', 'g', 'mg') THEN v_base
   END;

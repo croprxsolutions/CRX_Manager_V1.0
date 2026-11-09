@@ -17,7 +17,7 @@ import {
   Heading,
   Text,
 } from 'react-aria-components';
-import { parseDate, today } from '@internationalized/date';
+import { parseDate, today, type CalendarDate } from '@internationalized/date';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface DatePreset {
@@ -39,7 +39,16 @@ interface DatePickerProps {
 
 // The business runs on Chicago time. Plain calendar days only: no JS Date ever touches the value.
 const BUSINESS_TZ = 'America/Chicago';
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Anything that is not a plain YYYY-MM-DD day (empty, ISO timestamp, garbage) reads as no date instead of crashing.
+function safeParse(v: string | null | undefined): CalendarDate | null {
+  if (!v) return null;
+  try {
+    return parseDate(v);
+  } catch {
+    return null;
+  }
+}
 
 const navBtn =
   'h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-full text-gray-500 hover:bg-crx-green-tint hover:text-nav-dark outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20';
@@ -63,7 +72,8 @@ export default function DatePicker({
     else groupRef.current?.removeAttribute('aria-invalid');
   }, [error]);
 
-  const date = value ? parseDate(value) : null;
+  const date = safeParse(value);
+  const min = safeParse(minValue);
   const todayChicago = today(BUSINESS_TZ);
   const activePreset = presets?.find((p) => p.value === value);
 
@@ -71,7 +81,7 @@ export default function DatePicker({
     <RacDatePicker
       value={date}
       onChange={(d) => onChange(d ? d.toString() : null)}
-      minValue={minValue ? parseDate(minValue) : undefined}
+      minValue={min ?? undefined}
       placeholderValue={todayChicago}
       granularity="day"
       isOpen={open}
@@ -93,7 +103,7 @@ export default function DatePicker({
         `}
       >
         <Button
-          className="shrink-0 -ml-1 h-8 w-8 flex items-center justify-center rounded-md text-gray-500 outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20"
+          className="shrink-0 -ml-1 h-11 w-11 md:h-8 md:w-8 flex items-center justify-center rounded-md text-gray-500 outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20"
         >
           <CalendarIcon className="h-4 w-4" aria-hidden="true" />
         </Button>
@@ -105,10 +115,6 @@ export default function DatePicker({
             />
           )}
         </DateInput>
-        {date && (
-          // Readable form of the stored day, built from the string parts so no Date can shift it.
-          <span className="sr-only">{`${MONTHS[date.month - 1]} ${date.day}, ${date.year}`}</span>
-        )}
         {activePreset && (
           <span className="shrink-0 rounded-full bg-crx-green-light text-crx-green text-xs font-medium px-2">
             {activePreset.label}
@@ -126,15 +132,19 @@ export default function DatePicker({
         <Dialog className="outline-none">
           {presets && presets.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {presets.map((p) => (
+              {presets.map((p) => {
+                const pd = safeParse(p.value);
+                const tooEarly = !!(min && pd && pd.compare(min) < 0);
+                return (
                 <button
                   key={p.value}
                   type="button"
+                  disabled={tooEarly}
                   onClick={() => {
                     onChange(p.value);
                     setOpen(false);
                   }}
-                  className={`h-8 px-2.5 rounded-full border text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-crx-green/20 ${
+                  className={`h-11 md:h-8 px-2.5 rounded-full border text-xs font-medium outline-none disabled:text-gray-300 disabled:line-through disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-crx-green/20 ${
                     p.value === value
                       ? 'border-crx-green bg-crx-green-light text-crx-green'
                       : 'border-gray-300 bg-white text-nav-dark'
@@ -142,7 +152,8 @@ export default function DatePicker({
                 >
                   {p.label}
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
           <Calendar>

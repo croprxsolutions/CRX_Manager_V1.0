@@ -33,11 +33,24 @@ const segs = () =>
   ['month', 'day', 'year'].map((t) => screen.getAllByRole('spinbutton').find((s) => s.getAttribute('data-type') === t)!.textContent);
 
 describe('DatePicker', () => {
-  it('shows the stored day without shifting', () => {
+  it('shows the stored day without shifting (segments 9/30/2027)', () => {
     render(<Harness initial="2027-09-30" onChange={vi.fn()} />);
     expect(segs()).toEqual(['9', '30', '2027']);
-    // Readable form for assistive tech and the pill-free layout.
-    expect(screen.getByText('Sep 30, 2027')).toBeInTheDocument();
+  });
+
+  it.each(['2027-09-30T05:00:00Z', 'not a date'])('bad value %j renders an empty field without throwing', (bad) => {
+    render(<Harness initial={bad} onChange={vi.fn()} />);
+    expect(segs().join('')).not.toMatch(/\d{4}/);
+  });
+
+  it('a preset before minValue is disabled and does not fire', () => {
+    const onChange = vi.fn();
+    render(<Harness initial={null} minValue="2027-01-01" onChange={onChange} presets={[{ label: 'Too early', value: '2026-12-31' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: /calendar/i }));
+    const chip = screen.getByRole('button', { name: 'Too early' });
+    expect(chip).toBeDisabled();
+    fireEvent.click(chip);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('returns the picked day as YYYY-MM-DD', () => {

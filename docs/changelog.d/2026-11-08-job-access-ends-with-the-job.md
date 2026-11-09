@@ -32,7 +32,10 @@ assignment is current.
 * `jobs_select` uses it, and every policy that looks the job up through `jobs` inherits it. The
   eleven SECURITY DEFINER functions above change only their whole-job line.
 * `_is_dispatched_to_me`, `_can_see_field`'s dispatch leg and `get_dispatched_list` refuse a deleted or
-  cancelled job, including one cancelled after its dispatch was completed.
+  cancelled job, including one cancelled after its dispatch was completed, and a completed or invoiced
+  job more than 7 days after `completed_at` (Sol, 2026-11-08: an office override to invoiced leaves the
+  dispatch open, and editing a completed dispatch row moves its own timestamp). A job finished before
+  `completed_at` existed keeps today's clock, the dispatch row's last update.
 * `customer_addresses`: readable exactly when the customer is.
 * Dispatch-only applicators gain reads (no writes) of the job's shares, completion info, records and
   their field and crew rows, attachments and photos.
@@ -45,8 +48,8 @@ days ago, done 8 days ago but dated 30 days out, done 10 days ago but dated in 3
 two deleted ones in every table and function. The trigger stamps server time on completion and ignores
 a value the client sends. Dispatch rows: an assignee no longer reads the rows of deleted or cancelled jobs. The fixture includes the dispatch rows
 the assignment triggers would write.
-Dispatch-only applicator: before 3 jobs and none of their records; after 1 job (not the deleted one,
-nor one cancelled after its dispatch was completed) and all of its records. Driver: addresses 14 → 1 (their delivery customer). Entity recipient and an
+Dispatch-only applicator: before 5 jobs and none of their records; after 1 job (not the deleted one,
+nor one cancelled after its dispatch was completed, nor one finished 10 days ago whose dispatch was left open or edited today) and all of its records. Driver: addresses 14 → 1 (their delivery customer). Entity recipient and an
 unassigned applicator: addresses 14 → 0. Admin and sales rep: identical before and after.
 
 ### Not changed
@@ -55,6 +58,10 @@ What office staff read or write; `application_records` (an applicator's own spra
 billing, invoice, quote, sale and commission function. No existing row changes (the new column starts empty). `customers_select` keeps its own rule: an
 applicator sees a customer only through a job scheduled no more than 7 days ago, so a job finished
 today but scheduled earlier shows without its customer name, as it does today.
+
+Rollout: a whole-job applicator of a job finished in the week before the apply that has no dispatch row
+loses it at once, not 7 days later (no `completed_at` yet). Live on 2026-11-08 there is no such job (the
+only finished job, invoiced in August, has a dispatch row); re-check right before the apply.
 
 ### Doc stamps
 

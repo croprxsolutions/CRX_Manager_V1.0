@@ -891,7 +891,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   2026-11-08, NOT APPLIED, needs Mason's approval: `20261213100000`) ends the whole-job applicator's access when
   the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
   `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
-  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation. Proven per role in a disposable
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
   copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and

@@ -311,6 +311,7 @@ AS $function$
          d.dispatch_status = 'dispatched'
          OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
        )
+       AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = d.job_id AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days'))  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
        AND (
          d.applicator_id = (select auth.uid())
          OR (
@@ -362,6 +363,7 @@ AS $function$
            WHERE jf.field_id = p_field_id
              AND j.deleted_at IS NULL
              AND j.status <> 'cancelled'  -- KI-73 part C: a cancelled job ends dispatch access
+             AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
              AND (
                d.dispatch_status = 'dispatched'
                OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
@@ -1938,6 +1940,7 @@ AS $function$
   )
     FROM public.job_location_dispatches d
     JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL AND j.status <> 'cancelled'  -- KI-73 part C
+                             AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
     JOIN public.job_fields jf ON jf.id = d.job_field_id
     JOIN public.customers c   ON c.id = j.customer_id
    WHERE (
@@ -2073,8 +2076,8 @@ BEGIN
            a.owner AS was_owner, a.acl AS was_acl, a.proconfig AS was_config, a.prorettype AS was_rettype,
            a.provolatile AS was_volatile, a.prosecdef AS was_secdef
       FROM (VALUES
-      ('public._is_dispatched_to_me(uuid)',                                                                                'a6c698c4a1209e24c47fca84144cca96'),
-      ('public._can_see_field(uuid)',                                                                                      'be7fa8fe3b4616b4e1ec006c33d4bebc'),
+      ('public._is_dispatched_to_me(uuid)',                                                                                '5f103107f7b0b1048028a5ab3f1e91b9'),
+      ('public._can_see_field(uuid)',                                                                                      '19b629b80b4a87209fec57bcd7a0cda3'),
       ('public._start_job_replay_impl_20261015(uuid,uuid,text)',                                                           '31412ba33e4d6eebd145b7813878a655'),
       ('public._complete_job_replay_impl_20261015(uuid,jsonb,uuid,text)',                                                  '3bd9dfe0729d8175ffbb1cf16b258b5c'),
       ('public.stage_offline_action(uuid,text,uuid,integer,timestamp with time zone,jsonb,text,timestamp with time zone)', 'e3f9a5aaa1d9ac54bf9cee0546b057f9'),
@@ -2083,7 +2086,7 @@ BEGIN
       ('public.get_jobs_billed_customers(uuid[])',                                                                         '42bb182795a3a5cbbcf3106eaab97625'),
       ('public.get_job_billed_customers(uuid)',                                                                            '316d0eb63b76ef9a640a70db22b4f40c'),
       ('public.get_dispatch_board_jobs(uuid,text,date,date)',                                                              'cc849915c479a72bc391f359ccd1fa8f'),
-      ('public.get_dispatched_list(uuid,uuid)',                                                                            '13f69a7c68b70dfdba488dbe2c08fddb')
+      ('public.get_dispatched_list(uuid,uuid)',                                                                            '5284f75e5274c89778382e99205077bc')
       ) AS t(sig, new_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(t.sig)
       -- CREATE OR REPLACE keeps each OID, so the preflight snapshot is matched by OID.

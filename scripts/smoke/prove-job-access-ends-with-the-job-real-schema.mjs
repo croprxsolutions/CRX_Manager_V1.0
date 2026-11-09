@@ -70,6 +70,10 @@ const JOBS = {
   // Sol, 2026-11-08: a scheduled date near today must not reopen an old job, nor an old date close a fresh one.
   15: { who: W, status: 'completed', days: 3, done: 10, note: 'done 10 days ago, dated in 3 days' },
   16: { who: W, status: 'completed', days: -20, done: 0, noDispatch: true, note: 'done today, dated 20 days ago, no dispatch row' },
+  // Sol, 2026-11-08 (round 2): a finished job's dispatch access ends 7 days after the job, whatever the row says:
+  // an office override to invoiced leaves the row open; editing a completed row moves its updated_at.
+  17: { who: null, dispatch: D, status: 'invoiced', days: 0, done: 10, note: 'office-invoiced 10 days ago, dispatch still open' },
+  18: { who: null, dispatch: D, dispatchStatus: 'completed', status: 'completed', days: 0, done: 10, touched: 0, note: 'done 10 days ago, its dispatch row edited today' },
 };
 const uid = (n) => id(String(n));
 const today = "((now() AT TIME ZONE 'America/Chicago')::date)";
@@ -106,7 +110,7 @@ function seed() {
       INSERT INTO public.job_attachments (id, job_id, storage_path, file_name) VALUES ('${uid(1000 + n)}', '${uid(100 + n)}', '${uid(100 + n)}/a.jpg', 'a.jpg');
       INSERT INTO storage.objects (bucket_id, name) VALUES ('job-attachments', '${uid(100 + n)}/a.jpg');
       ${j.who && !j.noDispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.who}', '${j.status === 'cancelled' ? 'cancelled' : j.done === undefined ? 'dispatched' : 'completed'}', now() - interval '${j.done ?? 0} days');` : ''}
-      ${j.dispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.dispatch}', '${j.dispatchStatus ?? 'dispatched'}', now() - interval '${j.done ?? 0} days');` : ''}`);
+      ${j.dispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.dispatch}', '${j.dispatchStatus ?? 'dispatched'}', now() - interval '${j.touched ?? j.done ?? 0} days');` : ''}`);
   }
   // Customer 11: the driver's delivery today (the only customer a driver may see).
   rows.push(`INSERT INTO public.customers (id, farm_name) VALUES ('${uid(211)}', '[KI73] Driver farm');
@@ -174,7 +178,7 @@ const canAttach = (who, n) => probe(who, `BEGIN SET LOCAL ROLE authenticated;
   RAISE EXCEPTION 'PROBE_OK';
   EXCEPTION WHEN OTHERS THEN v := CASE WHEN SQLERRM = 'PROBE_OK' THEN 'yes' WHEN SQLERRM ~ 'row-level security' THEN 'no' ELSE 'ERR:' || SQLERRM END; END;`);
 
-const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12, 13, 15, 16], D: [9, 10, 14], X: [1], OFF: [8] };
+const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12, 13, 15, 16], D: [9, 10, 14, 17, 18], X: [1], OFF: [8] };
 function snapshot() {
   const reads = Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)]));
   const fns = {};
@@ -253,12 +257,12 @@ try {
   const after = snapshot();
   print('AFTER', after);
   for (const r of ['admin', 'rep']) assert.deepEqual(after.reads[r], before.reads[r], `${r} reads must not change`);
-  const all = '1,2,3,4,5,6,7,8,9,10,12,13,14,15,16';
-  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", addresses: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16",
+  const all = '1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17,18';
+  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18", addresses: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18",
     shares: all, applied_info: all, records: all, record_fields: all, record_crew: all, attachments: all, photos: all,
-    dispatches: '1,2,3,4,5,6,7,8,9,10,12,13,14,15' });
-  // Before: the open dispatch rows of deleted jobs (5, 7 and 10) were readable by their dispatchee.
-  assert.deepEqual([before.reads.W.dispatches, before.reads.D.dispatches], ['1,2,3,4,5,6,7,12,13,15', '9,10']);
+    dispatches: '1,2,3,4,5,6,7,8,9,10,12,13,14,15,17,18' });
+  // Before: the open dispatch rows of deleted jobs (5, 7 and 10) and of job 17, invoiced 10 days ago, were readable by their dispatchee.
+  assert.deepEqual([before.reads.W.dispatches, before.reads.D.dispatches], ['1,2,3,4,5,6,7,12,13,15', '9,10,17']);
   const job = (s) => ({ jobs: s, job_fields: s, shares: s, applied_info: s, records: s, record_fields: s, record_crew: s, attachments: s, photos: s });
   // Job 16's customer stays hidden: customers_select (unchanged) still asks for a scheduled date in the last 7 days.
   assert.deepEqual(after.reads.W, { ...job('1,2,6,13,16'), fields: '1,2,6,13,16', customers: '1,2,6,13', addresses: '1,2,6,13', dispatches: '1,2,6,13' },
@@ -274,10 +278,10 @@ try {
     'W job 15': no, 'W job 16': yes,
     // Job 13 was completed today, so the whole-job leg admits it like job 2.
     'W job 13': yes,
-    'D job 9': yes, 'D job 10': no, 'D job 14': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
+    'D job 9': yes, 'D job 10': no, 'D job 14': no, 'D job 17': no, 'D job 18': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
   });
   // "<dispatched list> <dispatch board>" per applicator; the board never showed deleted jobs.
-  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,15,16,2,3,4,6', D: '14,9 9' }); // text order
+  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,15,16,2,3,4,6', D: '14,17,18,9 17,9' }); // text order
   assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,16,2,6', D: '9 9' }, 'the board drops the ended jobs');
   assert.deepEqual(before.attach, { 'W job 1': 'yes', 'W job 4': 'yes', 'D job 9': 'no' }, 'before: the whole-job applicator writes to a cancelled job');
   assert.deepEqual(after.attach, { 'W job 1': 'yes', 'W job 4': 'no', 'D job 9': 'no' }, 'writes reaching the job through jobs inherit the window; dispatch stays read-only');

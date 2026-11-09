@@ -14,9 +14,9 @@ colors:
   cream-dark: "#f0ede6"
   white: "#ffffff"
   border-gray: "#e5e7eb"
-  field-border: "#d1d5db"
-  danger: "#dc2626"
-  danger-hover: "#b91c1c"
+  field-border: "#d1d5db" # descriptive alias, not a src/index.css token; use border-gray-300
+  danger: "#dc2626" # descriptive alias, not a src/index.css token; use red-600
+  danger-hover: "#b91c1c" # descriptive alias, not a src/index.css token; use red-700
 typography:
   page-title:
     fontFamily: "Barlow Semi Condensed, sans-serif"
@@ -112,7 +112,7 @@ Recorded from the shipped code on 2026-11-02. Token sources: the `@theme` block 
 
 CRX Manager is an operations tool, not a showcase. Office staff work in it all day on desktop; drivers and applicators use it on phones in trucks and fields. Every screen favours scanability and consistency over expression: a warm cream page, white cards with hairline borders, one deep brand green that marks action and the current place, and a condensed heading face that keeps titles compact.
 
-The brand is fixed. In November 2026 the owner approved deepening the green for readability (from #28A26A to the current crx-green) while keeping everything else. New screens extend this system; they never restyle it. Any visual change beyond what a task needs requires the owner's approval.
+The brand is fixed. In November 2026 the owner approved deepening the green for readability (from #28A26A to the current crx-green) while keeping everything else. New screens extend this system; they never restyle it. Any visual change beyond what a task needs requires the owner's approval (but see the 2026-11-07 note below: free rein on UI work if behaviour does not change).
 
 Owner, 2026-11-07: free rein on UI work; behaviour must not change.
 

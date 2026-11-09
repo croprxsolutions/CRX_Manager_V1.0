@@ -1,6 +1,6 @@
-## 2026-11-08 — Job access ends with the job (KI-01 part C, KI-73, To-Do rows 11.4 and 11.7)
+## 2026-11-08 — Job access ends with the job (KI-01 part C, KI-73, To-Do row 11.4)
 
-Part C of the row 11.4 fix plan in `docs/manual/KNOWN_ISSUES.md`, plus row 11.7. One new migration,
+Part C of the row 11.4 fix plan in `docs/manual/KNOWN_ISSUES.md`. One new migration,
 `20261213100000_job_access_ends_with_the_job.sql` (not applied), and a checked-in disposable prover
 (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). No screen changed. Scope is
 Mason's 2026-10-25 decision (`DECISION_LOG.md`): someone sent to a job sees the entire job while the
@@ -12,7 +12,6 @@ assignment is current.
   was completed, cancelled or deleted. `start_job`, `complete_job`, the offline completion queue,
   printing, the job map, billed customers, the dispatch board and the dispatched list all let them in.
 * A current dispatch kept granting a job after the job was deleted.
-* Every active account, drivers and entity recipients included, read every customer's addresses.
 * An applicator sent to a job by dispatch could not read the job's shares, completion info and
   records, attachments or photos.
 
@@ -36,7 +35,6 @@ assignment is current.
   job more than 7 days after `completed_at` (Sol, 2026-11-08: an office override to invoiced leaves the
   dispatch open, and editing a completed dispatch row moves its own timestamp). A job finished before
   `completed_at` existed keeps today's clock, the dispatch row's last update.
-* `customer_addresses`: readable exactly when the customer is.
 * Dispatch-only applicators gain reads (no writes) of the job's shares, completion info, records and
   their field and crew rows, attachments and photos.
 
@@ -49,10 +47,14 @@ two deleted ones in every table and function. The trigger stamps server time on 
 a value the client sends. Dispatch rows: an assignee no longer reads the rows of deleted or cancelled jobs. The fixture includes the dispatch rows
 the assignment triggers would write.
 Dispatch-only applicator: before 5 jobs and none of their records; after 1 job (not the deleted one,
-nor one cancelled after its dispatch was completed, nor one finished 10 days ago whose dispatch was left open or edited today) and all of its records. Driver: addresses 14 → 1 (their delivery customer). Entity recipient and an
-unassigned applicator: addresses 14 → 0. Admin and sales rep: identical before and after.
+nor one cancelled after its dispatch was completed, nor one finished 10 days ago whose dispatch was left open or edited today) and all of its records. Customer addresses: identical before and after for every role.
+Admin and sales rep: identical before and after.
 
 ### Not changed
+
+Customer addresses (row 11.7) stay readable by every active account: Mason, 2026-11-08, drivers keep
+the delivery address on FieldStop even when a delivery runs past its date; applicators do not need
+addresses, so narrowing them for applicators is a separate change.
 
 What office staff read or write; `application_records` (an applicator's own spray records); every
 billing, invoice, quote, sale and commission function. No existing row changes (the new column starts empty). `customers_select` keeps its own rule: an

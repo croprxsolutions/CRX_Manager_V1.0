@@ -23,9 +23,8 @@
  *      trigger, which ignores what a client sends), whatever its scheduled date and with or without a dispatch
  *      row, and loses the rest (cancelled, deleted, done 8+ days ago even when dated within 7 days or in the
  *      future); a dispatch-only applicator reads the rest of the job it is sent to but never a deleted one,
- *      nor its dispatch row; drivers and entity
- *      recipients read only the addresses of customers they can already see; admin and sales rep get
- *      exactly what they got before;
+ *      nor its dispatch row; customer addresses read exactly as before for every role (Mason,
+ *      2026-11-08: drivers keep the delivery address); admin and sales rep get exactly what they got before;
  *   5. RE-APPLY: refused by the preflight.
  *
  * Run: node scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs   (needs Docker; never touches live)
@@ -263,14 +262,16 @@ try {
     dispatches: '1,2,3,4,5,6,7,8,9,10,12,13,14,15,17,18' });
   // Before: the open dispatch rows of deleted jobs (5, 7 and 10) and of job 17, invoiced 10 days ago, were readable by their dispatchee.
   assert.deepEqual([before.reads.W.dispatches, before.reads.D.dispatches], ['1,2,3,4,5,6,7,12,13,15', '9,10,17']);
+  for (const r of Object.keys(ROLES)) assert.equal(after.reads[r].addresses, before.reads[r].addresses, `${r}: addresses unchanged`);
+  const everyAddress = before.reads.admin.addresses;
   const job = (s) => ({ jobs: s, job_fields: s, shares: s, applied_info: s, records: s, record_fields: s, record_crew: s, attachments: s, photos: s });
   // Job 16's customer stays hidden: customers_select (unchanged) still asks for a scheduled date in the last 7 days.
-  assert.deepEqual(after.reads.W, { ...job('1,2,6,13,16'), fields: '1,2,6,13,16', customers: '1,2,6,13', addresses: '1,2,6,13', dispatches: '1,2,6,13' },
+  assert.deepEqual(after.reads.W, { ...job('1,2,6,13,16'), fields: '1,2,6,13,16', customers: '1,2,6,13', addresses: everyAddress, dispatches: '1,2,6,13' },
     'whole-job applicator keeps only jobs not yet done or done in the last 7 days, whatever their date');
-  assert.deepEqual(after.reads.D, { ...job('9'), fields: '9', customers: '9', addresses: '9', dispatches: '9' }, 'dispatch-only applicator reads the rest of the job, never a deleted or cancelled one');
+  assert.deepEqual(after.reads.D, { ...job('9'), fields: '9', customers: '9', addresses: everyAddress, dispatches: '9' }, 'dispatch-only applicator reads the rest of the job, never a deleted or cancelled one');
   const none = { ...job('-'), fields: '-', customers: '-', addresses: '-', dispatches: '-' };
-  for (const r of ['X', 'OFF', 'recip']) assert.deepEqual(after.reads[r], none, `${r} reads nothing`);
-  assert.deepEqual(after.reads.driver, { ...job('-'), fields: '-', customers: '11', addresses: '11', dispatches: '-' }, 'a driver reads only their delivery customer and its addresses');
+  for (const r of ['X', 'OFF', 'recip']) assert.deepEqual(after.reads[r], { ...none, addresses: before.reads[r].addresses }, `${r} reads no job`);
+  assert.deepEqual(after.reads.driver, { ...job('-'), fields: '-', customers: '11', addresses: everyAddress, dispatches: '-' }, 'a driver reads their delivery customer and, as before, every address');
   // Calls: start/complete/offline/print/map/billed. The whole-job leg follows the window; dispatch never reaches a deleted job.
   const yes = 'yes yes yes yes yes yes', no = 'no no no no no no';
   assert.deepEqual(after.fns, {

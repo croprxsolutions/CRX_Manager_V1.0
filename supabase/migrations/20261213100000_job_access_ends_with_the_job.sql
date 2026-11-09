@@ -1,9 +1,10 @@
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migrations.d/20261213100000_job_access_ends_with_the_job.md.
 --
--- WHAT (KI-01 part C and KI-73 in docs/manual/KNOWN_ISSUES.md; To-Do rows 11.4 and 11.7): field access
--- ends when the job ends, customer addresses stop being readable by every account, and an applicator
--- sent to a job by dispatch reads the rest of that job. Live before this file (read-only, 2026-11-08):
+-- WHAT (KI-01 part C and KI-73 in docs/manual/KNOWN_ISSUES.md; To-Do row 11.4): field access
+-- ends when the job ends, and an applicator sent to a job by dispatch reads the rest of that job.
+-- Customer addresses are left as they are (Mason, 2026-11-08: drivers keep the delivery address on
+-- FieldStop; narrowing addresses for applicators is its own change). Live before this file (read-only, 2026-11-08):
 --   jobs_select and every job-table policy that looks the job up through `jobs`
 --                     the whole-job applicator (jobs.applicator_id) reads the job, its fields,
 --                     chemicals, shares, completion records, attachments and photos FOREVER:
@@ -17,8 +18,6 @@
 --   get_dispatched_list, _can_see_field
 --                     SECURITY DEFINER, so they skip row security and carry their own copy of the
 --                     unbounded whole-job test (the field functions refused a deleted job, nothing else).
---   addresses_select  every active account, drivers and entity recipients included, reads every
---                     customer's addresses (To-Do 11.7, HIGH).
 --   job_field_shares, job_applied_info, job_applied_records (+ _fields, + _crew), job_attachments,
 --   storage job-attachments objects
 --                     a dispatch-only applicator, who reads the job, its fields and chemicals, cannot
@@ -55,10 +54,6 @@
 --     readable. Its whole-job leg already reaches the job through jobs' row security.
 --   * The SECURITY DEFINER functions above: only their whole-job leg changes, to _is_job_applicator
 --     (each line marked "KI-73 part C"). _can_see_field's whole-job leg likewise.
---   * addresses_select: an address is readable exactly when its customer is (customers_select and
---     customers_select_location_dispatchee): office staff, a driver on a current delivery for that
---     customer, an applicator on a current job for that customer. FieldStop and Delivery Detail keep
---     working for drivers.
 --   * Dispatch-only applicators gain reads (never writes) of the job's saved shares, completion info,
 --     completion records and their field and crew rows, attachments and attachment photos:
 --     is_applicator() AND _is_dispatched_to_me(job). A driver in a ground crew does not, as for the
@@ -72,8 +67,7 @@
 --   OID); policy names, roles and commands; no existing row changes (the new column starts NULL).
 --
 -- EXPECTED NARROWING (by design): a whole-job applicator loses a cancelled or deleted job at once, and a
---   completed one 7 days after it was completed; a driver or entity recipient loses customer addresses
---   outside their current deliveries; nobody reads a deleted job's dispatch rows. A dispatch-only
+--   completed one 7 days after it was completed; nobody reads a deleted job's dispatch rows. A dispatch-only
 --   applicator gains the reads above.
 --
 -- ROLLBACK: re-run the pinned live bodies and policy texts (the preflight's pins; bodies in the git history
@@ -151,7 +145,6 @@ BEGIN
   FOR v_pin IN
     SELECT * FROM (VALUES
       ('public', 'jobs', 'jobs_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR (is_applicator() AND (applicator_id = ( SELECT auth.uid() AS uid))))', 2),
-      ('public', 'customer_addresses', 'addresses_select', '{authenticated}', '( SELECT is_active_profile() AS is_active_profile)', 1),
       ('public', 'job_location_dispatches', 'job_location_dispatches_select', '{authenticated}', E'(is_admin() OR is_sales_rep() OR ((dispatch_status = \'dispatched\'::text) AND (applicator_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active)))) OR ((dispatch_status = \'dispatched\'::text) AND (crew_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active))) AND (EXISTS ( SELECT 1\n   FROM (ground_crew_members gcm\n     JOIN ground_crews gc ON ((gc.id = gcm.crew_id)))\n  WHERE ((gcm.crew_id = job_location_dispatches.crew_id) AND (gcm.profile_id = ( SELECT auth.uid() AS uid)) AND gcm.is_active AND gc.is_active)))) OR (EXISTS ( SELECT 1\n   FROM jobs j\n  WHERE ((j.id = job_location_dispatches.job_id) AND is_applicator() AND (j.applicator_id = ( SELECT auth.uid() AS uid))))))', 1),
       ('public', 'job_field_shares', 'job_field_shares_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM jobs\n  WHERE ((jobs.id = job_field_shares.job_id) AND (is_admin() OR is_sales_rep() OR (is_applicator() AND (jobs.applicator_id = ( SELECT auth.uid() AS uid)))))))', 1),
       ('public', 'job_applied_info', 'job_applied_info_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM jobs\n  WHERE ((jobs.id = job_applied_info.job_id) AND (is_admin() OR is_sales_rep() OR (is_applicator() AND (jobs.applicator_id = ( SELECT auth.uid() AS uid)))))))', 1),
@@ -311,7 +304,7 @@ AS $function$
          d.dispatch_status = 'dispatched'
          OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
        )
-       AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = d.job_id AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days'))  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
+       AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = d.job_id AND (j.status IN ('scheduled', 'in_progress') OR j.completed_at >= now() - interval '7 days'))  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
        AND (
          d.applicator_id = (select auth.uid())
          OR (
@@ -363,7 +356,7 @@ AS $function$
            WHERE jf.field_id = p_field_id
              AND j.deleted_at IS NULL
              AND j.status <> 'cancelled'  -- KI-73 part C: a cancelled job ends dispatch access
-             AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
+             AND (j.status IN ('scheduled', 'in_progress') OR j.completed_at >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
              AND (
                d.dispatch_status = 'dispatched'
                OR (d.dispatch_status = 'completed' AND d.updated_at >= now() - interval '7 days')
@@ -1940,7 +1933,7 @@ AS $function$
   )
     FROM public.job_location_dispatches d
     JOIN public.jobs j        ON j.id = d.job_id AND j.deleted_at IS NULL AND j.status <> 'cancelled'  -- KI-73 part C
-                             AND (j.status IN ('scheduled', 'in_progress') OR COALESCE(j.completed_at, d.updated_at) >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
+                             AND (j.status IN ('scheduled', 'in_progress') OR j.completed_at >= now() - interval '7 days')  -- KI-73 part C: a finished job's dispatch ends 7 days after the job
     JOIN public.job_fields jf ON jf.id = d.job_field_id
     JOIN public.customers c   ON c.id = j.customer_id
    WHERE (
@@ -2016,10 +2009,6 @@ ALTER POLICY job_location_dispatches_select ON public.job_location_dispatches
                      WHERE j.id = job_location_dispatches.job_id AND is_applicator()
                        AND j.applicator_id = (SELECT auth.uid())));
 
--- An address is readable exactly when its customer is (To-Do 11.7).
-ALTER POLICY addresses_select ON public.customer_addresses
-  USING (EXISTS (SELECT 1 FROM public.customers c WHERE c.id = customer_addresses.customer_id));
-
 -- Dispatch-only applicators read the rest of the job they are sent to (Mason, 2026-10-25).
 ALTER POLICY job_field_shares_select ON public.job_field_shares
   USING (is_admin() OR is_sales_rep() OR public._is_job_applicator(job_id)
@@ -2076,8 +2065,8 @@ BEGIN
            a.owner AS was_owner, a.acl AS was_acl, a.proconfig AS was_config, a.prorettype AS was_rettype,
            a.provolatile AS was_volatile, a.prosecdef AS was_secdef
       FROM (VALUES
-      ('public._is_dispatched_to_me(uuid)',                                                                                '5f103107f7b0b1048028a5ab3f1e91b9'),
-      ('public._can_see_field(uuid)',                                                                                      '19b629b80b4a87209fec57bcd7a0cda3'),
+      ('public._is_dispatched_to_me(uuid)',                                                                                'cfb7c305fc8967e612e3e0493e457b15'),
+      ('public._can_see_field(uuid)',                                                                                      'be73b62d016aeda73d7fa59dd1e4bbfc'),
       ('public._start_job_replay_impl_20261015(uuid,uuid,text)',                                                           '31412ba33e4d6eebd145b7813878a655'),
       ('public._complete_job_replay_impl_20261015(uuid,jsonb,uuid,text)',                                                  '3bd9dfe0729d8175ffbb1cf16b258b5c'),
       ('public.stage_offline_action(uuid,text,uuid,integer,timestamp with time zone,jsonb,text,timestamp with time zone)', 'e3f9a5aaa1d9ac54bf9cee0546b057f9'),
@@ -2086,7 +2075,7 @@ BEGIN
       ('public.get_jobs_billed_customers(uuid[])',                                                                         '42bb182795a3a5cbbcf3106eaab97625'),
       ('public.get_job_billed_customers(uuid)',                                                                            '316d0eb63b76ef9a640a70db22b4f40c'),
       ('public.get_dispatch_board_jobs(uuid,text,date,date)',                                                              'cc849915c479a72bc391f359ccd1fa8f'),
-      ('public.get_dispatched_list(uuid,uuid)',                                                                            '5284f75e5274c89778382e99205077bc')
+      ('public.get_dispatched_list(uuid,uuid)',                                                                            'da281bd439301e58ea97f669c5324e5e')
       ) AS t(sig, new_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(t.sig)
       -- CREATE OR REPLACE keeps each OID, so the preflight snapshot is matched by OID.
@@ -2149,7 +2138,6 @@ BEGIN
     SELECT * FROM (VALUES
       ('public', 'jobs', 'jobs_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(id))'),
       ('public', 'job_location_dispatches', 'job_location_dispatches_select', '{authenticated}', E'(is_admin() OR is_sales_rep() OR (_is_dispatched_to_me(job_id) AND (((dispatch_status = \'dispatched\'::text) AND (applicator_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active)))) OR ((dispatch_status = \'dispatched\'::text) AND (crew_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active))) AND (EXISTS ( SELECT 1\n   FROM (ground_crew_members gcm\n     JOIN ground_crews gc ON ((gc.id = gcm.crew_id)))\n  WHERE ((gcm.crew_id = job_location_dispatches.crew_id) AND (gcm.profile_id = ( SELECT auth.uid() AS uid)) AND gcm.is_active AND gc.is_active)))))) OR (EXISTS ( SELECT 1\n   FROM jobs j\n  WHERE ((j.id = job_location_dispatches.job_id) AND is_applicator() AND (j.applicator_id = ( SELECT auth.uid() AS uid))))))'),
-      ('public', 'customer_addresses', 'addresses_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM customers c\n  WHERE (c.id = customer_addresses.customer_id)))'),
       ('public', 'job_field_shares', 'job_field_shares_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(job_id) OR (is_applicator() AND _is_dispatched_to_me(job_id)))'),
       ('public', 'job_applied_info', 'job_applied_info_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(job_id) OR (is_applicator() AND _is_dispatched_to_me(job_id)))'),
       ('public', 'job_applied_records', 'job_applied_records_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(job_id) OR (is_applicator() AND _is_dispatched_to_me(job_id)))'),

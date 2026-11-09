@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items) | 55 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)) | 61 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 15 |
 | WP-PM-3 local candidate items (KI-89–KI-92; not applied) | 4 |
@@ -475,6 +475,37 @@ file previews "ready" and then the whole save is refused with nothing written. T
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
 this number is fixed and live (archive, 2026-11-05).
 
+### KI-109 — Product Master follow-ups named in the Wave 2 report but never filed
+**LOW · UNVERIFIED (not re-checked since 2026-11-03) · products · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- No cancel for a previewed price change set: every live test leaves one behind (WP-PM-7's live check left
+  `a27b2386` in "previewed" on a test product; prices did not change).
+- No product-page list of open jobs still on old label values.
+- `save_job` does not itself refuse edits to a completed job. Partly covered since: `20261204120000` freezes a
+  completed or invoiced job's EPA numbers.
+- WP-PM-7 deferred LOWs: emoji character count, older `toFixed` displays, the raw select in the cost modal.
+- "Piksi Dust Plus - 1800G Jar" is stocked in milligrams but billed by dry ounces on jobs; check its price before it
+  goes on a job. Its cost basis is still an open question for Mason.
+
+### KI-110 — Three small invoicing findings from the October admin-only invoicing review
+**LOW · UNVERIFIED (seen 2026-10-09 to 2026-10-13, never re-checked) · invoicing · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- `_update_order_items_impl` sets `invoice_items.order_item_id = NULL` on draft invoices without locking the
+  `invoices` row, so a rep's order-line edit can change that link after an admin's versioned post compared the
+  invoice. No amount changes. Fix: lock the affected draft invoices `FOR UPDATE` (by id) first.
+- `cancel_delivery` refused an admin's quick delivery whose draft invoice was still open
+  (`ORDER_INVOICE_TERMINAL`), for an admin and a rep alike, in a container replay of the live schema. Not checked
+  live.
+- `finance_charges` still grants table writes to `authenticated`. Its policy is admin-only, so RLS refuses them;
+  this is clean-up debt, not a hole.
+
+### KI-111 — Field-acre billing: the real boundary-file import check is still owed
+**MED · UNVERIFIED (listed as open in code on 2026-09-30) · field app · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+- The one check left open at the June field-acre billing go-live: import one real John Deere, FieldView or .zip
+  boundary export (a test customer is fine). Confirm it bills on the file's acres, the ±10% difference flag
+  appears, and redrawing the map does not change the billed acres.
+- Field boundary bulk import has no Skip / Replace / Import-as-new choice at preview.
+- Split draft invoices created automatically when a delivery completes raise no bell notification.
+- The guided map-drawing tool has no "undo last point".
+
 ---
 
 ## Inventory and deliveries
@@ -651,6 +682,23 @@ rep gets an account: the database must refuse a different tier from reps (admins
 also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
 changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
 quote changes the tier label without repricing its locked lines.
+
+### KI-108 — Five products' stored stock did not match their transaction history on 2026-11-01
+**MED · UNVERIFIED (snapshot 2026-11-01 12:11 UTC, not re-checked) · inventory · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The monthly integrity report (closed PR #1230) found `inventory.quantity_available` different from the
+`inventory_transactions` ledger for five products. The other nine checks passed.
+
+| Product | Ledger says | Stored | Gap |
+|---|---|---|---|
+| Black Strap Molasses Sugar - Tote | 675 | 2,000 | 1,325 |
+| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | 530 |
+| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | 95 |
+| 2, 4D Amine 4# - Bulk | 0 | 55 | 55 |
+| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | 10 |
+
+Next step: re-run the check (the `/integrity-report` admin page shows the same check). For any product still off,
+read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
+(`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
 
 ## Database and release process
 
@@ -843,6 +891,21 @@ and one August proof are gone. The October/November proofs stay (recent work sti
 `scripts/smoke/undo-paths/` (eight proofs import it). Still open: the two Edge Functions and the helper and
 page-split work.
 
+### KI-107 — Review-proof guard refuses a delete after `cd` into a worktree when any part of the command has `..` or a variable
+**LOW · OPEN (rule read on `main` 2026-11-08) · tooling-guards · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+`review-proof-guard.mjs` refuses `cd <worktree> && <delete or move>` when any later part of the command climbs out
+(for example a harmless `ls ../wt-b`), and cannot see `S=<path>; rm -rf "$S"` as a literal path. Closed PR #1536
+(branch `claude/review-proof-guard-worktree-path-7639d0`, tip `b8ae8bf6e0`, two Luna rounds) judges each delete on
+its own and reads such variables: of 19 real refusals on 2026-11-05, 6 pass and 13 stay refused. Mason closed it
+on 2026-11-05 because that narrowing kept leaking the same class of hole; the branch is kept for its pinned test
+cases only. Workaround: run a delete or cleanup as its own command, not in one that `cd`s into a worktree.
+
+### KI-112 — A draft return-credit prover failed just after midnight UTC
+**LOW · UNVERIFIED · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.mjs` (closed PR #1319) failed just
+after midnight UTC with "fractional credit A PNL COGS delta=-1251". Not checked whether `main`'s live-dump version
+fails the same way; it fits the known pattern of live checks that fail between 6 PM and midnight Central.
+
 ---
 
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)
@@ -993,6 +1056,9 @@ service-role tools (LOW).
 - PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
   `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
   Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
+  Still open, not covered by that acceptance: a separate gap in `env-guard`'s frontend secret-key checks (LOW;
+  confirmed on `main` 2026-11-08; details withheld until the fix ships). PR #605's branch
+  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has the fix.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

@@ -68,6 +68,13 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RT2A_REVERSE_ROW_MOVED: nothing was changed: %', v_bad;
   END IF;
+  -- Same rule as the forward step: moving a rate unit would split it from a label maximum entered since.
+  SELECT string_agg(r.product_name, ', ' ORDER BY r.product_name) INTO v_bad
+    FROM rt2a_rev r JOIN public.products p ON p.id = r.id
+   WHERE r.kind = 'rate' AND (p.max_label_rate IS NOT NULL OR NULLIF(btrim(p.max_label_rate_unit), '') IS NOT NULL);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_LABEL_RATE: these products have a label maximum, nothing was changed: %', v_bad;
+  END IF;
   CREATE TEMP TABLE rt2a_rev_before ON COMMIT DROP AS
     SELECT id, rate_per_acre, tier1_price, tier2_price, tier3_price,
            tier1_price_per_acre, tier2_price_per_acre, tier3_price_per_acre, current_cost,

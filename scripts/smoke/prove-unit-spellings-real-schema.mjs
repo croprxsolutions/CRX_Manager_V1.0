@@ -502,6 +502,10 @@ async function main() {
   raw('ALTER TABLE public.products DISABLE TRIGGER trigger_zzz_guard_product_rate_lock;');
   refused('reverse.sql', /RT2A_REVERSE_GUARD_STATE/);
   raw('ALTER TABLE public.products ENABLE TRIGGER trigger_zzz_guard_product_rate_lock;');
+  // Sol round 3 HIGH: recovery also refuses a moving rate unit that gained a label maximum.
+  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Dry oz' WHERE id = '${dryRow.id}';`);
+  refused('reverse.sql', new RegExp(`RT2A_REVERSE_LABEL_RATE[^\\n]*${esc(dryRow.name)}`));
+  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${dryRow.id}';`);
   const rv = apply('reverse.sql');
   assert.equal(rv.status, 0, rv.output);
   assert.equal(units(), s0.units, 'U15: recovery restored every unit column');

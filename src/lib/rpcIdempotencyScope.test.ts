@@ -480,6 +480,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _create_job_from_quote_section_replay_impl_20261015: ['create_job_from_quote_section'],
   _batch_reschedule_deliveries_replay_impl_20261015: ['batch_reschedule_deliveries'],
   _save_field_crop_history_replay_impl_20261015: ['save_field_crop_history'],
+  // Same replay-binding shape (renamed behind their public wrappers; postgres-only EXECUTE). REG-1
+  // 20261210100000 re-emits both only to record each new draft's label_draft_targets row.
+  _create_label_draft_replay_impl_20261015: ['create_label_draft'],
+  _bulk_create_label_drafts_replay_impl_20261015: ['bulk_create_label_drafts'],
   // Restore the Wave A alias exemption when its drafts are promoted from
   // scripts/.staging-migrations/.
 };

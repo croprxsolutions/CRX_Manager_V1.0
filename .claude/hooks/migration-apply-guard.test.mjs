@@ -114,6 +114,29 @@ for (const [name, sqlText] of [
   ["a quoted UPDATE OF column spanning a TRUNCATE, no event", `SELECT 'create trigger x before update of "'; TRUNCATE customers; SELECT '" on';`],
   ["a quoted UPDATE OF column spanning a dollar-quoted TRUNCATE", `SELECT $q$create trigger x before update of "$q$; DO $d$ BEGIN TRUNCATE customers; END $d$; SELECT $q$" on$q$;`],
 ]) ok(destructiveMigrationCheck(sqlText).destructive, `${name} stays destructive`);
+// TRUNCATE as a privilege name is not a wipe. Lines from PR #1635, PR #1620 and 20261204120000.
+for (const sqlText of [
+  "DO $$ BEGIN IF has_table_privilege('authenticated', 'public.epa_registrations', 'INSERT,UPDATE,DELETE,TRUNCATE') THEN RAISE EXCEPTION 'x'; END IF; END $$;",
+  "DO $$ BEGIN IF has_table_privilege(v_role, 'public.' || v_table, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER') THEN RAISE EXCEPTION 'x'; END IF; END $$;",
+  "SELECT has_table_privilege('anon', 'public.t'::regclass, 'truncate with grant option');",
+  "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.job_chemicals FROM PUBLIC, authenticated, anon;",
+  "REVOKE GRANT OPTION FOR TRUNCATE ON TABLE public.t FROM authenticated;",
+  "GRANT SELECT, TRUNCATE ON public.t TO service_role;",
+  // The same privilege string, dollar-quoted.
+  "DO $$ BEGIN IF has_table_privilege('authenticated', 'public.t', $p$INSERT,UPDATE,DELETE,TRUNCATE$p$) THEN RAISE EXCEPTION 'x'; END IF; END $$;",
+  "SELECT has_table_privilege('anon', 'public.t', $$ TRUNCATE $$);",
+]) eq(destructiveMigrationCheck(sqlText).destructive, false, `privilege name is not destructive: ${sqlText}`);
+for (const [name, sqlText] of [
+  ["a privilege check then a real TRUNCATE", "SELECT has_table_privilege('a', 't', 'TRUNCATE'); TRUNCATE customers;"],
+  ["EXECUTE of a TRUNCATE string concatenated", "DO $$ BEGIN EXECUTE 'TRUNCATE ' || 'customers'; END $$;"],
+  ["a privilege-check header spanning two strings", "SELECT 'has_table_privilege(a, '; TRUNCATE customers; SELECT ')';"],
+  ["a REVOKE header spanning a TRUNCATE", "SELECT 'revoke '; TRUNCATE customers; SELECT ' on';"],
+  ["a privilege list that names a table", "SELECT has_table_privilege('a', 'b', 'TRUNCATE customers');"],
+  ["a dollar-quoted privilege check then a real TRUNCATE", "SELECT has_table_privilege('a', 't', $p$TRUNCATE$p$); TRUNCATE customers;"],
+  ["a dollar-quoted privilege list that names a table", "SELECT has_table_privilege('a', 'b', $p$TRUNCATE customers$p$);"],
+  ["mismatched dollar tags around a real TRUNCATE", "SELECT has_table_privilege('a', 'b', $p$TRUNCATE$q$); TRUNCATE customers; SELECT $q$x$p$);"],
+  ["a plain top-level TRUNCATE", "TRUNCATE public.customers;"],
+]) ok(destructiveMigrationCheck(sqlText).destructive, `${name} stays destructive`);
 // A function the migration RUNS that truncates is caught by the data-rewrite check (bodies never reach the one above).
 ok(dataRewriteCheck(`${rateLockTriggers}\nCREATE FUNCTION public.wipe() RETURNS void LANGUAGE sql AS $$ TRUNCATE public.customers $$;\nSELECT public.wipe();`, { history: [] }).rewrites,
   "a migration-run function that TRUNCATEs is still sent to Mason");

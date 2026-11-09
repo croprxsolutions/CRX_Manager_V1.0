@@ -21,6 +21,8 @@ import { CRX_GREEN, CHARCOAL, GRAY, ALT_ROW_BG, type JsPDFWithAutoTable } from '
 import { companyFooterInternal, fitCompanyNameFont, type CompanyInfo } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { fmtNum, type ApplicatorSheetCustomer } from './applicatorSheetData';
+import { loaderGroupWeightText, loaderLoadWeights, loaderWeightCaption, type LoaderProductWeights, type LoaderSourceLine } from './loaderWeights';
+import type { WeightUnitFactors } from '../types';
 import {
   computeLoaderWorksheet,
   type LoaderLoad,
@@ -83,6 +85,18 @@ export interface LoaderWorksheetPdfData {
   per_load_acres?: number[] | null;
   loads_done?: number[];
   display_mode?: LoaderWorksheetDisplayMode;
+  /** DM-2 product weights, from the same read as `products`. Omitted keeps the sheet as it was. */
+  weights?: LoaderPdfWeights;
+}
+
+export interface LoaderPdfWeights {
+  byProductId: Record<string, LoaderProductWeights>;
+  currentUnits: WeightUnitFactors;
+  sourceLines: LoaderSourceLine[];
+  /** True when the plan is a saved worksheet (its caption names saved weights). */
+  saved: boolean;
+  /** Set when the weights could not be read: printed in place of the caption, and no weights are shown. */
+  unavailable?: string;
 }
 
 export interface LoaderWorksheetPdfLoadColumn {
@@ -125,6 +139,61 @@ export function buildLoaderWorksheetPdfPlan(data: LoaderWorksheetPdfData): {
       done: loadsDone.includes(index),
     }));
   return { worksheet, columns };
+}
+
+/**
+ * The per-load mix table's rows: each product's printed amount per load (index-aligned with
+ * computeLoaderWorksheet, which pushes one entry per input line, in order, onto every load, so two lines of one
+ * product stay separate) and the Total across loads. With `data.weights`, each cell prints `amountCell` (a refused
+ * amount prints its reason, never 0) with its weight under it, and a "Product weight" row closes the table.
+ */
+export function loaderPdfMixBody(data: LoaderWorksheetPdfData, plan: ReturnType<typeof buildLoaderWorksheetPdfPlan>):
+  { body: string[][]; caption: string | null } {
+  const ws = plan.worksheet;
+  // With weights unavailable but the source lines known (a new job), a bad amount still prints its reason, never 0;
+  // only the weights are left off.
+  const weighed = data.weights && (!data.weights.unavailable || data.weights.sourceLines.length > 0)
+    ? loaderLoadWeights(ws, data.weights.byProductId, data.weights.currentUnits, data.weights.sourceLines) : null;
+  const w = data.weights?.unavailable ? null : weighed;
+  const loadIndex = (column: LoaderWorksheetPdfLoadColumn) => ws.loads.indexOf(column.load);
+  const groupIndexes = (column: LoaderWorksheetPdfLoadColumn) => column.loads.map((load) => ws.loads.indexOf(load));
+  const markCurrent = data.weights?.saved === true;
+  const body: string[][] = data.products.map((p, pi) => {
+    const row: string[] = [p.unit ? `${p.product_name} (${p.unit})` : p.product_name];
+    let refused = false;
+    plan.columns.forEach((column) => {
+      const amount = column.load.products[pi]?.amount;
+      if (amount == null) {
+        row.push('—');
+        return;
+      }
+      const cell = weighed?.loads[loadIndex(column)]?.cells[pi];
+      const each = column.loads.length > 1 ? ' each' : '';
+      const done = column.done ? '✓ ' : '';
+      if (!cell) {
+        row.push(`${done}${fmtNum(amount)}${each}`);
+        return;
+      }
+      if (cell.amountCell !== fmtNum(amount)) refused = true;
+      if (!w) {
+        row.push(refused ? cell.amountCell : `${done}${cell.amountCell}${each}`);
+        return;
+      }
+      const mark = markCurrent && cell.mark === 'current' ? ' (current)' : '';
+      row.push(refused ? cell.amountCell : `${done}${cell.amountCell}${each}
+${loaderGroupWeightText(w, groupIndexes(column), pi)}${mark}`);
+    });
+    const rowTotal = ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0);
+    row.push(refused ? '—' : fmtNum(Math.round(rowTotal * 10000) / 10000));
+    return row;
+  });
+  if (w) body.push(['Product weight', ...plan.columns.map((column) => {
+    const total = loaderGroupWeightText(w, groupIndexes(column), 'total');
+    if (!total) return '—';
+    return total.startsWith('Product weight: ') ? `${total.slice('Product weight: '.length)}${column.loads.length > 1 ? ' each' : ''}` : total;
+  }), '']);
+  const caption = !data.weights ? null : data.weights.unavailable ?? loaderWeightCaption(data.weights.saved, w?.anyCurrent ?? false);
+  return { body, caption };
 }
 
 /**
@@ -301,21 +370,7 @@ function drawLoaderWorksheet(
     // line, even when a job carries the same product on two lines (a name lookup
     // would collapse the duplicates onto the first line's amount). Total = the sum
     // across loads at the same index (independently per duplicate row).
-    const body: string[][] = data.products.map((p, pi) => {
-      const row: string[] = [p.unit ? `${p.product_name} (${p.unit})` : p.product_name];
-      plan.columns.forEach((column) => {
-        const amount = column.load.products[pi]?.amount;
-        if (amount == null) {
-          row.push('—');
-          return;
-        }
-        row.push(`${column.done ? '✓ ' : ''}${fmtNum(amount)}${column.loads.length > 1 ? ' each' : ''}`);
-      });
-      const rowTotal = ws.loads.reduce((sum, load) => sum + (load.products[pi]?.amount ?? 0), 0);
-      row.push(fmtNum(Math.round(rowTotal * 10000) / 10000));
-      return row;
-    });
-
+    const { body, caption } = loaderPdfMixBody(data, plan);
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
@@ -327,6 +382,14 @@ function drawLoaderWorksheet(
       columnStyles: { 0: { halign: 'left', fontStyle: 'bold', textColor: CHARCOAL } },
     });
     y = doc.lastAutoTable.finalY + 16;
+    if (caption) {
+      y = ensureRoom(doc, y, 14, margin);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...GRAY);
+      doc.text(caption, margin, y - 4);
+      y += 10;
+    }
   }
 
   // ── Loader Comment (verbatim) ────────────────────────────────────────────────

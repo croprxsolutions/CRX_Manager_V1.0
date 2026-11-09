@@ -18,6 +18,8 @@ const REUSE = process.env.CRX_DM2_CONTAINER || '';
 const NAME = REUSE || `crx-dm2-${process.pid}-${Date.now().toString(36)}`;
 let DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+// Only a container this proof created carries the label; reuse refuses any other, so its drops never touch someone else's databases.
+const OWNER_LABEL_VALUE = 'dm2-product-weights';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -198,7 +200,7 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
-  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  docker(['run', '-d', '--name', NAME, '--label', `crx.prover=${OWNER_LABEL_VALUE}`, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -408,6 +410,8 @@ const touchWs = (ws, uid = REP) => ok(uid, `UPDATE public.job_loader_worksheets 
 
 async function main() {
   if (REUSE) {
+    const label = docker(['inspect', '--format', '{{index .Config.Labels "crx.prover"}}', NAME]).stdout.trim();
+    if (label !== OWNER_LABEL_VALUE) throw new Error(`CRX_DM2_CONTAINER=${NAME} was not created by this proof (label crx.prover='${label}'); refusing to drop its databases.`);
     DB = 'template1';
     psql('DROP DATABASE IF EXISTS dm2work WITH (FORCE);', { user: 'supabase_admin' });
     psql('CREATE DATABASE dm2work TEMPLATE dm2base OWNER postgres;', { user: 'supabase_admin' });

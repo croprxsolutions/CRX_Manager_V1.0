@@ -44,7 +44,7 @@
  * React- and jsPDF-free so the aggregation + grouping are unit-tested in isolation; the
  * PDF layout lives in masterMixSummaryPdf.ts.
  */
-import type { ProductForm } from '../types';
+import type { ProductForm, ProductWeight, WeightUnitFactors } from '../types';
 import type { ApplicatorSheetData } from './applicatorSheetData';
 import { fmtNum } from './applicatorSheetData';
 import { toGallonOrLbEquivalent } from './chemCalculator';
@@ -53,6 +53,18 @@ import {
   type LoaderProductInput,
   type LoaderWorksheet,
 } from './loaderWorksheet';
+import { loaderLoadWeights, type LoaderSourceLine, type LoaderWeights } from './loaderWeights';
+import { formatLb, lineWeightLb, sumWeights, type WeightBasis } from './weightMath';
+
+/**
+ * DM-2 sheet 4.3: the batch summary is a live view, so it uses current approved weights (one
+ * `get_product_weights` read), or the reason none could be read.
+ */
+export type MasterMixWeights =
+  | { byProductId: Record<string, ProductWeight | undefined>; units: WeightUnitFactors }
+  | { unavailable: string };
+
+const MASTER_MIX_WEIGHT_CAPTION = 'Weights use the current approved weights.';
 
 /** One combined product line: a product+unit total summed across the included jobs. */
 export interface MasterMixRow {
@@ -70,6 +82,8 @@ export interface MasterMixRow {
   gl_lb_display: string;
   /** How many of the included jobs contributed to this product+unit line. */
   job_count: number;
+  /** Total weight ("104.30 lb"), each job line weighed on its own then added; or why not shown. Absent without weights. */
+  weight_text?: string;
 }
 
 /** A job whose loads share one tank capacity + carrier rate — one combined loads block. */
@@ -86,6 +100,8 @@ export interface MasterMixLoadGroup {
   total_acres: number;
   /** The computed combined loader worksheet for this group (loads + per-load split). */
   worksheet: LoaderWorksheet;
+  /** Each load's product weights (the loader worksheet's helper); absent without weights. */
+  weights?: LoaderWeights;
 }
 
 /** A job whose loads could NOT be planned (no capacity or no carrier rate) — mix still counted. */
@@ -161,6 +177,8 @@ export interface MasterMixSummaryData {
    * as one combined plan (criterion 6 note; also covers the Codex P1 recipe split).
    */
   mixed_capacities: boolean;
+  /** The weights caption, or why weights are not shown; null when no weights were asked for. */
+  weights_caption: string | null;
 }
 
 /** 4-dp rounding — matches the server/gatherer ROUND(..., 4) so sums stay exact. */
@@ -180,6 +198,56 @@ function round4(x: number): number {
  */
 function productUnitKey(productName: string, unit: string): string {
   return `${productName}\u0000${unit.toLowerCase()}`;
+}
+
+/** A line's combining key: its product (DM-2 sheet 4.3) when linked, else its name; plus its case-folded unit. */
+function lineKey(p: ApplicatorSheetData['products'][number], unit: string): string {
+  return p.product_id ? `id\u0000${p.product_id}\u0000${unit.toLowerCase()}` : productUnitKey(p.product_name, unit);
+}
+
+/**
+ * Two different products can share a name and unit; they stay separate rows (never added together), so each
+ * gets its EPA number, or a count when it has none, to tell them apart on the printout.
+ */
+function nameSameNamedProducts<T extends { product_name: string; unit: string | null }>(
+  items: T[], epaOf: (item: T) => string | null | undefined,
+): T[] {
+  const nameKey = (t: T) => `${t.product_name}\u0000${(t.unit ?? '').toLowerCase()}`;
+  const counts = new Map<string, number>();
+  for (const t of items) counts.set(nameKey(t), (counts.get(nameKey(t)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return items.map((t) => {
+    const k = nameKey(t);
+    if ((counts.get(k) ?? 0) < 2) return t;
+    const n = (seen.get(k) ?? 0) + 1;
+    seen.set(k, n);
+    const epa = epaOf(t)?.trim();
+    return { ...t, product_name: `${t.product_name} (${epa ? `EPA ${epa}` : `product ${n}`})` };
+  });
+}
+
+type ReadWeights = Extract<MasterMixWeights, { units: WeightUnitFactors }>;
+
+/** The current weight basis for a line: none when unlinked, null when the read has no entry for its product. */
+function currentBasis(productId: string | null | undefined, weights: ReadWeights): WeightBasis | null {
+  if (!productId) return { kind: 'none', none_reason: 'unlinked' };
+  return weights.byProductId[productId] ?? null;
+}
+
+/** Weighs each source line on its own, then adds: "104.30 lb", or every distinct reason a line has no weight. */
+function rowWeightText(lines: ApplicatorSheetData['products'], weights: MasterMixWeights): string {
+  if ('unavailable' in weights) return weights.unavailable;
+  const weighed = lines.map((p) => {
+    const basis = currentBasis(p.product_id, weights);
+    return {
+      quantity: p.total_applied,
+      weight: basis
+        ? lineWeightLb({ name: p.product_name, quantity: p.total_applied, unit: p.total_unit, form: p.product_form, weight: basis }, weights.units)
+        : { refused: true as const, reason: `${p.product_name}: weights unavailable` },
+    };
+  });
+  const sum = sumWeights(weighed);
+  return 'lb' in sum ? formatLb(sum.lb) : `Not shown: ${[...new Set(sum.reasons)].join('; ')}`;
 }
 
 /**
@@ -206,13 +274,14 @@ function recipeSignature(products: ApplicatorSheetData['products'], totalAcres: 
   return products
     .filter((p) => p.total_applied != null && Number.isFinite(p.total_applied))
     .map((p) => {
-      const unit = (p.total_unit ?? '').trim().toLowerCase();
+      const unit = (p.total_unit ?? '').trim();
       // Effective per-acre concentration drives the load split — derive it from the total
       // and the acre basis, falling back to the raw total when there is no acre basis.
       const effRate = acres > 0 ? round4((p.total_applied as number) / acres) : `q${round4(p.total_applied as number)}`;
       // NUL-delimited (not "|"): a product name could in principle contain a pipe, which
       // would let two distinct recipes collide into one signature (Codex P2 sibling case).
-      return `${p.product_name}\u0000${unit}\u0000${effRate}`;
+      // The same product identity the load groups combine by, so two products sharing a name never share loads.
+      return `${lineKey(p, unit)}\u0000${effRate}`;
     })
     .sort()
     .join('::');
@@ -237,6 +306,7 @@ function recipeSignature(products: ApplicatorSheetData['products'], totalAcres: 
 export function buildMasterMixSummaryData(
   jobs: MasterMixJobInput[],
   excluded: MasterMixExcludedJob[] = [],
+  weights?: MasterMixWeights,
 ): MasterMixSummaryData {
   // ── 1) Combined per-product mix (the #12 aggregation, verbatim semantics) ──────
   interface Acc {
@@ -248,6 +318,8 @@ export function buildMasterMixSummaryData(
     form: ProductForm | null;
     /** True once any later row carries a DIFFERENT form (null counts as distinct) → gal/lb '—'. */
     form_conflict: boolean;
+    /** Every contributing job line, each weighed on its own (never the summed quantity). */
+    lines: ApplicatorSheetData['products'];
   }
   const acc = new Map<string, Acc>();
 
@@ -270,11 +342,12 @@ export function buildMasterMixSummaryData(
       const unit = (p.total_unit ?? '').trim();
       // Key on name + a case-folded unit so "PT" and "pt" sum together; keep the
       // first-seen original unit casing for display.
-      const key = productUnitKey(p.product_name, unit);
+      const key = lineKey(p, unit);
       const existing = acc.get(key);
       if (existing) {
         existing.total = round4(existing.total + p.total_applied);
         existing.job_ids.add(job_id);
+        existing.lines.push(p);
         // Flag a product_form conflict (null treated as distinct) so gal/lb renders '—'
         // rather than guessing a gallon-vs-lb branch — the exact #12 guard.
         if (existing.form !== p.product_form) existing.form_conflict = true;
@@ -286,12 +359,13 @@ export function buildMasterMixSummaryData(
           job_ids: new Set([job_id]),
           form: p.product_form,
           form_conflict: false,
+          lines: [p],
         });
       }
     }
   }
 
-  const rows: MasterMixRow[] = [...acc.values()]
+  const rows: MasterMixRow[] = nameSameNamedProducts([...acc.values()], (a) => a.lines[0]?.epa_registration)
     .map((a) => {
       // RE-DERIVE the gal/lb equivalent from the SUMMED quantity (not by adding display
       // strings). Omit it on a product_form conflict — never guess a wrong branch.
@@ -303,6 +377,7 @@ export function buildMasterMixSummaryData(
         total_quantity_display: `${fmtNum(a.total)} ${a.unit}`.trim(),
         gl_lb_display: conv ? `${fmtNum(conv.value)} ${conv.unit}` : '—',
         job_count: a.job_ids.size,
+        ...(weights ? { weight_text: rowWeightText(a.lines, weights) } : {}),
       };
     })
     .sort((x, y) =>
@@ -310,7 +385,7 @@ export function buildMasterMixSummaryData(
     );
 
   // ── 2) Per-capacity loads picture (group by capacity+rate; never average) ──────
-  const { load_groups, no_load_jobs } = buildLoadGroups(jobs);
+  const { load_groups, no_load_jobs } = buildLoadGroups(jobs, weights);
 
   return {
     rows,
@@ -321,6 +396,7 @@ export function buildMasterMixSummaryData(
     distinct_product_lines: rows.length,
     total_acres,
     mixed_capacities: load_groups.length > 1,
+    weights_caption: !weights ? null : 'unavailable' in weights ? weights.unavailable : MASTER_MIX_WEIGHT_CAPTION,
   };
 }
 
@@ -331,7 +407,7 @@ export function buildMasterMixSummaryData(
  * jobs with no capacity OR no carrier rate cannot make a loads plan and are listed
  * separately (mix still summed elsewhere). Capacities are NEVER averaged.
  */
-function buildLoadGroups(jobs: MasterMixJobInput[]): {
+function buildLoadGroups(jobs: MasterMixJobInput[], weights?: MasterMixWeights): {
   load_groups: MasterMixLoadGroup[];
   no_load_jobs: MasterMixNoLoadJob[];
 } {
@@ -342,7 +418,7 @@ function buildLoadGroups(jobs: MasterMixJobInput[]): {
     capacity_sources: Set<string>;
     total_acres: number;
     /** Combined products keyed by product name + unit (summed across the group's jobs). */
-    products: Map<string, LoaderProductInput & { _key: string }>;
+    products: Map<string, LoaderProductInput & { _key: string; epa: string | null }>;
   }
   const groups = new Map<string, GroupAcc>();
   const no_load_jobs: MasterMixNoLoadJob[] = [];
@@ -421,20 +497,22 @@ function buildLoadGroups(jobs: MasterMixJobInput[]): {
     for (const p of j.data.products) {
       if (p.total_applied == null || !Number.isFinite(p.total_applied)) continue;
       const unit = (p.total_unit ?? '').trim();
-      const pk = productUnitKey(p.product_name, unit);
+      const pk = lineKey(p, unit);
       const existing = g.products.get(pk);
       if (existing) {
         existing.total_quantity = round4((existing.total_quantity ?? 0) + p.total_applied);
       } else {
-        g.products.set(pk, { _key: pk, product_name: p.product_name, total_quantity: round4(p.total_applied), unit: unit || null });
+        g.products.set(pk, { _key: pk, product_name: p.product_name, total_quantity: round4(p.total_applied), unit: unit || null,
+          product_id: p.product_id ?? null, product_form: p.product_form, source_line_id: pk, epa: p.epa_registration });
       }
     }
   }
 
   const load_groups: MasterMixLoadGroup[] = [...groups.values()]
     .map((g) => {
-      const products: LoaderProductInput[] = [...g.products.values()]
-        .map((p) => ({ product_name: p.product_name, total_quantity: p.total_quantity, unit: p.unit }))
+      const products: LoaderProductInput[] = nameSameNamedProducts([...g.products.values()], (p) => p.epa)
+        .map((p) => ({ product_name: p.product_name, total_quantity: p.total_quantity, unit: p.unit,
+          product_id: p.product_id, product_form: p.product_form, source_line_id: p.source_line_id }))
         .sort((a, b) =>
           a.product_name.localeCompare(b.product_name) || (a.unit ?? '').localeCompare(b.unit ?? ''),
         );
@@ -444,6 +522,15 @@ function buildLoadGroups(jobs: MasterMixJobInput[]): {
         tank_capacity: g.tank_capacity,
         products,
       });
+      // Every line in one combined product shares its product and unit, so weighing the combined load amount
+      // equals adding each line's weight; the combined total stands in as the split's source line.
+      const sourceLines: LoaderSourceLine[] = products.map((p) =>
+        ({ id: p.source_line_id as string, product_id: p.product_id ?? null, quantity: p.total_quantity, unit: p.unit }));
+      const loadWeights = weights && !('unavailable' in weights) && worksheet.valid
+        ? loaderLoadWeights(worksheet,
+          Object.fromEntries(Object.entries(weights.byProductId).map(([id, current]) => [id, { current }])),
+          weights.units, sourceLines)
+        : undefined;
       const sources = [...g.capacity_sources];
       const capacity_label = `${fmtNum(g.tank_capacity)} gal @ ${fmtNum(g.carrier_rate_gpa)} gal/ac`
         + (sources.length > 0 ? ` (${sources.join(', ')})` : '');
@@ -454,6 +541,7 @@ function buildLoadGroups(jobs: MasterMixJobInput[]): {
         job_numbers: g.job_numbers,
         total_acres: g.total_acres,
         worksheet,
+        ...(loadWeights ? { weights: loadWeights } : {}),
       };
     })
     // Largest capacity first, then by rate — a stable, human-friendly order.

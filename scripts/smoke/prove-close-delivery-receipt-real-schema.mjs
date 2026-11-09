@@ -327,7 +327,10 @@ function close(uid, i, reason, key, { allowFailure = true } = {}) {
 function closed(uid, i, reason, key) {
   const r = close(uid, i, reason, key);
   assert.equal(r.status, 0, r.err);
-  return JSON.parse(r.out);
+  const out = JSON.parse(r.out);
+  assert.ok('queued_at' in out, 'every answer names the receipt it is about');
+  delete out.queued_at;
+  return out;
 }
 function refused(r, pattern) {
   assert.notEqual(r.status, 0, 'the call must be refused');
@@ -420,12 +423,17 @@ async function main() {
   assert.deepEqual(closed(REP, 1, 'handled', 'k-1b'), { delivery_id: D(1), outcome: 'none', previous_status: 'cancelled', sent_at: null, send_authorized_at: null });
   // A late retry of the first Email Confirmation key no longer gets its old go-ahead: the receipt is closed now (Sol HIGH, #1678).
   assert.equal(closed(ADMIN, 1, 'manual_send', 'k-1').outcome, 'none');
-  // The receipt is queued again (as a second completion would): a late retry of the old 'handled' key closes the new one.
-  psql(`SET session_replication_role = replica; UPDATE public.delivery_receipt_queue SET status = 'pending', last_error = NULL WHERE delivery_id = '${D(1)}';`);
-  assert.deepEqual(closed(ADMIN, 1, 'handled', 'k-1h'), answer(1, 'closed', 'pending'));
-  assert.equal(row(1, 'status'), 'cancelled');
+  // The receipt is queued again, as a second completion does (new created_at): a late retry of either old key changes
+  // nothing and is refused, so it neither cancels the new receipt nor gives a go-ahead to send it (Sol HIGH, round 8).
+  psql(`SET session_replication_role = replica; UPDATE public.delivery_receipt_queue SET status = 'pending', last_error = NULL, created_at = now() WHERE delivery_id = '${D(1)}';`);
+  refused(close(ADMIN, 1, 'handled', 'k-1h'), /DELIVERY_RECEIPT_CHANGED/);
+  refused(close(ADMIN, 1, 'manual_send', 'k-1'), /DELIVERY_RECEIPT_CHANGED/);
+  assert.equal(row(1, 'status'), 'pending');
   assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key IN ('k-1', 'k-1h');"), '2');
-  console.log('[prover] Email Confirmation pauses a pending receipt on the list; handled then closes it; keys are bound and a retry re-checks the receipt');
+  // A fresh press (new key) acts on the new receipt.
+  assert.deepEqual(closed(ADMIN, 1, 'handled', 'k-1n'), answer(1, 'closed', 'pending'));
+  assert.equal(row(1, 'status'), 'cancelled');
+  console.log('[prover] Email Confirmation pauses a pending receipt on the list; handled then closes it; keys are bound; a retry re-checks the same receipt and never acts on a re-queued one');
 
   // A needs_check receipt (no email on file) on the office list, marked handled by a sales rep: it leaves the list.
   assert.equal(listed(2), '1');

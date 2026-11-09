@@ -28,7 +28,9 @@
 --   it saves its first answer with save_idempotency and binds it with _bind_replay_receipt_20261015 in the same
 --   transaction. A retry with a used key is refused unless it is the same caller and request, and then re-checks the
 --   receipt as it is now instead of returning the saved answer (both transitions are safe to repeat), so a stale
---   answer can never stand for a receipt that changed since (Sol HIGH, PR #1678). A refused call
+--   answer can never stand for a receipt that changed since (Sol HIGH, PR #1678). A retry acts only on the receipt its
+--   key first saw (the answer's queued_at): if the delivery was completed again and its receipt re-queued since, the
+--   retry changes nothing and is refused with DELIVERY_RECEIPT_CHANGED (Sol HIGH, round 8). A refused call
 --   (DELIVERY_RECEIPT_SENDING) rolls back and saves nothing.
 --
 -- actor-binding-check: exempt -- the actor is auth.uid() only; there is no p_performed_by parameter.
@@ -123,6 +125,13 @@ BEGIN
 
   -- Same lock confirm_delivery_receipt_send takes first, so the two never interleave: whichever commits first wins.
   SELECT * INTO v_row FROM public.delivery_receipt_queue q WHERE q.delivery_id = p_delivery_id FOR UPDATE;
+  -- A retry acts only on the receipt its key first saw: a second completion re-queues the receipt with a new created_at,
+  -- and an old retry must neither cancel that new receipt nor give a go-ahead to send it.
+  IF v_replay IS NOT NULL
+     AND v_row.created_at IS DISTINCT FROM (v_replay -> 'result' ->> 'queued_at')::timestamptz THEN
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_CHANGED: this delivery''s receipt was queued again since; reload the page'
+      USING ERRCODE = '55000';
+  END IF;
   IF v_row.id IS NULL OR v_row.status = 'cancelled' THEN
     v_outcome := 'none';
   ELSIF v_row.status = 'sent' THEN
@@ -150,7 +159,8 @@ BEGIN
      WHERE id = v_row.id;
   END IF;
   v_result := jsonb_build_object('delivery_id', p_delivery_id, 'outcome', v_outcome, 'previous_status', v_row.status,
-                                 'sent_at', v_row.sent_at, 'send_authorized_at', v_row.send_authorized_at);
+                                 'sent_at', v_row.sent_at, 'send_authorized_at', v_row.send_authorized_at,
+                                 'queued_at', v_row.created_at);  -- which receipt this answer is about (NULL: none)
 
   IF v_replay IS NULL THEN  -- first use of the key: save and bind its answer (a retry's key is already bound)
     PERFORM public.save_idempotency(p_idempotency_key, 'close_delivery_receipt', v_result);

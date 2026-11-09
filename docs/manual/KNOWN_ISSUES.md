@@ -512,12 +512,16 @@ same instant waits for the activation instead of being missed; proof
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
-**LOW-MED · UNVERIFIED · inventory/process · Mason**
-Five products still flag until counted (Mason chose not to count); returns/voids on Chem Man-billed deliveries stay
-allowed; six partially fulfilled orders and three stuck deliveries need a business call; 19 negative inventory rows
-must only be fixed from physical counts; the Order page still offers whole-order invoicing on 33 orders (server
-refuses, no double bill); live-data cleanups (eight SEED commission batches, PO-2026-0008/0015, an E2E zero-item
-invoice, five empty deliveries). Counts are older records' claims, not re-measured.
+**LOW-MED · PARTLY RE-MEASURED 2026-11-08 · inventory/process · Mason**
+Re-measured live, read-only, 2026-11-08 (no data changed): five products still flag until counted (Mason chose not to
+count; no stock movement since 2026-10-07); six partially fulfilled orders (0161/0162/0172/0176/0331/0343) still
+hold stock for unfilled lines; the same three deliveries are stuck (DEL-00075/00077/00082) plus nine more past their
+date on confirmed orders; 19 negative inventory rows (not the same 19 as June: two are new, one is deeper) must only be
+fixed from physical counts; PO-2026-0008 is a real fully-received PO with 7 short and 10 over lines, PO-2026-0015's
+receipt gap no longer shows; 10 deliveries have no items (5 completed, 2 voided, 3 cancelled); one cancelled
+zero-item invoice. Not re-measured (sales/billing): whole-order invoicing on 33 orders, eight SEED commission
+batches. Returns/voids on Chem Man-billed deliveries stay allowed. Yes/no sheet in the side-session notes (not in
+this repo).
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**

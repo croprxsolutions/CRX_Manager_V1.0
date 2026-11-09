@@ -14,11 +14,17 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
 - **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
-- **Split changes:** a new split starts on a date the office picks (while the build is in progress, only today's date, until the last old billing path is replaced; build sheet FP-1 and FP-7); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Split changes:** a new split starts on a date the office picks (any date, past or future, from the first package on; superseded the earlier today-only limit, see the 2026-11-08 Astra-review entry below); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
 - **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
 - **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
 **Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
 **What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
+
+## 2026-11-08 — Field splits: any start date from the start; fuel surcharge follows who pays application
+
+**Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.
+
+**What this forbids/implies:** the old invoice screens must not bill a date whose split differs from the current copy: they compare the split version in force on the work's date with the one the copy holds and refuse when they differ (build sheet FP-1 guard (c)), and a nightly job keeps the copy current when a future split starts. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
 
 ## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
 

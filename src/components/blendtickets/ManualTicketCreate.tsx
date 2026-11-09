@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Save, AlertCircle, Beaker } from 'lucide-react';
 import Button from '../ui/Button';
 import Card from '../ui/Card';
@@ -16,6 +16,9 @@ import { fetchAllRows } from '../../lib/pagedRead';
 import { blockedUnitSaveMessage, type UnitLoadState } from '../../lib/units';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../products/ProductOptionPresentation';
 import UnitSelect from './UnitSelect';
+import { useTicketWeights } from './useTicketWeights';
+import { warnWeightsChangedWhileSaving } from '../../lib/blendTicketWeights';
+import { useToast } from '../ui/Toast';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -175,6 +178,7 @@ function readPersistedUncertainManualTicket(userId: string): PersistedUncertainM
 
 export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreateProps) {
   const { profile } = useAuth();
+  const { toast } = useToast();
   const { getKey: getCreateKey, resetKey: resetCreateKey } = useIdempotencyKey(
     'create_blend_ticket',
     profile?.id || '',
@@ -352,6 +356,12 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
     setProducts(recipeProducts);
   }
 
+  const weightLines = useMemo(() => products.map((p) => ({ product_id: p.product_id, product_name: p.product_name,
+    quantity: p.quantity, unit: p.unit || null,
+    catalogForm: allProducts.find((candidate) => candidate.id === p.product_id)?.product_form ?? null })), [products, allProducts]);
+  const ticketWeights = useTicketWeights({ ticketId: null, pageRead: null, lines: weightLines,
+    headerTotal: null, headerUnit: null });
+
   useEffect(() => {
     const ticketData = {
       total_acres: formData.total_acres ? parseFloat(formData.total_acres) : null,
@@ -376,10 +386,10 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         product_inventory_unit: catalog?.inventory_unit || catalog?.unit_size || null,
       };
     });
-    setWarnings(validateBlendMath(ticketData, productData));
+    setWarnings(validateBlendMath(ticketData, productData, ticketWeights.options));
     // application_rate belongs in these deps: the tank check reads it, so leaving
     // it out would freeze the warning at whatever it was before the operator typed.
-  }, [products, allProducts, formData.total_acres, formData.total_volume, formData.total_volume_unit, formData.application_rate]);
+  }, [products, allProducts, formData.total_acres, formData.total_volume, formData.total_volume_unit, formData.application_rate, ticketWeights.options]);
 
   function addProduct() {
     if (catalogLoadFailed) return;
@@ -529,6 +539,9 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
       resetCreateKey();
       setTicketAttemptId(crypto.randomUUID());
       setAttemptUncertain(false);
+      // DM-2: the ticket keeps the weight in use at save; say so when that differs from the preview.
+      void warnWeightsChangedWhileSaving(attempt.ticketId, weightLines, ticketWeights,
+        (message) => toast('warning', message), 'manual_ticket_saved_weights');
       onComplete();
     } catch (err: unknown) {
       Sentry.captureException(
@@ -764,7 +777,12 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         </div>
 
         <div className="space-y-4">
-          {products.map((product) => {
+          {ticketWeights.status !== 'loading' && products.length > 0 && (
+            <p className="text-sm text-gray-600" data-testid="ticket-total-weight">
+              {ticketWeights.total}. Current approved weights; the weight in use when you save is kept with the ticket.
+            </p>
+          )}
+          {products.map((product, index) => {
             const catalog = allProducts.find((candidate) => candidate.id === product.product_id);
             const productForm = catalog?.product_form ?? null;
             return (
@@ -854,6 +872,11 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
+              {ticketWeights.lines[index] && (
+                <p className="col-span-12 text-xs text-gray-600" data-testid="ticket-line-weight">
+                  Weight: {ticketWeights.lines[index].text}
+                </p>
+              )}
             </div>
             );
           })}

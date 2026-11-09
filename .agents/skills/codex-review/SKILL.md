@@ -154,6 +154,21 @@ missing or duplicate verdict, or an opaque change. A binary file, or a text file
 `.gitattributes` (this repo marks security-sensitive baseline SQL that way), carries no content, so
 the run stops and names it; those files need Sol or a person.
 
+**Code health first (Mason, 2026-11-06).** When the diff touches `src/`, the script first runs the
+code-health ratchet that pre-push runs (`scripts/check-code-health.mjs`, about 30 seconds). If it
+fails, the run stops with exit 2 and prints the violations, and no model is called: fix them, commit,
+and run Luna again. If the check cannot run at all (no `node_modules` or knip in the worktree), Luna
+goes ahead and the result says `Code health: NOT CHECKED`; pre-push and CI still run the real check.
+
+**Settled findings (Mason, 2026-11-09).** When Luna keeps re-raising a finding you already refuted or
+deferred (PR #1688: the same refuted finding in 4 of 8 rounds), write a short file with one line per
+finding plus why it was settled, and add `--settled <file>` to the next round. Luna gets the list as
+untrusted data, still reads the whole diff, and re-reports a listed item only with new evidence,
+which it must name; the result prints `Settled list: ...` so the report shows a list was used. The
+file is capped at 8 KB (bigger is refused, exit 2). Add only findings you refuted with evidence or
+named as deferrals. **Never for Sol:** `--settled` with `--sol` is refused, and the Step 3B gate
+(`write-codex-push-proof.mjs`) has no such input, so Sol stays fully independent.
+
 **Oversized diffs.** When Luna runs out of output (`max_output_tokens`, twice on a 960-line diff in
 PR #1248) the script says so and prints one `--commit` command per commit, oldest first. Run those
 and report that they do not cover how the commits interact and skip merge commits. Sol still reads
@@ -219,9 +234,11 @@ mints no proof.
 
 **Only after Step 3A is clean, and only for a change that touches a file on
 `docs/reference/sol-required-paths.md`** (the merge gates read the PR's real file list; everything
-else lands on green checks). Run it LAST: after the head is frozen and checks are green (and after any CodeRabbit
-fix push, if a requested review arrived), immediately before the migration apply (if any) and
-the merge. The proof binds to that HEAD and to the base it reviewed, so a later commit voids it; on an
+else lands on green checks). Run it once, on the committed head, before the PR opens (Mason,
+2026-10-29): the wrapper notes "no pull request has this commit as its head yet" and reviews it. If a
+PR already exists (a fix after a finding, or a PR opened first), run it after the head is frozen and
+checks are green (and after any CodeRabbit fix push, if a requested review arrived), before the
+migration apply (if any) and the merge. The proof binds to that HEAD and to the base it reviewed, so a later commit voids it; on an
 unchanged head it stays valid for 24 hours (Mason, 2026-10-23), so a PR waiting in the merge queue keeps
 its review. A base that only moved forward afterwards does not void it at the merge gates: the PR may
 merge behind main (Mason, 2026-10-26). A live migration apply still needs the head's Sol
@@ -233,18 +250,30 @@ pushed after a PR was marked ready (2026-10-14 to 10-23). So the wrapper first r
 and refuses, spending no Sol tokens, unless the head contains the base the review pins (`origin/main`,
 or, when a peer worktree's fetch moved that shared ref past the branch, the one commit where the
 branch left main; a branch adding a migration or with several split points keeps `origin/main`, so it
-must `git merge origin/main` again, push, and wait); an open
-non-draft PR has this exact commit as its head;
+must `git merge origin/main` again, push, and wait); and, only once a PR exists: that PR is
+open and non-draft with this exact commit as its head;
 the Codex App's summary comment shows a completed review of this commit (or it was pushed 15 minutes
-ago with none, or the commit only merges main cleanly with no shared files: then the App's finished review of
+ago with none, or the App reviewed none of the PR's last 3 pushes, so it has stopped and Sol does not wait (Mason, 2026-11-06), or the commit only merges main cleanly with no shared files: then the App's finished review of
 the pre-merge head is enough (once the App starts on the merge, Sol waits for it to finish, or an hour with no update), and its threads on the pre-merge head must be
 answered too; Mason, 2026-10-29); no Codex App thread on this commit and no CodeRabbit thread on the PR is unanswered;
 CodeRabbit is not reviewing it; and if CodeRabbit already reviewed a money or Mason-named PR, that
 review covers this head (or Mason sent `skip coderabbit #<PR>`; the merging session must still hold
 it). A money PR with no CodeRabbit review does not wait for one: CodeRabbit is optional unless the
 PR carries the `needs-coderabbit` label (`AGENTS.md`).
-An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`
+It also runs the docs check CI runs (`npm run check:docs`) and refuses on a failure, so a stale
+"Last verified" stamp is fixed before Sol, not after (2026-11-08). An unreadable answer refuses; retry in a minute. `--dry-run` prints the decision; `--carry-forward`
 skips it. Merge main in before this point, not after Sol alongside fixes (ship.md Step 8 item 4).
+
+**Round count (Mason, 2026-11-06).** Each full run prints `Sol round N on PR #<n>`. When the same mechanism
+(a lock, timer, guard or rounding rule) comes back for a 3rd round, stop patching and ask Mason the business
+trade-off that would delete it (`AGENTS.md`, Operating Contract); the wrapper says so from round 3.
+
+**Applied history (Mason, 2026-11-08).** A full run reads the live migration ledger (read-only) for each
+migration file the PR adds. A file whose text, line endings aside, is exactly the one SQL text the live ledger
+stored under the same name is named to Sol as applied history: Sol still reads it and reviews how everything
+else uses it, but not its own design, since it already ran and can never be edited (PR #1653 failed rounds 3-7
+on exactly that). Anything short of an exact match, an edited (not added) file, or a failed live read means the
+ordinary full review. The proof lists matched files under `applied_history`.
 
 **Main moved after a clean Sol pass? Usually nothing to do (Mason, 2026-10-26).** The merge gates accept
 a head behind main when the head contains the base its proof reviewed and main only moved forward, so

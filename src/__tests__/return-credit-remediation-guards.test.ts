@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const migration = readFileSync(path.join(root, 'supabase/migrations/20260812130145_bind_return_receipts_to_intent_and_restore_overdue.sql'), 'utf8');
+// KI-18 batch 1 replaced _reverse_credit_memo_application (one due-date line); the predicate pins that live body.
+const ki18Batch1Migration = readFileSync(path.join(root, 'supabase/migrations/20261204100000_ki18_batch1_chicago_today.sql'), 'utf8');
 const helperGuardMigration = readFileSync(path.join(root, 'supabase/migrations/20260813070000_pin_return_idempotency_helper_contract.sql'), 'utf8');
 const completedDeliveryMigration = readFileSync(path.join(root, 'scripts/.staging-migrations/20260813060000_require_completed_delivery_before_invoice_post.sql'), 'utf8');
 const predicate = readFileSync(path.join(root, 'scripts/db-invariant-sweeps/predicates/return-credit-intent-binding.sql'), 'utf8');
@@ -188,7 +190,7 @@ describe('return/credit remediation durable guards', () => {
     for (const [name, signature] of Object.entries(signatures)) {
       expect(sha256(bodyFor(migration, name))).toBe(expectedHash(signature));
     }
-    expect(sha256(bodyFor(migration, '_reverse_credit_memo_application')))
+    expect(sha256(bodyFor(ki18Batch1Migration, '_reverse_credit_memo_application')))
       .toBe(expectedHash('_reverse_credit_memo_application(uuid,uuid,text,text)'));
     expect(sha256(bodyFor(migration, 'snapshot_invoice_line_shares_on_post')))
       .toBe(expectedHash('snapshot_invoice_line_shares_on_post()'));

@@ -20,7 +20,7 @@ account lookups. Anything not visible that way is marked **Mason to confirm**.
 | **Supabase Edge Function secrets** (project `rhyzpcqhnizqbxphqdkr`) | Keys the server-side functions use: email, OCR, error reporting, CORS | Supabase org members |
 | **GitHub Actions secrets**, app repo `croprxsolutions/CRX_Manager_V1.0` | Values for CI builds and the paused browser tests | Repo admins (Mason) |
 | **GitHub Actions secrets**, private backup repo `masonwells1/CRX_Backups` | Database and file-storage backup credentials, backup passphrase | Repo admins (Mason) |
-| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations, run the read-only db-invariant sweeps, and refresh the schema registry read-only | Mason's Windows login only |
+| **Mason's Windows Credential Manager** | Mason's Supabase CLI login token (target `Supabase CLI:supabase`), used by agents to apply migrations, run the read-only db-invariant sweeps and the read-only ledger drift check (`npm run db-drift:live`), and refresh the schema registry read-only | Mason's Windows login only |
 | **Mason's password manager** | The backup decryption passphrase and account passwords | Mason only |
 
 A local `.env` file (git-ignored) holds a developer's own copy of the browser values. The

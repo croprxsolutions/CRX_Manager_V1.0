@@ -269,4 +269,47 @@ try {
   assert.notEqual(cli.status, 0, 'an unknown migration must never mint a proof');
 }
 
+// Ordering pre-check (PR #1586): a stamp older than one already live is refused
+// before any reviewer runs. The temp home has no Codex CLI, so a migration that
+// passes the pre-check stops at "Trusted Codex CLI not found" and no real review runs.
+{
+  const root = tempDir('crx-apply-proof-ordering-');
+  try {
+    const migrationsDir = path.join(root, 'supabase', 'migrations');
+    const stateDir = path.join(root, '.claude', 'session-state');
+    mkdirSync(migrationsDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, 'applied-migrations.json'), JSON.stringify({
+      captured_at: new Date().toISOString(),
+      applied: [{ version: '20261130100000', name: '20261130100000_peer_change' }],
+    }));
+    const run = (name, sql = 'SELECT 1;\n') => {
+      writeFileSync(path.join(migrationsDir, `${name}.sql`), sql);
+      return spawnSync(process.execPath, [fileURLToPath(new URL('./write-apply-proofs.mjs', import.meta.url)), name], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 60_000,
+        env: { ...process.env, SUPABASE_ACCESS_TOKEN: '', HOME: root, USERPROFILE: root },
+      });
+    };
+
+    const old = run('20261126100000_product_parent_review_fixes');
+    assert.equal(old.status, 1, 'ordering: an out-of-order stamp is refused');
+    assert.match(old.stderr, /MIGRATION ORDERING GUARD: refusing to apply "20261126100000_product_parent_review_fixes"/);
+    assert.match(old.stderr, /npm run next-migration-stamp -- --live 20261130100000/, 'ordering: prints the apply gate restamp advice');
+    assert.match(old.stderr, /NO reviewer ran/);
+    assert.doesNotMatch(`${old.stdout}${old.stderr}`, /Running trusted Codex|Trusted Codex CLI not found/, 'ordering: refused before any reviewer step');
+
+    const fresh = run('20261201110000_product_parent_review_fixes');
+    assert.doesNotMatch(fresh.stderr, /ORDERING GUARD/, 'ordering: an in-order stamp is allowed through');
+    assert.match(fresh.stderr, /Trusted Codex CLI not found/, 'ordering: an in-order stamp reaches the reviewer step');
+
+    const replay = run('20261125100000_deliberate_replay', '-- ordering-guard: intentional-replay restoring the reviewed body\nSELECT 1;\n');
+    assert.doesNotMatch(replay.stderr, /ORDERING GUARD/, 'ordering: the intentional-replay marker still passes');
+    assert.match(replay.stderr, /Trusted Codex CLI not found/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 console.log('PASS - apply-proof review uses a single-read hash and sanitized stdin review packet.');

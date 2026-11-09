@@ -702,6 +702,22 @@
         "driver, getting-started denied": "/ shows / (index)"
       }
     },
+    "/group-products": {
+      "url": "/group-products",
+      "pageKey": "group-products",
+      "page": {
+        "type": "lazy pages/GroupProducts"
+      },
+      "access": {
+        "admin": "/group-products shows /group-products",
+        "sales_rep": "/ shows / (index)",
+        "sales_rep, group-products denied": "/ shows / (index)",
+        "applicator": "/ shows / (index)",
+        "applicator, group-products denied": "/ shows / (index)",
+        "driver": "/ shows / (index)",
+        "driver, group-products denied": "/ shows / (index)"
+      }
+    },
     "/integrity": {
       "url": "/integrity",
       "pageKey": "integrity",
@@ -3918,6 +3934,15 @@
         ]
       },
       {
+        "key": "group-products",
+        "path": "/group-products",
+        "label": "Group Products",
+        "category": "Inventory & Buying",
+        "roles": [
+          "admin"
+        ]
+      },
+      {
         "key": "purchase-orders",
         "path": "/purchase-orders",
         "label": "Purchase Orders",
@@ -4247,6 +4272,7 @@
           "products",
           "supplier-pricing",
           "brand-vs-generic",
+          "group-products",
           "purchase-orders",
           "receiving",
           "cycle-counts",

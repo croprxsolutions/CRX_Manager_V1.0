@@ -73,7 +73,7 @@ vi.mock('../lib/deliveryPdf', () => ({ downloadDeliveryPdf: vi.fn() }));
 vi.mock('../lib/emailService', () => ({ sendEmail: vi.fn(), buildEmailHtml: () => '<p></p>' }));
 vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resolve({ compliant: true, warnings: [] }) }));
 vi.mock('../lib/deliverySplitBilling', () => ({
-  fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '',
+  fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
 }));
 vi.mock('../lib/imageCompression', () => ({ compressImage: vi.fn() }));
 vi.mock('../components/deliveries/StartDeliveryModal', () => ({ default: () => null }));

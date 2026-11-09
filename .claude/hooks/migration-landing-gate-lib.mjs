@@ -40,12 +40,40 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { readTeammateComments, teammateCommentsDenial } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
 // (Mason, 2026-10-29, superseding his 2026-10-23 "Keep migration apply at 30
 // minutes"). The PR's head, checks and reviews are still read live at apply time.
 export const APPLY_SOL_PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// TAHA'S 4-HOUR HOLD (Mason, 2026-11-06; enforced 2026-11-08 at Taha's request,
+// after DM-1 #1634 and KI-30 #1653 were applied live within an hour of opening).
+// Every migration sits under supabase/, which is on the Sol list, so every PR this
+// gate sees is held: no live apply until Taha has posted a review or comment on it,
+// or 4 hours have passed since it opened. Mason's "I approve" does not lift it (the
+// owner-approval check runs only after this gate passes). Taha's own PRs are his.
+export const TAHA_LOGIN = "tahakhanabdalli";
+export const TAHA_HOLD_MS = 4 * 60 * 60 * 1000;
+
+// Returns null when the hold is over, else why the apply must wait. `pr` is the
+// `gh pr view --json author,createdAt,reviews,comments` answer.
+export function tahaHoldProblem(pr, now = Date.now()) {
+  const isTaha = (node) => String(node?.author?.login ?? "").trim().toLowerCase() === TAHA_LOGIN;
+  if (isTaha(pr)) return null;
+  const opened = Date.parse(String(pr?.createdAt ?? ""));
+  if (!Number.isFinite(opened) || !Array.isArray(pr?.reviews) || !Array.isArray(pr?.comments)) {
+    return "GitHub did not say when this PR opened or who has commented on it, so Taha's 4-hour review hold cannot be checked (fail closed).";
+  }
+  if (now - opened >= TAHA_HOLD_MS) return null;
+  // A PENDING review is a draft only Taha can see; it is not posted yet.
+  if (pr.reviews.some((r) => isTaha(r) && String(r?.state ?? "").toUpperCase() !== "PENDING")) return null;
+  if (pr.comments.some(isTaha)) return null;
+  const waitMin = Math.ceil((TAHA_HOLD_MS - Math.max(0, now - opened)) / 60_000);
+  return `Taha's 4-hour review hold is still on (ship.md Step 8 item 4a): the PR opened ${Math.floor(Math.max(0, now - opened) / 60_000)} minutes ago and Taha (TahaKhanAbdalli) has not posted a review or comment on it. ` +
+    `Wait about ${waitMin} more minutes or for his review, then re-run. Mason's chat approval does not lift this hold.`;
+}
 
 function refuse(why) {
   return {
@@ -160,7 +188,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let pr;
   try {
     pr = JSON.parse(gh(["pr", "view", branch, "--json",
-      "number,url,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup"]));
+      "number,url,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not find or read the open pull request for branch "${branch}" (${error?.message || error}).`);
@@ -174,6 +202,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }
+  const hold = tahaHoldProblem(pr, now);
+  if (hold) return refuse(`${number}: ${hold}`);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
@@ -250,6 +280,25 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   if (coderabbitOpen > 0) {
     return refuse(`${number} has ${coderabbitOpen} unresolved CodeRabbit comment thread(s). Reply on each (the fix or the reason) and resolve it before applying.`);
+  }
+  // A teammate's unanswered PR comment blocks the merge, so it blocks the apply
+  // that runs before the merge (Mason, 2026-11-08): Taha usually posts plain
+  // comments, which the CHANGES_REQUESTED check above never sees. Fails closed.
+  let teammates;
+  try {
+    teammates = readTeammateComments(gh, { owner: "{owner}", name: "{repo}", number: pr.number });
+  } catch (error) {
+    if (OUT(error)) throw error;
+    teammates = null;
+  }
+  if (!teammates) {
+    return refuse(`could not read ${number}'s comments, so an unanswered teammate comment (e.g. Taha's) cannot be ruled out (fail closed). Retry; if it keeps failing, read them by hand (gh pr view ${pr.number} --comments).`);
+  }
+  if (teammates.comments.length > 0) {
+    return refuse(teammateCommentsDenial(`${number} — answer before the live apply`, pr.number, teammates.comments));
+  }
+  if (teammates.truncated) {
+    return refuse(`${number} has more comments than the gate reads at once, so an unanswered teammate comment cannot be ruled out (fail closed). Read them by hand and ask Mason.`);
   }
 
   const baseSha = String(pr?.baseRefOid || "").trim();

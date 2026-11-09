@@ -50,6 +50,14 @@ import {
   safeProofName,
   snapshotMigrationSql,
 } from './write-apply-proofs-lib.mjs';
+import {
+  checkLiveMigrationOrdering,
+  checkMigrationOrdering,
+  ledgerRowsToNames,
+} from '../.claude/hooks/migration-ordering-lib.mjs';
+import { CRX_PRODUCTION_REF } from '../.claude/hooks/migration-apply-lib.mjs';
+import { readCredentialToken } from './lib/supabase-credential.mjs';
+import { withRestampHint } from './lib/migration-restamp-hint.mjs';
 
 const rawArgs = process.argv.slice(2);
 
@@ -118,6 +126,36 @@ function hashFile(file) {
 }
 
 let exitCode = 0;
+
+// ORDERING PRE-CHECK (2026-11-06, PR #1586): the apply gate refuses a stamp older
+// than one already live, so refuse it here before spending reviewer runs on it.
+// Same rule and replay marker as the apply gate; that gate stays the authority.
+// Token as in apply-migration-file.mjs: an explicit empty value means none.
+let ledgerToken = process.env.SUPABASE_ACCESS_TOKEN;
+if (ledgerToken === undefined && process.platform === 'win32') {
+  try { ledgerToken = readCredentialToken(); } catch { ledgerToken = ''; }
+}
+async function orderingRefusal(name, sql) {
+  if (ledgerToken) {
+    const live = await checkLiveMigrationOrdering({
+      fetchImpl: fetch, projectId: CRX_PRODUCTION_REF, token: ledgerToken, name, sql,
+    });
+    return live.ok ? null : live.reason;
+  }
+  // No token: judge this checkout's snapshot if it has one; otherwise only the apply gate checks.
+  const snapPath = path.join(stateDir, 'applied-migrations.json');
+  let appliedNames = [];
+  try {
+    const parsed = JSON.parse(readFileSync(snapPath, 'utf8'));
+    appliedNames = ledgerRowsToNames(Array.isArray(parsed) ? parsed : parsed?.applied);
+  } catch { /* missing or unreadable snapshot: no evidence either way */ }
+  if (!appliedNames.length) {
+    console.log(`Ordering not pre-checked for ${name}: no token and no applied-migration snapshot. The apply gate still checks it.`);
+    return null;
+  }
+  const verdict = checkMigrationOrdering({ name, sql, appliedNames });
+  return verdict.ok ? null : verdict.reason;
+}
 
 function runCodexCharter(codexBin, reviewerName, migRelPath, migrationSql, queryHash, safe, reviewRoot) {
   const charterFile = path.join(process.cwd(), '.claude', 'agents', `${reviewerName}.md`);
@@ -194,6 +232,13 @@ for (const name of names) {
   // One read supplies BOTH the attached review bytes and their hash. The final
   // disk hash below remains the TOCTOU check for edits during the review.
   const { migrationSql, queryHash } = snapshotMigrationSql(migFile);
+
+  const outOfOrder = await orderingRefusal(name, migrationSql);
+  if (outOfOrder) {
+    console.error(`${withRestampHint(outOfOrder)}\n\nNO reviewer ran and NO proofs were minted for "${name}".`);
+    exitCode = 1;
+    continue;
+  }
 
   let codexBin;
   try {

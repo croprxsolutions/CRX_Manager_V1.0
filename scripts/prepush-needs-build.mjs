@@ -2,7 +2,8 @@
 // Pre-push asks: does this push change anything the app type check or build reads?
 // Reads git's pre-push ref lines on stdin and prints "build" or "skip". Any doubt
 // prints "build", so a broken diff never skips the check. With --map it asks the same
-// about the workflow map generator's inputs and prints "check" or "skip". With --edge-tests it lists the vitest
+// about the workflow map generator's inputs and prints "check" or "skip"; --pins asks it about migration
+// SQL and records; --freshness asks it about migration SQL alone; --registry asks it about the schema registry and migration records. With --edge-tests it lists the vitest
 // files that read a changed Edge Function folder's source. CI builds every PR either way
 // (2026-11-03 retro: three scripts/docs pushes spent ~13 minutes rebuilding the app).
 import { execFileSync } from 'node:child_process';
@@ -21,6 +22,24 @@ const MAP_FILES = new Set(['docs/app-workflow-map.html', 'docs/reference/rpc-fun
 
 export function needsMapCheck(paths) {
   return paths.some((file) => file.startsWith('src/') || MAP_FILES.has(file));
+}
+
+// Migration SQL and records: a CRLF sha256 pin in a record failed 4 CI checks (PR #1579).
+export function needsPinCheck(paths) {
+  return paths.some((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(file)
+    || /^docs\/reference\/(?:migrations\.d\/[^/]+\.md|migration-history\.md)$/.test(file));
+}
+
+// Migration SQL only: a migration dated today makes CI fail stale live-state doc stamps (PR #1652).
+export function needsFreshnessCheck(paths) {
+  return paths.some((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(file));
+}
+
+// A registry refresh or a record flipped to APPLIED LIVE moves which migrations the contract tests
+// discover; skipping that test cost a CI round three times (#1051, #1562, #1606; 2026-11-07 retro).
+export function needsRegistryCheck(paths) {
+  return paths.some((file) => file === '.claude/schema-registry.json'
+    || /^docs\/reference\/migrations\.d\/[^/]+\.md$/.test(file));
 }
 
 // Edge Function folders touched by the push (_shared counts as a folder too).
@@ -73,11 +92,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && pro
     }
   } catch { /* nothing to run */ }
 } else if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const map = process.argv.includes('--map');
-  let verdict = map ? 'check' : 'build';
+  const mode = ['--map', '--pins', '--freshness', '--registry'].find((flag) => process.argv.includes(flag));
+  const check = Boolean(mode);
+  const needs = { '--map': needsMapCheck, '--pins': needsPinCheck, '--freshness': needsFreshnessCheck, '--registry': needsRegistryCheck }[mode] ?? needsAppBuild;
+  let verdict = check ? 'check' : 'build';
   try {
     const refs = readFileSync(0, 'utf8');
-    if (refs.trim() && !(map ? needsMapCheck : needsAppBuild)(changedPaths(refs))) verdict = 'skip';
+    if (refs.trim() && !needs(changedPaths(refs))) verdict = 'skip';
   } catch { /* keep build */ }
   console.log(verdict);
 }

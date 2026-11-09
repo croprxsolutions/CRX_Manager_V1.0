@@ -971,7 +971,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["5ea47dde9df5671b8b4acce4e274f242467e3eb71eeb0b3487c8940316a3019d", "profile-role-lock-insert-arm.sql"],
   ["201e22f0b21de39e663a7e732475a759b1e56a34316bed517dba68415ffc35cc", "quote-price-lock-boundary.sql"],
   ["cab1d5703f569d05b0c88812028f4ff4c6267256f4cc0163289152458873088d", "quote-versions-rpc-owned.sql"],
-  ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
+  ["4a12c1643b9f68d41a4b624706837f57b4a85ba3a97ff882e9d2986a029bdc32", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],
   ["7dab8645f051bbcf2d619853b721b8beac3eef0f901c37538b9d9c1b579c0961", "save-field-actor-binding.sql"],
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],
@@ -1650,6 +1650,22 @@ const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?
 function withoutTriggerEvents(t) {
   return t.replace(TRIGGER_HEADER_RE, (_, head, events, on) => head + events.replace(/"(?:[^"]|"")*"|\btruncate\b/gi, (w) => (w[0] === '"' ? w : "trigger_event")) + on);
 }
+// TRUNCATE as a privilege NAME is not a wipe (PR #1635's postflight tripped this):
+// a GRANT/REVOKE privilege list, or the privilege string that ends a
+// has_*_privilege(...) call. Only a list made purely of privilege words, commas
+// and WITH GRANT OPTION is blanked; none of those can hold a table name or ;,
+// so a real TRUNCATE (EXECUTE 'TRUNCATE t', or one between two strings) stays visible.
+const PRIV = String.raw`(?:select|insert|update|delete|truncate|references|trigger|maintain)(?:\s+with\s+grant\s+option)?`;
+const PRIV_LIST = String.raw`${PRIV}(?:\s*,\s*${PRIV})*`;
+const GRANT_LIST_RE = new RegExp(String.raw`(\b(?:grant|revoke)\s+(?:grant\s+option\s+for\s+)?)(${PRIV_LIST})(\s+on\b)`, "gi");
+// The privilege string may be single- or dollar-quoted ($$...$$ / $tag$...$tag$); the same quote must close it.
+const PRIV_CHECK_RE = new RegExp(String.raw`(\bhas_(?:table|any_column|column)_privilege\s*\([^;]*?,\s*('|\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$))(\s*${PRIV_LIST}\s*)(\2\s*\))`, "gi");
+function withoutPrivilegeNames(t) {
+  const blank = (list) => list.replace(/\btruncate\b/gi, "privilege_name");
+  return t
+    .replace(GRANT_LIST_RE, (_, head, list, tail) => head + blank(list) + tail)
+    .replace(PRIV_CHECK_RE, (_, head, _quote, list, tail) => head + blank(list) + tail);
+}
 
 export function destructiveMigrationCheck(sql) {
   // Strip ONLY clear function-definition bodies (AS $$...$$) — everything
@@ -1671,7 +1687,7 @@ export function destructiveMigrationCheck(sql) {
   if (/\balter\s+table\b[^;]*\bdrop\s+(?!constraint\b|not\s+null\b|default\b|identity\b|expression\b)/i.test(t)) {
     return { destructive: true, reason: "ALTER TABLE ... DROP [COLUMN]" };
   }
-  if (/\btruncate\b/i.test(withoutTriggerEvents(t))) return { destructive: true, reason: "TRUNCATE" };
+  if (/\btruncate\b/i.test(withoutPrivilegeNames(withoutTriggerEvents(t)))) return { destructive: true, reason: "TRUNCATE" };
   if (/\bdelete\s+from\b/i.test(t)) return { destructive: true, reason: "top-level DELETE FROM (any table)" };
   // MERGE can delete matched rows (WHEN MATCHED THEN DELETE) — and is rare
   // enough in a migration that ANY top-level MERGE deserves Mason's eyes

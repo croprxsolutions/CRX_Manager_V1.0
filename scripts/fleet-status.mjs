@@ -38,8 +38,12 @@ import { combinedMigrationHistoryAtRev, readCombinedMigrationHistory } from "../
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const notes = []; // degraded-mode notes, printed at the end
 
+// Every Git launch turns off core.fsmonitor: a repository-local fsmonitor setting in any
+// scanned worktree would otherwise run a program on index-refreshing commands like `status`.
+const GIT_SAFE = ["-c", "core.fsmonitor=false"];
+
 function git(args, cwd = repoRoot, timeout = 5000) {
-  return execFileSync("git", args, {
+  return execFileSync("git", [...GIT_SAFE, ...args], {
     encoding: "utf8", timeout, stdio: ["ignore", "pipe", "ignore"], cwd,
   });
 }
@@ -48,7 +52,7 @@ function git(args, cwd = repoRoot, timeout = 5000) {
 // shared parser validates echoed paths, record delimiters, and complete framing.
 function originMainSqlBlobMap(paths) {
   return parseOriginMainSqlBlobMap(paths, (input) => {
-    const result = spawnSync("git", ["cat-file", "--batch=%(objectname) %(objecttype) %(objectsize) %(rest)"], {
+    const result = spawnSync("git", [...GIT_SAFE, "cat-file", "--batch=%(objectname) %(objecttype) %(objectsize) %(rest)"], {
       cwd: repoRoot,
       input,
       timeout: 5000,
@@ -182,7 +186,7 @@ function mergedLabel(sha) {
   // so leaving rev symbolic lets a concurrent fetch label one worktree against a newer main
   // than the rest of the same snapshot — and the merge labels against a newer main than the
   // parked scan. Codex P2 on PR #437; the SessionStart hook already pinned its copy.
-  const r = spawnSync("git", ["merge-base", "--is-ancestor", sha, originMainRev], {
+  const r = spawnSync("git", [...GIT_SAFE, "merge-base", "--is-ancestor", sha, originMainRev], {
     encoding: "utf8", timeout: 5000, cwd: repoRoot,
   });
   return withMergedPrLabel(mergedLabelFromStatus(r.status, true), sha, mergedPrHeads);
@@ -237,7 +241,7 @@ const ownDraftPaths = createOwnDraftPathsReader({
   // immutable origin/main verification path.
   sha256Text: (text) => createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex"),
   run: (args, cwd) => {
-    const r = spawnSync("git", args, { encoding: "utf8", timeout: 5000, cwd });
+    const r = spawnSync("git", [...GIT_SAFE, ...args], { encoding: "utf8", timeout: 5000, cwd });
     return r.status === 0 ? String(r.stdout || "").split("\n") : null;
   },
 });

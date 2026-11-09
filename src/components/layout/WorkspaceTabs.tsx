@@ -41,6 +41,7 @@ const WORKSPACES: Workspace[] = [
       { path: '/products', label: 'Products', roles: ['admin', 'sales_rep'] },
       { path: '/supplier-pricing', label: 'Supplier Pricing', roles: ['admin'] },
       { path: '/brand-vs-generic', label: 'Brand vs Generic', roles: ['admin', 'sales_rep'] },
+      { path: '/group-products', label: 'Group Products', roles: ['admin'] },
     ],
   },
   {

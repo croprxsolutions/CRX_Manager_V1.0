@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { edgeSourceTests, needsAppBuild, needsMapCheck } from './prepush-needs-build.mjs';
+import { edgeSourceTests, needsAppBuild, needsFreshnessCheck, needsMapCheck, needsPinCheck, needsRegistryCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
 
 assert.equal(needsAppBuild(['scripts/a.mjs', 'docs/x.md', 'supabase/migrations/1_x.sql']), false);
@@ -15,6 +15,20 @@ for (const file of ['src/App.tsx', 'public/sw.js', 'index.html', 'vite.config.ts
 assert.equal(needsMapCheck(['scripts/a.mjs', 'docs/x.md', 'public/sw.js', 'package.json']), false);
 for (const file of ['src/pages/Jobs.tsx', 'docs/app-workflow-map.html', 'docs/reference/rpc-functions.md', 'scripts/generate-workflow-map.mjs']) {
   assert.equal(needsMapCheck([file]), true, `${file} must trigger the map check`);
+}
+
+assert.equal(needsPinCheck(['src/App.tsx', 'docs/reference/migrations.d/README.txt', 'supabase/migrations/x/y.sql', 'docs/changelog.d/a.md']), false);
+for (const file of ['supabase/migrations/20261201000000_x.sql', 'docs/reference/migrations.d/20261201000000_x.md', 'docs/reference/migration-history.md']) {
+  assert.equal(needsPinCheck([file]), true, `${file} must trigger the pin check`);
+}
+
+assert.equal(needsFreshnessCheck(['src/App.tsx', 'docs/reference/migrations.d/20261201000000_x.md', 'docs/manual/CURRENT_STATE.md', 'supabase/migrations/x/y.sql']), false,
+  'only migration SQL triggers the stamp check');
+assert.equal(needsFreshnessCheck(['supabase/migrations/20261201000000_x.sql']), true);
+
+assert.equal(needsRegistryCheck(['src/App.tsx', 'supabase/migrations/1_x.sql', '.claude/settings.json', 'docs/reference/migrations.d/x/y.md']), false);
+for (const file of ['.claude/schema-registry.json', 'docs/reference/migrations.d/20261204120000_x.md']) {
+  assert.equal(needsRegistryCheck([file]), true, `${file} must trigger the contract tests`);
 }
 
 // Edge Function source tests: pick tests that name a changed function folder, by path or by join() segments.

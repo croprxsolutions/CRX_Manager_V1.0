@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { tempDir } from './lib/test-temp-dir.mjs';
 import {
   chicagoCalendarStamp,
   freshnessEnforcedFor,
@@ -71,5 +76,61 @@ assert.equal(freshnessEnforcedFor(['supabase/migrations/20261103000000_x.sql']),
 assert.equal(freshnessEnforcedFor(['docs/manual/KNOWN_ISSUES.md']), true,
   'touching a live-state doc must leave its stamp fresh');
 assert.equal(freshnessEnforcedFor([]), false, 'an empty diff only warns');
+
+// --pins-only: the pre-push check refuses a record pinned to the CRLF hash and passes the LF one (PR #1579).
+{
+  const sha = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+  const sql = '-- x\nselect 1;\n';
+  const pinsOnly = (pin) => {
+    const root = tempDir('crx-pins-only-');
+    try {
+      mkdirSync(path.join(root, 'supabase/migrations'), { recursive: true });
+      mkdirSync(path.join(root, 'docs/reference/migrations.d'), { recursive: true });
+      writeFileSync(path.join(root, 'docs/reference/migration-history.md'), '# frozen\n');
+      // A Windows checkout's CRLF copy; the check must hash the LF text git stores.
+      writeFileSync(path.join(root, 'supabase/migrations/20261201000000_x.sql'), sql.replace(/\n/g, '\r\n'));
+      writeFileSync(path.join(root, 'docs/reference/migrations.d/20261201000000_x.md'),
+        `**LOCAL CANDIDATE — NOT APPLIED.** \`20261201000000_x.sql\` (SQL sha256: \`${pin}\`).\n`);
+      return spawnSync(process.execPath, [path.resolve('scripts/check-doc-drift.mjs'), '--pins-only', root], { encoding: 'utf8' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const crlf = pinsOnly(sha(sql.replace(/\n/g, '\r\n')));
+  assert.equal(crlf.status, 1, `a CRLF pin must fail: ${crlf.stdout}`);
+  assert.match(crlf.stdout, /sha256 does not match/);
+  const lf = pinsOnly(sha(sql));
+  assert.equal(lf.status, 0, `the LF pin must pass: ${lf.stdout}${lf.stderr}`);
+}
+
+// --freshness-only: pre-push refuses a migration dated today when the live-state stamps are older,
+// even outside a git checkout, and passes once they are bumped (PR #1652 found it in CI).
+{
+  const today = chicagoCalendarStamp();
+  const dashed = `${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6)}`;
+  const freshnessOnly = (stamp, stampLine = `**Last verified:** ${stamp}`) => {
+    const root = tempDir('crx-freshness-only-');
+    try {
+      mkdirSync(path.join(root, 'supabase/migrations'), { recursive: true });
+      mkdirSync(path.join(root, 'docs/manual'), { recursive: true });
+      writeFileSync(path.join(root, `supabase/migrations/${today}120000_x.sql`), 'select 1;\n');
+      for (const doc of ['CURRENT_STATE.md', 'KNOWN_ISSUES.md']) {
+        writeFileSync(path.join(root, 'docs/manual', doc), `# ${doc}\n\n${stampLine}\n`);
+      }
+      return spawnSync(process.execPath, [path.resolve('scripts/check-doc-drift.mjs'), '--freshness-only', root], { encoding: 'utf8' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const stale = freshnessOnly('2000-01-01');
+  assert.equal(stale.status, 1, `a stamp older than today's migration must fail: ${stale.stdout}${stale.stderr}`);
+  assert.match(stale.stdout, /FAIL manual freshness CURRENT_STATE\.md/);
+  assert.match(stale.stdout, /FAIL manual freshness KNOWN_ISSUES\.md/);
+  const fresh = freshnessOnly(dashed);
+  assert.equal(fresh.status, 0, `today's stamp must pass: ${fresh.stdout}${fresh.stderr}`);
+  const long = freshnessOnly(dashed, `**Last verified:** ${dashed} ${'x'.repeat(200)}`);
+  assert.equal(long.status, 1, `an over-long stamp line must fail: ${long.stdout}`);
+  assert.match(long.stdout, /FAIL manual doc CURRENT_STATE\.md stamp line/);
+}
 
 console.log('PASS - check-doc-drift helpers keep one record per migration, a frozen history file, short single stamps and Chicago-date freshness.');

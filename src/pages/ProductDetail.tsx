@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Search, Save } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Plus, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -20,6 +20,14 @@ import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
+import ProductParentPanel from '../components/products/ProductParentPanel';
+import ProductWeightCard from '../components/products/ProductWeightCard';
+import ProductChemistrySection from '../components/products/ProductChemistrySection';
+import ToteFillCard from '../components/inventory/ToteFillCard';
+import {
+  addProductSize, createProductWithParent, getParentOfProduct, newSizeFields, SIZE_ROLE_LABELS,
+  type ProductParent, type ProductSizeRole,
+} from '../lib/productParents';
 import { loadProductRateLock, PRODUCT_RATE_KEYS, rateLockSummary } from '../lib/productRateLock';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -93,11 +101,15 @@ type ProductPricingMoneyDrafts = Partial<Record<ProductPricingMoneyField, string
 type ProductPricingMarginField = 'tier1_margin' | 'tier2_margin' | 'tier3_margin';
 type ProductPricingMarginDrafts = Partial<Record<ProductPricingMarginField, string>>;
 
-function nonpricingProductPayload(product: Partial<Product>, persisted?: Product): Record<string, unknown> {
+// PAR-1: a grouped size's parent owns these; the page never sends them for one.
+const PARENT_OWNED_FIELDS = ['category', 'use_timings', 'epa_registration', ...PRODUCT_RATE_KEYS] as const;
+
+function nonpricingProductPayload(product: Partial<Product>, persisted?: Product, parentOwned = false): Record<string, unknown> {
   const payload: Record<string, unknown> = Object.fromEntries([
     ...PRODUCT_NONPRICING_FIELDS.map((field) => [field, product[field]] as const),
     ['updated_at', new Date().toISOString()],
   ]);
+  if (parentOwned) for (const field of PARENT_OWNED_FIELDS) delete payload[field];
   // Send these only when edited here, so a page left open never re-saves an old value over one
   // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
   // Rates too: a stale rate resent while rates are locked would refuse a details-only save.
@@ -213,6 +225,17 @@ function namesClearlyDiffer(productName: string | null | undefined, epaName: str
   return !epaTokens.some((token) => currentTokens.has(token));
 }
 
+/** Points a read-only, parent-owned field at where it changes. */
+function ParentOwnedHint({ parentName, identity = false }: { parentName?: string; identity?: boolean }) {
+  return (
+    <p className="mt-1 text-xs text-secondary">
+      {parentName
+        ? `Set on parent ${parentName}. Change it with ${identity ? 'Correct identity' : 'Edit parent'} in the Parent panel.`
+        : 'Read-only until the parent loads.'}
+    </p>
+  );
+}
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -236,9 +259,42 @@ export default function ProductDetail() {
   }, []);
   useEffect(loadRateLock, [loadRateLock]);
   // WP-PM-6b: a Duplicate arrives with its source's copied fields; a fresh create arrives flagged to prompt for prices.
-  const routeState = useLocation().state as { duplicateFrom?: DuplicateProductSource; justCreated?: boolean } | null;
+  // PAR-1: "Add a size" also carries the parent the new size joins; "New product" carries none.
+  const routeState = useLocation().state as {
+    duplicateFrom?: DuplicateProductSource; addSizeTo?: ProductParent; justCreated?: boolean;
+  } | null;
   const duplicateSource = isNew ? routeState?.duplicateFrom : undefined;
+  // State, so a stale parent can be refreshed in place after the database refuses it.
+  const [addSizeTo, setAddSizeTo] = useState<ProductParent | undefined>(isNew ? routeState?.addSizeTo : undefined);
   const justCreated = !isNew && routeState?.justCreated === true;
+  // undefined while loading or after a failed load, null when the product has no parent.
+  const [parent, setParent] = useState<ProductParent | null | undefined>(isNew ? null : undefined);
+  const [parentLoadFailed, setParentLoadFailed] = useState(false);
+  // DM-1: a weight save on this page re-reads cost per lb of active.
+  const [weightSaves, setWeightSaves] = useState(0);
+  const [parentReload, setParentReload] = useState(0);
+  // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
+  // none, they stay read-only.
+  const parentOwned = isNew ? Boolean(addSizeTo) : parent !== null;
+  const shownParent = isNew ? addSizeTo ?? null : parent ?? null;
+  // BLK-1a: a fixed tote with a Bulk fill source can be filled from that Bulk; the database rechecks everything else.
+  const fillableTote = !isNew && Boolean(parent?.sizes.some((size) =>
+    size.product_id === id && size.size_role === 'fixed_tote' && size.fill_source_product_id));
+  const [stockReload, setStockReload] = useState(0);
+  const [newParent, setNewParent] = useState({ name: '', nickname: '', formulation_type: '', safener: '' });
+  const [sizeRole, setSizeRole] = useState<ProductSizeRole>('package');
+  useEffect(() => {
+    if (isNew || !id) return;
+    let cancelled = false;
+    setParentLoadFailed(false);
+    getParentOfProduct(id)
+      .then((loaded) => { if (!cancelled) setParent(loaded); })
+      .catch((error: unknown) => {
+        Sentry.captureException(error, { extra: { context: 'product_detail_parent' } });
+        if (!cancelled) { setParent(undefined); setParentLoadFailed(true); }
+      });
+    return () => { cancelled = true; };
+  }, [id, isNew, parentReload]);
 
   const [product, setProduct] = useState<Partial<Product>>(() => ({
     product_name: '',
@@ -270,6 +326,11 @@ export default function ProductDetail() {
     is_active: true,
     // ProductDetailRoute remounts this page per id, so Duplicate's /products/new runs this initializer afresh.
     ...(duplicateSource ? duplicateProductDraft(duplicateSource) : {}),
+    // A new size shows its parent's values; the database copies them on save.
+    ...(addSizeTo ? {
+      category: addSizeTo.category ?? '', use_timings: addSizeTo.use_timings ?? [], product_form: addSizeTo.product_form as Product['product_form'],
+      epa_registration: addSizeTo.generic_epa_registration ?? '',
+    } : {}),
   }));
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
@@ -325,6 +386,7 @@ export default function ProductDetail() {
   const [epaLookupLoading, setEpaLookupLoading] = useState(false);
   const [epaDraftCreating, setEpaDraftCreating] = useState(false);
   const epaDraftKey = useIdempotencyKey('create_label_draft', profile?.id ?? '');
+  const { getKeyFor: getCreateKeyFor, resetKeyFor: resetCreateKeyFor } = useIdempotencyKey('create_product_with_parent', profile?.id ?? '');
   const {
     getKey: getPreviewPricingKey,
     resetKey: resetPreviewPricingKey,
@@ -501,7 +563,7 @@ export default function ProductDetail() {
     }
     const result = await supabaseUntyped
       .from('products')
-      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct))
+      .update(nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft, persistedProduct), persistedProduct, parentOwned))
       .eq('id', id!)
       .eq('pricing_version', persistedProduct.pricing_version)
       .select('id');
@@ -735,6 +797,13 @@ export default function ProductDetail() {
       return;
     }
 
+    // A new parent needs its form; a new size takes its parent's form.
+    if (isNew && !addSizeTo && !product.product_form) {
+      toast('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+      revealPhoneSection('information');
+      return;
+    }
+
     // Container size must be positive if set
     if (product.container_size != null && product.container_size <= 0
       && (!persistedProduct || product.container_size !== persistedProduct.container_size)) {
@@ -760,13 +829,26 @@ export default function ProductDetail() {
     setSaving(true);
     try {
       if (isNew) {
-        const productInsertResult = await supabaseUntyped
-          .from('products')
-          .insert([nonpricingProductPayload(normalizedProductSetup(product, reiDraft, phiDraft))])
-          .select('id');
-        if (productInsertResult.error) throw productInsertResult.error;
-        checkMutationResult(productInsertResult, 'Insert product');
-        const newProductId = (productInsertResult.data as { id: string }[] | null)?.[0]?.id;
+        // PAR-1: every new product is a size of a parent, created through the database's checked path.
+        const normalized = normalizedProductSetup(product, reiDraft, phiDraft);
+        // The notes are not setup fields, but the database saves them in the same step as the size.
+        const notes = Object.fromEntries((['quoting_notes', 'internal_notes'] as const)
+          .filter((field) => (normalized[field] ?? '').trim() !== '').map((field) => [field, normalized[field]]));
+        const size = { ...newSizeFields(normalized as Record<string, unknown>, sizeRole), ...notes };
+        const addSize = addSizeTo ? { ...size, epa_registration: null } : null;
+        const newParentFields = {
+          name: newParent.name.trim() || normalized.product_name, nickname: newParent.nickname,
+          product_form: normalized.product_form ?? null, formulation_type: newParent.formulation_type,
+          safener: newParent.safener, generic_epa_registration: normalized.epa_registration ?? null,
+          category: normalized.category ?? null, use_timings: normalized.use_timings ?? [],
+        };
+        // The key is tied to exactly this request, so an edited retry is a new request.
+        const scope = JSON.stringify(addSizeTo ? [addSizeTo.id, addSizeTo.parent_version, addSize] : [newParentFields, size]);
+        const created = addSizeTo && addSize
+          ? await addProductSize(addSizeTo.id, addSizeTo.parent_version, addSize, getCreateKeyFor(scope))
+          : await createProductWithParent(newParentFields, size, getCreateKeyFor(scope));
+        resetCreateKeyFor(scope);
+        const newProductId = created.product_id;
         setIsDirty(false);
         logActivity({ event: 'product_created', description: `Product ${product.product_name} created`, performedBy: profile!.id, entityType: 'product', entityId: newProductId });
         skipUnsavedPromptRef.current = true;
@@ -790,6 +872,19 @@ export default function ProductDetail() {
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
+      if (addSizeTo && hasRpcCode(err, RpcErrorCodes.PRODUCT_PARENT_STALE) && addSizeTo.sizes[0]) {
+        // The parent changed since "Add a size" opened: show its current values; the next save uses them.
+        void getParentOfProduct(addSizeTo.sizes[0].product_id).then((fresh) => {
+          if (!fresh) return;
+          if (fresh.id !== addSizeTo.id) {
+            toast('error', 'That size moved to another parent. Reopen "Add a size" from the parent you want.');
+            return;
+          }
+          setAddSizeTo(fresh);
+          setProduct((current) => ({ ...current, category: fresh.category ?? '', use_timings: fresh.use_timings ?? [],
+            epa_registration: fresh.generic_epa_registration ?? '' }));
+        }).catch((reloadError: unknown) => Sentry.captureException(reloadError));
+      }
       if (hasRpcCode(err, RpcErrorCodes.PRODUCT_RATES_LOCKED)) {
         // Rates were locked meanwhile: put the saved rates back so the rest of the edit can save.
         // Forget the stale open lock first, so a failed refresh still leaves the rates read-only.
@@ -954,7 +1049,9 @@ export default function ProductDetail() {
 
       setEpaLookupResult(data);
       setEpaLookupRegNumber(regNumber);
-      if (!data.found) {
+      if (data.transferredTo) {
+        toast('warning', `EPA moved registration ${regNumber} to ${data.transferredTo}.`);
+      } else if (!data.found) {
         toast('warning', `EPA did not find registration ${regNumber}.`);
       }
     } catch (err) {
@@ -1171,17 +1268,29 @@ export default function ProductDetail() {
         </h2>
         {missingSetup.length > 0 && <Badge variant="warning">Incomplete setup</Badge>}
         {isAdmin && !isNew && persistedProduct?.id === id && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="ml-auto"
-            icon={<Copy className="w-4 h-4" />}
-            showChevron={false}
-            disabled={pricingReloadRequired}
-            onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
-          >
-            Duplicate
-          </Button>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Plus className="w-4 h-4" />}
+              showChevron={false}
+              disabled={pricingReloadRequired || !parent || !parent.is_active}
+              title={parent === null ? 'This product has no parent yet, so it has no sizes to add to. Use New product.' : undefined}
+              onClick={() => parent && navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!), addSizeTo: parent } })}
+            >
+              Add a size
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Copy className="w-4 h-4" />}
+              showChevron={false}
+              disabled={pricingReloadRequired}
+              onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
+            >
+              New product
+            </Button>
+          </div>
         )}
       </div>
       {missingSetup.length > 0 && (
@@ -1192,9 +1301,18 @@ export default function ProductDetail() {
 
       {duplicateSource && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
-          <p className="font-medium">Copy of {duplicateSource.product_name}. Nothing is saved until you create it.</p>
+          <p className="font-medium">
+            {addSizeTo
+              ? `New size of ${addSizeTo.name}, started from ${duplicateSource.product_name}. Nothing is saved until you create it.`
+              : `New product started from ${duplicateSource.product_name}. Nothing is saved until you create it.`}
+          </p>
+          {addSizeTo && <p className="mt-1">Category, use timing, EPA number and rates come from the parent.</p>}
           <p className="mt-1">Copied: category, vendor, manufacturer, product form and inventory unit.</p>
-          <p className="mt-1">Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.</p>
+          <p className="mt-1">
+            {addSizeTo
+              ? 'Not copied, enter them for this size: SKU, container size, label details (RUP, signal word, REI, PHI), notes, brands, cost and prices.'
+              : 'Not copied, enter them for this product: SKU, container size, EPA number and label details (RUP, signal word, REI, PHI), rates, use timings, notes, brands, cost and prices.'}
+          </p>
         </div>
       )}
 
@@ -1215,6 +1333,94 @@ export default function ProductDetail() {
               </Button>
             </div>
           )}
+          {/* PAR-1: the parent this size belongs to, or the parent a new product creates. */}
+          {!isNew && parent && profile && (
+            <ProductParentPanel
+              parent={parent}
+              productId={id!}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              ratesLocked={rateLock ? rateLock.is_locked : null}
+              categoryOptions={categoryOptions}
+              timingOptions={timingOptions}
+              rateUnitOptions={rateUnitOptionsForProduct(unitConversions, parent.product_form, product.inventory_unit).map((uc) => uc.unit)}
+              busy={isDirty || pricingReloadRequired || saving}
+              onChanged={() => {
+                setParentReload((current) => current + 1);
+                loadRateLock();
+                void fetchProduct();
+                setPriceHistoryReloadToken((current) => current + 1);
+              }}
+            />
+          )}
+          {/* DM-2: weight per gallon (on the parent) or per pack; re-read when the product or its parent is saved. */}
+          {!isNew && persistedProduct && persistedProduct.id === id && profile && (
+            <ProductWeightCard
+              productId={id!}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+              reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
+                persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
+                parent?.id ?? null, parent?.parent_version ?? null])}
+              onSaved={() => setWeightSaves((n) => n + 1)}
+            />
+          )}
+          {/* DM-1: the parent's chemistry, shared by every size; an ungrouped size has none. */}
+          {!isNew && parent && profile && (
+            <ProductChemistrySection
+              parentId={parent.id}
+              parentVersion={parent.parent_version}
+              refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+            />
+          )}
+          {!isNew && parent === null && (
+            <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary">
+              Put this product in a parent to record its chemistry.
+            </p>
+          )}
+          {!isNew && parentLoadFailed && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" role="alert">
+              <span>Couldn&apos;t load this product&apos;s parent, so its category, use timing, EPA number and rates are read-only for now.</span>
+              <Button size="sm" variant="secondary" onClick={() => setParentReload((current) => current + 1)}>Retry</Button>
+            </div>
+          )}
+          {isNew && isAdmin && (
+            <Card>
+              <CardHeader title="Parent" accent={addSizeTo ? addSizeTo.name : 'New'} />
+              <fieldset disabled={saving} className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="product-new-parent">
+                {addSizeTo ? (
+                  <p className="text-sm text-secondary sm:col-span-2">
+                    This size joins {addSizeTo.name} ({addSizeTo.sizes.length} size(s) now). Its category, use timing, EPA number and rates come from the parent.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-secondary sm:col-span-2">
+                      Creates the product and its parent together. The parent holds the category, use timing, EPA number and rates every later size shares.
+                    </p>
+                    <Input label="Parent name" value={newParent.name} placeholder={product.product_name || 'Same as the product name'}
+                      onChange={(event) => setNewParent((current) => ({ ...current, name: event.target.value }))} />
+                    <Input label="Nickname" value={newParent.nickname}
+                      onChange={(event) => setNewParent((current) => ({ ...current, nickname: event.target.value }))} />
+                    <Input label="Formulation type" value={newParent.formulation_type}
+                      onChange={(event) => setNewParent((current) => ({ ...current, formulation_type: event.target.value }))} />
+                    <Input label="Safener" value={newParent.safener}
+                      onChange={(event) => setNewParent((current) => ({ ...current, safener: event.target.value }))} />
+                  </>
+                )}
+                <div>
+                  <label htmlFor="new-size-role" className="mb-1 block text-sm font-medium text-secondary">Size role</label>
+                  <select id="new-size-role" value={sizeRole} onChange={(event) => setSizeRole(event.target.value as ProductSizeRole)}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green">
+                    {(Object.keys(SIZE_ROLE_LABELS) as ProductSizeRole[]).map((role) => <option key={role} value={role}>{SIZE_ROLE_LABELS[role]}</option>)}
+                  </select>
+                </div>
+              </fieldset>
+            </Card>
+          )}
           <fieldset disabled={pricingReloadRequired || (isNew && saving)} className="contents">
           {/* The fieldset disables these toggles too, so a locked page keeps every section open. */}
           <PhoneSection title="Product Information" {...sectionProps('information', pricingReloadRequired)}>
@@ -1229,13 +1435,14 @@ export default function ProductDetail() {
                 <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
                 <select id="product-category" value={product.category || ''}
                   onChange={(e) => changeCategory(e.target.value || null)}
-                  disabled={!isAdmin || categoryLoadFailed}
+                  disabled={!isAdmin || categoryLoadFailed || parentOwned}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
                   <option value="">-- Select --</option>
                   {visibleProductCategories(categoryOptions, product.category).map((item) => (
                     <option key={item.name} value={item.name}>{item.name}{item.is_active ? '' : ' (retired)'}</option>
                   ))}
                 </select>
+                {parentOwned && <ParentOwnedHint parentName={shownParent?.name} />}
               </div>
               {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer'
                 || (timingLoadFailed && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
@@ -1253,7 +1460,7 @@ export default function ProductDetail() {
                           type="checkbox"
                           checked={(product.use_timings ?? []).includes(option.code)}
                           onChange={(event) => toggleUseTiming(option.code, event.target.checked)}
-                          disabled={!isAdmin || timingLoadFailed}
+                          disabled={!isAdmin || timingLoadFailed || parentOwned}
                           className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
                         />
                         {option.label}{option.is_active ? '' : ' (retired)'}
@@ -1277,7 +1484,7 @@ export default function ProductDetail() {
                     label="EPA Registration"
                     value={product.epa_registration || ''}
                     onChange={(e) => update('epa_registration', e.target.value)}
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || parentOwned}
                     placeholder="e.g., 34704-69"
                   />
                   <Button
@@ -1296,6 +1503,7 @@ export default function ProductDetail() {
                 <div className="mt-1">
                   <EpaLabelLink epaRegistration={product.epa_registration} showHint />
                 </div>
+                {parentOwned && <ParentOwnedHint parentName={shownParent?.name} identity />}
                 {isNew && (
                   <p className="mt-1 text-xs text-secondary">
                     You can preview EPA data now, but save the product before creating a review draft.
@@ -1366,10 +1574,21 @@ export default function ProductDetail() {
                     <div className="flex items-start gap-2 text-amber-900">
                       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                       <div>
-                        <p className="font-semibold">No EPA registration found</p>
-                        <p className="mt-1 text-sm">
-                          EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
-                        </p>
+                        {epaLookupResult.transferredTo ? (
+                          <>
+                            <p className="font-semibold">Registration moved</p>
+                            <p className="mt-1 text-sm">
+                              EPA moved {epaLookupRegNumber} to {epaLookupResult.transferredTo}{epaLookupResult.productname ? ` (${epaLookupResult.productname})` : ''}. Look up the new number to use its label details.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold">No EPA registration found</p>
+                            <p className="mt-1 text-sm">
+                              EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1638,7 +1857,7 @@ export default function ProductDetail() {
               {ratesLocked && rateLock && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" data-testid="product-rates-locked">
                   <span>Rates are locked. {rateLockSummary(rateLock)}</span>
-                  {isAdmin && !isNew && persistedProduct && (
+                  {isAdmin && !isNew && persistedProduct && parent === null && (
                     <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty}
                       title={isDirty ? 'Save or discard your other changes first' : undefined}>
                       Correct rates
@@ -1646,13 +1865,20 @@ export default function ProductDetail() {
                   )}
                 </div>
               )}
+              {(parentOwned || isNew) && (
+                <p className="mb-3 text-sm text-secondary" data-testid="product-rates-parent">
+                  {shownParent
+                    ? <>Set on parent {shownParent.name}. Change them with {ratesLocked ? 'Correct parent rates' : 'Parent rates'} in the Parent panel.</>
+                    : isNew ? 'Set on the parent after you create the product, in its Parent panel.' : 'Read-only until the parent loads.'}
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin || ratesLocked} />
+                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin || ratesLocked || parentOwned || isNew} />
                   <p className="mt-1 text-xs text-secondary">Free text shown on quote lines and the quote PDF, such as a rate range. Not used in any calculation.</p>
                 </div>
                 <div>
-                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin || ratesLocked} />
+                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin || ratesLocked || parentOwned || isNew} />
                   <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
                 </div>
                 <div>
@@ -1661,7 +1887,7 @@ export default function ProductDetail() {
                     id="product-rate-unit"
                     value={product.rate_unit || ''}
                     onChange={(e) => update('rate_unit', e.target.value)}
-                    disabled={!isAdmin || ratesLocked}
+                    disabled={!isAdmin || ratesLocked || parentOwned || isNew}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                   >
                     <option value="">-- Select --</option>
@@ -1923,8 +2149,19 @@ export default function ProductDetail() {
         {!isNew && id && (
           <div className="space-y-4 max-md:space-y-0">
             <PhoneSection title="Stock & Reorder" {...sectionProps('stock')}>
-              <ProductStockCard key={id} productId={id} isActive={product.is_active !== false} />
+              <ProductStockCard key={`${id}-${stockReload}`} productId={id} isActive={product.is_active !== false} />
             </PhoneSection>
+            {isAdmin && profile && fillableTote && (
+              <PhoneSection title="Tote Fill" {...sectionProps('tote-fill')}>
+                <ToteFillCard
+                  key={id}
+                  toteProductId={id}
+                  toteName={persistedProduct?.product_name ?? ''}
+                  profileId={profile.id}
+                  onStockChanged={() => setStockReload((n) => n + 1)}
+                />
+              </PhoneSection>
+            )}
             {isAdmin && (
               <PhoneSection title="Cost Basis" {...sectionProps('basis')}>
               <Card>

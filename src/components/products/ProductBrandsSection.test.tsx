@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   saveProductBrand: vi.fn(),
   lookupEpaRegistration: vi.fn(),
   logActivity: vi.fn(),
+  parentOf: vi.fn((_id: string): { parentId?: string; parentName?: string } => ({})),
 }));
 
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
@@ -26,7 +27,13 @@ vi.mock('./ProductSearchPicker', () => ({
 }));
 vi.mock('../../lib/productBrands', async () => {
   const actual = await vi.importActual<typeof import('../../lib/productBrands')>('../../lib/productBrands');
-  return { ...actual, listProductBrands: mocks.listProductBrands, saveProductBrand: mocks.saveProductBrand };
+  return {
+    ...actual,
+    listProductBrands: mocks.listProductBrands,
+    // The section's own list: an ungrouped size unless a test gives it a parent.
+    getProductBrands: async (id: string) => ({ parentId: null, parentName: null, ...mocks.parentOf(id), brands: await mocks.listProductBrands(id) }),
+    saveProductBrand: mocks.saveProductBrand,
+  };
 });
 
 import ProductBrandsSection from './ProductBrandsSection';
@@ -138,6 +145,18 @@ describe('ProductBrandsSection', () => {
     const [[firstInput, firstKey], [retryInput, retryKey]] = mocks.saveProductBrand.mock.calls;
     expect(retryInput).toEqual(firstInput);
     expect(retryKey).toBe(firstKey);
+  });
+
+  it('after a definite refusal (grouping not switched on), leaves the form editable, not locked as uncertain', async () => {
+    mocks.saveProductBrand.mockRejectedValueOnce({ message: 'PRODUCT_PARENT_GROUPING_NOT_OPEN: grouping opens later' });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('Brand name'), { target: { value: 'Mad Dog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    expect(await screen.findByText(/once grouping is switched on/i)).toBeInTheDocument();
+    expect(screen.queryByText(/may already have been saved/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Brand name')).toBeEnabled());
   });
 
   it('after an uncertain create is cancelled, keeps new creates off until the reload shows the saved brand', async () => {
@@ -257,6 +276,22 @@ describe('ProductBrandsSection', () => {
     expect(screen.getByLabelText('Signal word')).toHaveValue('Warning');
     expect(screen.getByLabelText('Restricted use (RUP)')).toHaveValue('no');
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('Bayer');
+  });
+
+  it('shows a moved EPA registration and offers no fill from it', async () => {
+    mocks.lookupEpaRegistration.mockResolvedValue({
+      found: false, regType: 'section3', eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE',
+      signalWordCanonical: 'Caution', needsManual: false, manufacturer: 'Ruveon', rupYn: 'No',
+      productStatus: 'Active', isCancelled: false, latestLabelPdfUrl: null, activeIngredients: [], labelPdfs: [],
+      transferredTo: '105211-77',
+    });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('EPA Reg. No.'), { target: { value: '524-475' } });
+    fireEvent.click(screen.getByRole('button', { name: /look up/i }));
+    expect(await screen.findByText(/EPA moved this registration to 105211-77/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use EPA/i })).toBeNull();
   });
 
   it('re-reads the source before copying and stops when a chosen brand changed there since it was listed', async () => {
@@ -477,5 +512,17 @@ describe('ProductBrandsSection', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn’t load brands/i);
     fireEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(await screen.findByText('Slam 5.4')).toBeInTheDocument();
+  });
+  it('shows and saves a grouped size brands on its parent, with no copy from another product', async () => {
+    mocks.parentOf.mockReturnValue({ parentId: 'par1', parentName: 'Roundup 5.4# Generic' });
+    mocks.saveProductBrand.mockResolvedValue({ ...slam, id: 'b2', brand_name: 'Ag Saver 5.4', row_version: 1 });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    expect(screen.getByText(/grouped under Roundup 5\.4# Generic/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /copy from another product/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Ag Saver 5\.4/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save brand' }));
+    await waitFor(() => expect(mocks.saveProductBrand).toHaveBeenCalledTimes(1));
+    expect(mocks.saveProductBrand.mock.calls[0][0]).toMatchObject({ productId: 'p1', parentId: 'par1', brandName: 'Ag Saver 5.4' });
   });
 });

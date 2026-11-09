@@ -16,6 +16,13 @@
         "get_deliveries_page"
       ]
     },
+    "get_deliveries_keyset_page": {
+      "chain": "smoke-goal4-deliveries-keyset-page.sql",
+      "container_prover": "prove-deliveries-page-real-schema.mjs",
+      "area": ["regression"],
+      "description": "REQUIRES 20261202100000. Goal 4 Deliveries list bookmark paging, read only: as the oldest active admin under the authenticated role, for the default order, customer_name ascending, priority descending and item_count descending, following next_cursor in pages of 7 lists exactly the offset read (pages of 500 joined) in the same order and the last page has no next_cursor; get_deliveries_page (now its wrapper) returns the same first page; a bookmark from another sort is refused; the busiest active driver's bookmark pages hold only deliveries assigned to them.",
+      "covers": ["get_deliveries_keyset_page", "get_deliveries_page"]
+    },
     "get_orders_keyset_page": {
       "chain": "smoke-goal4-orders-keyset-page.sql",
       "area": ["regression"],
@@ -96,8 +103,8 @@
     },
     "build_product_parent_proposal": {
       "chain": "smoke-product_parent_proposals.sql",
-      "container_prover": "prove-product-parent-proposals-real-schema.mjs",
-      "description": "REQUIRES 20261123120000. Product parent proposals (PAR-2): anon cannot execute the six public PAR-2 functions; on three invented two-size products an admin builds a proposal (a same-key retry answers the same) that proposes each as one EPA-number group, approves the first (a same-key retry answers the same) so both sizes join one new parent, refuses a hold without a reason, holds the second and rejects the third with reasons; the old per-size brand writer refuses a grouped size PRODUCT_BRANDS_BELONG_TO_PARENT; a parent brand is added, read through a size by get_product_brands, and retired with a reason (created and retired events logged); an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "container_prover": "prove-product-parent-review-fixes-real-schema.mjs",
+      "description": "REQUIRES 20261203110000. Product parent proposals (PAR-2): anon cannot execute the six public PAR-2 functions; on three invented two-size products an admin builds a proposal (a same-key retry answers the same) that proposes each as one EPA-number group, approves the first (a same-key retry answers the same) so both sizes join one new parent, refuses a hold without a reason, holds the second and rejects the third with reasons; the old per-size brand writer refuses a grouped size PRODUCT_BRANDS_BELONG_TO_PARENT; a parent brand is added, read through a size by get_product_brands, and retired with a reason (created and retired events logged); an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
       "covers": [
         "build_product_parent_proposal",
         "approve_product_parent_groups",
@@ -116,6 +123,22 @@
         "pricing",
         "security",
         "idempotency"
+      ]
+    },
+    "set_parent_density": {
+      "chain": "smoke-product_weights.sql",
+      "container_prover": "prove-product-weights-real-schema.mjs",
+      "description": "REQUIRES 20261207100000. Product weights (DM-2): anon cannot execute the public weight functions and a signed-in user cannot call the private density draft helper; on invented liquid parents an admin sets a measured 9.5 lb/gal and the size reads it, a same-key retry replays, 20.00005 is refused PRODUCT_WEIGHT_OUT_OF_RANGE and exactly 20 saves, an older version is refused PRODUCT_WEIGHT_STALE, a label draft is unread until approve_weights approves it; an active sales rep is refused ADMIN_REQUIRED.",
+      "covers": [
+        "set_parent_density",
+        "approve_weights",
+        "get_product_weights",
+        "_save_parent_density_draft",
+        "_product_weight"
+      ],
+      "area": [
+        "inventory",
+        "security"
       ]
     },
     "fill_tote_from_bulk": {
@@ -2046,6 +2069,12 @@
       "description": "REQUIRES 20261111120000. KI-27 server check, and retire, before a staff member clears their own stuck request. Self-seeding (needs one active admin profile; everything is rolled back): the function and receipt-guard bodies are pinned, only authenticated can execute the function and no client role reaches either new table; a key recorded under its own operation is safe (expired too) and one under another operation is not; an unrecorded key needs two checks 15+ minutes apart by server time in a token signed for that exact request (no, forged, borrowed and future tokens start a new wait; 5 minutes refused, 16 minutes safe, then retired); a batch with a row saved under adjust_inventory is recorded and a row under another operation or not ending in a UUID is not; after a safe answer the database refuses a later save of the request, of any batch row under it (any ending) and of an expired key, while an unrelated key still saves and a retired request with a live receipt still replays (allocate_payment's claim row included); an active non-admin staff member (when one exists) is answered for their own key and refused another user's; a service profile (when one exists), another user's key, a row key, a wrong idempotency key and a signed-out session are refused. The in-progress answer needs two sessions and is proven on the local test database.",
       "covers": ["retire_uncertain_request"],
       "area": ["idempotency", "regression"]
+    },
+    "chem_sale_bill_split_invoices": {
+      "chain": "smoke-chem-sale-bill-split-invoices.sql",
+      "description": "Migration 20261215110000 (billing plan M2): a delivery on a Bill Split sale drafts one invoice per payer, CS-...-1 / -2 in one group, each other payer paying exactly their percentage rounded down to the cent on whole-hundredth quantities when the share allows (4 places only for a share under 0.01; a 2.125 delivery bills) and the main customer taking the rest; Create Invoice is dated the day it runs and refuses a closed month, a line past its planned quantity included; an unposted payer invoice takes header edits and charges with its product lines still locked; line shares override the card; the card and line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN) and reopen when it is voided; a direct line write is refused, save_invoice can't bill past the delivery, re-saving a payer draft keeps its cents and takes a freight charge; a one-customer chemical-sale invoice is refused (ORDER_HAS_BILL_SPLIT); the group posts and the second payer can return; a card under 100% leaves the rest with the main customer; Create Invoice drafts per payer again after a group void; a sale with no card bills one plain invoice; a one-customer draft refuses a new payer (BILL_SPLIT_HAS_DRAFT); a payer draft's product lines can't change (BILL_SPLIT_LINES_LOCKED); each payer's invoice cost is its own lines' cost and survives a re-save; a change to a product line's cost or description can't land; a payer share under 0.01 of a unit bills (0.0099 of 0.01 at 99%), while one under 0.0001 that is worth cents refuses (BILL_SPLIT_QUANTITY_TOO_SMALL); backfilled payer invoices are dated the day Create Invoice runs; line shares and card rows record when they changed; one payer's draft can't be deleted or voided alone, the whole group can and Create Invoice redrafts; a three-decimal delivery (2.125) bills like a plain sale, while one finer than 4 places completes the delivery, leaves an activity record and bill_split_failed, and Create Invoice refuses it (BILL_SPLIT_QUANTITY_TOO_FINE); a field split can't take over a frozen Bill Split; Create Invoice with nothing to bill is refused; two deliveries under one card add up; replays draft nothing new; a rush sale waiting for prices drafts nothing, can be priced, then drafts; row security as rep and anon, soft-deleted orders hidden. Terminal rollback.",
+      "covers": ["_create_bill_split_delivery_invoices", "_bill_split_line_shares", "_order_has_bill_split", "_refuse_bill_split_change", "guard_invoice_terminal_order", "_complete_delivery_authorized_impl", "save_invoice", "create_invoice_for_unbilled_delivery", "post_invoice_group", "void_delivery", "delete_invoices", "unpost_invoice", "void_invoice_group", "unpost_invoice_group", "void_invoice", "complete_delivery", "price_order"],
+      "area": ["billing", "regression"]
     },
     "sale_line_vendor": {
       "chain": "smoke-sale-line-vendor.sql",

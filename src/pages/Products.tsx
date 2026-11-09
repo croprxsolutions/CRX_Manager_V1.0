@@ -48,6 +48,7 @@ import {
   type PricingSourceFile,
 } from '../lib/productPricing';
 import {
+  groupedUseTimingRefusal,
   MAX_PRICING_WORKBOOK_FILE_BYTES,
   MAX_PRICING_WORKBOOK_ROWS,
 } from '../lib/productPricingWorkbook';
@@ -80,6 +81,7 @@ import {
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { isDefinitiveRpcRejection } from '../lib/idempotency';
 import { matchesProductSearch } from '../lib/productSearch';
+import { useProductParents } from '../lib/productParents';
 
 const INLINE_PRICING_FIELDS = new Set([
   'pricing_mode',
@@ -155,6 +157,15 @@ export default function Products() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [products, setProducts] = useState<ProductListRow[]>([]);
+  // Grouped sizes take category from their parent (PAR-1); a parent's name or nickname finds its sizes.
+  const [parentsReload, setParentsReload] = useState(0);
+  const { byProduct: parentByProduct, index: parentIndex } = useProductParents(parentsReload);
+  // Product id → parent name, for the pricing workbook's grouped rows.
+  const groupedParentNames = useMemo(
+    () => new Map([...parentByProduct].map(([productId, parent]) => [productId, parent.name])),
+    [parentByProduct],
+  );
+  const searchProducts = useCallback((row: ProductListRow, search: string) => matchesProductSearch(row, search, parentIndex), [parentIndex]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
@@ -721,6 +732,10 @@ export default function Products() {
       }
       for (const [productId, fields] of changes) {
         const original = products.find((item) => item.id === productId);
+        const parent = parentByProduct.get(productId);
+        if ('category' in fields && original && parent && (fields.category || null) !== original.category) {
+          throw new Error(`${original.product_name}'s category is set on parent "${parent.name}". Change it on the product page's Parent panel.`);
+        }
         if ('category' in fields && original && (original.use_timings?.length ?? 0) > 0
           && (fields.category || null) !== original.category) {
           throw new Error('This product has use timings. Change its category on the product page.');
@@ -817,6 +832,7 @@ export default function Products() {
         logActivity({ event: 'products_bulk_updated', description: `${changes.size} product(s) updated via inline edit`, performedBy: profile.id, entityType: 'product' });
       }
       fetchProducts();
+      setParentsReload((n) => n + 1);
       return true;
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
@@ -887,6 +903,7 @@ export default function Products() {
       const blob = await generateProductPricingWorkbookWithSupplierEvidence(
         pricingExport,
         supplierEvidence,
+        { groupedParents: groupedParentNames },
       );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -927,6 +944,12 @@ export default function Products() {
         idempotencyKey: previewPricingIdem.getKeyFor(intent),
       });
       previewPricingIdem.resetKeyFor(intent);
+      // A grouped size's use timing is set on its parent; the database refuses it too.
+      const groupedRefusal = groupedUseTimingRefusal(preview, groupedParentNames);
+      if (groupedRefusal) {
+        toast('error', groupedRefusal);
+        return;
+      }
       setPricingSourceFile(sourceFile);
       setPricingPreview(preview);
     } catch (error) {
@@ -1000,7 +1023,11 @@ export default function Products() {
       sortable: true,
       editable: isAdmin,
       editType: 'select',
-      editRender: (row, getCellValue, setCellValue) => (
+      editRender: (row, getCellValue, setCellValue) => parentByProduct.has(row.id) ? (
+        <span className="text-sm text-nav-dark" title={`Set on parent ${parentByProduct.get(row.id)?.name}`}>
+          {row.category ?? '—'} <span className="block text-xs text-secondary">Set on parent {parentByProduct.get(row.id)?.name}</span>
+        </span>
+      ) : (
         <select aria-label="Category" value={String(getCellValue('category') ?? '')}
           onChange={(event) => setCellValue('category', event.target.value || null)}
           disabled={categoryChoices.length === 0}
@@ -1363,6 +1390,7 @@ export default function Products() {
             onChangePrice={isAdmin ? (product) => setQuickPriceProductId(product.id) : undefined}
             loadError={loadError}
             onRetry={retryProducts}
+            parentIndex={parentIndex}
           />
         </div>
         <div
@@ -1376,7 +1404,7 @@ export default function Products() {
             rowKey="id"
             searchable
             searchPlaceholder="Search products..."
-            searchMatcher={matchesProductSearch}
+            searchMatcher={searchProducts}
             onRowClick={(row) => navigate(`/products/${row.id}`)}
             emptyTitle={products.length > 0 ? 'No matching products' : 'No products yet'}
             emptyDescription={products.length > 0 ? 'Try a different search or filter' : 'Add your first product to get started'}

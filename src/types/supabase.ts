@@ -14062,6 +14062,26 @@ export type Database = {
         Returns: Json
       }
       get_dashboard_action_items: { Args: { p_limit?: number }; Returns: Json }
+      get_deliveries_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_after_id?: string
+          p_customer_id?: string
+          p_date_from?: string
+          p_date_to?: string
+          p_driver_id?: string
+          p_limit?: number
+          p_offset?: number
+          p_priority?: string
+          p_search?: string
+          p_sort_desc?: boolean
+          p_sort_key?: string
+          p_statuses?: string[]
+          p_today: string
+          p_week_start: string
+        }
+        Returns: Json
+      }
       get_deliveries_page: {
         Args: {
           p_after_id?: string
@@ -14467,6 +14487,23 @@ export type Database = {
       }
       get_open_booking_rollover: {
         Args: { p_customer_id?: string; p_season?: number }
+        Returns: Json
+      }
+      get_orders_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_from: string
+          p_limit?: number
+          p_needs_split_billing?: boolean
+          p_offset?: number
+          p_planned?: boolean
+          p_pricing_status?: string
+          p_search?: string
+          p_sort_dir?: string
+          p_sort_key?: string
+          p_status?: string
+          p_to: string
+        }
         Returns: Json
       }
       get_orders_page: {

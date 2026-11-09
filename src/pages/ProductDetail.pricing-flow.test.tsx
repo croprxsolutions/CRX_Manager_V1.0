@@ -147,6 +147,12 @@ vi.mock('../lib/db', async () => {
   };
 });
 
+// PAR-1: the page asks for the product's parent; these products have none.
+vi.mock('../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productParents')>()),
+  getParentOfProduct: async () => null,
+}));
+
 vi.mock('../lib/productPricing', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/productPricing')>();
   return {
@@ -325,9 +331,9 @@ describe('ProductDetail governed pricing flow', () => {
     });
   });
 
-  it('Duplicate opens a new product carrying only the copied fields (WP-PM-6b)', async () => {
+  it('New product opens a new product carrying only the copied fields (WP-PM-6b)', async () => {
     render(<ProductDetail />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'New product' }));
     expect(mockNavigate).toHaveBeenCalledWith('/products/new', { state: { duplicateFrom: {
       id: product.id, product_name: product.product_name, category: product.category, vendor: product.vendor,
       manufacturer: product.manufacturer, product_form: product.product_form, inventory_unit: product.inventory_unit,
@@ -947,7 +953,8 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
     const banner = await screen.findByTestId('product-rates-locked');
     expect(banner).toHaveTextContent('Rates are locked.');
-    expect(within(banner).getByRole('button', { name: 'Correct rates' })).toBeInTheDocument();
+    // The button waits for the page to learn the product has no parent.
+    expect(await within(banner).findByRole('button', { name: 'Correct rates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled();
 
     // A correction bumps pricing_version, so the cost-basis workspace reloads with the product.

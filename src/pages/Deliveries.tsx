@@ -31,6 +31,7 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import ReceiptsToCheck from '../components/deliveries/ReceiptsToCheck';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import type { SortDir } from '../lib/tableSearchSort';
@@ -38,7 +39,7 @@ import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
-import type { Database } from '../types/supabase';
+import type { Database, Json } from '../types/supabase';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
@@ -118,9 +119,20 @@ const priorityBadge = (p: string) => {
 };
 
 /* ─── Server-side list (Goal 4) ─── */
-// get_deliveries_page searches, filters, sorts and counts in the database and returns one page
+// get_deliveries_keyset_page searches, filters, sorts and counts in the database and returns one page
 // plus the true totals. Its default order keeps today's work first, then upcoming, then past.
 const LIST_PAGE_SIZE = 50;
+/** Page one has no bookmark: it reads from the top of the list. */
+const FIRST_PAGE: (Json | null)[] = [null];
+type NextBookmark = { key: string; page: number; cursor: Json | null };
+/** The bookmark after the page on screen, only when it came from that same query and page. */
+function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): Json | null {
+  return next && next.key === key && next.page === page ? next.cursor : null;
+}
+/** The bookmark no longer fits the list (the sort or the day changed) or is malformed: read again from page one. */
+function isBookmarkRefused(error: unknown): boolean {
+  return /DELIVERIES_PAGE_(STALE|BAD)_CURSOR/.test((error as { message?: string } | null)?.message ?? '');
+}
 const SEARCH_MAX_CHARS = 200;
 interface DeliveriesSummary {
   visible_count: number;
@@ -134,6 +146,8 @@ interface DeliveriesPage {
   total_count: number;
   rows: DeliveryRow[];
   summary: DeliveriesSummary;
+  /** The bookmark after this page's last row, to read the next page from; null on the last page. */
+  next_cursor: Json | null;
 }
 interface DeliveriesQuery {
   p_today: string;
@@ -151,8 +165,10 @@ interface DeliveriesQuery {
 // The database returns at most this many rows per call.
 const FULL_READ_PAGE_SIZE = 500;
 // limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
-async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, offset = 0): Promise<DeliveriesPage> {
-  if (limit !== null) return readOnePage(query, limit, offset);
+// With `after` (the previous page's next_cursor) a page starts right after that row, so deliveries that left
+// the list in between never push one past the screen.
+async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, after: Json | null = null): Promise<DeliveriesPage> {
+  if (limit !== null) return readOnePage(query, limit, { after });
   // Pages are separate reads, so the list can change between them. A read whose total moved, or whose
   // rows do not add up to it, is read again. A count can stay equal through a change (one delivery
   // cancelled, another created), so a read that needed more than one page is returned only once a second
@@ -172,11 +188,11 @@ const FULL_READ_ATTEMPTS = 3;
 // Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
 // or repeated; then put the rows back in the chosen order. Null when the list changed mid-read.
 async function readAllPagesOnce(query: DeliveriesQuery): Promise<{ page: DeliveriesPage; pages: number } | null> {
-  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, FIRST_ID);
+  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, { afterId: FIRST_ID });
   const rows = [...first.rows];
   let pages = 1;
   for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE; pages++) {
-    page = await readOnePage(query, FULL_READ_PAGE_SIZE, 0, page.rows[page.rows.length - 1].id);
+    page = await readOnePage(query, FULL_READ_PAGE_SIZE, { afterId: page.rows[page.rows.length - 1].id });
     if (page.total_count !== first.total_count) return null;
     rows.push(...page.rows);
   }
@@ -186,14 +202,20 @@ async function readAllPagesOnce(query: DeliveriesQuery): Promise<{ page: Deliver
 }
 // Below every delivery id: the first page of a read by id.
 const FIRST_ID = '00000000-0000-0000-0000-000000000000';
-async function readOnePage(query: DeliveriesQuery, limit: number, offset: number, afterId?: string): Promise<DeliveriesPage> {
+// One page: from the top, after a delivery id (a read by id), or after a bookmark.
+async function readOnePage(query: DeliveriesQuery, limit: number, from: { afterId?: string; after?: Json | null }): Promise<DeliveriesPage> {
   // Generated Args cannot say null; the function reads a null filter as "no filter".
-  const args = { ...query, p_limit: limit, p_offset: offset, ...(afterId ? { p_after_id: afterId } : {}) } as unknown as Database['public']['Functions']['get_deliveries_page']['Args'];
-  const { data, error } = await supabase.rpc('get_deliveries_page', args);
+  const args = {
+    ...query, p_limit: limit, p_offset: 0,
+    ...(from.afterId ? { p_after_id: from.afterId } : {}),
+    ...(from.after ? { p_after: from.after } : {}),
+  } as unknown as Database['public']['Functions']['get_deliveries_keyset_page']['Args'];
+  const { data, error } = await supabase.rpc('get_deliveries_keyset_page', args);
   if (error) throw error;
-  const page = assertRpcResult<DeliveriesPage>(data, 'get_deliveries_page');
-  if (!Array.isArray(page.rows) || typeof page.total_count !== 'number' || !page.summary || !Array.isArray(page.summary.strip)) {
-    throw new Error('get_deliveries_page returned an unexpected result');
+  const page = assertRpcResult<DeliveriesPage>(data, 'get_deliveries_keyset_page');
+  if (!Array.isArray(page.rows) || typeof page.total_count !== 'number' || !page.summary || !Array.isArray(page.summary.strip)
+    || (page.next_cursor != null && (typeof page.next_cursor !== 'object' || Array.isArray(page.next_cursor)))) {
+    throw new Error('get_deliveries_keyset_page returned an unexpected result');
   }
   return page;
 }
@@ -499,16 +521,27 @@ export default function Deliveries() {
     }
     return listQuery;
   }, [isDriver, profile?.id, viewMode, todayStr, weekStartStr, statusFilter, listQuery]);
-  // The page number belongs to one query: a new search, filter or sort starts again at page one.
+  // Each list page is read from the bookmark (the last row) of the page before it, so deliveries removed in
+  // between never push one past the screen. afters[i] is page i's bookmark; the last one is on screen.
+  // The pages belong to one query: a new search, filter or sort starts again at page one.
   const loadQueryKey = JSON.stringify(loadQuery);
-  const [pageState, setPageState] = useState({ key: '', page: 0 });
-  const listPage = paged && pageState.key === loadQueryKey ? pageState.page : 0;
-  const goToPage = (page: number) => setPageState({ key: loadQueryKey, page });
+  const [pageState, setPageState] = useState({ key: '', afters: FIRST_PAGE });
+  const afters = paged && pageState.key === loadQueryKey ? pageState.afters : FIRST_PAGE;
+  const listPage = afters.length - 1;
+  // The bookmark after the page on screen, from its own read; null on the last page.
+  const [nextState, setNextState] = useState<NextBookmark | null>(null);
+  const nextCursor = nextBookmarkFor(nextState, loadQueryKey, listPage);
+  const goNext = () => {
+    if (nextCursor !== null) setPageState({ key: loadQueryKey, afters: [...afters, nextCursor] });
+  };
+  const goPrevious = () => {
+    if (listPage > 0) setPageState({ key: loadQueryKey, afters: afters.slice(0, -1) });
+  };
   useEffect(() => {
-    setPageState((prev) => (prev.key === loadQueryKey ? prev : { key: loadQueryKey, page: 0 }));
+    setPageState((prev) => (prev.key === loadQueryKey ? prev : { key: loadQueryKey, afters: FIRST_PAGE }));
   }, [loadQueryKey]);
-  // The offset of the rows on screen, so "Showing X–Y" never pairs a new page number with old rows.
-  const [loadedOffset, setLoadedOffset] = useState(0);
+  // The page of the rows on screen, so the pager never pairs a new page number with old rows.
+  const [loadedPage, setLoadedPage] = useState(0);
 
   // A read can finish after a newer one started (a page flip, or a refresh after completing or
   // cancelling); only the latest read may set the list, its counts or the loading state.
@@ -517,20 +550,26 @@ export default function Deliveries() {
     const seq = ++fetchSeq.current;
     setPageLoading(true);
     try {
-      const result = await readDeliveriesPage(loadQuery, paged ? LIST_PAGE_SIZE : null, listPage * LIST_PAGE_SIZE);
+      const result = await readDeliveriesPage(loadQuery, paged ? LIST_PAGE_SIZE : null, afters[listPage]);
       if (seq !== fetchSeq.current) return;
-      // The page emptied (e.g. its last rows were cancelled): show the last page that has rows.
-      if (paged && listPage > 0 && result.rows.length === 0 && result.total_count > 0) {
-        setPageState({ key: loadQueryKey, page: Math.ceil(result.total_count / LIST_PAGE_SIZE) - 1 });
+      // Every delivery after the bookmark was removed (e.g. cancelled): step back to the page before.
+      if (listPage > 0 && result.rows.length === 0) {
+        setPageState({ key: loadQueryKey, afters: afters.slice(0, -1) });
         return;
       }
       setDeliveries(result.rows);
-      setLoadedOffset(paged ? listPage * LIST_PAGE_SIZE : 0);
+      setLoadedPage(listPage);
+      setNextState({ key: loadQueryKey, page: listPage, cursor: result.next_cursor ?? null });
       setTotalCount(result.total_count);
       setSummary(result.summary);
       setLoadFailed(false);
     } catch (error) {
       if (seq !== fetchSeq.current) return;
+      // The bookmark no longer fits this list (e.g. the day changed): start again at page one, with no error.
+      if (listPage > 0 && isBookmarkRefused(error)) {
+        setPageState({ key: loadQueryKey, afters: FIRST_PAGE });
+        return;
+      }
       // A failed read shows an error, never an empty or partial list with complete-looking counts.
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries' } });
       toast('error', 'Failed to load deliveries. Please try again.');
@@ -544,7 +583,7 @@ export default function Deliveries() {
         setPageLoading(false);
       }
     }
-  }, [loadQuery, loadQueryKey, paged, listPage, toast]);
+  }, [loadQuery, loadQueryKey, paged, afters, listPage, toast]);
 
   // Inventory shortage check over every scheduled or in-progress delivery the user can see, not
   // only the shown page: products are summed across all of them before comparing to stock.
@@ -1749,6 +1788,8 @@ export default function Deliveries() {
         )}
       />
 
+      {canCreate && <ReceiptsToCheck />}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card>
@@ -2037,23 +2078,8 @@ export default function Deliveries() {
               </ul>
             )}
           </div>
-          {totalCount > 0 && (
-            <nav aria-label="Delivery list pages" className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-sm text-secondary" aria-live="polite">
-                Showing {loadedOffset + 1}–{loadedOffset + deliveries.length} of {totalCount}
-              </span>
-              {totalCount > LIST_PAGE_SIZE && (
-                <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => goToPage(listPage - 1)} disabled={listPage === 0 || pageLoading}>
-                    Previous
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={() => goToPage(listPage + 1)} disabled={(listPage + 1) * LIST_PAGE_SIZE >= totalCount || pageLoading}>
-                    Next
-                  </Button>
-                </div>
-              )}
-            </nav>
-          )}
+          <DeliveriesPager totalCount={totalCount} page={loadedPage} rowsShown={deliveries.length} busy={pageLoading}
+            hasPrevious={listPage > 0} hasNext={nextCursor !== null} onPrevious={goPrevious} onNext={goNext} />
         </div>
       </SectionCard>
       </>}
@@ -2291,5 +2317,38 @@ export default function Deliveries() {
         loading={completing}
       />
     </div>
+  );
+}
+
+/** "Showing 1–B of N" (later pages: "Page P · B shown of N") with Previous/Next; N covers every matching delivery. */
+function DeliveriesPager({ totalCount, page, rowsShown, busy, hasPrevious, hasNext, onPrevious, onNext }: {
+  totalCount: number;
+  page: number;
+  rowsShown: number;
+  busy: boolean;
+  /** From the page being read, not the one on screen: a new search returns to page one before its rows land. */
+  hasPrevious: boolean;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (totalCount === 0) return null;
+  return (
+    <nav aria-label="Delivery list pages" className="flex flex-wrap items-center justify-between gap-3">
+      <span className="text-sm text-secondary" aria-live="polite">
+        {/* Past page one the exact row numbers are unknown: a page starts after the last row seen, and deliveries removed before it change the numbering. */}
+        {page === 0 ? `Showing 1–${rowsShown}` : `Page ${page + 1} · ${rowsShown} shown`} of {totalCount}
+      </span>
+      {(totalCount > LIST_PAGE_SIZE || page > 0) && (
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onPrevious} disabled={!hasPrevious || busy}>
+            Previous
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onNext} disabled={!hasNext || busy}>
+            Next
+          </Button>
+        </div>
+      )}
+    </nav>
   );
 }

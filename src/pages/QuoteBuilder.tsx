@@ -29,7 +29,13 @@ import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
-import { QuoteCreditStatus } from '../components/quotes/QuoteCustomerChecks';
+import { QuoteCreditStatus, TierMismatchNote } from '../components/quotes/QuoteCustomerChecks';
+import { readAssignedTier } from '../lib/customerTier';
+
+// Ties a "quote at this tier anyway" tick to one quote, customer and pair of tiers, so opening another
+// quote, or the customer's assigned tier changing, never inherits it.
+const tierChoiceKey = (quoteId: string | null | undefined, customerId: string, tier: number, assignedTier: number) =>
+  `${quoteId ?? 'new'}:${customerId}:${tier}:${assignedTier}`;
 import CustomerSearchPicker, { CUSTOMER_SEARCH_SELECT, type CustomerSearchResult } from '../components/customers/CustomerSearchPicker';
 import FieldSearchPicker, { FIELD_SEARCH_SELECT, type FieldSearchResult } from '../components/fields/FieldSearchPicker';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
@@ -93,6 +99,7 @@ import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
+import { useProductParents } from '../lib/productParents';
 import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
 import type {
   Quote,
@@ -484,6 +491,13 @@ export default function QuoteBuilder() {
   // Whether a customer was picked since the open quote loaded (picking one and back still counts).
   const customerPickedSinceLoadRef = useRef(false);
   const [tier, setTier] = useState(1);
+  // A tier other than the customer's assigned one is saved only once chosen on purpose (KI-105).
+  const [tierChoice, setTierChoice] = useState('');
+  // What the tier check (KI-105) depends on, as on screen now; Save compares it after its re-read.
+  const tierInputsRef = useRef('');
+  // The id a new quote's first save opens: its tick carries over; opening any other quote clears it.
+  const keepTierChoiceForRef = useRef<string | null>(null);
+  useEffect(() => { tierInputsRef.current = `${customerId}|${tier}|${tierChoice}`; }, [customerId, tier, tierChoice]);
   // The expiry date the rep picked; null = season end (Mason 2026-10-26/27). The database
   // applies it at each send (20261029100000).
   const [chosenExpiryDate, setChosenExpiryDate] = useState<string | null>(null);
@@ -725,6 +739,10 @@ export default function QuoteBuilder() {
   // `price` is the price_per_unit the database holds for that row (loaded, then each save's
   // item_prices): a sent quote keeps it on later saves (20261027040000). `todayApplied` marks a
   // "use today's price" choice the database already stored, so it is applied once, not again.
+  // Lines "Use Tier N" moved to today's price (KI-105). Picking another tier from the menu undoes it,
+  // so a sent price is never replaced by a choice the operator walked back (Sol, #1605).
+  // Each line's state before "Use Tier N", put back exactly when the tier menu undoes it (Codex, #1605).
+  const useTierUndoRef = useRef(new Map<string, { useToday: boolean; applied?: boolean }>());
   const savedLineIdsRef = useRef(new Map<string, {
     id: string;
     productId: string;
@@ -1597,6 +1615,10 @@ export default function QuoteBuilder() {
       quoteNumberSeqRef.current += 1;
       newQuoteNumberRequestedRef.current = false;
       setQuoteNumberLoading(false);
+      // A tier tick or "Use Tier N" belongs to one visit to a quote (Luna, #1605).
+      if (keepTierChoiceForRef.current !== id) setTierChoice('');
+      keepTierChoiceForRef.current = null;
+      useTierUndoRef.current = new Map();
       fetchQuote(id);
     } else if (!newQuoteNumberRequestedRef.current) {
       newQuoteNumberRequestedRef.current = true;
@@ -1609,6 +1631,9 @@ export default function QuoteBuilder() {
   }, [id, fetchQuote, fetchReferenceData, isEditing]);
 
   const selectedCustomer = customerRow && customerRow.id === customerId ? customerRow : undefined;
+  const assignedTier = selectedCustomer?.assigned_tier ?? null;
+  const tierMismatch = assignedTier != null && tier !== assignedTier;
+  const tierChosen = tierMismatch && tierChoice === tierChoiceKey(id, customerId, tier, assignedTier);
 
   // Saved sections name their field by id only; read those fields by id (no active filter: it is
   // the saved record) for their names. One that fails to load or no longer exists blocks saving
@@ -1801,6 +1826,45 @@ export default function QuoteBuilder() {
     );
   };
 
+  // `toAssigned` is "Use Tier N" from the tier note: on a sent quote it also moves each line without a
+  // negotiated price to today's Tier N price (as "Use today" does), so the label never changes while the
+  // lines keep another tier's locked price (Sol, KI-105). The tier menu itself keeps sent prices.
+  const applyTier = (t: number, toAssigned = false) => {
+    if (repriceBlocked) {
+      toast('error', 'Products are still loading. Try again in a moment.');
+      return;
+    }
+    setTier(t);
+    const undo = useTierUndoRef.current;
+    useTierUndoRef.current = new Map();
+    if (!toAssigned || !priceLocked) {
+      undo.forEach((before, key) => {
+        const saved = savedLineIdsRef.current.get(key);
+        if (saved) saved.todayApplied = before.applied;
+      });
+      setSections((prev) => prev.map((sec) => ({
+        ...sec,
+        items: sec.items.map((item) => {
+          const before = undo.get(item._key);
+          return recalcItem(before ? { ...item, use_todays_price: before.useToday } : item, t);
+        }),
+      })));
+      return;
+    }
+    const repriced = (item: LocalItem) => !!item.product_id && item.price_override == null;
+    // A new choice: send it again even where an earlier one was saved.
+    const keys = new Set(sections.flatMap((sec) => sec.items.filter(repriced).map((item) => item._key)));
+    // Pressing "Use Tier N" twice keeps the state from before the first press.
+    useTierUndoRef.current = new Map(sections.flatMap((sec) => sec.items.filter((item) => keys.has(item._key)))
+      .map((item) => [item._key, undo.get(item._key)
+        ?? { useToday: !!item.use_todays_price, applied: savedLineIdsRef.current.get(item._key)?.todayApplied }]));
+    savedLineIdsRef.current.forEach((saved, key) => { if (keys.has(key)) saved.todayApplied = false; });
+    setSections((prev) => prev.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => recalcItem(repriced(item) ? { ...item, use_todays_price: true } : item, t)),
+    })));
+  };
+
   // "Update to today's prices" for the whole quote (Mason, 2026-10-14): every line, manual prices
   // included, takes today's tier price. A price change means the quote must be sent again.
   const applyTodaysPricesToAllLines = () => {
@@ -1810,6 +1874,7 @@ export default function QuoteBuilder() {
     }
     // A new choice: send it again even where an earlier one was saved.
     savedLineIdsRef.current.forEach((saved) => { saved.todayApplied = false; });
+    useTierUndoRef.current = new Map();
     setSections((prev) =>
       prev.map((sec) => ({
         ...sec,
@@ -2261,6 +2326,38 @@ export default function QuoteBuilder() {
       }
     }
 
+    // KI-105: a tier other than the customer's assigned one needs "Use Tier N" or the tick. The assigned
+    // tier is re-read here, since an admin may have changed it while this quote was open (Sol).
+    // Screen-only BY DECISION (Mason, 2026-11-05, DECISION_LOG): anyone may quote at any tier, so
+    // save_quote does not check the tick, and an admin change landing after this read is not caught.
+    // The operator may open another quote during the read; this save then belongs to neither (Codex, #1605).
+    const routeAtTierRead = routeQuoteIdRef.current;
+    const loadAtTierRead = quoteLoadSerialRef.current;
+    const currentAssignedTier = await readAssignedTier(customerId).catch((err: unknown) => {
+      Sentry.captureException(err, { tags: { action: 'quote_tier_check' } });
+      return null;
+    });
+    if (routeQuoteIdRef.current !== routeAtTierRead || quoteLoadSerialRef.current !== loadAtTierRead) return null;
+    // The tier, customer or tick changed during the read: this save would send the old ones (Luna, #1605).
+    if (tierInputsRef.current !== `${customerId}|${tier}|${tierChoice}`) {
+      toast('error', 'The price tier or customer changed while saving. Save again.');
+      return null;
+    }
+    if (currentAssignedTier === null) {
+      toast('error', "The customer's price tier could not be checked. Try again in a moment.");
+      return null;
+    }
+    if (currentAssignedTier !== selectedCustomer.assigned_tier) {
+      // Only if the operator has not picked another customer while the read ran (Luna, #1605).
+      setCustomerRow((row) => (row?.id === customerId ? { ...row, assigned_tier: currentAssignedTier } : row));
+    }
+    if (tier !== currentAssignedTier && tierChoice !== tierChoiceKey(id, customerId, tier, currentAssignedTier)) {
+      toast('error', customerView
+        ? 'Turn off Customer View and confirm the price tier before saving.'
+        : `This customer is assigned Tier ${currentAssignedTier}. Use Tier ${currentAssignedTier}, or tick "Quote at Tier ${tier} anyway", before saving.`);
+      return null;
+    }
+
     // Minted before the payload so the frozen clock can be bound to it. `getKey`
     // returns the SAME key until it is retired, so this is a read, not a new attempt.
     const idemKey = getSaveQuoteIdempotencyKey();
@@ -2556,6 +2653,8 @@ export default function QuoteBuilder() {
         }
         savedLineIdsRef.current = savedLineIds;
         setSavedLineIdByKey(new Map(savedLineIds));
+        // The save is the new baseline: a later tier change no longer undoes "Use Tier N".
+        useTierUndoRef.current = new Map();
         // The save recorded any changed price; read the record the database will check.
         await refreshPriceChanges(result.quote_id);
         if (editingSessionChanged()) return null;
@@ -2663,6 +2762,9 @@ export default function QuoteBuilder() {
 
         if (!isEditing) {
           skipUnsavedPromptRef.current = true;
+          // The new quote's tier tick (KI-105) stays with it once it has an id.
+          setTierChoice((choice) => (choice.startsWith('new:') ? `${result}${choice.slice(3)}` : choice));
+      keepTierChoiceForRef.current = result;
           navigate(`/quotes/${result}`, { replace: true });
         }
       }
@@ -4077,6 +4179,8 @@ export default function QuoteBuilder() {
     }
   };
 
+  // A parent's name or nickname finds its sizes (PAR-1).
+  const { index: parentIndex } = useProductParents();
   const filteredProducts = useMemo(() => {
     if (!productQuery.trim()) return products;
     const q = productQuery.toLowerCase();
@@ -4085,9 +4189,11 @@ export default function QuoteBuilder() {
         p.product_name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q)) ||
         (p.category && p.category.toLowerCase().includes(q)) ||
-        (p.vendor && p.vendor.toLowerCase().includes(q))
+        (p.vendor && p.vendor.toLowerCase().includes(q)) ||
+        parentIndex.get(p.id)?.name.toLowerCase().includes(q) ||
+        parentIndex.get(p.id)?.nickname?.toLowerCase().includes(q)
     );
-  }, [products, productQuery]);
+  }, [parentIndex, products, productQuery]);
 
   const fmt = formatUSD; // quote math is dollar-denominated (not cents)
 
@@ -4904,21 +5010,22 @@ export default function QuoteBuilder() {
             </label>
             <select
               value={tier}
-              onChange={(e) => {
-                if (repriceBlocked) {
-                  toast('error', 'Products are still loading. Try again in a moment.');
-                  return;
-                }
-                const t = parseInt(e.target.value);
-                setTier(t);
-                recalcAllForTier(t);
-              }}
+              onChange={(e) => applyTier(parseInt(e.target.value))}
               className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value={1}>Tier 1</option>
               <option value={2}>Tier 2</option>
               <option value={3}>Tier 3</option>
             </select>
+            {!customerView && tierMismatch && (
+              <TierMismatchNote
+                tier={tier}
+                assignedTier={assignedTier}
+                acknowledged={tierChosen}
+                onUseAssigned={() => applyTier(assignedTier, true)}
+                onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
+              />
+            )}
           </div>
           <div>
             <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">
@@ -5319,6 +5426,7 @@ export default function QuoteBuilder() {
                                         // A new choice: send it again even if an earlier one was saved.
                                         const saved = savedLineIdsRef.current.get(item._key);
                                         if (saved) saved.todayApplied = false;
+                                        useTierUndoRef.current.delete(item._key);
                                         updateItem(sec._key, item._key, {
                                           price_override: null,
                                           use_todays_price: true,

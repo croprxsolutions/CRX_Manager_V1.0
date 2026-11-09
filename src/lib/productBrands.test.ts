@@ -22,6 +22,7 @@ vi.mock('./db', async () => {
 import {
   EPA_REGISTRATION_PATTERN,
   epaLabelSearchUrl,
+  getProductBrands,
   productBrandErrorMessage,
   saveProductBrand,
   suggestBrandNamesFromProductName,
@@ -92,6 +93,10 @@ describe('epaLabelSearchUrl', () => {
   });
 });
 
+// saveProductBrand first re-reads which list the size uses (get_product_brands), then saves.
+const ownList = { data: { source: 'product', parent_id: null, parent_name: null, brands: [] }, error: null };
+const parentList = (id: string) => ({ data: { source: 'parent', parent_id: id, parent_name: 'Roundup', brands: [] }, error: null });
+
 describe('saveProductBrand', () => {
   beforeEach(() => {
     mockRpc.mockReset();
@@ -99,7 +104,7 @@ describe('saveProductBrand', () => {
   });
 
   it('sends a new brand with blanks as NULL and the retry key', async () => {
-    mockRpc.mockResolvedValue({ data: { id: 'b1', brand_name: 'Slam 5.4' }, error: null });
+    mockRpc.mockResolvedValueOnce(ownList).mockResolvedValue({ data: { id: 'b1', brand_name: 'Slam 5.4' }, error: null });
     await saveProductBrand({
       productId: 'p1',
       brandName: '  Slam 5.4 ',
@@ -125,7 +130,7 @@ describe('saveProductBrand', () => {
   });
 
   it('sends an edit with the version it read', async () => {
-    mockRpc.mockResolvedValue({ data: { id: 'b1' }, error: null });
+    mockRpc.mockResolvedValueOnce(ownList).mockResolvedValue({ data: { id: 'b1' }, error: null });
     await saveProductBrand({
       productId: 'p1',
       brandId: 'b1',
@@ -137,7 +142,7 @@ describe('saveProductBrand', () => {
       isRup: false,
       signalWord: 'Caution',
     }, 'key-2');
-    expect(mockRpc.mock.calls[0][1]).toMatchObject({
+    expect(mockRpc.mock.calls[1][1]).toMatchObject({
       p_brand_id: 'b1',
       p_expected_row_version: 3,
       p_epa_registration: '524-475',
@@ -149,11 +154,62 @@ describe('saveProductBrand', () => {
   });
 
   it('throws the database error', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { message: 'BRAND_NAME_TAKEN: x' } });
+    mockRpc.mockResolvedValueOnce(ownList).mockResolvedValue({ data: null, error: { message: 'BRAND_NAME_TAKEN: x' } });
     await expect(saveProductBrand({
       productId: 'p1', brandName: 'x', epaRegistration: '', manufacturer: '',
       isCurrentlySourced: true, isRup: null, signalWord: null,
     }, 'k')).rejects.toMatchObject({ message: 'BRAND_NAME_TAKEN: x' });
+  });
+});
+
+describe('getProductBrands (PAR-2)', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('returns the parent list of a grouped size, shown on this size', async () => {
+    mockRpc.mockResolvedValue({ data: { source: 'parent', parent_id: 'par1', parent_name: 'Roundup', brands: [{ id: 'pb1', parent_id: 'par1', brand_name: 'Slam' }] }, error: null });
+    const list = await getProductBrands('p1');
+    expect(mockRpc).toHaveBeenCalledWith('get_product_brands', { p_product_id: 'p1' });
+    expect(list).toMatchObject({ parentId: 'par1', parentName: 'Roundup', brands: [{ id: 'pb1', product_id: 'p1', brand_name: 'Slam' }] });
+  });
+
+  it('returns the own list of an ungrouped size with no parent', async () => {
+    mockRpc.mockResolvedValue({ data: { source: 'product', parent_id: null, parent_name: null, brands: [{ id: 'b1', product_id: 'p1', brand_name: 'Slam' }] }, error: null });
+    expect(await getProductBrands('p1')).toMatchObject({ parentId: null, parentName: null, brands: [{ id: 'b1' }] });
+  });
+});
+
+describe('saveProductBrand on a parent', () => {
+  beforeEach(() => mockRpc.mockReset());
+
+  it('saves the brand of a grouped size through upsert_parent_brand', async () => {
+    mockRpc.mockResolvedValueOnce(parentList('par1')).mockResolvedValue({ data: { id: 'pb1', parent_id: 'par1', brand_name: 'Slam' }, error: null });
+    const saved = await saveProductBrand({
+      productId: 'p1', parentId: 'par1', brandName: 'Slam', epaRegistration: '', manufacturer: '',
+      isCurrentlySourced: true, isRup: null, signalWord: null,
+    }, 'k');
+    // p_product_id lets the database refuse a size that moved off par1 after the re-read above.
+    expect(mockRpc).toHaveBeenCalledWith('upsert_parent_brand', expect.objectContaining({
+      p_parent_id: 'par1', p_product_id: 'p1', p_brand_name: 'Slam', p_idempotency_key: 'k',
+    }));
+    expect(saved).toMatchObject({ id: 'pb1', product_id: 'p1' });
+  });
+
+  it('refuses, saving nothing, when the size moved to another parent since its list loaded', async () => {
+    mockRpc.mockResolvedValueOnce(parentList('par2'));
+    await expect(saveProductBrand({
+      productId: 'p1', parentId: 'par1', brandName: 'Slam', epaRegistration: '', manufacturer: '',
+      isCurrentlySourced: true, isRup: null, signalWord: null,
+    }, 'k')).rejects.toThrow(/^PRODUCT_BRANDS_PARENT_CHANGED/);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses, saving nothing, when an ungrouped size joined a parent since its list loaded', async () => {
+    mockRpc.mockResolvedValueOnce(parentList('par1'));
+    await expect(saveProductBrand({
+      productId: 'p1', brandName: 'Slam', epaRegistration: '', manufacturer: '',
+      isCurrentlySourced: true, isRup: null, signalWord: null,
+    }, 'k')).rejects.toThrow(/^PRODUCT_BRANDS_PARENT_CHANGED/);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -167,5 +223,9 @@ describe('productBrandErrorMessage', () => {
       .not.toBe('This product already lists a brand with that name.');
     expect(productBrandErrorMessage({ message: 'NOT_AUTHORIZED: only an admin' }))
       .toBe('Only an admin can change a product’s brands.');
+    expect(productBrandErrorMessage(new Error('PRODUCT_BRANDS_PARENT_CHANGED: moved')))
+      .toMatch(/moved to a different parent since the page loaded, so nothing was saved/);
+    expect(productBrandErrorMessage({ message: 'PRODUCT_PARENT_GROUPING_NOT_OPEN: grouping opens later' }))
+      .toBe('Shared parent brands can be changed once grouping is switched on. Nothing was saved.');
   });
 });

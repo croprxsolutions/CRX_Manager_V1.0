@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { logActivity } from '../lib/activityLogger';
 import { assertRpcResult, checkMutationResult, supabase, supabaseUntyped } from '../lib/db';
+import { sanitizeError } from '../lib/errorSanitizer';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import {
   buildFindingsForRegistration,
@@ -37,6 +38,8 @@ import {
   EPA_REQUEST_INTERVAL_MS,
   waitForEpaRequestSlot,
 } from '../lib/epaRequestThrottle';
+import { isEpaLookupResult } from '../lib/epaLookupClient';
+import { getProductParents } from '../lib/productParents';
 import { Sentry } from '../lib/sentry';
 import type { EpaLookupResult, LabelCoverageReport } from '../types';
 
@@ -94,6 +97,7 @@ const FILTERS: FindingFilter[] = [
   'DISTRIBUTOR_NAME_DIFF',
   'CANCELLED',
   'NOT_FOUND',
+  'TRANSFERRED',
   'RUP_DISAGREE',
   'SIGNAL_WORD_AVAILABLE',
   'MISSING_EPA',
@@ -107,6 +111,7 @@ const FIXABLE_FINDINGS = new Set<EpaDataQualityFindingType>([
   'NAME_MISMATCH',
   'CANCELLED',
   'NOT_FOUND',
+  'TRANSFERRED',
   'UNSUPPORTED_REGNUM',
   'MISSING_EPA',
 ]);
@@ -118,6 +123,7 @@ const VALID_FINDING_TYPES = new Set<EpaDataQualityFindingType>([
   'RUP_DISAGREE',
   'UNSUPPORTED_REGNUM',
   'NOT_FOUND',
+  'TRANSFERRED',
   'SIGNAL_WORD_AVAILABLE',
   'MISSING_EPA',
   'NEEDS_MANUAL',
@@ -146,27 +152,6 @@ function errorMessage(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isEpaLookupResult(value: unknown): value is EpaLookupResult {
-  if (!isRecord(value)) return false;
-  const nullableString = (field: unknown) => field === null || typeof field === 'string';
-  return typeof value.found === 'boolean'
-    && (value.regType === 'section3' || value.regType === 'distributor')
-    && nullableString(value.eparegno)
-    && nullableString(value.productname)
-    && (value.signalWordCanonical === null
-      || value.signalWordCanonical === 'Danger'
-      || value.signalWordCanonical === 'Warning'
-      || value.signalWordCanonical === 'Caution')
-    && typeof value.needsManual === 'boolean'
-    && nullableString(value.manufacturer)
-    && (value.rupYn === null || value.rupYn === 'Yes' || value.rupYn === 'No')
-    && nullableString(value.productStatus)
-    && typeof value.isCancelled === 'boolean'
-    && Array.isArray(value.activeIngredients)
-    && nullableString(value.latestLabelPdfUrl)
-    && Array.isArray(value.labelPdfs);
 }
 
 function isCachedFinding(value: unknown): value is EpaDataQualityFinding {
@@ -303,6 +288,7 @@ function findingLabel(type: FindingFilter): string {
     DISTRIBUTOR_NAME_DIFF: 'Distributor name differs',
     CANCELLED: 'Cancelled',
     NOT_FOUND: 'Not found',
+    TRANSFERRED: 'Moved by EPA',
     RUP_DISAGREE: 'RUP differs',
     SIGNAL_WORD_AVAILABLE: 'Signal word available',
     MISSING_EPA: 'Missing EPA number',
@@ -321,6 +307,7 @@ function findingVariant(type: DisplayFindingType): BadgeVariant {
     case 'NAME_MISMATCH':
     case 'CANCELLED':
     case 'NOT_FOUND':
+    case 'TRANSFERRED':
     case 'MISSING_EPA':
       return 'error';
     case 'RUP_DISAGREE':
@@ -375,6 +362,8 @@ export default function LabelDataQuality() {
   const [batchSignalFailures, setBatchSignalFailures] = useState<string[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [editors, setEditors] = useState<Record<string, EditorState>>({});
+  // Grouped size id -> parent name (PAR-1): its EPA number is set on the parent, not here.
+  const [parentNames, setParentNames] = useState<ReadonlyMap<string, string>>(new Map());
   const cancelRequestedRef = useRef(false);
   const runSequenceRef = useRef(0);
 
@@ -456,6 +445,22 @@ export default function LabelDataQuality() {
       setCoverageLoading(false);
     }
   }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // A failed load keeps the editor open; the database still refuses a grouped size's EPA number.
+    getProductParents(null)
+      .then((parents) => {
+        if (cancelled) return;
+        setParentNames(new Map(parents.flatMap((parent) => parent.sizes.map((size) => [size.product_id, parent.name] as const))));
+      })
+      .catch((error: unknown) => {
+        Sentry.captureException(error instanceof Error ? error : new Error(errorMessage(error)), {
+          tags: { page: 'label_data_quality', action: 'load_product_parents' },
+        });
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     void loadProducts();
@@ -745,6 +750,14 @@ export default function LabelDataQuality() {
       if (!isEpaLookupResult(data)) {
         throw new Error('EPA lookup returned an invalid response.');
       }
+      if (data.transferredTo) {
+        updateEditor(row.id, {
+          verifiedNumber: null,
+          verifiedResult: null,
+          error: `EPA moved ${classification.normalized} to ${data.transferredTo}. Enter the new number to save it.`,
+        });
+        return;
+      }
       if (!data.found || !data.productname || data.eparegno?.trim() !== classification.normalized) {
         updateEditor(row.id, {
           verifiedNumber: null,
@@ -792,6 +805,11 @@ export default function LabelDataQuality() {
       && typeof verifiedResult.productname === 'string'
       && verifiedResult.eparegno?.trim() === registrationNumber;
     if (!canSave || editor.saving || running) return;
+    const parentName = parentNames.get(row.product.id);
+    if (parentName) {
+      updateEditor(row.id, { error: `Set on parent ${parentName}. Correcting a grouped product's EPA number isn't available yet.` });
+      return;
+    }
     if (!profile?.id) {
       toast('error', 'Your user profile is not available. Refresh the page before saving.');
       return;
@@ -853,11 +871,11 @@ export default function LabelDataQuality() {
         tags: { page: 'label_data_quality', action: 'save_registration' },
         extra: { productId: row.id },
       });
-      updateEditor(row.id, { error: `Save failed: ${errorMessage(error)}` });
+      updateEditor(row.id, { error: `Save failed: ${sanitizeError(error)}` });
     } finally {
       updateEditor(row.id, { saving: false });
     }
-  }, [editors, lastChecked, profile?.id, running, toast, updateEditor]);
+  }, [editors, lastChecked, parentNames, profile?.id, running, toast, updateEditor]);
 
   const filteredRows = useMemo(() => (
     filter === 'ALL' ? allRows : allRows.filter((row) => findingTypes(row).includes(filter))
@@ -885,6 +903,15 @@ export default function LabelDataQuality() {
           return row.findings.some((finding) => finding.type === 'MISSING_EPA')
             ? <span className="text-secondary">No EPA number saved</span>
             : <span className="text-secondary">Not lookupable / lookup failed</span>;
+        }
+        const movedTo = row.findings.find((finding) => finding.type === 'TRANSFERRED')?.epaValue;
+        if (typeof movedTo === 'string') {
+          return (
+            <div>
+              <p className="font-medium text-red-700">EPA moved this to {movedTo}</p>
+              {row.epa.productName && <p className="mt-0.5 text-xs text-secondary">{row.epa.productName}</p>}
+            </div>
+          );
         }
         if (!row.epa.found) return <span className="font-medium text-red-700">No EPA match</span>;
         return (
@@ -916,6 +943,10 @@ export default function LabelDataQuality() {
       render: (row) => {
         if (!isFixable(row)) {
           return <span className="text-xs text-secondary">No registration correction needed</span>;
+        }
+        const parentName = parentNames.get(row.product.id);
+        if (parentName) {
+          return <span className="text-xs text-secondary">Set on parent {parentName}. Correcting a grouped product's EPA number isn't available yet.</span>;
         }
         const editor = editors[row.id] ?? EMPTY_EDITOR;
         const normalizedInput = editor.input.trim();
@@ -1001,6 +1032,7 @@ export default function LabelDataQuality() {
     type === 'NAME_MISMATCH'
     || type === 'CANCELLED'
     || type === 'NOT_FOUND'
+    || type === 'TRANSFERRED'
     || type === 'UNSUPPORTED_REGNUM'
     || type === 'MISSING_EPA'
   ))).length;

@@ -16,6 +16,7 @@ import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { lookupEpaRegistration } from '../../lib/epaLookupClient';
 import {
   EPA_REGISTRATION_PATTERN,
+  getProductBrands,
   listProductBrands,
   productBrandErrorMessage,
   saveProductBrand,
@@ -70,9 +71,10 @@ function draftFromBrand(brand: ProductBrand): BrandDraft {
   };
 }
 
-function inputFromDraft(productId: string, draft: BrandDraft): ProductBrandInput {
+function inputFromDraft(productId: string, parentId: string | null, draft: BrandDraft): ProductBrandInput {
   return {
     productId,
+    parentId,
     brandId: draft.brandId,
     expectedRowVersion: draft.expectedRowVersion,
     brandName: draft.brandName,
@@ -120,12 +122,17 @@ function isClearRefusal(err: unknown): boolean {
     RpcErrorCodes.NOT_AUTHORIZED,
     RpcErrorCodes.PRODUCT_NOT_FOUND,
     RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH,
+    RpcErrorCodes.PRODUCT_PARENT_GROUPING_NOT_OPEN,
+    RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT,
+    RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED,
   ].some((code) => hasRpcCode(err, code));
 }
 
 export default function ProductBrandsSection({ productId, productName, isAdmin, userId }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
+  // A grouped size shows and edits its parent's list (PAR-2); null while the size has its own list.
+  const [parent, setParent] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -178,8 +185,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     let active = true;
     setLoading(true);
     setLoadError(null);
-    listProductBrands(productId)
-      .then((rows) => { if (active) setBrands(rows); })
+    getProductBrands(productId)
+      .then((list) => {
+        if (!active) return;
+        setBrands(list.brands);
+        setParent(list.parentId ? { id: list.parentId, name: list.parentName ?? 'its parent' } : null);
+      })
       .catch((err: unknown) => {
         if (!active) return;
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands' } });
@@ -210,7 +221,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
     // Retire its key, so the same values entered later are a new request, not a replay of that save.
     // If that save is still landing when the reload reads, the name index refuses a second brand of
     // the same name (BRAND_NAME_TAKEN); a changed name was always a new request with its own key.
-    if (createUncertain && draft) resetKeyFor(saveScope(inputFromDraft(productId, draft)));
+    if (createUncertain && draft) resetKeyFor(saveScope(inputFromDraft(productId, parent?.id ?? null, draft)));
     setCreateUncertain(false);
     setDraft(null);
   };
@@ -238,7 +249,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       if (!result || isStale()) return;
       setEpaResult(result);
       setEpaResultNumber(regNumber);
-      if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
+      if (result.transferredTo) toast('warning', `EPA moved registration ${regNumber} to ${result.transferredTo}.`);
+      else if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
     } catch (err) {
       if (isStale()) return;
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
@@ -279,7 +291,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setDraftError('That is not an EPA registration number (like 524-475 or 100-1234-5905).');
       return;
     }
-    const input = inputFromDraft(productId, draft);
+    const input = inputFromDraft(productId, parent?.id ?? null, draft);
     const scope = saveScope(input);
     setSaving(true);
     setDraftError(null);
@@ -300,7 +312,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'upsert_product_brand' } });
       // An edit needs no lock: a changed resubmit after a lost-but-committed edit fails BRAND_CHANGED.
       if (!draft.brandId && !isClearRefusal(err)) setCreateUncertain(true);
-      if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED)) {
+      if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED) || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED)
+        || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT)) {
         // The form holds a version that is no longer current; close it so the next edit starts fresh.
         toast('error', productBrandErrorMessage(err));
         setDraft(null);
@@ -413,9 +426,11 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
         title="Brands"
         action={isAdmin ? (
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" disabled={!brandsReady} onClick={() => { setCopyOpen(true); void loadCopySource(null); }}>
-              Copy from another product
-            </Button>
+            {!parent && (
+              <Button size="sm" variant="secondary" disabled={!brandsReady} onClick={() => { setCopyOpen(true); void loadCopySource(null); }}>
+                Copy from another product
+              </Button>
+            )}
             <Button size="sm" icon={<Plus className="h-4 w-4" aria-hidden="true" />} showChevron={false} disabled={!brandsReady} onClick={() => openDraft(emptyDraft())}>
               Add brand
             </Button>
@@ -424,6 +439,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       />
       <p className="mb-3 text-sm text-secondary">
         The real brands that can be delivered for this product, each with its own EPA number. Quotes, prices and cost stay on this product.
+        {parent && ` This size is grouped under ${parent.name}, so its brands are that parent's list, shared by every size.`}
       </p>
 
       {isAdmin && suggestions.length > 0 && (
@@ -556,6 +572,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                         Use EPA’s signal word and restricted-use status (and manufacturer, if blank)
                       </Button>
                     </>
+                  ) : epaResult.transferredTo ? (
+                    <p className="text-red-700">EPA moved this registration to {epaResult.transferredTo}. Enter the new number to use EPA’s details.</p>
                   ) : (
                     <p>EPA did not find this registration number.</p>
                   )}

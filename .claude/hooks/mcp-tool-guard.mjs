@@ -104,7 +104,7 @@ try {
       const isSettings = surfaces.some((s) => /(^|\/)\.claude\/settings\.json$/i.test(s));
       const isHookFile = surfaces.some((s) => /(^|\/)\.claude\/hooks\/[\w.-]+\.mjs$/i.test(s));
       // ANY migration-file write via MCP is denied — new files too, not just
-      // existing ones. The content guards (sql-safety, rls-on-new-tables,
+      // existing ones. The content guards (sql-safety,
       // status-enum-check, generated-column-check, idempotency-body-check) are
       // wired to the native Write/Edit matchers only, so CREATING a migration
       // through an MCP write tool would skip every one of them (Codex P1

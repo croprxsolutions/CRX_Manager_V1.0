@@ -24,6 +24,28 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
   });
+  // RAISE texts of 20261108120000_product_parents.sql (PAR-1).
+  it.each([
+    ['PRODUCT_PARENT_VALUE: category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)',
+      'Nothing was saved. Category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)'],
+    ['PRODUCT_PARENT_STALE: parent "Atrazine 4L" changed since you opened it; reload and try again',
+      'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
+    ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
+      'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
+    // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
+    ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
+      'Nothing was saved. Stock of the tote or its bulk has moved since this fill; adjust stock instead'],
+    ['TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)',
+      'Nothing was saved. "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)'],
+    // RAISE texts of 20261207100000_product_weights.sql (DM-2).
+    ['PRODUCT_WEIGHT_OUT_OF_RANGE: weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)',
+      'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
+    ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
+      'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
+  ])('explains the parent refusal %s by name', (raw, expected) => {
+    expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');
@@ -250,6 +272,60 @@ describe('sanitizeError', () => {
     expect(sanitizeError(
       'ORDER_HAS_FIELD_SPLIT: this order is split across fields; bill it per field owner through create_split_invoices_from_order'
     )).toBe("Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again");
+    expect(sanitizeError("BILL_SPLIT_FROZEN: delivery DEL-1 is complete, so this sale's bill split can't change. Void the delivery to change it."))
+      .toContain('its bill split is locked');
+    expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
+      "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
+    );
+    expect(sanitizeError('ORDER_ITEM_SHARES_BUSY: a delivery on this sale is being completed; try again')).toBe(
+      'Nothing was changed. A delivery on this sale is being completed. Try again in a moment',
+    );
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again')).toBe(
+      'Nothing was changed. This line moved to another order. Refresh the page and try again',
+    );
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
+      'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
+    );
+    expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's draft has a product line with no quantity")).toBe(
+      "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group",
+    );
+    expect(sanitizeError("BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can't be added")).toBe(
+      "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first",
+    );
+    expect(sanitizeError('GROUP_UNPOST_REQUIRED')).toBe(
+      'Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again',
+    );
+    expect(sanitizeError('BILL_SPLIT_LINES_LOCKED: follow the split')).toBe(
+      "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"
+    );
+    expect(sanitizeError('BILL_SPLIT_GROUP_DELETE_PARTIAL: select every payer')).toBe(
+      "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
+      "Nothing was billed. A payer's share of a product is under 0.0001 of a unit. Change the bill split so each payer gets at least 0.0001"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_FINE: delivery D-1 delivered 1.23456')).toBe(
+      "Nothing was billed. A delivered amount has more than 4 decimal places, which an invoice line can't hold. Correct it with Fix Delivery, then choose Create Invoice"
+    );
+    expect(sanitizeError('RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places')).toBe(
+      'Nothing was returned. A return holds 2 decimal places. Enter a quantity like 0.70'
+    );
+    expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
+      'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'
+    );
+    expect(sanitizeError('SPLIT_INVOICE_PROVENANCE_IMMUTABLE: x')).toBe(
+      'Nothing was changed. This split invoice is locked to its group. Void the group and create a replacement'
+    );
+    expect(sanitizeError('ORDER_SHARES_OVER_100: order x')).toBe("Nothing was changed. The bill split can't total more than 100%");
+    expect(sanitizeError('ORDER_SHARES_ORDER_IMMUTABLE: x')).toBe("Nothing was changed. A bill split row can't move to another order");
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_IMMUTABLE: x')).toBe("Nothing was changed. A line share can't move to another line");
+    expect(sanitizeError('BILL_SPLIT_NOTHING_TO_BILL: delivery D-1')).toBe(
+      'Nothing was billed. This delivery has no delivered quantity'
+    );
+    expect(sanitizeError('ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice'))
+      .toContain('billed per payer');
+    expect(sanitizeError("ORDER_ITEM_SHARES_OVER_100: a line's shares can't total more than 100%"))
+      .toContain('more than 100%');
     expect(sanitizeError('INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID: invoice and order customer must match'))
       .toContain("only be for that order's customer");
     expect(sanitizeError(

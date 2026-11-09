@@ -136,7 +136,6 @@ describe('OfflineBanner', () => {
     await waitFor(() => expect(mockSyncPendingActions).toHaveBeenCalledTimes(1));
     expect(mockSyncPendingActions).toHaveBeenCalledWith('user-1', {
       force: false,
-      runWithBelowCostApproval: expect.any(Function),
     });
     await waitFor(() => expect(screen.getByText(/failed to sync and remain saved/)).toBeInTheDocument());
     expect(mockSyncPendingActions).toHaveBeenCalledTimes(1);
@@ -187,7 +186,6 @@ describe('OfflineBanner', () => {
     await waitFor(() => {
       expect(mockSyncPendingActions).toHaveBeenCalledWith('user-1', {
         force: true,
-        runWithBelowCostApproval: expect.any(Function),
       });
     });
   });
@@ -206,7 +204,6 @@ describe('OfflineBanner', () => {
     await waitFor(() => {
       expect(mockSyncPendingActions).toHaveBeenCalledWith('user-1', {
         force: true,
-        runWithBelowCostApproval: expect.any(Function),
       });
     });
   });

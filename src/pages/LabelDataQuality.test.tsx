@@ -27,6 +27,7 @@ const H = vi.hoisted(() => ({
   logActivity: vi.fn(),
   toast: vi.fn(),
   captureException: vi.fn(),
+  getProductParents: vi.fn(),
 }));
 
 const coverage: LabelCoverageReport = {
@@ -133,6 +134,10 @@ vi.mock('../lib/activityLogger', () => ({
   logActivity: H.logActivity,
 }));
 
+vi.mock('../lib/productParents', () => ({
+  getProductParents: H.getProductParents,
+}));
+
 vi.mock('../lib/sentry', () => ({
   Sentry: { captureException: H.captureException },
 }));
@@ -152,6 +157,7 @@ describe('LabelDataQuality', () => {
     H.missingProducts = [];
     H.mutationResults = [];
     H.rpc.mockResolvedValue({ data: coverage, error: null });
+    H.getProductParents.mockResolvedValue([]);
     H.invoke.mockResolvedValue({ data: verifiedLookup(), error: null });
     sessionStorage.clear();
     sessionStorage.setItem(CACHE_KEY, JSON.stringify({
@@ -488,6 +494,48 @@ describe('LabelDataQuality', () => {
     );
   });
 
+  it('shows a moved registration and a base-matched distributor number after a fresh check', async () => {
+    sessionStorage.clear();
+    H.products = [
+      { id: 'moved-1', product_name: 'Roundup Ultra', epa_registration: '524-475', is_rup: false, signal_word: null },
+      { id: 'dist-1', product_name: 'Volley', epa_registration: '62719-671-55467', is_rup: false, signal_word: null },
+    ];
+    H.invoke.mockImplementation((_name: string, { body }: { body: { regNumber: string } }) => Promise.resolve({
+      data: body.regNumber === '62719-671-55467'
+        ? verifiedLookup({ regType: 'distributor', eparegno: '62719-671-55467', productname: 'KEYSTONE NXT', signalWordCanonical: 'Warning', transferredTo: null })
+        : verifiedLookup({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+      error: null,
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run EPA check/ }));
+    expect(await screen.findByText('EPA moved this to 105211-77')).toBeInTheDocument();
+    expect(await screen.findByText('KEYSTONE NXT')).toBeInTheDocument();
+    expect(screen.getAllByText('Moved by EPA').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Distributor name differs').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('No EPA match')).not.toBeInTheDocument();
+    // Only the filter dropdown option, no row badge.
+    expect(screen.getAllByText('Lookup error')).toHaveLength(1);
+    // A moved number never offers the signal-word fill.
+    expect(screen.queryByRole('button', { name: 'Apply “Caution”' })).toBeNull();
+    // The distributor's base-record signal word stays offered, as for any distributor match.
+    expect(screen.getByRole('button', { name: 'Apply “Warning”' })).toBeEnabled();
+
+    fireEvent.change(
+      screen.getByLabelText('Corrected EPA registration for Roundup Ultra'),
+      { target: { value: '524-475' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByText('EPA moved 524-475 to 105211-77. Enter the new number to save it.'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
   it('discards a cached run with internally inconsistent EPA-derived findings', async () => {
     H.products = [];
     sessionStorage.clear();
@@ -512,6 +560,42 @@ describe('LabelDataQuality', () => {
 
     expect(await screen.findByText('No EPA check results yet')).toBeInTheDocument();
     expect(screen.queryByText('Inconsistent Product')).not.toBeInTheDocument();
+  });
+
+  it('replaces the EPA correction with a parent note for a grouped size', async () => {
+    H.getProductParents.mockResolvedValue([{ id: 'parent-1', name: 'Callisto 4L', sizes: [{ product_id: 'product-1' }] }]);
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Set on parent Callisto 4L. Correcting a grouped product's EPA number isn't available yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Correct identity/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Corrected EPA registration for Callisto Herbicide')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(H.getProductParents).toHaveBeenCalledWith(null);
+  });
+
+  it('keeps the editor when parents fail to load, reports it, and shows the database refusal in plain words', async () => {
+    H.getProductParents.mockRejectedValue(new Error('parents offline'));
+    H.mutationResults = [{ data: null, error: { message: 'PRODUCT_PARENT_VALUE: epa_registration belongs to parent "Callisto 4L"; edit it on the parent' } }];
+    H.checkMutationResult.mockImplementation((result: { error: unknown }) => { if (result.error) throw result.error; });
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(H.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'parents offline' }),
+      expect.objectContaining({ tags: expect.objectContaining({ action: 'load_product_parents' }) }),
+    ));
+    const input = await screen.findByLabelText('Corrected EPA registration for Callisto Herbicide');
+    fireEvent.change(input, { target: { value: '264-849' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Save failed: Nothing was saved\. Epa_registration belongs to parent "Callisto 4L"/)).toBeInTheDocument();
   });
 });
 

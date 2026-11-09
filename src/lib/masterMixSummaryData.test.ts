@@ -430,3 +430,79 @@ describe('buildMasterMixSummaryData — included/excluded accounting (never unde
     expect(out.mixed_capacities).toBe(false);
   });
 });
+
+describe('buildMasterMixSummaryData — DM-2 product weights (sheet 4.3)', () => {
+  const units = {
+    factors: { lb: { kind: 'weight' as const, factor: 1 }, gal: { kind: 'volume' as const, factor: 1 }, qt: { kind: 'volume' as const, factor: 0.25 } },
+    ambiguous: [],
+  };
+  const density = (lb: number) => ({ kind: 'density' as const, lb_per_unit: lb, per_unit: 'Gal', product_form: 'liquid' as const });
+  const weights = { byProductId: { p1: density(10), p2: density(8) }, units };
+  const capacity = { tank_capacity: 100, carrier_rate_gpa: 10 };
+  const liquid = (over: Partial<RawSheetProduct>) => product({ product_form: 'liquid', ...over });
+
+  it('weighs each job line on its own and adds them; a product in two units stays two rows', () => {
+    const out = buildMasterMixSummaryData([
+      job('j1', { products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'Gal', total_quantity: 2 })] }),
+      job('j2', { products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'gal', total_quantity: 3 }),
+        liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'Qt', total_quantity: 4 })] }),
+    ], [], weights);
+    expect(out.rows.map((r) => [r.unit, r.total_quantity, r.weight_text])).toEqual([['Gal', 5, '50.00 lb'], ['Qt', 4, '10.00 lb']]);
+    expect(out.weights_caption).toBe('Weights use the current approved weights.');
+  });
+
+  it('combines by product, so two products sharing a name stay separate rows with their own weights', () => {
+    const out = buildMasterMixSummaryData([
+      job('j1', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p1', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }, capacity),
+      job('j2', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p2', product_name: 'Same', unit: 'gal', total_quantity: 1 })] }, capacity),
+    ], [], weights);
+    expect(out.rows.map((r) => r.weight_text).sort()).toEqual(['10.00 lb', '8.00 lb']);
+    // The printout tells the two apart, in the totals table and in the load table.
+    expect(out.rows.map((r) => r.product_name).sort()).toEqual(['Same (product 1)', 'Same (product 2)']);
+    // Same name, unit and rate but different products: separate load groups, never mixed in one tank.
+    expect(out.load_groups).toHaveLength(2);
+    for (const g of out.load_groups) {
+      expect(g.worksheet.loads.every((l) => l.products.length === 1)).toBe(true);
+      expect(g.job_numbers).toHaveLength(1);
+    }
+  });
+
+  it('names a product with no weight and withholds its load total; the amounts still print', () => {
+    const noWeight = { byProductId: { p1: { kind: 'none' as const, none_reason: 'no_parent' as const } }, units };
+    const out = buildMasterMixSummaryData([job('j1', { fields: [field({ acres: 20 })],
+      products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'gal', total_quantity: 4 })] }, capacity)], [], noWeight);
+    expect(out.rows[0]).toMatchObject({ total_quantity: 4, weight_text: 'Not shown: put Alpha in a parent to record its weight' });
+    const loads = out.load_groups[0].weights!.loads;
+    expect(loads).toHaveLength(2);
+    expect(loads[0].cells[0].amountCell).toBe('2');
+    expect(loads[0].totalLb).toBeNull();
+  });
+
+  it('gives each load its product weight through the loader helper', () => {
+    const out = buildMasterMixSummaryData([
+      job('j1', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'gal', total_quantity: 3 })] }, capacity),
+      job('j2', { fields: [field({ acres: 10 })], products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'gal', total_quantity: 3 })] }, capacity),
+    ], [], weights);
+    expect(out.load_groups).toHaveLength(1);
+    const loads = out.load_groups[0].weights!.loads;
+    // 20 ac × 10 gal/ac = 200 gal in 2 loads of 100; 6 gal of Alpha → 3 gal (30 lb) per load.
+    expect(loads.map((l) => [l.cells[0].amountCell, l.cells[0].weightText, l.totalLb])).toEqual([['3', '30.00 lb', 30], ['3', '30.00 lb', 30]]);
+    expect(out.rows[0].weight_text).toBe('60.00 lb');
+  });
+
+  it('prints the reason in every weight row when weights could not be read, keeping amounts and loads', () => {
+    const out = buildMasterMixSummaryData([job('j1', { fields: [field({ acres: 20 })],
+      products: [liquid({ product_id: 'p1', product_name: 'Alpha', unit: 'gal', total_quantity: 4 })] }, capacity)], [],
+    { unavailable: 'Too many products to weigh at once: select fewer jobs' });
+    expect(out.rows[0]).toMatchObject({ total_quantity: 4, weight_text: 'Too many products to weigh at once: select fewer jobs' });
+    expect(out.weights_caption).toBe('Too many products to weigh at once: select fewer jobs');
+    expect(out.load_groups[0].worksheet.loads_count).toBe(2);
+    expect(out.load_groups[0].weights).toBeUndefined();
+  });
+
+  it('leaves the summary as it was when no weights are passed', () => {
+    const out = buildMasterMixSummaryData([job('j1', { products: [liquid({ product_id: 'p1', unit: 'gal', total_quantity: 1 })] })]);
+    expect(out.rows[0].weight_text).toBeUndefined();
+    expect(out.weights_caption).toBeNull();
+  });
+});

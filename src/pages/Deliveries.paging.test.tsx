@@ -1,9 +1,10 @@
 /**
  * Deliveries.paging.test.tsx — Goal 4: the Deliveries list pages, searches and counts in the database.
  *
- * The list reads one page of 50 from get_deliveries_page, which also returns the true total and the
+ * The list reads one page of 50 from get_deliveries_keyset_page, which also returns the true total and the
  * cards' counts over every visible delivery. The fake function below behaves like the real one for
- * what the page relies on: search, limit/offset and the totals. Exports and the load sheet must read
+ * what the page relies on: search, limit, the bookmark of the last row shown (next_cursor / p_after) and
+ * the totals. Exports and the load sheet must read
  * every matching row in pages of 500 (the most one call may return), and a failed read must never show
  * zeros or a short list.
  */
@@ -12,7 +13,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 
 type Row = Record<string, unknown>;
-type PageArgs = { p_search?: string | null; p_driver_id?: string | null; p_limit: number; p_offset: number; p_after_id?: string; p_today: string };
+type PageArgs = { p_search?: string | null; p_driver_id?: string | null; p_limit: number; p_offset: number; p_after_id?: string; p_after?: { id: string }; p_today: string };
 const FIRST_ID = '00000000-0000-0000-0000-000000000000';
 
 const H = vi.hoisted(() => ({
@@ -29,6 +30,10 @@ const H = vi.hoisted(() => ({
   swapBehindReadAtCall: null as number | null,
   // Every get_deliveries_page call first saves one more delivery, so no read ever sees a still list.
   growEveryPageCall: false,
+  // While set, every bookmark is refused as stale.
+  refuseBookmarks: false,
+  // While set, answers leave next_cursor out (as an older database function would).
+  omitNextCursor: false,
   // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
   holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
@@ -73,15 +78,22 @@ function deliveriesPage(args: PageArgs) {
   // Like the real function: a read by id returns the rows after that id in id order, each with its place
   // in the chosen order.
   if (args.p_after_id && args.p_offset !== 0) throw new Error('DELIVERIES_PAGE_BAD_ARGS');
+  if (args.p_after && (args.p_offset !== 0 || args.p_after_id)) throw new Error('DELIVERIES_PAGE_BAD_ARGS');
   const placed: Row[] = matching.map((d, i) => ({ ...d, sort_position: i + 1 }));
+  // A bookmark starts right after its row; here the bookmarked row must still be listed (the tests remove
+  // others), and H.refuseBookmarks makes every bookmark stale, as a new day or sort would.
+  const start = args.p_after ? placed.findIndex((d) => d.id === args.p_after!.id) + 1 : args.p_offset;
+  if (args.p_after && (start === 0 || H.refuseBookmarks)) throw new Error('DELIVERIES_PAGE_STALE_CURSOR');
   const rows = args.p_after_id
     ? placed.filter((d) => String(d.id) > args.p_after_id!).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, args.p_limit)
-    : placed.slice(args.p_offset, args.p_offset + args.p_limit);
+    : placed.slice(start, start + args.p_limit);
+  const nextCursor = !args.p_after_id && start + args.p_limit < placed.length ? { id: String(rows[rows.length - 1].id) } : null;
   const scheduledToday = H.deliveries.filter((d) => d.scheduled_date === args.p_today).length;
   return {
     success: true,
     total_count: matching.length,
     rows,
+    next_cursor: nextCursor,
     summary: {
       visible_count: H.deliveries.length,
       open_count: H.deliveries.length,
@@ -93,11 +105,22 @@ function deliveriesPage(args: PageArgs) {
   };
 }
 
+// The function's own refusals come back as an error, as PostgREST returns a raised exception.
+function answer(args: PageArgs) {
+  try {
+    const data = deliveriesPage(args);
+    if (H.omitNextCursor) delete (data as { next_cursor?: unknown }).next_cursor;
+    return { data, error: null };
+  } catch (e) {
+    return { data: null, error: { message: (e as Error).message } };
+  }
+}
+
 vi.mock('../lib/db', () => ({
   supabase: {
     from: (table: string) => { H.tableReads.push(table); return serverQuery(table); },
     rpc: vi.fn((name: string, args: PageArgs) => {
-      if (name !== 'get_deliveries_page') return Promise.resolve({ data: null, error: null });
+      if (name !== 'get_deliveries_keyset_page') return Promise.resolve({ data: null, error: null });
       H.pageCalls.push(args);
       if (H.failPageFromCall !== null && H.pageCalls.length >= H.failPageFromCall) {
         return Promise.resolve({ data: null, error: { message: 'connection reset' } });
@@ -111,8 +134,8 @@ vi.mock('../lib/db', () => ({
         H.deliveries.push({ ...H.deliveries[0], id: 'a-new', delivery_number: 'DEL-SWAP' });
       }
       if (H.growEveryPageCall) H.deliveries.push({ ...H.deliveries[0], id: `del-grow-${H.pageCalls.length}`, delivery_number: `DEL-GROW-${H.pageCalls.length}` });
-      if (H.holdPageCalls) return H.holdPageCalls.then(() => ({ data: deliveriesPage(args), error: null }));
-      return Promise.resolve({ data: deliveriesPage(args), error: null });
+      if (H.holdPageCalls) return H.holdPageCalls.then(() => answer(args));
+      return Promise.resolve(answer(args));
     }),
   },
   sanitizeError: vi.fn((e: unknown) => (e as Error)?.message || 'Error'),
@@ -132,6 +155,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 vi.mock('../components/deliveries/BatchCancelModal', () => ({ default: () => null }));
 vi.mock('../components/deliveries/QuickDeliveryModal', () => ({ default: () => null }));
+vi.mock('../components/deliveries/ReceiptsToCheck', () => ({ default: () => null }));
 vi.mock('../components/deliveries/DeliveryCalendar', () => ({ default: () => null }));
 vi.mock('../components/customers/CustomerDrawer', () => ({ default: () => null }));
 // The table only reports the rows it was given and the first delivery number.
@@ -158,6 +182,8 @@ beforeEach(() => {
   H.growEveryPageCall = false;
   H.swapBehindReadAtCall = null;
   H.holdPageCalls = null;
+  H.refuseBookmarks = false;
+  H.omitNextCursor = false;
   H.failTable = null;
   H.holdStockCheck = null;
   H.tableReads = [];
@@ -185,7 +211,7 @@ beforeEach(() => {
   };
 });
 
-const showing = () => screen.getByText(/^Showing /);
+const showing = () => screen.getByText(/^(Showing|Page \d+) /);
 
 describe('Deliveries list pages in the database', () => {
   it('shows one page with the true totals, pages through, and exports every matching row', async () => {
@@ -199,9 +225,10 @@ describe('Deliveries list pages in the database', () => {
     expect(H.pageCalls[0]).toMatchObject({ p_limit: 50, p_offset: 0 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Page 2 · 50 shown of ${TOTAL}`));
     expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
-    expect(H.pageCalls[H.pageCalls.length - 1]).toMatchObject({ p_limit: 50, p_offset: 50 });
+    // Page two starts right after page one's last row, not at a row count.
+    expect(H.pageCalls[H.pageCalls.length - 1]).toMatchObject({ p_limit: 50, p_offset: 0, p_after: { id: 'del-0049' } });
 
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
     await waitFor(() => expect(H.exportToCSV).toHaveBeenCalledTimes(1));
@@ -217,7 +244,7 @@ describe('Deliveries list pages in the database', () => {
     render(<MemoryRouter><Deliveries /></MemoryRouter>);
     await screen.findByText('Scheduled Today');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => expect(showing()).toHaveTextContent('Showing 51–100'));
+    await waitFor(() => expect(showing()).toHaveTextContent('Page 2 · 50 shown'));
 
     fireEvent.change(screen.getByLabelText('Search deliveries'), { target: { value: 'DEL-1499' } });
     await waitFor(() => expect(showing()).toHaveTextContent('Showing 1–1 of 1'), { timeout: 3000 });
@@ -235,7 +262,7 @@ describe('Deliveries list pages in the database', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Deliveries could not be loaded');
     expect(screen.queryByText('Scheduled Today')).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Showing /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^(Showing|Page \d+) /)).not.toBeInTheDocument();
     expect(H.toast).toHaveBeenCalledWith('error', 'Failed to load deliveries. Please try again.');
   });
 
@@ -259,7 +286,7 @@ describe('Deliveries list pages in the database', () => {
 
     H.failPageFromCall = null;
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Page 2 · 50 shown of ${TOTAL}`));
     expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
   });
 
@@ -278,7 +305,7 @@ describe('Deliveries list pages in the database', () => {
     expect(screen.queryAllByRole('checkbox', { name: 'Select DEL-0000' })).toHaveLength(0);
 
     await act(async () => { release(); });
-    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Page 2 · 50 shown of ${TOTAL}`));
     expect(screen.queryByRole('button', { name: /Cancel 1 Selected/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Export CSV/ })).toBeEnabled();
   });
@@ -301,7 +328,7 @@ describe('Deliveries list pages in the database', () => {
     const before = H.tableReads.filter((t) => t === 'delivery_items').length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 51–100 of ${TOTAL}`));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Page 2 · 50 shown of ${TOTAL}`));
     expect(H.tableReads.filter((t) => t === 'delivery_items')).toHaveLength(before);
   });
 
@@ -414,5 +441,73 @@ describe('Deliveries list pages in the database', () => {
     expect(H.pageCalls.every((c) => c.p_limit === 500 && c.p_driver_id === 'driver-1')).toBe(true);
     // Two pages, read twice: a list read in more than one page is kept only when a second read matches it.
     expect(H.pageCalls.map((c) => c.p_after_id)).toEqual([FIRST_ID, 'del-0999', FIRST_ID, 'del-0999']);
+  });
+});
+
+describe('Deliveries list pages by bookmark, so a removed delivery never skips one', () => {
+  it('shows the same page two after a delivery on page one is removed', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    // Just before the page-two read, DEL-0001 (on page one) is cancelled and DEL-NEW is saved at the end.
+    H.editDeliveriesAtCall = H.pageCalls.length + 1;
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Page 2 · 50 shown of ${TOTAL}`));
+    // Read by row count, page two would now start at DEL-0051 and DEL-0050 would never be shown.
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0050');
+  });
+
+  it('goes back to page one with Previous, read from the top again', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent('Page 2 · 50 shown'));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 1–50 of ${TOTAL}`));
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0000');
+    expect(H.pageCalls[H.pageCalls.length - 1].p_after).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+  });
+
+  it('greys out Next on the last page, where the database gives no next bookmark', async () => {
+    H.deliveries = H.deliveries.slice(0, 75);
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(showing()).toHaveTextContent('Page 2 · 25 shown of 75'));
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('starts again at page one, with no error, when the database refuses the bookmark', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    H.refuseBookmarks = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(H.pageCalls[H.pageCalls.length - 1].p_after).toBeUndefined());
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 1–50 of ${TOTAL}`));
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0000');
+    expect(H.toast).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('steps back a page when every delivery after the bookmark was removed', async () => {
+    H.deliveries = H.deliveries.slice(0, 60);
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    // The last ten are cancelled before page two is read.
+    H.deliveries = H.deliveries.slice(0, 50);
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(H.pageCalls.some((c) => c.p_after)).toBe(true));
+    await waitFor(() => expect(showing()).toHaveTextContent('Showing 1–50 of 50'));
+    expect(screen.getByTestId('table-first')).toHaveTextContent('DEL-0000');
+  });
+});
+
+describe('Deliveries list with no bookmark in the answer', () => {
+  it('greys out Next instead of reading page one again', async () => {
+    H.omitNextCursor = true;
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await screen.findByText('Scheduled Today');
+    await waitFor(() => expect(showing()).toHaveTextContent(`Showing 1–50 of ${TOTAL}`));
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 });

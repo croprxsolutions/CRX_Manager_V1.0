@@ -187,6 +187,7 @@ export async function fetchChemicalApplicationReportData(
         unit: c.unit,
         total_quantity: c.quantity,
         product_form: lbl?.product_form ?? null,
+        product_id: c.product_id,
         // Prefer the per-job_chemicals override; else the product label.
         rei_hours: c.rei_hours ?? lbl?.rei_hours ?? null,
         phi_days: c.phi_days ?? lbl?.phi_days ?? null,

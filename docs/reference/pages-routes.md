@@ -1,4 +1,4 @@
-# Pages & Routes Reference (80 pages, 95 routes)
+# Pages & Routes Reference (81 pages, 96 routes)
 
 > Rebuilt 2026-09-26 from the router. Since 2026-10-22 every signed-in page and route lives in the shared page list `src/appPages.tsx`, which `src/App.tsx` builds its routes from; `src/App.tsx` itself keeps only the sign-in pages, the `/` landing redirect, the dev-only `DesignPreview`, the `*` catch-all, and the two `invoices/field-app/*` routes (a test pins their text there). The page count is the number of `lazy(` imports in those two files (it includes the `JobDetailRoute` wrapper and `DesignPreview`). The route count is the number of rows in this table, which lists every router path except `login`, `forgot-password`, `reset-password`, and the `*` catch-all. `npm run check:docs` (`scripts/check-doc-drift.mjs`) compares the page count with those files, but compares the route count only with this table's own rows: nothing checks that each row matches a real route, so rebuild the table from `src/appPages.tsx` whenever routes change. Redirect rows are routes kept for old bookmarks and render no page of their own. Role gates come from each page's `roles` in `src/appPages.tsx` (a route may narrow them); the router's `ProtectedRoute` and the page registry `PAGE_PERMISSIONS` in `src/lib/pagePermissions.ts` both read them.
 
@@ -64,6 +64,7 @@
 | `/cycle-counts` | CycleCounts | Admin-only. Inventory cycle counting with variance tracking |
 | `/returns` | Returns | Returns/RMA workflow (request -> approve -> receive -> credit) |
 | `/brand-vs-generic` | BrandVsGeneric | Ingredient mapping: branded vs generic |
+| `/group-products` | GroupProducts | Admin: group product sizes under one parent (build, hold, reject, approve proposals) |
 | `/crop-programs` | CropPrograms | Seasonal crop program management |
 | `/compliance` | Compliance | Applicator license tracking, RUP product list, RUP Sales Register (auto-generated from invoices, filterable, CSV export; the register tab is admin-only, the rest is admin and sales rep) |
 | `/lot-trace` | LotTrace | **B1 Lot Capture & Trace** — recall/compliance lookup: enter a lot number → every application that used it (product, field(s), date, customer, applicator, record #, invoice, source). Admin/sales. The `get_lot_application_trace` RPC is live (B1 migration `20260622170000`, applied 2026-06-23). |

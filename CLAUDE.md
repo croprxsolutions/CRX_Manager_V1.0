@@ -8,6 +8,7 @@
 - Refresh `.claude/schema-registry.json` after schema changes with `regen-schema-registry`.
 - Read `docs/reference/claude-model-tuning.md` only when choosing models or effort, delegating, or writing reviewer prompts.
 - Cloud sessions may lack `node_modules`, `gh`, Codex, Graphify, or the Supabase MCP: say early which gates cannot run, finish what can, and deliver a draft PR. Never report an unrun gate as passed.
+- **Taha's billing work (Mason, 2026-11-06):** when Mason starts money, billing or invoice work, check Taha's open PRs (`gh pr list --author TahaKhanAbdalli`) and warn Mason in one line if it may overlap Taha's billing plan or his other items, then carry on: a warning, never a block. Field application invoices are Mason's own work. Never push to Taha's PRs (`.claude/commands/ship.md` › Taha's PRs).
 
 ## Workflows
 

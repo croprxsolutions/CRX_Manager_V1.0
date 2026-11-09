@@ -293,7 +293,15 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // removing the assigned-rep checks); changing the literal would orphan existing receipts.
   _save_invoice_split_provenance_impl_20260719: ['save_invoice'],
   _save_invoice_below_cost_impl_20260810: ['save_invoice'],
+  // Postgres-only layer behind save_invoice; it reads the public receipt that save_invoice already
+  // matched, so a retry replays before the Bill Split draft checks (20261215110000).
+  _save_invoice_intent_impl_20260802: ['save_invoice'],
   _post_invoice_public_impl_20260718: ['post_invoice'],
+  // Direct EXECUTE is revoked (live 2026-11-06: proacl `postgres=X/postgres`). Private layers behind the
+  // public void_invoice and unapply_credit_memo wrappers; they share the wrapper's receipt namespace.
+  // 20261204100000 (KI-18) re-emits the live bodies only to add the Chicago-date closed-month check.
+  _void_invoice_split_provenance_impl_20260719: ['void_invoice'],
+  _unapply_return_credit_guard_impl_20260826: ['unapply_credit_memo'],
   // Direct EXECUTE is revoked. This private implementation remains behind the
   // public create_invoice_from_order wrapper and deliberately shares that
   // wrapper's cache namespace so a retry through either layer finds the same
@@ -317,6 +325,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // orphan existing receipts.
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
+  // Same rename for start_job; 20261217100000 (KI-73 part C) re-emits it only to end whole-job access with
+  // the job. Changing the literal would orphan existing receipts.
+  _start_job_replay_impl_20261015: ['start_job'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
   // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing
@@ -455,6 +466,27 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _price_order_below_cost_impl_20260810: ['price_order'],
   _save_invoice_lineage_unaware_impl_20260827: ['save_invoice'],
   _save_field_app_invoice_impl_20260714: ['save_field_app_invoice'],
+  // KI-18 batch 1 (20261204100000) re-emits these renamed private bodies only to take "today" from the
+  // Chicago date. Each was created by ALTER FUNCTION ... RENAME TO, so it kept the public operation
+  // literal its wrapper binds; direct EXECUTE is revoked. Changing a literal would orphan existing receipts.
+  _reverse_write_off_replay_impl_20261015: ['reverse_write_off'],
+  _apply_prepay_to_invoice_replay_impl_20261015: ['apply_prepay_to_invoice'],
+  _apply_write_off_replay_impl_20261015: ['apply_write_off'],
+  _post_commission_payment_intent_impl_20260809: ['post_commission_payment'],
+  _void_payment_replay_impl_20261015: ['void_payment'],
+  _create_commission_payment_intent_impl_20260809: ['create_commission_payment'],
+  _dispatch_job_locations_replay_impl_20261015: ['dispatch_job_locations'],
+  _create_inventory_hold_intent_impl_20260905: ['create_inventory_hold'],
+  _transition_rebate_claim_replay_impl_20261015: ['transition_rebate_claim'],
+  _create_rush_order_below_cost_impl_20260810: ['create_rush_order'],
+  _create_followup_delivery_replay_impl_20261015: ['create_followup_delivery'],
+  _create_job_from_quote_section_replay_impl_20261015: ['create_job_from_quote_section'],
+  _batch_reschedule_deliveries_replay_impl_20261015: ['batch_reschedule_deliveries'],
+  _save_field_crop_history_replay_impl_20261015: ['save_field_crop_history'],
+  // Same replay-binding shape (renamed behind their public wrappers; postgres-only EXECUTE). REG-1
+  // 20261210100000 re-emits both only to record each new draft's label_draft_targets row.
+  _create_label_draft_replay_impl_20261015: ['create_label_draft'],
+  _bulk_create_label_drafts_replay_impl_20261015: ['bulk_create_label_drafts'],
   // Restore the Wave A alias exemption when its drafts are promoted from
   // scripts/.staging-migrations/.
 };

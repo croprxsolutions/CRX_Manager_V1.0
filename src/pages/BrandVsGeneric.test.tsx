@@ -1,14 +1,11 @@
 /**
- * BrandVsGeneric.test.tsx — behavioral coverage for the ingredient-map management
- * UI added in Structure Wave-2 P2-3 (wire the brand↔generic page).
- *
- * Proves the parts most likely to be wrong: the insert payload shape (branded_ingredient
- * defaults to the branded name to satisfy the NOT-NULL column; generic name resolves to a
- * product id; blank notes → null), the "must be a real product" validation gate, and the
- * admin-only write gate (sales_rep sees read-only, matching the table's RLS).
+ * BrandVsGeneric.test.tsx — the Brand vs Generic page is read-only since DM-1
+ * (docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md section 6): it lists the mappings and the
+ * comparison, says ingredients move to each product's Chemistry section, and offers no add, edit
+ * or delete to anyone. The database freezes ingredient_map in the DM-1 database PR.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
 const H = vi.hoisted(() => ({
   state: {
@@ -94,181 +91,48 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+const MAPPING = {
+  id: 'm1',
+  fallback_branded_product: 'Roundup PowerMAX',
+  branded_ingredient: 'Glyphosate',
+  generic_product_id: 'p2',
+  generic_has_bulk: true,
+  notes: 'Cheaper in bulk',
+  generic_product: GENERIC,
+};
 
-describe('BrandVsGeneric — ingredient-map management', () => {
-  it('lists existing mappings for an admin', async () => {
-    H.state.mappings = [
-      {
-        id: 'm1',
-        fallback_branded_product: 'Roundup PowerMAX',
-        branded_ingredient: 'Glyphosate',
-        generic_product_id: 'p2',
-        generic_has_bulk: true,
-        notes: 'Cheaper in bulk',
-        generic_product: GENERIC,
-      },
-    ];
-    render(<BrandVsGeneric />);
-    // The row's edit/delete controls are unique to the management table (the
-    // branded/generic names also appear in the "select a product" dropdown).
-    // Assert inside waitFor with *All* matchers so it retries until the async
-    // data load has settled — a single sync snapshot can land mid-transition
-    // under the loaded full-suite worker.
-    await waitFor(() => {
-      expect(screen.getAllByLabelText('Edit mapping for Roundup PowerMAX').length).toBeGreaterThan(0);
-      expect(screen.getAllByLabelText('Delete mapping for Roundup PowerMAX').length).toBeGreaterThan(0);
+describe('BrandVsGeneric — read-only ingredient map', () => {
+  for (const role of ['admin', 'sales_rep'] as const) {
+    it(`lists mappings with no write controls for ${role}`, async () => {
+      H.state.role = role;
+      H.state.mappings = [MAPPING];
+      render(<BrandVsGeneric />);
+      await waitFor(() => expect(screen.getAllByText('Cheaper in bulk').length).toBeGreaterThan(0));
       expect(screen.getAllByText('Generic Glyphosate').length).toBeGreaterThan(0);
+      expect(screen.getByRole('note')).toHaveTextContent('This list is read-only');
+      expect(screen.queryByRole('button', { name: /Add Mapping/i })).toBeNull();
+      expect(screen.queryByLabelText(/Edit mapping/i)).toBeNull();
+      expect(screen.queryByLabelText(/Delete mapping/i)).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(H.state.lastInsert).toBeNull();
+      expect(H.state.lastUpdate).toBeNull();
+      expect(H.state.lastDelete).toBeNull();
     });
+  }
+
+  it('the comparison still shows the mapped generic for a selected product', async () => {
+    H.state.mappings = [MAPPING];
+    render(<BrandVsGeneric />);
+    await waitFor(() => expect(screen.getAllByText('Cheaper in bulk').length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'p1' } });
+    expect(await screen.findByText('Price')).toBeInTheDocument();
   });
 
-  it('inserts with branded_ingredient defaulted to the branded name and the generic resolved to its id', async () => {
-    render(<BrandVsGeneric />);
-    const addButtons = await screen.findAllByRole('button', { name: 'Add Mapping' });
-    fireEvent.click(addButtons[0]);
-
-    const dialogs = await screen.findAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products...'), {
-      target: { value: 'Roundup PowerMAX' },
-    });
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products (optional)...'), {
-      target: { value: 'Generic Glyphosate' },
-    });
-    // Leave Active Ingredient + Notes blank on purpose.
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
-
-    await waitFor(() => expect(H.state.lastInsert).not.toBeNull());
-    expect(H.state.lastInsert?.table).toBe('ingredient_map');
-    expect(H.state.lastInsert?.payload).toEqual({
-      fallback_branded_product: 'Roundup PowerMAX',
-      branded_ingredient: 'Roundup PowerMAX', // defaulted from branded name (NOT NULL column)
-      generic_product_id: 'p2',
-      generic_has_bulk: false,
-      notes: null,
-    });
-  });
-
-  it('rejects a branded product that is not in the catalog (no insert)', async () => {
-    render(<BrandVsGeneric />);
-    const addButtons = await screen.findAllByRole('button', { name: 'Add Mapping' });
-    fireEvent.click(addButtons[0]);
-
-    const dialogs = await screen.findAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products...'), {
-      target: { value: 'Totally Made Up Product' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
-
-    expect(await within(dialog).findByText(/must match an existing product/i)).toBeTruthy();
-    expect(H.state.lastInsert).toBeNull();
-  });
-
-  it('blocks a duplicate mapping for a branded product that already has one (no insert)', async () => {
-    H.state.mappings = [
-      {
-        id: 'm1',
-        fallback_branded_product: 'Roundup PowerMAX',
-        branded_ingredient: 'Glyphosate',
-        generic_product_id: 'p2',
-        generic_has_bulk: false,
-        notes: null,
-        generic_product: GENERIC,
-      },
-    ];
-    render(<BrandVsGeneric />);
-    const addButtons = await screen.findAllByRole('button', { name: 'Add Mapping' });
-    fireEvent.click(addButtons[0]);
-
-    const dialogs = await screen.findAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products...'), {
-      target: { value: 'Roundup PowerMAX' }, // already mapped above
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
-
-    expect(await within(dialog).findByText(/already exists/i)).toBeTruthy();
-    expect(H.state.lastInsert).toBeNull();
-  });
-
-  it('resolves the generic to the correct product id when product names collide (SKU-disambiguated)', async () => {
-    // Two active products share a name — the picker must resolve to a SPECIFIC id,
-    // not collapse them (schema does not enforce product_name uniqueness).
-    H.state.products = [
-      ROUNDUP,
-      { id: 'd1', product_name: 'Dupe Product', sku: 'AAA', is_active: true },
-      { id: 'd2', product_name: 'Dupe Product', sku: 'BBB', is_active: true },
-    ];
-    H.state.mappings = [];
-    render(<BrandVsGeneric />);
-    const addButtons = await screen.findAllByRole('button', { name: 'Add Mapping' });
-    fireEvent.click(addButtons[0]);
-
-    const dialogs = await screen.findAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products...'), {
-      target: { value: 'Roundup PowerMAX' },
-    });
-    // The duplicate rows are offered as "Dupe Product — SKU AAA/BBB"; pick BBB (d2).
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products (optional)...'), {
-      target: { value: 'Dupe Product — SKU BBB' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
-
-    await waitFor(() => expect(H.state.lastInsert).not.toBeNull());
-    expect(H.state.lastInsert?.payload.generic_product_id).toBe('d2'); // the exact SKU BBB row, not d1
-  });
-
-  it('a failed refresh after a save clears the earlier lists and blocks new mappings (Goal 4 part 3)', async () => {
-    H.state.mappings = [
-      {
-        id: 'm1',
-        fallback_branded_product: 'Roundup PowerMAX',
-        branded_ingredient: 'Glyphosate',
-        generic_product_id: 'p2',
-        generic_has_bulk: false,
-        notes: null,
-        generic_product: GENERIC,
-      },
-    ];
-    render(<BrandVsGeneric />);
-    await waitFor(() => expect(screen.getAllByLabelText('Edit mapping for Roundup PowerMAX').length).toBeGreaterThan(0));
-
-    // Save a new mapping; the reload that follows fails.
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Add Mapping' }))[0]);
-    const dialogs = await screen.findAllByRole('dialog');
-    const dialog = dialogs[dialogs.length - 1];
-    fireEvent.change(within(dialog).getByPlaceholderText('Search products...'), { target: { value: 'Generic Glyphosate' } });
+  it('a failed load shows the error and no rows', async () => {
+    H.state.mappings = [MAPPING];
     H.state.failProductReads = true;
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Mapping' }));
-
-    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
-    expect(screen.queryByText('No mappings yet')).not.toBeInTheDocument();
-    expect(screen.queryAllByLabelText('Edit mapping for Roundup PowerMAX')).toHaveLength(0);
-    expect(screen.queryByRole('option', { name: 'Roundup PowerMAX' })).not.toBeInTheDocument();
-    const addButtons = screen.getAllByRole('button', { name: 'Add Mapping' });
-    expect(addButtons[0]).toBeDisabled();
-  });
-
-  it('hides all write controls from a non-admin (read-only)', async () => {
-    H.state.role = 'sales_rep';
-    H.state.mappings = [
-      {
-        id: 'm1',
-        fallback_branded_product: 'Roundup PowerMAX',
-        branded_ingredient: 'Glyphosate',
-        generic_product_id: 'p2',
-        generic_has_bulk: false,
-        notes: null,
-        generic_product: GENERIC,
-      },
-    ];
     render(<BrandVsGeneric />);
-    // Data still visible (appears in the dropdown + table row)…
-    expect((await screen.findAllByText('Generic Glyphosate')).length).toBeGreaterThan(0);
-    // …but no Add button and no per-row edit/delete controls.
-    expect(screen.queryByRole('button', { name: 'Add Mapping' })).toBeNull();
-    expect(screen.queryByLabelText(/Edit mapping/i)).toBeNull();
-    expect(screen.queryByLabelText(/Delete mapping/i)).toBeNull();
+    expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('Cheaper in bulk')).not.toBeInTheDocument();
   });
 });

@@ -1408,7 +1408,7 @@ export default function Jobs() {
     setMasterMixExporting(true);
     try {
       const ids = selectedRows.map((j) => j.id);
-      const { jobs: fetched, excluded } = await fetchMasterMixSummaryData(ids);
+      const { jobs: fetched, excluded, weights } = await fetchMasterMixSummaryData(ids);
       // Every selected job failed to resolve / had no chemicals → don't produce an
       // official-looking empty mix sheet. Tell the user why (mirrors the per-job guards).
       if (fetched.length === 0) {
@@ -1418,7 +1418,7 @@ export default function Jobs() {
         setMasterMixExporting(false);
         return;
       }
-      const mix = buildMasterMixSummaryData(fetched, excluded);
+      const mix = buildMasterMixSummaryData(fetched, excluded, weights);
       await generateMasterMixSummaryPdf(mix);
 
       // Audit log only (NO printed_at stamp — this is a batch-prep doc, not a compliance print).

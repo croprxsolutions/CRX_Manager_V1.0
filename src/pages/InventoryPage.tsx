@@ -1,6 +1,6 @@
 import { useEffect, useState , useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Package, ArrowDownToLine, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
+import { Package, ArrowDownToLine, PaintBucket, Pencil, Plus, AlertTriangle, ChevronDown, ChevronUp, Trash2, Download, FileText, TrendingUp, ShoppingCart } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
@@ -31,6 +31,8 @@ import { logActivity } from '../lib/activityLogger';
 import TransactionLedgerModal from '../components/inventory/TransactionLedgerModal';
 import BatchAdjustModal from '../components/inventory/BatchAdjustModal';
 import InventoryPositionMobileCards from '../components/inventory/InventoryPositionMobileCards';
+import ToteFillModal from '../components/inventory/ToteFillModal';
+import { listFillableToteIds, TOTE_FILL_LOCATION } from '../lib/toteFill';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import ReasonModal from '../components/ui/ReasonModal';
 import { localToday, parseLocalDate } from '../lib/dateUtils';
@@ -263,6 +265,21 @@ export default function InventoryPage() {
 
   const isAdmin = role === 'admin';
   const [exportingPdf, setExportingPdf] = useState(false);
+
+  // BLK-1a: tote sizes with a Bulk fill source get a Fill button; the database rechecks each fill.
+  const [fillableToteIds, setFillableToteIds] = useState<Set<string>>(new Set());
+  const [fillTote, setFillTote] = useState<{ productId: string; name: string } | null>(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    listFillableToteIds()
+      .then((ids) => { if (!cancelled) setFillableToteIds(ids); })
+      .catch((error: unknown) => {
+        Sentry.captureException(error, { tags: { source: 'fetch', page: 'inventory-fillable-totes' } });
+        if (!cancelled) toast('warning', 'Tote Fill buttons could not be loaded. Reload to try again, or fill from the tote product page.');
+      });
+    return () => { cancelled = true; };
+  }, [isAdmin, toast]);
 
   const handleExportCSV = () => {
     exportToCSV(filtered as unknown as Record<string, unknown>[], [
@@ -1413,6 +1430,16 @@ export default function InventoryPage() {
             header: 'Actions',
             render: (row: InventoryRow) => (
               <div className="flex gap-1">
+                {isAdmin && fillableToteIds.has(row.product_id) && row.location === TOTE_FILL_LOCATION && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setFillTote({ productId: row.product_id, name: row.product_name }); }}
+                    className="p-1.5 rounded hover:bg-gray-100 text-secondary"
+                    title="Fill Tote from Bulk"
+                    aria-label="Fill Tote from Bulk"
+                  >
+                    <PaintBucket className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); openReceiveModal(row.id); }}
                   className="p-1.5 rounded hover:bg-gray-100 text-secondary"
@@ -1697,6 +1724,8 @@ export default function InventoryPage() {
             onReceive={openReceiveModal}
             onAdjust={openAdjustModal}
             onDelete={handleDelete}
+            fillableToteIds={isAdmin ? fillableToteIds : undefined}
+            onFillTote={(row) => setFillTote({ productId: row.product_id, name: row.product_name })}
           />
         </div>
         )}
@@ -2290,6 +2319,16 @@ export default function InventoryPage() {
           );
         })()}
       </Modal>
+
+      {fillTote && profile && isAdmin && (
+        <ToteFillModal
+          toteProductId={fillTote.productId}
+          toteName={fillTote.name}
+          profileId={profile.id}
+          onClose={() => setFillTote(null)}
+          onFilled={() => { fetchInventory(); }}
+        />
+      )}
 
       <TransactionLedgerModal
         open={ledgerOpen}

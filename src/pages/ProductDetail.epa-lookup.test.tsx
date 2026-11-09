@@ -87,7 +87,9 @@ function lookupResult(overrides: Partial<EpaLookupResult> = {}): EpaLookupResult
 
 // The Vendors section has its own tests; these page tests do not mock its reads.
 vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
-vi.mock('../lib/db', () => {
+vi.mock('../components/products/ProductWeightCard', () => ({ default: () => null }));
+vi.mock('../lib/db', async () => {
+  const { hasRpcCode, RpcErrorCodes } = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   function chainable(resolveWith: unknown) {
     const builder: Record<string, unknown> = {};
     let resolved = resolveWith;
@@ -124,8 +126,23 @@ vi.mock('../lib/db', () => {
       return data;
     },
     checkMutationResult: vi.fn(),
+    hasRpcCode,
+    RpcErrorCodes,
+    sanitizeError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   };
 });
+
+// PAR-1: the page asks for the product's parent; these products have none (and the rpc spy stays EPA-only).
+vi.mock('../lib/productParents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productParents')>()),
+  getParentOfProduct: async () => null,
+}));
+
+// The brands section reads through its own RPC; keep it off H.rpc so these tests see only the EPA draft call.
+vi.mock('../lib/productBrands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productBrands')>()),
+  getProductBrands: vi.fn(async () => ({ parentId: null, parentName: null, brands: [] })),
+}));
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: H.toast }),
@@ -157,6 +174,8 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({
     getKey: () => 'epa-draft-key',
+    getKeyFor: () => 'create-key',
+    resetKeyFor: vi.fn(),
     resetKey: H.resetDraftKey,
   }),
 }));
@@ -254,6 +273,22 @@ describe('ProductDetail EPA lookup', () => {
     expect(params.p_status).toBe('needs_manual');
     expect(params.p_confidence).toBe('medium');
     expect(JSON.stringify(params)).not.toContain('UNRECOGNIZED RAW VALUE');
+  });
+
+  it('shows a moved registration and offers nothing to apply', async () => {
+    render(<ProductDetail />);
+    H.invoke.mockResolvedValueOnce({
+      data: lookupResult({ found: false, eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE', transferredTo: '105211-77' }),
+      error: null,
+    });
+    const registrationInputs = await screen.findAllByLabelText('EPA Registration');
+    fireEvent.change(registrationInputs[0], { target: { value: '264-849' } });
+    fireEvent.click((await screen.findAllByRole('button', { name: /look up epa/i }))[0]);
+
+    expect(await screen.findByText(/EPA moved 264-849 to 105211-77 \(ROUNDUP ULTRA HERBICIDE\)/)).toBeInTheDocument();
+    expect(H.toast).toHaveBeenCalledWith('warning', 'EPA moved registration 264-849 to 105211-77.');
+    expect(screen.queryByRole('button', { name: /apply to product/i })).toBeNull();
+    expect(H.rpc).not.toHaveBeenCalled();
   });
 
   it('blocks applying a lookup of a registration different from the product\'s saved one', async () => {

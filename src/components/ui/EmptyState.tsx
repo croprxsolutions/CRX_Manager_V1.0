@@ -17,10 +17,10 @@ export default function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-4">
-      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-        {icon || <Inbox className="w-6 h-6 text-gray-400" />}
+      <div className="w-14 h-14 rounded-full bg-crx-green-light text-crx-green flex items-center justify-center mb-4">
+        {icon || <Inbox className="w-6 h-6" strokeWidth={1.75} />}
       </div>
-      <h3 className="text-base font-semibold text-nav-dark mb-1">{title}</h3>
+      <h3 className="text-lg font-semibold font-heading text-nav-dark mb-1">{title}</h3>
       {description && (
         <p className="text-sm text-secondary mb-4 text-center max-w-sm">
           {description}
@@ -46,7 +46,7 @@ export function LoadFailedState({
   return (
     <div role="alert">
       <EmptyState
-        icon={<AlertTriangle className="w-6 h-6 text-amber-500" />}
+        icon={<AlertTriangle className="w-6 h-6 text-amber-600" strokeWidth={1.75} />}
         title={title}
         description="This does not mean the records are gone. Check your connection and try again."
         action={

@@ -17,10 +17,10 @@ interface ConfirmModalProps {
   loading?: boolean;
 }
 
-const variantStyles: Record<ConfirmVariant, { bg: string; text: string; icon: string }> = {
-  danger: { bg: 'bg-red-50', text: 'text-red-800', icon: 'text-red-600' },
-  warning: { bg: 'bg-amber-50', text: 'text-amber-800', icon: 'text-amber-600' },
-  info: { bg: 'bg-blue-50', text: 'text-blue-800', icon: 'text-blue-600' },
+const variantStyles: Record<ConfirmVariant, string> = {
+  danger: 'bg-red-50 text-red-700',
+  warning: 'bg-amber-50 text-amber-700',
+  info: 'bg-crx-green-light text-crx-green',
 };
 
 const defaultIcons: Record<ConfirmVariant, LucideIcon> = {
@@ -52,7 +52,7 @@ export default function ConfirmModal({
       title={title}
       footer={
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button variant="ghost" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
+          <Button variant="secondary" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
             {cancelLabel}
           </Button>
           <Button
@@ -67,11 +67,11 @@ export default function ConfirmModal({
         </div>
       }
     >
-      <div className="space-y-4">
-        <div className={`flex items-center gap-3 p-3 ${styles.bg} rounded-lg`}>
-          <Icon className={`w-5 h-5 ${styles.icon} shrink-0`} />
-          <p className={`text-sm ${styles.text}`}>{message}</p>
-        </div>
+      <div className="flex items-start gap-3">
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${styles}`} aria-hidden="true">
+          <Icon className="w-5 h-5" />
+        </span>
+        <p className="pt-2 text-sm text-secondary">{message}</p>
       </div>
     </Modal>
   );

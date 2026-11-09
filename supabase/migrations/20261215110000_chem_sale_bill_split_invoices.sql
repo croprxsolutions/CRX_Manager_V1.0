@@ -1908,18 +1908,6 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE';
   END IF;
-  -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill Split
-  -- payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
-  -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09).
-  IF EXISTS (
-    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) e
-     -- Any text numeric accepts, exponent form included ("1.005e0"), so none slips past as a string.
-     WHERE (e ->> 'quantity') ~ '^\s*[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$'
-       AND (e ->> 'quantity')::numeric <> round((e ->> 'quantity')::numeric, 2)
-  ) THEN
-    RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
-      USING ERRCODE = 'check_violation';
-  END IF;
   IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_return requires p_idempotency_key';
   END IF;
@@ -1935,6 +1923,19 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
     END IF;
     RETURN v_replay -> 'result';
+  END IF;
+  -- After the replay, so a retry of an earlier accepted request still answers as before.
+  -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill Split
+  -- payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
+  -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09).
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) e
+     -- Any text numeric accepts, exponent form included ("1.005e0"), so none slips past as a string.
+     WHERE (e ->> 'quantity') ~ '^\s*[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$'
+       AND (e ->> 'quantity')::numeric <> round((e ->> 'quantity')::numeric, 2)
+  ) THEN
+    RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
+      USING ERRCODE = 'check_violation';
   END IF;
 
   v_result := public._create_return_intent_impl_20260812(p_return, p_items, p_idempotency_key);

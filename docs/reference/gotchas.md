@@ -164,6 +164,7 @@ Setting `updated_at = now()` in an UPDATE on a table without the column will cra
 | Money must be exact whole cents. New storage uses `bigint` cents. Legacy PostgreSQL numeric-dollar storage is approved only after exact `numeric` math, clean finite whole-cent values, and an active finite whole-cent CHECK are verified; dirty or unconstrained columns remain findings. | Binary-float conversion, parsing, arithmetic, or rounding corrupts authoritative money. Parse decimal input into integer cents; do not casually retype legacy values. |
 | Season = October 1 to September 30 | Hardcoded in commission and prepay rollover logic |
 | Status enum strings are case- and value-sensitive | DB CHECK constraints enforce exact strings — `'void'` vs `'voided'` matters |
+| `products.tierN_gross_margin` (and the pricing tables' `output_tierN_gross_margin`) means **markup**: (price − cost) ÷ cost. `tierN_margin` is the true margin: (price − cost) ÷ price. | The pricing functions compute `round((price - cost) / cost, 4)` (or `margin / (1 - margin)`), and the screens label it "Markup %" beside "Net margin %". Cost 50, price 62.50 → margin 0.20, "gross_margin" 0.25. Checked live 2026-11-08: no product matches the price-based formula. Never feed `gross_margin` into anything that expects a margin. |
 
 ---
 

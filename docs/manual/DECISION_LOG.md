@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — Taha's merge hold covers a fixed list, not every PR
 
 **Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.

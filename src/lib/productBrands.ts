@@ -126,9 +126,11 @@ export function productBrandErrorMessage(error: unknown): string {
  * Brand names written inside a product's name, e.g. "Roundup 5.4# Generic (Ag Saver 5.4, Slam 5.4) - 2.5 Gal"
  * → ["Ag Saver 5.4", "Slam 5.4"]. Only suggestions: some words in brackets are notes, not brands, so an admin
  * confirms each one (and types its EPA number) before it is saved. Names already listed are left out. Uses the
- * same bracket reader as the name-vs-brand check on Label Data Quality, so both agree.
+ * same bracket reader as the name-vs-brand check on Label Data Quality, so both agree. A brand the name may have
+ * cut off (e.g. "Bra" in "(Brand A, Bra") is never suggested: the name needs fixing, not a new brand.
  */
 export function suggestBrandNamesFromProductName(productName: string, existingNames: string[] = []): string[] {
   const taken = new Set(existingNames.map(normalizeBrand));
-  return parseNameBrands(productName).brands.filter((name) => !taken.has(normalizeBrand(name)));
+  const { brands, maybeCutOff } = parseNameBrands(productName);
+  return brands.filter((name) => name !== maybeCutOff && !taken.has(normalizeBrand(name)));
 }

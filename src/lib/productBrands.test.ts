@@ -52,6 +52,10 @@ describe('suggestBrandNamesFromProductName', () => {
   it('suggests the brands of a cut-off name without the size it swallowed', () => {
     expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, 2.5G')).toEqual(['Alpha', 'Bravo']);
   });
+
+  it('never suggests a brand the name may have cut off', () => {
+    expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, Cha')).toEqual(['Alpha', 'Bravo']);
+  });
 });
 
 describe('EPA_REGISTRATION_PATTERN', () => {

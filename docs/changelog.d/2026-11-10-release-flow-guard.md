@@ -12,15 +12,19 @@ New workflow `.github/workflows/release-flow.yml` for the staging-first release 
   has commits `staging` lacks.
 - **Back-merge** (pushes to `main`): opens one `main → staging` PR when staging is missing main's
   commits (after a release or a hotfix), asking for a merge commit, same day. It uses the release
-  bot GitHub App (secrets `RELEASE_APP_ID`, `RELEASE_APP_KEY`), because this repository doesn't let
+  bot GitHub App (secrets `RELEASE_APP_ID`, `RELEASE_APP_KEY`, kept in the `release-bot` GitHub
+  Environment, which deploys only from `main` and `staging`, so no PR workflow can read them), because this repository doesn't let
   Actions open PRs and a PR opened by the built-in token gets no CI.
 - "Main inside staging" must never be a required check (it is skipped on PRs, and GitHub counts a
   skipped required job as passed).
 - **Release flow scripts** (every PR): `node --test .github/scripts/release-flow.test.mjs`.
 
-Settings that close the remaining gaps (Taha, with Mason's OK): CODEOWNERS with code-owner review on
-`.github/**` (otherwise a PR could edit this workflow itself), and "require branches to be up to date"
-on `main` (so a green guard is re-run after a hotfix moves `main`).
+`.github/CODEOWNERS` makes Mason and Taha the owners of `.github/`. Settings that close the remaining
+gaps (Taha, with Mason's OK): "Require review from Code Owners" on `main` and `staging` (otherwise a
+PR could edit this workflow itself); "Require branches to be up to date" on `main` (so a green guard
+re-runs after a hotfix moves `main`); a ruleset letting only the release bot push `release/next`; and
+the `release-bot` environment. A back-merge squashed by mistake turns "Main inside staging" red; the
+fix is another back-merge with a merge commit.
 
 Nothing is enforced until the repository variable `RELEASE_FLOW` is set to `on`, which Taha does
 together with the branch rulesets once Mason agrees. Until then each check passes with a notice.

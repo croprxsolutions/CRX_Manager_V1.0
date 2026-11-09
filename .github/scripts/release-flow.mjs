@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 // Only the bot's release branch and hotfix branches may open a PR into main.
 export function isReleaseOrHotfixHead(ref) {
-  return typeof ref === 'string' && /^(release\/next|hotfix\/[^/].*)$/.test(ref);
+  return typeof ref === 'string' && /^(release\/next|hotfix\/[^/]+)$/.test(ref);
 }
 
 // Every enforcing check stays inert until the repository variable RELEASE_FLOW is "on".

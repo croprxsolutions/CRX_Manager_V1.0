@@ -5,7 +5,7 @@ import { isReleaseOrHotfixHead, flowEnabled } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
   for (const ok of ['release/next', 'hotfix/fix-x', 'hotfix/2026-11-10-cents']) assert.equal(isReleaseOrHotfixHead(ok), true, ok);
-  for (const bad of ['hotfix/', 'release/v1.0.0', 'release/next/x', 'main', 'staging', 'taha/x', 'claude/hotfix/x', '', undefined]) {
+  for (const bad of ['hotfix/', 'release/v1.0.0', 'release/next/x', 'hotfix/fix/extra', 'main', 'staging', 'taha/x', 'claude/hotfix/x', '', undefined]) {
     assert.equal(isReleaseOrHotfixHead(bad), false, String(bad));
   }
 });

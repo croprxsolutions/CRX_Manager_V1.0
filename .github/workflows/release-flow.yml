@@ -85,6 +85,9 @@ jobs:
     name: Back-merge main into staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # The release bot's key lives only in this environment, which deploys from main and staging
+    # alone, so no pull_request workflow can read it.
+    environment: release-bot
     concurrency:
       group: release-flow-back-merge
     permissions:

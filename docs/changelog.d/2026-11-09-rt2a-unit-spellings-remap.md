@@ -8,5 +8,9 @@
   changes (every pair has the same conversion factor); the unit list itself is untouched until step 2.
 - Every listed product must still match its reviewed id, name, form and spelling, or nothing changes. The
   change history logs each move. New paperwork for those products shows `oz` / `qt`; old documents keep theirs.
+- New migration `20261227090000_convert_to_gl_lb_dry_oz.sql`, applied first: a field job's pound equivalent
+  now reads `Dry oz` on a dry product as pounds (16 Dry oz = 1 lb), on screen, on new invoice lines and on the
+  applicator sheet, chemical summary, master-mix and projected-use reports. Before it, the 76 products already
+  on `Dry oz` showed a dash; invoice lines saved before keep their dash. Job billing's unit matching is unchanged.
 - After the live apply, download fresh pricing and setup workbooks (older downloads refuse the moved rows).
 - Proof: `node scripts/smoke/prove-unit-spellings-real-schema.mjs` (UNIT_SPELLINGS_STEP1_PROOF_PASS).

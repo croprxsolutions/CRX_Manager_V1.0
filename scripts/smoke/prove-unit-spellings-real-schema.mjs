@@ -362,6 +362,10 @@ async function main() {
   seed(rows);
   stageText('cand.sql', lf(CANDIDATE));
   stageText('reverse.sql', lf(REVERSE));
+  const MIG = path.join(ROOT, 'supabase', 'migrations');
+  const fnBlock = (t) => t.match(/CREATE OR REPLACE FUNCTION public\.convert_to_gl_lb[\s\S]*?\$function\$;\n/)[0];
+  stageText('gllb-old.sql', fnBlock(lf(path.join(MIG, '20261104150000_product_forms_seed_each.sql'))));
+  stageText('gllb-new.sql', lf(path.join(MIG, '20261227090000_convert_to_gl_lb_dry_oz.sql')));
   const s0 = { units: units(), money: money(), versions: versions(), fns: fnBodies(), perAcre: perAcre() };
   assert.match(s0.fns, /:14$/, 'the 14 functions that read unit_conversions are present');
   const q0 = quotes(rows);
@@ -394,6 +398,12 @@ async function main() {
   refused('cand.sql', /RT2A_UNLISTED_SPELLING[^\n]*seed LB/);
   raw("DELETE FROM public.product_form_units WHERE product_form = 'seed' AND unit = 'LB';");
   console.log('[prover] U8: an unlisted product, or a form-unit entry, using LB refuses');
+
+  // The remap refuses until 20261227090000 is live (put the old converter back, refuse, re-apply the new one).
+  assert.equal(apply('gllb-old.sql').status, 0);
+  refused('cand.sql', /RT2A_GLLB_FIRST/);
+  { const g = apply('gllb-new.sql'); assert.equal(g.status, 0, g.output); }
+  console.log('[prover] order: without the Dry oz converter the remap refuses; the converter migration re-applies cleanly');
 
   // U9. A listed product used in a family refuses; so does a family rate unit on a losing spelling.
   raw(`INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${FAM}', 'RT2A family', 'liquid', '${ADMIN}', '${ADMIN}');
@@ -455,6 +465,12 @@ async function main() {
   // U13. The setup guard still refuses an ordinary stock-unit change.
   const u13 = psql(`UPDATE public.products SET inventory_unit = 'Gal', unit_size = 'Gal' WHERE id = '${armezon.id}';`, { allowFailure: true });
   assert.match(`${u13.stdout}\n${u13.stderr}`, /can't change on a saved product/);
+  // Sol round 1 HIGH: the two products moved to Dry oz keep their pound equivalent (20261227090000).
+  for (const row of rows.filter((x) => x.neu === 'Dry oz')) {
+    assert.equal(scalar(`SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.products p,
+        public.convert_to_gl_lb(16, p.rate_unit, p.product_form) c WHERE p.id = '${row.id}';`), '1.00000000000000000000 LB', `${row.name} pound equivalent`);
+  }
+  console.log('[prover] gl/lb: 16 Dry oz of each moved dry product is 1 LB');
   console.log('[prover] U13: after the apply a stock-unit change is still refused');
 
   // U1 at S1: the same quotes price to the cent.

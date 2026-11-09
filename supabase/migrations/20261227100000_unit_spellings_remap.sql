@@ -70,6 +70,10 @@ BEGIN
 
   -- The rate lock must be off: the three rate changes and the stock-unit changes of rated products pass
   -- guard_product_rate_lock only while it is.
+  -- 20261227090000 must be live first, or the two products moved to Dry oz lose their pound equivalent.
+  IF (SELECT c.converted_value FROM public.convert_to_gl_lb(16, 'Dry oz', 'dry') c) IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'RT2A_GLLB_FIRST: apply 20261227090000_convert_to_gl_lb_dry_oz first. Nothing was changed.';
+  END IF;
   -- FOR SHARE holds the lock state until commit, so nobody can lock rates halfway through.
   IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'RT2A_RATE_LOCK_ON: product rates are locked; unlock them with a reason, apply, then lock again. Nothing was changed.';

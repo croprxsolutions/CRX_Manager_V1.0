@@ -174,7 +174,7 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
   function serverGlLb(q: number, unit: string, form: 'liquid' | 'dry'): { value: number; unit: 'gal' | 'lb' } | null {
     const u = unit.trim().toUpperCase();
     if (form === 'dry') {
-      const f = (u === 'OZ' || u === 'OUNCE' || u === 'OUNCES') ? 1 / 16
+      const f = (u === 'OZ' || u === 'DRY OZ' || u === 'OUNCE' || u === 'OUNCES') ? 1 / 16
         : (u === 'LB' || u === 'LBS' || u === 'POUND' || u === 'POUNDS') ? 1
         : (u === 'TON' || u === 'TONS') ? 2000 : null;
       return f === null ? null : { value: Math.round(q * f * 10000) / 10000, unit: 'lb' };
@@ -193,6 +193,14 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
     expect(toGallonOrLbEquivalent(80, 'oz', 'liquid')).toEqual({ value: 0.625, unit: 'gal' });
     expect(toGallonOrLbEquivalent(80, 'oz')).toEqual({ value: 5, unit: 'lb' }); // legacy/no-form path (unchanged)
     expect(toGallonOrLbEquivalent(80, 'oz', 'liquid')).toEqual(serverGlLb(80, 'oz', 'liquid'));
+  });
+
+  it('DRY + Dry oz → POUNDS (16 Dry oz = 1 lb), equal to the server; Dry oz on a liquid stays a dash (RT-2)', () => {
+    expect(toGallonOrLbEquivalent(16, 'Dry oz', 'dry')).toEqual({ value: 1, unit: 'lb' });
+    expect(toGallonOrLbEquivalent(4.8, 'DRY OZ', 'dry')).toEqual(serverGlLb(4.8, 'DRY OZ', 'dry'));
+    expect(toGallonOrLbEquivalent(16, 'Dry oz')).toEqual({ value: 1, unit: 'lb' }); // no-form path
+    expect(toGallonOrLbEquivalent(16, 'Dry oz', 'liquid')).toBeNull();
+    expect(serverGlLb(16, 'Dry oz', 'liquid')).toBeNull();
   });
 
   it('LIQUID qt / pt / gal → GALLONS, equal to the server', () => {

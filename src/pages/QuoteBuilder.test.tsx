@@ -4942,10 +4942,10 @@ describe('QuoteBuilder', () => {
     expect(refusalMessage).toMatch(/was not saved/i);
   });
   describe('header and actions (Quotes UI redesign)', () => {
-    function renderAtStatus(status: string, isPlanned = true) {
+    function renderAtStatus(status: string, isPlanned = true, orders: unknown[] = []) {
       const quote = { id: `quote-${status}`, quote_number: 'Q-HDR-1', customer_id: 'customer-1', customer: QUOTE_FIXTURE_CUSTOMER, tier: 1, valid_days: 30, header_notes: '', footer_notes: '', status, is_planned: isPlanned, commission_split: { splits: [] }, row_version: 1, created_at: RECENT_QUOTE_CREATED_AT };
       mockFrom.mockImplementation((table: string) => buildChain({
-        data: table === 'quotes' ? quote : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER] : [],
+        data: table === 'quotes' ? quote : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER] : table === 'orders' ? orders : [],
         error: null,
       }));
       renderQuoteBuilder(quote.id);
@@ -4961,25 +4961,39 @@ describe('QuoteBuilder', () => {
       .filter((el) => el.getAttribute('aria-disabled') !== 'true')
       .map((el) => el.querySelector('[slot="label"]')?.textContent ?? el.textContent ?? '');
 
-    /** Every action a user can run from the header: enabled buttons plus enabled items of both menus. */
-    function availableActions(): string[] {
+    function stubPhone() {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+      }));
+    }
+
+    /**
+     * Every action a user can run from the header (and, on a phone, the bottom bar): enabled buttons
+     * plus enabled items of both menus. On a phone the preview icon and the green Preview & send are
+     * one action, so names are de-duplicated there.
+     */
+    function availableActions(phone = false): string[] {
+      const regions = [header(), screen.queryByTestId('quote-bottom-bar')].filter((el): el is HTMLElement => !!el);
       const names: string[] = [];
-      for (const button of within(header()).getAllByRole('button')) {
-        // Skips the menu triggers (their items are read below), help tips and the Quotes breadcrumb.
-        const name = button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '';
-        if ((button as HTMLButtonElement).disabled || ['More actions', 'Create order', 'More info', 'Quotes'].includes(name)) continue;
-        names.push(name);
+      for (const region of regions) {
+        for (const button of within(region).getAllByRole('button')) {
+          // Skips the menu triggers (their items are read below), help tips and the Quotes breadcrumb.
+          const name = button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '';
+          if ((button as HTMLButtonElement).disabled || ['More actions', 'Create order', 'More info', 'Quotes'].includes(name)) continue;
+          names.push(name === 'Preview and send' ? 'Preview & send' : name);
+        }
       }
       fireEvent.click(within(header()).getByRole('button', { name: 'More actions' }));
       names.push(...menuItemNames());
       fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
-      const createOrder = within(header()).queryByRole('button', { name: 'Create order' });
+      const createOrder = regions.map((r) => within(r).queryByRole('button', { name: 'Create order' })).find(Boolean);
       if (createOrder) {
         fireEvent.click(createOrder);
         names.push(...menuItemNames());
         fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
       }
-      return names.sort();
+      return (phone ? [...new Set(names)] : names).sort();
     }
 
     /** Today's show and enable conditions (QuoteBuilder before the redesign), one action name each. */
@@ -4991,7 +5005,7 @@ describe('QuoteBuilder', () => {
       if (status === 'draft') names.push('Book as order');
       if (open || status === 'accepted') names.push('Convert whole booking');
       if (open) names.push('Draw part of booking…', "Close short (grower won't take the rest)", 'Decline quote');
-      if (open && planned) names.push('Close as applied (we applied it)');
+      if (open && planned) names.push('Close as applied (we applied the product)');
       if (status === 'sent') names.push('Revise quote');
       if (status === 'draft' || open) names.push('Cancel quote');
       if (role === 'admin' && ['accepted', 'declined', 'expired', 'cancelled'].includes(status)) {
@@ -5050,13 +5064,12 @@ describe('QuoteBuilder', () => {
     });
 
     it('phone: top bar with back, number, preview and More; Save draft and the green action stay at the bottom', async () => {
-      vi.stubGlobal('matchMedia', (query: string) => ({
-        matches: query === '(max-width: 767px)', media: query, onchange: null,
-        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
-      }));
+      stubPhone();
       try {
-        renderAtStatus('sent');
+        renderAtStatus('sent', true, [{ id: 'order-hdr-1', order_number: 'O-HDR-1' }]);
         await loaded();
+        // The quote's orders stay reachable on a phone.
+        expect(within(await screen.findByLabelText('Transaction thread')).getByText(/O-HDR-1/)).toBeInTheDocument();
         const top = header();
         expect(within(top).getByRole('link', { name: 'Back to quotes' })).toHaveAttribute('href', '/quotes');
         expect(within(top).getByRole('button', { name: 'Preview and send' })).toBeInTheDocument();
@@ -5084,15 +5097,23 @@ describe('QuoteBuilder', () => {
     it.each(['draft', 'sent', 'revised', 'accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short'])(
       '%s: the header offers exactly today’s actions to an admin and a sales rep',
       async (status) => {
-        for (const role of ['admin', 'sales_rep']) {
-          for (const planned of [true, false]) {
-            authState.role = role;
-            dirtyStates.length = 0;
-            renderAtStatus(status, planned);
-            await loaded();
-            expect(availableActions(), `${status} / ${role} / planned=${planned}`).toEqual(todaysActions(status, role, planned));
-            cleanup();
+        try {
+          for (const phone of [false, true]) {
+            if (phone) stubPhone();
+            for (const role of ['admin', 'sales_rep']) {
+              for (const planned of [true, false]) {
+                authState.role = role;
+                dirtyStates.length = 0;
+                renderAtStatus(status, planned);
+                await loaded();
+                expect(availableActions(phone), `${status} / ${role} / planned=${planned} / phone=${phone}`)
+                  .toEqual(todaysActions(status, role, planned));
+                cleanup();
+              }
+            }
           }
+        } finally {
+          vi.unstubAllGlobals();
         }
       },
     );

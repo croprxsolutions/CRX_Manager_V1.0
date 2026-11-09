@@ -4244,10 +4244,10 @@ export default function QuoteBuilder() {
       onAction: () => { setRevertReason(''); setShowRevertModal(true); }, disabled: reverting,
     }] : []),
     // The phone top bar has no room for secondaries, so they join the menu there.
-    ...(isPhone && showRevise ? [{ id: 'revise', label: 'Revise quote', icon: <Pencil className="w-4 h-4" />, onAction: handleReviseQuote, disabled: revising }] : []),
+    ...(isPhone && showRevise ? [{ id: 'revise', label: revising ? 'Revising…' : 'Revise quote', icon: <Pencil className="w-4 h-4" />, onAction: handleReviseQuote, disabled: revising }] : []),
     ...(isPhone && showCreateOrder && primary !== 'createOrder' ? createOrderItems.map((item) => ({ ...item, group: 'Create order' })) : []),
     ...(canCloseApplied ? [{
-      id: 'close-applied', label: 'Close as applied (we applied it)', icon: <CheckCircle className="w-4 h-4" />, group: 'Close this booking',
+      id: 'close-applied', label: 'Close as applied (we applied the product)', icon: <CheckCircle className="w-4 h-4" />, group: 'Close this booking',
       onAction: () => setConfirmCloseAppliedOpen(true), disabled: closingApplied,
     }] : []),
     ...(canCloseShort ? [{
@@ -4328,11 +4328,28 @@ export default function QuoteBuilder() {
   ].filter(Boolean).join(' · ');
   const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
   const hasBottomBar = isPhone && (showSaveDraft || !!greenAction);
+  // The shared component carries its own mb-4; the wrapper drops it inside the header.
+  const thread = isEditing && threadOrders.length > 0 && (
+    <div className="[&>div]:mb-0">
+      <TransactionThread
+        quoteId={quoteId || undefined}
+        quoteNumber={quoteNumber || undefined}
+        orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
+        deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
+        invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
+        currentEntity="quote"
+        currentEntityId={quoteId || undefined}
+      />
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
+    // Scroll margins keep a focused control clear of the sticky bars: TopBar + quote header above
+    // (about 112 px on a phone, up to about 210 px on desktop), MobileBottomNav + bottom bar below (about 115 px).
+    <div className="space-y-4 [&_:is(a,button,input,select,textarea)]:scroll-mt-32 md:[&_:is(a,button,input,select,textarea)]:scroll-mt-56 max-md:[&_:is(a,button,input,select,textarea)]:scroll-mb-32">
       {isPhone ? (
         <>
+          {/* top-14 = TopBar phone height (h-14); -mx-4 -mt-4 undo AppLayout main padding (p-4). */}
           <div data-testid="quote-header" className="sticky top-14 z-20 -mx-4 -mt-4 flex h-14 items-center gap-1 border-b border-gray-200 bg-white px-1">
             <Link to="/quotes" aria-label="Back to quotes" className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-nav-dark">
               <ArrowLeft className="w-5 h-5" aria-hidden="true" />
@@ -4356,25 +4373,17 @@ export default function QuoteBuilder() {
             {selectedCustomer?.farm_name && <span className="text-base font-semibold text-nav-dark break-words">{selectedCustomer.farm_name}</span>}
             {plannedToggle}
           </div>
+          {thread}
         </>
       ) : (
-        <div data-testid="quote-header" className="sticky top-16 z-20 -mx-4 -mt-4 lg:-mx-6 lg:-mt-6 flex flex-col gap-2.5 border-b border-gray-200 bg-cream/95 px-4 py-3.5 backdrop-blur lg:px-6">
+        // top-16 = TopBar height (md:h-16); -mx/-mt undo AppLayout main padding (p-4, lg:p-6). Not sticky on short landscape screens.
+        <div data-testid="quote-header" className="[@media(min-height:600px)]:sticky top-16 z-20 -mx-4 -mt-4 lg:-mx-6 lg:-mt-6 flex flex-col gap-2.5 border-b border-gray-200 bg-cream/95 px-4 py-3.5 backdrop-blur lg:px-6">
           <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
             <Breadcrumbs items={[
               { label: 'Quotes', href: '/quotes' },
               { label: isEditing ? (quoteNumber || 'Quote') : 'New quote' },
             ]} />
-            {isEditing && threadOrders.length > 0 && (
-              <TransactionThread
-                quoteId={quoteId || undefined}
-                quoteNumber={quoteNumber || undefined}
-                orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
-                deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
-                invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
-                currentEntity="quote"
-                currentEntityId={quoteId || undefined}
-              />
-            )}
+            {thread}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
             <div className="flex min-w-0 flex-col gap-0.5">
@@ -6139,7 +6148,8 @@ export default function QuoteBuilder() {
         variant="warning"
       />
 
-      {/* Phone: sticky above the app's bottom nav. It sits in the page flow, so it never covers the last content. */}
+      {/* Phone: sticky above MobileBottomNav (min-h-11 + 1px border + safe area); -mx-4 undoes AppLayout main p-4.
+          It sits in the page flow, so it never covers the last content. */}
       {hasBottomBar && (
         <div data-testid="quote-bottom-bar" className="sticky bottom-[calc(2.75rem+1px+env(safe-area-inset-bottom))] z-20 -mx-4 flex gap-2 border-t border-gray-200 bg-white px-4 pb-3.5 pt-2.5 shadow-[0_-1px_4px_rgba(0,0,0,0.08)]">
           {showSaveDraft && saveDraftButton('flex-1')}

@@ -1,11 +1,13 @@
 import { supabase } from './db';
-import { ilikeOrPattern, excludedIdList } from './recordSearch';
+import { fetchAllRows } from './pagedRead';
 
 /** Words too common in farm names to say two customers are the same. */
 const FILLER_WORDS = new Set(['farm', 'farms', 'inc', 'llc', 'ltd', 'co', 'corp', 'company', 'the', 'and', 'of', 'partnership', 'lp', 'llp']);
 
 function normalizeFarmName(name: string): string {
   return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // "José" and "Jose" are the same name
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
@@ -75,43 +77,26 @@ export function duplicateReasons(input: CustomerDuplicateInput, candidate: Custo
 
 const CANDIDATE_COLUMNS = 'id, farm_name, phone, email, city, state, is_active';
 
-async function readCandidates(filters: string[], excludeId: string | undefined, limit: number) {
-  if (filters.length === 0) return [];
-  let query = supabase.from('customers').select(CANDIDATE_COLUMNS).or(filters.join(','));
-  if (excludeId) query = query.not('id', 'in', excludedIdList([excludeId]));
-  const { data, error } = await query.order('farm_name').order('id').limit(limit);
-  if (error) throw error;
-  return data ?? [];
-}
-
 /**
  * Likely existing duplicates of a customer about to be created or renamed, active or not.
- * The database narrows by name-word prefix, phone digits or email; `duplicateReasons` decides.
- * Phone and email are read on their own so a common name word cannot crowd them out.
- * shortcut: reads at most 200 name candidates and misses a typo in a word's first 4 letters; upgrade to a trigram RPC if that bites.
+ * Every customer is read and compared here, so a typo anywhere in a name, an accent, or a
+ * common name word cannot hide one (KI-77; about 150 customers in November 2026).
+ * shortcut: reads the whole customer list per check; move matching into a trigram RPC if customers pass ~5,000.
  */
 export async function findLikelyDuplicateCustomers(
   input: CustomerDuplicateInput,
   excludeId?: string,
 ): Promise<CustomerDuplicateMatch[]> {
-  // The first 4 letters of each word, so a typo later in a one-word name ("Hendriks") still finds "Hendricks".
-  const nameFilters = [...new Set(normalizeFarmName(input.farm_name).split(' ').filter(Boolean).map((w) => w.slice(0, 4)))]
-    .slice(0, 4)
-    .map((w) => `farm_name.ilike.${ilikeOrPattern(w)}`);
-  const contactFilters: string[] = [];
-  const phone = phoneDigits(input.phone);
-  // Digits in order with anything between, so "(555) 123-4567" and "555.123.4567" both match.
-  if (phone.length >= 7) contactFilters.push(`phone.ilike."%${phone.slice(-7).split('').join('%')}%"`);
-  const email = (input.email ?? '').trim();
-  if (email) contactFilters.push(`email.ilike.${ilikeOrPattern(email)}`);
-
-  const [byName, byContact] = await Promise.all([
-    readCandidates(nameFilters, excludeId, 200),
-    readCandidates(contactFilters, excludeId, 50),
-  ]);
-  const seen = new Set<string>();
-  return [...byContact, ...byName]
-    .filter((row) => !seen.has(row.id) && Boolean(seen.add(row.id)))
+  if (!normalizeFarmName(input.farm_name) && phoneDigits(input.phone).length < 7 && !(input.email ?? '').trim()) return [];
+  const { data, error } = await fetchAllRows<CustomerDuplicateInput & Omit<CustomerDuplicateMatch, 'reasons'>>((from, to) => supabase
+    .from('customers')
+    .select(CANDIDATE_COLUMNS, { count: 'exact' })
+    .order('farm_name')
+    .order('id')
+    .range(from, to));
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .filter((row) => row.id !== excludeId)
     .map((row) => ({
       id: row.id,
       farm_name: row.farm_name,

@@ -296,8 +296,13 @@ export default function CustomerDetail() {
   // effects below, so the ref is always the committed route by the time any fetch
   // that reads it starts.
   const currentIdRef = useRef(id);
+  // Bumped whenever this visit ends (route change or unmount). The id alone cannot
+  // tell "still on A" from "left A and came back": a save paused on its duplicate
+  // check must not resume into a later visit and commit edits the user abandoned.
+  const visitRef = useRef(0);
   useLayoutEffect(() => {
     currentIdRef.current = id;
+    return () => { visitRef.current += 1; };
   }, [id]);
 
   const fetchAddresses = useCallback(async () => {
@@ -1013,6 +1018,7 @@ export default function CustomerDetail() {
       || (customer.phone ?? '') !== (loaded.phone ?? '')
       || (customer.email ?? '') !== (loaded.email ?? '');
     if (!skipDuplicateCheck && identityChanged) {
+      const visitAtClick = visitRef.current;
       setSaving(true);
       let matches: CustomerDuplicateMatch[] = [];
       try {
@@ -1025,7 +1031,7 @@ export default function CustomerDetail() {
         // Warn-only: a failed duplicate check must never stop the save.
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_duplicate_check' } });
       }
-      if (currentIdRef.current !== id) { setSaving(false); return; }
+      if (visitRef.current !== visitAtClick) { setSaving(false); return; }
       if (matches.length > 0) {
         setDuplicateMatches(matches);
         setSaving(false);

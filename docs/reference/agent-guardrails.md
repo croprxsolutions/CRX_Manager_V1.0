@@ -49,6 +49,7 @@
 > the PR's author and `masonwells1` has a comment, review or thread reply with no comment from a different human
 > containing its link (`.claude/hooks/teammate-comments-lib.mjs`). A failed read refuses and the agent retries; a list
 > over 100 comments refuses and needs Mason's decision. A merge outside the local hooks, such as GitHub's button, skips this.
+> The live migration apply refuses the same way (`migration-landing-gate-lib.mjs`, Mason, 2026-11-08), since it runs before the merge.
 >
 > **CodeRabbit is optional (Mason, 2026-10-19, 2026-10-29, 2026-10-30).** It only comments, makes no automatic reviews
 > (`auto_review.enabled: false`), and no PR needs it unless it carries the `needs-coderabbit` label; then one completed

@@ -301,6 +301,21 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: a 3-place return failed for the wrong reason: %', v_err;
     END IF;
   END;
+  -- The same quantity sent as exponent text ("0.125e0") is refused too, not stored rounded.
+  BEGIN
+    PERFORM public.create_return(
+      jsonb_build_object('customer_id', v_b, 'order_id', v_order, 'reason', 'defective'),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_line1, 'quantity', '0.125e0')),
+      'e2e-split-return-create-b-fine-exp-' || v_suffix
+    );
+    RAISE EXCEPTION 'SMOKE_FAIL: a return finer than 2 decimal places, sent as exponent text, was created';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF position('RETURN_QUANTITY_TOO_FINE' IN v_err) = 0 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: an exponent-text return failed for the wrong reason: %', v_err;
+    END IF;
+  END;
   -- 2c. D, billed nothing on the order, cannot return from it.
   BEGIN
     PERFORM public.create_return(

@@ -1913,7 +1913,8 @@ BEGIN
   -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09).
   IF EXISTS (
     SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) e
-     WHERE (e ->> 'quantity') ~ '^\s*[0-9]*\.[0-9]+\s*$'
+     -- Any text numeric accepts, exponent form included ("1.005e0"), so none slips past as a string.
+     WHERE (e ->> 'quantity') ~ '^\s*[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$'
        AND (e ->> 'quantity')::numeric <> round((e ->> 'quantity')::numeric, 2)
   ) THEN
     RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'

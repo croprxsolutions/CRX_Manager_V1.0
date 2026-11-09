@@ -122,9 +122,9 @@ One table, admin only (the page is already admin only: `src/appPages.tsx:411`). 
 | **Disagrees** | The name has brands and the brand list has brands, and they differ | Name, active or not, in name only, on list only, spelled-differently pairs, and where the list comes from (this size, or parent "<name>") |
 | **Brands in the name, no brand list yet** | The name has brands; the brand list is empty | Name and the name brands. This is a worklist for brand entry. On 2026-11-08 every bracketed product falls here, because live has 0 brand rows. |
 | **Brand list, no brands in the name** | The name has no brand brackets; the brand list has brands | Name and the list |
-| **Bracket not closed** | `unclosed` | A flag on whichever group the row is in |
+| **Bracket not closed** | `unclosed` | A flag on whichever group the row is in; a product in no other group is still listed here, so no unclosed name is hidden |
 
-Products that agree, and products with neither, are counted at the top (for example "N products agree; M have no brands in the name or the list") but not listed. Inactive products are included and marked, because an inactive product's name can still disagree with its rows. The section has no buttons and writes nothing; each name links to the product page, where brands are edited as today.
+Products that agree, and products with neither, are counted at the top (for example "N products agree; M have no brands in the name or the list") but not listed. Inactive products are included and marked, because an inactive product's name can still disagree with its rows. The section shows when it loaded, has one Reload button (which only reads again) and writes nothing; each name links to the product page, where brands are edited as today.
 
 ## 6. Done when
 
@@ -136,7 +136,7 @@ All of these, observed, not only tested:
      ```sql
      BEGIN READ ONLY;
      WITH items AS (
-       SELECT p.id, lower(btrim(regexp_replace(it, '[\s_-]+', ' ', 'g'))) AS item
+       SELECT p.id, lower(btrim(regexp_replace(regexp_replace(it, '[®™©]', '', 'g'), '[\s_-]+', ' ', 'g'))) AS item
        FROM products p,
             regexp_matches(p.product_name, '\(([^)]*)(\)|$)', 'g') g,
             regexp_split_to_table(g[1], '[,;]') it)
@@ -158,7 +158,8 @@ All of these, observed, not only tested:
 3. **Typo hints can pair the wrong two brands** when two real brands differ by two letters. It is only a hint and never counts as a match.
 4. **Names in a public repo.** Tests and this sheet use made-up names only; screenshots stay out of the PR.
 5. **Size of the catalog.** Five paged reads of about 600 rows each is small. If the catalog grows tenfold it is still a few seconds on one admin page.
-6. **Overlapping edits to `LabelDataQuality.tsx`.** REG-1's screen PR (2b) and PAR-1's screen PR also edit this page. CLN-3 adds one import and one line, so a clash is a trivial merge; build it in whichever order they land.
+6. **The reads are not one snapshot.** If an admin changes brands or turns grouping on while the section is loading, one row can briefly show a false disagreement. The report is advisory and changes nothing, so this is accepted: the section shows the time it loaded and a Reload button, and a row is trusted only after a reload. A single database snapshot would need a new function and a migration (risk 1's upgrade path covers both).
+7. **Overlapping edits to `LabelDataQuality.tsx`.** REG-1's screen PR (2b) and PAR-1's screen PR also edit this page. CLN-3 adds one import and one line, so a clash is a trivial merge; build it in whichever order they land.
 
 **Sol list:** no (no listed path; no migration). Lands on green checks after Luna, held open 4 hours under Taha's rule. **Mason-gated:** nothing; no live write, no permission change.
 
@@ -186,3 +187,4 @@ The report lists every product whose name has brand names in brackets that do no
 | Round | Reviewer | Result |
 |---|---|---|
 | 1 (`d1afedcac`) | Luna, xhigh | 2 findings. MED: the read list lacked `product_parents`, so the page could not name a grouped size's parent (added; read count corrected). LOW: the sample SQL's size rule had no end anchor (anchored here and in rule 6; the live count stayed 107). |
+| 2 (`ecee6419e`) | Luna, xhigh | 3 findings. MED: the sample SQL did not strip `®™©` like the parser (fixed). MED: separate reads are not one snapshot (accepted as risk 6: advisory report, load time and Reload shown). LOW: an unclosed bracket on a product in no group was hidden (now always listed). |

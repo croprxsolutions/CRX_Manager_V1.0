@@ -59,6 +59,9 @@ describe('cardLiveCents cents (each other payer: floor of their percent, per lin
   it('turns dollars into cents without float noise (1.005 is 101 cents, as the database rounds)', () => {
     expect(cardLiveCents([{ id: 'z', total_price: 1.005 }], new Set(), [], 'main').get('main')).toBe(101);
   });
+  it('keeps every cent on a ten-billion-dollar line', () => {
+    expect(cardLiveCents([{ id: 'big', total_price: 10_000_000_000.01 }], new Set(), [], 'main').get('main')).toBe(1_000_000_000_001);
+  });
   it('skips lines with no price yet', () => {
     expect(p2([{ id: 'p', total_price: null }], new Set(), 50)).toBe(0);
   });

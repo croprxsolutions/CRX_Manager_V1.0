@@ -79,8 +79,8 @@ export function cardLiveCents(
   const out = new Map<string, number>();
   for (const it of items) {
     if (it.total_price == null || linesWithOwnSplit.has(it.id)) continue;
-    // ponytail: float cents conversion holds to 12 significant digits (lines under $10 billion); use a decimal type past that.
-    const cents = BigInt(Math.round(Number((it.total_price * 100).toPrecision(12))));
+    // ponytail: 15 significant digits, the most a double keeps, so cents are exact on lines up to about $1 trillion.
+    const cents = BigInt(Math.round(Number((it.total_price * 100).toPrecision(15))));
     let rest = cents;
     for (const [id, m] of payers.slice(1)) {
       const c = (cents * m) / 100_000_000n;

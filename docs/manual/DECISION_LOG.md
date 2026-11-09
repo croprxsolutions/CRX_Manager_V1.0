@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — KI-30 EPA corrections: the restore check reads history, not today's number; no follow-up check
+
+**Decision (Mason, in chat, 2026-11-09: "drop the check").** The check-only follow-up migration `20261215120000_ki30_epa_followup_checks` (never applied) is dropped from PR #1653. The restore data proof in `supabase/baselines/README.md` keeps requiring a change-history row that set each of the 48 corrected numbers; it does not compare each product's current number.
+**Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
+**What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
+
 ## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
 
 **Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.

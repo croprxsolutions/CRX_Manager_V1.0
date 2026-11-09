@@ -61,9 +61,9 @@ billing, invoice, quote, sale and commission function. No existing row changes (
 applicator sees a customer only through a job scheduled no more than 7 days ago, so a job finished
 today but scheduled earlier shows without its customer name, as it does today.
 
-Rollout: a whole-job applicator of a job finished in the week before the apply that has no dispatch row
-loses it at once, not 7 days later (no `completed_at` yet). Live on 2026-11-08 there is no such job (the
-only finished job, invoiced in August, has a dispatch row); re-check right before the apply.
+Rollout (Mason, 2026-11-08: no backfill, no install check): a job finished before the apply has no
+`completed_at` and loses access at once. Accepted: nobody uses applicator access for business until
+March 2027, and live on 2026-11-08 there is no such job (the only finished job was invoiced in August).
 
 Office staff still see, in the dispatched list, a dispatch row left open on a job invoiced more than 7 days
 ago (Sol MED), so it can be cleaned up; the 7-day clock there applies to field callers only.

@@ -28,6 +28,15 @@
 > on a guard change` and exits 1 without calling Codex (count: `crx-luna-guard-rounds.json` in the git common dir,
 > not a proof). Drop the carve-out or hand the decision to Mason.
 >
+> **Whole-branch round cap (Mason, 2026-11-09).** The written stop rule (same mechanism, three rounds) failed seven times
+> (PR #1688 ran about 12 Luna rounds, Brand PR B 26). After 6 completed whole-branch Luna rounds on a branch (default or
+> `--base` scope; `--commit`, `--uncommitted`, `--sol` and a detached HEAD are neither stopped nor counted), the 7th prints
+> `LUNA RESULT: STOPPED after 6 whole-branch Luna rounds` and exits 1 without calling Codex. It names three ways on:
+> simplify (a fresh "attack this plan for simplicity" session), merge or rebase onto current main and re-plan, or ask Mason
+> the business rule behind the mechanism. Rerunning with `--after-simplify`, `--after-rebase` or `--after-new-approach "<reason>"`
+> allows 6 more and records the step and reason under `<branch> luna-unlocks` in the same counter file. The flag is refused
+> before the cap stops a run. The guard-change cap of 2 is unchanged. Advisory only: no gate reads the count.
+>
 > **Luna runs code health first (Mason, 2026-11-06).** When the reviewed diff touches `src/`, `scripts/luna-review.mjs`
 > runs `scripts/check-code-health.mjs` before calling Codex. A `FAIL` stops the round with exit 2 (`DID NOT RUN`) and no
 > model call; a check that cannot run (no `node_modules`/knip) warns, Luna continues, and the result says

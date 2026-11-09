@@ -157,6 +157,7 @@ No change to `_product_parent_timings`, `update_product_parent`, the guards, or 
 - Inside one transaction (the temp-table pattern of `20261103210000`).
 - `product_crop_options` does not exist; no function named `add_use_timing_option` or `set_use_timing_option_active` exists with **any** argument list (`pg_proc` by name, so no overload can be created); none of the three new rules exists (`product_use_timing_options_crop_fkey`, `product_use_timing_options_active_pair_key`, `product_use_timing_options_timing_code_check`).
 - The 9 options have exactly the codes, labels, timing codes, crops and categories in section 1.
+- No row of `products` or `product_parents` holds two options with the same (category, timing code, crop) pair (3.4).
 - Every `crop` on the options is null or one of the seeded crop codes; every `timing_code` matches the code pattern.
 - `_product_parent_require_admin`, `_product_parent_replay`, `save_idempotency` exist.
 - Capture into a temp table: per-code counts of `products.use_timings` and `product_parents.use_timings`, the count of products with any timing, and an md5 of `(id, use_timings, use_timing, pricing_version)` for every product.

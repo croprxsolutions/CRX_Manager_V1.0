@@ -43,6 +43,8 @@ const LEDGER_ONLY = new Set([
   // KI-01 part C changes job and storage access only; its preflight needs live's storage.objects policies, which this
   // database does not have. Its own proof is prove-job-access-ends-with-the-job-real-schema.mjs.
   '20261217100000_job_access_ends_with_the_job.sql',
+  // Its KI-73 follow-up (applicator spray-record fields) needs part C applied; same reason.
+  '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(close_delivery_receipt|delivery_receipt_queue|confirm_delivery_receipt_send|finish_delivery_receipt|claim_delivery_receipts|check_idempotency_intent|_bind_replay_receipt_20261015|_replay_fingerprint_20261015)\b/i;

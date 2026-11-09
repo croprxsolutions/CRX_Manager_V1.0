@@ -54,12 +54,12 @@ test.describe('Quotes list width guard', () => {
     await page.goto('/quotes/new');
     await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));
     await page.getByRole('option', { name }).click();
-    await page.getByRole('button', { name: /Add Item/i }).first().click();
+    await page.getByRole('button', { name: 'Add one' }).first().click();
     await page.getByRole('button', { name: /Select Product/i }).first().click();
     await page.getByPlaceholder('Search by name, SKU, category, or vendor...').fill(E2E_PREFIX);
     // Scoped to the product picker's result list (as quote-builder-v2.spec.ts does), not any button on the page.
     await page.getByRole('dialog').locator('.max-h-80 button').filter({ hasText: E2E_PREFIX }).first().click();
-    await page.getByLabel('Units needed').first().fill('1');
+    await page.getByLabel('Quantity', { exact: true }).first().fill('1');
     await page.getByRole('button', { name: /Save Draft/i }).first().click();
     await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 30000 });
 

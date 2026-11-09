@@ -311,10 +311,9 @@ vi.mock('../components/ui/UnsavedChangesModal', () => ({ default: () => null }))
 const mockUseLastCharged = vi.hoisted(() => vi.fn());
 vi.mock('../components/quotes/LastChargedPrices', () => ({ LastChargedPricesCard: () => <div data-testid="last-charged-card" /> }));
 vi.mock('../hooks/useLastChargedPrices', () => ({
-  useLastChargedPrices: (...args: unknown[]) => {
-    mockUseLastCharged(...args);
-    return { products: [], state: { status: 'loading' }, retry: () => {} };
-  },
+  // A test may return loaded data from mockUseLastCharged; otherwise it stays loading.
+  useLastChargedPrices: (...args: unknown[]) => mockUseLastCharged(...args)
+    ?? { products: [], state: { status: 'loading' }, retry: () => {} },
 }));
 
 import { preferredQuoteNotes } from '../lib/quoteNotes';
@@ -3393,10 +3392,10 @@ describe('QuoteBuilder', () => {
 
   describe('sent-price lock (To-Do 1.2)', () => {
     // A revised quote whose V1 was sent at 10.00; the catalog tier 1 price is 12.00 today.
-    function configureLockedQuote(quoteTier = 1) {
+    function configureLockedQuote(quoteTier = 1, todayTier1Price = 12) {
       const fixture = makeQuoteFixture('sent', 7);
       const quote = { ...fixture.quote, status: 'revised', created_at: new Date().toISOString(), tier: quoteTier };
-      const product = { ...fixture.product, tier1_price: 12 };
+      const product = { ...fixture.product, tier1_price: todayTier1Price };
       const item = { ...fixture.item, product };
       const sentVersion = {
         id: 'version-1',
@@ -3485,7 +3484,7 @@ describe('QuoteBuilder', () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);
       expect(await screen.findByText(/Prices stay as sent in version 1/)).toBeInTheDocument();
-      const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+      const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
       await waitFor(() => expect(units).toBeEnabled());
       fireEvent.change(units, { target: { value: '3' } });
       expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(10);
@@ -3553,13 +3552,13 @@ describe('QuoteBuilder', () => {
         }, error: null });
       });
       renderQuoteBuilder(quote.id);
-      expect(await screen.findByText('New since V1')).toBeInTheDocument();
-      const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+      expect(await screen.findByText('New since version 1')).toBeInTheDocument();
+      const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
       await waitFor(() => expect(units).toBeEnabled());
       fireEvent.change(units, { target: { value: '3' } });
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
 
-      await waitFor(() => expect(screen.queryByText('New since V1')).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText('New since version 1')).not.toBeInTheDocument());
       expect(screen.queryByText(/Prices or lines changed after version 1 was sent/)).not.toBeInTheDocument();
     });
 
@@ -3613,7 +3612,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
       const picker = await screen.findByRole('dialog');
       fireEvent.click(await within(picker).findByRole('button', { name: /T1 price/ }));
-      fireEvent.change(await screen.findByRole('spinbutton', { name: 'Units needed' }), { target: { value: '2' } });
+      fireEvent.change(await screen.findByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
       fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
 
       await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/quotes/quote-new', { replace: true }));
@@ -3642,6 +3641,37 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
       expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything());
       expect(mockRpc).not.toHaveBeenCalledWith('create_quote_version', expect.anything());
+    });
+
+    // Quotes UI redesign, Feedback fixes: same apply, then a toast built from the page's rounded totals.
+    it('Use today\'s prices shows the result toast', async () => {
+      const { quote } = configureLockedQuote();
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      expect(price).toHaveValue(10);
+      mockToast.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: "Use today's prices" }));
+
+      expect(price).toHaveValue(12);
+      expect(mockToast).toHaveBeenCalledTimes(1);
+      expect(mockToast).toHaveBeenCalledWith(
+        'success',
+        "1 line now uses today's Tier 1 prices. Total went from $20.00 to $24.00. Save draft to keep it.",
+      );
+    });
+
+    it('Use today\'s prices with nothing to change says so', async () => {
+      const { quote } = configureLockedQuote(1, 10);
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      mockToast.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: "Use today's prices" }));
+
+      expect(price).toHaveValue(10);
+      expect(mockToast).toHaveBeenCalledTimes(1);
+      expect(mockToast).toHaveBeenCalledWith('info', "Prices already match today's Tier 1 prices. Nothing changed.");
     });
 
     it('rewinds to the version last sent in one confirmed step', async () => {
@@ -3856,7 +3886,7 @@ describe('QuoteBuilder', () => {
         : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+    const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
     const opener = screen.getByRole('button', { name: 'Create order' });
@@ -3974,7 +4004,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(fixture.quote.id);
     expect(await screen.findByText('today $8.00 · up')).toBeInTheDocument();
-    const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+    const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
@@ -4017,7 +4047,7 @@ describe('QuoteBuilder', () => {
     const saveCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'save_quote').map(([, a]) => (a as SaveArgs).p_sections[0].items[0]);
 
     renderQuoteBuilder(fixture.quote.id);
-    const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
+    const units = await screen.findByRole('spinbutton', { name: 'Quantity' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
@@ -5405,6 +5435,181 @@ describe('QuoteBuilder', () => {
       serveTabs('draft');
       await screen.findByRole('tab', { name: /^Products/ });
       expect(screen.queryByRole('tab', { name: /^History/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('sections and lines (Quotes UI redesign)', () => {
+    function stubPhone() {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+      }));
+    }
+
+    // A draft with two lines of one product: 2 gal ($20.00, cost $6.00, profit $8.00, 40.0%) and 3 gal ($30.00).
+    function serveLines(productName = 'Product') {
+      const fixture = makeQuoteFixture('draft', 7);
+      const product = { ...fixture.product, product_name: productName };
+      const first = { ...fixture.item, product };
+      const second = { ...fixture.item, id: 'item-2', sort_order: 1, product, total_units_needed: 3, total_price: 30, profit: 12 };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? fixture.quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [first, second]
+              : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER]
+                : table === 'products' ? [product]
+                  : [],
+        error: null,
+      }));
+      renderQuoteBuilder(fixture.quote.id);
+    }
+    async function loaded() {
+      const prices = await screen.findAllByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(prices[0]).toBeEnabled());
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    }
+    const quoteTotal = () => within(screen.getByRole('region', { name: 'Summary' })).getByText('Quote total').nextElementSibling?.textContent;
+    const priceInputs = () => screen.queryAllByRole('spinbutton', { name: 'Price per unit' });
+
+    it('removing a line with a product asks first and names product, amount and new total', async () => {
+      serveLines();
+      await loaded();
+      expect(quoteTotal()).toBe('$50.00');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
+      let dialog = await screen.findByRole('dialog', { name: 'Remove this line?' });
+      expect(dialog).toHaveTextContent('Product, 2 gal, $20.00. The quote total drops to $30.00.');
+      expect(priceInputs()).toHaveLength(2);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Keep line' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove this line?' })).not.toBeInTheDocument());
+      expect(priceInputs()).toHaveLength(2);
+      expect(quoteTotal()).toBe('$50.00');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
+      dialog = await screen.findByRole('dialog', { name: 'Remove this line?' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove line' }));
+      await waitFor(() => expect(priceInputs()).toHaveLength(1));
+      expect(quoteTotal()).toBe('$30.00');
+    });
+
+    it('removing a blank line does not ask', async () => {
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'products' ? [{ id: 'product-1', product_name: 'Alpha Herbicide', is_active: true }] : [],
+        error: null,
+      }));
+      renderQuoteBuilder();
+      await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('products'));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
+      expect(await screen.findByRole('button', { name: /Select Product/ })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
+      expect(screen.queryByRole('dialog', { name: 'Remove this line?' })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole('button', { name: /Select Product/ })).not.toBeInTheDocument());
+      expect(screen.getByRole('button', { name: 'Add one' })).toBeInTheDocument();
+    });
+
+    // Review Focus 2: a sales rep and Customer view never see a line's cost, profit or margin.
+    it('line cost and margin column is absent for a sales rep and in Customer view', async () => {
+      const lineTable = () => screen.getByRole('columnheader', { name: 'Total' }).closest('table') as HTMLElement;
+      const costText = /\$6\.00|today \$|\$8\.00 · 40\.0%|40\.0%/;
+
+      // Admin control: the column and its figures are there.
+      serveLines();
+      await loaded();
+      expect(screen.getByRole('columnheader', { name: 'Cost · margin' })).toBeInTheDocument();
+      expect(lineTable().textContent).toMatch(costText);
+      cleanup();
+
+      authState.role = 'sales_rep';
+      serveLines();
+      await loaded();
+      expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
+      expect(lineTable().textContent).not.toMatch(costText);
+      cleanup();
+
+      authState.role = 'admin';
+      serveLines();
+      await loaded();
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
+      expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
+      expect(lineTable().textContent).not.toMatch(costText);
+      cleanup();
+
+      // Line cards (phone): the same rule.
+      stubPhone();
+      try {
+        serveLines();
+        await loaded();
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).toMatch(costText);
+        cleanup();
+
+        authState.role = 'sales_rep';
+        serveLines();
+        await loaded();
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).not.toMatch(costText);
+        cleanup();
+
+        authState.role = 'admin';
+        serveLines();
+        await loaded();
+        fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).not.toMatch(costText);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    // Review Focus 1: a long name wraps on the 360 px card instead of being cut off behind a tooltip.
+    it('a line card at 360 px keeps a 60-character product name readable', async () => {
+      const longName = 'Synthetic pre-emerge herbicide concentrate, long label names';
+      expect(longName).toHaveLength(60);
+      stubPhone();
+      try {
+        serveLines(longName);
+        await loaded();
+        const card = screen.getByRole('article', { name: `Line 1, ${longName}` });
+        expect(within(card).queryByRole('table')).not.toBeInTheDocument();
+        const name = within(card).getByText(longName);
+        expect(name.className).toMatch(/break-words/);
+        for (let el: HTMLElement | null = name; el && el !== card; el = el.parentElement) {
+          expect(el.className).not.toMatch(/\btruncate\b|line-clamp|text-ellipsis/);
+        }
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('the product cell shows the last charge only once the Last charged data has loaded', async () => {
+      mockUseLastCharged.mockReturnValue({
+        products: [],
+        state: { status: 'loaded', requestKey: 'customer-1|product-1', byProduct: new Map([['product-1', { product_id: 'product-1', unit_price_cents: 870, price_tier: 1, unit_size: 'gal', charged_on: '2026-03-14', source: 'invoice' }]]) },
+        retry: () => {},
+      });
+      try {
+        serveLines();
+        await loaded();
+        expect(screen.getAllByText('Last charged $8.70 / gal on Mar 14, 2026')).toHaveLength(2);
+        cleanup();
+
+        mockUseLastCharged.mockReturnValue({ products: [], state: { status: 'loaded', requestKey: 'k', byProduct: new Map() }, retry: () => {} });
+        serveLines();
+        await loaded();
+        expect(screen.getAllByText('First time for this customer')).toHaveLength(2);
+        cleanup();
+
+        mockUseLastCharged.mockReset();
+        serveLines();
+        await loaded();
+        expect(screen.queryByText(/Last charged \$|First time for this customer/)).not.toBeInTheDocument();
+      } finally {
+        mockUseLastCharged.mockReset();
+      }
     });
   });
 });

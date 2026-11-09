@@ -100,8 +100,8 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     const body = await page.locator('body').textContent();
     const hasItems =
       body?.includes('Section') ||
-      body?.includes('Add Item') ||
-      body?.includes('No items in this section');
+      body?.includes('Add product') ||
+      body?.includes('No products yet');
     expect(hasItems).toBeTruthy();
   });
 
@@ -184,10 +184,10 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     await page.goto(quoteUrl);
     await waitForPageStable(page, 3000);
 
-    const unitsInput = page.locator('input[aria-label="Units needed"]').first();
+    const unitsInput = page.locator('input[aria-label="Quantity"]').first();
     const hasUnits = await unitsInput.isVisible({ timeout: 5000 }).catch(() => false);
     if (!hasUnits) {
-      test.skip(true, 'No Units needed input found');
+      test.skip(true, 'No Quantity input found');
       return;
     }
 
@@ -290,10 +290,10 @@ test.describe.serial('Quote Builder Edit Deep (QBE1–QBE14)', () => {
     await page.goto(quoteUrl);
     await waitForPageStable(page, 3000);
 
-    const addSectionBtn = page.locator('button').filter({ hasText: /Add Section/i });
+    const addSectionBtn = page.locator('button').filter({ hasText: /Add a section/i });
     const hasBtnVisible = await addSectionBtn.isVisible({ timeout: 5000 }).catch(() => false);
     if (!hasBtnVisible) {
-      test.skip(true, 'No Add Section button — quote may not be editable');
+      test.skip(true, 'No Add a section button: quote may not be editable');
       return;
     }
 

@@ -8,7 +8,7 @@ import {
   Trash2,
   Search,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   Download,
   AlertTriangle,
   Pencil,
@@ -101,7 +101,8 @@ import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
 import { useIsPhone } from '../hooks/useIsPhone';
-import { primaryAction } from '../lib/quoteBuilderView';
+import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../lib/quoteBuilderView';
+import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
@@ -209,6 +210,32 @@ interface ActivePlannedHold {
   product_id: string;
   quantity: number;
   expires_at: string | null;
+}
+
+// The line table's "no unit" choice (the old select's "--" option).
+const NO_UNIT = '__none__';
+// Number boxes in the line table and cards: 44 px below 768 px, 36 px above.
+const LINE_INPUT = 'w-full min-w-0 h-11 md:h-9 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+
+// The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
+function quoteTotals(sections: LocalSection[]) {
+  let totalPrice = 0;
+  let totalCost = 0;
+  let totalProfit = 0;
+  sections.forEach((sec) => {
+    sec.items.forEach((item) => {
+      totalPrice += item.total_price;
+      totalCost += item.current_cost * (item.total_units_needed || 0);
+      totalProfit += item.profit;
+    });
+  });
+  const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
+  return {
+    totalPrice: Math.round(totalPrice * 100) / 100,
+    totalCost: Math.round(totalCost * 100) / 100,
+    totalProfit: Math.round(totalProfit * 100) / 100,
+    totalMarginPct: Math.round(totalMarginPct * 100) / 100,
+  };
 }
 
 interface CostAlert {
@@ -638,6 +665,10 @@ export default function QuoteBuilder() {
   const [productQuery, setProductQuery] = useState('');
   const [keepProductPickerOpen, setKeepProductPickerOpen] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  // Products tab: the line waiting on "Remove this line?", and which notes are open for editing.
+  const [removeLineTarget, setRemoveLineTarget] = useState<{ sectionKey: string; itemKey: string } | null>(null);
+  const [openSectionNotes, setOpenSectionNotes] = useState<Set<string>>(new Set());
+  const [editingLineNote, setEditingLineNote] = useState<string | null>(null);
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
@@ -1862,14 +1893,22 @@ export default function QuoteBuilder() {
     // A new choice: send it again even where an earlier one was saved.
     savedLineIdsRef.current.forEach((saved) => { saved.todayApplied = false; });
     useTierUndoRef.current = new Map();
-    setSections((prev) =>
-      prev.map((sec) => ({
-        ...sec,
-        items: sec.items.map((item) => (item.product_id
-          ? recalcItem({ ...item, price_override: null, use_todays_price: true }, tier)
-          : item)),
-      }))
-    );
+    const toToday = (secs: LocalSection[]) => secs.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => (item.product_id
+        ? recalcItem({ ...item, price_override: null, use_todays_price: true }, tier)
+        : item)),
+    }));
+    setSections(toToday);
+    // The message only: the same repricing of the lines on screen (it keeps every line, in order),
+    // so line i before pairs with line i after; totals by the page's own rule.
+    const after = toToday(sections);
+    const beforeLines = sections.flatMap((sec) => sec.items);
+    const changedCount = after.flatMap((sec) => sec.items)
+      .filter((item, i) => Math.round(item.price_per_unit * 100) !== Math.round(beforeLines[i].price_per_unit * 100))
+      .length;
+    const message = todaysPricesMessage({ changedCount, beforeTotal: totals.totalPrice, afterTotal: quoteTotals(after).totalPrice, tier });
+    toast(changedCount > 0 ? 'success' : 'info', `${message.title}. ${message.body}`);
   };
 
   const handleCustomerChangeRef = useLatestRef(handleCustomerChange);
@@ -2099,6 +2138,22 @@ export default function QuoteBuilder() {
     );
   };
 
+  // Decision 4: a line with a product or a quantity asks first; a blank line goes at once.
+  const requestRemoveItem = (sectionKey: string, item: LocalItem) => {
+    if (lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed })) {
+      setRemoveLineTarget({ sectionKey, itemKey: item._key });
+    } else {
+      removeItem(sectionKey, item._key);
+    }
+  };
+
+  // "Edit note" from a line's menu: focus the note once the menu has closed and handed focus back.
+  useEffect(() => {
+    if (!editingLineNote) return;
+    const frame = requestAnimationFrame(() => document.getElementById(`line-note-${editingLineNote}`)?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [editingLineNote]);
+
   const toggleSectionCollapse = (key: string) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
@@ -2111,25 +2166,7 @@ export default function QuoteBuilder() {
     });
   };
 
-  const totals = useMemo(() => {
-    let totalPrice = 0;
-    let totalCost = 0;
-    let totalProfit = 0;
-    sections.forEach((sec) => {
-      sec.items.forEach((item) => {
-        totalPrice += item.total_price;
-        totalCost += item.current_cost * (item.total_units_needed || 0);
-        totalProfit += item.profit;
-      });
-    });
-    const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
-    return {
-      totalPrice: Math.round(totalPrice * 100) / 100,
-      totalCost: Math.round(totalCost * 100) / 100,
-      totalProfit: Math.round(totalProfit * 100) / 100,
-      totalMarginPct: Math.round(totalMarginPct * 100) / 100,
-    };
-  }, [sections]);
+  const totals = useMemo(() => quoteTotals(sections), [sections]);
 
   // KI-82: after a save, show an admin the cost the database recorded for each saved line. A new
   // line, or one switched to another product, is stamped at today's cost, which may have moved since
@@ -2353,6 +2390,7 @@ export default function QuoteBuilder() {
     if (previousAttempt && previousAttempt.key === idemKey) {
       saveAttemptAtMs = previousAttempt.atMs;
     } else {
+      // eslint-disable-next-line react-hooks/purity -- runs inside the async saveQuote handler, not during render
       saveAttemptAtMs = Date.now();
       saveQuoteAttemptClockRef.current.set(saveQuoteIntentScope, { key: idemKey, atMs: saveAttemptAtMs });
     }
@@ -4707,541 +4745,638 @@ export default function QuoteBuilder() {
       {sections.map((sec) => {
         const isCollapsed = collapsedSections.has(sec._key);
         const sectionTotal = sec.items.reduce((s, i) => s + i.total_price, 0);
+        // A section with a note shows it; the link opens an empty one. Focus keeps it open while it is cleared.
+        const sectionNoteOpen = !!sec.section_header_notes || openSectionNotes.has(sec._key);
+        const openSectionNote = () => setOpenSectionNotes((prev) => (prev.has(sec._key) ? prev : new Set(prev).add(sec._key)));
+
+        // Each line's controls are built once and laid out as a table row (768 px and up) or a card.
+        const lineParts = (item: LocalItem, n: number) => {
+          const prod =
+            item.product ||
+            products.find((p) => p.id === item.product_id);
+          const todayPrice = prod ? getTierPrice(prod, tier) : null;
+          const todayPriceOffer = priceLocked && canEdit
+            && todayPrice != null
+            && Math.round(todayPrice * 100) !== Math.round(item.price_per_unit * 100)
+            ? todayPrice
+            : null;
+          const sentState = priceLocked && lastSentVersion && item.product_id
+            ? sentLineState(lastSentItems, priceLockLineOf(item))
+            : null;
+          const sentHint = sentState == null || !lastSentVersion
+            ? null
+            : sentState.kind === 'new'
+              ? `New since version ${lastSentVersion.version_number}`
+              : `Sent at ${formatCents(sentState.sentCents)}`;
+          const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
+          const costHint = costAlert?.below_cost
+            ? "Below today's cost: converting needs an admin's approval."
+            : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
+          const openPicker = () => {
+            setProductSearchOpen({
+              sectionKey: sec._key,
+              itemKey: item._key,
+            });
+            setProductQuery('');
+          };
+          // Only from Last charged data already loaded for this customer and these products.
+          const charged = lastCharged.state;
+          const charge = staffSeesLastCharged && prod && charged.status === 'loaded' ? charged.byProduct.get(item.product_id) ?? null : undefined;
+          const lastChargeText = charge === undefined
+            ? null
+            : charge
+              ? `Last charged ${formatCents(charge.unit_price_cents)}${charge.unit_size ? ` / ${charge.unit_size}` : ''} on ${formatChargedOn(charge.charged_on)}`
+              : 'First time for this customer';
+          const defaultNote = prod ? preferredQuoteNotes(prod) : null;
+          const noteEditing = editingLineNote === item._key;
+          const allowNoUnit = prod?.product_form !== 'seed' && prod?.product_form !== 'each';
+          const unitChoices = rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit);
+          // A unit the list no longer offers stays listed, so the line still shows what it holds.
+          const unitOptions = (current: string | null, label: (unit: string) => string) => [
+            ...(allowNoUnit ? [{ value: NO_UNIT, label: '--' }] : []),
+            ...unitChoices.map((uc) => ({ value: uc.unit, label: label(uc.unit) })),
+            ...(current && !unitChoices.some((uc) => uc.unit === current) ? [{ value: current, label: label(current) }] : []),
+          ];
+
+          const product = (
+            <div className="min-w-0">
+              {prod ? (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  className="text-left font-medium text-nav-dark break-words hover:text-crx-green"
+                >
+                  {prod.product_name}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  className="inline-flex min-h-11 md:min-h-0 items-center gap-1 font-medium text-crx-green hover:underline"
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  Select Product
+                </button>
+              )}
+              {prod && <ProductOptionDetails product={prod} />}
+              {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}
+              {lastChargeText && <p className="mt-0.5 text-xs text-secondary">{lastChargeText}</p>}
+              {noteEditing ? (
+                <div className="mt-1.5">
+                  <textarea
+                    id={`line-note-${item._key}`}
+                    value={item.notes || ''}
+                    onChange={(e) => updateItem(sec._key, item._key, { notes: e.target.value || null })}
+                    rows={2}
+                    placeholder="Product notes..."
+                    aria-label="Line note"
+                    className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setEditingLineNote(null)}
+                    className="min-h-11 md:min-h-0 text-xs font-medium text-crx-green hover:underline"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : item.notes && (
+                <p className="mt-1 text-xs italic text-secondary break-words">Note: {item.notes}</p>
+              )}
+              {defaultNote && item.notes !== defaultNote && (
+                <button
+                  type="button"
+                  onClick={() => updateItem(sec._key, item._key, { notes: defaultNote })}
+                  title="Reset to default"
+                  className="min-h-11 md:min-h-0 text-xs font-medium text-crx-green hover:underline"
+                >
+                  Reset note
+                </button>
+              )}
+            </div>
+          );
+
+          const rate = (
+            <>
+              <input
+                type="number"
+                value={item.actual_rate ?? ''}
+                onChange={(e) =>
+                  updateItem(sec._key, item._key, {
+                    actual_rate: e.target.value
+                      ? parseFloat(e.target.value)
+                      : null,
+                    calc_mode: 'rate_acres',
+                  })
+                }
+                aria-label="Actual rate"
+                className={`${LINE_INPUT} border-gray-300`}
+                step="any"
+                min={0}
+              />
+              <div className="mt-1">
+                <Dropdown
+                  aria-label="Rate unit"
+                  size="sm"
+                  noHelperRow
+                  value={item.rate_unit || (allowNoUnit ? NO_UNIT : null)}
+                  onChange={(v) =>
+                    updateItem(sec._key, item._key, {
+                      rate_unit: v === NO_UNIT ? null : v || null,
+                    })
+                  }
+                  options={unitOptions(item.rate_unit, (unit) => unit)}
+                  placeholder="--"
+                  disabled={formLocked}
+                />
+              </div>
+              {item.oz_per_acre != null && (
+                <p className="mt-1 text-xs text-secondary tabular-nums">{item.oz_per_acre.toFixed(2)} oz/acre</p>
+              )}
+            </>
+          );
+
+          const acres = (
+            <input
+              type="number"
+              value={item.acres ?? ''}
+              onChange={(e) =>
+                updateItem(sec._key, item._key, {
+                  acres: e.target.value
+                    ? parseFloat(e.target.value)
+                    : null,
+                  acres_source: 'typed',
+                  calc_mode: item.calc_mode === 'units_direct'
+                    ? 'units_direct' // keep units_direct if typing acres alongside units
+                    : 'rate_acres',
+                })
+              }
+              aria-label="Acres"
+              className={`${LINE_INPUT} border-gray-300`}
+              step="any"
+              min={0}
+            />
+          );
+
+          const quantity = (
+            <>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  value={item.total_units_needed ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      total_units_needed: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'units_direct',
+                    })
+                  }
+                  aria-label="Quantity"
+                  className={`${LINE_INPUT} ${
+                    item.calc_mode === 'units_direct'
+                      ? 'border-crx-green bg-crx-green-tint'
+                      : 'border-gray-300'
+                  }`}
+                  step="any"
+                  min={0}
+                />
+                {prod?.inventory_unit && <span className="shrink-0 text-sm text-secondary">{prod.inventory_unit}</span>}
+              </div>
+              {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
+            </>
+          );
+
+          const price = (
+            <>
+              <input
+                type="number"
+                value={item.price_per_unit || ''}
+                onChange={(e) => {
+                  const val = e.target.value ? parseFloat(e.target.value) : 0;
+                  // A manual price is one that differs from what the line
+                  // would otherwise take: its saved price on a sent quote,
+                  // else today's tier price.
+                  const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
+                    ?? (prod ? getTierPrice(prod, tier) : 0);
+                  const isOverride = Math.abs(val - basePrice) > 0.001;
+                  updateItem(sec._key, item._key, {
+                    price_override: isOverride ? val : null,
+                    price_per_unit: val,
+                  });
+                }}
+                aria-label="Price per unit"
+                // A stated $0 tier price shows as 0.00, not as a missing price.
+                placeholder={prod ? '0.00' : undefined}
+                className={`${LINE_INPUT} ${
+                  item.price_override != null
+                    ? 'border-amber-400 bg-amber-50'
+                    : 'border-gray-300'
+                }`}
+                step="any"
+                min={0}
+              />
+              <div className="mt-1">
+                <Dropdown
+                  aria-label="Price unit"
+                  size="sm"
+                  noHelperRow
+                  value={item.price_unit || (allowNoUnit ? NO_UNIT : null)}
+                  onChange={(v) =>
+                    updateItem(sec._key, item._key, {
+                      price_unit: v === NO_UNIT ? null : v || null,
+                    })
+                  }
+                  options={unitOptions(item.price_unit, (unit) => `per ${unit}`)}
+                  placeholder="--"
+                  disabled={formLocked}
+                />
+              </div>
+              {item.price_override != null && (
+                <p className="mt-1 text-xs text-amber-800">
+                  Set by hand ·{' '}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateItem(sec._key, item._key, {
+                        price_override: null,
+                      })
+                    }
+                    title={priceLocked
+                      ? 'Reset to the price saved on this line'
+                      : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
+                    aria-label="Reset the manual price"
+                    className="min-h-11 md:min-h-0 font-semibold text-crx-green hover:underline"
+                  >
+                    Reset
+                  </button>
+                </p>
+              )}
+              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
+              {!customerView && prod && item.price_override == null && !item.price_per_unit
+                && isTierPriceMissing(prod, tier) && (
+                <p role="status" className="mt-1 flex items-center gap-1 text-xs text-amber-800">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  No tier {tier} price. Type one.
+                </p>
+              )}
+              {!customerView && priceLocked && (() => {
+                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
+                return raise && (
+                  <label className="mt-1 flex items-start gap-1.5 text-xs text-amber-800">
+                    <input
+                      type="checkbox"
+                      checked={item.grower_confirmed_cents === raise.toCents}
+                      disabled={formLocked}
+                      onChange={(e) => updateItem(sec._key, item._key, {
+                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
+                      })}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-crx-green"
+                    />
+                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
+                  </label>
+                );
+              })()}
+              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
+                <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs">
+                  {sentHint && <span className="text-amber-700">{sentHint}</span>}
+                  {costHint && (
+                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
+                  )}
+                  {todayPriceOffer != null && (
+                    <>
+                      {(sentHint || costHint) && <span aria-hidden="true" className="text-secondary">·</span>}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // A new choice: send it again even if an earlier one was saved.
+                          const saved = savedLineIdsRef.current.get(item._key);
+                          if (saved) saved.todayApplied = false;
+                          useTierUndoRef.current.delete(item._key);
+                          updateItem(sec._key, item._key, {
+                            price_override: null,
+                            use_todays_price: true,
+                          });
+                        }}
+                        disabled={formLocked}
+                        className="min-h-11 md:min-h-0 font-semibold text-crx-green hover:underline disabled:opacity-50"
+                      >
+                        Use today {fmt(todayPriceOffer)}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          );
+
+          // Admin only, never in Customer view (hideCost): cost when quoted beside today's, then profit and margin.
+          const cost = !hideCost && (
+            <div>
+              <QuoteLineCost
+                quotedCost={item.current_cost}
+                // A line not yet quoted (new, or switched to another product)
+                // already shows today's cost.
+                todayCost={holdsQuotedCost(item, item.product_id, savedLineIdByKey.get(item._key))
+                  ? prod?.current_cost ?? null
+                  : null}
+                pricePerUnit={item.price_per_unit}
+              />
+              <div className="mt-0.5 font-medium text-crx-green tabular-nums whitespace-nowrap">
+                {fmt(item.profit)} · {pct(item.net_margin)}
+              </div>
+            </div>
+          );
+
+          const menu = (
+            <ActionMenu
+              label={`Actions for line ${n}`}
+              disabled={formLocked}
+              items={[
+                ...(prod ? [{ id: 'change', label: 'Change product', onAction: openPicker }] : []),
+                { id: 'note', label: item.notes ? 'Edit note' : 'Add note', onAction: () => setEditingLineNote(item._key) },
+                {
+                  id: 'remove',
+                  label: lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed }) ? 'Remove line…' : 'Remove line',
+                  icon: <Trash2 className="w-4 h-4" />,
+                  danger: true,
+                  onAction: () => requestRemoveItem(sec._key, item),
+                },
+              ]}
+            />
+          );
+
+          return { prod, product, rate, acres, quantity, price, cost, menu };
+        };
 
         return (
           <Card key={sec._key} padding={false}>
-            <div className="p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1">
-                  <button
-                    onClick={() => toggleSectionCollapse(sec._key)}
-                    className="p-1 rounded hover:bg-gray-100 text-secondary"
-                    aria-label={isCollapsed ? 'Expand section' : 'Collapse section'}
-                  >
-                    {isCollapsed ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronUp className="w-4 h-4" />
-                    )}
-                  </button>
-                  <span className="text-xs font-mono text-gray-400 w-6">
-                    {sec.sort_order}
-                  </span>
-                  <input
-                    value={sec.section_name}
-                    onChange={(e) => updateSectionName(sec._key, e.target.value)}
-                    className="text-sm font-semibold font-heading text-nav-dark bg-transparent border-none outline-none focus:ring-0 flex-1"
-                    placeholder="Section name"
+            <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 md:px-4 ${isCollapsed ? '' : 'border-b border-cream-dark'}`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionCollapse(sec._key)}
+                className="h-11 w-11 md:h-8 md:w-8 shrink-0 inline-flex items-center justify-center rounded-md text-secondary hover:bg-gray-100"
+                aria-label={isCollapsed ? 'Expand section' : 'Collapse section'}
+                aria-expanded={!isCollapsed}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-4.5 h-4.5" />
+                ) : (
+                  <ChevronDown className="w-4.5 h-4.5" />
+                )}
+              </button>
+              <input
+                value={sec.section_name}
+                onChange={(e) => updateSectionName(sec._key, e.target.value)}
+                aria-label="Section name"
+                className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-9 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+                placeholder="Section name"
+              />
+              <div className="order-last md:order-none w-full md:w-auto flex flex-wrap items-center gap-2">
+                <div className="flex w-full sm:w-auto items-center gap-2">
+                  <span className="text-xs text-secondary whitespace-nowrap">Field</span>
+                  {/* Active fields only (the customer's, once one is chosen), as the old list loaded. */}
+                  <FieldSearchPicker<FieldOption>
+                    value={sec.field_id || ''}
+                    selectedLabel={(sec.field_id && fields[sec.field_id]?.field_name) || ''}
+                    onSelect={(field) => handleSectionFieldChange(sec._key, field)}
+                    select={QUOTE_FIELD_SELECT}
+                    customerId={customerId || null}
+                    placeholder="Search fields..."
+                    ariaLabel={`Field for ${sec.section_name || 'section'}`}
+                    className="min-w-0 flex-1 sm:flex-none sm:w-56"
                   />
-                  {/* U13 (#111): per-section job badge — a section that already has a
-                      scheduled job links straight to it (and the Schedule Job button
-                      below hides, since a 2nd job per section is rejected server-side). */}
-                  {sec.id && sectionJobs[sec.id] && (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/jobs/${sectionJobs[sec.id as string].id}`)}
-                      className="shrink-0"
-                      title="Open the job scheduled from this section"
-                    >
-                      <Badge variant={statusToBadgeVariant[sectionJobs[sec.id as string].status] || 'info'}>
-                        Job {sectionJobs[sec.id as string].job_number}
-                      </Badge>
-                    </button>
-                  )}
-                  <span className="text-sm font-mono text-secondary">
-                    {fmt(sectionTotal)}
+                </div>
+                {/* U13 (#111): per-section job badge: a section that already has a
+                    scheduled job links straight to it (and the Schedule job button
+                    hides, since a 2nd job per section is rejected server-side). */}
+                {sec.id && sectionJobs[sec.id] && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/jobs/${sectionJobs[sec.id as string].id}`)}
+                    className="shrink-0 min-h-11 md:min-h-0"
+                    title="Open the job scheduled from this section"
+                  >
+                    <Badge variant={statusToBadgeVariant[sectionJobs[sec.id as string].status] || 'info'}>
+                      Job {sectionJobs[sec.id as string].job_number}
+                    </Badge>
+                  </button>
+                )}
+                {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
+                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-9">
+                    Schedule job
+                  </Button>
+                )}
+                {scheduleBlockedAccepted && quoteId && sec.id && sec.items.length > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs text-secondary">
+                    <XCircle className="w-3 h-3 text-orange-500" />
+                    Sold, make a standalone job
+                    <HelpTip text="This booking was accepted and converted to a chemical sale (order). To do field work, create a standalone job from the Jobs page. Scheduling from a sold booking would double-count the product." />
                   </span>
-                  {isPlanned && (
-                    <>
-                      <div className="flex items-center gap-2 ml-2">
-                        <label className="text-xs text-secondary whitespace-nowrap flex items-center">Needed By:<HelpTip text="This is when the customer needs the product — different from the quote expiration. Used for inventory forecasting and delivery scheduling." className="ml-1" /></label>
-                        <input
-                          type="date"
-                          value={sec.needed_by_date || ''}
-                          onChange={(e) => updateSectionField(sec._key, 'needed_by_date', e.target.value || null)}
-                          className="text-sm border border-gray-200 rounded px-2 py-1"
-                        />
-                      </div>
-                      {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
-                      {quoteId && activePlannedHolds.length > 0 && (
-                        <div className="ml-2 flex flex-col items-start gap-0.5 text-xs text-secondary">
-                          {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
-                            const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
-                            if (holds.length === 0) return null;
-                            const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
-                            const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
-                              if (hold.expires_at == null) return earliest;
-                              return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
-                            }, null);
-                            const unit = products.find((product) => product.id === productId)?.inventory_unit;
-                            const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
-                            return (
-                              <span key={productId}>
-                                Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
-                                  <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
-                                ) : 'no expiry (no needed-by date)'}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className="flex items-center gap-2 ml-2">
-                    <label className="text-xs text-secondary whitespace-nowrap">Field:</label>
-                    {/* Active fields only (the customer's, once one is chosen), as the old list loaded. */}
-                    <FieldSearchPicker<FieldOption>
-                      value={sec.field_id || ''}
-                      selectedLabel={(sec.field_id && fields[sec.field_id]?.field_name) || ''}
-                      onSelect={(field) => handleSectionFieldChange(sec._key, field)}
-                      select={QUOTE_FIELD_SELECT}
-                      customerId={customerId || null}
-                      placeholder="Search fields..."
-                      ariaLabel={`Field for ${sec.section_name || 'section'}`}
-                      className="w-[180px]"
+                )}
+              </div>
+              <span className="md:ml-auto text-base font-semibold text-nav-dark tabular-nums whitespace-nowrap">
+                {fmt(sectionTotal)}
+              </span>
+              {sections.length > 1 && (
+                <ActionMenu
+                  label="Section actions"
+                  disabled={formLocked}
+                  items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
+                />
+              )}
+              {isPlanned && (
+                <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
+                  <div className="w-full sm:w-52">
+                    <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
+                      Needed by
+                      <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
+                    </div>
+                    <DatePicker
+                      aria-label="Needed by"
+                      value={sec.needed_by_date || null}
+                      onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
+                      disabled={formLocked}
                     />
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Plus className="w-3 h-3" />}
-                    showChevron={false}
-                    onClick={() => addItem(sec._key)}
-                  >
-                    Add Item
-                  </Button>
-                  {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
-                    <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3 h-3" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key}>
-                      Schedule Job
-                    </Button>
-                  )}
-                  {scheduleBlockedAccepted && quoteId && sec.id && sec.items.length > 0 && (
-                    <span className="inline-flex items-center gap-1 text-xs text-secondary">
-                      <XCircle className="w-3 h-3 text-orange-500" />
-                      Sold — make a standalone job
-                      <HelpTip text="This booking was accepted and converted to a chemical sale (order). To do field work, create a standalone job from the Jobs page — scheduling from a sold booking would double-count the product." />
-                    </span>
-                  )}
-                  {sections.length > 1 && (
-                    <button
-                      onClick={() => removeSection(sec._key)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                      aria-label="Remove section"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
+                  {quoteId && activePlannedHolds.length > 0 && (
+                    <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
+                      {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
+                        const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
+                        if (holds.length === 0) return null;
+                        const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
+                        const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
+                          if (hold.expires_at == null) return earliest;
+                          return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
+                        }, null);
+                        const unit = products.find((product) => product.id === productId)?.inventory_unit;
+                        const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
+                        return (
+                          <span key={productId}>
+                            Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
+                              <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
+                            ) : 'no expiry (no needed-by date)'}
+                          </span>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
             </div>
 
             {!isCollapsed && (
               <>
-              {/* Section Header Notes — above items table */}
-              <div className="px-5 pb-2">
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-xs text-secondary">Section Header Notes</span>
-                  <HelpTip text="These notes print above the items in the PDF. Use for delivery instructions like 'Apply before 10am' or 'Requires cool storage'." className="ml-1" />
-                </div>
-                <textarea
-                  value={sec.section_header_notes || ''}
-                  onChange={(e) => updateSectionField(sec._key, 'section_header_notes', e.target.value || null)}
-                  rows={2}
-                  placeholder="Section notes for grower (shown above products on PDF)..."
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none"
-                />
-              </div>
-              <div className="overflow-x-auto">
-                {sec.items.length === 0 ? (
-                  <div className="px-5 pb-5">
-                    <p className="text-sm text-secondary">
-                      No items in this section.{' '}
-                      <button
-                        onClick={() => addItem(sec._key)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        Add one
-                      </button>
-                    </p>
+              {/* Section note: prints above the section's products on the PDF. */}
+              <div className="px-3 md:px-4 pt-2">
+                {sectionNoteOpen ? (
+                  <div className="pb-1">
+                    <div className="mb-1 flex items-center gap-1 text-xs text-secondary">
+                      <span id={`section-note-${sec._key}`}>Note for this section (prints above its products)</span>
+                      <HelpTip text="These notes print above the items in the PDF. Use for delivery instructions like 'Apply before 10am' or 'Requires cool storage'." />
+                    </div>
+                    <textarea
+                      value={sec.section_header_notes || ''}
+                      onChange={(e) => updateSectionField(sec._key, 'section_header_notes', e.target.value || null)}
+                      onFocus={openSectionNote}
+                      // eslint-disable-next-line jsx-a11y/no-autofocus -- only an empty note just opened by its link; the user means to type
+                      autoFocus={!sec.section_header_notes}
+                      aria-labelledby={`section-note-${sec._key}`}
+                      rows={2}
+                      placeholder="Section notes for grower (shown above products on PDF)..."
+                      className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
+                    />
                   </div>
                 ) : (
-                  <table className="w-full text-sm">
+                  <button
+                    type="button"
+                    onClick={openSectionNote}
+                    className="-ml-2 inline-flex min-h-11 md:min-h-8 items-center gap-1.5 px-2 text-left text-sm font-medium text-crx-green hover:underline"
+                  >
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    Add a note for this section (prints above its products)
+                  </button>
+                )}
+              </div>
+              {sec.items.length === 0 ? (
+                <p className="px-3 md:px-4 pt-2 pb-4 text-sm text-secondary">
+                  No products yet.{' '}
+                  <button
+                    type="button"
+                    onClick={() => addItem(sec._key)}
+                    className="min-h-11 md:min-h-0 text-crx-green hover:underline font-medium"
+                  >
+                    Add one
+                  </button>
+                </p>
+              ) : isPhone ? (
+                <div className="mt-2 divide-y divide-cream-dark border-t border-cream-dark">
+                  {sec.items.map((item, idx) => {
+                    const line = lineParts(item, idx + 1);
+                    return (
+                      <article
+                        key={item._key}
+                        aria-label={line.prod ? `Line ${idx + 1}, ${line.prod.product_name}` : `Line ${idx + 1}`}
+                        className="px-3 py-4 space-y-3"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1 min-w-0">{line.product}</div>
+                          {line.menu}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate</span>{line.rate}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Acres</span>{line.acres}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Quantity</span>{line.quantity}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Price</span>{line.price}</div>
+                        </div>
+                        <div className="flex items-end justify-between gap-3 border-t border-cream-dark pt-2.5">
+                          <div className="min-w-0 text-[13px] text-secondary">
+                            <div className="tabular-nums">{item.price_per_acre != null ? `${fmt(item.price_per_acre)}/acre` : '–/acre'}</div>
+                            {line.cost}
+                          </div>
+                          <strong className="shrink-0 text-[17px] font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                // 768 px and up: all columns; the table scrolls inside its card with Product pinned when it doesn't fit.
+                <div className="mt-2 overflow-x-auto">
+                  <table className={`w-full text-sm ${hideCost ? 'min-w-[53rem]' : 'min-w-[61rem]'}`}>
                     <thead>
-                      <tr className="border-t border-gray-100 text-left text-xs text-secondary uppercase tracking-wide">
-                        <th className="px-5 py-3 font-medium w-8">#</th>
-                        <th className="px-3 py-3 font-medium min-w-[200px]">Product</th>
-                        <th className="px-3 py-3 font-medium">Price/Unit</th>
-                        {!hideCost && <th className="px-3 py-3 font-medium">Cost quoted / today</th>}
-                        <th className="px-3 py-3 font-medium">Sug. Rate</th>
-                        <th className="px-3 py-3 font-medium">Actual Rate</th>
-                        <th className="px-3 py-3 font-medium">Unit</th>
-                        <th className="px-3 py-3 font-medium">Acres</th>
-                        <th className="px-3 py-3 font-medium">Oz/Acre</th>
-                        <th className="px-3 py-3 font-medium">$/Acre</th>
-                        <th className="px-3 py-3 font-medium">Units Needed</th>
-                        <th className="px-3 py-3 font-medium">Total</th>
-                        <th className="px-3 py-3 font-medium min-w-[140px]">Notes</th>
-                        {!hideCost && <th className="px-3 py-3 font-medium">Profit</th>}
-                        {!hideCost && <th className="px-3 py-3 font-medium">Margin</th>}
-                        <th className="px-3 py-3 font-medium w-10" />
+                      <tr className="border-t border-cream-dark text-left text-xs text-secondary">
+                        <th scope="col" className="py-2.5 pl-4 pr-2 w-8 font-medium">#</th>
+                        <th scope="col" className="sticky left-0 z-[1] bg-white py-2.5 px-2 min-w-[12rem] font-medium">Product</th>
+                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Rate</th>
+                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium">Acres</th>
+                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Quantity</th>
+                        <th scope="col" className="py-2.5 px-2 w-[7.5rem] font-medium">Price</th>
+                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium text-right">$/acre</th>
+                        <th scope="col" className="py-2.5 px-2 w-24 font-medium text-right">Total</th>
+                        {!hideCost && <th scope="col" className="py-2.5 px-2 w-32 font-medium text-right">Cost · margin</th>}
+                        <th scope="col" className="py-2.5 pl-2 pr-4 w-14"><span className="sr-only">Line actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sec.items.map((item) => {
-                        const prod =
-                          item.product ||
-                          products.find((p) => p.id === item.product_id);
-                        const todayPrice = prod ? getTierPrice(prod, tier) : null;
-                        const todayPriceOffer = priceLocked && canEdit
-                          && todayPrice != null
-                          && Math.round(todayPrice * 100) !== Math.round(item.price_per_unit * 100)
-                          ? todayPrice
-                          : null;
-                        const sentState = priceLocked && lastSentVersion && item.product_id
-                          ? sentLineState(lastSentItems, priceLockLineOf(item))
-                          : null;
-                        const sentHint = sentState == null || !lastSentVersion
-                          ? null
-                          : sentState.kind === 'new'
-                            ? `New since V${lastSentVersion.version_number}`
-                            : `Sent at ${formatCents(sentState.sentCents)}`;
-                        const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
-                        const costHint = costAlert?.below_cost
-                          ? "Below today's cost: converting needs an admin's approval."
-                          : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
+                      {sec.items.map((item, idx) => {
+                        const line = lineParts(item, idx + 1);
                         return (
-                          <tr
-                            key={item._key}
-                            className="border-t border-gray-50 hover:bg-crx-green-tint transition-colors"
-                          >
-                            <td className="px-5 py-2 font-mono text-gray-400 text-xs">
-                              {item.sort_order}
+                          <tr key={item._key} className="border-t border-cream-dark align-top">
+                            <td className="py-3 pl-4 pr-2 pt-5 text-xs text-secondary tabular-nums">{idx + 1}</td>
+                            <td className="sticky left-0 z-[1] bg-white py-3 px-2">{line.product}</td>
+                            <td className="py-3 px-2">{line.rate}</td>
+                            <td className="py-3 px-2">{line.acres}</td>
+                            <td className="py-3 px-2">{line.quantity}</td>
+                            <td className="py-3 px-2">{line.price}</td>
+                            <td className="py-3 px-2 pt-5 text-right text-secondary tabular-nums">
+                              {item.price_per_acre != null ? fmt(item.price_per_acre) : '–'}
                             </td>
-                            <td className="px-3 py-2">
-                              {prod ? (
-                                <button
-                                  onClick={() => {
-                                    setProductSearchOpen({
-                                      sectionKey: sec._key,
-                                      itemKey: item._key,
-                                    });
-                                    setProductQuery('');
-                                  }}
-                                  className="text-left"
-                                >
-                                  <p className="font-medium text-nav-dark truncate max-w-[200px]">
-                                    {prod.product_name}
-                                  </p>
-                                  <ProductOptionDetails product={prod} />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setProductSearchOpen({
-                                      sectionKey: sec._key,
-                                      itemKey: item._key,
-                                    });
-                                    setProductQuery('');
-                                  }}
-                                  className="text-crx-green hover:underline font-medium flex items-center gap-1"
-                                >
-                                  <Search className="w-3 h-3" />
-                                  Select Product
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  value={item.price_per_unit || ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value ? parseFloat(e.target.value) : 0;
-                                    // A manual price is one that differs from what the line
-                                    // would otherwise take: its saved price on a sent quote,
-                                    // else today's tier price.
-                                    const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
-                                      ?? (prod ? getTierPrice(prod, tier) : 0);
-                                    const isOverride = Math.abs(val - basePrice) > 0.001;
-                                    updateItem(sec._key, item._key, {
-                                      price_override: isOverride ? val : null,
-                                      price_per_unit: val,
-                                    });
-                                  }}
-                                  aria-label="Price per unit"
-                                  // A stated $0 tier price shows as 0.00, not as a missing price.
-                                  placeholder={prod ? '0.00' : undefined}
-                                  className={`w-20 px-2 py-1 text-sm font-mono border rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green ${
-                                    item.price_override != null
-                                      ? 'border-amber-400 bg-amber-50'
-                                      : 'border-gray-200'
-                                  }`}
-                                  step="any"
-                                  min={0}
-                                />
-                                {item.price_override != null && (
-                                  <button
-                                    onClick={() =>
-                                      updateItem(sec._key, item._key, {
-                                        price_override: null,
-                                      })
-                                    }
-                                    title={priceLocked
-                                      ? 'Reset to the price saved on this line'
-                                      : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
-                                    aria-label="Reset the manual price"
-                                    className="p-0.5 rounded text-amber-500 hover:text-amber-700 hover:bg-amber-100 transition-colors"
-                                  >
-                                    <RotateCcw className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
-                              {!customerView && prod && item.price_override == null && !item.price_per_unit
-                                && isTierPriceMissing(prod, tier) && (
-                                <p role="status" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
-                                  <AlertTriangle className="w-3 h-3 shrink-0" />
-                                  No tier {tier} price. Type one.
-                                </p>
-                              )}
-                              {!customerView && priceLocked && (() => {
-                                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
-                                return raise && (
-                                  <label className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
-                                    <input
-                                      type="checkbox"
-                                      checked={item.grower_confirmed_cents === raise.toCents}
-                                      disabled={formLocked}
-                                      onChange={(e) => updateItem(sec._key, item._key, {
-                                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
-                                      })}
-                                    />
-                                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
-                                  </label>
-                                );
-                              })()}
-                              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
-                                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
-                                  {sentHint && <span className="text-amber-700">{sentHint}</span>}
-                                  {costHint && (
-                                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
-                                  )}
-                                  {todayPriceOffer != null && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        // A new choice: send it again even if an earlier one was saved.
-                                        const saved = savedLineIdsRef.current.get(item._key);
-                                        if (saved) saved.todayApplied = false;
-                                        useTierUndoRef.current.delete(item._key);
-                                        updateItem(sec._key, item._key, {
-                                          price_override: null,
-                                          use_todays_price: true,
-                                        });
-                                      }}
-                                      disabled={formLocked}
-                                      className="text-crx-green hover:underline disabled:opacity-50"
-                                    >
-                                      Use today {fmt(todayPriceOffer)}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                              <select
-                                value={item.price_unit || ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    price_unit: e.target.value || null,
-                                  })
-                                }
-                                aria-label="Price unit"
-                                className="w-20 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green mt-0.5"
-                              >
-                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
-                                  .map((uc) => (
-                                    <option key={uc.id} value={uc.unit}>
-                                      per {uc.unit}
-                                    </option>
-                                  ))}
-                              </select>
-                            </td>
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-secondary">
-                                <QuoteLineCost
-                                  quotedCost={item.current_cost}
-                                  // A line not yet quoted (new, or switched to another product)
-                                  // already shows today's cost.
-                                  todayCost={holdsQuotedCost(item, item.product_id, savedLineIdByKey.get(item._key))
-                                    ? prod?.current_cost ?? null
-                                    : null}
-                                  pricePerUnit={item.price_per_unit}
-                                />
-                              </td>
-                            )}
-                            <td className="px-3 py-2 text-secondary">
-                              {item.suggested_rate || '-'}
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.actual_rate ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    actual_rate: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    calc_mode: 'rate_acres',
-                                  })
-                                }
-                                aria-label="Actual rate"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <select
-                                value={item.rate_unit || ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    rate_unit: e.target.value || null,
-                                  })
-                                }
-                                aria-label="Rate unit"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                              >
-                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
-                                  .map((uc) => (
-                                    <option key={uc.id} value={uc.unit}>
-                                      {uc.unit}
-                                    </option>
-                                  ))}
-                              </select>
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.acres ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    acres: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    acres_source: 'typed',
-                                    calc_mode: item.calc_mode === 'units_direct'
-                                      ? 'units_direct' // keep units_direct if typing acres alongside units
-                                      : 'rate_acres',
-                                  })
-                                }
-                                aria-label="Acres"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono text-secondary">
-                              {item.oz_per_acre != null
-                                ? item.oz_per_acre.toFixed(2)
-                                : '-'}
-                            </td>
-                            <td className="px-3 py-2 font-mono text-secondary">
-                              {item.price_per_acre != null
-                                ? fmt(item.price_per_acre)
-                                : '-'}
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.total_units_needed ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    total_units_needed: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    calc_mode: 'units_direct',
-                                  })
-                                }
-                                aria-label="Units needed"
-                                className={`w-20 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green font-mono ${
-                                  item.calc_mode === 'units_direct'
-                                    ? 'border-crx-green bg-crx-green-tint'
-                                    : 'border-gray-200'
-                                }`}
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono font-medium text-nav-dark">
+                            <td className="py-3 px-2 pt-5 text-right font-semibold text-nav-dark tabular-nums">
                               {fmt(item.total_price)}
                             </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-1">
-                                <textarea
-                                  value={item.notes || ''}
-                                  onChange={(e) => updateItem(sec._key, item._key, { notes: e.target.value || null })}
-                                  rows={1}
-                                  placeholder="Product notes..."
-                                  className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:ring-1 focus:ring-crx-green/20 resize-none"
-                                />
-                                {prod && preferredQuoteNotes(prod)
-                                  && item.notes !== preferredQuoteNotes(prod) && (
-                                  <button
-                                    onClick={() => updateItem(sec._key, item._key, { notes: preferredQuoteNotes(prod) })}
-                                    title="Reset to default"
-                                    className="text-xs text-crx-green hover:underline whitespace-nowrap"
-                                  >
-                                    Reset
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-emerald-600">
-                                {fmt(item.profit)}
-                              </td>
-                            )}
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-secondary">
-                                {pct(item.net_margin)}
-                              </td>
-                            )}
-                            <td className="px-3 py-2">
-                              <button
-                                onClick={() => removeItem(sec._key, item._key)}
-                                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                                aria-label="Remove line item"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
+                            {!hideCost && <td className="py-3 px-2 pt-5 text-right text-xs">{line.cost}</td>}
+                            <td className="py-2 pl-2 pr-4 text-right">{line.menu}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                )}
-              </div>
+                </div>
+              )}
+              {sec.items.length > 0 && (
+                <div className="px-3 md:px-4 py-3 border-t border-cream-dark">
+                  <Button
+                    variant="secondary"
+                    icon={<Plus className="w-4 h-4" />}
+                    showChevron={false}
+                    onClick={() => addItem(sec._key)}
+                    className="w-full md:w-auto"
+                  >
+                    Add product
+                  </Button>
+                </div>
+              )}
               </>
             )}
           </Card>
         );
       })}
 
-      <div className="flex justify-center">
-        <Button
-          variant="secondary"
-          icon={<Plus className="w-4 h-4" />}
-          showChevron={false}
-          onClick={addSection}
-        >
-          Add Section
-        </Button>
-      </div>
-
+      <button
+        type="button"
+        onClick={addSection}
+        className="w-full flex items-center md:justify-center gap-3 rounded-xl border-[1.5px] border-dashed border-gray-300 px-4 py-4 text-left text-nav-dark transition-colors hover:border-crx-green hover:bg-crx-green-tint disabled:opacity-50"
+      >
+        <span className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-full bg-crx-green-light text-crx-green">
+          <Plus className="w-4 h-4" aria-hidden="true" />
+        </span>
+        <span className="flex flex-col leading-snug">
+          <span className="font-semibold">Add a section</span>
+          <span className="text-[13px] text-secondary">Group products by field or timing, like &quot;Spring pre-emerge&quot;. Each section gets its own total on the PDF.</span>
+        </span>
+      </button>
               </fieldset>
             ),
           },
@@ -6020,6 +6155,34 @@ export default function QuoteBuilder() {
           icon={RotateCcw}
         />
       )}
+
+      {/* Decision 4: names the product and its amount, and the quote total without the line (the page's totals rule). */}
+      {(() => {
+        const target = removeLineTarget && sections.find((sec) => sec._key === removeLineTarget.sectionKey)
+          ?.items.find((item) => item._key === removeLineTarget.itemKey);
+        if (!removeLineTarget || !target) return null;
+        const prod = target.product || products.find((p) => p.id === target.product_id);
+        const unit = prod?.inventory_unit;
+        const quantity = target.total_units_needed ? `, ${target.total_units_needed.toLocaleString()}${unit ? ` ${unit}` : ''}` : '';
+        const totalAfter = quoteTotals(sections.map((sec) => (sec._key === removeLineTarget.sectionKey
+          ? { ...sec, items: sec.items.filter((item) => item._key !== removeLineTarget.itemKey) }
+          : sec))).totalPrice;
+        return (
+          <ConfirmModal
+            open
+            onClose={() => setRemoveLineTarget(null)}
+            onConfirm={() => {
+              removeItem(removeLineTarget.sectionKey, removeLineTarget.itemKey);
+              setRemoveLineTarget(null);
+            }}
+            title="Remove this line?"
+            message={`${prod?.product_name ?? 'This line'}${quantity}, ${fmt(target.total_price)}. The quote total drops to ${fmt(totalAfter)}.`}
+            confirmLabel="Remove line"
+            cancelLabel="Keep line"
+            variant="danger"
+          />
+        );
+      })()}
 
       <ConfirmModal
         open={confirmBookAsOrderOpen}

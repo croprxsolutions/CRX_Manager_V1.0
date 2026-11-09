@@ -407,8 +407,8 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
       const prod = prods[i];
       const expectedQty = quantities[i];
 
-      // Click "Add Item"
-      const addBtn = page.getByRole('button', { name: /Add Item/i }).first();
+      // Click "Add one" (empty section) or "Add product"
+      const addBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
       if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
         await addBtn.scrollIntoViewIfNeeded();
         await addBtn.click();
@@ -443,7 +443,7 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
 
       // Set units needed
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      const unitsInputs = page.locator('input[aria-label="Units needed"]');
+      const unitsInputs = page.locator('input[aria-label="Quantity"]');
       const unitsInput = unitsInputs.nth(i);
       if (await unitsInput.isVisible({ timeout: 2000 }).catch(() => false)) {
         await unitsInput.fill(String(expectedQty));

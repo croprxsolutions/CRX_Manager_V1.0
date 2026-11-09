@@ -158,7 +158,8 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
     await customerSelect.selectOption(S.customerId);
     await waitStable(page, 1000);
 
-    // Add section header notes (textarea visible below section header)
+    // Add section header notes (the link under the section header opens the textarea)
+    await page.getByRole('button', { name: /Add a note for this section/ }).first().click();
     const headerNotesTextarea = page.locator('textarea[placeholder*="Section notes for grower"]').first();
     await expect(headerNotesTextarea).toBeVisible({ timeout: 5000 });
     await headerNotesTextarea.fill(`E2E-V2 test header note ${RUN}`);

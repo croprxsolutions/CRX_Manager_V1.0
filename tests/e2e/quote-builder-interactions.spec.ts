@@ -74,7 +74,7 @@ test.describe('Quote Builder Interactions', () => {
 
     // Click Add Section
     const addSectionBtn = page.locator(
-      'button:has-text("Add Section"), button:has-text("New Section"), button:has-text("+ Section")'
+      'button:has-text("Add a section"), button:has-text("New Section"), button:has-text("+ Section")'
     ).first();
     const btnVisible = await addSectionBtn.isVisible({ timeout: 5000 }).catch(() => false);
 
@@ -106,7 +106,7 @@ test.describe('Quote Builder Interactions', () => {
 
     // May need to add a section first
     const addSectionBtn = page.locator(
-      'button:has-text("Add Section"), button:has-text("New Section")'
+      'button:has-text("Add a section"), button:has-text("New Section")'
     ).first();
     if (await addSectionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await addSectionBtn.click();
@@ -149,7 +149,7 @@ test.describe('Quote Builder Interactions', () => {
 
     // Add section if needed
     const addSectionBtn = page.locator(
-      'button:has-text("Add Section"), button:has-text("New Section")'
+      'button:has-text("Add a section"), button:has-text("New Section")'
     ).first();
     if (await addSectionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await addSectionBtn.click();

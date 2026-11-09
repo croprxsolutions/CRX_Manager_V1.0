@@ -126,7 +126,7 @@ async function fillInNewQuote() {
   fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
   const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
   fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getByText('Alpha Chem'));
-  fireEvent.change(await screen.findByLabelText('Units needed'), { target: { value: '2' } });
+  fireEvent.change(await screen.findByLabelText('Quantity'), { target: { value: '2' } });
 }
 
 describe('QuoteBuilder — leaving a new quote', () => {
@@ -172,7 +172,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     // The page leaves for the saved quote once the save lands, so an edit made now would
     // be lost: every field, including Planned Program, is locked until then.
     expect(screen.getByPlaceholderText(/Notes visible at the top of the quote/)).toBeDisabled();
-    expect(screen.getByLabelText('Units needed')).toBeDisabled();
+    expect(screen.getByLabelText('Quantity')).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Customer' })).toBeDisabled();
     expect(screen.getByRole('switch', { name: /^Planned program/ })).toBeDisabled();
     releaseSave();

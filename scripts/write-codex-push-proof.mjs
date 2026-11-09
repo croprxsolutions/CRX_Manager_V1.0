@@ -1795,7 +1795,8 @@ export function centralDate(now = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(now);
 }
 
-// True when a "## <date> — …" entry dated `today` or later has a **Decision line and mentions #<prNumber>.
+// True when a "## <date> — …" entry dated `today` or later has a **Decision line naming Mason and mentions #<prNumber>.
+// A text check cannot prove he decided; it stops placeholders, and the entry is visible in the PR diff.
 export function decisionLogNamesPr(decisionLog, prNumber, today) {
   if (!Number.isInteger(prNumber)) return false;
   const names = new RegExp(`(?<![\\w&])#${prNumber}(?!\\w)`);
@@ -1803,7 +1804,7 @@ export function decisionLogNamesPr(decisionLog, prNumber, today) {
   return String(decisionLog || "").split(/^## /m).slice(1).some((entry) => {
     const heading = entry.split(/\r?\n/, 1)[0];
     return (heading.match(/\d{4}-\d{2}-\d{2}/g) || []).some((date) => date >= today && realDate(date))
-      && /^\*\*Decision\b/m.test(entry) && names.test(entry);
+      && /^\*\*Decision\b[^\n]*\bMason\b/m.test(entry) && names.test(entry);
   });
 }
 
@@ -1816,8 +1817,8 @@ export function solRoundGate({ round, prNumber, decisionLog, today, dryRun = fal
     "Stop patching: ask Mason the business trade-off that would delete the mechanism that keeps coming back " +
     "(AGENTS.md, Operating Contract), " +
     (pr
-      ? `record his answer in docs/manual/DECISION_LOG.md as an entry dated ${today} or later, with a **Decision line, that names ${pr}, commit it, then re-run this command.`
-      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a **Decision line, that names the PR as #<number>, commit it, then re-run this command.");
+      ? `record his answer in docs/manual/DECISION_LOG.md as an entry dated ${today} or later, with a "**Decision (Mason, …)" line, that names ${pr}, commit it, then re-run this command.`
+      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>, commit it, then re-run this command.");
   return { refuse: !dryRun, message };
 }
 

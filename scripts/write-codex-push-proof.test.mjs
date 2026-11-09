@@ -1824,12 +1824,13 @@ not json
     assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*DECISION_LOG\.md.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: named, today }).refuse, false, "round stop: round 5 with today's entry naming #1653 proceeds");
     assert.equal(solRoundGate({ round: 8, prNumber: 1653, decisionLog: logWith("2026-11-09 — Trade-off", "**Decision (Mason):** loss over duplicate for PR #1653."), today }).refuse, false, "round stop: 'PR #n' in the body counts");
-    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** keep #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
-    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-08 — Yesterday", "**Decision:** #1653"), today }).refuse, true, "round stop: an older entry naming the PR does not count");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** Mason keeps #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-08 — Yesterday", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an older entry naming the PR does not count");
     assert.equal(solRoundGate({ round: 5, prNumber: 165, decisionLog: named, today }).refuse, true, "round stop: #1653 does not name #165");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Pending", "PR #1653; decision pending"), today }).refuse, true, "round stop: a mention with no **Decision line does not count (Luna MED)");
-    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-99-99 — Bad date", "**Decision:** #1653"), today }).refuse, true, "round stop: an impossible date does not count (Luna LOW)");
-    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Token", "**Decision:** #1653abc"), today }).refuse, true, "round stop: #1653abc does not name #1653 (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Placeholder", "**Decision:** pending; no trade-off chosen yet. PR #1653"), today }).refuse, true, "round stop: a **Decision line that does not name Mason does not count (Luna HIGH r2)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-99-99 — Bad date", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an impossible date does not count (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Token", "**Decision (Mason):** #1653abc"), today }).refuse, true, "round stop: #1653abc does not name #1653 (Luna LOW)");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: "", today }).refuse, true, "round stop: an unreadable decision log refuses");
     assert.match(solRoundGate({ round: 5, prNumber: null, decisionLog: named, today }).message, /open the PR/, "round stop: no PR yet says open it first");
     assert.deepEqual(solRoundGate({ round: 4, prNumber: 1653, decisionLog: "", today }), { refuse: false, message: null }, "round stop: round 4 proceeds");

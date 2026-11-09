@@ -3119,6 +3119,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20261218110000 re-issues this renamed body so a commit also updates the registration record; it keeps
   // p_idempotency_key behind its required-key public wrapper and never reaches the generated types.
   '_commit_label_draft_replay_impl_20261015',
+  // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
+  // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
+  'close_delivery_receipt',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

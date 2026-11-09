@@ -174,6 +174,30 @@ assert.deepEqual(
   'the README data proof must list exactly the deliveries the migration recorded',
 );
 
+// The KI-30 data proof must check the same 48 products and corrected numbers the migration set.
+const ki30Pairs = (text, pattern) => [...text.matchAll(pattern)].map((m) => `${m[1]} ${m[2]}`).sort();
+const ki30Migration = ki30Pairs(
+  readFileSync(
+    path.join(root, 'supabase', 'migrations', '20261214100000_ki30_epa_registration_corrections.sql'),
+    'utf8',
+  ),
+  /\('([0-9a-f-]{36})'::uuid, '(?:[^']|'')*', '[^']*', '([^']+)'\)/g,
+);
+assert.equal(ki30Migration.length, 48, 'the KI-30 migration lists 48 products');
+const ki30Start = readme.indexOf('ki30_epa_fixed (product_id, new_epa) AS (VALUES');
+const ki30End = readme.indexOf('SELECT', ki30Start);
+assert.equal(ki30Start >= 0 && ki30End > ki30Start, true, 'the KI-30 data proof list not found');
+assert.deepEqual(
+  ki30Pairs(readme.slice(ki30Start, ki30End), /\('([0-9a-f-]{36})', '([^']+)'\)/g),
+  ki30Migration,
+  'the README KI-30 data proof must list exactly the products and numbers the migration set',
+);
+assert.equal(
+  readme.includes("SELECT 'KI-30 EPA numbers'"),
+  true,
+  'the README data proof must check the KI-30 EPA numbers',
+);
+
 const conflictingModes = spawnSync(
   process.execPath,
   [

@@ -67,7 +67,7 @@
 | The factor-1 fallback (the reason for the unit rules) | `src/lib/quoteCalc.ts:77-86` `getConversionFactor`; live `_save_quote_below_cost_impl_20260810` (`COALESCE(rate_conv.factor_oz, 1)`); live `product_price_per_acre` (`… LIMIT 1`) | A blank or unlisted unit silently becomes 1 oz. RT-1 never calls these and never changes them. Its own unit table has no fallback. |
 | `unit_conversions` | live, 14 rows | Factors RT-1's unit table must match (postflight check, section 4.G; weight units match after dividing RT-1's milligram factor by 28349.523125 and rounding to the `unit_conversions` factor's own decimals): `fl oz`, `oz`, `Oz` = 1; `Pt` = 16; `qt`, `Qt` = 32; `Gal` = 128; `Dry oz` = 1; `Lb`, `LB` = 16; `g` = 0.03527396; `MG` = 0.00003527396; `Ea`, `Unit` = 1. |
 | `_unit_factor_oz(unit, unit_type)` | live | Returns null for an unknown or ambiguous unit (no fallback). RT-1 does not use it, because its own table is the authority, but it is the model. |
-| `normalize_rate_unit(text)` | live (`20260630170000`) | Strips `/acre`, `per acre`; maps spellings to `oz`, `pt`, `qt`, `gal`, `lb`, `g`, `kg`, `l`, `ml`, `ton`; keeps any other `/…` string whole. RT-1's label-maximum parser uses it (section 3.5). |
+| `normalize_rate_unit(text)` | live (`20260630170000`) | Strips a per-acre denominator (`/ac`, `/acre`, `/acres`, `/a`, ` per acre`; `20260630170000` lines 58-61); maps spellings to `oz`, `pt`, `qt`, `gal`, `lb`, `g`, `kg`, `l`, `ml`, `ton`; keeps any other `/…` string whole. RT-1's label-maximum parser uses it only to name the base unit after RT-1 has split off the denominator itself (section 3.5). |
 | Rate readers | `src/` | `rate_per_acre` appears in 122 files; 53 outside tests and `src/types/`. (The grand plan's "93 / 42" was the 2026-10-29 count.) `rate_unit` appears in 118 files. RT-1 touches none of them. |
 | Rate lock | `20261107060000_product_rate_lock.sql`; triggers `trg_a_share_product_rate_lock`, `trigger_zzz_guard_product_rate_lock`; `set_product_rate_lock`, `correct_product_rates` | Locks **live** rates only (the `products` columns, and after PAR-1 the parent columns). Drafts are outside it (overlap 11). |
 | Parent rate columns | `product_parents.rate_per_acre`, `rate_unit`, `suggested_rate`; written only by `_apply_parent_rates` (through `set_parent_rates` / `correct_parent_rates`), which copies them to every member size | The derivation reads the **parent's** columns and checks the sizes agree (section 5). |
@@ -103,7 +103,7 @@
 - `parent_id uuid NOT NULL` FK `product_parents(id)` (no cascade; parents are never deleted).
 - `basis text NOT NULL` CHECK in (`per_acre`, `per_100_gal`, `per_unit`, `per_cwt_seed`, `per_seed_unit`).
 - `source text NOT NULL` CHECK in (`label`, `house_standard`).
-- `low numeric(18,6)`, `recommended numeric(18,6)`, `high numeric(18,6)`, each `CHECK (x IS NULL OR x >= 0)` (WP-PM-8's rate ≥ 0, overlap 4). The precision matches `_product_rate_value_ok` (12 digits, 6 decimals).
+- `low numeric`, `recommended numeric`, `high numeric` (deliberately **unconstrained** `numeric`, because a `numeric(18,6)` column would round a seventh decimal on assignment before any check could see it), each `CHECK (x IS NULL OR (x >= 0 AND x < 1e12 AND x = round(x, 6)))` (WP-PM-8's rate ≥ 0, overlap 4). This is `_product_rate_value_ok`'s rule (12 digits, 6 decimals) enforced by the table itself, so any future writer that sends `1.1234567` is refused, never rounded.
 - `unit text NOT NULL` FK `product_rate_units(code)`. So a blank or unknown unit cannot be stored at all.
 - `is_quoting_default boolean NOT NULL DEFAULT false`.
 - `status text NOT NULL DEFAULT 'draft'` CHECK in (`draft`, `approved`). RT-1 writes only `draft`; `approved` is there so RT-3 needs no constraint change. `approved_by uuid`, `approved_at timestamptz`, with `CHECK ((status = 'draft' AND approved_by IS NULL AND approved_at IS NULL) OR (status = 'approved' AND approved_by IS NOT NULL AND approved_at IS NOT NULL))`, so a draft can carry neither approval field and an approved row must carry both.
@@ -168,7 +168,7 @@ Refused cells raise `PRODUCT_RATE_UNIT_NOT_FOR_BASIS`. A weight rate on a liquid
 **Conversion and rounding.**
 - RT-1 **stores no converted value.** A row keeps the number and unit it was given.
 - Conversions happen only inside the label check (3.5), within one kind: `value × factor` gives fluid ounces (volume) or milligrams (weight). Every factor is exact, so nothing is ever truncated. They are done in exact PostgreSQL `numeric` with no rounding at any step; "equal" is not "above".
-- Values are entered with at most 6 decimals (`numeric(18,6)`); more decimals are refused (`PRODUCT_RATE_INVALID`, the existing `_product_rate_value_ok` rule), never rounded silently.
+- Values are entered with at most 6 decimals (the 3.1 scale CHECK); more decimals are refused (`PRODUCT_RATE_INVALID`, the existing `_product_rate_value_ok` rule), never rounded silently.
 - Converting **between** bases (per 100 gal → per acre needs a spray volume; per cwt → per acre needs a seeding rate) is **not** done by RT-1. The examples below that cross a basis are only to show what the numbers mean.
 - RT-4 note: when RT-4 fills the old columns from an approved default, it writes the row's own number and the unit's legacy spelling, so no rounding or factor ever enters a quote.
 
@@ -214,11 +214,12 @@ The named refusals are raised by the RPCs before the constraint would fire, so t
 2. Collect the parent's EPA numbers from the four places `_parent_chemistry_epa_refusal` reads (trimmed, non-blank, distinct).
 3. If none, or REG-1's seed function is missing or reports unseeded (`to_regprocedure('public._epa_registrations_seeded()')` is null, or it returns false), return `{status: 'not_checked', why: 'no_registration' | 'registrations_not_seeded'}`.
 4. For each number, read `epa_registrations.max_label_rate` and `max_label_rate_unit`. A maximum is **comparable** only when:
-   - the row's basis is `per_acre` **and** `basis_confirmed` is true (otherwise the result is `not_checked`, why `basis_unconfirmed`);
-   - the max unit, through `normalize_rate_unit`, ends with an acre denominator or has none (a bare unit is read as per acre, as `compareToMaxRate` does), and its base maps to a `product_rate_units` code of the row's kind (`oz` → `fl_oz` for liquid, `dry_oz` for dry; `pt`, `qt`, `gal`, `lb`, `g`, and `mg` map directly; anything else, such as `kg`, `l`, `ml`, `ton` or a `/100 gal` maximum, is not comparable).
+   - `basis_confirmed` is true (otherwise the result is `not_checked`, why `basis_unconfirmed`);
+   - the max unit's **denominator**, read with the same strict grammar as section 5 Row 2 (`/acre`, `/acres`, `/ac`, `/a`, `per acre` or no denominator → `per_acre`, a bare unit being read as per acre as `compareToMaxRate` does; `/100 gal` → `per_100_gal`; `/cwt` → `per_cwt_seed`; `/unit` → `per_seed_unit`), gives **the row's own basis**. A different basis is never converted (that would need a spray volume or seeding rate), so `3 qt/100 gal` is compared with a `2 qt/100 gal` maximum but not with a per-acre one;
+   - the base unit left after the denominator, named through `normalize_rate_unit`, maps to a `product_rate_units` code of the row's kind (`oz` → `fl_oz` for liquid, `dry_oz` for dry; `pt`, `qt`, `gal`, `lb`, `g`, and `mg` map directly; anything else, such as `kg`, `l`, `ml` or `ton`, is not comparable). `per_unit` rows have no label-maximum form and are always `not_checked` (`why: basis_has_no_label_max`).
 5. The highest value on the row is `greatest(low, recommended, high)` (nulls ignored). Compare `highest × row factor` with `max × max factor` in exact numeric.
 6. Result:
-   - **`above`** if any comparable maximum is exceeded. It lists each exceeded registration with its max. `reason_missing: true` when the row has no `over_label_reason` (possible if a maximum was lowered after the save; RT-3 must not approve such a row).
+   - **`above`** if any comparable maximum is exceeded. It lists each exceeded registration with its max. `reason_missing: true` when the row has no `over_label_reason` (possible if a maximum was lowered after the save, or on a derived row, see 4.C; RT-3 must not approve such a row).
    - Else **`not_checked`** if any linked registration has no maximum or a non-comparable one, with which and why.
    - Else **`within`**.
 
@@ -280,6 +281,8 @@ For a wrongly derived row (wrong basis, wrong source). Admin, key, replay. Reaso
 ### 4.C `derive_draft_product_rates(p_parent_ids uuid[], p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 
 Section 5 defines the rules. 1 to 500 distinct parent IDs per call (`PRODUCT_RATE_DERIVE_BATCH`). Parents are processed in ID order, each under the 3.6 locks. Returns, per parent, `{parent_id, outcome: 'derived' | 'skipped_has_rows' | 'skipped_sizes_disagree' | 'nothing_to_derive', rows: [...], notes: [...]}` plus totals. A re-run never changes an existing row: a parent that already has any `product_rates` row is skipped.
+
+**Above label during derivation.** Derivation copies today's numbers and has no reason to give, so the reason rule of 4.A step 5 does not apply to it. A derived house row whose label check is `above` is still written, with `over_label_reason` null; the parent's report and a `derive_note` event carry note `above_label` with the exceeded registrations, and every later read shows `above` with `reason_missing: true`. It cannot become live: RT-3 must not approve it until an admin saves it through 4.A with a reason or a lower rate. Refusing the row instead would hide a real (if wrong) rate the business uses today, and failing the batch would let one product block 499 others.
 
 ### 4.D `get_parent_draft_rates(p_parent_id uuid) RETURNS jsonb` (read)
 
@@ -345,7 +348,7 @@ No other `src/` file changes. The PR description lists its file list against thi
 - Anything else (`1.5 qt/ton`, `1-3lb`, `Beans 5 oz/acre -- Corn 14oz/acre`, `Spray on`, `2 products`): no row, note `text_unparsed` with the text. A unit that fails 3.3 for the parent's form (the each-form seed treatments' `oz/unit`): no row, note `unit_not_for_form`.
 - Never a quoting default.
 
-**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`.
+**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`, `above_label`.
 
 **What derivation never does:** change any `products` or `product_parents` value; overwrite or merge into an existing row; set a default other than the house per-acre row; convert between bases; touch the rate lock.
 
@@ -375,7 +378,9 @@ The harness is `scripts/smoke/prove-product-rates-draft-real-schema.mjs`, run ag
 | R6 | Ranges: low 2 / rec 1 / high 3; low 3 / high 2; all three null; −1; 1.1234567 | Refused `PRODUCT_RATE_RANGE_INVALID` (first four) and `PRODUCT_RATE_INVALID` (last); 1 ≤ 1 ≤ 1 accepted |
 | R7 | Every hand-worked example in 3.3 | The label check and stored values match the table exactly, including "24 is not above 24" |
 | R8 | Over label: house 1.6 pt/acre, registration max `24 oz/acre` | Without a reason refused `PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED`; with a reason saved, result `above`, reason stored |
-| R9 | Max unknown, max `2 qt/100 gal`, max `1 kg/acre`, no registration, REG-1 unseeded | Each saves with no reason; check `not_checked` with the matching `why` |
+| R9 | Max unknown, a per-acre row against max `2 qt/100 gal`, max `1 kg/acre`, no registration, REG-1 unseeded, a `per_unit` row | Each saves with no reason; check `not_checked` with the matching `why` |
+| R9b | Same-basis maximums: house `3 qt/100 gal` against max `2 qt/100 gal`; house `1.6 pt/acre` against max `24 oz/ac` and `24 oz/a`; direct insert of `1.1234567` as `postgres` | First two refused `PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED` without a reason; the insert fails the scale CHECK |
+| R9c | Derive a parent whose house rate is above a seeded maximum | Row written with no reason, note `above_label`, read shows `above` + `reason_missing: true`; the rest of the batch derives normally |
 | R10 | Lower the registration max after an R8-style save without an over-label row | Read shows `above`, `reason_missing: true` |
 | R11 | Two sessions: a draft save and a REG-1 registration write (or `set_parent_rates`) on the same parent | One waits; no deadlock |
 | R12 | **No reader changed:** before migration and derivation, snapshot every fixture product's and parent's rate columns, `product_price_per_acre` for every fixture product and tier, a fixture quote's saved lines, and the md5 of the five function bodies in 4.G | All identical after the migration, after derivation, and after every R-case |
@@ -468,3 +473,9 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 - MED truncated g/mg factors could flip a borderline check: fixed, weight factors are exact milligrams; boundary example added (3.2 table, 3.3, 4.G).
 - LOW seed-unit estimate 15 vs 9: fixed (section 5).
 - LOW `source_text` over 200 characters would fail a derivation write: fixed, length checked first and noted (3.1).
+
+**Luna round 2** (head `ee90c1911`): 4 findings, all fixed.
+- HIGH non-per-acre house rows were never checked, so `3 qt/100 gal` against a `2 qt/100 gal` max saved with no reason: fixed, a maximum is compared when its denominator gives the row's own basis (3.5 step 4, R9b).
+- MED `/ac` and `/a` maximums: `normalize_rate_unit` already strips them (`20260630170000` lines 58-61); section 1 corrected, and RT-1 now reads the denominator with its own grammar (3.5, R9b).
+- MED `numeric(18,6)` rounds a seventh decimal before a CHECK sees it: fixed, unconstrained `numeric` with a scale CHECK (3.1, R9b).
+- MED derivation had no defined outcome for an above-label house rate: fixed, written with note `above_label` and `reason_missing`, never approvable as-is (4.C, R9c).

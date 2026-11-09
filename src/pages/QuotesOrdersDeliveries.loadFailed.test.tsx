@@ -5,7 +5,7 @@
  * $0 return with live Approve / Receive / Credit buttons; Try again shows the rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { getSeasonDates } from '../utils/season';
 
@@ -111,6 +111,13 @@ describe('Quotes list', () => {
     at('/quotes', <Quotes />);
     expect(await screen.findByText('Q-2026-0042')).toBeInTheDocument();
     expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Product names could not be loaded'));
+  });
+
+  it('the rollover help tip is not nested inside the toggle button', async () => {
+    at('/quotes', <Quotes />);
+    const toggle = await screen.findByRole('button', { name: /Open booking rollover/ });
+    const help = within(toggle.parentElement as HTMLElement).getByRole('button', { name: 'More info' });
+    expect(toggle.contains(help)).toBe(false);
   });
 
   it('a failed booking rollover says so instead of "No open bookings."', async () => {

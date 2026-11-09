@@ -603,7 +603,8 @@ export default function Orders() {
     },
     {
       key: 'fulfillment_pct',
-      header: (<span className="flex items-center">Fulfillment<HelpTip text="Fulfillment shows delivery progress. Invoiced shows billing progress. Both are weighted by dollar value." className="ml-1" /></span>),
+      header: 'Fulfillment',
+      headerExtra: <HelpTip text="Fulfillment shows delivery progress. Invoiced shows billing progress. Both are weighted by dollar value." className="ml-1" />,
       sortable: true,
       render: (row) => (
         <div className="flex items-center gap-2">

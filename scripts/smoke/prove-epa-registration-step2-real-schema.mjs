@@ -553,7 +553,10 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   }
   ownerRefused(`UPDATE public.invoice_items SET sale_rup_status = 'no' WHERE id = '${L5}';`, /INVOICE_LINE_SALE_CAPTURE/);
   ownerRefused(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
-    VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, '999-9');`, /INVOICE_LINE_NO_REGISTRATION/);
+    VALUES ('${L6}', '${INV1}', '${P2}', 'x', 1, 'Gal', 1500, 1500, '999-9');`, /INVOICE_LINE_NO_REGISTRATION/);
+  // Decision (a): a line sells under its size's number, even a registered one from another writer.
+  ownerRefused(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
+    VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, '${N2}');`, /INVOICE_LINE_EPA_MISMATCH/);
   ownerOk(`UPDATE public.invoice_items SET unit_price_cents = 1600, extended_cents = 3200 WHERE id = '${L1}';`);
   assert.equal(capture(L1), `${N1}|no|Warning|seed-assumed:registration:${N1}@1|true`);
   ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4800 WHERE id = '${L1}';`);
@@ -582,7 +585,9 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.equal(ok(ADMIN, GEN('g2')), '0');
   raw(`UPDATE public.invoice_items SET quantity = 4 WHERE id = '${L5}';`);
   refused(ADMIN, GEN('g3'), /RUP_RECORD_CONFLICT/);
-  raw(`UPDATE public.invoice_items SET quantity = 3 WHERE id = '${L5}';
+  raw(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4400 WHERE id = '${L5}';`);
+  refused(ADMIN, GEN('g3b'), /RUP_RECORD_CONFLICT/);
+  raw(`UPDATE public.invoice_items SET extended_cents = 4500 WHERE id = '${L5}';
     INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L6}', '${INV1}', '${P2}', 'x', 1, 'Gal', 1500, 1500);`);
   refused(ADMIN, GEN('g4'), /INVOICE_LINE_NOT_CAPTURED/);
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);

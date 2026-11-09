@@ -141,6 +141,12 @@ BEGIN
   END IF;
   SELECT p.id, p.epa_registration, p.is_rup, p.signal_word INTO v_p
     FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
+  -- Decision (a): a line sells under its size's number, whichever writer inserted it.
+  IF public._normalize_epa_registration(NEW.epa_registration) IS NOT NULL
+     AND public._normalize_epa_registration(v_p.epa_registration) IS NOT NULL
+     AND public._normalize_epa_registration(NEW.epa_registration) <> public._normalize_epa_registration(v_p.epa_registration) THEN
+    RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number differs from its product''s; reload the invoice';
+  END IF;
   v_n := COALESCE(public._normalize_epa_registration(NEW.epa_registration), public._normalize_epa_registration(v_p.epa_registration));
   NEW.epa_registration := v_n;
   IF v_n IS NOT NULL THEN
@@ -719,6 +725,7 @@ DECLARE
   v_items refcursor;
   v_line record;
   v_rec_qty numeric;
+  v_rec_total bigint;
 BEGIN
   -- N2-4 role gate (matches the sole caller post_invoice): block applicators/drivers.
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'authentication required'; END IF;
@@ -854,7 +861,7 @@ BEGIN
     IF v_seeded THEN
       -- REG-1: one active record per invoice, product, sold number, captured signal word, unit and unit price;
       -- one that disagrees with what this posting would write is an error, never skipped.
-      SELECT r.quantity INTO v_rec_qty FROM rup_sales_records r
+      SELECT r.quantity, r.total_cents INTO v_rec_qty, v_rec_total FROM rup_sales_records r
        WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id
          AND public._normalize_epa_registration(r.epa_registration) IS NOT DISTINCT FROM v_item.epa_registration
          AND r.signal_word IS NOT DISTINCT FROM v_item.signal_word
@@ -863,8 +870,8 @@ BEGIN
          AND r.voided_at IS NULL
        ORDER BY r.id LIMIT 1;
       IF FOUND THEN
-        IF v_rec_qty IS DISTINCT FROM v_item.quantity THEN
-          RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % under EPA number % with a different quantity',
+        IF v_rec_qty IS DISTINCT FROM v_item.quantity OR v_rec_total IS DISTINCT FROM v_item.extended_cents THEN
+          RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % under EPA number % with a different quantity or amount',
             v_invoice.invoice_number, v_item.product_name, v_item.epa_registration;
         END IF;
         CONTINUE;

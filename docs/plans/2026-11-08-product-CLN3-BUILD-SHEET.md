@@ -44,7 +44,7 @@ Read-only checks of `main` (`4504e3e6a`) and the live database on 2026-11-08 (on
 
 Typing slips seen in the lists: a double comma (an empty item), a leading space, a double space between words, and at least one brand name with two letters swapped.
 
-**Where brands are stored (current `main`).**
+**Where brands are stored (current `main`).** Migration file stamps in this repo run ahead of the calendar, so a December stamp is not a sign of a future change. Each object below was confirmed to exist on live on 2026-11-08 (`to_regclass` / `to_regprocedure`, read only): `product_parent_brands`, `product_parent_members`, `get_product_brands(uuid)`, `get_product_grouping_open()`.
 - `product_brands` (`supabase/migrations/20261022086500_product_brands.sql`): one row per brand per size; `brand_name` is trimmed, unique per size ignoring case. RLS: `SELECT` for active users; no browser writes.
 - `product_parent_brands` (`20261123120000_product_parent_proposals.sql:286`): one row per brand per parent, `status` `active` or `retired`; same trim rule; `SELECT` for active users.
 - `product_parent_members` (`20261108120000_product_parents.sql:138`): `product_id` is the primary key (**no `id` column**), `parent_id`. `SELECT` for active users.
@@ -87,7 +87,9 @@ Why, against the other two options:
 - `product_parent_members`: `product_id, parent_id`, ordered by `product_id` (the table has no `id` column);
 - `product_parents`: `id, name`, ordered by `id`, so a grouped size's row can name the parent its list comes from;
 - `product_parent_brands`: `id, parent_id, brand_name, status, is_currently_sourced`, ordered by `id`;
-- `get_product_grouping_open()` once. If it fails, the section shows an error and no rows; it never guesses the switch.
+- `get_product_grouping_open()` once.
+
+**All or nothing.** The section waits for all six reads. If any one fails (any table page or the switch), it shows one error and no rows, never a partial report: a failed `product_brands` read would otherwise put real branded products in "no brand list yet". **One load at a time:** Reload is disabled while a load runs, and each load carries a number; a result is shown only if its number is the latest, so a slow older load can never overwrite a newer one.
 
 Five table reads and one switch read for the whole catalog, instead of 604 `get_product_brands` calls. The cost is that the rule is copied (risk 1).
 
@@ -102,7 +104,7 @@ Five table reads and one switch read for the whole catalog, instead of 604 `get_
 5. **Normal form of each item:** remove `®`, `™` and `©`; turn every run of spaces, tabs, hyphens and underscores into one space; trim; lower-case. Periods and digits stay (`5.4` and `54` are different products). So `Brand-X  4L`, `brand x 4l` and ` Brand X 4L` are one brand; an empty item from a double comma disappears.
 6. **Items that are notes, not brands,** go to `notes` and are never compared:
    - an item with no letters at all (percent, ratio, fertilizer analysis);
-   - a size: the whole item is a number and a unit, nothing more (`2.5 gal`, `265g`, `12#`; an item like `4L Shield` stays a brand). Units: `gal`, `g`, `#`, `lb`, `lbs`, `oz`, `qt`, `pt`, `l`, `ml`, `kg`, `ton`, `tote`, `bulk`, `case`);
+   - a size: the whole item is a number (digits with at most one decimal point) and a unit, nothing more (`2.5 gal`, `265g`, `12#`; an item like `4L Shield` stays a brand). Units: `gal`, `g`, `#`, `lb`, `lbs`, `oz`, `qt`, `pt`, `l`, `ml`, `kg`, `ton`, `tote`, `bulk`, `case`);
    - a short fixed list: `retired`, `no return`, `full tote`, `full pallets`, `full pallet`. The list is in one constant with a comment; adding a word is a one-line change plus a test.
    Notes that are words but not on the list (an ingredient code, for example) are treated as brands. On a product with no brand list they only appear in the "no brand list yet" group; on a product with one they show as "in the name, not on the list", which is the truth. The page never hides a row to look cleaner.
 7. **Several brands, one name:** each is compared on its own; order does not matter; a brand repeated in the name counts once.
@@ -142,14 +144,15 @@ All of these, observed, not only tested:
             regexp_split_to_table(g[1], '[,;]') it)
      SELECT count(DISTINCT id) FROM items
       WHERE item <> '' AND item ~ '[a-z]'
-        AND item !~ '^[0-9.]+ ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)$'
+        AND item !~ '^([0-9]+(\.[0-9]*)?|\.[0-9]+) ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)$'
         AND item NOT IN ('retired', 'no return', 'full tote', 'full pallets', 'full pallet');
      ```
    - "Disagrees" and "Brand list, no brands in the name" are empty, because live has 0 brand rows.
    - Every name in the "no brand list yet" group is checked by eye against its bracket text for ten rows chosen across the shapes in section 1 (a long list, a one-item list, the two-group name, both unclosed names).
 3. **Disagreement cases on the private test copy** (the same local test database the Stage 2 packages use; never live): seed brand rows so that one size agrees, one has an extra brand on the list, one is missing a brand from the list, one has a two-letter typo, one is grouped with the switch on (parent list used), and one is grouped with the switch off (own list used). The page shows each exactly as expected, and for every seeded product the list the page used equals what `get_product_brands` returns for that product.
-4. **It changes nothing:** the network panel shows only `GET` reads and the one `get_product_grouping_open` call while the section loads; no `POST` to a table, no other RPC.
-5. Screenshot of the section on the live page (names blurred or not attached to the PR, because the repo is public) shown to Mason in the session.
+4. **Failure and reload** (a component test with mocked reads): one failed table read shows the error and no rows; a slow first load finishing after a second load does not replace the second load's result.
+5. **It changes nothing:** the network panel shows only `GET` reads and the one `get_product_grouping_open` call while the section loads; no `POST` to a table, no other RPC.
+6. Screenshot of the section on the live page (names blurred or not attached to the PR, because the repo is public) shown to Mason in the session.
 
 ## 7. Risks
 
@@ -188,3 +191,4 @@ The report lists every product whose name has brand names in brackets that do no
 |---|---|---|
 | 1 (`d1afedcac`) | Luna, xhigh | 2 findings. MED: the read list lacked `product_parents`, so the page could not name a grouped size's parent (added; read count corrected). LOW: the sample SQL's size rule had no end anchor (anchored here and in rule 6; the live count stayed 107). |
 | 2 (`ecee6419e`) | Luna, xhigh | 3 findings. MED: the sample SQL did not strip `®™©` like the parser (fixed). MED: separate reads are not one snapshot (accepted as risk 6: advisory report, load time and Reload shown). LOW: an unclosed bracket on a product in no group was hidden (now always listed). |
+| 3 (`a87462895`) | Luna, xhigh | 4 findings. HIGH (refuted): "the brand tables may not be live yet" because of their December file stamps; every object was confirmed on live, now stated in section 1. MED: overlapping reloads (one load at a time, latest wins). MED: partial failure (all six reads or nothing). LOW: the size rule accepted malformed numbers (tightened in rule 6 and the SQL). |

@@ -112,7 +112,7 @@
 
 **`rup_sales_records.brand_name text`** (new, NULL for an unbranded record). Two brands with one EPA number in one record show both names, joined with "; ".
 
-**`delivery_brand_settings`** (new, one row, `id boolean PRIMARY KEY DEFAULT true CHECK (id)`): `brand_required boolean NOT NULL DEFAULT false`, `changed_by`, `changed_at`, `reason`. RLS on; `REVOKE ALL` from `PUBLIC`, `anon`, `authenticated`, `service_role`; `GRANT SELECT` to `authenticated`. No role can write it except through `set_delivery_brand_required` (4.J), and no other function writes it, so the switch is not in `app_settings` where the generic admin settings path could change it. The migration inserts the one row, a live data row, so the apply gate may not class the migration as "routine grants only" (section 10).
+**`delivery_brand_settings`** (new, one row, `id boolean PRIMARY KEY DEFAULT true CHECK (id)`): `brand_required boolean NOT NULL DEFAULT false`, `changed_by`, `changed_at`, `reason`. RLS on; `REVOKE ALL` from `PUBLIC`, `anon`, `authenticated`, `service_role`; `GRANT SELECT` to `authenticated` with a SELECT policy for any active app user (the existing active-user check the delivery policies use), so the settings page and the screens can read the switch. No role can write it except through `set_delivery_brand_required` (4.J), and no other function writes it, so the switch is not in `app_settings` where the generic admin settings path could change it. The migration inserts the one row, a live data row, so the apply gate may not class the migration as "routine grants only" (section 10).
 
 ### 3.2 Brand-list resolution (one internal helper)
 
@@ -191,7 +191,9 @@ The `completed` event records, for every line, its delivered amount and the size
    - **before the seed:** from the brand row (`is_rup` true → `yes`, false → `no`, NULL → `unknown`);
    - **typed:** `unknown`, unless seeded and its number has a registration.
 
-A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Not chosen:** a reserved key inside `p_quantities` (step 1's plan). It would change the parsing and fingerprints of every function that reads `p_quantities`, for a rare case.
+A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL` (the same way `20261113140000` added a trailing default argument). When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens always send it. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Callers that do not send it (old replays, the one-click list button) complete against the current picks, which the switch rules still check.
+
+**Not chosen:** a reserved key inside `p_quantities` (step 1's plan). It would change the parsing and fingerprints of every function that reads `p_quantities`, for a rare case.
 
 The Bill Split auto-split path in completion runs inside `EXCEPTION WHEN OTHERS` and falls back to manual split billing (`20261215110000:~1281-1300`). A brand-helper error there must not be swallowed: the brand work runs before that block, and P26 proves an error in it fails completion instead of silently changing the billing.
 
@@ -231,7 +233,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **A line with brand entries:** one candidate record per entry, read from the stored `brand_lines`.
   - **Allocating the line's quantity and cents to entries:**
     - a Bill Split payer's line: in proportion to `delivered_quantity`;
-    - any other line: in entry order (trip order), each entry taking up to its delivered amount until the line's quantity is used up. If the line's quantity is above the delivered total, the excess is added to the last entry. So a whole-order line still at 60 after trips of A 60 and B 40 records A 60, not A 36 and B 24.
+    - any other line: in entry order (trip order), each entry taking up to its delivered amount until the line's quantity is used up. A restricted-use line whose quantity is **above** the delivered total (outside Bill Split) refuses posting with `BRAND_QTY_OVER_DELIVERED: <product> is billed for more than was delivered by brand; fix the quantity or the brand amounts`, because no brand can be named for the extra. So a whole-order line still at 60 after trips of A 60 and B 40 records A 60, not A 36 and B 24.
     - Cents follow the quantity in whole cents; quantities are rounded to the line quantity's own scale (the builder confirms the column's scale from live). The last entry takes both remainders, so the records add up to the line exactly.
   - **Which entries need a record (REG-1's rule, per entry):** the entry's captured `rup_status` is `yes`, **or** the registration of that entry's number says `yes` at posting. Over-recording is the safe side; a captured `yes` is never lowered by a later change. An entry captured `unknown` under a restricted-use generic, or a typed entry captured `unknown`, is also recorded, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed entry `unknown` under a non-RUP generic is not recorded, and shows on REG-DB's Compliance not-reviewed list (4.D).
   - **What each record holds:** the entry's EPA number, signal word and `brand_name`.
@@ -261,7 +263,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 ### 4.H Read RPCs
 - `get_delivery_brands(p_delivery_id)`: each line, its brand list (3.2), its current picks, and the delivery's highest event `seq`. Same read rule as the delivery.
 - `get_typed_brands_for_review()`: admin only; pending typed picks with delivery, product and line.
-- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed lines with `quantity_delivered > 0` that had a brand list **at completion** and have no current picks (the switch-on backlog report, section 10). Whether a line had a brand list is read from the `completed` event, which records each line's brand-list size at that moment (4.C), so retiring a brand later never hides an old gap.
+- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed lines with `quantity_delivered > 0` that had a brand list **at completion** and either have no current picks or have picks that do not add up to the delivered amount (the switch-on backlog report, section 10). Whether a line had a brand list is read from the `completed` event, which records each line's brand-list size at that moment (4.C), so retiring a brand later never hides an old gap.
 - `get_detailed_statement_data` is re-issued to return `brand_lines`.
 
 ### 4.J `set_delivery_brand_required(p_on boolean, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
@@ -302,7 +304,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **Saving safely:**
   - The screen's picks belong to one delivery ID and are reloaded from `get_delivery_brands` when it opens another delivery or reopens.
   - Each save gets one retry key from the existing `useIdempotencyKey` hook, reused on every retry of that same save and replaced only when the choices change.
-  - One save at a time: while a save or a completion is in flight, the picker, Split and Complete are disabled, and a reply for anything but the latest request is ignored. Complete is offered only after the latest save has come back. Completion sends nothing about brands; the database reads the saved picks.
+  - One save at a time: while a save or a completion is in flight, the picker, Split and Complete are disabled, and a reply for anything but the latest request is ignored. Complete is offered only after the latest save has come back, and sends the base `seq` it loaded or saved (`p_brand_base_seq`); the database reads the saved picks.
   - A `BRAND_PICKS_CHANGED` refusal (someone else saved, or the delivery was edited) reloads the picks and says so.
   - A failed save leaves the screen's choices in place, shows the error, and keeps Complete disabled until a save succeeds.
 - **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
@@ -362,7 +364,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 **RUP**
 - P19. A split restricted-use line posts two records with the right numbers, amounts and cents adding up exactly. Two lines of one product and one brand number on one invoice produce one record. A whole-order line at 60 after trips of A 60 and B 40 records A 60.
 - P20. A brand captured `no` whose registration says `yes` at posting is recorded (REG-1's rule); one captured `yes` keeps its record after a flip to `no`. An `unknown` entry under a restricted-use generic, and a typed `unknown` entry under a non-RUP generic, are recorded with the warning. A listed `unknown` entry under a non-RUP generic is not recorded and shows on the Compliance not-reviewed list.
-- P21. A restricted-use line with `brand_lines = []` or a no-brand entry, and any line with a typed no-number entry, refuse posting with `BRAND_NOT_RECORDED`; a restricted-use line whose entries do not add up to delivered refuses with `BRAND_SPLIT_MISMATCH`; after the draft-time correction each posts.
+- P21. A restricted-use line with `brand_lines = []` or a no-brand entry, and any line with a typed no-number entry, refuse posting with `BRAND_NOT_RECORDED`; a restricted-use line whose entries do not add up to delivered refuses with `BRAND_SPLIT_MISMATCH`; a restricted-use line billed above the delivered total refuses with `BRAND_QTY_OVER_DELIVERED`; after the draft-time fix each posts.
 - P22. Unpost, void and re-post behave as before under the new grouping (PARKED-006).
 
 **Correction and review**
@@ -374,11 +376,12 @@ A line the office adds by hand gets `brand_lines` NULL.
 - P26. Changing only a scheduled delivery's date keeps the picks under the new line IDs; changing one line's quantity or unit size drops only that line's picks; both write an `edited` event. An error in the brand step during a Bill Split completion fails the completion instead of falling back.
 - P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none) and service_role has no table privilege on the new tables.
 - P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the four new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
-- P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
+- P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty. A line whose picks do not add up to delivered is on the report until corrected. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
 - P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
 - P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
 - P34. A direct write to `delivery_brand_settings` from `authenticated` is refused, and no function other than `set_delivery_brand_required` writes it. With the switch on, a no-pick completion is refused through every entry point, `process_offline_action` included, and the refused replay appears on the offline work review page.
 - P35. A `yes` listed entry and a typed `unknown` entry sharing one record key give one record with `warning` and both notes.
+- P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. The settings row is readable by an active user.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
 
@@ -515,3 +518,9 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - HIGH, an owner-role check could not prove which function changed the switch: **fixed** by moving the switch to its own table that only `set_delivery_brand_required` writes (3.1, 4.J, P34).
 - MED, zero-delivered lines blocked switch-on: excluded from the report (4.H, P30).
 - MED, retiring a brand could hide an old gap: the report reads the brand-list size recorded at completion (4.C, 4.H, P30).
+
+**Luna round 9** (head `4e3989a2a`): 2 HIGH, 2 MED, all **fixed**.
+- HIGH, quantity billed above the delivered total was given to the last brand: a restricted-use line billed above delivered refuses posting until fixed (4.E, P21).
+- HIGH, completion did not check the screen saw the current picks: optional trailing `p_brand_base_seq` on the completion RPCs, always sent by the capture screens (4.C, section 5, P36).
+- MED, no read policy on the switch table: active-user SELECT policy (3.1, P36).
+- MED, mismatched splits from before switch-on did not block it: they are on the backlog report (4.H, P30).

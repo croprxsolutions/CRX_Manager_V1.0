@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { AlertTriangle, Download, FileText, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Archive, Download, FileText, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, supabase } from '../../lib/db';
 import { logActivity } from '../../lib/activityLogger';
@@ -34,6 +34,7 @@ interface CustomerDocumentRow {
   expiration_date: string | null;
   notes: string | null;
   created_at: string;
+  deleted_at: string | null;
 }
 
 interface CustomerDocumentsProps {
@@ -87,6 +88,15 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<CustomerDocumentRow | null>(null);
+  // Admins only (KI-07): list removed documents to download or restore them.
+  const [showRemoved, setShowRemoved] = useState(false);
+  // Another customer opens on its current documents, not the removed view.
+  const [viewCustomerId, setViewCustomerId] = useState(customerId);
+  if (viewCustomerId !== customerId) {
+    setViewCustomerId(customerId);
+    setShowRemoved(false);
+  }
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const { getKeyFor: getRemoveKeyFor, resetKeyFor: resetRemoveKeyFor } = useIdempotencyKey(
     'soft_delete_customer_document',
     userId,
@@ -99,11 +109,11 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
     setLoading(true);
     setLoadError(false);
     try {
-      const documentResult = await supabase
+      const query = supabase
         .from('customer_documents')
-        .select('id, customer_id, document_type, storage_path, filename, mime_type, size_bytes, effective_date, expiration_date, notes, created_at')
-        .eq('customer_id', customerId)
-        .is('deleted_at', null)
+        .select('id, customer_id, document_type, storage_path, filename, mime_type, size_bytes, effective_date, expiration_date, notes, created_at, deleted_at')
+        .eq('customer_id', customerId);
+      const documentResult = await (showRemoved ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null))
         .order('expiration_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false });
 
@@ -122,7 +132,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [customerId, toast]);
+  }, [customerId, showRemoved, toast]);
 
   useEffect(() => {
     setDocuments([]);
@@ -132,6 +142,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
   // Admins and sales reps remove documents of ANY customer (Mason, 2026-10-13;
   // soft_delete_customer_document enforces the same rule since 20261013220000).
   const canDelete = profile?.role === 'admin' || profile?.role === 'sales_rep';
+  const isAdmin = profile?.role === 'admin';
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -215,7 +226,9 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       setEffectiveDate('');
       setExpirationDate('');
       setNotes('');
-      await loadDocuments();
+      // The new file is a current document: leave the removed view so the admin sees it.
+      if (showRemoved) setShowRemoved(false);
+      else await loadDocuments();
     } catch (error: unknown) {
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
         extra: { context: 'CustomerDocuments.upload' },
@@ -242,6 +255,40 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       void loadDocuments();
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  // A direct update under the admin policy; guard_customer_document_update lets only an
+  // active admin clear both removal columns and nothing else (20261222100000).
+  const handleRestore = async (document: CustomerDocumentRow) => {
+    setRestoringId(document.id);
+    try {
+      const result = await supabase
+        .from('customer_documents')
+        .update({ deleted_at: null, deleted_by: null })
+        .eq('id', document.id)
+        .eq('customer_id', customerId)
+        .not('deleted_at', 'is', null)
+        .select('id');
+      checkMutationResult(result, 'Restore customer document');
+      await logActivity({
+        event: 'document_restored',
+        description: `Restored ${document.document_type.replace(/_/g, ' ')} document: ${document.filename}`,
+        performedBy: userId,
+        entityType: 'customer_document',
+        entityId: document.id,
+        customerId,
+      });
+      setDocuments((current) => current.filter((row) => row.id !== document.id));
+      toast('success', 'Document restored');
+    } catch (error: unknown) {
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        extra: { context: 'CustomerDocuments.restore', documentId: document.id },
+      });
+      toast('error', errorMessage(error, 'Failed to restore document'));
+      void loadDocuments();
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -345,7 +392,12 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
 
       <Card padding={false}>
         <div className="flex items-center justify-end gap-3 p-4 sm:p-5">
-          <Button type="button" variant="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} onClick={() => void loadDocuments()} className="min-h-11">Refresh</Button>
+          {isAdmin && (
+            <Button type="button" variant="ghost" size="sm" icon={<Archive className="h-4 w-4" />} showChevron={false} disabled={restoringId !== null} onClick={() => { setDocuments([]); setShowRemoved((current) => !current); }} className="min-h-11">
+              {showRemoved ? 'Show current documents' : 'Show removed documents'}
+            </Button>
+          )}
+          <Button type="button" variant="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} disabled={restoringId !== null} onClick={() => void loadDocuments()} className="min-h-11">Refresh</Button>
         </div>
         {loading ? (
           <div className="space-y-3 px-4 pb-5 sm:px-5">
@@ -357,7 +409,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
             <Button type="button" variant="secondary" size="sm" icon={<RefreshCw className="h-4 w-4" />} showChevron={false} onClick={() => void loadDocuments()} className="min-h-11">Try again</Button>
           </div>
         ) : documents.length === 0 ? (
-          <div className="px-4 pb-5 text-sm text-secondary sm:px-5">No documents have been uploaded yet.</div>
+          <div className="px-4 pb-5 text-sm text-secondary sm:px-5">{showRemoved ? 'No removed documents.' : 'No documents have been uploaded yet.'}</div>
         ) : (
           <div className="divide-y divide-gray-100">
             {documents.map((document) => {
@@ -371,6 +423,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
                         <p className="break-words font-medium text-nav-dark">{document.filename}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           <Badge variant="info">{document.document_type.replace('_', ' ')}</Badge>
+                          {document.deleted_at && <Badge variant="expired">Removed {formatDate(document.deleted_at)}</Badge>}
                           {status === 'soon' && <Badge variant="warning"><AlertTriangle className="mr-1 h-3 w-3" />Expiring soon</Badge>}
                           {status === 'expired' && <Badge variant="expired">Expired</Badge>}
                         </div>
@@ -378,7 +431,9 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
                     </div>
                     <div className="flex shrink-0 gap-2">
                       <Button type="button" variant="secondary" size="sm" aria-label={`Download ${document.filename}`} loading={downloadingId === document.id} icon={<Download className="h-4 w-4" />} showChevron={false} onClick={() => void handleDownload(document)} className="min-h-11">Download</Button>
-                      {canDelete && <Button type="button" variant="ghost" size="sm" icon={<Trash2 className="h-4 w-4" />} showChevron={false} onClick={() => setDocumentToDelete(document)} aria-label={`Remove ${document.filename}`} className="min-h-11 text-red-600 hover:text-red-700">Remove</Button>}
+                      {document.deleted_at ? (
+                        isAdmin && <Button type="button" variant="secondary" size="sm" aria-label={`Restore ${document.filename}`} loading={restoringId === document.id} disabled={restoringId !== null} icon={<RotateCcw className="h-4 w-4" />} showChevron={false} onClick={() => void handleRestore(document)} className="min-h-11">Restore</Button>
+                      ) : canDelete && <Button type="button" variant="ghost" size="sm" icon={<Trash2 className="h-4 w-4" />} showChevron={false} onClick={() => setDocumentToDelete(document)} aria-label={`Remove ${document.filename}`} className="min-h-11 text-red-600 hover:text-red-700">Remove</Button>}
                     </div>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-secondary sm:grid-cols-4">

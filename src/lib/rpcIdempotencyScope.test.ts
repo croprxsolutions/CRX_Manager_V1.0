@@ -293,6 +293,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // removing the assigned-rep checks); changing the literal would orphan existing receipts.
   _save_invoice_split_provenance_impl_20260719: ['save_invoice'],
   _save_invoice_below_cost_impl_20260810: ['save_invoice'],
+  // Postgres-only layer behind save_invoice; it reads the public receipt that save_invoice already
+  // matched, so a retry replays before the Bill Split draft checks (20261215110000).
+  _save_invoice_intent_impl_20260802: ['save_invoice'],
   _post_invoice_public_impl_20260718: ['post_invoice'],
   // Direct EXECUTE is revoked (live 2026-11-06: proacl `postgres=X/postgres`). Private layers behind the
   // public void_invoice and unapply_credit_memo wrappers; they share the wrapper's receipt namespace.
@@ -322,6 +325,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // orphan existing receipts.
   _manual_inventory_add_replay_impl_20261015: ['manual_inventory_add'],
   _complete_job_replay_impl_20261015: ['complete_job'],
+  // Same rename for start_job; 20261217100000 (KI-73 part C) re-emits it only to end whole-job access with
+  // the job. Changing the literal would orphan existing receipts.
+  _start_job_replay_impl_20261015: ['start_job'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
   // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing

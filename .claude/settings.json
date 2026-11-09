@@ -201,6 +201,7 @@
       "mcp__supabase__delete_feedback"
     ],
     "deny": [
+      "Artifact",
       "Bash(git push --force:*)",
       "Bash(git push --force-with-lease:*)",
       "Bash(git push -f:*)",

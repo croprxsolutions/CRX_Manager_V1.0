@@ -1,5 +1,5 @@
 -- Written 2026-11-08, cut down 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261226110000_rup_records_by_sold_number.md (REG-1 Step 2, file C of 4).
+-- docs/reference/migrations.d/20261226110000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 4.C): once the seed has run,

@@ -136,7 +136,7 @@ describe('ToastProvider + useToast', () => {
     expect(screen.getByText('Second')).toBeInTheDocument();
   });
 
-  it('applies correct background class for each toast type', () => {
+  it('applies the icon circle colour for each toast type', () => {
     function TypeTrigger() {
       const { toast } = useToast();
       return (
@@ -156,19 +156,19 @@ describe('ToastProvider + useToast', () => {
     );
 
     fireEvent.click(screen.getByText('Btn S'));
-    const successToast = screen.getByText('msg-success').closest('[class*="bg-emerald-50"]');
+    const successToast = screen.getByText('msg-success').parentElement?.querySelector('[class*="bg-emerald-50"]');
     expect(successToast).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Btn E'));
-    const errorToast = screen.getByText('msg-error').closest('[class*="bg-red-50"]');
+    const errorToast = screen.getByText('msg-error').parentElement?.querySelector('[class*="bg-red-50"]');
     expect(errorToast).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Btn I'));
-    const infoToast = screen.getByText('msg-info').closest('[class*="bg-blue-50"]');
+    const infoToast = screen.getByText('msg-info').parentElement?.querySelector('[class*="bg-sky-50"]');
     expect(infoToast).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Btn W'));
-    const warnToast = screen.getByText('msg-warn').closest('[class*="bg-amber-50"]');
+    const warnToast = screen.getByText('msg-warn').parentElement?.querySelector('[class*="bg-amber-50"]');
     expect(warnToast).toBeInTheDocument();
   });
 });

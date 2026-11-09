@@ -630,14 +630,16 @@ export default function Quotes() {
       {canBulkAction && (
         <Card padding={false}>
           <div className="p-5">
-            <button onClick={toggleRollover} className="w-full flex items-center justify-between text-left">
-              <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5 text-crx-green" />
-                <h3 className="font-semibold text-nav-dark">Open booking rollover</h3>
-                <HelpTip text="Every open booking (sent/revised quote) with its booked / drawn / remaining value. Use it at season-end to see what's still outstanding. (Prepay-earmarked columns return when the booking-prepay engine ships.)" className="ml-1" />
-              </div>
-              {showRollover ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
-            </button>
+            <div className="flex items-center justify-between gap-2">
+              <button onClick={toggleRollover} className="flex flex-1 items-center justify-between text-left">
+                <span className="flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-crx-green" />
+                  <h3 className="font-semibold text-nav-dark">Open booking rollover</h3>
+                </span>
+                {showRollover ? <ChevronUp className="w-4 h-4 text-secondary" /> : <ChevronDown className="w-4 h-4 text-secondary" />}
+              </button>
+              <HelpTip text="Every open booking (sent/revised quote) with its booked / drawn / remaining value. Use it at season-end to see what's still outstanding. (Prepay-earmarked columns return when the booking-prepay engine ships.)" className="ml-2.5" />
+            </div>
             {showRollover && (
               <div className="mt-4 overflow-x-auto">
                 {rolloverLoading ? (

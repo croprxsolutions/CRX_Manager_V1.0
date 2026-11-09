@@ -3149,6 +3149,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
+  _record_customer_document_restore:
+    'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   guard_invoice_terminal_order:
     'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
   _create_bill_split_delivery_invoices:

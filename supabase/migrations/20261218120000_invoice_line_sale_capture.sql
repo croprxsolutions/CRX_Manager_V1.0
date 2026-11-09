@@ -5,8 +5,9 @@
 -- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 3.1, 3.3, 4.C): once the
 --   seed has run, each invoice line records what was sold (its EPA number, restricted-use answer and signal
 --   word) when it is saved, and posting builds the restricted-use register from that, never from the
---   product's state at posting time. One exception (sheet 4.C): a line with no number has only its product,
---   so posting refuses it while that product is restricted-use (INVOICE_LINE_RUP_NO_EPA).
+--   product's state at posting time. A missing, unregistered or mismatched EPA number never blocks a sale
+--   (Mason, 2026-11-09): the line saves and posts, gets no restricted-use record without a number, and is
+--   listed on Sales to check.
 --
 -- WHAT:
 --   - invoice_items gains sale_rup_status (yes/no/unknown; NULL = not captured), sale_signal_word,
@@ -20,11 +21,10 @@
 --   - _fill_invoice_line_epa re-issued (md5 pinned) to take the shared lock before it reads a product.
 --   - _save_invoice_lineage_unaware_impl_20260827 re-issued (md5 pinned): kept lines carry the number they
 --     were sold under and their capture; a quantity change re-captures (a Yes is never lowered); a sent
---     number that differs is refused (INVOICE_LINE_EPA_MISMATCH). Before the seed it stores what it does today.
+--     number that differs is ignored (the line takes its stored or its size's number). Before the seed it stores what it does today.
 --   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After the seed it
 --     reads only the line's capture and its sold number's registration, groups by product, number and
---     signal word, and refuses an uncaptured line, a restricted-use line with no number and a number with no
---     registration.
+--     signal word, refuses an uncaptured line, and skips (never refuses) a line with no number.
 --   - get_epa_sales_to_check() (admin, read-only): posted lines a person should check (sheet 4.C).
 --   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today);
 --     the postflight proves it, including the new columns.
@@ -142,17 +142,13 @@ BEGIN
   SELECT p.id, p.epa_registration, p.is_rup, p.signal_word INTO v_p
     FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
   -- Decision (a): a line sells under its size's number, whichever writer inserted it; a numberless size's line has none.
-  IF public._normalize_epa_registration(NEW.epa_registration) IS NOT NULL
-     AND public._normalize_epa_registration(NEW.epa_registration) IS DISTINCT FROM public._normalize_epa_registration(v_p.epa_registration) THEN
-    RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number differs from its product''s; reload the invoice';
-  END IF;
-  v_n := COALESCE(public._normalize_epa_registration(NEW.epa_registration), public._normalize_epa_registration(v_p.epa_registration));
+  -- A different number sent by a screen is replaced, never refused: a missing or wrong number never blocks a sale (Mason, 2026-11-09).
+  v_n := public._normalize_epa_registration(v_p.epa_registration);
   NEW.epa_registration := v_n;
   IF v_n IS NOT NULL THEN
     SELECT * INTO v_reg FROM public.epa_registrations WHERE epa_registration = v_n FOR SHARE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'INVOICE_LINE_NO_REGISTRATION: EPA number % has no registration; add it before selling under it', v_n;
-    END IF;
+  END IF;
+  IF v_n IS NOT NULL AND v_reg.epa_registration IS NOT NULL THEN
     NEW.sale_rup_status := v_reg.rup_status;
     NEW.sale_signal_word := v_reg.signal_word;
     NEW.sale_facts_source := 'registration:' || v_n || '@' || v_reg.registration_version;
@@ -242,7 +238,6 @@ DECLARE
   v_cap jsonb;
   v_keep_yes boolean;
   v_new_line_id uuid;
-  v_prod_epa text;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
   IF NOT (is_admin() OR is_sales_rep()) THEN
@@ -503,10 +498,7 @@ BEGIN
         v_old := v_old - lower(v_item->>'id');  -- each saved line is carried once
       END IF;
       IF v_old_line IS NOT NULL AND (v_old_line->>'product_id')::uuid = (v_item->>'product_id')::uuid THEN
-        -- Kept line: the screen sends back the number it loaded; blank means unchanged.
-        IF v_pay IS NOT NULL AND v_pay IS DISTINCT FROM public._normalize_epa_registration(v_old_line->>'epa_registration') THEN
-          RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number changed since this invoice was loaded; reload the invoice';
-        END IF;
+        -- Kept line: keeps its stored (sold) number; a different payload number is ignored, never refused (Mason, 2026-11-09).
         IF v_qty IS DISTINCT FROM (v_old_line->>'quantity')::numeric THEN
           v_line_epa := NULL;  -- a quantity change re-captures from the product's current label (Mason, 2026-11-06)
           v_keep_yes := (v_old_line->>'sale_rup_status') = 'yes';  -- with today's facts, but a Yes is never lowered
@@ -515,14 +507,7 @@ BEGIN
           v_cap := v_old_line;
         END IF;
       ELSE
-        -- New or product-changed line: blank means "the product's number"; a different number is refused.
-        IF v_pay IS NOT NULL AND NOT v_is_field THEN
-          SELECT public._normalize_epa_registration(p.epa_registration) INTO v_prod_epa
-            FROM products p WHERE p.id = (v_item->>'product_id')::uuid;
-          IF v_pay IS DISTINCT FROM v_prod_epa THEN
-            RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number differs from its product''s; reload the invoice';
-          END IF;
-        END IF;
+        -- New or product-changed line: the capture trigger gives it the product's number, whatever was sent.
         v_line_epa := v_pay;
       END IF;
     END IF;
@@ -785,7 +770,8 @@ BEGIN
   END;
 
   IF v_seeded THEN
-    -- REG-1: every product line must have been captured, and a restricted-use sale needs a registered number.
+    -- REG-1: every product line must have been captured. A missing or unregistered number never blocks posting
+    -- (Mason, 2026-11-09): the line posts, gets no record without a number, and is listed on Sales to check.
     FOR v_line IN
       SELECT ii.id, public._normalize_epa_registration(ii.epa_registration) AS n, ii.sale_rup_status,
              ii.sale_facts_captured_at, p.is_rup, p.product_name
@@ -796,12 +782,6 @@ BEGIN
       IF v_line.sale_facts_captured_at IS NULL THEN
         -- Only a line saved before the seed on an invoice unposted after it; one save captures it.
         RAISE EXCEPTION 'INVOICE_LINE_NOT_CAPTURED: a line of invoice % (%) has no sale capture; open the invoice, save it again, then post', v_invoice.invoice_number, v_line.product_name;
-      END IF;
-      IF v_line.n IS NULL AND (v_line.sale_rup_status = 'yes' OR v_line.is_rup) THEN
-        RAISE EXCEPTION 'INVOICE_LINE_RUP_NO_EPA: add this product''s EPA number (% on invoice %)', v_line.product_name, v_invoice.invoice_number;
-      END IF;
-      IF v_line.n IS NOT NULL AND NOT EXISTS (SELECT 1 FROM epa_registrations r WHERE r.epa_registration = v_line.n) THEN
-        RAISE EXCEPTION 'INVOICE_LINE_NO_REGISTRATION: EPA number % on invoice % has no registration', v_line.n, v_invoice.invoice_number;
       END IF;
     END LOOP;
     -- A line needs a record when its capture or its sold number's registration says Yes (sheet 4.C).
@@ -815,6 +795,7 @@ BEGIN
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(ii.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
          AND (ii.sale_rup_status = 'yes' OR r.rup_status = 'yes')
+         AND public._normalize_epa_registration(ii.epa_registration) IS NOT NULL  -- a RUP record never has a blank number
        GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration), ii.sale_signal_word,
                 ii.unit_size, ii.unit_price_cents
        ORDER BY ii.product_id, 7, 8, 4, 5;
@@ -964,6 +945,7 @@ BEGIN
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            public._normalize_epa_registration(ii.epa_registration) AS epa_registration,
            ii.quantity, ii.sale_rup_status, ii.sale_facts_source, ii.sale_facts_captured_at, r.rup_status AS registration_rup_status,
+           r.epa_registration IS NULL AS no_registration,
            public._rup_record_covers_line(ii) AS has_record
       FROM invoice_items ii
       JOIN invoices i ON i.id = ii.invoice_id
@@ -981,7 +963,8 @@ BEGIN
              CASE WHEN sale_rup_status = 'unknown' AND NOT has_record THEN 'not_reviewed_no_record' END,
              CASE WHEN sale_facts_captured_at IS NULL THEN 'posted_before_seed' END,
              CASE WHEN sale_facts_source LIKE 'seed-assumed:%' THEN 'seed_assumed' END,
-             CASE WHEN sale_facts_source ~ '^(seed-assumed:)?product:' THEN 'no_epa_number' END], NULL)))
+             CASE WHEN epa_registration IS NULL AND sale_facts_captured_at IS NOT NULL THEN 'no_epa_number' END,
+             CASE WHEN epa_registration IS NOT NULL AND no_registration AND sale_facts_captured_at IS NOT NULL THEN 'no_registration' END], NULL)))
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
     FROM lines
@@ -989,7 +972,7 @@ BEGIN
       OR (sale_rup_status = 'unknown' AND NOT has_record)
       OR sale_facts_captured_at IS NULL
       OR sale_facts_source LIKE 'seed-assumed:%'
-      OR sale_facts_source ~ '^(seed-assumed:)?product:';
+      OR (sale_facts_captured_at IS NOT NULL AND (epa_registration IS NULL OR no_registration));
   RETURN v_out;
 END;
 $function$;

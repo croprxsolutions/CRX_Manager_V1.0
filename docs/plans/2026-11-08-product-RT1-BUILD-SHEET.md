@@ -266,7 +266,7 @@ Every mutating RPC:
 
 Inserts a draft (`p_rate_id` null) or edits one.
 1. Admin check, key check, replay (scope `save_draft_product_rate`).
-2. Check shapes: basis and source in their lists; each value null or a number ≥ 0 with at most 6 decimals (`PRODUCT_RATE_INVALID`); unit trimmed and present in `product_rate_units` (`PRODUCT_RATE_UNIT_UNKNOWN`); reason trimmed, ≤ 500.
+2. Check shapes: basis and source in their lists; each value null or a number ≥ 0, below 1e12, with at most 6 decimals (the 3.1 CHECK's exact rule, tested before any write so the caller gets `PRODUCT_RATE_INVALID`, never a raw constraint error); unit trimmed and present in `product_rate_units` (`PRODUCT_RATE_UNIT_UNKNOWN`); reason trimmed, ≤ 500.
 3. Lock (3.6). Parent missing or inactive: `PARENT_NOT_FOUND`.
 4. On edit: the row must belong to `p_parent_id` (`PRODUCT_RATE_NOT_FOUND`), be `draft` (`PRODUCT_RATE_APPROVED`) and match `p_expected_row_version` (`PRODUCT_RATE_STALE`).
 5. Run the section 3.4 checks in table order and raise the named refusal for the first that fails.
@@ -345,10 +345,11 @@ No other `src/` file changes. The PR description lists its file list against thi
   - followed by a denominator: `/acre`, `/ac`, `/a`, `per acre` → `per_acre`; `/100 gal` → `per_100_gal`; `/cwt` → `per_cwt_seed`; `/unit` → `per_seed_unit` (all 15 such rows are seed treatments; note `basis_from_text`; the 6 each-form ones then fail the unit check below); or the suffix `gpa` with no unit → `gal` per acre.
   - Units: the legacy spellings, plus `fl oz`, `pint(s)`, `quart(s)`, `gallon(s)`, `lb(s)`, `pound(s)`, `gram(s)`, `dry oz`. `oz` means `fl_oz` on a liquid parent and `dry_oz` on a dry one (in text, unlike the stored unit, "oz" on a dry label means dry ounces).
 - One number → `recommended`. A range → `low` and `high`, `recommended` null.
+- **Value check before any write (both rows):** every number derivation would store must pass the 3.1 value rule (≥ 0, below 1e12, at most 6 decimals). One that fails (for example `1.1234567 oz/acre`) makes no row and is noted `value_invalid` with the text; nothing is rounded and the batch carries on. So no derived write can hit the CHECK.
 - Anything else (`1.5 qt/ton`, `1-3lb`, `Beans 5 oz/acre -- Corn 14oz/acre`, `Spray on`, `2 products`): no row, note `text_unparsed` with the text. A unit that fails 3.3 for the parent's form (the each-form seed treatments' `oz/unit`): no row, note `unit_not_for_form`.
 - Never a quoting default.
 
-**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`, `above_label`.
+**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`, `above_label`, `value_invalid`.
 
 **What derivation never does:** change any `products` or `product_parents` value; overwrite or merge into an existing row; set a default other than the house per-acre row; convert between bases; touch the rate lock.
 
@@ -375,7 +376,7 @@ The harness is `scripts/smoke/prove-product-rates-draft-real-schema.mjs`, run ag
 | R3 | A default on a `per_100_gal` row | Refused `PRODUCT_RATE_DEFAULT_NOT_PER_ACRE` |
 | R4 | Blank unit, `'  '`, `'oz '` with stray spaces trimmed (accepted), `'quartz'`, `'Qt'` (a legacy spelling, not a code) | Blank, spaces-only, `quartz` and `Qt` refused `PRODUCT_RATE_UNIT_UNKNOWN`; a direct insert with a bad unit fails the FK |
 | R5 | Unit outside 3.3: `lb` on liquid, `fl_oz` on dry, `each` per 100 gal, `fl_oz` per seed unit on an each parent | Each refused `PRODUCT_RATE_UNIT_NOT_FOR_BASIS` |
-| R6 | Ranges: low 2 / rec 1 / high 3; low 3 / high 2; all three null; −1; 1.1234567 | Refused `PRODUCT_RATE_RANGE_INVALID` (first four) and `PRODUCT_RATE_INVALID` (last); 1 ≤ 1 ≤ 1 accepted |
+| R6 | Ranges: low 2 / rec 1 / high 3; low 3 / high 2; all three null; −1; 1.1234567; 1000000000000; derive a parent whose text is `1.1234567 oz/acre` | Refused `PRODUCT_RATE_RANGE_INVALID` (first four) and `PRODUCT_RATE_INVALID` (next two); the derivation writes no text row, notes `value_invalid`, and finishes the batch; 1 ≤ 1 ≤ 1 accepted |
 | R7 | Every hand-worked example in 3.3 | The label check and stored values match the table exactly, including "24 is not above 24" |
 | R8 | Over label: house 1.6 pt/acre, registration max `24 oz/acre` | Without a reason refused `PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED`; with a reason saved, result `above`, reason stored |
 | R9 | Max unknown, a per-acre row against max `2 qt/100 gal`, max `1 kg/acre`, no registration, REG-1 unseeded, a `per_unit` row | Each saves with no reason; check `not_checked` with the matching `why` |
@@ -479,3 +480,7 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 - MED `/ac` and `/a` maximums: `normalize_rate_unit` already strips them (`20260630170000` lines 58-61); section 1 corrected, and RT-1 now reads the denominator with its own grammar (3.5, R9b).
 - MED `numeric(18,6)` rounds a seventh decimal before a CHECK sees it: fixed, unconstrained `numeric` with a scale CHECK (3.1, R9b).
 - MED derivation had no defined outcome for an above-label house rate: fixed, written with note `above_label` and `reason_missing`, never approvable as-is (4.C, R9c).
+
+**Luna round 3** (head `9b08ad381`): no BLOCKER or HIGH; 2 findings, both fixed.
+- MED a parsed value with more than 6 decimals would fail the CHECK mid-batch: fixed, derivation checks every value first and notes `value_invalid` (section 5, R6).
+- LOW the save RPC's value check missed the `< 1e12` limit: fixed, it tests the CHECK's exact rule first (4.A step 2, R6).

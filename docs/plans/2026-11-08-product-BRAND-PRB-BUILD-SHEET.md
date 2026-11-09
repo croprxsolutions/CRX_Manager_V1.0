@@ -120,11 +120,14 @@
 
 ### 3.3 Locking
 
-Two kinds of writer, and neither waits on the other in a cycle:
-- **Delivery-side writers** (`set_delivery_brands`, `edit_delivery`, completion, `correct_delivery_brands`): REG-DB's shared registration lock first (each re-issued function already takes it first), then the delivery row `FOR UPDATE`, its lines (ID order), brand rows `FOR SHARE` (legacy, then parent, ID order), picks, and last any **draft or unposted** invoices they re-copy (ID order), skipping any invoice that is no longer draft or unposted once locked.
-- **Posting** keeps REG-DB's order (invoices first, REG-1 sheet §3.2). It reads the stored `brand_lines` only. It never reads or locks picks, deliveries or brand rows, so it never waits on a delivery-side writer.
-
-Because the line guard refuses a `brand_lines` change on a posted invoice, a delivery-side writer that locks an invoice just after it was posted skips it instead of failing.
+**One order for everyone: REG-DB's** (REG-1 sheet §3.2: invoices first, then the registration lock, then the rest). No writer ever takes an invoice lock after the registration lock, so delivery work and posting cannot wait on each other in a cycle.
+- **Delivery-side writers** (`set_delivery_brands`, `edit_delivery`, completion, `correct_delivery_brands`):
+  1. read, without locking, the **draft or unposted** invoices whose lines they may re-copy (4.D), then lock them `FOR UPDATE` in ID order and drop any that is no longer draft or unposted;
+  2. REG-DB's shared registration lock;
+  3. the delivery row `FOR UPDATE`, its lines (ID order), brand rows `FOR SHARE` (legacy, then parent, ID order), picks.
+  Invoices the writer creates itself (completion's drafts) are new rows and need no prior lock. An invoice created by someone else after step 1 is not re-copied by that writer; the posting check below catches it.
+- **Posting** keeps REG-DB's order. It never locks picks, deliveries or brand rows.
+- **Read-only staleness check at posting:** before the line hash is taken, posting recomputes each delivery-made line's expected `brand_lines` from the current picks (a plain read) and refuses with `BRAND_LINES_STALE: reload and save the invoice` if the stored copy differs. Nothing is rewritten, so the posting hash check is unaffected. Re-saving the draft (`save_invoice`, 4.D) refreshes it.
 
 ### 3.4 Retry safety and authorization (every public RPC)
 
@@ -161,15 +164,16 @@ Built from each re-issued function's body **on live at build time** (after REG-D
 - **Returns:** the delivery's current picks and the new base `seq`.
 
 ### 4.B `edit_delivery` (re-issued)
-Today its body deletes and re-creates every line (`20260611211058…:1573-1585`), so every line gets a new ID. After re-issue:
-- the picks of each line whose `order_item_id`, `product_id`, `quantity` and `unit_size` are unchanged are re-pointed to the re-created line's new ID, with their snapshots, in the same transaction;
+Today its body deletes and re-creates every line (`20260611211058…:1573-1585`), so every line gets a new ID. It already accepts only deliveries that are not completed; the builder confirms that from the live body and, if any completed path exists, refuses it for a delivery with picks (`DELIVERY_BRANDS_LOCKED`; corrections go through 4.F). After re-issue:
+- **before** the old lines are deleted (the pick foreign key cascades), the current picks are copied into a temporary table;
+- the picks of each line whose `order_item_id`, `product_id`, `quantity` and `unit_size` are unchanged are re-inserted from that copy against the re-created line's new ID, with their snapshots, in the same transaction;
 - the picks of a changed or removed line are dropped. The result lists those lines, so the screen flags them for a new pick;
 - one `edited` event records the carried and dropped picks, so an open screen's next save is refused as stale (4.A) and it reloads with the new line IDs.
 
 Cancel, void and restore leave picks alone. Picks go when `update_order_items` removes a cancelled delivery's lines (cascade); nothing was delivered, and the cancellation is already in the order's history.
 
 ### 4.C The completion rule (inside `_complete_delivery_authorized_impl`)
-It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. **An old offline replay is always treated as switch-off** (it was captured on a device with no brand picker, so refusing it would only strand it): it completes, and its branded lines appear on the missing-brands report. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
+It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. **An old offline replay is always treated as switch-off** (it was captured on a device with no brand picker, so refusing it would only strand it): it completes, and its branded lines appear on the missing-brands report. The database tells them apart by entry point, not by anything the client sends: `process_offline_action` is re-issued to call `_complete_delivery_authorized_impl` directly with an internal `p_offline_replay => true` argument (the impl has no client grant), while `complete_delivery` and `start_and_complete_delivery` always pass false. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
 
 1. **Delivered zero:** its picks are removed (one `completed` event keeps them).
 2. **One pick:** its amount is set to the delivered amount (same brand, smaller amount; nothing is guessed).
@@ -209,7 +213,7 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 
 **Re-copy on every pick change, never at posting.** `brand_lines`, the sold number and the copied capture are re-copied on the **draft and unposted** lines a pick change affects: at completion (this delivery's own invoices, the quick-delivery draft, the partial-delivery trim, and the open drafts of order-level invoices covering the lines it just completed), in `edit_delivery`, and in `correct_delivery_brands`. Posting does **not** re-copy: `post_invoice` hashes the lines before and after posting and refuses if they changed (`20261022022000_post_binds_reviewed_invoice_version.sql:480-487`), so posting reads exactly the stored `brand_lines` the office reviewed.
 
-**`save_invoice`** carries `brand_lines` through its old-line-ID map, as REG-DB carries the capture columns. For a kept line with `brand_lines` not NULL:
+**`save_invoice`** recomputes `brand_lines` for each kept delivery-made line from the current picks (so a reload and save heals a stale draft), and carries the capture as REG-DB does through its old-line-ID map. For a kept line with `brand_lines` not NULL:
 - a **quantity** change keeps `brand_lines`, the sold number and the capture (Question 4: this is the one departure from REG-1's "a quantity change re-captures the line", because re-capturing would put the generic's number on a branded line);
 - a **product** change sets `brand_lines` NULL and the line is captured as a new line.
 A line the office adds by hand gets `brand_lines` NULL.
@@ -234,7 +238,7 @@ A line the office adds by hand gets `brand_lines` NULL.
   - **any** line, restricted-use or not, has a typed entry with no EPA number, because its restricted-use status cannot be known without the number: the same `BRAND_NOT_RECORDED` (Question 1);
   - a restricted-use line's entries do not add up to what was delivered (a split kept while the brand-required switch was off, 4.C step 3): `BRAND_SPLIT_MISMATCH: fix the brand amounts for <product> before posting`, so the register never records a split the delivery did not establish.
   The office fixes each with the correction in 4.F while the invoice is still a draft. The truck is never stopped by this.
-- **Grouping:** REG-DB's key `(invoice, product, sold number, signal word)`, with each entry treated as its own sold number. Entries sharing a key are added into one record and their brand names joined. REG-DB's "an existing active record that disagrees is an error" rule and its posting lock stay.
+- **Grouping:** REG-DB's key `(invoice, product, sold number, signal word)`, with each entry treated as its own sold number. Entries sharing a key are added into one record and their brand names joined. The merged record keeps the most cautious status (`warning` over compliant) and every entry's note, so a typed or unconfirmed entry's warning is never lost by merging. REG-DB's "an existing active record that disagrees is an error" rule and its posting lock stay.
 - `get_rup_sales_register` returns `brand_name`.
 
 ### 4.F `correct_delivery_brands(p_delivery_id uuid, p_lines jsonb, p_reason text, p_base_event_seq bigint, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
@@ -260,8 +264,8 @@ A line the office adds by hand gets `brand_lines` NULL.
 
 ### 4.J `set_delivery_brand_required(p_on boolean, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 - **Who:** admin only; the reason is required.
-- **Turning on is refused** (`BRAND_BACKLOG_OPEN`) while `get_deliveries_missing_brands` for the last 30 days is not empty or any branded line's product has an empty brand list, so the switch cannot go on before the lists and backlog are ready.
-- A trigger on `app_settings` refuses any other change to the `delivery_brand_required` row (the RPC sets a transaction-local flag the trigger checks), so the generic admin settings path cannot flip it.
+- **Turning on is refused** (`BRAND_BACKLOG_OPEN`) while `get_deliveries_missing_brands` for the last 30 days is not empty, so the switch cannot go on before the backlog is cleared. A product with no brand rows has no brands by definition (3.2) and needs no pick; entering the lists is Mason's step 2 (section 10). As an advisory, the settings screen also shows the restricted-use products sold in the last 90 days that still have no brand list.
+- A trigger on `app_settings` refuses any insert, update or delete of the `delivery_brand_required` row unless `current_user` is the function owner role, which is true only inside this `SECURITY DEFINER` RPC (a client session runs as `authenticated` and cannot become the owner; no settable flag is trusted). So the generic admin settings path cannot flip it.
 - Writes an activity log entry with the reason. It is added to the receipt-binding trigger's operation list with the other three (3.4).
 - Section 10 still keeps turning it on as Mason's call; this makes the readiness part a hard check.
 
@@ -369,6 +373,10 @@ A line the office adds by hand gets `brand_lines` NULL.
 - P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none) and service_role has no table privilege on the new tables.
 - P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the four new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
 - P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty; a direct `app_settings` update of the row is refused; an old offline completion replay after switch-on completes and lands on the report.
+- P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
+- P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
+- P34. A direct `app_settings` update of `delivery_brand_required` from an `authenticated` session that first sets any custom setting is still refused. An online `complete_delivery` with no pick is refused with the switch on, while an old `process_offline_action` replay completes.
+- P35. A `yes` listed entry and a typed `unknown` entry sharing one record key give one record with `warning` and both notes.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
 
@@ -490,3 +498,12 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - MED, two corrections could overwrite each other: `p_base_event_seq` on corrections (4.F, P31).
 - MED, old offline completions could be stranded after switch-on: replays are always treated as switch-off and land on the report (4.C, P30).
 - MED, any admin could flip the switch early: new `set_delivery_brand_required` RPC refuses switch-on while the backlog is open, and a trigger blocks direct edits (4.J, P30).
+
+**Luna round 7** (head `698b98f8d`): 3 HIGH, 4 MED.
+- HIGH, delivery writers locked invoices after the registration lock, while posting does the reverse: **fixed**, everyone uses REG-DB's invoices-first order, with a read-only `BRAND_LINES_STALE` check at posting for an invoice a writer did not lock (3.3, 4.D, P32). Lock order was also a round 3 finding; this rewrite removes the second order altogether.
+- HIGH, the switch-on check cannot see a product that should be branded but has no brand rows: **refuted in part**. By the acceptance rule a product with no brand rows has no brands, and entering lists is Mason's step; an advisory list of restricted-use products with no brand list is added to the settings screen (4.J).
+- HIGH, the database could not tell an old offline replay from an online completion: **fixed**, by entry point (`process_offline_action` passes an internal flag the client cannot reach) (4.C, P34).
+- MED, a settable flag could be forged to flip the switch: **fixed**, the trigger checks `current_user` is the owner role (4.J, P34).
+- MED, the cascade would delete picks before `edit_delivery` could carry them: **fixed**, copied first (4.B, P33).
+- MED, `edit_delivery` on a completed delivery: **fixed**, refused for a delivery with picks (4.B, P33).
+- MED, merging entries could drop a warning: **fixed**, the merged record keeps the most cautious status and all notes (4.E, P35).

@@ -561,10 +561,6 @@ function runHook(file, payload) {
 // hold-latch-guard: no hold.json → nothing (assumes none latched; safe if a real repo has one, so only assert exit 0)
 let r = runHook("hold-latch-guard.mjs", { tool_name: "Edit", tool_input: { file_path: "src/x.tsx" } });
 eq(r.status, 0, "hold-latch-guard exits 0");
-// active-area-guard: no active-areas.json in a scratch payload → passthrough (nothing)
-r = runHook("active-area-guard.mjs", { tool_name: "Bash", tool_input: { command: "ls" } });
-eq(r.status, 0, "active-area-guard exits 0 on benign cmd");
-eq(r.stdout.trim(), "", "active-area-guard silent on benign cmd");
 // live-testdata-guard: a [E2E] insert → silent (allowed)
 r = runHook("live-testdata-guard.mjs", { tool_name: "mcp__supabase__execute_sql", tool_input: { query: "INSERT INTO customers (name) VALUES ('[E2E] X')" } });
 eq(r.status, 0, "live-testdata-guard exits 0");

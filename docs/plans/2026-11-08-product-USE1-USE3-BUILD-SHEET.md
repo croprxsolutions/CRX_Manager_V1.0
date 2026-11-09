@@ -1,0 +1,314 @@
+# Product Master Stage 6: USE-1 and USE-3 build sheet (crop and timing pairs; quoting notes fill)
+
+**Status (2026-11-08):** a plan only. No code and no migration have been written. It was written against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces the USE-1 and USE-3 outlines in `docs/plans/2026-10-29-product-GRAND-PLAN.md` Stage 6. Where the two differ, this sheet wins on *how*, and section 2 lists each difference; the grand plan still wins on order and on Mason's settled decisions. A reference like "overlap 1" points to the grand plan's section 4. Nothing here authorizes building; each package starts when Mason says so.
+
+**USE-2 is not in this sheet.** USE-2 (label link and adjuvants) stores label-required adjuvants per EPA registration, so it builds on REG-1. REG-1's next step waits on Taha's PR #1524. USE-2 gets its own sheet once REG-1 is live. Nothing in USE-1 or USE-3 depends on USE-2, or blocks it.
+
+**What the two packages do, in one line each.**
+- **USE-1:** lets a product say "pre-emerge on corn" and "post-emerge on soybeans" as separate crop-and-timing choices, and lets an admin add a new pair (for example "Post-Emerge Wheat") without a code change.
+- **USE-3:** lets Mason fill the customer-facing "quoting notes" for many products at once from the setup spreadsheet, and shows, before saving, exactly what a new quote line will show before and after.
+
+**Words used here.**
+- **Pair:** one crop with one timing, such as corn + pre-emergence. "Any crop" is allowed.
+- **Option:** one row of `product_use_timing_options`. Each option already has a label ("Pre-Emerge Corn"), a timing code (`pre_emergence`) and an optional crop (`corn`). **An option is a pair** (section 3.1).
+- **Parent / size:** as in the Stage 2 sheet. A parent is one formulation; each size is a product row. Use timings belong to the parent and are copied down to every size by the database (PAR-1).
+- **Quoting note:** `products.quoting_notes`, the text that auto-fills into a new quote line's notes.
+- **Description:** `products.notes`, the product's general notes. Today it is the fallback when the quoting note is blank.
+- **Setup workbook:** the spreadsheet download/upload on the Products page (WP-PM-11a-2), separate from the price workbook.
+
+---
+
+## 1. Facts this plan is built on (checked 2026-11-08)
+
+**Live data (counts only; no product rows in this repo):**
+
+| Fact | Value |
+|---|---|
+| Products (all / active) | 604 / 596 |
+| Products with any use timing | 317, every one with exactly **one** option (0 with two or more) |
+| …by option code | `post_emergence` 91, `pre_emerge_soybean` 84, `pre_emerge_corn` 57, `foliar` 53, `range_pasture_turf` 25, `volunteer_corn` 7 |
+| …by category | Herbicide and Foliar Fertilizer only |
+| Products whose legacy `use_timing` text is set | 317 (matches the list, as the sync trigger keeps them equal) |
+| `product_use_timing_options` | 9 rows, all active; no admin screen or RPC writes them (migration only) |
+| Parents / members | 0 / 0 (PAR-1 and PAR-2 database parts are live; no group approved yet) |
+| Parents with use timings | 0 |
+| `quoting_notes` filled | **0** of 604 |
+| `notes` (description) filled | 444 |
+| `internal_notes` filled | 443 |
+| Active products whose new quote line today auto-fills from the **description** (quoting note blank, description set) | **442** |
+| A crop table or crop-use table | none. The only fixed crop list in the database is the `customers.crops` CHECK: `corn`, `soybeans`, `wheat`, `milo`, `cotton`, `alfalfa`, `pasture_hay`, `other` |
+| Latest live migration | `20261215110000_chem_sale_bill_split_invoices` |
+| `20261202110000_product_size_notes_in_one_step` (notes saved with "New product" in one step) | **not applied** (local candidate) |
+
+**Where Use Timing lives today (code):**
+
+| Thing | Where | What it does |
+|---|---|---|
+| Options table | `20261103210000_product_use_timings.sql` | `code` (PK), `label` (unique, no `;`), `timing_code`, `crop` (nullable, free text), `category` (CHECK Herbicide or Foliar Fertilizer), `sort_order`, `is_active`. RLS on; SELECT for active profiles; no write grant to any app role. |
+| The 9 options | same file | `pre_emerge` (any crop, pre), `pre_emerge_corn` (corn, pre), `pre_emerge_soybean` (soybeans, pre), `post_emergence` (any, post), `post_emerge_corn` (corn, post), `post_emerge_soybeans` (soybeans, post), `volunteer_corn` (corn, `volunteer_corn`), `range_pasture_turf` (any, `range_pasture_turf`), `foliar` (any, `foliar`; Foliar Fertilizer). |
+| Size storage | `products.use_timings text[]` (codes) and `products.use_timing text` (labels joined by `; `) | `sync_product_use_timings()` (trigger `trg_sync_product_use_timings`) keeps the two equal, refuses unknown codes, refuses a code whose option belongs to another category, refuses timings on any category but Herbicide and Foliar Fertilizer, and lets a product keep an option that was later turned off. |
+| Parent storage | `product_parents.use_timings text[]` (`20261108120000_product_parents.sql:122`) | Written only by `create_product_with_parent` and `update_product_parent` (which checks each code with `_product_parent_timings`), and copied to every size by `_copy_parent_to_size` under a pass. |
+| Grouped-size guard | `guard_product_parent_timings()` (trigger `trg_b_guard_product_parent_timings`) and `guard_product_parent_values()` | Refuse a change to a grouped size's timings without a parent pass, naming the parent. An ungrouped size (all 604 today) is edited directly. |
+| Category change | `update_product_parent` raises `PRODUCT_PARENT_TIMINGS_MUST_CLEAR`; the screens confirm first (`ProductParentPanel.tsx:146`, `ProductDetail.tsx:2398` "Clear use timings?", `Products.tsx:739`) | Already meets "a category change clears them after a confirm". |
+| Screen | `src/lib/productUseTimings.ts` (`listProductUseTimingOptions`, `visibleProductUseTimingOptions`), the multi-select on `ProductDetail.tsx` and `ProductParentPanel.tsx` | Shows active options for the product's category, plus any turned-off option it still holds. |
+| Other readers | change history (`write_product_change_history`), price workbook (`use_timing_snapshot`), parent proposals (`productParentProposals.ts`), bulk import (`bulkProductImportSafety.ts`, legacy `use_timing` text), setup workbook | All read codes or labels. No quote, job, invoice, PDF or field-app screen reads use timings. |
+
+**How parent records work after PAR-1 (relevant parts):**
+- A parent owns category, use timings and rates; the database copies them to each size in the same step. A direct write to a grouped size's copied value is refused, naming the parent.
+- `update_product_parent(p_parent_id, p_expected_parent_version, p_changes, p_reason, p_idempotency_key)` takes `name`, `nickname`, `category`, `use_timings`; needs a reason; refuses a stale `parent_version`; writes one parent event and copies to each size.
+- Quoting notes and descriptions are **size** values, not parent values. `_insert_parent_size` takes them on create only once `20261202110000` is applied; until then the screen saves them in a second call.
+
+**How quote notes are stored and read:**
+- `src/lib/quoteNotes.ts` `preferredQuoteNotes(product)` returns the trimmed quoting note, else the trimmed description, else blank.
+- `QuoteBuilder.tsx:1985` (`assignProduct`) copies that text into the line's `notes` when a product is put on a line. The line's notes are then the line's own (`quote_items.notes`), editable per quote; a "Reset" button (`QuoteBuilder.tsx:5581-5584`) puts the product's current text back.
+- So an existing quote never changes when a product's notes change; only new lines and a manual "Reset" pick up the new text. `quotePdf.ts` prints the line's own notes.
+
+**What the setup workbook does today (WP-PM-11a-2, live since 2026-11-05):**
+- `get_product_setup_workbook` exports one row per size; `src/lib/productSetupWorkbook.ts` writes three visible tabs (`Setup`, `Rates`, `Parent Rates`) and a hidden manifest. Format `crx-product-setup-v2`; a v1 file is refused whole.
+- The **Setup** tab's editable fields include `use_timings` (labels, `;`-separated), `notes`, `internal_notes` and **`quoting_notes`**. For a grouped size, `category`, `use_timings` and `epa_registration` are locked (`PARENT_OWNED_SETUP_FIELDS`), because the parent owns them. **There is no parent-level tab for timings**, so once products are grouped, timings cannot be filled from the spreadsheet.
+- Upload: `parseSetupWorkbook` refuses added or removed rows and changed headers; `buildSetupPreview` lists each changed field with before and after, refuses rows changed since the download (by `setup_fingerprint`), and nothing saves until the tab is confirmed. Save: `apply_product_setup` (admin, retry key, at most 2000 rows, all in one transaction).
+- Two other writers also change notes: the **price workbook** (`quoting_notes`, `internal_notes`, through its approved change sets; `PricingChangePreviewModal.tsx`) and **bulk import** (WP-PM-10; `notes` and legacy `use_timing` text).
+
+---
+
+## 2. Where the grand plan's outline is wrong or silent against current code
+
+| Grand plan says | Current code / this sheet |
+|---|---|
+| USE-1 "adds the real product-to-pair rows (product, crop, timing), migrated from each product's chosen options" | **Each option already is a pair** (`timing_code` + optional `crop`), and a product can hold several options. A separate pair table would be a second copy of the same fact, needing its own copy-down, guards, history and workbook column. So USE-1 keeps the option codes as the storage and adds what is missing: a fixed crop list, one option per pair (no duplicates), and an admin way to add a pair (section 3). |
+| "Old timings migrate with counts matching" | Nothing needs to move, because storage does not change. The proof becomes: the 317 products and their per-code counts (section 1) are identical before and after the migration, and every stored code resolves to exactly one (crop, timing) pair (postflight, section 4.F). |
+| "It adds the setup workbook's Crop Uses tab" | The Setup tab already carries `use_timings` for **ungrouped** sizes. What is missing is the **grouped** case: a parent-level **Crop Uses** tab, one row per parent, saving through `update_product_parent` (section 5). |
+| "Two sizes of one parent show the same pairs; editing one size's pairs is refused, naming the parent" | Already true since PAR-1 (`guard_product_parent_timings`). USE-1 re-proves it with the new options. |
+| "A category change clears them after a confirm" | Already true (section 1). Re-proved, not rebuilt. |
+| USE-3 "A mass fill previews which products' quote notes change" | The setup workbook **already** fills `quoting_notes` in bulk with a per-row preview, stale-row refusal and a confirm. What it does not show is the **customer-visible** effect: 442 active products auto-fill their *description* today, so a new quoting note replaces different text, and editing a description alone also changes new quote lines. USE-3 is a screen change that shows the real before and after (section 6). No migration. |
+| USE-3 silent on who writes the notes | The notes themselves are catalog data (a DATA step), drafted and reviewed privately, then uploaded through the setup workbook. Mason decides the content source (question 3). |
+
+---
+
+## 3. USE-1 design
+
+### 3.1 The model: an option is a pair
+
+Keep `products.use_timings` and `product_parents.use_timings` exactly as they are. Make the pair explicit and safe on the options table:
+- **A crop list.** New table `product_crop_options` (code, label, sort order, active). Each option's `crop` must be one of its codes, or blank for "any crop".
+- **One option per pair.** A unique rule on (category, timing code, crop), with blank crop counted as a value, so "Pre-Emerge" + corn cannot exist twice under two labels. The 9 live options already satisfy it.
+- **An admin can add a pair** and turn one off, through two RPCs. A product keeps a turned-off option it already has (the existing trigger rule); it just stops appearing in the picker.
+- **No renaming.** Each size stores the joined labels in `use_timing`, written at save time, so renaming an option would leave every existing product showing the old label. To fix a wrong label, turn it off and add a new one. (Rename is out of scope; if Mason later wants it, it is its own package that rewrites the joined text.)
+
+Why this is the smallest complete design: the copy-down, the grouped-size guard, change history, the parent proposals, the workbook column, the category-clear rule and the picker all already work on option codes. USE-1 adds two small tables' worth of rules and two admin RPCs, and touches no existing function.
+
+### 3.2 Tables
+
+**`product_crop_options`** (new)
+- `code text PRIMARY KEY CHECK (code ~ '^[a-z][a-z0-9_]*$')`.
+- `label text NOT NULL` (trimmed, non-empty, ≤ 60 characters), unique on `lower(label)`.
+- `sort_order integer NOT NULL`, `is_active boolean NOT NULL DEFAULT true`, `created_at timestamptz NOT NULL DEFAULT now()`.
+- Seed (question 1): `corn` Corn, `soybeans` Soybeans, `wheat` Wheat, `milo` Milo, `cotton` Cotton, `alfalfa` Alfalfa, `pasture_hay` Pasture/Hay. These are the codes the `customers.crops` list already uses (without `other`), so a later "products for this grower's crops" view needs no translation. `corn` and `soybeans` cover every crop the live options use today.
+- New crops are added by a small migration (rare). No crop-writing RPC in USE-1.
+
+**`product_use_timing_options`** (existing; constraints and two columns added, nothing dropped)
+- `ADD CONSTRAINT product_use_timing_options_crop_fkey FOREIGN KEY (crop) REFERENCES product_crop_options(code)`.
+- `ADD CONSTRAINT product_use_timing_options_pair_key UNIQUE NULLS NOT DISTINCT (category, timing_code, crop)`.
+- `ADD CONSTRAINT … CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
+- `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, so each admin add or turn-off records who and when. The 9 seeded rows keep null.
+- **No grant, revoke or policy change** on this existing table (so no Mason permission approval is needed for it).
+
+### 3.3 RPCs (both new, both mutating)
+
+Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search_path = public, pg_temp`, owner `postgres`; admin check with `_product_parent_require_admin()` **before** the replay lookup; `p_idempotency_key text DEFAULT NULL` required (NULL refused) through `_product_parent_replay(key, scope, fingerprint)` and `save_idempotency`; `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role`, then `GRANT EXECUTE … TO authenticated`. Both take `pg_advisory_xact_lock(hashtext('crx_use_timing_options'))` so two admins cannot add the same pair at once.
+
+**`add_use_timing_option(p_category text, p_timing_code text, p_crop text, p_label text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
+1. Admin, key, replay (scope `add_use_timing_option`; fingerprint covers every argument trimmed).
+2. Category must be `Herbicide` or `Foliar Fertilizer` (the existing CHECK; Mason, 2026-10-28) — `USE_TIMING_CATEGORY`.
+3. Timing code matches the code pattern — `USE_TIMING_CODE_INVALID`. A new timing code is allowed (for example `burndown`); the label is what people see.
+4. Crop null, or an **active** `product_crop_options` code — `USE_TIMING_CROP_UNKNOWN`.
+5. Label trimmed, 1–60 characters, no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
+6. Pair not already present (active or not) — `USE_TIMING_PAIR_EXISTS`, naming the existing label (an admin turns that one back on instead).
+7. Code: a slug of the label (`lower`, non-letters to `_`, trimmed of `_`), with `_2`, `_3` added if taken. Sort order: the category's current largest plus 10.
+8. Insert with `created_by`; return `{code, label, timing_code, crop, category, sort_order}`.
+
+**`set_use_timing_option_active(p_code text, p_is_active boolean, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
+1. Admin, key, replay.
+2. Option must exist — `USE_TIMING_NOT_FOUND`. Same value already — `USE_TIMING_NO_CHANGE`.
+3. Turning **off**: allowed even while products hold it (they keep it). The result reports how many sizes and parents still hold it, so the screen can say so.
+4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`.
+5. Update `is_active`, `changed_by`, `changed_at`; return the row and the holder counts.
+
+No change to `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once.
+
+---
+
+## 4. USE-1 DB · The database PR
+
+**File:** `supabase/migrations/<stamp>_product_crop_use_pairs.sql`. The stamp is chosen at build. It must sort after `20261215110000` (latest live) and after any stamp claimed in `docs/changelog.d/` or the sibling notes folder.
+
+### 4.A Preflight (refuse to run unless all hold)
+- Inside one transaction (the temp-table pattern of `20261103210000`).
+- `product_crop_options` does not exist; the two new constraints do not exist.
+- The 9 options have exactly the codes, labels, timing codes, crops and categories in section 1.
+- Every `crop` on the options is null or one of the seeded crop codes; every `timing_code` matches the code pattern.
+- `_product_parent_require_admin`, `_product_parent_replay`, `save_idempotency` exist.
+- Capture into a temp table: per-code counts of `products.use_timings` and `product_parents.use_timings`, the count of products with any timing, and an md5 of `(id, use_timings, use_timing, pricing_version)` for every product.
+- Capture the md5 of `pg_get_functiondef` for `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, `guard_product_parent_timings`, `guard_product_parent_values`.
+
+### 4.B Body
+Section 3.2's table and constraints, section 3.3's two functions. RLS on `product_crop_options` with one policy `product_crop_options_select` FOR SELECT TO authenticated USING `(SELECT public.is_active_profile())`; `REVOKE ALL ON TABLE … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`; `GRANT SELECT … TO authenticated`. No write grant on either table to any app role.
+
+### 4.C What the migration does not touch
+- No `products` or `product_parents` column, trigger, grant or row.
+- None of the five functions named in 4.A.
+- No option row is added, changed or turned off. The only new rows are the 7 crop options.
+
+### 4.D Rollback (its own reviewed migration)
+Drop the two functions, the two constraints and the three new option columns, then `product_crop_options`. No product data to restore, because none changed. If an admin has added options by then, the rollback keeps them (they are ordinary option rows) and says so.
+
+### 4.E Lock and timing
+`SET LOCAL lock_timeout = '5s'`. The `ALTER TABLE` takes a short lock on the 9-row options table; product saves read it, so apply outside busy hours (no fixed window needed; the lock lasts milliseconds).
+
+### 4.F Postflight (inside the migration)
+- **Counts match:** per-code counts, the 317 total and every product's md5 equal the preflight capture (this is the "old timings migrate with counts matching" proof).
+- Every option code in use resolves to exactly one (category, timing code, crop) pair.
+- RLS on, one policy, exact grants on `product_crop_options` (read from `has_table_privilege`, as `20261103210000` does), and no new privilege on `product_use_timing_options`.
+- Both functions owned by `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`, `EXECUTE` only for `authenticated` (not `PUBLIC`, `anon`, `service_role`).
+- The five function md5s equal the preflight capture.
+
+### 4.G Files (the Stage 2 sheet §3 rule 9 checklist)
+- the migration;
+- `docs/changelog.d/<date>-use1-crop-use-pairs.md` and `docs/reference/migrations.d/<stamp>_product_crop_use_pairs.md`;
+- `scripts/smoke/prove-product-crop-use-pairs-real-schema.mjs` (cases in section 7);
+- `docs/reference/rpc-functions.md` entries for the two RPCs;
+- `src/types/index.ts` (`CropOption`; `UseTimingOption` gains nothing it needs) and regenerated `src/types/supabase.ts`;
+- after apply: schema registry refresh, live function snapshot entries, `npm run db-sweeps:live` (and the sweep allowlist if it flags the two new `SECURITY DEFINER` functions).
+
+### 4.H Risks
+
+| Risk | Handling |
+|---|---|
+| A new option silently changes existing products | It cannot: options are only added or turned off; storage and readers are untouched (postflight md5s). |
+| Two labels for one pair ("Pre-Emerge Corn" and "Corn Pre") | The unique pair rule; `USE_TIMING_PAIR_EXISTS` names the existing label. |
+| A crop typed two ways (`soybean` vs `soybeans`) | Crop must be a `product_crop_options` code (foreign key). |
+| The picker grows long | The screen groups options by crop (section 5); turned-off options hide. |
+| Fungicides or insecticides need crop uses later | Out of scope: Mason's rule is timings only on Herbicide and Foliar Fertilizer (2026-10-28). Widening it is a category-CHECK change in its own package. |
+| `volunteer_corn` stored with crop `corn` reads oddly as a pair | Kept exactly as is unless Mason answers question 2 otherwise; changing it is a data step with its own proof. |
+
+---
+
+## 5. USE-1 Screens · The screen PR
+
+Lands after the database PR is applied (`docs/workflows/DATABASE_CHANGE_CHECKLIST.md`, migration-plus-callers split).
+
+**Files:**
+- `src/lib/productUseTimings.ts`: `listProductCropOptions()`, `addUseTimingOption(...)`, `setUseTimingOptionActive(...)`, each through `src/lib/db.ts` with `assertRpcResult()` and a retry key per intent (the existing `getCreateKeyFor` pattern).
+- `src/pages/ProductDetail.tsx` and `src/components/products/ProductParentPanel.tsx`: the existing multi-select shows options **grouped by crop** ("Any crop", "Corn", "Soybeans", …) with the timing label in each group. Admins get an **"Add a crop and timing"** link under the picker: a small modal (category fixed to the product's, timing chosen from existing timing codes or typed new, crop from the crop list or "Any crop", label pre-filled as "<Timing> <Crop>", editable). A turned-off option a product still holds shows with "(retired)", as today.
+- A **"Manage crop and timing choices"** list for admins (the same modal file) to turn a choice off or back on, showing how many products hold it. `ConfirmModal` before turning one off.
+- `src/lib/productSetupWorkbook.ts` and `src/components/products/ProductSetupWorkbookModal.tsx`: a fourth visible tab, **Crop Uses**, one row per parent: `parent_id`, `parent_version` (hidden), `parent_name`, `category` (read-only), `sizes` (read-only), `use_timings` (editable labels, `;`-separated, the same format as the Setup tab). Saving it calls `update_product_parent` once per changed row with `{use_timings: [...]}`, the reason `"Setup workbook: crop uses"`, the downloaded `parent_version` and a per-row retry key derived from the upload. The format version moves to `crx-product-setup-v3`; a v2 file is refused whole (the existing old-version rule), because it has no Crop Uses tab.
+  - **Why per row and not one batch RPC:** `update_product_parent` already does the lock, stale check, copy-down and event. A batch RPC would need a new private helper re-emitted from that live function, a larger and riskier change for a non-money field. The cost: if row 40 of 100 is refused (stale), rows 1–39 have saved. The result screen lists exactly which rows saved and which were refused and why, as the grand plan requires ("the result screen shows exactly which rows saved"), and a re-upload skips saved rows because they no longer differ.
+  - The tab is empty until PAR-2 grouping runs (0 parents today). Ungrouped sizes keep using the Setup tab's `use_timings` column, unchanged.
+- Tests: component tests for the grouped picker, the add modal (refusals shown in plain words), turning off; `productSetupWorkbook.test.ts` cases for the Crop Uses tab round trip, a v2 file refused, a stale parent row refused by name, a category that does not take timings refused before upload.
+
+**Sol:** `ProductDetail.tsx` and `Products.tsx`-area screens are on the Sol list, so this PR needs Sol (section 8).
+
+---
+
+## 6. USE-3 · Quoting notes fill (one screen PR, no migration)
+
+### 6.1 The gap
+Filling quoting notes from the setup workbook works today. What the preview does not say is what a **customer** will see. For 442 active products the new quote line shows the **description** today, so:
+- adding a quoting note **replaces** the description on new quote lines (not "blank to text", as the preview reads now);
+- clearing a quoting note makes new lines fall back to the description;
+- editing a **description** on a product with no quoting note changes new quote lines too, and the preview does not flag it.
+
+### 6.2 The change
+- `src/lib/quoteNotes.ts`: no change to `preferredQuoteNotes`; it stays the one rule for "what a new quote line shows".
+- `src/lib/productSetupWorkbook.ts` `buildSetupPreview`: for every row where `quoting_notes` or `notes` changes, compute `preferredQuoteNotes(before)` and `preferredQuoteNotes(after)`. When they differ, add one display line **"New quote lines show"** with before and after, and mark the row **customer-visible**. When they are the same (for example a description edit on a product that has a quoting note), add nothing.
+- `src/components/products/ProductSetupWorkbookModal.tsx`: a count at the top of the Setup tab's preview — "N products change what new quote lines show. Existing quotes keep their notes." — and a filter to list only those rows. The confirm button's text names the count. Nothing else in the save path changes (`apply_product_setup`, its retry key, stale refusal and 2000-row limit are reused).
+- `src/components/products/PricingChangePreviewModal.tsx` (the price workbook's preview, the second writer of `quoting_notes`): the same "New quote lines show" line, from the same helper, so either spreadsheet tells the truth.
+- Bulk import (WP-PM-10) writes `notes` only on **new** products, which have no existing quotes; no change there.
+
+**Why no database change:** the save path already has the admin check, retry key, stale-row refusal and one-transaction save; quote lines already copy the note when the line is made, so existing quotes cannot change. The missing piece is honest wording in two previews.
+
+### 6.3 Filling the notes (the data step, not code)
+This is catalog work under the grand plan's data rules, after Mason answers question 3:
+1. An agent drafts the quoting note for each product into a private review list in `C:\Users\mason\Documents\Obsidian Vault\Products\Product Master review\` (never into this repo or a PR; repo carries counts only).
+2. Mason reviews and approves a batch.
+3. The approved batch is pasted into a fresh setup workbook download's `quoting_notes` column and uploaded. The preview's count must equal the batch size; then Mason (or an admin, with Mason's go for that batch) confirms the Setup tab.
+4. The repo records only the batch count and date in `docs/manual/CURRENT_STATE.md`.
+
+Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11): each batch needs his go at the time.
+
+### 6.4 Files and gates
+- `src/lib/productSetupWorkbook.ts`, `src/components/products/ProductSetupWorkbookModal.tsx`, `src/components/products/PricingChangePreviewModal.tsx`, their tests (`productSetupWorkbook.test.ts`, `PricingChangePreviewModal.test.tsx`), and `src/lib/quoteNotes.test.ts` if a case is added.
+- `PricingChangePreviewModal.tsx` carries a money word ("Pricing"), so the PR needs Sol (section 8). If Sol is not wanted for a notes-only wording change, the price-workbook half can be split into its own PR; the setup-workbook half alone is off the Sol list (re-check with the classifier at build: the money-word match is a substring check).
+
+### 6.5 Risks
+
+| Risk | Handling |
+|---|---|
+| A batch changes what customers see on hundreds of new quote lines | The preview count and "New quote lines show" lines; Mason approves each batch; existing quotes never change. |
+| Someone presses "Reset" on an old quote line after a fill | That is the button's purpose (it pulls the current text); the line's own note is kept until then. |
+| The description and quoting note drift apart | Expected: after a fill, the description becomes internal-facing text, and the quoting note is the customer text. The preview flags any description edit that still reaches quotes. |
+| Notes per size versus per parent | Kept per size, as today (the grand plan's overlap 13 table lists notes on neither the parent nor the registration). The workbook makes filling all sizes of one formulation a copy-down in the spreadsheet. Moving notes to the parent is not needed for USE-3; if wanted later, it is its own package. |
+| A note over 5000 characters | Refused by `apply_product_setup`'s existing check. |
+
+---
+
+## 7. Done when
+
+**USE-1, in the harness (`prove-product-crop-use-pairs-real-schema.mjs`, against the schema-matched copy):**
+1. **Counts match:** before and after the migration, 317 products hold timings with the same per-code counts as section 1, every product's `use_timings`, `use_timing` and `pricing_version` unchanged (postflight, re-run by the script).
+2. An admin adds "Post-Emerge Wheat" (Herbicide, `post_emergence`, `wheat`); a non-admin and a direct table insert are refused and write nothing; a repeat with the same key returns the first result and writes once; the same key with a different label is refused.
+3. Adding a second label for an existing pair is refused, naming the existing label; a crop not on the list is refused; a label with `;` is refused.
+4. A product with "Pre-Emerge Corn" and "Post-Emerge Soybeans" keeps both after save and reload (ungrouped size, then a grouped parent).
+5. Two sizes of one parent show the same pairs after a parent edit; editing one size's timings directly is refused, naming the parent.
+6. A category change on a parent with timings is refused until timings are cleared; the screen's confirm then clears them on every size in one event.
+7. Turning an option off: it disappears from the picker; a product holding it keeps it and can still save other fields; a new product cannot pick it; turning it back on works; the result reports holder counts.
+8. A setup workbook export and re-import with no edits saves nothing; a Crop Uses row edit saves through `update_product_parent` with one parent event and one copy per size; a stale parent row is refused by name while other rows save, and the result lists both.
+
+**USE-1, observed in the app against the private test copy (`scripts/local-app/`):** add a pair from the product page as an admin; pick it on a product; see it grouped under its crop; download and re-upload the setup workbook with a Crop Uses edit. A flow the test copy cannot run is recorded as owed, not passed.
+
+**USE-3, in the app against the private test copy:**
+1. Upload a setup workbook that adds quoting notes to three products (one with a description, one without, one grouped size) and edits one description on a product with no quoting note: the preview shows four customer-visible rows with the right before and after text, the count says 4, and nothing is saved until confirmed.
+2. After confirming, a **new** quote line for each product shows the new text.
+3. An **existing** saved quote with those products still shows its old notes, and its PDF prints them; "Reset" on one of its lines pulls the new text.
+4. A description edit on a product that has a quoting note shows no "New quote lines show" line.
+5. The price workbook preview shows the same line for a `quoting_notes` change.
+
+---
+
+## 8. PR split, order and gates
+
+| PR | Contents | Sol | Lands |
+|---|---|---|---|
+| **USE-1 DB** | Section 4 | Yes (`supabase/`) | Luna until clean → Sol on the exact head → apply live before merge through the migration-apply proof gate (routine grants on new objects only; non-destructive) → merge |
+| **USE-1 Screens** | Section 5 | Yes (`ProductDetail.tsx`) | After USE-1 DB is applied. Luna → Sol → green checks |
+| **USE-3 Screens** | Section 6 | Yes while it touches `PricingChangePreviewModal.tsx` | Independent of USE-1; may land first. Luna → Sol → green checks |
+| **USE-3 data** | Section 6.3 | — | After USE-3 Screens; each batch with Mason's go |
+
+Every PR stays open at least 4 hours before merge (Taha, 2026-11-08). None of these touch the files of Taha's open PRs; re-check `gh pr list --author TahaKhanAbdalli` at build time.
+
+**Order against other work (checked 2026-11-08):**
+- USE-1 follows WP-PM-5 (done). It does not need PAR-2 grouping to land; the Crop Uses tab simply stays empty until parents exist.
+- USE-1 Screens and Brand PR B and the RT-1/RT-3 screens may all edit `ProductDetail.tsx` and the setup workbook files; build them one at a time on current `main`, never in parallel on those files.
+- USE-3 touches the setup workbook files too; same rule.
+- USE-2 waits for REG-1 (Taha's #1524).
+
+---
+
+## 9. Questions for Mason
+
+**NEEDS MASON - DECISION REQUIRED (1 of 3): which crops can a product be marked for?**
+The app needs a fixed crop list so "soybean" and "soybeans" can't both appear. **Recommend:** start with the same list your customer records already use: Corn, Soybeans, Wheat, Milo, Cotton, Alfalfa, Pasture/Hay (plus "any crop"). Adding one later is a small change. Reply "yes" or name the crops to add or drop.
+
+**NEEDS MASON - DECISION REQUIRED (2 of 3): what does "Volunteer Corn" mean as a crop and timing?**
+Today the "Volunteer Corn" choice (on 7 products) is stored as crop **corn**. As a pair, that reads "used on corn", but volunteer corn is usually killed in another crop, such as soybeans. **Recommend:** keep it exactly as it is now (no change to those 7 products), and treat it as "controls volunteer corn, any crop" on screen. Reply "keep" or tell me which crop it should be.
+
+**NEEDS MASON - DECISION REQUIRED (3 of 3): what goes into the customer quote notes?**
+Today no product has a quote note, so 442 products put their general description onto every new quote line. **Recommend:** an agent drafts a short customer-facing note for each product from its description and label, you approve them in batches in your private notes, and each approved batch is uploaded from the setup spreadsheet. Products without an approved note keep showing their description, as today. Existing quotes never change. Reply "yes" or say what the notes should contain.
+
+**Settled here, not asked:** who can add or turn off a crop and timing choice (admins, matching the category rule); notes stay per size; no option renaming.
+
+---
+
+## 10. Review record
+
+Luna review rounds of this sheet are recorded here when run.

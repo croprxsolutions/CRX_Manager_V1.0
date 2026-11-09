@@ -29,8 +29,8 @@ import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
-import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE, RECEIPT_NOT_SENT_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
+import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -45,7 +45,7 @@ import { formatCents as fmtCents } from '../lib/money';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed, fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
+import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -53,6 +53,7 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import TransactionThread from '../components/ui/TransactionThread';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { billSplitCompletion, billSplitFailedMessage, createdInvoicesMessage } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
@@ -91,6 +92,8 @@ interface CreateDeliveryInvoiceResult {
   delivery_id: string;
   invoice_id: string;
   invoice_number: string;
+  /** Every payer's invoice on a Bill Split delivery. */
+  invoice_numbers?: string[] | null;
   total_cents: number;
 }
 
@@ -1187,6 +1190,9 @@ export default function DeliveryDetail() {
       ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
       ...(usesDeliveredOn && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
       p_evidence: submittedEvidence,
+      // KI-25: the receipt is recorded in the same save and emailed by the server (send-delivery-receipts),
+      // so a dropped signal can no longer lose it. A no-proof record sends no receipt.
+      ...(emailOnComplete && submittedEvidence !== 'no_proof' ? { p_email_receipt: true } : {}),
       // The exact ticket photo the screen shows as saved (the signature's reference comes from the key).
       ...(ticketPhoto ? { p_evidence_ref: ticketPhoto.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
@@ -1222,6 +1228,7 @@ export default function DeliveryDetail() {
       p_issue_notes?: string;
       p_evidence: DeliveryCompletionEvidence;
       p_evidence_ref?: string;
+      p_email_receipt?: boolean;
     } = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1230,11 +1237,6 @@ export default function DeliveryDetail() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
-    // The receipt address is read while the delivery is still open (a driver may not see the customer),
-    // after the signal check and for at most a few seconds. A no-proof record sends no receipt.
-    const recipient = submittedEvidence !== 'no_proof' && emailOnComplete && !customer?.email
-      ? (receiptRecipient ?? await fetchReceiptRecipientWithin(deliveryId))
-      : null;
     // The checks above can take a few seconds; never complete (or upload for) a delivery the user has left.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -1312,14 +1314,18 @@ export default function DeliveryDetail() {
         toast('warning', `Delivery completed, but ${shortN} product(s) were short — on-hand inventory went negative. Admins have been notified to review.`);
       }
 
-      if (invoiceNum) {
+      const billSplit = billSplitCompletion(completeResult);
+      if (billSplit.failed) {
+        toast('warning', billSplitFailedMessage(role));
+      } else if (billSplit.numbers.length > 0) {
+        toast('success', `Delivery completed${isPartialDelivery ? ' (partial)' : ''}. Draft invoices ${billSplit.numbers.join(', ')} created.`);
+      } else if (invoiceNum) {
         toast('success', isPartialDelivery
           ? `Delivery completed (partial). Draft invoice ${invoiceNum} created.`
           : `Delivery completed. Draft invoice ${invoiceNum} created.`);
       } else {
         toast('success', isPartialDelivery ? 'Delivery completed (partial quantities)' : 'Delivery completed');
       }
-      if (billSplitFailed(completeResult)) toast('warning', BILL_SPLIT_FAILED_MESSAGE);
       const proofText = submittedEvidence === 'no_proof'
         ? ` (recorded without proof: ${await storedNoProofReason(deliveryId, noProofReason)})`
         : usePaperTicket ? ' (signed paper ticket photo)' : ' (on-screen signature)';
@@ -1350,63 +1356,18 @@ export default function DeliveryDetail() {
       await notifyDeliveryCompleted(
         delivery.id,
         delivery.delivery_number,
-        customer?.farm_name || recipient?.farmName || receiptRecipient?.farmName || 'Unknown',
+        customer?.farm_name || receiptRecipient?.farmName || 'Unknown',
         delivery.assigned_driver,
         delivery.order_id,
         isPartialDelivery
       );
 
-      // === Email customer when delivery is completed (opt-out via checkbox) ===
-      // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
-      // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
-      const sendTo = customer?.email || recipient?.email || receiptRecipient?.email || null;
-      const sendToName = customer?.contact_name ?? recipient?.contactName ?? receiptRecipient?.contactName ?? null;
+      // === Customer receipt (KI-25): recorded with the completion; the server emails it ===
       if (submittedEvidence === 'no_proof') {
         // No customer confirmed this delivery, so no automatic "your delivery was completed" receipt.
         toast('info', 'Recorded without proof. No receipt was emailed; the office can send one later with Email Confirmation.');
-      } else if (emailOnComplete && sendTo) {
-        try {
-          const deliveredLines = items
-            .map((item) => {
-              const qty = isPartialDelivery ? (deliveryQtys[item.id] ?? item.quantity) : item.quantity;
-              return { name: item.product?.product_name || 'Product', qty };
-            })
-            .filter((row) => row.qty > 0);
-
-          // A paper-ticket receipt shows the day on the ticket, matching the backdated delivery.
-          const receiptDate = usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn)
-            ? parseLocalDate(paperDeliveredOn).toLocaleDateString()
-            : new Date().toLocaleDateString();
-          const html = buildDeliveryReceiptHtml({
-            variant: 'completed',
-            deliveryNumber: delivery.delivery_number,
-            contactName: sendToName,
-            dateText: receiptDate,
-            lines: deliveredLines,
-            signedBy: signedBy || null,
-            isPartial: isPartialDelivery,
-          });
-
-          await sendEmail({
-            to: sendTo,
-            subject: `Delivery ${delivery.delivery_number} Completed — Crop RX Solutions`,
-            html,
-            email_type: 'delivery_completed',
-            customer_id: delivery.customer_id,
-            resource_type: 'delivery',
-            resource_id: delivery.id,
-            idempotency_key: `delivery-completed-${delivery.id}`,
-          });
-        } catch (emailErr) {
-          Sentry.captureException(emailErr instanceof Error ? emailErr : new Error(String(emailErr)), { level: 'warning', extra: { context: 'Delivery completion email failed — delivery already succeeded' } });
-          // The delivery already succeeded; say plainly that the receipt did not go out.
-          toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-        }
-      } else if (emailOnComplete) {
-        // The receipt was wanted but no address could be read here. A visible customer with no email
-        // has none on file; otherwise the customer is hidden from this user and the lookup failed or
-        // timed out. Say so instead of skipping it silently.
-        toast('warning', customer ? RECEIPT_NO_EMAIL_ON_FILE_MESSAGE : RECEIPT_NO_EMAIL_MESSAGE);
+      } else if (emailOnComplete && !receiptEmail) {
+        toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
       }
 
       if (signatureRouteIdRef.current === deliveryId) fetchDelivery();
@@ -1428,7 +1389,7 @@ export default function DeliveryDetail() {
         return;
       }
       if (outcome.kind === 'completed_not_replayed') {
-        toast('error', forThisDelivery(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+        toast('error', forThisDelivery(RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
       } else {
         toast('error', forThisDelivery(sanitizeError(error)));
         // The upload had already failed for a reason other than the signal: say what it was.
@@ -1516,7 +1477,7 @@ export default function DeliveryDetail() {
       );
       createInvoiceIdem.resetKeyFor(delivery.id);
       setCreateInvoiceConfirmOpen(false);
-      toast('success', `Invoice ${result.invoice_number} created`);
+      toast('success', createdInvoicesMessage(result));
       await fetchDelivery();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
@@ -1957,18 +1918,17 @@ export default function DeliveryDetail() {
                   </div>
                 </>
               )}
-              {receiptEmail && (
-                <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={emailOnComplete}
-                    onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                  />
-                  Email delivery receipt to customer
-                  <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-                </label>
-              )}
+              {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
+              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={emailOnComplete}
+                  onChange={(e) => setEmailOnComplete(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+                />
+                Email delivery receipt to customer
+                <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
+              </label>
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
@@ -2848,7 +2808,8 @@ export default function DeliveryDetail() {
             </div>
           )}
 
-          {receiptEmail && completionEvidence !== 'no_proof' && (
+          {/* Shown whenever a receipt can be asked for, even when this screen cannot see the email. */}
+          {completionEvidence !== 'no_proof' && (
             <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
               <input
                 type="checkbox"

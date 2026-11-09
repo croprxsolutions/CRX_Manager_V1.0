@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)) | 61 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 added 2026-11-09) | 62 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 18 |
 | WP-PM-3 checks still owed (KI-92) | 1 |
@@ -150,10 +150,24 @@ nothing is back-filled or deleted without his approval. A database owner who dis
   live read-only 2026-11-06) — `20261123130000_revoke_truncate_trigger_maintain.sql` APPLIED LIVE 2026-11-06 11:09 AM Central, ledger `20261106170917`; repo
   guard `browserTableMaintenanceGrants.test.ts`. Known limit: `supabase_admin`'s default privileges (platform and
   extension objects) cannot be changed by `postgres`; live sweep `browser-table-maintenance` watches for them; every app table is `postgres`-owned and the migration checks that. LOW-MED.
-- Customer-document post-apply check (browser storage policies removed, Documents tab still works) was never
-  recorded; and a removed document cannot be reopened even by an admin — UNVERIFIED, LOW.
-- Three older "reps work any customer" leftovers: signed-in rep click-through of `customer-document-files`
-  still owed — LOW.
+- Customer-document post-apply check RECORDED 2026-11-08 on the local test copy (all migrations, `20260914100700`
+  included): no browser storage policy names the `customer-documents` bucket, and the Documents tab uploads and
+  downloads through `customer-document-files` (served locally). Removed documents: LIVE 2026-11-09 (PR #1663;
+  `20261222100000_document_restore_and_photo_uploader.sql`, ledger `20261109173810`; `customer-document-files` v6;
+  Mason checked restore in the live app) — an active admin can restore one (both removal columns
+  cleared, nothing else), and `customer-document-files` lets admins download a removed one; the Documents tab has an
+  admin-only "Show removed documents" view with Restore. Each restore is kept in `customer_document_restores` (who
+  removed it and when, who restored it), written by the database; a retried removal after a restore is refused
+  instead of reporting "removed". Live API check 2026-11-09 (publishable key, `Accept-Profile: storage`): the API
+  answers `PGRST106`, exposing only `public` and `graphql_public`, so the `storage` schema is not reachable. LOW.
+  Deferred from #1663 (#1698), LOW each: (a) a removed document whose file was deleted can still be restored (the
+  record shows, its download fails; no service-role cleanup deletes such files today); (b) the retried-removal check
+  reads the document without a lock, so an admin restore at the same instant as a retried removal can still let that
+  retry report "removed".
+- Signed-in rep click-through of `customer-document-files` RECORDED 2026-11-08 (local test copy): a sales rep opens
+  a customer document and sees no removed-documents view; after removing one, the download service answers "no
+  longer available" and a restore attempt changes 0 rows. Repeat on live (v6 deployed 2026-11-09) — needs a
+  sales-rep sign-in, so Mason or a rep does it — LOW.
 - A staff viewer can mint a temporary photo link (Mason accepted this, see accepted list KI-60).
 - 12 live SECURITY DEFINER functions set `search_path` to `public, extensions, pg_temp`, which the written rule
   (`public, pg_temp`, or an exactly empty path with fully-qualified names) does not cover: `fields_acre_authority_guard`,
@@ -511,22 +525,22 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+**MED · OPEN (sender live; app switch in PR #1649) · UI/database/Edge Function · Claude**
 The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
-check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
-that waits on Mason's approval to
-deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
+2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
+that asks for the server receipt is PR #1649; it must not land before the sender's secrets are stored. Not built:
 provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
 card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
-Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
-and should land before the app switch.
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
+chose (2026-11-08) to land the app switch first; the close action is a follow-up migration PR.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**
 Following `20261022075000` (PR #1024): old app versions are refused until reloaded; offline completions queued
 before the change go to review; old completed deliveries have no proof stored; some old proof scripts fail;
-abandoned signature files stay stored; file contents are not inspected. Real-phone airplane-mode test PASSED
+abandoned signature files stay stored (deleting them is out of scope); file contents are not inspected. Photo proof
+is now tied to who uploaded it (LIVE 2026-11-09, ledger `20261109173810`; see KI-77). Real-phone airplane-mode test PASSED
 (Mason 2026-11-06, after the narrowing below): an offline signed completion synced and showed its signature.
 The four older signature policies (fixed path `signatures/<id>.png`) are narrowed by
 `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`): insert, update and delete dropped,
@@ -891,6 +905,17 @@ The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.m
 after midnight UTC with "fractional credit A PNL COGS delta=-1251". Not checked whether `main`'s live-dump version
 fails the same way; it fits the known pattern of live checks that fail between 6 PM and midnight Central.
 
+### KI-113 — The customer-document byte-boundary prover is out of date
+**LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
+`scripts/smoke/prove-customer-document-bytes-server-only.mjs` (PR #635) builds a hand-made scratch project (a
+`profiles`/`customers` fixture plus `20260717013415`, then `20260914100700`) and serves today's
+`customer-document-files`. Its `--phase=after` fails on `profiles.email NOT NULL`, and today's function also relies on
+later migrations (`20261013220000`, `20261222100000`) its fixture lacks, so a one-line email fix would not make it
+pass. Not a customer risk today: live read-only 2026-11-09, the `customer-documents` bucket is private and no
+`storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
+`customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
+boundary. Fix when next needed: rebuild it on the real-schema harness.
+
 ---
 
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)
@@ -1041,8 +1066,15 @@ list (PR #381); the customer form warns, without blocking, when a new or renamed
 same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
-evidence: photo proof is not tied to who took it, and storage-rule guarantees do not cover dashboard or
-service-role tools (LOW).
+evidence: photo proof tied to who uploaded the file — LIVE 2026-11-09 (`20261222100000`, ledger `20261109173810`): a signed-in user's new delivery
+photo must name that user as uploader and a `delivery-photos` file that user owns (as signatures are checked), its
+upload time is the server clock, and its delivery, file, uploader and time never change. Older photo rows are not
+re-checked; storage-rule guarantees still do not cover dashboard or service-role tools (LOW). Not checked: a
+user can attach a photo file they uploaded for one delivery to another delivery they may add photos to, so that
+delivery's photo list shows it; `complete_delivery` still refuses it as proof (the evidence smoke files such rows
+on purpose to prove that). LOW. Also deferred from #1663 (#1698): photo ownership is checked only when the photo row is
+added, so if a photo file is deleted and someone else uploads a different file at the same path, the existing row keeps
+the first uploader's name and time. LOW.
 
 ### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)
 **MED/LOW · OPEN · tooling-guards**
@@ -1085,7 +1117,7 @@ service-role tools (LOW).
 
 ## Unverified items (could not confirm either way; treat as open until checked)
 
-KI-07 (customer-document post-apply check), KI-16 (split-acre
+KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
 (live-data counts), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.

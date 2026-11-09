@@ -3573,6 +3573,8 @@ export interface Job {
   customer_id: string;
   status: JobStatus;
   job_date: string;
+  /** KI-73 part C: server-stamped when the job first reaches completed/invoiced; never written by the app. */
+  completed_at?: string | null;
   scheduled_time: string | null;
   applicator_id: string | null;
   vehicle_id: string | null;

@@ -259,7 +259,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
   };
 
   // A direct update under the admin policy; guard_customer_document_update lets only an
-  // active admin clear both removal columns and nothing else (20261217110000).
+  // active admin clear both removal columns and nothing else (20261222100000).
   const handleRestore = async (document: CustomerDocumentRow) => {
     setRestoringId(document.id);
     try {

@@ -3,7 +3,7 @@ import { render, cleanup, screen, waitFor, fireEvent } from '@testing-library/re
 
 // KI-07: an admin can list removed documents and restore one. The database
 // side (only an active admin may clear both removal columns) is
-// guard_customer_document_update in 20261217110000.
+// guard_customer_document_update in 20261222100000.
 
 const toastSpy = vi.fn();
 vi.mock('../ui/Toast', () => ({

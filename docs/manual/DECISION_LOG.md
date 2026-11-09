@@ -10,6 +10,33 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — Email Confirmation stays a hand send from the screen; two rare duplicates are accepted (KI-25 follow-up)
+
+**Decision (Mason, in session, 2026-11-09: "Yes, allow it"; widened the same morning: "Yes, accept it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Three rare cases are accepted: two office users pressing it for the same delivery within seconds can both email the customer; a void in the seconds between the go-ahead and the hand send does not stop that send; and a second office user may mark the paused receipt handled while a hand send is still going, so if that send then fails the receipt is off the list (the sender sees the failure and can press Email Confirmation again).
+**Why:** Sol (round 4) and Luna both asked for the go-ahead to be an exclusive permission that also holds the delivery until the email leaves. That needs a "sending now" lock plus rules for a failed send, or moving the hand send into the server sender: a redesign. The duplicate this work exists to stop, the server emailing a copy after the office sent one, is closed; a delivery that is already not completed is refused (`DELIVERY_NOT_COMPLETED`, checked before any replay).
+**What this forbids/implies:** don't add a sending-now lock or make `paused` an exclusive send permission in `close_delivery_receipt` (`20261221100000`) or make `handled` wait for an in-flight hand send, without re-deciding this; a matching retry of a used key re-checks the same receipt as it is now, never an earlier saved answer, and never acts on a receipt re-queued since (`DELIVERY_RECEIPT_CHANGED`). Closing these fully means sending Email Confirmation through the server sender.
+## 2026-11-09 — KI-30 EPA corrections: the restore check reads history, not today's number; no follow-up check
+
+**Decision (Mason, in chat, 2026-11-09: "drop the check").** The check-only follow-up migration `20261215120000_ki30_epa_followup_checks` (never applied) is dropped from PR #1653. The restore data proof in `supabase/baselines/README.md` keeps requiring a change-history row that set each of the 48 corrected numbers; it does not compare each product's current number.
+**Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
+**What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
+## 2026-11-09 — Sol round 5 is a hard stop until Mason's trade-off is recorded
+
+**Decision (Mason, 2026-11-09 overnight-run retro: "spin both up in fresh sessions"):** from Sol round 5, `scripts/write-codex-push-proof.mjs` refuses a full Sol run until this log has an entry dated that day or later naming the PR as `#<n>`. Rounds 3–4 keep the warning line.
+**Why:** PR 1653 reached Sol round 8 past the round-3 warning before Mason was asked; he then decided in one message.
+**What this forbids/implies:** at round 5, ask Mason the business trade-off (AGENTS.md Operating Contract), record his answer here naming the PR, commit, then re-run. `--dry-run` and the carries are unaffected. Supersedes the warning-only part of the 2026-11-06 round-count entry.
+
+## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
+
+**Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
+**Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
+**What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
+## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
+
+**Decision (Mason, in session, 2026-11-08: "sometimes the same field is sprayed by both sprayers"; "any sprayer should be able to just pick up field and start spraying, not wait on someone from office"):** when a job already on sprayer A's board is reassigned to B while B is inactive, re-activating B does not move the field off A's board. B, as the job's applicator, already sees the job in the field app and can start and complete it; A keeps the field and can start it.
+**Why:** Taha's review of PR #1652 suggested re-pointing such rows to B. Two sprayers sometimes work the same field, and the board holds one sprayer per field, so moving it would take work away from A. The real-schema proof shows B already gets the job without an office step.
+**What this forbids/implies:** don't make `_sync_job_location_dispatch_on_applicator_qualify` overwrite or replace a dispatch row held by someone else without re-deciding this. A dispatch row whose sprayer differs from `jobs.applicator_id` is allowed, not a defect.
 ## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
 
 **Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.

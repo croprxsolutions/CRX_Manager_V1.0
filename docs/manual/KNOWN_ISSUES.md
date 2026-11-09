@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108043505`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -42,8 +42,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | WP-PM-3 checks still owed (KI-92) | 1 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
-Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
-part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
+Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
+2026-10-27 UTC, part C, access ending with the job, 2026-11-09 UTC), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone).
@@ -53,13 +53,13 @@ key alone).
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · Mason approval needed to narrow permissions; parts A and B applied live, part C not started**
+**HIGH · PARTIAL · security · parts A, B and C applied live; the related lows below stay open**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
-C (the job route); A and B are applied live and merged; part C has no PR. Related lows: dispatched
+C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
@@ -153,7 +153,7 @@ nothing is back-filled or deleted without his approval. A database owner who dis
 - Customer-document post-apply check RECORDED 2026-11-08 on the local test copy (all migrations, `20260914100700`
   included): no browser storage policy names the `customer-documents` bucket, and the Documents tab uploads and
   downloads through `customer-document-files` (served locally). Removed documents: BUILT, NOT LIVE —
-  `20261217110000_document_restore_and_photo_uploader.sql` lets an active admin restore one (both removal columns
+  `20261222100000_document_restore_and_photo_uploader.sql` lets an active admin restore one (both removal columns
   cleared, nothing else), and `customer-document-files` lets admins download a removed one; the Documents tab has an
   admin-only "Show removed documents" view with Restore. Proven in the local app (admin remove, view, download,
   restore; activity recorded) and on a real-schema replay. Live needs the migration applied and the function
@@ -550,6 +550,8 @@ any already waiting (board splits and undispatched locations left alone; a job a
 same instant waits for the activation instead of being missed; proof
 `scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
+Taha's review: a job reassigned to an inactive applicator keeps the old applicator's dispatch row after re-activation.
+Kept as designed (Mason, DECISION_LOG 2026-11-08): both sprayers can see and start it, proved in the same script.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · PARTLY RE-MEASURED 2026-11-08 · inventory/process · Mason**
@@ -565,12 +567,7 @@ this repo).
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
-**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data), re-measured read-only 2026-11-08 against EPA PPLS: all
-286 active products that carry a number use the valid format; of the 203 different numbers, 169 match the
-registry, 30 are confirmed wrong (9 moved by EPA to a new number, 21 belong to another brand or are not in the
-registry) and 4 are unconfirmed until a person reads the jug; 8 products with no number have a registry match to add. Each has a
-proposed number and source in Mason's review workbook (side-session notes, not in this repo); no live row was
-changed. Two `epa-lookup` limits make `LabelDataQuality` misreport some of them: a number EPA moved returns a
+**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data): a read-only check on 2026-11-08 against EPA PPLS found 30 wrong numbers (9 moved by EPA to a new number, 21 belonging to another brand or not in the registry) and 8 products with no number but a registry match; on 2026-11-08 those 48 products were corrected live from EPA's registry (PR #1653). 4 numbers still need a person to read the jug label. Two `epa-lookup` limits make `LabelDataQuality` misreport some numbers: a number EPA moved returns a
 lookup error instead of the new number, and a three-part distributor number returns "not found" even when
 valid. CRM has no data entered; 146 of 151 active customers lack a
 sales rep (live read-only count, 2026-11-08). The tool exists: an admin ticks customers on the Customers list and uses
@@ -952,14 +949,25 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
   to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
   Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
-- Every active account reads every `customer_addresses` row (To-Do row 11.7; HIGH).
+- Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
+  keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
+  part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
+- DEFERRED (LOW, Sol 2026-11-08, part C): `start_job` and `complete_job` return a matching idempotency result before
+  the job-access check, so a former applicator replaying their own key gets back the earlier result (ids they already
+  had). Nothing new is written. Fix: check access before the replay lookup.
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
   billing splits and spray-record field/acres data through `field_billing_defaults` and
   `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
 - Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
-  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH; part C, not
-  started). Part A's `_can_see_field` already ends whole-job access when `jobs.deleted_at` is set, for the
-  field-map lookups only.
+  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). FIXED LIVE 2026-11-09
+  05:29 UTC (11:29 PM Central, 2026-11-08) by part C (PR #1650, ledger `20261109052957`, `20261217100000`), which ends the whole-job applicator's access when
+  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
+  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
+  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
+  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
+  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
   `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
@@ -976,7 +984,8 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   whose role is driver keeps the crew job and its map but not the field tables (by design).
 - Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
   details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
-  ticket) means these should be widened to the dispatch route too; not built.
+  ticket) means these should be widened to the dispatch route too. Part C (live 2026-11-09 UTC, PR #1650)
+  gives them read-only access to those rows of the job they are dispatched to.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
 **MED · PARTIAL · security/money · Mason**
@@ -1041,7 +1050,7 @@ list (PR #381); the customer form warns, without blocking, when a new or renamed
 same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
-evidence: photo proof tied to who uploaded the file — BUILT, NOT LIVE (`20261217110000`): a signed-in user's new delivery
+evidence: photo proof tied to who uploaded the file — BUILT, NOT LIVE (`20261222100000`): a signed-in user's new delivery
 photo must name that user as uploader and a `delivery-photos` file that user owns (as signatures are checked), its
 upload time is the server clock, and its delivery, file, uploader and time never change. Older photo rows are not
 re-checked; storage-rule guarantees still do not cover dashboard or service-role tools (LOW). Not checked: a
@@ -1055,12 +1064,17 @@ on purpose to prove that). LOW.
   stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
   approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
   advisory).
-- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
-  `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
-  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
-  Still open, not covered by that acceptance: a separate gap in `env-guard`'s frontend secret-key checks (LOW;
-  confirmed on `main` 2026-11-08; details withheld until the fix ships). PR #605's branch
-  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has the fix.
+- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables` and `generated-column-check`
+  still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
+  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching, `.env` aliases in
+  `env-guard` included (LOW). Revisit trigger: if Claude Code regains a MultiEdit tool, reopen the 2026-11-02
+  acceptance for these three content guards.
+- `env-guard` service-role scan: FIXED 2026-11-08 (branch `claude/guard-port-envguard-ki107-7aecfa`). An Edit is
+  judged as the whole file after the edit, comments are scanned like code, and a repo-relative or upper-case `src/`
+  path counts. `*.test.ts(x)` files may quote `'service_role'` (several assert database grants) but still may not
+  name the key or hold a JWT-shaped literal. Still not caught (LOW): frontend files with other extensions (`.mjs`,
+  `.vue`, `.html`), a key name or role built at run time from pieces, keys not shaped like a JWT, and the `.env`
+  path aliases accepted above.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

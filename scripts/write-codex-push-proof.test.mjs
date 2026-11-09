@@ -30,6 +30,8 @@ import {
   recentPushedHeads,
   countSolRounds,
   solRoundLine,
+  solRoundGate,
+  centralDate,
   cleanMainMergeParent,
   readSolPreflightFacts,
   solReviewBase,
@@ -1813,6 +1815,29 @@ not json
 `, [h1, h2]), 2, "rounds: only this branch's heads count");
     assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
     assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
+    // Hard stop from round 5 (Mason, 2026-11-09, after PR 1653 reached round 8).
+    const today = "2026-11-09";
+    const logWith = (heading, body) => `# Decision Log\n\n## ${heading}\n\n${body}\n\n## 2026-11-01 — older\n\nPR #1653 old note.\n`;
+    const named = logWith("2026-11-09 — Rounding stays per line on #1653", "**Decision (Mason):** keep it.");
+    const r5 = solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Something else", "No PR here."), today });
+    assert.equal(r5.refuse, true, "round stop: round 5 without a decision entry refuses");
+    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*DECISION_LOG\.md.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: named, today }).refuse, false, "round stop: round 5 with today's entry naming #1653 proceeds");
+    assert.equal(solRoundGate({ round: 8, prNumber: 1653, decisionLog: logWith("2026-11-09 — Trade-off", "**Decision (Mason):** loss over duplicate for PR #1653."), today }).refuse, false, "round stop: 'PR #n' in the body counts");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** Mason keeps #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-08 — Yesterday", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an older entry naming the PR does not count");
+    assert.equal(solRoundGate({ round: 5, prNumber: 165, decisionLog: named, today }).refuse, true, "round stop: #1653 does not name #165");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Pending", "PR #1653; decision pending"), today }).refuse, true, "round stop: a mention with no **Decision line does not count (Luna MED)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Placeholder", "**Decision:** pending; no trade-off chosen yet. PR #1653"), today }).refuse, true, "round stop: a **Decision line that does not name Mason does not count (Luna HIGH r2)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-99-99 — Bad date", "**Decision (Mason):** #1653"), today }).refuse, true, "round stop: an impossible date does not count (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Token", "**Decision (Mason):** #1653abc"), today }).refuse, true, "round stop: #1653abc does not name #1653 (Luna LOW)");
+    assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: "", today }).refuse, true, "round stop: an unreadable decision log refuses");
+    assert.match(solRoundGate({ round: 5, prNumber: null, decisionLog: named, today }).message, /open the PR/, "round stop: no PR yet says open it first");
+    assert.deepEqual(solRoundGate({ round: 4, prNumber: 1653, decisionLog: "", today }), { refuse: false, message: null }, "round stop: round 4 proceeds");
+    const dry = solRoundGate({ round: 5, prNumber: 1653, decisionLog: "", today, dryRun: true });
+    assert.equal(dry.refuse, false, "round stop: --dry-run never refuses");
+    assert.match(dry.message, /Sol round 5/, "round stop: --dry-run still reports the stop");
+    assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
   }
   assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
   assert.equal(check({ headContainsBase: null }).ok, false, "preflight: an unreadable containment check refuses");

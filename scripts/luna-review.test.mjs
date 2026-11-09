@@ -3,6 +3,7 @@
 // Run: node scripts/luna-review.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,6 +13,7 @@ import {
   EXIT_FINDINGS,
   LUNA_EFFORT,
   LUNA_MODEL,
+  SETTLED_MAX_BYTES,
   buildLunaExecArgs,
   classifyLunaRun,
   codeHealthGate,
@@ -21,6 +23,7 @@ import {
   nextStepHint,
   scopeHint,
   parseArgs,
+  readSettled,
   runLunaReview,
 } from "./luna-review.mjs";
 import { fixedGitExecutable } from "./write-codex-push-proof.mjs";
@@ -306,5 +309,86 @@ assert.match(scopeHint("branch against origin/main (abc) at head def", true), /n
 assert.match(scopeHint("branch against origin/release (abc) at head def"), /whole-branch round/);
 assert.equal(nextStepHint("- **High — a.ts:1** — wrong total\nLUNA_REVIEW: FINDINGS 1\n"), null);
 assert.equal(nextStepHint("- BLOCKER: a.sql:3 — grants anon\n- MED: b.ts:2\nLUNA_REVIEW: FINDINGS 2\n"), null);
+
+// --settled (retro, Mason, 2026-11-09): Luna re-raised one refuted finding in 4 of 8 rounds on PR #1688.
+{
+  // No flag: the prompt is byte-for-byte the one from before --settled existed (hash pinned then).
+  assert.equal(
+    createHash("sha256").update(buildLunaPrompt({ diff: "+x\n", canary })).digest("hex"),
+    "3669e4a83f6f06a136ce2507a864a84510f7f21fcf717885b5bb4589da7a6d3a",
+  );
+  assert.equal(buildLunaPrompt({ diff: "+x\n", canary, settled: null }), buildLunaPrompt({ diff: "+x\n", canary }));
+
+  // Flag: the list sits inside its own canary-marked data section, after every instruction and
+  // before the diff, and the diff with its tail canary still ends the prompt.
+  const item = "- types lack p_new_registration on upsert_parent_brand: refuted, that RPC is not in the generated types";
+  const withList = buildLunaPrompt({ diff: "+x\n", canary, settled: item });
+  const open = withList.indexOf(`===== SETTLED FINDINGS (canary: ${canary}) =====`);
+  const close = withList.indexOf(`===== END SETTLED FINDINGS (canary: ${canary}) =====`);
+  const at = withList.indexOf(item);
+  assert.ok(open > withList.indexOf("LUNA_REVIEW: NO_DIFF") && open < at && at < close);
+  assert.ok(close < withList.indexOf(`===== CANDIDATE DIFF (canary: ${canary}) =====`));
+  assert.ok(withList.endsWith(`===== END CANDIDATE DIFF (tail canary: ${canary}-END) =====\n`));
+  assert.match(withList, /untrusted data under the\nsame TRUST BOUNDARY/);
+  assert.match(withList, /still read and review the whole diff and echo the tail canary/);
+  assert.match(withList, /NEW evidence/);
+  assert.equal(withList.split(item).length, 2, "the list appears exactly once");
+
+  // The file is capped and refused whole, never trimmed; an empty one is refused too.
+  const dir = tempDir("crx-luna-settled-");
+  const file = (name, text) => { const p = path.join(dir, name); writeFileSync(p, text); return p; };
+  assert.equal(readSettled(file("ok.md", `${item}\r\n`)), item);
+  assert.equal(readSettled(file("limit.md", "a".repeat(SETTLED_MAX_BYTES))).length, SETTLED_MAX_BYTES);
+  assert.throws(() => readSettled(file("big.md", "a".repeat(SETTLED_MAX_BYTES + 1))), /limit is 8192/);
+  assert.throws(() => readSettled(file("empty.md", " \n")), /empty/);
+
+  // Luna only: Sol never sees the list, and a path that looks like an option is refused.
+  assert.equal(parseArgs(["--settled", "s.md"]).settled, "s.md");
+  assert.throws(() => parseArgs(["--sol", "--reason", "r", "--settled", "s.md"]), /Sol never sees/);
+  assert.throws(() => parseArgs(["--settled", "--sol"]), /needs a value/);
+
+  // End to end: the list reaches Luna's stdin; an oversized one stops the run before Codex.
+  const repoDir = path.join(dir, "repo");
+  mkdirSync(repoDir);
+  const git = (...gitArgs) => execFileSync(fixedGitExecutable(), ["-c", "user.name=t", "-c", "user.email=t@example.com", ...gitArgs], { cwd: repoDir });
+  git("init", "-q");
+  writeFileSync(path.join(repoDir, "a.txt"), "one\n");
+  git("add", "a.txt");
+  git("commit", "-q", "-m", "one");
+  const inputs = [];
+  const out = [];
+  const savedLog = console.log;
+  const savedErr = console.error;
+  console.log = (line = "") => out.push(line);
+  console.error = () => {};
+  process.chdir(repoDir);
+  const stub = {
+    resolveCodex: () => "codex-stub",
+    spawn: (bin, spawnArgs, options) => {
+      inputs.push(options.input);
+      const tailCanary = /tail canary: (CRXDIFF-[^)\s]+)\) =====\s*$/.exec(options.input)[1];
+      writeFileSync(spawnArgs[spawnArgs.indexOf("-o") + 1], `${tailCanary}\nLUNA_REVIEW: CLEAN\n`);
+      return { status: 0, stdout: "", stderr: `${banner(LUNA_MODEL)}tokens used\n1\n` };
+    },
+  };
+  let exits;
+  try {
+    exits = [
+      main(["--commit", "HEAD", "--settled", path.join(dir, "ok.md")], stub),
+      main(["--commit", "HEAD", "--settled", path.join(dir, "big.md")], stub),
+      main(["--commit", "HEAD"], stub),
+    ];
+  } finally {
+    process.chdir(realCwd);
+    console.log = savedLog;
+    console.error = savedErr;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(exits, [EXIT_CLEAN, EXIT_DID_NOT_RUN, EXIT_CLEAN]);
+  assert.equal(inputs.length, 2, "the oversized list never reached Codex");
+  assert.ok(inputs[0].includes(item) && !inputs[1].includes("SETTLED FINDINGS"));
+  assert.match(out.join("\n"), /Settled list: .*ok\.md \(1 line\(s\)\) was given to Luna; it never goes to Sol\./);
+  assert.match(out.join("\n"), /DID NOT RUN[\s\S]*limit is 8192/);
+}
 
 console.log("luna-review tests passed");

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261217110000 (KI-07, KI-77/KI-26). Builds the checked-in schema baseline in a
+ * Real-schema proof for 20261222100000 (KI-07, KI-77/KI-26). Builds the checked-in schema baseline in a
  * network-disabled PostgreSQL container, replays migrations up to the candidate, shows the old guard refuses an
  * admin restore, applies the candidate (a second apply refuses), then, as real signed-in roles on invented rows:
  *   documents: an active admin restores a removed document (both removal columns cleared, nothing else);
@@ -32,7 +32,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261217110000_document_restore_and_photo_uploader.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261222100000_document_restore_and_photo_uploader.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

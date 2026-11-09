@@ -18,8 +18,8 @@ Crop RX Solutions' production agricultural chemical distribution app. Repository
 
 - Review/audit/diagnosis/status/plan requests are read-only; build/change/fix/finish/handle/implement/ship authorizes reversible work through verification and protected delivery. Codex and Claude both proceed after a short plan without waiting for approval.
 - Deliver what was asked at the scope intended. Explain concerns and continue rather than quietly narrowing, widening, or transforming it. Guard/audit work needs a request, demonstrated blocker, or current production incident.
-- Obey all explicit limits and "stop", "pause", or "hold on" literally.
-- Stop and hand over both positions and a recommendation only when the same BLOCKER/HIGH survives two fix rounds, a new BLOCKER/HIGH traces to the same mechanism (lock, timer, guard, design piece) for three rounds in a row (stop patching, name it, ask Mason the business trade-off that deletes it, e.g. duplicate vs loss, block vs warn, and re-plan through Astra, Luna, Sol), a checked BLOCKER remains disputed, a required gate cannot run, or a hard gate needs Mason. If a design keeps something correct by matching an ID the screen sends back, ask Mason the business rule at round 2. Round caps are ceilings, not targets.
+- Obey explicit limits and "stop", "pause", or "hold on" literally.
+- Stop and hand over both positions and a recommendation only if the same BLOCKER/HIGH survives two fix rounds, a new BLOCKER/HIGH traces to the same mechanism (lock, timer, guard, design) three rounds running (stop patching, name it, ask Mason the business trade-off that deletes it, e.g. duplicate/loss, and re-plan (Astra, Luna, Sol); Sol round 5+ refuses until DECISION_LOG.md names the PR), a checked BLOCKER stays disputed, a required gate cannot run, or a hard gate needs Mason. If a design stays correct by matching an ID the screen sends back, ask Mason the business rule at round 2. Round caps are ceilings, not targets.
 
 ## Start and Route
 

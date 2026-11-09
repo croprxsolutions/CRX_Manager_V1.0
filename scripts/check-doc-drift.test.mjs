@@ -59,15 +59,17 @@ assert.equal(
   'freshness uses the repository business timezone rather than UTC',
 );
 assert.equal(
-  manualFreshnessBoundary('20260905', '20260904'),
-  '20260904',
-  'a deliberately future-stamped candidate must not force a future verification claim',
+  manualFreshnessBoundary(['20260903', '20260905'], '20260904'),
+  '20260903',
+  'a future-dated migration neither raises the bar nor makes "today" the bar',
 );
 assert.equal(
-  manualFreshnessBoundary('20260903', '20260904'),
-  '20260903',
-  'an ordinary migration still defines the minimum freshness boundary',
+  manualFreshnessBoundary(['20260903', '20260904', '20260905'], '20260904'),
+  '20260904',
+  'a migration dated today is due, so it sets the bar',
 );
+assert.equal(manualFreshnessBoundary(['20260905'], '20260904'), undefined, 'only future migrations: no bar yet');
+assert.equal(manualFreshnessBoundary([], '20260904'), undefined, 'no migrations: no bar');
 
 assert.equal(freshnessEnforcedFor(['scripts/a.mjs', 'docs/changelog.d/x.md']), false,
   'a change with no migration and no live-state doc only warns on a stale stamp');
@@ -108,12 +110,12 @@ assert.equal(freshnessEnforcedFor([]), false, 'an empty diff only warns');
 {
   const today = chicagoCalendarStamp();
   const dashed = `${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6)}`;
-  const freshnessOnly = (stamp, stampLine = `**Last verified:** ${stamp}`) => {
+  const freshnessOnly = (stamp, stampLine = `**Last verified:** ${stamp}`, migrationDates = [today]) => {
     const root = tempDir('crx-freshness-only-');
     try {
       mkdirSync(path.join(root, 'supabase/migrations'), { recursive: true });
       mkdirSync(path.join(root, 'docs/manual'), { recursive: true });
-      writeFileSync(path.join(root, `supabase/migrations/${today}120000_x.sql`), 'select 1;\n');
+      for (const date of migrationDates) writeFileSync(path.join(root, `supabase/migrations/${date}120000_x.sql`), 'select 1;\n');
       for (const doc of ['CURRENT_STATE.md', 'KNOWN_ISSUES.md']) {
         writeFileSync(path.join(root, 'docs/manual', doc), `# ${doc}\n\n${stampLine}\n`);
       }
@@ -131,6 +133,20 @@ assert.equal(freshnessEnforcedFor([]), false, 'an empty diff only warns');
   const long = freshnessOnly(dashed, `**Last verified:** ${dashed} ${'x'.repeat(200)}`);
   assert.equal(long.status, 1, `an over-long stamp line must fail: ${long.stdout}`);
   assert.match(long.stdout, /FAIL manual doc CURRENT_STATE\.md stamp line/);
+
+  // Midnight Central with a future-dated migration on main (2026-11-09): the bar is the
+  // newest migration already due, never "today" by itself.
+  const y = new Date(Date.UTC(+today.slice(0, 4), +today.slice(4, 6) - 1, +today.slice(6) - 1)).toISOString().slice(0, 10);
+  const yesterday = y.replace(/-/g, '');
+  const future = '20991231';
+  const docsOnly = freshnessOnly(y, undefined, [yesterday, future]);
+  assert.equal(docsOnly.status, 0, `(a) yesterday's stamps pass when nothing is due today: ${docsOnly.stdout}${docsOnly.stderr}`);
+  const futureOnly = freshnessOnly('2026-01-01', undefined, ['20260101', future]);
+  assert.equal(futureOnly.status, 0, `(b) a future-dated migration does not raise the bar: ${futureOnly.stdout}${futureOnly.stderr}`);
+  const dueToday = freshnessOnly(y, undefined, [yesterday, today, future]);
+  assert.equal(dueToday.status, 1, `(c) a migration dated today still needs today's stamps: ${dueToday.stdout}`);
+  assert.match(dueToday.stdout, /FAIL manual freshness CURRENT_STATE\.md/);
+  assert.match(dueToday.stdout, /FAIL manual freshness KNOWN_ISSUES\.md/);
 }
 
 console.log('PASS - check-doc-drift helpers keep one record per migration, a frozen history file, short single stamps and Chicago-date freshness.');

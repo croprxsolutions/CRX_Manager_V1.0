@@ -3,7 +3,7 @@
 - KI-07: on a customer's Documents tab an admin can switch to "Show removed documents", download a removed
   document and restore it. The `customer-document-files` Edge Function serves a removed document to an admin
   only (needs a deploy); reps still get "no longer available". New migration
-  `20261217110000_document_restore_and_photo_uploader.sql` lets the database accept the restore from an
+  `20261222100000_document_restore_and_photo_uploader.sql` lets the database accept the restore from an
   active admin only, keeps each restore in a new admin-readable table `customer_document_restores` (who
   removed it, who restored it), and makes a retried removal after a restore fail instead of reporting "removed".
 - KI-77 / KI-26: the same migration refuses a delivery photo record that names someone other than the

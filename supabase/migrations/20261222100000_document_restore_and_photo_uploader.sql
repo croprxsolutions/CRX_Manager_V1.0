@@ -1,5 +1,5 @@
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261217110000_document_restore_and_photo_uploader.md.
+-- docs/reference/migrations.d/20261222100000_document_restore_and_photo_uploader.md.
 --
 -- WHAT (KI-07, KI-26, KI-77):
 --   1. KI-07. An active admin may RESTORE a removed customer document. guard_customer_document_update
@@ -137,7 +137,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.guard_customer_document_update() IS
-  'Makes document identity and provenance immutable and enforces one-way attributable soft deletes; an active admin may restore a removed document by clearing deleted_at and deleted_by together (20261217110000, KI-07).';
+  'Makes document identity and provenance immutable and enforces one-way attributable soft deletes; an active admin may restore a removed document by clearing deleted_at and deleted_by together (20261222100000, KI-07).';
 
 -- 1b. A restore clears deleted_at and deleted_by, so the database keeps its own record of each
 --     restore: who removed the document and when, and who restored it and when. Written only by the
@@ -158,7 +158,7 @@ GRANT SELECT ON TABLE public.customer_document_restores TO authenticated;
 CREATE POLICY customer_document_restores_admin_select ON public.customer_document_restores
   FOR SELECT TO authenticated USING ((SELECT public.is_admin()));
 COMMENT ON TABLE public.customer_document_restores IS
-  'One row per restore of a removed customer document (20261217110000, KI-07): the removal it undid and who restored it. Written only by trigger customer_documents_record_restore; admins read it.';
+  'One row per restore of a removed customer document (20261222100000, KI-07): the removal it undid and who restored it. Written only by trigger customer_documents_record_restore; admins read it.';
 
 -- DEFINER so the trigger can write the record the restoring admin cannot write directly.
 CREATE FUNCTION public._record_customer_document_restore()
@@ -307,7 +307,7 @@ BEGIN
     END IF;
     -- Reps remove documents of ANY customer (Mason, 2026-10-13); the replay's
     -- assigned-rep re-check is removed by 20261013220000.
-    -- KI-07 (20261217110000): an admin may have restored the document after this removal
+    -- KI-07 (20261222100000): an admin may have restored the document after this removal
     -- committed. Replaying the old receipt would tell the caller it is removed while it is live.
     IF NOT EXISTS (SELECT 1 FROM public.customer_documents d
                     WHERE d.id = p_document_id AND d.deleted_at IS NOT NULL) THEN
@@ -420,7 +420,7 @@ ALTER FUNCTION public._guard_delivery_photo_uploader() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._guard_delivery_photo_uploader() FROM PUBLIC, anon, authenticated, service_role;
 
 COMMENT ON FUNCTION public._guard_delivery_photo_uploader() IS
-  'Trigger (20261217110000, KI-77/KI-26): a signed-in insert must name the caller as uploaded_by and a delivery-photos file the caller owns; uploaded_at is the file''s own upload time; delivery_id, storage_path, uploaded_by and uploaded_at never change.';
+  'Trigger (20261222100000, KI-77/KI-26): a signed-in insert must name the caller as uploaded_by and a delivery-photos file the caller owns; uploaded_at is the file''s own upload time; delivery_id, storage_path, uploaded_by and uploaded_at never change.';
 
 CREATE TRIGGER delivery_photos_uploader_guard
   BEFORE INSERT OR UPDATE ON public.delivery_photos

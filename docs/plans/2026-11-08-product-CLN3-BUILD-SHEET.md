@@ -141,7 +141,9 @@ All of these, observed, not only tested:
        SELECT p.id, lower(btrim(regexp_replace(regexp_replace(it, '[®™©]', '', 'g'), '[\s_-]+', ' ', 'g'))) AS item
        FROM products p,
             regexp_matches(p.product_name, '\(([^)]*)(\)|$)', 'g') g,
-            regexp_split_to_table(g[1], '[,;]') it)
+            regexp_split_to_table(
+              regexp_replace(g[1], '\s+-\s+([0-9]+(\.[0-9]*)?|\.[0-9]+) ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)\s*$', '', 'i'),
+              '[,;]') it)
      SELECT count(DISTINCT id) FROM items
       WHERE item <> '' AND item ~ '[a-z]'
         AND item !~ '^([0-9]+(\.[0-9]*)?|\.[0-9]+) ?(gal|g|#|lb|lbs|oz|qt|pt|l|ml|kg|ton|tote|bulk|case)$'
@@ -193,3 +195,4 @@ The report lists every product whose name has brand names in brackets that do no
 | 2 (`ecee6419e`) | Luna, xhigh | 3 findings. MED: the sample SQL did not strip `®™©` like the parser (fixed). MED: separate reads are not one snapshot (accepted as risk 6: advisory report, load time and Reload shown). LOW: an unclosed bracket on a product in no group was hidden (now always listed). |
 | 3 (`a87462895`) | Luna, xhigh | 4 findings. HIGH (refuted): "the brand tables may not be live yet" because of their December file stamps; every object was confirmed on live, now stated in section 1. MED: overlapping reloads (one load at a time, latest wins). MED: partial failure (all six reads or nothing). LOW: the size rule accepted malformed numbers (tightened in rule 6 and the SQL). |
 | 4 (`44e94a208`) | Luna, xhigh | 2 findings. MED (refuted, already risk 2): word notes such as an ingredient code show as brands; kept on purpose, since a short code can be a real brand, and the count now says they are included. LOW: an unclosed group ending `- 2.5 Gal` kept the size on the last brand (rule 3 now cuts it). |
+| 5 (`387782b3c`) | Luna, xhigh | 1 finding. LOW: the sample SQL did not cut rule 3's size tail (added; the live count stayed 107). |

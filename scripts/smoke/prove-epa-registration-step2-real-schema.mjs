@@ -581,6 +581,11 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
   assert.equal(capture(L5), `${N2}|yes|Danger|registration:${N2}@1|true`);
+  // A Yes line keeps the number it was sold under on a quantity change, even after its size moved to another number.
+  raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id = '${P4}';`);
+  ownerOk(`UPDATE public.invoice_items SET quantity = 5, extended_cents = 7500 WHERE id = '${L5}';`);
+  assert.ok(capture(L5).startsWith(`${N2}|yes|`), capture(L5));
+  raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}'; UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
   console.log('[prover] case 11: a new line captures its number\'s registration; a sent capture is refused; an unregistered or different number never blocks the line; a price edit keeps the capture and a quantity edit re-captures');
 
   // 12. Posting writes the restricted-use record once.
@@ -660,6 +665,12 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
     ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] line';`), product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500 },
          { id: L6, product_id: P4, description: '[PROVER] legacy', quantity: 1, unit_size: 'Gal', unit_price_cents: 1500, epa_registration: N1 }])}, 'k-save14c');`);
   assert.equal(scalar(`SELECT epa_registration FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] legacy';`), N1);
+  // save_invoice: a kept Yes line keeps its sold number on a quantity change after its size moved number.
+  raw(`UPDATE public.products SET epa_registration = '${N3}' WHERE id = '${P4}';`);
+  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
+    ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] line';`), product_id: P4, description: '[PROVER] line', quantity: 6, unit_size: 'Gal', unit_price_cents: 1500 }])}, 'k-save14d');`);
+  assert.equal(scalar(`SELECT epa_registration || '|' || sale_rup_status FROM public.invoice_items WHERE invoice_id = '${INV4}';`), `${N2}|yes`);
+  raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
   raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   console.log('[prover] case 14: save_invoice re-captures a kept Yes line on a quantity change with the current facts and keeps the Yes');
   console.log('[prover] case 13: Sales to check lists a restricted-use sale posted before the seed, a numberless sale and a seed-assumed one, and not a recorded one');

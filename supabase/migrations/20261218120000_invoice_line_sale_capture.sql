@@ -130,8 +130,8 @@ BEGIN
     IF NEW.quantity IS NOT DISTINCT FROM OLD.quantity THEN
       RETURN NEW;  -- price, notes and similar edits keep the capture
     END IF;
-    NEW.epa_registration := NULL;  -- a quantity change re-captures from the product's current label
     v_keep_yes := OLD.sale_rup_status = 'yes';  -- with today's facts, but a Yes is never lowered
+    NEW.epa_registration := NULL;  -- a quantity change re-captures from the product's current label
   END IF;
 
   IF NEW.product_id IS NULL THEN
@@ -144,7 +144,10 @@ BEGIN
   -- Decision (a): a line sells under its size's number, whichever writer inserted it; a numberless size's line has none.
   -- A different number sent by a screen is replaced, never refused: a missing or wrong number never blocks a sale (Mason, 2026-11-09).
   -- Only save_invoice (holding the invoice's pass) sends a number: a kept line's stored (sold) number, which it keeps.
-  v_n := CASE WHEN public._epa_registration_has_pass('invoices', NEW.invoice_id)
+  -- A Yes line keeps its old sold number on a quantity change (sheet 4.C), so its record names the label sold.
+  v_n := CASE WHEN v_keep_yes AND public._normalize_epa_registration(OLD.epa_registration) IS NOT NULL
+              THEN public._normalize_epa_registration(OLD.epa_registration)
+              WHEN public._epa_registration_has_pass('invoices', NEW.invoice_id)
                    AND public._normalize_epa_registration(NEW.epa_registration) IS NOT NULL
               THEN public._normalize_epa_registration(NEW.epa_registration)
               ELSE public._normalize_epa_registration(v_p.epa_registration) END;
@@ -502,8 +505,9 @@ BEGIN
       IF v_old_line IS NOT NULL AND (v_old_line->>'product_id')::uuid = (v_item->>'product_id')::uuid THEN
         -- Kept line: keeps its stored (sold) number; a different payload number is ignored, never refused (Mason, 2026-11-09).
         IF v_qty IS DISTINCT FROM (v_old_line->>'quantity')::numeric THEN
-          v_line_epa := NULL;  -- a quantity change re-captures from the product's current label (Mason, 2026-11-06)
           v_keep_yes := (v_old_line->>'sale_rup_status') = 'yes';  -- with today's facts, but a Yes is never lowered
+          -- a quantity change re-captures from the product's current label (Mason, 2026-11-06); a Yes line keeps its sold number
+          v_line_epa := CASE WHEN v_keep_yes THEN v_old_line->>'epa_registration' END;
         ELSE
           v_line_epa := v_old_line->>'epa_registration';
           v_cap := v_old_line;

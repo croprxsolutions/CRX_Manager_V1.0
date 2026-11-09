@@ -69,6 +69,25 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --pins
   done
 fi
 
+# A migration dated today needs CURRENT_STATE and KNOWN_ISSUES stamps that new; CI failed it on PR #1652 (2026-11-08 retro).
+if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs --freshness)" = "check" ]; then
+  echo ""
+  echo "Checking the live-state docs' Last verified stamps..."
+  FRESH_SHAS="$(printf '%s\n' "$PUSH_REFS" | awk 'NF >= 2 && $2 !~ /^0+$/ { print $2 }')"
+  for FRESH_SHA in ${FRESH_SHAS:-HEAD}; do
+    FRESH_DIR="$(mktemp -d)"
+    if ! { git archive "$FRESH_SHA" supabase/migrations docs/manual/CURRENT_STATE.md docs/manual/KNOWN_ISSUES.md \
+        | tar -x -C "$FRESH_DIR" && node scripts/check-doc-drift.mjs --freshness-only "$FRESH_DIR" 2>&1; }; then
+      rm -rf "$FRESH_DIR"
+      echo ""
+      echo "❌ LIVE-STATE DOC STAMP STALE — push blocked."
+      echo "Re-verify CURRENT_STATE.md and KNOWN_ISSUES.md against the live ledger, then bump their Last verified stamps."
+      exit 1
+    fi
+    rm -rf "$FRESH_DIR"
+  done
+fi
+
 # A schema registry refresh or an APPLIED LIVE record flip changes which migrations the contract
 # tests discover; it failed CI three times despite a written rule (PR #1606, 2026-11-07 retro).
 if [ "$(printf '%s

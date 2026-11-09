@@ -24,6 +24,8 @@ import {
   capacityForLoaderVesselSelection,
 } from '../../lib/loaderVesselOptions';
 import type { JobLoaderWorksheet, Vehicle } from '../../types';
+import { selectedLoaderWeights, useLoaderJobWeights } from './loaderPanelWeights';
+import { LoaderLoadWeightsCell } from './LoaderLoadWeightsCell';
 
 const MANUAL_VESSEL_VALUE = '__manual_vessel__';
 
@@ -125,6 +127,9 @@ export function LoaderWorksheetsPanel({
   const [deleteTarget, setDeleteTarget] = useState<JobLoaderWorksheet | null>(null);
   const [perLoadAcres, setPerLoadAcres] = useState<string[]>([]);
   const [perLoadError, setPerLoadError] = useState('');
+  // DM-2: bumped after every successful worksheet read or save, so the weights are re-read with it.
+  const [weightsVersion, setWeightsVersion] = useState(0);
+  const weightsRead = useLoaderJobWeights(jobId, weightsVersion);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -137,6 +142,7 @@ export function LoaderWorksheetsPanel({
         .order('created_at', { ascending: false });
       if (error) throw error;
       setWorksheets((data ?? []).map(worksheetFromRow));
+      setWeightsVersion((version) => version + 1);
     } catch (_error) {
       setWorksheets([]);
       setReadError(true);
@@ -195,6 +201,10 @@ export function LoaderWorksheetsPanel({
   const selectedSavedAcres = selectedWorksheet?.per_load_acres?.join('|') ?? '';
   const selectedManualAcres = selectedWorksheet?.per_load_acres ?? null;
   const selectedWorksheetValid = selectedComputed?.valid ?? false;
+  const selectedWeights = selectedWorksheet && selectedComputed?.valid
+    ? selectedLoaderWeights(weightsRead, selectedWorksheet, selectedComputed)
+    : null;
+  const weightsShown = selectedWeights && 'weights' in selectedWeights ? selectedWeights : null;
   const selectedLoadsDone = selectedComputed
     ? validLoaderLoadDone(selectedWorksheet?.loads_done ?? [], selectedComputed.loads_count)
     : [];
@@ -446,6 +456,7 @@ export function LoaderWorksheetsPanel({
         .eq('job_id', jobId)
         .select('id');
       checkMutationResult(result, 'Update completed loads');
+      setWeightsVersion((version) => version + 1);
     } catch (_error) {
       setWorksheets((current) => current.map((worksheet) => worksheet.id === selectedWorksheet.id
         ? { ...worksheet, loads_done: previous }
@@ -591,7 +602,7 @@ export function LoaderWorksheetsPanel({
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-left text-xs font-medium text-secondary">
-                    <tr><th className="px-3 py-2">Load</th><th className="px-3 py-2 text-right">Acres</th><th className="px-3 py-2 text-right">Spray volume</th><th className="px-3 py-2">Status</th></tr>
+                    <tr><th className="px-3 py-2">Load</th><th className="px-3 py-2 text-right">Acres</th><th className="px-3 py-2 text-right">Spray volume</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Product weight</th></tr>
                   </thead>
                   <tbody>
                     {displayMode === 'individual' ? selectedComputed.loads.map((load, index) => {
@@ -606,6 +617,7 @@ export function LoaderWorksheetsPanel({
                           <td className="px-3 py-2">
                             {canEdit ? <button type="button" disabled={busyId === selectedWorksheet.id} onClick={() => void toggleDone(index)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-crx-green hover:bg-crx-green-tint disabled:opacity-50"><Check className="h-3.5 w-3.5" />{done ? 'Done' : 'Mark done'}</button> : (done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>)}
                           </td>
+                          <td className="px-3 py-2">{weightsShown ? <LoaderLoadWeightsCell result={weightsShown} loadIndexes={[index]} /> : <>&mdash;</>}</td>
                         </tr>
                       );
                     }) : condenseLoaderLoads(selectedComputed.loads, selectedLoadsDone).map((group) => {
@@ -617,12 +629,16 @@ export function LoaderWorksheetsPanel({
                           <td className="px-3 py-2 text-right">{formatNumber(load.volume / selectedComputed.carrier_rate_gpa)}{each}</td>
                           <td className="px-3 py-2 text-right">{formatNumber(load.volume)} gal{each}</td>
                           <td className="px-3 py-2">{group.done ? <span className="inline-flex items-center gap-1 text-crx-green"><Check className="h-4 w-4" />Done</span> : <span>&mdash;</span>}</td>
+                          <td className="px-3 py-2">{weightsShown ? <><LoaderLoadWeightsCell result={weightsShown} loadIndexes={group.loads.map((member) => selectedComputed.loads.indexOf(member))} />{each && <p className="text-xs text-secondary">each</p>}</> : <>&mdash;</>}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
+              {selectedWeights && (
+                <p className="text-xs text-secondary" role="status">{'caption' in selectedWeights ? selectedWeights.caption : selectedWeights.reason}</p>
+              )}
               {canEdit && displayMode === 'individual' && (
                 <div className="flex flex-wrap items-center gap-3">
                   <Button size="sm" showChevron={false} icon={<Save className="h-4 w-4" />} loading={busyId === selectedWorksheet.id} onClick={() => void savePerLoadAcres()}>Save load acres</Button>

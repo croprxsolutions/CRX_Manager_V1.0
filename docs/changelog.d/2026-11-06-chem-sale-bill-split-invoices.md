@@ -1,6 +1,6 @@
 ## 2026-11-06 — The Bill Split card bills: one invoice per payer on a chemical sale (billing plan M2)
 
-- New migration `20261208110000_chem_sale_bill_split_invoices.sql` (not applied; record in
+- New migration `20261215110000_chem_sale_bill_split_invoices.sql` (not applied; record in
   `docs/reference/migrations.d/`). Until now the Bill Split card saved percentages nothing read.
   When a delivery on a sale with other payers completes, it now drafts one invoice per payer:
   one sale number with a suffix (CS-2026-0412-1, -2), in one split group that posts together.
@@ -38,3 +38,7 @@ A Bill Split bills only delivered quantities in whole hundredths (2.12, not 2.12
 An unposted Bill Split invoice can be corrected like a draft: header edits and charges save, its product lines stay locked, and the group posts again.
 Each other payer pays exactly their percentage of each line again, rounded down to the cent, on their quantity in whole hundredths; the main customer takes the rest, under a cent per other payer on each line (Mason, 2026-11-06, restoring exact cents over quantity times price). A line delivered past its planned quantity splits its capped total by percentage the same way. A save retried after a lost response still answers once the group posts.
 A one-customer draft given a group id with no split record blocks adding a payer. A delivery that drafts its payers clears the split flag, and Create Invoice returns every payer's invoice number.
+
+**Mason's answers, 2026-11-09.** A Bill Split now bills the real delivered amount, as a plain sale does: a 2.125 delivery bills each payer their share to 4 places (0.85 of 2.125 at 40%), the main customer takes the rest, and every payer's money is exact to the cent. No one has to use Fix Delivery to get an invoice out. This replaces the Nov 6 whole-hundredths rule; as on a plain sale, a sliver under 0.01 may not be returnable. Only a delivered amount with more than 4 decimal places, which an invoice line can't hold, still refuses. Create Invoice on a Bill Split delivery is dated the day it runs, as a plain Create Invoice is, so a rush sale billed after pricing lands in the month it was billed, and nothing is dated into a closed month.
+A return holds 2 decimal places, so creating a return of a finer quantity (a payer's 0.7083, or a plain 2.125 line) is now refused in plain words instead of being created and then stuck at receive. The Returns screen offers a payer's share rounded down to 2 places.
+Another payer's quantity stays in whole hundredths whenever the share allows, so they can return it in full (1 unit at 33.33% bills 0.33, not 0.3333); only a share under 0.01 falls back to 4 places so it still bills. The main customer takes the rest, so a 2.125 delivery still bills like a plain sale.

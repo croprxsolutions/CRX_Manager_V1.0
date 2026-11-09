@@ -1,5 +1,9 @@
 import {
   classifyRegistrationNumber,
+  confirmedDistributorListing,
+  distributorBaseRegistration,
+  needsDistributorBaseLookup,
+  normalizeDistributorBasePayload,
   normalizeEpaPayload,
   normalizeSignalWord,
 } from "./logic.ts";
@@ -189,6 +193,7 @@ Deno.test("EPA payload normalizer returns the Stage 1 response shape", () => {
           "https://www3.epa.gov/pesticides/chem_search/ppls/000264-00849-20240124.pdf",
       },
     ],
+    transferredTo: null,
   });
 });
 
@@ -217,4 +222,212 @@ Deno.test("EPA payload normalizer flags unrecognized signal words for manual rev
   );
   assertEquals(result.signalWordCanonical, null);
   assertEquals(result.needsManual, true);
+});
+
+// Shape copied from the live EPA PPLS answer for 524-475 on 2026-11-08.
+const MOVED_PAYLOAD = {
+  items: [{
+    eparegno: "105211-77",
+    productname: "ROUNDUP ULTRA HERBICIDE",
+    product_status: "Active",
+    cancel_flag: "No",
+    signal_word: "Caution",
+    transfer_history: [
+      {
+        previous_eparegno: "524-475",
+        previous_company: "BAYER CROPSCIENCE, LLC",
+        transferred_date: "January 14, 2026",
+      },
+      {
+        previous_eparegno: "105211-18",
+        previous_company: "RUVEON, LLC",
+        transferred_date: "January 22, 2026",
+      },
+    ],
+  }],
+};
+
+Deno.test("EPA payload normalizer reports a moved registration with its new number", () => {
+  const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "524-475");
+  // found:false keeps screens without transferredTo from applying the new record.
+  assertEquals(result.found, false);
+  assertEquals(result.eparegno, "105211-77");
+  assertEquals(result.transferredTo, "105211-77");
+  assertEquals(result.productname, "ROUNDUP ULTRA HERBICIDE");
+  assertEquals(result.signalWordCanonical, "Caution");
+});
+
+Deno.test("EPA payload normalizer does not mark the current number as moved", () => {
+  const result = normalizeEpaPayload(MOVED_PAYLOAD, "section3", "105211-77");
+  assertEquals(result.found, true);
+  assertEquals(result.eparegno, "105211-77");
+  assertEquals(result.transferredTo, null);
+});
+
+Deno.test("EPA payload normalizer still rejects an unrelated registration", () => {
+  let message = "";
+  try {
+    normalizeEpaPayload(MOVED_PAYLOAD, "section3", "264-849");
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA response registration did not match the request");
+});
+
+Deno.test("EPA payload normalizer rejects a move to a malformed number", () => {
+  let message = "";
+  try {
+    normalizeEpaPayload(
+      {
+        items: [{
+          eparegno: "https://evil.example/1",
+          transfer_history: [{ previous_eparegno: "524-475" }],
+        }],
+      },
+      "section3",
+      "524-475",
+    );
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA response registration did not match the request");
+});
+
+Deno.test("distributor base is the first two parts", () => {
+  assertEquals(distributorBaseRegistration("62719-671-55467"), "62719-671");
+});
+
+// Shape copied from EPA's regnum search for 62719-671-5546 on 2026-11-08 (partial match).
+const VOLLEY_SEARCH = {
+  items: [{
+    eparegno: "62719-671-55467",
+    productname: "VOLLEY ATZ NXT ",
+    product_name_status: "Active",
+    product_status: "Active",
+  }],
+};
+const VOLLEY_LISTING = { productname: "VOLLEY ATZ NXT", productStatus: "Active" };
+
+Deno.test("distributor search confirms only an exact listing", () => {
+  assertEquals(
+    confirmedDistributorListing(VOLLEY_SEARCH, "62719-671-55467"),
+    VOLLEY_LISTING,
+  );
+  // A partial-match hit for another number never confirms a made-up number.
+  assertEquals(confirmedDistributorListing(VOLLEY_SEARCH, "62719-671-5546"), null);
+  assertEquals(confirmedDistributorListing({ items: [] }, "62719-671-999999"), null);
+  let message = "";
+  try {
+    confirmedDistributorListing({ nope: true }, "62719-671-55467");
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(message, "EPA search response did not contain an items array");
+});
+
+Deno.test("confirmed distributor takes label facts from the base and name from its listing", () => {
+  const result = normalizeDistributorBasePayload(
+    {
+      items: [{
+        eparegno: "62719-671",
+        productname: "KEYSTONE NXT",
+        product_status: "Active",
+        rup_yn: "Yes",
+        signal_word: "Warning",
+      }],
+    },
+    "62719-671-55467",
+    VOLLEY_LISTING,
+  );
+  assertEquals(result.found, true);
+  assertEquals(result.regType, "distributor");
+  assertEquals(result.eparegno, "62719-671-55467");
+  assertEquals(result.productname, "VOLLEY ATZ NXT");
+  assertEquals(result.rupYn, "Yes");
+  assertEquals(result.signalWordCanonical, "Warning");
+  assertEquals(result.transferredTo, null);
+});
+
+Deno.test("a cancelled distributor listing is reported cancelled even on an active base", () => {
+  const result = normalizeDistributorBasePayload(
+    { items: [{ eparegno: "62719-671", product_status: "Active" }] },
+    "62719-671-55467",
+    { productname: "VOLLEY ATZ NXT", productStatus: "Cancelled" },
+  );
+  assertEquals(result.isCancelled, true);
+  assertEquals(result.productStatus, "Cancelled");
+});
+
+Deno.test("confirmed distributor stays not found when the base is missing", () => {
+  const result = normalizeDistributorBasePayload(
+    { items: [] },
+    "62719-671-55467",
+    VOLLEY_LISTING,
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.regType, "distributor");
+  assertEquals(result.eparegno, null);
+});
+
+Deno.test("a moved base lends the distributor neither its new number nor its label facts", () => {
+  const result = normalizeDistributorBasePayload(
+    MOVED_PAYLOAD,
+    "524-475-12345",
+    { productname: "SOME DISTRIBUTOR BRAND", productStatus: "Active" },
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.eparegno, null);
+  assertEquals(result.transferredTo, null);
+  assertEquals(result.signalWordCanonical, null);
+  assertEquals(result.rupYn, null);
+});
+
+Deno.test("a distributor number missing from a non-empty lookup still goes on to the search", () => {
+  const result = normalizeEpaPayload(
+    { items: [{ eparegno: "62719-671", product_status: "Active" }] },
+    "distributor",
+    "62719-671-55467",
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.eparegno, null);
+  assertEquals(needsDistributorBaseLookup(result), true);
+});
+
+Deno.test("only an unlisted, unmoved distributor number falls back to its base", () => {
+  const empty = normalizeEpaPayload({ items: [] }, "distributor", "62719-671-55467");
+  assertEquals(needsDistributorBaseLookup(empty), true);
+  assertEquals(
+    needsDistributorBaseLookup(
+      normalizeEpaPayload({ items: [] }, "section3", "62719-671"),
+    ),
+    false,
+  );
+  const movedDistributor = normalizeEpaPayload(
+    {
+      items: [{
+        eparegno: "62719-671-55468",
+        transfer_history: [{ previous_eparegno: "62719-671-55467" }],
+      }],
+    },
+    "distributor",
+    "62719-671-55467",
+  );
+  assertEquals(movedDistributor.transferredTo, "62719-671-55468");
+  assertEquals(needsDistributorBaseLookup(movedDistributor), false);
+  assertEquals(
+    needsDistributorBaseLookup(
+      normalizeEpaPayload(MOVED_PAYLOAD, "section3", "105211-77"),
+    ),
+    false,
+  );
+});
+
+Deno.test("a move wins when EPA lists the old record next to its replacement", () => {
+  const result = normalizeEpaPayload(
+    { items: [{ eparegno: "524-475", productname: "OLD" }, ...MOVED_PAYLOAD.items] },
+    "section3",
+    "524-475",
+  );
+  assertEquals(result.found, false);
+  assertEquals(result.transferredTo, "105211-77");
 });

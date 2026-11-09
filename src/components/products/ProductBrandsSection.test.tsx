@@ -278,6 +278,22 @@ describe('ProductBrandsSection', () => {
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('Bayer');
   });
 
+  it('shows a moved EPA registration and offers no fill from it', async () => {
+    mocks.lookupEpaRegistration.mockResolvedValue({
+      found: false, regType: 'section3', eparegno: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE',
+      signalWordCanonical: 'Caution', needsManual: false, manufacturer: 'Ruveon', rupYn: 'No',
+      productStatus: 'Active', isCancelled: false, latestLabelPdfUrl: null, activeIngredients: [], labelPdfs: [],
+      transferredTo: '105211-77',
+    });
+    render(<ProductBrandsSection productId="p1" productName={productName} isAdmin userId="u1" />);
+    await screen.findByText('Slam 5.4');
+    fireEvent.click(screen.getByRole('button', { name: /add brand/i }));
+    fireEvent.change(screen.getByLabelText('EPA Reg. No.'), { target: { value: '524-475' } });
+    fireEvent.click(screen.getByRole('button', { name: /look up/i }));
+    expect(await screen.findByText(/EPA moved this registration to 105211-77/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use EPA/i })).toBeNull();
+  });
+
   it('re-reads the source before copying and stops when a chosen brand changed there since it was listed', async () => {
     const bulkMad = { ...slam, id: 'x2', product_id: 'p2', brand_name: 'Mad Dog', epa_registration: '228-366', row_version: 2 };
     let sourceReads = 0;

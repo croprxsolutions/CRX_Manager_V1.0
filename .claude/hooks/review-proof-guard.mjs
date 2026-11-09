@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  commandWithoutTextHeredocs,
   ENFORCEMENT_SURFACE_PATH_RE,
   extractPatchDestinations,
   folderVariableValue,
@@ -181,7 +182,10 @@ if (!readOnlyBuiltin && stateDirCandidates.length > 0 && !isPureAckWrite) {
   deny("REVIEW PROOF GUARD: the review state directory (.claude/session-state) and its wrapper-owned contents cannot be created, moved, or deleted through a file tool. Stale ledger entries are removed with node scripts/remove-applied-ledger-entry.mjs after verifying the live migration ledger.");
 }
 
-const command = nativePatch ? "" : String(input.command ?? input.cmd ?? "");
+// Here-document text that only `cat`/`tee` write names no target (2026-11-07);
+// Bash only, as cmd and PowerShell have no here-documents.
+const rawCommand = nativePatch ? "" : String(input.command ?? input.cmd ?? "");
+const command = toolName === "Bash" ? commandWithoutTextHeredocs(rawCommand) : rawCommand;
 // The shell resolves ANSI-C escapes, drops unquoted backslashes, and joins
 // quote-split tokens before running a command, so `applied-source"-"ledger.json`
 // or `.clau\de` EXECUTES as the real path/verb while a raw-string regex misses

@@ -21,6 +21,8 @@ import ProductMarginFloorCard from '../components/products/ProductMarginFloorCar
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
 import ProductParentPanel from '../components/products/ProductParentPanel';
+import ProductWeightCard from '../components/products/ProductWeightCard';
+import ProductChemistrySection from '../components/products/ProductChemistrySection';
 import ToteFillCard from '../components/inventory/ToteFillCard';
 import {
   addProductSize, createProductWithParent, getParentOfProduct, newSizeFields, SIZE_ROLE_LABELS,
@@ -268,6 +270,8 @@ export default function ProductDetail() {
   // undefined while loading or after a failed load, null when the product has no parent.
   const [parent, setParent] = useState<ProductParent | null | undefined>(isNew ? null : undefined);
   const [parentLoadFailed, setParentLoadFailed] = useState(false);
+  // DM-1: a weight save on this page re-reads cost per lb of active.
+  const [weightSaves, setWeightSaves] = useState(0);
   const [parentReload, setParentReload] = useState(0);
   // Category, use timings, EPA number and rates belong to the parent; until the page knows there is
   // none, they stay read-only.
@@ -1045,7 +1049,9 @@ export default function ProductDetail() {
 
       setEpaLookupResult(data);
       setEpaLookupRegNumber(regNumber);
-      if (!data.found) {
+      if (data.transferredTo) {
+        toast('warning', `EPA moved registration ${regNumber} to ${data.transferredTo}.`);
+      } else if (!data.found) {
         toast('warning', `EPA did not find registration ${regNumber}.`);
       }
     } catch (err) {
@@ -1347,6 +1353,35 @@ export default function ProductDetail() {
               }}
             />
           )}
+          {/* DM-2: weight per gallon (on the parent) or per pack; re-read when the product or its parent is saved. */}
+          {!isNew && persistedProduct && persistedProduct.id === id && profile && (
+            <ProductWeightCard
+              productId={id!}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+              reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
+                persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
+                parent?.id ?? null, parent?.parent_version ?? null])}
+              onSaved={() => setWeightSaves((n) => n + 1)}
+            />
+          )}
+          {/* DM-1: the parent's chemistry, shared by every size; an ungrouped size has none. */}
+          {!isNew && parent && profile && (
+            <ProductChemistrySection
+              parentId={parent.id}
+              parentVersion={parent.parent_version}
+              refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
+              isAdmin={isAdmin}
+              profileId={profile.id}
+              busy={isDirty || pricingReloadRequired || saving}
+            />
+          )}
+          {!isNew && parent === null && (
+            <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary">
+              Put this product in a parent to record its chemistry.
+            </p>
+          )}
           {!isNew && parentLoadFailed && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" role="alert">
               <span>Couldn&apos;t load this product&apos;s parent, so its category, use timing, EPA number and rates are read-only for now.</span>
@@ -1539,10 +1574,21 @@ export default function ProductDetail() {
                     <div className="flex items-start gap-2 text-amber-900">
                       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
                       <div>
-                        <p className="font-semibold">No EPA registration found</p>
-                        <p className="mt-1 text-sm">
-                          EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
-                        </p>
+                        {epaLookupResult.transferredTo ? (
+                          <>
+                            <p className="font-semibold">Registration moved</p>
+                            <p className="mt-1 text-sm">
+                              EPA moved {epaLookupRegNumber} to {epaLookupResult.transferredTo}{epaLookupResult.productname ? ` (${epaLookupResult.productname})` : ''}. Look up the new number to use its label details.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold">No EPA registration found</p>
+                            <p className="mt-1 text-sm">
+                              EPA returned no record for {epaLookupRegNumber}. Check the number and try again.
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

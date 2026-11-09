@@ -38,6 +38,11 @@ describe('sanitizeError', () => {
       'Nothing was saved. Stock of the tote or its bulk has moved since this fill; adjust stock instead'],
     ['TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)',
       'Nothing was saved. "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)'],
+    // RAISE texts of 20261207100000_product_weights.sql (DM-2).
+    ['PRODUCT_WEIGHT_OUT_OF_RANGE: weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)',
+      'Nothing was saved. Weight per gallon must be above 0 and at most 20 lb/gal (this is 30.0000 lb/gal)'],
+    ['PRODUCT_WEIGHT_STALE: the weight of "TEST UAN" changed since you opened it; reload',
+      'Nothing was saved. The weight of "TEST UAN" changed since you opened it; reload'],
   ])('explains the parent refusal %s by name', (raw, expected) => {
     expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
   });
@@ -281,8 +286,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
       'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
     );
-    expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's share is under 0.01 of a unit")).toBe(
-      "Nothing was saved. This payer's share is under 0.01 of a unit, so its draft can't be edited. Post it as drafted, or void the group",
+    expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's draft has a product line with no quantity")).toBe(
+      "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group",
     );
     expect(sanitizeError("BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can't be added")).toBe(
       "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first",
@@ -297,10 +302,13 @@ describe('sanitizeError', () => {
       "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
     );
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
-      "Nothing was billed. A payer's share of a product is under 0.01 of a unit. Change the bill split so each payer gets at least 0.01"
+      "Nothing was billed. A payer's share of a product is under 0.0001 of a unit. Change the bill split so each payer gets at least 0.0001"
     );
-    expect(sanitizeError('BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery D-1 delivered 1.2345')).toBe(
-      "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_FINE: delivery D-1 delivered 1.23456')).toBe(
+      "Nothing was billed. A delivered amount has more than 4 decimal places, which an invoice line can't hold. Correct it with Fix Delivery, then choose Create Invoice"
+    );
+    expect(sanitizeError('RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places')).toBe(
+      'Nothing was returned. A return holds 2 decimal places. Enter a quantity like 0.70'
     );
     expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'

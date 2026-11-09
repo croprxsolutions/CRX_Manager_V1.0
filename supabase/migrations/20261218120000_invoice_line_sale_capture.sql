@@ -141,10 +141,9 @@ BEGIN
   END IF;
   SELECT p.id, p.epa_registration, p.is_rup, p.signal_word INTO v_p
     FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
-  -- Decision (a): a line sells under its size's number, whichever writer inserted it.
+  -- Decision (a): a line sells under its size's number, whichever writer inserted it; a numberless size's line has none.
   IF public._normalize_epa_registration(NEW.epa_registration) IS NOT NULL
-     AND public._normalize_epa_registration(v_p.epa_registration) IS NOT NULL
-     AND public._normalize_epa_registration(NEW.epa_registration) <> public._normalize_epa_registration(v_p.epa_registration) THEN
+     AND public._normalize_epa_registration(NEW.epa_registration) IS DISTINCT FROM public._normalize_epa_registration(v_p.epa_registration) THEN
     RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number differs from its product''s; reload the invoice';
   END IF;
   v_n := COALESCE(public._normalize_epa_registration(NEW.epa_registration), public._normalize_epa_registration(v_p.epa_registration));

@@ -922,6 +922,7 @@ BEGIN
            ii.quantity, ii.sale_rup_status, ii.sale_facts_source, ii.sale_facts_captured_at, r.rup_status AS registration_rup_status,
            EXISTS (SELECT 1 FROM rup_sales_records s
                     WHERE s.invoice_id = ii.invoice_id AND s.product_id = ii.product_id AND s.voided_at IS NULL
+                      AND s.unit IS NOT DISTINCT FROM ii.unit_size AND s.unit_price_cents IS NOT DISTINCT FROM ii.unit_price_cents
                       AND public._normalize_epa_registration(s.epa_registration)
                           IS NOT DISTINCT FROM public._normalize_epa_registration(ii.epa_registration)) AS has_record
       FROM invoice_items ii

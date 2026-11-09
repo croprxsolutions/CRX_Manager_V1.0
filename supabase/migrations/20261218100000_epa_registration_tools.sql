@@ -361,7 +361,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
    WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
      AND public._normalize_epa_registration(ii.epa_registration) = p_number
      AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records rs
-                      WHERE rs.invoice_id = ii.invoice_id AND rs.product_id = ii.product_id AND rs.voided_at IS NULL);
+                      WHERE rs.invoice_id = ii.invoice_id AND rs.product_id = ii.product_id AND rs.voided_at IS NULL
+                        -- posting writes one record per unit and unit price, so a record covers only its own
+                        AND rs.unit IS NOT DISTINCT FROM ii.unit_size AND rs.unit_price_cents IS NOT DISTINCT FROM ii.unit_price_cents);
 $function$;
 
 -- Moves one size or brand to p_new (whose registration exists and is locked by the caller, who also holds

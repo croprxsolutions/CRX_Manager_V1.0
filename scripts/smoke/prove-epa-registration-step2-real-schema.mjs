@@ -598,6 +598,13 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.deepEqual(check[L2], ['no_epa_number']);
   assert.deepEqual(check[L4], ['seed_assumed']);
   assert.equal(check[L5], undefined);
+  assert.equal(check[L7], undefined);
+  // A record covers only its own price: with the second-price record voided, that line is listed and L5 is not.
+  raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV1}' AND unit_price_cents = 1700;`);
+  const check2 = Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]));
+  assert.ok(check2[L7]?.includes('restricted_use_to_record'), JSON.stringify(check2[L7]));
+  assert.equal(check2[L5], undefined);
+  assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L7}"}]' AND NOT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L5}"}]';`), 't');
   console.log('[prover] case 13: Sales to check lists a restricted-use sale posted before the seed, a numberless sale and a seed-assumed one, and not a recorded one');
   console.log('EPA_REGISTRATION_STEP2_PROOF_PASS');
 }

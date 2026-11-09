@@ -902,9 +902,15 @@ BEGIN
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND ii.charge_type IS NULL
                    AND ii.quantity <> CASE WHEN i.customer_id = v_payer2 THEN 0.0099 ELSE 0.0001 END)
-     OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
-          IS DISTINCT FROM (SELECT sum(_allocated_delivery_cents(di.order_item_id, di.quantity_delivered, NULL))
-                              FROM delivery_items di WHERE di.delivery_id = v_d) THEN
+     -- Each line bills 0.01 of its price, the payer exactly 99% of it rounded down, the main customer the rest.
+     OR EXISTS (SELECT 1 FROM order_items oi
+                 WHERE oi.order_id = v_o
+                   AND ((SELECT sum(ii.extended_cents) FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                          WHERE i.delivery_id = v_d AND ii.order_item_id = oi.id)
+                          IS DISTINCT FROM round(oi.price_per_unit * 0.01 * 100)::bigint
+                     OR (SELECT ii.extended_cents FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                          WHERE i.delivery_id = v_d AND ii.order_item_id = oi.id AND i.customer_id = v_payer2)
+                          IS DISTINCT FROM floor(round(oi.price_per_unit * 0.01 * 100) * 99 / 100.0)::bigint)) THEN
     v_fails := v_fails || ' (AJ) a share under 0.01 of a unit did not bill to the cent: ' || v_r::text || ';';
   END IF;
 

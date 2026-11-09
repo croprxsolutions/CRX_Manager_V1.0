@@ -26,7 +26,7 @@ export default function Switch({ label, description, isSelected, onChange, isDis
       >
         <span
           className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150 ${
-            isSelected ? 'translate-x-4.5' : 'translate-x-0'
+            isSelected ? 'translate-x-5' : 'translate-x-0'
           }`}
         />
       </span>

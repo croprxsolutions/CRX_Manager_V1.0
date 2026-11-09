@@ -113,7 +113,8 @@ BEGIN
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'close_delivery_receipt', v_actor, v_fingerprint);
   -- A replay returns the first answer even if the row moved since. 'paused' is a go-ahead, not an exclusive permission:
   -- two office users pressing Email Confirmation at once may both send, and a void after the go-ahead does not stop the
-  -- hand send. Mason accepted both on 2026-11-09 (DECISION_LOG.md, "Email Confirmation stays a hand send").
+  -- hand send; another office user may mark it handled while a hand send is still going (the sender sees a failure
+  -- and can press again). Mason accepted all three on 2026-11-09 (DECISION_LOG.md, "Email Confirmation stays a hand send").
   IF v_replay IS NOT NULL THEN
     RETURN v_replay -> 'result';
   END IF;

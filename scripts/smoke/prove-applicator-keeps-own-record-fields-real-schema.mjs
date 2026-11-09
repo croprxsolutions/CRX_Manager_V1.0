@@ -159,8 +159,11 @@ try {
   assert.deepEqual(after.reads.D, { records: '-', fields: '4', record_fields: '-', billing_defaults: '4', boundaries: '4', jobs: '2', job_fields: '4' });
   console.log('MED: the applicator keeps the field of their own 30-day-old spray record; nobody else gains anything');
 
-  // LOW: complete job 2 for real (triggers on); W, the whole-job applicator without a dispatch row, keeps it.
-  const done = attempt(W, `UPDATE public.jobs SET status = 'completed' WHERE id = '${uid(102)}';
+  // LOW: W completes job 2 through the app's own call (complete_job, signed in as W, triggers on); W, the
+  // whole-job applicator without a dispatch row, keeps it.
+  const done = attempt(W, `SET LOCAL ROLE authenticated;
+    PERFORM public.complete_job('${uid(102)}', '{}'::jsonb, '${W}', 'own-complete-' || gen_random_uuid());
+    RESET ROLE;
     v := (SELECT (completed_at >= now() - interval '1 minute')::text FROM public.jobs WHERE id = '${uid(102)}') || ' ' ||
          (SELECT count(*) FROM public.job_location_dispatches WHERE job_id = '${uid(102)}' AND applicator_id = '${W}')::text;
     SET LOCAL ROLE authenticated;

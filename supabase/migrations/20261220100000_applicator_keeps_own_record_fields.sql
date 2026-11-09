@@ -23,12 +23,17 @@
 --   the prover, not changed). No row changes.
 --
 -- WIDENING (by design): an active applicator reads, forever, the field row (name and boundary) and the
---   application_record_fields rows of spray records they performed. field_polygons_select is
+--   application_record_fields rows of spray records that name them as the applicator. field_polygons_select is
 --   `field_id IN (SELECT id FROM fields)` under the caller's row security, so the field's boundary parts
---   follow (reads only; their writes are office-only). Until 20261217100000 the whole-job applicator read
---   all of this, forever, for every field of every job they held; this gives back only the fields they
---   actually sprayed. A deactivated applicator, a driver or a crew member who is not the record's
---   applicator gains nothing.
+--   follow (reads only; their writes are office-only). The rule is "the fields listed on spray records that
+--   name you as the applicator", not "the fields you sprayed with your own hands": complete_job writes ONE
+--   record per job, naming whoever completed it, with a row for EVERY field on the job. So on a split job
+--   the completer also keeps the field another applicator was dispatched to. That record is the legal
+--   spray record under their name and Record Book shows all of its fields.
+--   Until 20261217100000 the whole-job applicator read
+--   every field of every job they held, forever; this keeps only the fields on records naming them.
+--   Records are written only by definer functions, so an applicator cannot add a field to one. A
+--   deactivated applicator, a driver, or a crew member not named on the record gains nothing.
 --
 -- ROLLBACK: ALTER POLICY fields_select ON public.fields USING (is_admin() OR is_sales_rep() OR
 --   (is_applicator() AND _can_see_field(id))); ALTER POLICY arf_select ON public.application_record_fields
@@ -86,8 +91,8 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  -- Taha's review of #1650: an applicator always sees the field of a spray record they performed
-  -- (Record Book), after the job's 7-day window ends. is_applicator() requires an ACTIVE applicator.
+  -- Taha's review of #1650: an applicator always sees the fields listed on a spray record naming them as
+  -- the applicator (Record Book), after the job's 7-day window ends. is_applicator() requires an ACTIVE applicator.
   -- Answers only for the caller.
   -- Driven from the field (idx_app_records_field, idx_arf_field): runs once per fields row scanned.
   SELECT public.is_applicator() AND (
@@ -103,7 +108,7 @@ REVOKE ALL ON FUNCTION public._is_my_application_field(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public._is_my_application_field(uuid) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public._is_my_application_field(uuid) IS
-  'The caller is an active applicator who performed a spray record (application_records.applicator_id) on this field, as its field_id or one of its application_record_fields rows. No time limit (Record Book).';
+  'The caller is an active applicator named as applicator (application_records.applicator_id) on a spray record listing this field, as its field_id or one of its application_record_fields rows. No time limit (Record Book).';
 
 ALTER POLICY fields_select ON public.fields
   USING (is_admin() OR is_sales_rep() OR (is_applicator() AND (public._can_see_field(id) OR public._is_my_application_field(id))));

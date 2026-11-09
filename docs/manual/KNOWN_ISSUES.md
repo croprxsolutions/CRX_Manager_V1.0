@@ -838,6 +838,10 @@ never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpcla
 the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
 deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
 them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
+**Part 2 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-part2-delete-unused-hooks.md`): the two unwired hooks
+and one August proof are gone. The October/November proofs stay (recent work still runs them by hand), as does
+`scripts/smoke/undo-paths/` (eight proofs import it). Still open: the two Edge Functions and the helper and
+page-split work.
 
 ---
 

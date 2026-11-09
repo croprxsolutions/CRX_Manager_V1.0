@@ -74,3 +74,8 @@ export function sharesLeft(percents: number[]): number {
   const left = 100_000_000 - percents.reduce((sum, p) => sum + Math.round(p * 1_000_000), 0);
   return left > 0 ? left / 1_000_000 : 0;
 }
+
+/** The shares' total for display, added exactly (millionths). */
+export function sharesTotal(percents: number[]): number {
+  return percents.reduce((sum, p) => sum + Math.round(p * 1_000_000), 0) / 1_000_000;
+}

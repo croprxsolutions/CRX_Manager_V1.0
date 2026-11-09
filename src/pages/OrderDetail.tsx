@@ -48,7 +48,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
-import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred } from '../lib/billSplitLock';
+import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from '../lib/billSplitLock';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
@@ -2094,7 +2094,7 @@ export default function OrderDetail() {
               <div className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg">
                 <span className="text-xs font-medium text-blue-700">Total Allocated</span>
                 <span className="text-xs font-semibold text-blue-700">
-                  {shares.reduce((s, sh) => s + sh.split_percentage, 0)}%
+                  {sharesTotal(shares.map((sh) => sh.split_percentage))}%
                   {sharesLeft(shares.map((sh) => sh.split_percentage)) > 0 && (
                     <span className="text-amber-600 ml-2">
                       (the other {Math.round(sharesLeft(shares.map((sh) => sh.split_percentage)) * 100) / 100}% stays with {customer?.farm_name || 'the main customer'})

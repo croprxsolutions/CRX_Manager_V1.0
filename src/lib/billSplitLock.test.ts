@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred } from './billSplitLock';
+import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from './billSplitLock';
 
 const delivery = (over: Record<string, unknown> = {}) => ({
   id: 'd1', delivery_number: 'DEL-1', status: 'completed', deleted_at: null, ...over,
@@ -103,5 +103,12 @@ describe('sharesLeft (exact remainder)', () => {
   it('gives the exact rest', () => {
     expect(sharesLeft([0.2, 83.9])).toBe(15.9);
     expect(sharesLeft([33.333333])).toBe(66.666667);
+  });
+});
+
+describe('sharesTotal (shown on the card)', () => {
+  it('shows 100, not 100.00000000000001, for 0.2 + 83.9 + 15.9', () => {
+    expect(sharesTotal([0.2, 83.9, 15.9])).toBe(100);
+    expect(sharesTotal([33.333333, 33.333333])).toBe(66.666666);
   });
 });

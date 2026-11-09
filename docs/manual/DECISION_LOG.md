@@ -24,7 +24,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.
 
-**What this forbids/implies:** the old invoice screens must not bill a date whose split differs from the current copy: they compare the split version in force on the work's date with the one the copy holds and refuse when they differ (build sheet FP-1 guard (c)), and a nightly job keeps the copy current when a future split starts. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
+**What this forbids/implies:** until the new invoice screen is live, the old screens refuse any field whose split has changed (build sheet FP-1 changeover rule), and a nightly job keeps the copy current when a future split starts. Mason confirmed the same day that field application invoices are not billed until February and the feature is used from about March, so that refusal costs nothing in practice. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
 
 ## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
 

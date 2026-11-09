@@ -12,7 +12,7 @@ const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
 function supabaseHost(url: string | undefined): string {
   try {
-    return new URL(url ?? '').hostname;
+    return new URL(url ?? '').hostname.replace(/\.$/, '');
   } catch {
     return '';
   }

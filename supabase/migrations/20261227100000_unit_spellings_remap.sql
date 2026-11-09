@@ -4,7 +4,7 @@
 -- product's stock and container unit EXACTLY, so the alias rows cannot be deleted (step 2) while products still
 -- use them. Mason chose the winners on 2026-11-09 ("Yes, all three"): oz, qt and Lb stay; Unit and Ea stay
 -- separate; the two dry products whose rate unit is the liquid "oz" move to "Dry oz".
--- Build sheet: docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md, section 4.
+-- Build sheet: docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md, section 4 (PR #1703).
 --
 -- WHAT: exactly these 22 rows change, each pinned by id, name, form and its current spelling:
 --   11 stock units Oz -> oz and 8 stock units Qt -> qt (inventory_unit and unit_size together),
@@ -70,7 +70,8 @@ BEGIN
 
   -- The rate lock must be off: the three rate changes and the stock-unit changes of rated products pass
   -- guard_product_rate_lock only while it is.
-  IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false) THEN
+  -- FOR SHARE holds the lock state until commit, so nobody can lock rates halfway through.
+  IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'RT2A_RATE_LOCK_ON: product rates are locked; unlock them with a reason, apply, then lock again. Nothing was changed.';
   END IF;
 
@@ -121,8 +122,13 @@ BEGIN
     SELECT string_agg(pp.name, ', ' ORDER BY pp.name) INTO v_bad
       FROM public.product_parents pp WHERE pp.rate_unit IN ('Oz', 'Qt', 'LB');
   END IF;
+  IF v_bad IS NULL THEN
+    -- A form-unit entry would keep a losing spelling valid for new products after step 2.
+    SELECT string_agg(f.product_form || ' ' || f.unit, ', ' ORDER BY f.product_form, f.unit) INTO v_bad
+      FROM public.product_form_units f WHERE f.unit IN ('Oz', 'Qt', 'LB');
+  END IF;
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'RT2A_UNLISTED_SPELLING: these products or families use Oz, Qt or LB but are not in the reviewed list, nothing was changed: %', v_bad;
+    RAISE EXCEPTION 'RT2A_UNLISTED_SPELLING: these products, families or form units use Oz, Qt or LB but are not in the reviewed list, nothing was changed: %', v_bad;
   END IF;
 
   -- No listed product may be in a family (its rate is the family's) or carry a net weight (a stock-unit change
@@ -148,6 +154,10 @@ BEGIN
    WHERE n.nspname = 'public' AND p.prosrc ILIKE '%unit_conversions%';
 
   -- The remap. Only the setup guard is switched off, and only for these two statements.
+  IF (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
+        AND tgname = 'trg_validate_product_setup_fields') IS DISTINCT FROM 'O' THEN
+    RAISE EXCEPTION 'RT2A_SETUP_GUARD_STATE: the setup guard is not in its normal on state. Nothing was changed.';
+  END IF;
   ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
   UPDATE public.products p
      SET inventory_unit = m.new_unit, unit_size = m.new_unit, updated_at = now()

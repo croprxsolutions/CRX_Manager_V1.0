@@ -38,7 +38,7 @@ BEGIN
     ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'Imazuron Herbicide', 'rate', 'LB', 'Lb'),
     ('61ac0e28-bdbe-4197-a764-93aa33bf036a'::uuid, 'Autumn Super 51 WDG', 'rate', 'oz', 'Dry oz'),
     ('1ec38578-6eaa-4cff-acd5-0ee0ec8dceda'::uuid, 'Cimarron Plus - 10 oz', 'rate', 'oz', 'Dry oz');
-  IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false) THEN
+  IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'RT2A_REVERSE_RATE_LOCK_ON: unlock product rates first. Nothing was changed.';
   END IF;
   IF (SELECT count(*) FROM public.unit_conversions WHERE unit IN ('Oz', 'Qt', 'LB')) <> 3 THEN
@@ -54,6 +54,11 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RT2A_REVERSE_ROW_MOVED: nothing was changed: %', v_bad;
   END IF;
+  CREATE TEMP TABLE rt2a_rev_before ON COMMIT DROP AS
+    SELECT id, rate_per_acre, tier1_price, tier2_price, tier3_price,
+           tier1_price_per_acre, tier2_price_per_acre, tier3_price_per_acre, current_cost,
+           inventory_unit, unit_size, rate_unit, container_unit, max_label_rate_unit
+      FROM public.products;
   ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
   UPDATE public.products p SET inventory_unit = r.old_unit, unit_size = r.old_unit, updated_at = now()
     FROM rt2a_rev r WHERE r.kind = 'stock' AND p.id = r.id;
@@ -73,6 +78,23 @@ BEGIN
               AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')
               AND tgenabled <> 'O') THEN
     RAISE EXCEPTION 'RT2A_REVERSE_POSTFLIGHT: a product guard was left off';
+  END IF;
+  -- No money field moved, and only the listed unit columns changed, exactly back to the old spelling.
+  SELECT string_agg(b.id::text, ', ') INTO v_bad
+    FROM rt2a_rev_before b LEFT JOIN public.products p ON p.id = b.id LEFT JOIN rt2a_rev r ON r.id = b.id
+   WHERE p.id IS NULL
+      OR (b.rate_per_acre, b.tier1_price, b.tier2_price, b.tier3_price, b.tier1_price_per_acre,
+          b.tier2_price_per_acre, b.tier3_price_per_acre, b.current_cost)
+         IS DISTINCT FROM
+         (p.rate_per_acre, p.tier1_price, p.tier2_price, p.tier3_price, p.tier1_price_per_acre,
+          p.tier2_price_per_acre, p.tier3_price_per_acre, p.current_cost)
+      OR (p.inventory_unit, p.unit_size, p.rate_unit, p.container_unit, p.max_label_rate_unit) IS DISTINCT FROM (
+           CASE WHEN r.kind = 'stock' THEN r.old_unit ELSE b.inventory_unit END,
+           CASE WHEN r.kind = 'stock' THEN r.old_unit ELSE b.unit_size END,
+           CASE WHEN r.kind = 'rate' THEN r.old_unit ELSE b.rate_unit END,
+           b.container_unit, b.max_label_rate_unit);
+  IF v_bad IS NOT NULL OR (SELECT count(*) FROM public.products) <> (SELECT count(*) FROM rt2a_rev_before) THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_POSTFLIGHT: an unexpected product change: %', v_bad;
   END IF;
 END;
 $rt2a_reverse$;

@@ -390,7 +390,10 @@ async function main() {
   raw(`UPDATE public.products SET container_unit = 'LB' WHERE id = '${CONTROLS[1].id}';`);
   refused('cand.sql', /RT2A_UNLISTED_SPELLING[^\n]*Lb per Lb/);
   raw(`UPDATE public.products SET container_unit = NULL WHERE id = '${CONTROLS[1].id}';`);
-  console.log('[prover] U8: an unlisted product using LB refuses');
+  raw("INSERT INTO public.product_form_units (product_form, unit) VALUES ('seed', 'LB');");
+  refused('cand.sql', /RT2A_UNLISTED_SPELLING[^\n]*seed LB/);
+  raw("DELETE FROM public.product_form_units WHERE product_form = 'seed' AND unit = 'LB';");
+  console.log('[prover] U8: an unlisted product, or a form-unit entry, using LB refuses');
 
   // U9. A listed product used in a family refuses; so does a family rate unit on a losing spelling.
   raw(`INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${FAM}', 'RT2A family', 'liquid', '${ADMIN}', '${ADMIN}');

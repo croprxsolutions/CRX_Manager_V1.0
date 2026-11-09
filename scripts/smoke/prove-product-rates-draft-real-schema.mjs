@@ -407,6 +407,13 @@ try {
   assert.equal(pick(rates(P['MSO XL']), 'house_standard', 'per_acre').is_quoting_default, true);
   expectCode(refused(save(P['No Rate'], { basis: 'per_100_gal', source: 'label', rec: 2, unit: 'qt', def: true })), 'PRODUCT_RATE_DEFAULT_NOT_PER_ACRE');
   expectCode(refused(save(P['No Rate'], { basis: 'per_acre', source: 'label', low: 1, unit: 'qt', def: true })), 'PRODUCT_RATE_DEFAULT_NEEDS_RECOMMENDED');
+  // A label row is never label-checked, so it can never be the quoting default (table CHECK too).
+  expectCode(refused(save(P['No Rate'], { basis: 'per_acre', source: 'label', rec: 10, unit: 'qt', def: true })), 'PRODUCT_RATE_DEFAULT_NOT_HOUSE');
+  const directLabelDefault = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-c',
+    `INSERT INTO public.product_rates (parent_id, basis, source, recommended, unit, is_quoting_default, origin, created_by, updated_by)
+     VALUES ('${P['No Rate']}', 'per_acre', 'label', 1, 'qt', true, 'manual', '${ADMIN}', '${ADMIN}');`], { allowFailure: true });
+  assert.notEqual(directLabelDefault.status, 0);
+  assert.match(directLabelDefault.stderr, /product_rates_default_house/);
   console.log('R2/R3: a second default, a non-acre default and a default without a recommended rate are refused');
 
   // R4: units.

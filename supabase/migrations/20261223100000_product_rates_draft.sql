@@ -166,6 +166,7 @@ CREATE TABLE public.product_rates (
   CONSTRAINT product_rates_recommended_le_high CHECK (recommended IS NULL OR high IS NULL OR recommended <= high),
   CONSTRAINT product_rates_default_per_acre CHECK (NOT is_quoting_default OR basis = 'per_acre'),
   CONSTRAINT product_rates_default_recommended CHECK (NOT is_quoting_default OR recommended IS NOT NULL),
+  CONSTRAINT product_rates_default_house CHECK (NOT is_quoting_default OR source = 'house_standard'),
   -- Room for crops: a later optional crop column widens this key and the default index.
   CONSTRAINT product_rates_one_per_source_basis UNIQUE (parent_id, source, basis)
 );
@@ -760,6 +761,10 @@ BEGIN
     END IF;
     IF p_basis <> 'per_acre' THEN RAISE EXCEPTION 'PRODUCT_RATE_DEFAULT_NOT_PER_ACRE: only a per-acre rate can be the quoting default'; END IF;
     IF p_recommended IS NULL THEN RAISE EXCEPTION 'PRODUCT_RATE_DEFAULT_NEEDS_RECOMMENDED: the quoting default needs a recommended rate'; END IF;
+    -- Only a house rate is checked against the label maximum, so only a house rate may be quoted by default.
+    IF p_source <> 'house_standard' THEN
+      RAISE EXCEPTION 'PRODUCT_RATE_DEFAULT_NOT_HOUSE: only a house rate can be the quoting default';
+    END IF;
   END IF;
   IF NOT public._product_rate_unit_fits(v_parent.product_form, p_basis, v_unit.kind) THEN
     RAISE EXCEPTION 'PRODUCT_RATE_UNIT_NOT_FOR_BASIS: % is not allowed for % on a % product', v_unit.code, p_basis, v_parent.product_form;

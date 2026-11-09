@@ -502,10 +502,14 @@ The four older signature policies (fixed path `signatures/<id>.png`) are narrowe
 and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · OPEN · database · unassigned**
-The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
-add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`);
-the write-path fix is not built. Older record counted 0 missing rows live.
+**MED · FIXED 2026-11-08 5:58 PM Central (PR #1652, migration `20261215100000`, ledger `20261108235833`) · database · Claude**
+The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later did not
+add the job back. Fix: a `profiles` trigger dispatches the open jobs' undispatched locations to a person the moment
+they become an active applicator, whatever their license (Mason, 2026-11-08, DECISION_LOG), and the apply backfills
+any already waiting (board splits and undispatched locations left alone; a job assignment or location add at the
+same instant waits for the activation instead of being missed; proof
+`scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
+`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**

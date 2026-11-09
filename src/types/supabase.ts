@@ -6775,6 +6775,7 @@ export type Database = {
           id: string
           order_item_id: string
           split_percentage: number
+          updated_at: string
         }
         Insert: {
           created_at?: string
@@ -6782,6 +6783,7 @@ export type Database = {
           id?: string
           order_item_id: string
           split_percentage: number
+          updated_at?: string
         }
         Update: {
           created_at?: string
@@ -6789,6 +6791,7 @@ export type Database = {
           id?: string
           order_item_id?: string
           split_percentage?: number
+          updated_at?: string
         }
         Relationships: [
           {

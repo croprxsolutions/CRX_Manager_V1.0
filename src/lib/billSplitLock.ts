@@ -5,6 +5,7 @@ type LockInvoice = {
   invoice_type: string | null;
   invoice_group_id?: string | null;
   delivery_id?: string | null;
+  deleted_at?: string | null;
 };
 type LockDelivery = { id: string; delivery_number: string | null; status: string; deleted_at?: string | null };
 
@@ -12,10 +13,11 @@ export type BillSplitLock = { kind: 'posted' | 'delivery' | 'draft'; number: str
 
 /**
  * Why the Bill Split can't change, in the order `_refuse_bill_split_change` checks it.
- * `invoices` is the order page's list, which already leaves out voided, cancelled and deleted ones.
+ * `invoices` is the order page's list, which leaves out voided and cancelled ones but not deleted ones.
  * The database stays the authority: this only keeps the editors from offering a change it refuses.
  */
-export function billSplitLock(invoices: LockInvoice[], deliveries: LockDelivery[]): BillSplitLock | null {
+export function billSplitLock(allInvoices: LockInvoice[], deliveries: LockDelivery[]): BillSplitLock | null {
+  const invoices = allInvoices.filter((i) => !i.deleted_at);
   const posted = invoices.find((i) => ['posted', 'paid', 'overdue'].includes(i.status));
   if (posted) return { kind: 'posted', number: posted.invoice_number };
 

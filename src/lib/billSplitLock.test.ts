@@ -41,6 +41,13 @@ describe('billSplitLock (same order as _refuse_bill_split_change)', () => {
     expect(billSplitLock([invoice({ delivery_id: null, invoice_number: 'CS-6', status: 'unposted' })], [])).toBeNull();
   });
 
+  it('ignores deleted invoices at every step, as the database does', () => {
+    const deleted = { deleted_at: '2026-11-09' };
+    expect(billSplitLock([invoice({ ...deleted, invoice_group_id: null, delivery_id: null })], [])).toBeNull();
+    expect(billSplitLock([invoice({ ...deleted, status: 'posted' })], [])).toBeNull();
+    expect(billSplitLock([invoice(deleted)], [delivery()])).toBeNull();
+  });
+
   it("a Bill Split payer's draft switched to misc charge is not a one-customer draft", () => {
     expect(billSplitLock([invoice({ invoice_type: 'misc_charge' })], [delivery({ status: 'scheduled' })])).toBeNull();
   });

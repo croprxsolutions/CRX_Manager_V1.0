@@ -105,6 +105,24 @@ describe('Invoices — Print Selected', () => {
     expect(H.printed.mock.calls[0][0][0]).toMatchObject({ invoice_number: 'CS-1001', customer_address: '9 Barn Rd' });
   });
 
+  it("prints a Bill Split payer's invoice with the sale's payer table, as its own page does", async () => {
+    const split = { ...posted, invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
+    H.tables.invoices = [
+      { ...split, invoice_number: 'CS-1001-1', total_amount_cents: 6000 },
+      { ...split, id: 'inv-2', invoice_number: 'CS-1001-2', total_amount_cents: 4000, customer: { farm_name: 'Landlord' } },
+    ];
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+    expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
+    await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
+    expect(H.printed.mock.calls[0][0][0].shares).toMatchObject([
+      { invoice_number: 'CS-1001-1', customer_name: 'Farmer', split_percentage: 60, amount_cents: 6000 },
+      { invoice_number: 'CS-1001-2', customer_name: 'Landlord', split_percentage: 40, amount_cents: 4000 },
+    ]);
+  });
+
   const cases: Array<[string, FailMode]> = [
     ['customers', 'error'], ['customers', 'nodata'], ['customers', 'throws'],
     ['invoice_shares', 'error'], ['invoice_shares', 'nodata'], ['invoice_shares', 'notlist'], ['invoice_shares', 'throws'],

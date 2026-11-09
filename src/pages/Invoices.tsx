@@ -28,6 +28,8 @@ import {
   generateBatchInvoicePdf,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
+  isBillSplitInvoice,
+  loadBillSplitPayers,
   mapInvoicePdfItem,
   type InvoicePdfData,
 } from '../lib/invoicePdf';
@@ -520,6 +522,10 @@ export default function Invoices() {
       .then((r) => r, detailsUnavailable);
     // A split invoice printed without its shares would hide who owes what.
     if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
+    // A Bill Split payer's invoice prints the sale's payers, as its own page does.
+    const payers = shares.length === 0 && isBillSplitInvoice(inv) && inv.invoice_group_id
+      ? await loadBillSplitPayers(supabase, inv.invoice_group_id).then((r) => r, detailsUnavailable)
+      : [];
 
     return {
       ...invoiceRowPdfFields(inv),
@@ -530,7 +536,7 @@ export default function Invoices() {
       customer_zip: cust.zip || undefined,
       account_number: cust.account_number || undefined,
       payment_terms: inv.payment_terms || cust.payment_terms || undefined,
-      shares: shares.length > 0 ? invoicePdfShares(shares as InvoiceShareRow[]) : undefined,
+      shares: shares.length > 0 ? invoicePdfShares(shares as InvoiceShareRow[]) : payers.length > 0 ? payers : undefined,
       items: groupReturnCreditDisplayItems(inv.invoice_type, (items || []).map(mapInvoicePdfItem)),
       options,
     };
@@ -921,12 +927,10 @@ export default function Invoices() {
   ];
 
   // Determine if batch print dialog needs any shares info
-  const anySelectedHasShares = selectedInvoices.some(
-    (i) => i.invoice_type === 'field_application'
-  );
-  // Identical predicate to anySelectedHasShares — reuse the computed value
-  // instead of scanning the selection a second time.
-  const anySelectedIsFieldApp = anySelectedHasShares;
+  const anySelectedIsFieldApp = selectedInvoices.some((i) => i.invoice_type === 'field_application');
+  // A Bill Split chemical sale prints its payers too (the misc charge layout has no share table).
+  const anySelectedHasShares = anySelectedIsFieldApp
+    || selectedInvoices.some((i) => i.invoice_type === 'chemical_sale' && isBillSplitInvoice(i));
 
   if (loading) {
     return (

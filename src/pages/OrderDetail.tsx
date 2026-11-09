@@ -312,11 +312,14 @@ export default function OrderDetail() {
         setShares(shareRes.data as OrderShare[]);
 
         // A line's own payers, overriding the card for that line (billing plan M2).
-        const lineShareRes = await supabase
+        // Paged and counted, so a capped read can't leave lines looking like they follow the card.
+        const lineShareRes = await fetchAllRows((from, to) => pageWithList(supabase
           .from('order_item_shares')
-          .select('id, order_item_id, customer_id, split_percentage, customer:customers(farm_name), order_items!inner(order_id)')
+          .select('id, order_item_id, customer_id, split_percentage, customer:customers(farm_name), order_items!inner(order_id)', { count: 'exact' })
           .eq('order_items.order_id', id!)
-          .order('created_at');
+          .order('created_at')
+          .order('id')
+          .range(from, to)));
         if (readFailed(lineShareRes, 'line shares')) return false;
         if (isStale()) return false;
         setLineShares((lineShareRes.data || []) as unknown as LineShare[]);
@@ -2083,6 +2086,7 @@ export default function OrderDetail() {
                       {!hasAllocations && (
                         <p className="text-xs text-secondary">
                           about {fmt((cardLive.get(share.customer_id) ?? 0) / 100)} of the products
+                          {linesWithOwnSplit.size > 0 && ' on lines that follow this card'}
                         </p>
                       )}
                     </div>

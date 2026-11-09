@@ -24,7 +24,7 @@
 --     number that differs is ignored (the line takes its stored or its size's number). Before the seed it stores what it does today.
 --   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After the seed it
 --     reads only the line's capture and its sold number's registration, groups by product, number and
---     signal word, refuses an uncaptured line, and skips (never refuses) a line with no number.
+--     signal word, records an uncaptured line from its stored number's registration, and skips (never refuses) a line with no number.
 --   - get_epa_sales_to_check() (admin, read-only): posted lines a person should check (sheet 4.C).
 --   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today);
 --     the postflight proves it, including the new columns.
@@ -776,33 +776,25 @@ BEGIN
   END;
 
   IF v_seeded THEN
-    -- REG-1: every product line must have been captured. A missing or unregistered number never blocks posting
-    -- (Mason, 2026-11-09): the line posts, gets no record without a number, and is listed on Sales to check.
-    FOR v_line IN
-      SELECT ii.id, public._normalize_epa_registration(ii.epa_registration) AS n, ii.sale_rup_status,
-             ii.sale_facts_captured_at, p.is_rup, p.product_name
-        FROM invoice_items ii JOIN products p ON p.id = ii.product_id
-       WHERE ii.invoice_id = p_invoice_id
-       ORDER BY ii.id
-    LOOP
-      IF v_line.sale_facts_captured_at IS NULL THEN
-        -- Only a line saved before the seed on an invoice unposted after it; one save captures it.
-        RAISE EXCEPTION 'INVOICE_LINE_NOT_CAPTURED: a line of invoice % (%) has no sale capture; open the invoice, save it again, then post', v_invoice.invoice_number, v_line.product_name;
-      END IF;
-    END LOOP;
+    -- REG-1: a missing or unregistered number never blocks posting (Mason, 2026-11-09): the line posts, gets no record
+    -- without a number, and is listed on Sales to check. Neither does a line with no capture (one posted before the seed and
+    -- unposted after; a split group cannot be re-saved): it records under its stored number with that number's registration
+    -- facts and is listed on Sales to check as posted_before_seed.
     -- A line needs a record when its capture or its sold number's registration says Yes (sheet 4.C).
     -- One record per unit and unit price too, so a record never merges lines sold at different prices or units.
     OPEN v_items FOR
       SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity, ii.unit_size,
              ii.unit_price_cents, sum(ii.extended_cents)::bigint AS extended_cents,
-             public._normalize_epa_registration(ii.epa_registration) AS epa_registration, ii.sale_signal_word AS signal_word
+             public._normalize_epa_registration(ii.epa_registration) AS epa_registration,
+             CASE WHEN ii.sale_facts_captured_at IS NULL THEN r.signal_word ELSE ii.sale_signal_word END AS signal_word
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(ii.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
          AND (ii.sale_rup_status = 'yes' OR r.rup_status = 'yes')
          AND public._normalize_epa_registration(ii.epa_registration) IS NOT NULL  -- a RUP record never has a blank number
-       GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration), ii.sale_signal_word,
+       GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration),
+                CASE WHEN ii.sale_facts_captured_at IS NULL THEN r.signal_word ELSE ii.sale_signal_word END,
                 ii.unit_size, ii.unit_price_cents
        ORDER BY ii.product_id, 7, 8, 4, 5;
   ELSE

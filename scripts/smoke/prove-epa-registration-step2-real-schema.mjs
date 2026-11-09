@@ -605,9 +605,12 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   raw(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4400 WHERE id = '${L5}';`);
   refused(ADMIN, GEN('g3b'), /RUP_RECORD_CONFLICT/);
   raw(`UPDATE public.invoice_items SET extended_cents = 4500 WHERE id = '${L5}';
-    INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L6}', '${INV1}', '${P2}', 'x', 1, 'Gal', 1500, 1500);`);
-  refused(ADMIN, GEN('g4'), /INVOICE_LINE_NOT_CAPTURED/);
-  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+    INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 1600, 1600, '${N2}');`);
+  // A line with no capture (posted before the seed, unposted after) never blocks posting: it records under its stored number
+  // with that number's registration facts, and Sales to check lists it (Codex App P2 on #1688: a split group cannot be re-saved).
+  assert.equal(ok(ADMIN, GEN('g4')), '1');
+  assert.equal(scalar(`SELECT epa_registration || '|' || quantity || '|' || signal_word FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1600;`), `${N2}|1.0000|Danger`);
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1600; DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   // The same product and number sold at a second price gets its own record; neither merges price nor total.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L7}', '${INV1}', '${P4}', 'x', 2, 'Gal', 1700, 3400);`);
@@ -616,7 +619,7 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.equal(scalar(`SELECT string_agg(quantity || '@' || unit_price_cents || '=' || total_cents, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`),
     '3.0000@1500=4500,2.0000@1700=3400');
   assert.equal(ok(ADMIN, GEN('g6')), '0');
-  console.log('[prover] case 12: posting never refuses a numberless restricted-use line (it gets no record), writes one restricted-use record per sold number, unit and price, skips it on a repeat, refuses a record that disagrees and a line with no capture');
+  console.log('[prover] case 12: posting never refuses a numberless restricted-use line (it gets no record), writes one restricted-use record per sold number, unit and price, skips it on a repeat, refuses a record that disagrees, and posts a line with no capture from its stored number');
 
   // 13. Sales to check.
   refused(REP, 'SELECT public.get_epa_sales_to_check();', /ADMIN_REQUIRED/);

@@ -34,6 +34,14 @@ function withThreadDefault(runGh) {
       const seen = parsed?.headRefOid || parsed?.data?.repository?.pullRequest?.headRefOid;
       if (typeof seen === "string" && /^[0-9a-f]{40}$/i.test(seen)) threadHead = seen;
     } catch { /* not JSON — nothing to learn */ }
+    // The PR view now asks for the description (Follow-ups gate, 2026-11-09): a
+    // fixture written before it carries none, so default it to "- None".
+    if (Array.isArray(args) && args.includes("--json") && args.some((a) => /(^|,)body(,|$)/.test(String(a)))) {
+      try {
+        const pr = JSON.parse(out);
+        if (pr && typeof pr === "object" && !("body" in pr)) return JSON.stringify({ ...pr, body: "## Follow-ups\n- None\n" });
+      } catch { /* not PR JSON — fall through */ }
+    }
     // The thread lookup first asks `gh pr view --json number,url`; a fixture that
     // answers every call with the PR JSON has no url, so supply one.
     if (Array.isArray(args) && args.includes("number,url")) {
@@ -583,6 +591,19 @@ try {
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
     nowMs: Date.now(), runGh: () => ordinaryPrJson,
   }).blocked, false, "...and merges once the exact-SHA Sol proof exists");
+  // Follow-ups gate (Mason, 2026-11-09): the same mergeable PR, but its description lists nothing.
+  for (const [body, why] of [["## Summary\nx", /no `## Follow-ups` section/], ["## Follow-ups\n- fix later", /name no issue/]]) {
+    const missing = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+      nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body }),
+    });
+    assert.equal(missing.blocked, true, "a PR without a usable Follow-ups section cannot merge");
+    assert.match(missing.reason, why);
+  }
+  assert.equal(evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: Date.now(), runGh: () => JSON.stringify({ ...JSON.parse(ordinaryPrJson), body: "## Follow-ups\n- #1700 later" }),
+  }).blocked, false, "a Follow-ups line naming an issue merges");
   // A teammate's comment is the only thing wrong with this otherwise mergeable PR.
   const teammateAnswer = (comments) => (args) => (
     args.some((a) => /reviewThreads\(last:100\)/.test(String(a)))
@@ -1192,7 +1213,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 21, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 22, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // session-context-reminder writes the rules every later Codex session starts from,
   // so Codex may not edit it either.
   for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {
@@ -1598,6 +1619,7 @@ try {
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: risky.sha }, submittedAt: "2026-09-26T12:00:00Z" }],
     mergeStateStatus: "CLEAN",
     statusCheckRollup: greenChecks,
+    body: "## Follow-ups\n- None\n",
   };
   const mainPrJson = JSON.stringify(mainPr);
   // Sol HIGH, 2026-09-26: every agent merge must pin the head the gate checked.

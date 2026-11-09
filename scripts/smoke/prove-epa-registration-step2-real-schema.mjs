@@ -513,9 +513,11 @@ async function main() {
   // 12. Posting writes the restricted-use record once, under the line's stored number.
   raw(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV1}';`);
   const GEN = (key) => `SELECT public.generate_rup_sales_records('${INV1}', '${key}');`;
-  // L4 has no number and its product was ticked restricted-use in case 6: posting goes through, with no blank-number record.
-  assert.equal(ok(ADMIN, GEN('g0')), '1');
-  assert.equal(scalar(`SELECT count(*) || '|' || count(*) FILTER (WHERE epa_registration IS NULL) FROM public.rup_sales_records WHERE invoice_id = '${INV1}';`), '1|0');
+  // L4 has no number and its product was ticked restricted-use in case 6: posting goes through and records it with the
+  // number blank (Mason, 2026-11-09, "Yes, always record"; Sol r2 HIGH).
+  assert.equal(ok(ADMIN, GEN('g0')), '2');
+  assert.equal(scalar(`SELECT count(*) || '|' || count(*) FILTER (WHERE epa_registration IS NULL) FROM public.rup_sales_records WHERE invoice_id = '${INV1}';`), '2|1');
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND epa_registration IS NULL;`);
   raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by)
       VALUES ('${INV3}', '${CUST}', '${ORD}', 'E2-I3', 'draft', current_date, '${ADMIN}');
     UPDATE public.invoice_items SET invoice_id = '${INV3}' WHERE id = '${L4}';`);
@@ -550,6 +552,13 @@ async function main() {
     `${N1}|Caution,${N1}|Caution,${N2}|Danger`);
   raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);
     DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2a')}'); UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
+  // A number typed on a line cannot avoid the record: P4 unticked, its own number N2 says Yes, the line carries N1 (No).
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P4}';
+    INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, 'Gal', 2100, 2100, '${N1}');`);
+  assert.equal(ok(ADMIN, GEN('g4d')), '1');
+  assert.equal(scalar(`SELECT epa_registration FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2100;`), N1);
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2100; DELETE FROM public.invoice_items WHERE id = '${L6}';
+    UPDATE public.products SET is_rup = true WHERE id = '${P4}';`);
   // The same product and number sold at a second price gets its own record; neither merges price nor total.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L7}', '${INV1}', '${P4}', 'x', 2, 'Gal', 1700, 3400);`);
@@ -602,6 +611,11 @@ async function main() {
   assert.equal(reasons()[L7], 'restricted_use_to_record');
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L7}"}]' AND NOT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L5}"}]';`), 't');
+  // A recorded numberless sale stays listed after its product is unticked (Sol r2 HIGH).
+  assert.equal(ok(ADMIN, `SELECT public.generate_rup_sales_records('${INV3}', 'g-inv3');`), '1');
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P5}';`);
+  assert.equal(reasons()[L4], 'no_epa_number');
+  raw(`UPDATE public.products SET is_rup = true WHERE id = '${P5}';`);
   console.log('[prover] case 13: Sales to check lists an unrecorded restricted-use sale (by number or product tick) and a numberless restricted-use sale, and not a recorded one');
 
   // 14. Keep as sold (Mason, 2026-11-09): a re-saved line keeps the number it was sold under, through save_invoice and any

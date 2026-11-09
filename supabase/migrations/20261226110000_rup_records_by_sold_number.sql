@@ -6,24 +6,28 @@
 --   posting writes the restricted-use register under the EPA number each invoice line was sold under (the
 --   line's stored number), and takes the restricted-use answer and signal word from that number's
 --   registration. Today it reads the product's current number and tick, which can differ from the label sold.
---   A missing or unregistered number never blocks a sale (Mason, 2026-11-09): the line posts, gets no
---   record without a number, and is listed on Sales to check.
+--   A missing or unregistered number never blocks a sale (Mason, 2026-11-09). Every restricted-use sale
+--   gets its record (Mason, 2026-11-09, "Yes, always record"): a line with no number gets one with the
+--   number blank (as live does today) and stays on Sales to check.
 --   SIMPLIFIED (Mason, 2026-11-09, "Yes, simplify"): no per-line copy of the label facts. Restricted use is
 --   a fact of the EPA number, and the line's stored number already survives a re-save (the screens send it
 --   back; _fill_invoice_line_epa keeps a sent number and fills only a blank line from its product, as today).
 --
 -- WHAT:
 --   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After the seed a
---     line needs a record when its stored number's registration says Yes OR its product is ticked
---     restricted-use (sizes are not kept in step with registrations, so either Yes records it; recording
---     one extra sale is the safe side; Mason, 2026-11-09, "Drop them"). One record per product, number, unit and
---     unit price (lines sold at different prices or units never merge). A line with no number is skipped,
---     never refused. An active record that disagrees with what posting would write is refused
+--     line needs a record when its stored number's registration says Yes, OR its product is ticked
+--     restricted-use, OR its product's own number's registration says Yes (any Yes records it, so a number
+--     typed on a line can never avoid a record; recording one extra sale is the safe side; Mason, 2026-11-09,
+--     "Yes, always record"). One record per product, number, unit and unit price (lines sold at different
+--     prices or units never merge). A line with no number gets a record with the number blank, never a
+--     refusal. An active record that disagrees with what posting would write is refused
 --     (RUP_RECORD_CONFLICT), never silently kept.
 --   - _rup_record_covers_line: the one rule for "this posted line has its record"; used by
 --     _epa_registration_unrecorded_posted_lines (re-issued from 20261226100000, same grants) and the list below.
---   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines (same either-Yes rule) with no record
---     (restricted_use_to_record) and posted lines of a restricted-use product with no number (no_epa_number).
+--   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines (same any-Yes rule) with no record
+--     (restricted_use_to_record); posted lines with no number that are restricted-use or have a record
+--     (no_epa_number; a recorded one stays listed even if its product is later unticked); unrecorded lines whose
+--     number has no registration (no_registration) or a Not reviewed one (not_reviewed).
 --   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today);
 --     the postflight proves it.
 --
@@ -192,8 +196,8 @@ BEGIN
 
   IF v_seeded THEN
     -- REG-1 (sheet 4.C): a line records under the number it was sold under (its stored number), and needs a
-    -- record when that number's registration says Yes or its product is ticked (either Yes records it).
-    -- A line with no number posts with no record and is listed on Sales to check (Mason, 2026-11-09).
+    -- record when that number's registration, its product's tick, or its product's own number's registration
+    -- says Yes (any Yes records it). A line with no number records with the number blank (Mason, 2026-11-09).
     -- One record per unit and unit price too, so a record never merges lines sold at different prices or units.
     OPEN v_items FOR
       SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity, ii.unit_size,
@@ -203,9 +207,9 @@ BEGIN
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(ii.epa_registration)
+        LEFT JOIN epa_registrations pr ON pr.epa_registration = public._normalize_epa_registration(p.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
-         AND public._normalize_epa_registration(ii.epa_registration) IS NOT NULL  -- a RUP record never has a blank number
-         AND (r.rup_status = 'yes' OR p.is_rup)
+         AND (r.rup_status = 'yes' OR p.is_rup OR pr.rup_status = 'yes')
        GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration),
                 COALESCE(r.signal_word, p.signal_word), ii.unit_size, ii.unit_price_cents
        ORDER BY ii.product_id, 7, 4, 5;
@@ -329,12 +333,13 @@ BEGIN
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            public._normalize_epa_registration(ii.epa_registration) AS epa_registration, ii.quantity,
            r.rup_status AS registration_rup_status, p.is_rup AS product_is_rup,
-           (r.rup_status = 'yes' OR p.is_rup) AS restricted_use,
+           COALESCE(r.rup_status = 'yes' OR p.is_rup OR pr.rup_status = 'yes', false) AS restricted_use,
            public._rup_record_covers_line(ii) AS has_record
       FROM invoice_items ii
       JOIN invoices i ON i.id = ii.invoice_id
       JOIN products p ON p.id = ii.product_id
       LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(ii.epa_registration)
+      LEFT JOIN epa_registrations pr ON pr.epa_registration = public._normalize_epa_registration(p.epa_registration)
      WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -352,7 +357,7 @@ BEGIN
    -- a number whose registration is missing or Not reviewed is listed too (sheet 4.C: unknown lines are findable)
    WHERE (epa_registration IS NOT NULL AND NOT has_record
           AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'))
-      OR (epa_registration IS NULL AND product_is_rup);
+      OR (epa_registration IS NULL AND (restricted_use OR has_record));
   RETURN v_out;
 END;
 $function$;

@@ -2,7 +2,7 @@
 // Self-test for pr-readiness's pure helpers with fixture PR views.
 // Run: node scripts/pr-readiness.test.mjs
 import assert from "node:assert/strict";
-import { checkCounts, codexReviewedHead, openThreads } from "./pr-readiness.mjs";
+import { checkCounts, codexReviewedHead, formatBlock, openThreads, teammateLines } from "./pr-readiness.mjs";
 
 const HEAD = "282ae54fa945a6a5f9a7030c7f643cf784ec69a8";
 const OLD = "ad4718cbd6d8d8833aeb486a55ade591ab8b8169";
@@ -37,5 +37,20 @@ assert.deepEqual(openThreads({ nodes: [
   thread(true, false, "coderabbitai", "src/b.ts"),
   thread(false, true, "taha", "src/c.ts"),
 ] }), ["chatgpt-codex-connector src/a.ts"]);
+
+// Teammate comments: shown early, never a silent 0 when the read failed or was cut off.
+const URL1 = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1650#issuecomment-6728662906";
+assert.equal(teammateLines(7, { comments: [], truncated: false }), "  unanswered teammate comments: 0");
+const one = teammateLines(7, { comments: [{ login: "tahakhanabdalli", url: URL1 }], truncated: false });
+assert.match(one, /: 1 - NOT READY: /);
+assert.match(one, /\n    - @tahakhanabdalli https:\/\/github\.com\/.*#issuecomment-6728662906$/);
+assert.match(teammateLines(7, null), /: UNREADABLE - NOT READY: .*gh pr view 7 --comments/);
+const cut = teammateLines(7, { comments: [], truncated: true });
+assert.match(cut, /: 0 seen, list TRUNCATED - NOT READY/);
+assert.doesNotMatch(cut, /^  unanswered teammate comments: 0$/);
+// The line sits right after the head line, before checks and threads.
+const block = formatBlock(7, { title: "t", statusCheckRollup: [] }, { nodes: [] }, "NO SOL NEEDED: x", null).split("\n");
+assert.match(block[2], /^  unanswered teammate comments: UNREADABLE/);
+assert.doesNotMatch(block.join("\n"), /READY: yes/);
 
 console.log("pr-readiness.test: all assertions passed");

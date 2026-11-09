@@ -1,22 +1,45 @@
 import { describe, it, expect } from 'vitest';
-import { appEnv, envTitlePrefix } from './appEnv';
+import { appEnv, envTitlePrefix, isTestDatabase } from './appEnv';
+
+const LIVE = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
+const STAGING = 'https://fsnjredpmakbmhwowjjt.supabase.co';
 
 describe('appEnv', () => {
   it('reads staging and local from VITE_APP_ENV', () => {
-    expect(appEnv('staging', false)).toBe('staging');
-    expect(appEnv('local', false)).toBe('local');
-    expect(appEnv('Staging ', false)).toBe('staging');
+    expect(appEnv('staging', false, LIVE)).toBe('staging');
+    expect(appEnv('local', false, LIVE)).toBe('local');
+    expect(appEnv('Staging ', false, LIVE)).toBe('staging');
   });
 
   it('treats the Vite dev server as local unless told otherwise', () => {
-    expect(appEnv(undefined, true)).toBe('local');
-    expect(appEnv('staging', true)).toBe('staging');
+    expect(appEnv(undefined, true, LIVE)).toBe('local');
+    expect(appEnv('staging', true, LIVE)).toBe('staging');
   });
 
-  it('falls back to production for unset or unknown values', () => {
-    expect(appEnv(undefined, false)).toBe('production');
-    expect(appEnv('', false)).toBe('production');
-    expect(appEnv('prod', false)).toBe('production');
+  it('is production only when unset or "production" and not on the staging database', () => {
+    expect(appEnv(undefined, false, LIVE)).toBe('production');
+    expect(appEnv('', false, LIVE)).toBe('production');
+    expect(appEnv('production', false, LIVE)).toBe('production');
+    expect(appEnv(undefined, false, undefined)).toBe('production');
+  });
+
+  it('fails loud: a misspelt value or a build on the staging database shows the staging banner', () => {
+    expect(appEnv('stagin', false, LIVE)).toBe('staging');
+    expect(appEnv(undefined, false, STAGING)).toBe('staging');
+    expect(appEnv('production', false, STAGING)).toBe('staging');
+  });
+});
+
+describe('isTestDatabase', () => {
+  it('is true only for the staging project and local hosts, by exact host', () => {
+    expect(isTestDatabase(STAGING)).toBe(true);
+    expect(isTestDatabase('http://127.0.0.1:56321')).toBe(true);
+    expect(isTestDatabase('http://localhost:54321')).toBe(true);
+    expect(isTestDatabase(LIVE)).toBe(false);
+    expect(isTestDatabase('https://db.croprxsolutions.app')).toBe(false);
+    expect(isTestDatabase('https://fsnjredpmakbmhwowjjt.supabase.co.evil.example')).toBe(false);
+    expect(isTestDatabase(undefined)).toBe(false);
+    expect(isTestDatabase('not a url')).toBe(false);
   });
 });
 

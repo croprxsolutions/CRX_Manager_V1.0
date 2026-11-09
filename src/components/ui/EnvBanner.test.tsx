@@ -13,10 +13,13 @@ describe('EnvBanner', () => {
     expect(screen.getByText('LOCAL')).toBeInTheDocument();
   });
 
-  it('never calls a build pointed at the live database test data', () => {
-    render(<EnvBanner env="staging" supabaseUrl="https://rhyzpcqhnizqbxphqdkr.supabase.co" />);
-    expect(screen.getByText('STAGING · LIVE DATABASE')).toBeInTheDocument();
-    expect(screen.queryByText(/test data/)).not.toBeInTheDocument();
+  it('claims test data only for a database known to hold it', () => {
+    for (const url of ['https://rhyzpcqhnizqbxphqdkr.supabase.co', 'https://db.example.com', undefined]) {
+      const { unmount } = render(<EnvBanner env="staging" supabaseUrl={url} />);
+      expect(screen.getByText('STAGING · check which database this uses')).toBeInTheDocument();
+      expect(screen.queryByText(/test data/)).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('shows nothing on production', () => {

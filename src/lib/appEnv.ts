@@ -1,17 +1,39 @@
 /**
  * Which environment this build runs in, from one build-time variable.
  * VITE_APP_ENV=staging on the Vercel staging environment; the Vite dev server counts as local;
- * anything else (unset on production) is production, which shows no banner.
+ * unset or "production" is production, which shows no banner. Two safety nets: an unknown value
+ * shows the staging banner rather than nothing, and a build pointed at the staging database is
+ * staging even if the variable is missing.
  */
 export type AppEnv = 'production' | 'staging' | 'local';
+
+const STAGING_SUPABASE_HOST = 'fsnjredpmakbmhwowjjt.supabase.co';
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
+
+export function supabaseHost(url: string | undefined): string {
+  try {
+    return new URL(url ?? '').hostname;
+  } catch {
+    return '';
+  }
+}
+
+// True only when the build's database is positively known to hold test data.
+export function isTestDatabase(url: string | undefined): boolean {
+  const host = supabaseHost(url);
+  return host === STAGING_SUPABASE_HOST || LOCAL_HOSTS.has(host);
+}
 
 export function appEnv(
   raw: string | undefined = import.meta.env.VITE_APP_ENV,
   dev: boolean = import.meta.env.DEV,
+  supabaseUrl: string | undefined = import.meta.env.VITE_SUPABASE_URL,
 ): AppEnv {
   const value = raw?.trim().toLowerCase();
   if (value === 'staging' || value === 'local') return value;
-  return dev ? 'local' : 'production';
+  if (value && value !== 'production') return 'staging';
+  if (dev) return 'local';
+  return supabaseHost(supabaseUrl) === STAGING_SUPABASE_HOST ? 'staging' : 'production';
 }
 
 export function envTitlePrefix(env: AppEnv): string {

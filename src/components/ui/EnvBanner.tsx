@@ -1,4 +1,4 @@
-import { appEnv, type AppEnv } from '../../lib/appEnv';
+import { appEnv, isTestDatabase, type AppEnv } from '../../lib/appEnv';
 
 // Amber for staging and blue for local: both stay clear of the brand green, so nobody
 // mistakes a test build for the live app. Production shows nothing.
@@ -9,16 +9,14 @@ const LOOK: Record<Exclude<AppEnv, 'production'>, { text: string; className: str
   local: { text: 'LOCAL', className: 'bg-blue-700 text-white', line: 'bg-blue-600' },
 };
 
-// Live project ref: a staging build wrongly pointed at live must never claim "test data only".
-const LIVE_SUPABASE_REF = 'rhyzpcqhnizqbxphqdkr';
-
 export default function EnvBanner({
   env = appEnv(),
   supabaseUrl = import.meta.env.VITE_SUPABASE_URL,
 }: { env?: AppEnv; supabaseUrl?: string }) {
   if (env === 'production') return null;
   const { className, line } = LOOK[env];
-  const text = supabaseUrl?.includes(LIVE_SUPABASE_REF) ? `${env.toUpperCase()} · LIVE DATABASE` : LOOK[env].text;
+  // "test data only" only when the database is positively the staging or a local one.
+  const text = isTestDatabase(supabaseUrl) ? LOOK[env].text : `${env.toUpperCase()} · check which database this uses`;
   // A plain label, not a live region: screen readers shouldn't announce it on every load.
   return (
     <>

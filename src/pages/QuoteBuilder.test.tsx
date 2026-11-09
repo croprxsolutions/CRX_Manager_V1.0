@@ -532,25 +532,6 @@ describe('QuoteBuilder', () => {
     mockSendEmail.mockResolvedValue({ deduplicated: false });
   });
 
-  it('shows the Last Charged card to admins and sales reps, never in Customer View or to other roles', async () => {
-    renderQuoteBuilder();
-    expect(await screen.findByTestId('last-charged-card')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
-    expect(screen.queryByTestId('last-charged-card')).not.toBeInTheDocument();
-    cleanup();
-
-    authState.role = 'sales_rep';
-    renderQuoteBuilder();
-    expect(await screen.findByTestId('last-charged-card')).toBeInTheDocument();
-    cleanup();
-
-    authState.role = 'driver';
-    renderQuoteBuilder();
-    expect(await screen.findByRole('button', { name: 'More actions' })).toBeInTheDocument();
-    expect(screen.queryByTestId('last-charged-card')).not.toBeInTheDocument();
-  });
-
   it('prices from the searched customer\'s tier and clears a section field of another customer', async () => {
     mockFrom.mockImplementation((table: string) => buildChain({
       data: table === 'customers'
@@ -1652,8 +1633,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(2\)/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /^History/ }));
 
     // Both rows are listed, and neither claims an item count or a total — those could only
     // come from a snapshot this build has already refused to read.
@@ -1756,8 +1736,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(3\)/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /^History/ }));
 
     // Guard the fixture: if all three landed in one bucket the ordering claim would be vacuous.
     expect(await screen.findByText(/Saved in an older format/)).toBeInTheDocument();
@@ -1803,8 +1782,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(1\)/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /^History/ }));
 
     expect(await screen.findByText('Details unavailable')).toBeInTheDocument();
     // Calling it an older format would be a guess: the server says this row is current.
@@ -5249,6 +5227,129 @@ describe('QuoteBuilder', () => {
       expect(sentSwitch).toBeDisabled();
     });
   });
+
+  describe('tabs (Quotes UI redesign)', () => {
+    const SETTLEMENT = { found: true, booked_cents: 10000, drawn_cents: 2500, remaining_cents: 7500, prepay_remaining_cents: 0, prepay_earmarked_cents: 0, prepay_applied_cents: 0, lines: [] };
+    const readableSnapshot = (quoteId: string, total: number) => ({
+      quote: {
+        quote_number: 'Q-tabs', customer_id: 'customer-1', tier: 1, status: 'sent', total_price: total,
+        total_cost: 0, total_profit: total, total_margin_pct: 100, valid_days: 30, expires_at: null,
+        header_notes: null, footer_notes: null, is_planned: false, commission_split: null,
+      },
+      sections: [],
+      quote_id: quoteId,
+    });
+    function serveTabs(status: 'draft' | 'sent', opts: { settlement?: Record<string, unknown> | null; versions?: number } = {}) {
+      const fixture = makeQuoteFixture(status, 7);
+      const { quote } = fixture;
+      const versions = Array.from({ length: opts.versions ?? 0 }, (_, i) => {
+        const n = (opts.versions ?? 0) - i;
+        return {
+          id: `version-${n}`, quote_id: quote.id, version_number: n, sent_by: 'profile-1',
+          sent_at: `2026-03-16T15:4${n}:00.000Z`, sent_method: null, pdf_url: null, notes: null,
+          restore_trusted_at: null, snapshot_data: readableSnapshot(quote.id, 100 * n),
+        };
+      });
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [fixture.item]
+              : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER]
+                : table === 'products' ? [fixture.product]
+                  : table === 'quote_versions' ? versions
+                    : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_booking_settlement'
+        ? { data: opts.settlement ?? null, error: null }
+        : { data: null, error: null }));
+      renderQuoteBuilder(quote.id);
+    }
+    const tabNames = () => screen.getAllByRole('tab').map((t) => t.textContent);
+
+    it('Products is the default tab and a plain draft shows only the tabs that apply', async () => {
+      serveTabs('draft');
+      const products = await screen.findByRole('tab', { name: /^Products/ });
+      expect(products).toHaveAttribute('aria-selected', 'true');
+      expect(products).toHaveTextContent('1');
+    });
+
+    it('Booking balance shows exactly when the settlement shows today, and keeps its per-product table', async () => {
+      serveTabs('sent', { settlement: { ...SETTLEMENT, lines: [{ product_id: 'p', product_name: 'Tab Product', booked_qty: 5, drawn_qty: 1, remaining_qty: 4 }] } });
+      fireEvent.click(await screen.findByRole('tab', { name: 'Booking balance' }));
+      expect(await screen.findByText('Tab Product')).toBeInTheDocument();
+      // The strip is the only place that shows Booked once the tab's duplicate figures are gone.
+      expect(screen.getAllByText('Booked')).toHaveLength(2); // strip label + table header
+      expect(screen.queryByText('Remaining to draw')).not.toBeInTheDocument();
+      cleanup();
+
+      serveTabs('sent', { settlement: { found: false } });
+      await screen.findByRole('tab', { name: /^Products/ });
+      expect(screen.queryByRole('tab', { name: 'Booking balance' })).not.toBeInTheDocument();
+      cleanup();
+
+      serveTabs('draft', { settlement: SETTLEMENT });
+      await screen.findByRole('tab', { name: /^Products/ });
+      expect(screen.queryByRole('tab', { name: 'Booking balance' })).not.toBeInTheDocument();
+    });
+
+    it('Last charged shows under its four conditions only', async () => {
+      serveTabs('draft');
+      expect(await screen.findByRole('tab', { name: 'Last charged' })).toBeInTheDocument();
+      expect(screen.queryByTestId('last-charged-card')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('tab', { name: 'Last charged' }));
+      expect(screen.getByTestId('last-charged-card')).toBeInTheDocument();
+
+      // Customer View hides it, and the selected tab falls back to Products.
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
+      expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /^Products/ })).toHaveAttribute('aria-selected', 'true');
+      cleanup();
+
+      // A sales rep sees it; another role never does.
+      authState.role = 'sales_rep';
+      serveTabs('draft');
+      expect(await screen.findByRole('tab', { name: 'Last charged' })).toBeInTheDocument();
+      cleanup();
+
+      authState.role = 'driver';
+      serveTabs('draft');
+      await screen.findByRole('tab', { name: /^Products/ });
+      expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+      cleanup();
+
+      // No customer, no tab.
+      authState.role = 'admin';
+      renderQuoteBuilder();
+      await screen.findByRole('tab', { name: /^Products/ });
+      expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+    });
+
+    it('History shows with the version count, keeps compare and restore, and the menu item is gone', async () => {
+      serveTabs('draft', { versions: 2 });
+      const history = await screen.findByRole('tab', { name: /^History/ });
+      expect(history).toHaveTextContent('2');
+      expect(tabNames()).toEqual(expect.arrayContaining([expect.stringMatching(/^History/)]));
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      expect(screen.queryByRole('menuitem', { name: /Version history/ })).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+      fireEvent.click(history);
+      fireEvent.click(await screen.findByText('v2'));
+      fireEvent.click(screen.getByRole('button', { name: /Compare/ }));
+      expect(screen.getByText('Comparing V2 vs Current')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Exit Compare/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Restore$/ }));
+      expect(screen.getByText('Restore V2?')).toBeInTheDocument();
+    });
+
+    it('a quote with no saved versions has no History tab', async () => {
+      serveTabs('draft');
+      await screen.findByRole('tab', { name: /^Products/ });
+      expect(screen.queryByRole('tab', { name: /^History/ })).not.toBeInTheDocument();
+    });
+  });
 });
 
 // To-Do 10.5: a saved quote whose reads fail says so; it never shows an empty quote
@@ -5332,8 +5433,8 @@ describe('QuoteBuilder load failures', () => {
       ? { data: { found: true, booked_cents: 12345, drawn_cents: 0, remaining_cents: 12345, prepay_remaining_cents: 0, prepay_earmarked_cents: 0, prepay_applied_cents: 0, lines: [] }, error: null }
       : { data: null, error: null }));
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
-    // "Booked" now shows in the settlement card and in the summary strip.
-    expect(await screen.findAllByText('Booked')).toHaveLength(2);
+    // "Booked" shows once, in the summary strip (the balance tab holds the per-product table).
+    expect(await screen.findAllByText('Booked')).toHaveLength(1);
     expect(screen.queryByText('The booking settlement could not be loaded')).not.toBeInTheDocument();
   });
 });

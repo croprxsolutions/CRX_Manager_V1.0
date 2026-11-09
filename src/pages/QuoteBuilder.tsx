@@ -12,7 +12,6 @@ import {
   Download,
   AlertTriangle,
   Pencil,
-  History,
   RotateCcw,
   Eye,
   EyeOff,
@@ -27,7 +26,8 @@ import {
   Clock,
   Lock,
 } from 'lucide-react';
-import Card, { CardHeader } from '../components/ui/Card';
+import Card from '../components/ui/Card';
+import Tabs from '../components/ui/Tabs';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
@@ -671,7 +671,7 @@ export default function QuoteBuilder() {
   );
   const [selectedVersion, setSelectedVersion] = useState<QuoteVersion | null>(null);
   const [compareMode, setCompareMode] = useState(false);
-  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState('products');
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmRewindOpen, setConfirmRewindOpen] = useState(false);
   const [revising, setRevising] = useState(false);
@@ -4237,11 +4237,6 @@ export default function QuoteBuilder() {
       id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
       onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
     }] : []),
-    // Task 12 replaces this with the History tab.
-    ...(isEditing && savedVersionCount > 0 ? [{
-      id: 'versions', label: `Version history (${savedVersionCount})`, icon: <History className="w-4 h-4" />,
-      onAction: () => setShowVersionHistory(!showVersionHistory),
-    }] : []),
     ...(canRevert ? [{
       id: 'revert', label: revertLabel, icon: <Undo2 className="w-4 h-4" />,
       onAction: () => { setRevertReason(''); setShowRevertModal(true); }, disabled: reverting,
@@ -4318,6 +4313,20 @@ export default function QuoteBuilder() {
   const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
   // Summary strip: the totals memo and the booking settlement, as the Totals and Settlement cards show them.
   const settlement = isEditing && canDraw && bookingSettlement?.found ? bookingSettlement : null;
+  const staffSeesLastCharged = !customerView && (isAdmin || profile?.role === 'sales_rep');
+  const lastChargedLines = sections.flatMap((section) => section.items.map((item) => ({
+    productId: item.product_id,
+    productName: item.product?.product_name ?? 'Product',
+  })));
+  // Each tab shows exactly when its old card did.
+  const tabAvailable: Record<string, boolean> = {
+    products: true,
+    balance: settlement !== null,
+    last: staffSeesLastCharged && !!customerId && lastChargedLines.some((line) => !!line.productId),
+    history: isEditing && savedVersionCount > 0,
+  };
+  const shownTab = tabAvailable[activeTab] ? activeTab : 'products';
+  const productCount = sections.reduce((sum, sec) => sum + sec.items.length, 0);
   const bookedCents = settlement?.booked_cents ?? 0;
   const drawnPct = bookedCents > 0 ? Math.min(100, Math.max(0, Math.round(((settlement?.drawn_cents ?? 0) / bookedCents) * 100))) : 0;
   const summaryFigures: { label: string; value: ReactNode }[] = [{ label: 'Quote total', value: fmt(totals.totalPrice) }];
@@ -4529,354 +4538,6 @@ export default function QuoteBuilder() {
           />
         </Card>
       )}
-      {isEditing && canDraw && bookingSettlement?.found && (
-        <Card>
-          <CardHeader title="Booking" accent="Settlement" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-            <div>
-              <div className="text-secondary">Booked</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.booked_cents ?? 0)}</div>
-            </div>
-            <div>
-              <div className="text-secondary">Drawn</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.drawn_cents ?? 0)}</div>
-            </div>
-            <div>
-              <div className="text-secondary">Remaining to draw</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.remaining_cents ?? 0)}</div>
-            </div>
-            {/* Prepaid cell hidden while there is no earmarked prepay — the booking-prepay
-                earmark engine is shelved (docs/roadmap/shelved-earmark-engine/), so this
-                reads 0 for now and lights up automatically when the engine returns. */}
-            {((bookingSettlement.prepay_remaining_cents ?? 0) > 0 || (bookingSettlement.prepay_earmarked_cents ?? 0) > 0) && (
-              <div>
-                <div className="text-secondary">Prepaid (remaining)</div>
-                <div className="font-semibold text-crx-green">{formatCents(bookingSettlement.prepay_remaining_cents ?? 0)}</div>
-              </div>
-            )}
-          </div>
-          {(bookingSettlement.prepay_earmarked_cents ?? 0) > 0 && (
-            <div className="mt-2 text-xs text-secondary">
-              Prepay earmarked {formatCents(bookingSettlement.prepay_earmarked_cents ?? 0)} · applied {formatCents(bookingSettlement.prepay_applied_cents ?? 0)}
-            </div>
-          )}
-          {bookingSettlement.lines && bookingSettlement.lines.length > 0 && (
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-gray-100 text-secondary">
-                    <th className="px-2 py-1 text-left font-medium">Product</th>
-                    <th className="px-2 py-1 text-right font-medium">Booked</th>
-                    <th className="px-2 py-1 text-right font-medium">Drawn</th>
-                    <th className="px-2 py-1 text-right font-medium">Remaining</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bookingSettlement.lines.map((ln) => (
-                    (() => {
-                      const unit = products.find((product) => product.id === ln.product_id)?.inventory_unit;
-                      const suffix = unit ? ` ${unit}` : '';
-                      return (
-                        <tr key={ln.product_id} className="border-b border-gray-50">
-                          <td className="px-2 py-1">{ln.product_name ?? '—'}</td>
-                          <td className="px-2 py-1 text-right">{ln.booked_qty}{suffix}</td>
-                          <td className="px-2 py-1 text-right">{ln.drawn_qty}{suffix}</td>
-                          <td className="px-2 py-1 text-right">{ln.remaining_qty}{suffix}</td>
-                        </tr>
-                      );
-                    })()
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {showVersionHistory && savedVersionCount > 0 && (
-        <Card>
-          <CardHeader title="Version" accent="History" />
-          {/* Version list */}
-          <div className="divide-y divide-gray-100">
-            {orderedVersionHistory.map((entry) => {
-              if (!entry.readable) {
-                /*
-                  Saved versions whose snapshot this build cannot read. Listed at all so a quote whose
-                  only versions are legacy still shows its history, and shown without an item count or
-                  total because both would have to be read out of a snapshot that cannot be trusted.
-                  Not selectable, so they reach neither the compare view nor restore.
-
-                  Only rows the server itself treats as legacy are called an older format; a row the
-                  server stamped as restorable says only that its details are unavailable, because
-                  calling it old would be a guess. Those also raise a Sentry report - see
-                  reportUntrustworthyQuoteVersions.
-                */
-                const u = entry.version;
-                return (
-                  <div key={u.id} className="py-3 px-3 flex items-center justify-between">
-                    <div>
-                      <span className="font-medium text-secondary">v{u.version_number}</span>
-                      <span className="text-secondary text-sm ml-3">
-                        {new Date(u.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <div className="text-sm text-secondary italic">
-                      {u.server_trusted
-                        ? 'Details unavailable'
-                        : 'Saved in an older format · details unavailable'}
-                    </div>
-                  </div>
-                );
-              }
-              const v = entry.version;
-              const itemCount = v.snapshot_data?.sections?.reduce(
-                (sum, s) => sum + (s.items?.length || 0), 0
-              ) || 0;
-              const totalPrice = v.snapshot_data?.quote?.total_price || 0;
-              const isSelected = selectedVersion?.id === v.id;
-              return (
-                <div
-                  key={v.id}
-                  className={`py-3 px-3 flex items-center justify-between cursor-pointer transition-colors ${isSelected ? 'bg-crx-green/10 border-l-4 border-crx-green' : 'hover:bg-gray-50'}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setSelectedVersion(isSelected ? null : v);
-                    setCompareMode(false);
-                    setConfirmRestore(null);
-                  }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedVersion(isSelected ? null : v); setCompareMode(false); setConfirmRestore(null); } }}
-                >
-                  <div>
-                    <span className="font-medium text-nav-dark">v{v.version_number}</span>
-                    <span className="text-secondary text-sm ml-3">
-                      {new Date(v.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  <div className="text-sm text-secondary">
-                    {itemCount} item{itemCount !== 1 ? 's' : ''} &middot;{' '}
-                    {fmt(totalPrice)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Selected version details */}
-          {selectedVersion && !compareMode && (
-            <div className="border-t border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-nav-dark">V{selectedVersion.version_number} Snapshot</h4>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<Eye className="w-3.5 h-3.5" />}
-                    showChevron={false}
-                    onClick={() => setCompareMode(true)}
-                  >
-                    Compare
-                  </Button>
-                  {canEdit && (
-                    <>
-                      {confirmRestore === selectedVersion.id ? (
-                        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}?</span>
-                          <Button
-                            size="sm"
-                            icon={<CheckCircle className="w-3.5 h-3.5" />}
-                            showChevron={false}
-                            onClick={() => handleRestoreVersion(selectedVersion.id)}
-                          >
-                            Yes
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            showChevron={false}
-                            onClick={() => setConfirmRestore(null)}
-                          >
-                            No
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          icon={<RotateCcw className="w-3.5 h-3.5" />}
-                          showChevron={false}
-                          onClick={() => setConfirmRestore(selectedVersion.id)}
-                        >
-                          Restore
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    showChevron={false}
-                    onClick={() => { setSelectedVersion(null); setConfirmRestore(null); }}
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-              <div className="text-sm text-secondary mb-3">
-                Total: {fmt(selectedVersion.snapshot_data?.quote?.total_price || 0)}
-                {' '}&middot;{' '}
-                {!hideCost && <>Margin: {(selectedVersion.snapshot_data?.quote?.total_margin_pct || 0).toFixed(1)}%</>}
-              </div>
-              {selectedVersion.snapshot_data?.sections?.map((sec, si) => (
-                <div key={si} className="mb-3">
-                  <div className="flex items-center gap-2">
-                    <h5 className="text-sm font-medium text-nav-dark mb-1">{sec.section_name}</h5>
-                    {sec.needed_by_date && <span className="text-xs text-amber-600 mb-1">Needed by: {sec.needed_by_date}</span>}
-                  </div>
-                  {sec.section_header_notes && <p className="text-xs text-secondary italic mb-1">{sec.section_header_notes}</p>}
-                  {sec.section_notes && <p className="text-xs text-secondary mb-1">{sec.section_notes}</p>}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-200 text-secondary">
-                          <th className="text-left py-1 pr-2">Product</th>
-                          <th className="text-right py-1 px-2">Rate</th>
-                          <th className="text-right py-1 px-2">Acres</th>
-                          <th className="text-right py-1 px-2">Units</th>
-                          <th className="text-right py-1 px-2">Price/Unit</th>
-                          <th className="text-right py-1 pl-2">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sec.items?.map((item, ii) => (
-                          <tr key={ii} className="border-b border-gray-100">
-                            <td className="py-1 pr-2 text-nav-dark">{item.product_name}</td>
-                            <td className="py-1 px-2 text-right text-secondary">
-                              {item.actual_rate ? `${item.actual_rate} ${item.rate_unit || ''}` : '-'}
-                            </td>
-                            <td className="py-1 px-2 text-right text-secondary">{item.acres ?? '-'}</td>
-                            <td className="py-1 px-2 text-right text-secondary">{item.total_units_needed ?? '-'}</td>
-                            <td className="py-1 px-2 text-right text-secondary">{fmt(item.price_per_unit)}</td>
-                            <td className="py-1 pl-2 text-right font-medium text-nav-dark">{fmt(item.total_price)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Compare mode: show differences between selected version and current quote */}
-          {selectedVersion && compareMode && (
-            <div className="border-t border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-nav-dark">
-                  Comparing V{selectedVersion.version_number} vs Current
-                </h4>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<EyeOff className="w-3.5 h-3.5" />}
-                    showChevron={false}
-                    onClick={() => setCompareMode(false)}
-                  >
-                    Exit Compare
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    showChevron={false}
-                    onClick={() => { setSelectedVersion(null); setCompareMode(false); setConfirmRestore(null); }}
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-              {/* Price comparison summary */}
-              {(() => {
-                const vTotal = selectedVersion.snapshot_data?.quote?.total_price || 0;
-                const cTotal = totals.totalPrice;
-                const diff = cTotal - vTotal;
-                return (
-                  <div className={`rounded-lg p-3 mb-3 text-sm ${diff > 0 ? 'bg-green-50 text-green-800' : diff < 0 ? 'bg-red-50 text-red-800' : 'bg-gray-50 text-secondary'}`}>
-                    V{selectedVersion.version_number} Total: {fmt(vTotal)} &rarr; Current: {fmt(cTotal)}
-                    {diff !== 0 && (
-                      <span className="ml-2 font-medium">
-                        ({diff > 0 ? '+' : ''}{fmt(diff)})
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-              {/* Item-level comparison */}
-              {(() => {
-                const versionItems = (selectedVersion.snapshot_data?.sections || []).flatMap(
-                  s => (s.items || []).map(i => ({ ...i, section: s.section_name }))
-                );
-                const currentItems = sections.flatMap(
-                  s => s.items.filter(i => i.product_id).map(i => ({
-                    product_id: i.product_id,
-                    product_name: i.product?.product_name || '',
-                    price_per_unit: i.price_per_unit,
-                    total_price: i.total_price,
-                    total_units_needed: i.total_units_needed,
-                    section: s.section_name,
-                  }))
-                );
-                const vMap = new Map(versionItems.map(i => [i.product_id, i]));
-                const cMap = new Map(currentItems.map(i => [i.product_id, i]));
-                const allProductIds = new Set([...vMap.keys(), ...cMap.keys()]);
-
-                return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-200 text-secondary">
-                          <th className="text-left py-1 pr-2">Product</th>
-                          <th className="text-right py-1 px-2">V{selectedVersion.version_number} Price</th>
-                          <th className="text-right py-1 px-2">Current Price</th>
-                          <th className="text-right py-1 px-2">V{selectedVersion.version_number} Total</th>
-                          <th className="text-right py-1 pl-2">Current Total</th>
-                          <th className="text-right py-1 pl-2">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from(allProductIds).map((pid) => {
-                          const vItem = vMap.get(pid);
-                          const cItem = cMap.get(pid);
-                          const isAdded = !vItem && cItem;
-                          const isRemoved = vItem && !cItem;
-                          const priceChanged = vItem && cItem && Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001;
-                          const bgClass = isAdded ? 'bg-green-50' : isRemoved ? 'bg-red-50' : priceChanged ? 'bg-amber-50' : '';
-                          return (
-                            <tr key={pid} className={`border-b border-gray-100 ${bgClass}`}>
-                              <td className="py-1 pr-2 text-nav-dark">{vItem?.product_name || cItem?.product_name || ''}</td>
-                              <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.price_per_unit) : '-'}</td>
-                              <td className="py-1 px-2 text-right text-secondary">{cItem ? fmt(cItem.price_per_unit) : '-'}</td>
-                              <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.total_price) : '-'}</td>
-                              <td className="py-1 pl-2 text-right text-secondary">{cItem ? fmt(cItem.total_price) : '-'}</td>
-                              <td className="py-1 pl-2 text-right">
-                                {isAdded && <Badge variant="success">Added</Badge>}
-                                {isRemoved && <Badge variant="error">Removed</Badge>}
-                                {priceChanged && <Badge variant="warning">Changed</Badge>}
-                                {!isAdded && !isRemoved && !priceChanged && <span className="text-secondary">-</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-        </Card>
-      )}
-
       <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
       {!id && quoteTemplates.length > 0 && (
         <div className="max-w-sm">
@@ -5023,6 +4684,19 @@ export default function QuoteBuilder() {
         </Notice>
       )}
 
+      </fieldset>
+
+      <Tabs
+        ariaLabel="Quote sections"
+        activeKey={shownTab}
+        onChange={setActiveTab}
+        tabs={[
+          {
+            key: 'products',
+            label: 'Products',
+            count: productCount,
+            content: (
+              <fieldset disabled={formLocked} aria-busy={formLocked} className="min-w-0 space-y-4 pt-4">
       {sections.map((sec) => {
         const isCollapsed = collapsedSections.has(sec._key);
         const sectionTotal = sec.items.reduce((s, i) => s + i.total_price, 0);
@@ -5561,20 +5235,359 @@ export default function QuoteBuilder() {
         </Button>
       </div>
 
-      </fieldset>
+              </fieldset>
+            ),
+          },
+          ...(settlement ? [{
+            key: 'balance',
+            label: 'Booking balance',
+            content: <div className="pt-4"><Card>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm empty:hidden">
+            {/* Prepaid cell hidden while there is no earmarked prepay — the booking-prepay
+                earmark engine is shelved (docs/roadmap/shelved-earmark-engine/), so this
+                reads 0 for now and lights up automatically when the engine returns. */}
+            {((settlement.prepay_remaining_cents ?? 0) > 0 || (settlement.prepay_earmarked_cents ?? 0) > 0) && (
+              <div>
+                <div className="text-secondary">Prepaid (remaining)</div>
+                <div className="font-semibold text-crx-green">{formatCents(settlement.prepay_remaining_cents ?? 0)}</div>
+              </div>
+            )}
+          </div>
+          {(settlement.prepay_earmarked_cents ?? 0) > 0 && (
+            <div className="mt-2 text-xs text-secondary">
+              Prepay earmarked {formatCents(settlement.prepay_earmarked_cents ?? 0)} · applied {formatCents(settlement.prepay_applied_cents ?? 0)}
+            </div>
+          )}
+          {settlement.lines && settlement.lines.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 text-secondary">
+                    <th className="px-2 py-1 text-left font-medium">Product</th>
+                    <th className="px-2 py-1 text-right font-medium">Booked</th>
+                    <th className="px-2 py-1 text-right font-medium">Drawn</th>
+                    <th className="px-2 py-1 text-right font-medium">Remaining</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {settlement.lines.map((ln) => (
+                    (() => {
+                      const unit = products.find((product) => product.id === ln.product_id)?.inventory_unit;
+                      const suffix = unit ? ` ${unit}` : '';
+                      return (
+                        <tr key={ln.product_id} className="border-b border-gray-50">
+                          <td className="px-2 py-1">{ln.product_name ?? '—'}</td>
+                          <td className="px-2 py-1 text-right">{ln.booked_qty}{suffix}</td>
+                          <td className="px-2 py-1 text-right">{ln.drawn_qty}{suffix}</td>
+                          <td className="px-2 py-1 text-right">{ln.remaining_qty}{suffix}</td>
+                        </tr>
+                      );
+                    })()
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card></div>,
+          }] : []),
+          ...(tabAvailable.last ? [{
+            key: 'last',
+            label: 'Last charged',
+            content: <div className="pt-4"><LastChargedPrices
+              // A new customer starts a new card, so the last customer's prices never show for a moment.
+              key={customerId}
+              customerId={customerId}
+              lines={lastChargedLines}
+            /></div>,
+          }] : []),
+          ...(tabAvailable.history ? [{
+            key: 'history',
+            label: 'History',
+            count: savedVersionCount,
+            content: <div className="pt-4"><Card>
+          {/* Version list */}
+          <div className="divide-y divide-gray-100">
+            {orderedVersionHistory.map((entry) => {
+              if (!entry.readable) {
+                /*
+                  Saved versions whose snapshot this build cannot read. Listed at all so a quote whose
+                  only versions are legacy still shows its history, and shown without an item count or
+                  total because both would have to be read out of a snapshot that cannot be trusted.
+                  Not selectable, so they reach neither the compare view nor restore.
 
-      {/* To-Do 0.3: what this customer was charged before. Staff only; never in Customer View. */}
-      {!customerView && (isAdmin || profile?.role === 'sales_rep') && (
-        <LastChargedPrices
-          // A new customer starts a new card, so the last customer's prices never show for a moment.
-          key={customerId}
-          customerId={customerId}
-          lines={sections.flatMap((section) => section.items.map((item) => ({
-            productId: item.product_id,
-            productName: item.product?.product_name ?? 'Product',
-          })))}
-        />
-      )}
+                  Only rows the server itself treats as legacy are called an older format; a row the
+                  server stamped as restorable says only that its details are unavailable, because
+                  calling it old would be a guess. Those also raise a Sentry report - see
+                  reportUntrustworthyQuoteVersions.
+                */
+                const u = entry.version;
+                return (
+                  <div key={u.id} className="py-3 px-3 flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-secondary">v{u.version_number}</span>
+                      <span className="text-secondary text-sm ml-3">
+                        {new Date(u.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-sm text-secondary italic">
+                      {u.server_trusted
+                        ? 'Details unavailable'
+                        : 'Saved in an older format · details unavailable'}
+                    </div>
+                  </div>
+                );
+              }
+              const v = entry.version;
+              const itemCount = v.snapshot_data?.sections?.reduce(
+                (sum, s) => sum + (s.items?.length || 0), 0
+              ) || 0;
+              const totalPrice = v.snapshot_data?.quote?.total_price || 0;
+              const isSelected = selectedVersion?.id === v.id;
+              return (
+                <div
+                  key={v.id}
+                  className={`py-3 px-3 flex items-center justify-between cursor-pointer transition-colors ${isSelected ? 'bg-crx-green/10 border-l-4 border-crx-green' : 'hover:bg-gray-50'}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setSelectedVersion(isSelected ? null : v);
+                    setCompareMode(false);
+                    setConfirmRestore(null);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedVersion(isSelected ? null : v); setCompareMode(false); setConfirmRestore(null); } }}
+                >
+                  <div>
+                    <span className="font-medium text-nav-dark">v{v.version_number}</span>
+                    <span className="text-secondary text-sm ml-3">
+                      {new Date(v.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="text-sm text-secondary">
+                    {itemCount} item{itemCount !== 1 ? 's' : ''} &middot;{' '}
+                    {fmt(totalPrice)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Selected version details */}
+          {selectedVersion && !compareMode && (
+            <div className="border-t border-gray-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-nav-dark">V{selectedVersion.version_number} Snapshot</h4>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<Eye className="w-3.5 h-3.5" />}
+                    showChevron={false}
+                    onClick={() => setCompareMode(true)}
+                  >
+                    Compare
+                  </Button>
+                  {canEdit && (
+                    <>
+                      {confirmRestore === selectedVersion.id ? (
+                        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
+                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}?</span>
+                          <Button
+                            size="sm"
+                            icon={<CheckCircle className="w-3.5 h-3.5" />}
+                            showChevron={false}
+                            onClick={() => handleRestoreVersion(selectedVersion.id)}
+                          >
+                            Yes
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            showChevron={false}
+                            onClick={() => setConfirmRestore(null)}
+                          >
+                            No
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<RotateCcw className="w-3.5 h-3.5" />}
+                          showChevron={false}
+                          onClick={() => setConfirmRestore(selectedVersion.id)}
+                        >
+                          Restore
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    showChevron={false}
+                    onClick={() => { setSelectedVersion(null); setConfirmRestore(null); }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+              <div className="text-sm text-secondary mb-3">
+                Total: {fmt(selectedVersion.snapshot_data?.quote?.total_price || 0)}
+                {' '}&middot;{' '}
+                {!hideCost && <>Margin: {(selectedVersion.snapshot_data?.quote?.total_margin_pct || 0).toFixed(1)}%</>}
+              </div>
+              {selectedVersion.snapshot_data?.sections?.map((sec, si) => (
+                <div key={si} className="mb-3">
+                  <div className="flex items-center gap-2">
+                    <h5 className="text-sm font-medium text-nav-dark mb-1">{sec.section_name}</h5>
+                    {sec.needed_by_date && <span className="text-xs text-amber-600 mb-1">Needed by: {sec.needed_by_date}</span>}
+                  </div>
+                  {sec.section_header_notes && <p className="text-xs text-secondary italic mb-1">{sec.section_header_notes}</p>}
+                  {sec.section_notes && <p className="text-xs text-secondary mb-1">{sec.section_notes}</p>}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-secondary">
+                          <th className="text-left py-1 pr-2">Product</th>
+                          <th className="text-right py-1 px-2">Rate</th>
+                          <th className="text-right py-1 px-2">Acres</th>
+                          <th className="text-right py-1 px-2">Units</th>
+                          <th className="text-right py-1 px-2">Price/Unit</th>
+                          <th className="text-right py-1 pl-2">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sec.items?.map((item, ii) => (
+                          <tr key={ii} className="border-b border-gray-100">
+                            <td className="py-1 pr-2 text-nav-dark">{item.product_name}</td>
+                            <td className="py-1 px-2 text-right text-secondary">
+                              {item.actual_rate ? `${item.actual_rate} ${item.rate_unit || ''}` : '-'}
+                            </td>
+                            <td className="py-1 px-2 text-right text-secondary">{item.acres ?? '-'}</td>
+                            <td className="py-1 px-2 text-right text-secondary">{item.total_units_needed ?? '-'}</td>
+                            <td className="py-1 px-2 text-right text-secondary">{fmt(item.price_per_unit)}</td>
+                            <td className="py-1 pl-2 text-right font-medium text-nav-dark">{fmt(item.total_price)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Compare mode: show differences between selected version and current quote */}
+          {selectedVersion && compareMode && (
+            <div className="border-t border-gray-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-nav-dark">
+                  Comparing V{selectedVersion.version_number} vs Current
+                </h4>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<EyeOff className="w-3.5 h-3.5" />}
+                    showChevron={false}
+                    onClick={() => setCompareMode(false)}
+                  >
+                    Exit Compare
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    showChevron={false}
+                    onClick={() => { setSelectedVersion(null); setCompareMode(false); setConfirmRestore(null); }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+              {/* Price comparison summary */}
+              {(() => {
+                const vTotal = selectedVersion.snapshot_data?.quote?.total_price || 0;
+                const cTotal = totals.totalPrice;
+                const diff = cTotal - vTotal;
+                return (
+                  <div className={`rounded-lg p-3 mb-3 text-sm ${diff > 0 ? 'bg-green-50 text-green-800' : diff < 0 ? 'bg-red-50 text-red-800' : 'bg-gray-50 text-secondary'}`}>
+                    V{selectedVersion.version_number} Total: {fmt(vTotal)} &rarr; Current: {fmt(cTotal)}
+                    {diff !== 0 && (
+                      <span className="ml-2 font-medium">
+                        ({diff > 0 ? '+' : ''}{fmt(diff)})
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              {/* Item-level comparison */}
+              {(() => {
+                const versionItems = (selectedVersion.snapshot_data?.sections || []).flatMap(
+                  s => (s.items || []).map(i => ({ ...i, section: s.section_name }))
+                );
+                const currentItems = sections.flatMap(
+                  s => s.items.filter(i => i.product_id).map(i => ({
+                    product_id: i.product_id,
+                    product_name: i.product?.product_name || '',
+                    price_per_unit: i.price_per_unit,
+                    total_price: i.total_price,
+                    total_units_needed: i.total_units_needed,
+                    section: s.section_name,
+                  }))
+                );
+                const vMap = new Map(versionItems.map(i => [i.product_id, i]));
+                const cMap = new Map(currentItems.map(i => [i.product_id, i]));
+                const allProductIds = new Set([...vMap.keys(), ...cMap.keys()]);
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-secondary">
+                          <th className="text-left py-1 pr-2">Product</th>
+                          <th className="text-right py-1 px-2">V{selectedVersion.version_number} Price</th>
+                          <th className="text-right py-1 px-2">Current Price</th>
+                          <th className="text-right py-1 px-2">V{selectedVersion.version_number} Total</th>
+                          <th className="text-right py-1 pl-2">Current Total</th>
+                          <th className="text-right py-1 pl-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from(allProductIds).map((pid) => {
+                          const vItem = vMap.get(pid);
+                          const cItem = cMap.get(pid);
+                          const isAdded = !vItem && cItem;
+                          const isRemoved = vItem && !cItem;
+                          const priceChanged = vItem && cItem && Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001;
+                          const bgClass = isAdded ? 'bg-green-50' : isRemoved ? 'bg-red-50' : priceChanged ? 'bg-amber-50' : '';
+                          return (
+                            <tr key={pid} className={`border-b border-gray-100 ${bgClass}`}>
+                              <td className="py-1 pr-2 text-nav-dark">{vItem?.product_name || cItem?.product_name || ''}</td>
+                              <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.price_per_unit) : '-'}</td>
+                              <td className="py-1 px-2 text-right text-secondary">{cItem ? fmt(cItem.price_per_unit) : '-'}</td>
+                              <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.total_price) : '-'}</td>
+                              <td className="py-1 pl-2 text-right text-secondary">{cItem ? fmt(cItem.total_price) : '-'}</td>
+                              <td className="py-1 pl-2 text-right">
+                                {isAdded && <Badge variant="success">Added</Badge>}
+                                {isRemoved && <Badge variant="error">Removed</Badge>}
+                                {priceChanged && <Badge variant="warning">Changed</Badge>}
+                                {!isAdded && !isRemoved && !priceChanged && <span className="text-secondary">-</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </Card></div>,
+          }] : []),
+        ]}
+      />
+
 
       <Modal
         open={productSearchOpen !== null}

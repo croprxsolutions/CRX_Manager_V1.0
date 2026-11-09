@@ -95,7 +95,7 @@ export default function Tabs({
                 onClick={() => onChange(tab.key)}
                 onKeyDown={(event) => handleKeyDown(event, index)}
                 className={`
-                  -mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-2
+                  -mb-px inline-flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-4 py-2 md:min-h-10
                   text-sm font-medium whitespace-nowrap transition-colors
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green
                   focus-visible:ring-offset-2

@@ -1,6 +1,6 @@
 # Product Master Stage 3: brand PR B build sheet (delivered brand, its EPA number, RUP records per brand)
 
-**Status (2026-11-08, reworked 2026-11-09 after an independent review):** this is a plan only. **Not ready to build: Question 5 (block or warn on brand problems at posting) is open, and sections 4.E and 7 change with Mason's answer.** No code and no migration have been written. It was written on 2026-11-08 against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces "PR B" in `docs/plans/2026-10-22-product-brands-step1-PLAN.md` (sections 4, 5, 7 and 8). Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "step 1 §4" means that plan.
+**Status (2026-11-08, reworked 2026-11-09 after an independent review):** this is a plan only. **Question 5 answered (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): a brand problem never stops a delivery or an invoice; it warns and is listed for the office.** Sections 3, 4, 5, 7, 9 and 10 were rewritten to that rule; the brand-required switch is removed. No code and no migration have been written. It was written on 2026-11-08 against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces "PR B" in `docs/plans/2026-10-22-product-brands-step1-PLAN.md` (sections 4, 5, 7 and 8). Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "step 1 §4" means that plan.
 
 **Cannot start yet.** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
 
@@ -11,7 +11,8 @@
 - **Snapshot:** the brand name and EPA number copied onto the pick (and later onto the invoice line) at the time, so later edits to the brand list never change history.
 - **Branded line:** a delivery line whose product has at least one brand on its list, or that carries a typed pick.
 - **Registration, sale capture, seeded:** as in the REG-1 sheet (`docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md`): the per-EPA-number record, the RUP and signal-word facts copied onto an invoice line when it is made, and whether the REG-1 seed has run.
-- **The switch** (brand-required switch): `delivery_brand_settings.brand_required` (3.1), off by default. While off, nothing is ever refused for a missing brand.
+- **Brand problem:** on a branded line, no brand recorded, a typed brand with no EPA number, brand amounts that do not add up to what was delivered, or more billed than was delivered.
+- **Warn, never block** (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): no brand problem ever refuses a completion or a posting. It shows a warning and puts the line on an office follow-up list (4.H). There is no brand-required switch.
 
 ---
 
@@ -26,7 +27,6 @@
 | `epa_registrations` | 0 rows (REG-1 step 1 live; not seeded) |
 | `_product_parent_grouping_open()` | returns `false` (PAR-2 grouping and brand move not switched on) |
 | `delivery_item_brands`, any brand column on `delivery_items`, `invoice_items` or `rup_sales_records` | do not exist |
-| `delivery_brand_required` setting | does not exist |
 | Latest live migration | `20261215110000_chem_sale_bill_split_invoices` (Taha's #1524, merged as `b1a5c0e80`). This repo's migration stamps run ahead of the calendar on purpose (each new one sorts after the newest on main), so a December stamp on a November date is normal; the version was read from the live ledger. |
 
 **Live tables PR B reads or extends:**
@@ -106,13 +106,11 @@
 
 **`invoice_items.brand_lines jsonb`** (new column; NULL by default). Meaning:
 - `NULL`: the line has no delivered-brand information (an unbranded product, a credit memo, or a line not made from a delivery). It behaves exactly as REG-DB.
-- `[]`: a branded line whose delivery recorded no brand (only possible while the brand-required switch is off). It prints "Brand not recorded" and keeps no EPA number, never the generic's own number.
+- `[]`: a branded line whose delivery recorded no brand (allowed: a missing brand never refuses completion). It prints "Brand not recorded" and keeps no EPA number, never the generic's own number.
 - `[ {brand_name, epa_registration, manufacturer, delivered_quantity, rup_status, signal_word, facts_source, typed, pick_ids, completed_at} … ]`: one entry per delivered brand, ordered by trip completion time, then brand name, then EPA number. A completed trip with no picks adds an entry with `brand_name` NULL ("no brand recorded") for its amount.
 - It is written only by the database, under REG-DB's capture pass. The client column grant is revoked, which fits REG-1 Q7 (all client writes on `invoice_items` revoked).
 
 **`rup_sales_records.brand_name text`** (new, NULL for an unbranded record). Two brands with one EPA number in one record show both names, joined with "; ".
-
-**`delivery_brand_settings`** (new, one row, `id boolean PRIMARY KEY DEFAULT true CHECK (id)`): `brand_required boolean NOT NULL DEFAULT false`, `changed_by`, `changed_at`, `reason`. RLS on; `REVOKE ALL` from `PUBLIC`, `anon`, `authenticated`, `service_role`; `GRANT SELECT` to `authenticated` with a SELECT policy for any active app user (the existing active-user check the delivery policies use), so the settings page and the screens can read the switch. No role can write it except through `set_delivery_brand_required` (4.J), and no other function writes it, so the switch is not in `app_settings` where the generic admin settings path could change it. The migration inserts the one row, a live data row, so the apply gate may not class the migration as "routine grants only" (section 10).
 
 ### 3.2 Brand-list resolution (one internal helper)
 
@@ -132,7 +130,7 @@
 ### 3.4 Retry safety and authorization (every public RPC)
 
 - Each RPC takes `p_idempotency_key text DEFAULT NULL`. A missing key is refused (`IDEMPOTENCY_KEY_REQUIRED`) on every write path, following the bound-receipt pattern the delivery functions use today (`check_idempotency_intent(key, operation, actor, fingerprint)`, then `_bind_replay_receipt`, as in `20261019200000_bind_delivery_job_replay_receipts_batch3a.sql`). That pattern keeps one row per key: the same key on a different operation is refused (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`), and the same key and operation with a different payload is refused.
-- The four new operations (`set_delivery_brands`, `correct_delivery_brands`, `review_typed_brand`, `set_delivery_brand_required`) are added to the operation list of the `require_bound_replay_receipt_20261015` constraint trigger, by dropping and recreating it with the drift preflight the batch migrations use (`20261123110000…:237-250`).
+- The three new operations (`set_delivery_brands`, `correct_delivery_brands`, `review_typed_brand`) are added to the operation list of the `require_bound_replay_receipt_20261015` constraint trigger, by dropping and recreating it with the drift preflight the batch migrations use (`20261123110000…:237-250`).
 - Authorization runs **before** the replay lookup (the `20260716173342` rule), so a stranger cannot read someone else's cached result.
 - Every `SECURITY DEFINER` function in PR B, public or internal, has `SET search_path = public, pg_temp` and schema-qualifies its references.
 - Public RPCs: `REVOKE ALL … FROM PUBLIC, anon`, `GRANT EXECUTE … TO authenticated`.
@@ -173,25 +171,21 @@ Today its body deletes and re-creates every line (`20260611211058…:1573-1585`)
 Cancel, void and restore leave picks alone. Picks go when `update_order_items` removes a cancelled delivery's lines (cascade); nothing was delivered, and the cancellation is already in the order's history.
 
 ### 4.C The completion rule (inside `_complete_delivery_authorized_impl`)
-It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. **No path is exempt**, old offline replays included: the database cannot prove a replay is old, so an exemption would be a way around the rule. An old queued completion refused after switch-on (`BRAND_REQUIRED`) shows on the existing offline work review page (`OfflineWorkReview`) for the office to pick the brand and complete, as other refused replays do today. Completion has been online only since 2026-10-15, so by switch-on very few, if any, such actions should remain. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
+It runs right after the loop that writes `quantity_delivered` (today `:1107-1150`; the status is set `completed` just before it at `:1102-1106`) and before the tote copy (`:1159-1168`) and invoice drafting. It cannot be a status trigger, because the status flips before the delivered amounts exist. Every completion path goes through this function: `complete_delivery`, `start_and_complete_delivery`, and old offline replays still sitting on devices. Every path, old offline replays included, gets the same rule, and the rule never refuses for a brand problem. The builder lists every caller from `pg_proc`, and the harness asserts each one reaches the rule. For each line:
 
 1. **Delivered zero:** its picks are removed (one `completed` event keeps them).
 
 The `completed` event records, for every line, its delivered amount and the size of its brand list at that moment, for the missing-brands report (4.H).
 2. **One pick:** its amount is set to the delivered amount (same brand, smaller amount; nothing is guessed).
-3. **Several picks:** their sum must equal the delivered amount. When it does not:
-   - brand-required switch on: refused with `BRAND_SPLIT_MISMATCH: line <product> delivered <n>, brands add up to <m>`;
-   - switch off: kept as is and flagged "split does not match delivered" on the draft invoice.
-4. **Branded line with no pick:**
-   - switch on: refused with `BRAND_REQUIRED: pick the brand for <product>`;
-   - switch off: completes. The line's invoice gets `brand_lines = []` (3.1).
+3. **Several picks whose sum is not the delivered amount:** completes; the picks are kept as saved and the line is flagged "split does not match delivered" on the draft invoice and the missing-brands list (4.H).
+4. **Branded line with no pick:** completes. The line's invoice gets `brand_lines = []` (3.1), and the line is on the missing-brands list.
 5. **Listed pick no longer on the list** (the size moved parent, or the brand was retired, since the pick): never refused, because the snapshot already records what went off the truck. A legacy pick whose brand was moved is re-pointed to its parent brand through `product_parent_brand_sources` (`20261123120000`); otherwise it is kept with its snapshot and flagged for review.
 6. **Capture sale facts** on every current pick, so a later brand-list edit never rewrites the sale:
    - **seeded:** from the pick's number's registration (`rup_status`, `signal_word`, `registration:<n>@<v>`). A number with no registration gets `unknown`;
    - **before the seed:** from the brand row (`is_rup` true → `yes`, false → `no`, NULL → `unknown`);
    - **typed:** `unknown`, unless seeded and its number has a registration.
 
-A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` (`0` when it has no events) differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens and the list always send it, as `0` for a delivery with no brand events, so NULL means only "an old caller that asked for no check" and a first save after the screen loaded is still caught. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Old queued replays do not send it and complete against the current picks, which the switch rules still check. The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
+A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` (`0` when it has no events) differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens and the list always send it, as `0` for a delivery with no brand events, so NULL means only "an old caller that asked for no check" and a first save after the screen loaded is still caught. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Old queued replays do not send it and complete against the current picks. The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
 
 **Not chosen:** a reserved key inside `p_quantities` (step 1's plan). It would change the parsing and fingerprints of every function that reads `p_quantities`, for a rare case.
 
@@ -199,7 +193,7 @@ The Bill Split auto-split path in completion runs inside `EXCEPTION WHEN OTHERS`
 
 Stock shortages still never block (To-Do 2.6). Lot and tote numbers are not read or required anywhere in PR B (August T-7, R-5).
 
-**The acceptance rule "a brand must be picked when the product has brands" is enforced only once the brand-required switch is on** (section 9, order step 6). Until then PR B records and flags, and never blocks.
+**The acceptance rule "a brand must be picked when the product has brands" (step 1) is never enforced** (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"). PR B records, warns and lists, and never blocks.
 
 ### 4.D Snapshot onto invoice lines
 **Which picks belong to an invoice line** (used here and by the correction in 4.F):
@@ -233,15 +227,17 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **A line with brand entries:** one candidate record per entry, read from the stored `brand_lines`.
   - **Allocating the line's quantity and cents to entries:**
     - a Bill Split payer's line, and a **landlord split** payer's line: in proportion to `delivered_quantity`, so each payer gets the same share of every brand. The per-brand amounts across all payer lines of one order line are allocated together (largest remainder on the last payer), so for each brand they add up exactly to what was delivered;
-    - any other line: in entry order (trip order), each entry taking up to its delivered amount until the line's quantity is used up. A restricted-use line whose quantity is **above** the delivered total (outside Bill Split) refuses posting with `BRAND_QTY_OVER_DELIVERED: <product> is billed for more than was delivered by brand; fix the quantity or the brand amounts`, because no brand can be named for the extra. So a whole-order line still at 60 after trips of A 60 and B 40 records A 60, not A 36 and B 24.
+    - any other line: in entry order (trip order), each entry taking up to its delivered amount until the line's quantity is used up. The extra on a line billed **above** the delivered total (outside Bill Split) is given to no brand and gets no record, because no brand can be named for it; it goes on the RUP brand gaps list (below). So a whole-order line still at 60 after trips of A 60 and B 40 records A 60, not A 36 and B 24.
     - Cents follow the quantity in whole cents; quantities are rounded to the line quantity's own scale (the builder confirms the column's scale from live). The last entry takes both remainders, so the records add up to the line exactly.
   - **Which entries need a record (REG-1's rule, per entry):** the entry's captured `rup_status` is `yes`, **or** the registration of that entry's number says `yes` at posting. Over-recording is the safe side; a captured `yes` is never lowered by a later change. An entry captured `unknown` under a restricted-use generic, or a typed entry captured `unknown`, is also recorded, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed entry `unknown` under a non-RUP generic is not recorded, and shows on REG-DB's Compliance not-reviewed list (4.D).
   - **What each record holds:** the entry's EPA number, signal word and `brand_name`.
-- **A record never has a blank EPA number, and never a guessed split** (REG-1's rule). Posting refuses, naming the line, when:
-  - a restricted-use line has an entry with no brand recorded, or `brand_lines = []`: `BRAND_NOT_RECORDED: record the brand and its EPA number for <product> before posting` (Question 3);
-  - **any** line, restricted-use or not, has a typed entry with no EPA number, because its restricted-use status cannot be known without the number: the same `BRAND_NOT_RECORDED` (Question 1);
-  - a restricted-use line's entries do not add up to what was delivered (a split kept while the brand-required switch was off, 4.C step 3): `BRAND_SPLIT_MISMATCH: fix the brand amounts for <product> before posting`, so the register never records a split the delivery did not establish.
-  The office fixes each with the correction in 4.F while the invoice is still a draft. The truck is never stopped by this.
+- **Brand problems never refuse posting** (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"). A record still never has a blank EPA number and never a guessed split (REG-1's rule), so posting records only what is known and puts the rest on the **RUP brand gaps** list (4.H):
+  - an entry with no brand recorded, or `brand_lines = []`: no record for that amount; listed "brand not recorded";
+  - a typed entry with no EPA number: no record for that entry; listed "EPA number not recorded" (its restricted-use status cannot be known);
+  - a line whose entries do not add up to what was delivered: no record for the line; listed "brand amounts do not match delivered", with both amounts;
+  - a line billed above the delivered total: the delivered part is recorded as above, the extra is listed "billed above delivered".
+  Every posted branded line with a brand problem is listed, whatever its generic's restricted-use status, because a restricted-use brand can sit under a generic that is not (the hole behind Question 5). For a line with `brand_lines` not NULL, REG-DB's numberless-line refusal (`INVOICE_LINE_RUP_NO_EPA`) is replaced by this listing. Lines with `brand_lines` NULL keep REG-DB's behaviour exactly.
+  Before posting, the invoice screen shows each problem and the office confirms "Post anyway" (section 6). The office can fix a problem first with the correction in 4.F while the invoice is a draft; after posting, the fix is REG-1's void and reissue, and a voided invoice's lines leave the list.
 - **Grouping:** REG-DB's key `(invoice, product, sold number, signal word)`, with each entry treated as its own sold number. Entries sharing a key are added into one record and their brand names joined. The merged record keeps the most cautious status (`warning` over compliant) and every entry's note, so a typed or unconfirmed entry's warning is never lost by merging. REG-DB's "an existing active record that disagrees is an error" rule and its posting lock stay.
 - `get_rup_sales_register` returns `brand_name`.
 
@@ -263,14 +259,12 @@ A line the office adds by hand gets `brand_lines` NULL.
 ### 4.H Read RPCs
 - `get_delivery_brands(p_delivery_id)`: each line, its brand list (3.2), its current picks, and the delivery's highest event `seq`. Same read rule as the delivery.
 - `get_typed_brands_for_review()`: admin only; pending typed picks with delivery, product and line.
-- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed lines with `quantity_delivered > 0` that had a brand list **at completion** and either have no current picks or have picks that do not add up to the delivered amount (the switch-on backlog report, section 10). Whether a line had a brand list is read from the `completed` event, which records each line's brand-list size at that moment (4.C), so retiring a brand later never hides an old gap.
+- `get_deliveries_missing_brands(p_from date, p_to date)`: admin only; completed lines with `quantity_delivered > 0` that had a brand list **at completion** and either have no current picks or have picks that do not add up to the delivered amount (the office's follow-up list; it never blocks anything). Whether a line had a brand list is read from the `completed` event, which records each line's brand-list size at that moment (4.C), so retiring a brand later never hides an old gap.
+- `get_rup_brand_gaps(p_from date, p_to date)`: admin only; posted, not-voided invoice lines with a brand problem (4.E), each with the invoice, product, generic's restricted-use status, problem and quantity not recorded. Computed from the frozen `brand_lines` and the records, so it needs no new table.
 - `get_detailed_statement_data` is re-issued to return `brand_lines`.
 
-### 4.J `set_delivery_brand_required(p_on boolean, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
-- **Who:** admin only; the reason is required.
-- **Turning on is refused** (`BRAND_BACKLOG_OPEN`) while `get_deliveries_missing_brands` over **all dates** is not empty, so the switch cannot go on before the backlog is cleared. A product with no brand rows has no brands by definition (3.2) and needs no pick; entering the lists is Mason's step 2 (section 10). As an advisory, the settings screen also shows the restricted-use products sold in the last 90 days that still have no brand list.
-- It is the only writer of `delivery_brand_settings` (3.1): no client role has a write grant, and the harness checks that no other function body writes the table.
-- Writes an activity log entry with the reason. It is added to the receipt-binding trigger's operation list with the other three (3.4).
+### 4.J (removed) Brand-required switch
+Removed by Question 5 (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): no `delivery_brand_settings` table, no `set_delivery_brand_required`, no settings toggle.
 - Section 10 still keeps turning it on as Mason's call; this makes the readiness part a hard check.
 
 ### 4.I Files, harness, risks
@@ -298,22 +292,21 @@ A line the office adds by hand gets `brand_lines` NULL.
   - a **Brand** picker per branded line: currently sourced brands first, then "Not currently bought (old stock)", plus **Other brand…** (name, EPA number, manufacturer; the number is optional and marked "from the jug label");
   - **Split** adds a second brand with an amount. Picks save any time before completion.
 - **Completion screens:**
-  - a line with no pick asks for one;
+  - a line with no pick shows "No brand picked for <product>" with **Pick brand** and **Complete anyway**; a split that does not add up shows the same warning;
   - a short split line asks how much of each brand went off the truck, pre-filled with what was loaded, then saves it (`set_delivery_brands`) before calling completion;
-  - the refusal codes from 4.C are shown as plain sentences naming the line.
+  - nothing about brands refuses completion; only `BRAND_PICKS_CHANGED` (someone else saved) can, and it reloads.
 - **Saving safely:**
   - The screen's picks belong to one delivery ID and are reloaded from `get_delivery_brands` when it opens another delivery or reopens.
   - Each save gets one retry key from the existing `useIdempotencyKey` hook, reused on every retry of that same save and replaced only when the choices change.
   - One save at a time: while a save or a completion is in flight, the picker, Split and Complete are disabled, and a reply for anything but the latest request is ignored. Complete is offered only after the latest save has come back, and sends the base `seq` it loaded or saved (`p_brand_base_seq`); the database reads the saved picks.
   - A `BRAND_PICKS_CHANGED` refusal (someone else saved, or the delivery was edited) reloads the picks and says so.
   - A failed save leaves the screen's choices in place, shows the error, and keeps Complete disabled until a save succeeds.
-- **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
+- **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** completes as today; a branded line with no pick lands on the missing-brands list.
 - **Edit delivery:** the lines whose picks were dropped (4.B) are flagged.
 - **Products page** (`src/pages/Products.tsx`): a **Brands to review** tab (admin), using a new `src/components/products/TypedBrandReview.tsx`. "Add to list" calls the existing brand RPC, then `review_typed_brand('link')`. PR B-2 does **not** edit `ProductDetail.tsx` or `ProductBrandsSection.tsx`.
-- **Admin settings** (`src/pages/SettingsPage.tsx`): the brand-required switch, showing the count from `get_deliveries_missing_brands` beside it. It calls `set_delivery_brand_required` (4.J), never a direct table update.
 - **Quick delivery:** no picker in the modal. It is completed on its delivery page, where the picker is (step 1 §5).
 - **New client helper:** `src/lib/deliveryBrands.ts`, which calls `assertRpcResult()` after each RPC.
-- **Sol list:** yes (`src/pages/Products.tsx`, `src/pages/SettingsPage.tsx`, plus "deliver" in file names).
+- **Sol list:** yes (`src/pages/Products.tsx`, plus "deliver" in file names).
 
 ## 6. PR B-3 · Paperwork and records (after B-1 is live; may land with or after B-2)
 
@@ -327,28 +320,28 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **Statement:** `src/lib/statementPdf.ts:581`, `:636` print the joined numbers when the line's own number is blank, from `get_detailed_statement_data`'s `brand_lines`.
 - **Invoice screen** (`src/pages/InvoiceDetail.tsx`):
   - the brands are shown read-only on lines made from a delivery;
-  - warnings before posting: "Brand typed at delivery, not yet checked", "Brand not recorded", "Split does not match delivered", and "Quantity changed from delivered"; and the plain sentence for `BRAND_NOT_RECORDED` (4.E).
-- **Compliance page** (`src/pages/Compliance.tsx`): the RUP register shows a **Brand** column and the new notes; the not-reviewed list shows `unknown` brand entries (4.D).
+  - warnings before posting: "Brand typed at delivery, not yet checked", "Brand not recorded", "EPA number not recorded", "Split does not match delivered", "Billed above delivered" and "Quantity changed from delivered". Posting a line with a brand problem asks once to confirm (`ConfirmModal`, "Post anyway") and says which part gets no RUP record (4.E).
+- **Compliance page** (`src/pages/Compliance.tsx`): the RUP register shows a **Brand** column and the new notes; the not-reviewed list shows `unknown` brand entries (4.D); a new **RUP brand gaps** list shows `get_rup_brand_gaps` (4.H), next to a **Deliveries missing brands** list from `get_deliveries_missing_brands`.
 - **Sol list:** yes (`invoicePdf.ts`, `statementPdf.ts`, `deliveryPdf.ts`, `InvoiceDetail.tsx` carry money words, and `supabase/functions/`). The `pdf-output-reviewer` agent runs on the three PDFs.
 
 ---
 
 ## 7. Done when (prover cases; B-1 in the real-schema harness, B-2/B-3 with screen tests and a local run)
 
-"Switch" below means the brand-required switch; "grouping switch" means `_product_parent_grouping_open()`.
+"Grouping switch" means `_product_parent_grouping_open()`. There is no brand-required switch.
 
 **Brand lists and picks**
 - P1. Ungrouped size with legacy brands: listed pick saved, snapshot from the brand row. A Liberty brand on a Roundup line, a brand from another parent and a brand from another size's legacy list are refused (`BRAND_NOT_FOR_PRODUCT`).
 - P2. Grouped size with the grouping switch on: the parent's active brands are the list. A retired parent brand is refused. A legacy brand ID on a grouped size is refused. A not-currently-sourced listed brand is accepted.
 - P3. Typed brand with a number completes and lands on the review list. A typed brand with a blank number completes and is flagged. A typed name equal to a listed brand with the same number is stored as listed.
-- P4. A driver not assigned to the delivery, a non-active user and an anonymous caller are refused. The same key with the same request changes nothing (one event); the same key with a different request is refused; the same key on another of the four operations is refused (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`); a missing key is refused.
+- P4. A driver not assigned to the delivery, a non-active user and an anonymous caller are refused. The same key with the same request changes nothing (one event); the same key with a different request is refused; the same key on another of the three operations is refused (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`); a missing key is refused.
 - P5. A save with an old `p_base_event_seq` is refused after a newer save and after an `edit_delivery`; a same-key replay of the older save returns its original result.
 
 **Completion**
-- P6. Switch on: a branded line with no pick is refused, naming the line. After the pick, it completes. The check sees the final delivered amounts (the case a status trigger would miss).
-- P7. A 30/15 split loaded at 45, delivered 40: with the switch on, completion is refused until the 40 split is saved; after saving, it completes. A line delivered at zero keeps no picks.
-- P8. Switch off: every case above completes, records what was picked, and gives `brand_lines = []` with no EPA number (never the generic's).
-- P9. A legacy pick whose size was then grouped completes in both switch states and is re-pointed to its parent brand; a pick of a retired brand completes and is flagged.
+- P6. A branded line with no pick completes, gives `brand_lines = []` with no EPA number (never the generic's), and is on the missing-brands list. The rule sees the final delivered amounts (the case a status trigger would miss).
+- P7. A 30/15 split loaded at 45, delivered 40, not re-saved: completes, keeps 30/15, flagged and listed; saved as 25/15 first: completes with no flag. A line delivered at zero keeps no picks.
+- P8. No brand problem refuses completion through any entry point, `process_offline_action` included.
+- P9. A legacy pick whose size was then grouped completes and is re-pointed to its parent brand; a pick of a retired brand completes and is flagged.
 - P10. No lot or tote number anywhere: every case completes. A tote number, when present, is still copied as today.
 - P11. Every caller of `_complete_delivery_authorized_impl` from `pg_proc` reaches the rule, including an old offline completion replay.
 
@@ -364,7 +357,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 **RUP**
 - P19. A split restricted-use line posts two records with the right numbers, amounts and cents adding up exactly. Two lines of one product and one brand number on one invoice produce one record. A whole-order line at 60 after trips of A 60 and B 40 records A 60.
 - P20. A brand captured `no` whose registration says `yes` at posting is recorded (REG-1's rule); one captured `yes` keeps its record after a flip to `no`. An `unknown` entry under a restricted-use generic, and a typed `unknown` entry under a non-RUP generic, are recorded with the warning. A listed `unknown` entry under a non-RUP generic is not recorded and shows on the Compliance not-reviewed list.
-- P21. A restricted-use line with `brand_lines = []` or a no-brand entry, and any line with a typed no-number entry, refuse posting with `BRAND_NOT_RECORDED`; a restricted-use line whose entries do not add up to delivered refuses with `BRAND_SPLIT_MISMATCH`; a restricted-use line billed above the delivered total refuses with `BRAND_QTY_OVER_DELIVERED`; after the draft-time fix each posts.
+- P21. Each brand problem posts and is never refused: `brand_lines = []` or a no-brand entry (no record for that amount), a typed no-number entry (no record for it), entries not adding up to delivered (no record for the line), billed above delivered (delivered part recorded, extra not). Each is on `get_rup_brand_gaps`, under a restricted-use generic and under one that is not; no record has a blank EPA number. A line with `brand_lines` NULL and no number on a restricted-use product still gets REG-DB's `INVOICE_LINE_RUP_NO_EPA`. Voiding the invoice removes its lines from the list.
 - P22. Unpost, void and re-post behave as before under the new grouping (PARKED-006).
 
 **Correction and review**
@@ -375,13 +368,12 @@ A line the office adds by hand gets `brand_lines` NULL.
 **Editing, receipts, grants, concurrency**
 - P26. Changing only a scheduled delivery's date keeps the picks under the new line IDs; changing one line's quantity or unit size drops only that line's picks; both write an `edited` event. An error in the brand step during a Bill Split completion fails the completion instead of falling back.
 - P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none) and service_role has no table privilege on the new tables.
-- P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the four new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
-- P30. Switch-on through `set_delivery_brand_required` is refused while the missing-brands report is not empty. A line whose picks do not add up to delivered is on the report until corrected. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
+- P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the three new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
+- P30. A line whose picks do not add up to delivered is on the missing-brands report until corrected. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
 - P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
 - P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
-- P34. A direct write to `delivery_brand_settings` from `authenticated` is refused, and no function other than `set_delivery_brand_required` writes it. With the switch on, a no-pick completion is refused through every entry point, `process_offline_action` included, and the refused replay appears on the offline work review page.
 - P35. A `yes` listed entry and a typed `unknown` entry sharing one record key give one record with `warning` and both notes.
-- P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. A list loaded with no brand events (sends `0`), then a first save, then Mark Delivered: refused. The settings row is readable by an active user.
+- P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. A list loaded with no brand events (sends `0`), then a first save, then Mark Delivered: refused.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
 
@@ -404,21 +396,20 @@ A line the office adds by hand gets `brand_lines` NULL.
 | **REG-1 step 2 (REG-DB) merged and live** | PR B extends REG-DB's `_capture_invoice_line_sale`, invoice-line guard, `generate_rup_sales_records`, lock order and every invoice writer it re-issues. Building PR B first would re-issue the same functions twice. | Unblocked now that #1524 is merged; being built on branch `claude/reg1-step2-db` (stamps `20261218100000`–`20261218130000`) |
 | REG-1 seed | Not required. PR B captures from brand rows before the seed and from registrations after it (4.C step 6). | Mason-gated, not run |
 | #1649, #1678 (receipt sending) | B-1 adds brands to the receipt snapshot wherever these leave it (3.5) | Open |
-| Brand data | Admins enter brands (on parents once grouped). The switch stays off until the lists exist. | Mason |
+| Brand data | Admins enter brands (on parents once grouped). Until a generic has a list, it has no brands and nothing is asked. | Mason |
 
 **Shared files:**
 - PR B touches neither `ProductDetail.tsx` nor `ProductBrandsSection.tsx` (REG-1's screens edit both).
-- B-2 edits `Products.tsx` and `SettingsPage.tsx`: re-check open PRs on both before starting.
+- B-2 edits `Products.tsx`: re-check open PRs on it before starting.
 - RT-1 (rates) is a separate build sheet. Its later rate packages may touch invoice writers; whichever lands second rebuilds from live bodies.
 - Taha's open PRs (#1534, #1576, #1587) touch invoice and order screens. Check for overlap before B-3, and never push to them.
 
 **Order:**
 1. REG-DB is live.
 2. The PAR-2 move is live and verified.
-3. B-1 (Sol), then its live apply through the migration-apply gate, with the switch off.
+3. B-1 (Sol), then its live apply through the migration-apply gate.
 4. B-2 and B-3 (Sol each).
-5. Admins clear the missing-brands report.
-6. Mason turns the switch on.
+5. The office works the missing-brands and RUP brand gaps lists as part of normal follow-up (nothing waits on them).
 
 ---
 
@@ -426,21 +417,20 @@ A line the office adds by hand gets `brand_lines` NULL.
 
 1. **Grouping and brand move (PAR-2):** his grouping data step, then the move switch-on. Both are already gated in PAR-2.
 2. **Brand lists:** entering each generic's brands with their EPA numbers (admin work; no code).
-3. **Apply B-1 live.** It is non-destructive, but it also inserts the one `delivery_brand_settings` row and recreates the receipt-binding trigger on `idempotency_keys`, so the apply gate may not class it as routine grants only. If so, it needs Mason's `approve <code>`.
+3. **Apply B-1 live.** It is non-destructive, but it recreates the receipt-binding trigger on `idempotency_keys`, so the apply gate may not class it as routine grants only. If so, it needs Mason's `approve <code>`.
 4. **Deploy the `send-delivery-receipts` Edge Function change** (B-3). An Edge Function deploy always needs his explicit yes; it is downloaded and diffed after deploy.
-5. **Turn on the brand-required switch** (`set_delivery_brand_required`) once B-2 and B-3 are live and proven and the missing-brands report is empty. It is a live setting change, so it needs his explicit yes in that session.
 
 ---
 ---
 
 ## 11. Questions for Mason
 
-1. **A typed brand whose EPA number cannot be read** (smudged jug, no label): the delivery still finishes, and the line is flagged on the review list and the draft invoice. The invoice cannot be posted until the office records the number, on any product, because without the number nobody can tell whether that brand is restricted-use (REG-1: a RUP record never has a blank number). **Recommended.** The alternative is to require the number at the truck, which would stop the delivery.
+1. **A typed brand whose EPA number cannot be read** (smudged jug, no label): the delivery still finishes, and the line is flagged on the review list and the draft invoice. **Answered by Question 5:** the invoice still posts with a warning; that entry gets no RUP record (never a blank number) and is on the RUP brand gaps list.
 2. **A delivered brand whose restricted-use status is unknown, under a restricted-use generic, or any typed brand whose status is unknown:** it goes on the RUP register with a warning to confirm (over-recording is the safe side). **Recommended.** The alternative is only listing it on the Compliance review list, which risks a missing regulated record.
-3. **A restricted-use line delivered with no brand recorded** (only while the brand-required switch is off): the invoice cannot be posted until the office records the brand. **Recommended**, because a RUP record can never have a blank number. The alternative is posting with the generic product's number, which may be the wrong label.
+3. **A restricted-use line delivered with no brand recorded:** **answered by Question 5:** it posts with a warning, gets no RUP record (never the generic's number, never a blank one) and is on the RUP brand gaps list.
 4. **The office changes the quantity on a branded invoice line:** the plan keeps the delivered brand and its EPA number. This departs from your REG-1 rule ("a quantity change re-captures the line from the product's current label") only for branded lines, because re-capturing would put the generic's number on a line whose brand is known. **Recommended.** The alternative is to follow REG-1 exactly, which prints the generic's number after any quantity edit.
 
-5. **Block or warn: which invoice lines with a brand problem can still be posted?** A brand problem is: no brand recorded, a typed brand with no EPA number, brand amounts that do not match what was delivered, or more billed than was delivered. Today the plan blocks posting only when the **generic product** is restricted-use. Luna's rounds 6, 9 and 10 kept finding the same hole: a restricted-use **brand** can sit under a generic that is not, so the restricted-use sale can slip past. **Recommended: block posting for any branded line with a brand problem, whatever the product.** The office fixes the brand on the delivery first (a draft-time correction, a minute's work), and a restricted-use sale can never be missed or given a guessed amount. The cost: while the brand-required switch is off, more draft invoices on branded products wait for that fix. The alternative is to keep warning only on non-restricted-use generics, which needs more special rules and keeps that hole.
+5. **Block or warn: which invoice lines with a brand problem can still be posted?** A brand problem is: no brand recorded, a typed brand with no EPA number, brand amounts that do not match what was delivered, or more billed than was delivered. Today the plan blocks posting only when the **generic product** is restricted-use. Luna's rounds 6, 9 and 10 kept finding the same hole: a restricted-use **brand** can sit under a generic that is not, so the restricted-use sale can slip past. **Answered (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): never block, only warn.** Nothing about brands refuses a completion or a posting, and the brand-required switch is removed. The hole is closed by listing instead: every posted branded line with a brand problem, under any generic, is on the RUP brand gaps list, and the unknown part gets no record rather than a blank or guessed one (4.E). The cost Mason accepted: a restricted-use sale can post with its record incomplete until the office follows up (void and reissue).
 
 A brand corrected after the invoice was sent follows REG-1: void and reissue the invoice. No question needed.
 
@@ -539,3 +529,5 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - Landlord split lines allocated each payer from the first trip, over-recording one brand: landlord splits use the proportional rule, reconciled across payers (4.E, P13).
 - Merging same-brand trips lost the trip order allocation needs: trips stay separate entries; records merge afterwards (4.D, P14).
 - NULL meant both "no events yet" and "no check": empty history is `0`, NULL only for old callers (4.A, 4.C, P36).
+
+**Mason's answer to Question 5 (2026-11-09):** "do not be strict on RUP license don't ever block just warn". Applied to the whole plan: no brand problem refuses completion or posting; the brand-required switch (3.1 table, 4.J, settings toggle, order steps 5-6, Mason step 5) is removed; posting records only what is known and lists the rest on a new RUP brand gaps list (4.E, 4.H, P21); Questions 1 and 3 follow from it. Kept, because they protect data rather than enforce RUP: `BRAND_PICKS_CHANGED` (someone else saved), `BRAND_NOT_FOR_PRODUCT` (a brand from another product), `BRAND_SPLIT_OVER_LOADED` (more than was loaded), and REG-1's own rules for lines with no brand information.

@@ -490,6 +490,13 @@ async function main() {
   assert.equal(row(9, 'status'), 'sending');
   console.log('[prover] same-instant close and confirm wait for each other in both orders; never both');
 
+  // The live smoke chain (smoke-close-delivery-receipt-chain.sql) passes here too, with a sent receipt present.
+  stageText('chain.sql', `BEGIN;\n${lf(path.join(ROOT, 'scripts', 'smoke', 'smoke-close-delivery-receipt-chain.sql'))}\nROLLBACK;\n`);
+  const chain = apply('chain.sql');
+  assert.match(chain.output, /SMOKE_PASS_ROLLBACK/, chain.output);
+  assert.doesNotMatch(chain.output, /SMOKE_FAIL|SMOKE_SETUP/, chain.output);
+  console.log('[prover] the live smoke chain passes (SMOKE_PASS_ROLLBACK)');
+
   console.log('CLOSE_DELIVERY_RECEIPT_PROOF_PASS');
 }
 

@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
+
+**Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
+**Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
+**What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
+
 ## 2026-11-08 — A re-activated applicator's open jobs go straight onto the Dispatch Board (KI-28)
 
 **Decision (Mason, in session, 2026-11-08: "A: show them right away" / "Yes do the recomended option"):** when a person is re-activated or made an applicator, their already-assigned open jobs go straight onto the Dispatch Board even if their license has expired, the same as adding a location to their job today. The license is checked when a job is assigned, and the Expiring Licenses card warns.

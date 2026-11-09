@@ -9,12 +9,12 @@ describe('EnvBanner', () => {
   });
 
   it('marks a local build', () => {
-    render(<EnvBanner env="local" supabaseUrl="http://127.0.0.1:56321" />);
+    render(<EnvBanner env="local" supabaseUrl="https://rhyzpcqhnizqbxphqdkr.supabase.co" />);
     expect(screen.getByText('LOCAL')).toBeInTheDocument();
   });
 
   it('claims test data only for a database known to hold it', () => {
-    for (const url of ['https://rhyzpcqhnizqbxphqdkr.supabase.co', 'https://db.example.com', undefined]) {
+    for (const url of ['https://rhyzpcqhnizqbxphqdkr.supabase.co', 'http://localhost:54321', undefined]) {
       const { unmount } = render(<EnvBanner env="staging" supabaseUrl={url} />);
       expect(screen.getByText('STAGING · check which database this uses')).toBeInTheDocument();
       expect(screen.queryByText(/test data/)).not.toBeInTheDocument();

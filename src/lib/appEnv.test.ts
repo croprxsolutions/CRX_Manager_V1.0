@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appEnv, envTitlePrefix, isTestDatabase } from './appEnv';
+import { appEnv, envTitlePrefix, isStagingDatabase } from './appEnv';
 
 const LIVE = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
 const STAGING = 'https://fsnjredpmakbmhwowjjt.supabase.co';
@@ -32,16 +32,15 @@ describe('appEnv', () => {
   });
 });
 
-describe('isTestDatabase', () => {
-  it('is true only for the staging project and local hosts, by exact host', () => {
-    expect(isTestDatabase(STAGING)).toBe(true);
-    expect(isTestDatabase('http://127.0.0.1:56321')).toBe(true);
-    expect(isTestDatabase('http://localhost:54321')).toBe(true);
-    expect(isTestDatabase(LIVE)).toBe(false);
-    expect(isTestDatabase('https://db.croprxsolutions.app')).toBe(false);
-    expect(isTestDatabase('https://fsnjredpmakbmhwowjjt.supabase.co.evil.example')).toBe(false);
-    expect(isTestDatabase(undefined)).toBe(false);
-    expect(isTestDatabase('not a url')).toBe(false);
+describe('isStagingDatabase', () => {
+  it('is true only for the staging project, by exact host', () => {
+    expect(isStagingDatabase(STAGING)).toBe(true);
+    expect(isStagingDatabase('http://127.0.0.1:56321')).toBe(false);
+    expect(isStagingDatabase('http://localhost:54321')).toBe(false);
+    expect(isStagingDatabase(LIVE)).toBe(false);
+    expect(isStagingDatabase('https://fsnjredpmakbmhwowjjt.supabase.co.evil.example')).toBe(false);
+    expect(isStagingDatabase(undefined)).toBe(false);
+    expect(isStagingDatabase('not a url')).toBe(false);
   });
 });
 

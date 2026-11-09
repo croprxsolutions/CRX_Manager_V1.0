@@ -18,10 +18,10 @@ function supabaseHost(url: string | undefined): string {
   }
 }
 
-// True only when the build's database is positively known to hold test data.
-export function isTestDatabase(url: string | undefined): boolean {
-  const host = supabaseHost(url);
-  return host === STAGING_SUPABASE_HOST || LOCAL_HOSTS.has(host);
+// True only when the build's database is positively the staging project (test data only).
+// A localhost URL proves nothing (it could forward anywhere), so LOCAL never claims test data.
+export function isStagingDatabase(url: string | undefined): boolean {
+  return supabaseHost(url) === STAGING_SUPABASE_HOST;
 }
 
 export function appEnv(

@@ -10,9 +10,9 @@ reads it, `src/components/ui/EnvBanner.tsx` draws it from `RootLayout`, and `src
 title prefix. `.env.example` and `.env.staging.example` list the variable. The strip scrolls with the
 page on purpose, so the sticky top bar and the pages' sticky offsets don't move; the cost is that
 staging and local pages scroll by the strip's ~20px even when short. The words "test data only" appear
-only when the build's database is positively the staging project or a local one; otherwise the strip
-says "check which database this uses". A misspelt `VITE_APP_ENV` shows the staging strip rather than
-nothing, and a build pointed at the staging database is staging even if the variable is missing. It is a
+only on staging and only when the build's database is exactly the staging project's host; otherwise
+the strip says "STAGING · check which database this uses". LOCAL never claims test data. A misspelt `VITE_APP_ENV` shows the staging strip rather than
+nothing, and a build pointed at the staging database is staging (and one at a local database is local) even if the variable is missing. It is a
 plain label, not a live region, so screen readers don't announce it on every load.
 
 Tests: `src/lib/appEnv.test.ts`, `src/components/ui/EnvBanner.test.tsx`. Part of the staging-first

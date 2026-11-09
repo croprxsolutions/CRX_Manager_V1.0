@@ -29,8 +29,8 @@ import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
-import { RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
+import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -1358,7 +1358,7 @@ export default function DeliveryDetail() {
       if (submittedEvidence === 'no_proof') {
         // No customer confirmed this delivery, so no automatic "your delivery was completed" receipt.
         toast('info', 'Recorded without proof. No receipt was emailed; the office can send one later with Email Confirmation.');
-      } else if (emailOnComplete && (customer || receiptRecipient) && !receiptEmail) {
+      } else if (emailOnComplete && !receiptEmail) {
         toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
       }
 
@@ -1381,7 +1381,7 @@ export default function DeliveryDetail() {
         return;
       }
       if (outcome.kind === 'completed_not_replayed') {
-        toast('error', forThisDelivery(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+        toast('error', forThisDelivery(RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
       } else {
         toast('error', forThisDelivery(sanitizeError(error)));
         // The upload had already failed for a reason other than the signal: say what it was.
@@ -1910,18 +1910,17 @@ export default function DeliveryDetail() {
                   </div>
                 </>
               )}
-              {receiptEmail && (
-                <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={emailOnComplete}
-                    onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                  />
-                  Email delivery receipt to customer
-                  <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-                </label>
-              )}
+              {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
+              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={emailOnComplete}
+                  onChange={(e) => setEmailOnComplete(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+                />
+                Email delivery receipt to customer
+                <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
+              </label>
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
@@ -2801,7 +2800,8 @@ export default function DeliveryDetail() {
             </div>
           )}
 
-          {receiptEmail && completionEvidence !== 'no_proof' && (
+          {/* Shown whenever a receipt can be asked for, even when this screen cannot see the email. */}
+          {completionEvidence !== 'no_proof' && (
             <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
               <input
                 type="checkbox"

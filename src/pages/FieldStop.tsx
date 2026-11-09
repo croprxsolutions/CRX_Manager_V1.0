@@ -29,13 +29,13 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
-import { RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
+import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
@@ -517,7 +517,7 @@ export default function FieldStop() {
       await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || receiptRecipient?.farmName || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
       // KI-25: the receipt was recorded with the completion; the server emails it (or lists it for the office).
-      if (emailOnComplete && (delivery.customer || receiptRecipient) && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
+      if (emailOnComplete && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
 
       if (stillOnStop) setStep('done');
     };
@@ -539,7 +539,7 @@ export default function FieldStop() {
         return;
       }
       if (outcome.kind === 'completed_not_replayed') {
-        toast('error', forThisStop(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+        toast('error', forThisStop(RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
       } else {
         toast('error', forThisStop(sanitizeError(error)));
         // The upload had already failed for a reason other than the signal: say what it was.
@@ -786,12 +786,11 @@ export default function FieldStop() {
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Signed by</dt><dd className="text-nav-dark text-right break-words">{signedBy || '—'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
             </dl>
-            {receiptEmail && (
-              <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
-                <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
-                Email a receipt to the customer
-              </label>
-            )}
+            {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
+            <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
+              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
+              Email a receipt to the customer
+            </label>
           </div>
 
           {!isOnline && (

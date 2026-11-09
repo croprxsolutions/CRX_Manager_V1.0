@@ -26,6 +26,8 @@ re-runs after a hotfix moves `main`); a ruleset letting only the release bot pus
 the `release-bot` environment. A back-merge squashed by mistake turns "Main inside staging" red; the
 fix is another back-merge with a merge commit.
 
+Direct pushes to `main` stay impossible: `protect-main` requires a PR and has no bypass actors.
+
 Nothing is enforced until the repository variable `RELEASE_FLOW` is set to `on`, which Taha does
 together with the branch rulesets once Mason agrees. Until then each check passes with a notice.
 Actions are pinned to commit SHAs, each job has only the permissions it needs, and there is no

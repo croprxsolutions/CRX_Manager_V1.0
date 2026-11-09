@@ -226,7 +226,7 @@ END;
 $function$;
 
 -- Posted invoice lines sold under p_number with no active RUP record (shown when a label turns Yes).
--- 20261226110000 re-issues it with the one coverage rule (which also matches the sold number).
+-- 20261226110000 re-issues it to match by the product's own number, with the one coverage rule.
 CREATE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
@@ -262,7 +262,7 @@ $owners$;
 -- ---------------------------------------------------------------------------------------------
 
 -- Edits one registration, or creates it when p_expected_version is NULL and none exists. Admin only.
--- Sizes and brands keep their own facts (no copy); posting reads the registration by the sold number.
+-- Sizes and brands keep their own facts (no copy); posting reads the registration of the product's number.
 CREATE OR REPLACE FUNCTION public.set_epa_registration(p_epa_registration text, p_expected_version bigint, p_changes jsonb,
   p_reason text, p_label_draft_id uuid DEFAULT NULL, p_idempotency_key text DEFAULT NULL)
 RETURNS jsonb

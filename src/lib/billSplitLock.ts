@@ -1,4 +1,3 @@
-import { isBillSplitInvoice } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 type LockInvoice = {
   invoice_number: string | null;
@@ -26,10 +25,11 @@ export function billSplitLock(invoices: LockInvoice[], deliveries: LockDelivery[
     && invoices.some((i) => i.delivery_id === d.id && i.invoice_type !== 'credit_memo'));
   if (billed) return { kind: 'delivery', number: billed.delivery_number };
 
-  // A draft that bills the sale to one customer (no Bill Split group, e.g. Create Invoice or a field split).
+  // A draft that bills the sale to one customer: no split group (e.g. Create Invoice). The database exempts any
+  // invoice a split wrote (its provenance row), Bill Split or field split, and every such invoice has a group.
   const draft = invoices.find((i) => ['draft', 'unposted'].includes(i.status)
     && ['chemical_sale', 'misc_charge'].includes(i.invoice_type ?? '')
-    && !isBillSplitInvoice(i));
+    && !i.invoice_group_id);
   if (draft) return { kind: 'draft', number: draft.invoice_number };
 
   return null;
@@ -54,4 +54,23 @@ export function cardPayerLiveCents(
     total += (BigInt(cents) * micro) / 100_000_000n;
   }
   return Number(total);
+}
+
+/**
+ * Who may open the split editors. The delivery status doesn't close them: completing a delivery marks the sale
+ * fulfilled or part-delivered, and a split the database refused to bill must stay fixable. billSplitLock decides.
+ */
+export function canEditBillSplit(role: string | null | undefined, orderStatus: string | null | undefined): boolean {
+  return (role === 'admin' || role === 'sales_rep') && !!orderStatus && orderStatus !== 'cancelled';
+}
+
+/** True when shares total over 100%, added exactly (millionths, as numeric(9,6)) so 0.2 + 83.9 + 15.9 is 100. */
+export function sharesOverHundred(percents: number[]): boolean {
+  return percents.reduce((sum, p) => sum + Math.round(p * 1_000_000), 0) > 100_000_000;
+}
+
+/** What's left of 100% after these shares, exactly (millionths); 0 when they're full or over. */
+export function sharesLeft(percents: number[]): number {
+  const left = 100_000_000 - percents.reduce((sum, p) => sum + Math.round(p * 1_000_000), 0);
+  return left > 0 ? left / 1_000_000 : 0;
 }

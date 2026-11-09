@@ -5,6 +5,7 @@ import CustomerSearchPicker from '../customers/CustomerSearchPicker';
 import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult, sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
+import { sharesLeft, sharesOverHundred } from '../../lib/billSplitLock';
 
 export interface LineShare {
   id: string;
@@ -47,7 +48,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
     setSaving(false);
   };
 
-  const handleAdd = (itemId: string, used: number) => {
+  const handleAdd = (itemId: string, ownPercents: number[]) => {
     const value = parseFloat(pct);
     if (!customer || Number.isNaN(value) || value <= 0 || value > 100) {
       toast('error', 'Pick a customer and a share between 0 and 100');
@@ -57,8 +58,8 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       toast('error', 'Use at most two decimals for a share');
       return;
     }
-    if (used + value > 100) {
-      toast('error', `A line's shares can't total more than 100% (currently ${used}%)`);
+    if (sharesOverHundred([...ownPercents, value])) {
+      toast('error', `A line's shares can't total more than 100% (currently ${Math.round((100 - sharesLeft(ownPercents)) * 100) / 100}%)`);
       return;
     }
     void write('Add line share', () => supabase.from('order_item_shares')
@@ -79,7 +80,9 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       <p className="text-xs font-medium text-secondary">By line</p>
       {items.map((item) => {
         const own = lineShares.filter((s) => s.order_item_id === item.id);
-        const used = own.reduce((sum, s) => sum + s.split_percentage, 0);
+        // Added exactly, as the database adds numeric: float sums refuse or mislabel a split that is exactly full.
+        const ownPercents = own.map((s) => s.split_percentage);
+        const left = sharesLeft(ownPercents);
         const name = item.product_name || 'Line';
         const isOpen = openItemId === item.id;
         return (
@@ -92,7 +95,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                 ) : (
                   <p className="text-xs text-secondary">
                     {own.map((s) => `${s.customer?.farm_name || 'Unknown'} ${s.split_percentage}%`).join(' · ')}
-                    {used < 100 && <span className="text-amber-600"> Other {Math.round((100 - used) * 100) / 100}% stays with {mainCustomerName}</span>}
+                    {left > 0 && <span className="text-amber-600"> Other {Math.round(left * 100) / 100}% stays with {mainCustomerName}</span>}
                   </p>
                 )}
               </div>
@@ -134,7 +137,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                   <input type="number" aria-label="Line split percent" value={pct} onChange={(e) => setPct(e.target.value)} disabled={saving}
                     placeholder="%" min="0.01" max="100" step="0.01"
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20" />
-                  <Button size="sm" showChevron={false} loading={saving} onClick={() => handleAdd(item.id, used)}>Add</Button>
+                  <Button size="sm" showChevron={false} loading={saving} onClick={() => handleAdd(item.id, ownPercents)}>Add</Button>
                 </div>
               </div>
             )}

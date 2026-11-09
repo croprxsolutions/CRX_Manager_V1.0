@@ -48,7 +48,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
-import { billSplitLock, cardPayerLiveCents } from '../lib/billSplitLock';
+import { billSplitLock, canEditBillSplit, cardPayerLiveCents, sharesLeft, sharesOverHundred } from '../lib/billSplitLock';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
@@ -947,8 +947,8 @@ export default function OrderDetail() {
   const openShareEditor = () => {
     setNewShareCustomerId('');
     setNewShareCustomerName('');
-    // The card should reach 100%, so the next share starts at what's left.
-    const left = Math.round((100 - shares.reduce((sum, sh) => sum + sh.split_percentage, 0)) * 100) / 100;
+    // The card should reach 100%, so the next share starts at exactly what's left (rounding it could push it over).
+    const left = sharesLeft(shares.map((sh) => sh.split_percentage));
     setNewSharePct(shares.length > 0 && left > 0 ? String(left) : '');
     setShowShareEditor(true);
   };
@@ -960,9 +960,9 @@ export default function OrderDetail() {
       toast('error', 'Percentage must be between 0 and 100');
       return;
     }
-    const totalExisting = shares.reduce((s, sh) => s + sh.split_percentage, 0);
-    if (totalExisting + pct > 100) {
-      toast('error', `Total split would exceed 100% (currently ${totalExisting}%)`);
+    // Added exactly, as the database does: a float sum refuses a card that is exactly 100%.
+    if (sharesOverHundred([...shares.map((sh) => sh.split_percentage), pct])) {
+      toast('error', `Total split would exceed 100% (currently ${Math.round((100 - sharesLeft(shares.map((sh) => sh.split_percentage))) * 100) / 100}%)`);
       return;
     }
     // The picked customer's name, kept from the search picker.
@@ -1350,6 +1350,8 @@ export default function OrderDetail() {
   const splitLock = billSplitLock(invoices, deliveries);
   const sharesLocked = !!splitLock;
   const linesWithOwnSplit = new Set(lineShares.map((ls) => ls.order_item_id));
+  // The split editors follow the lock, not the delivery status: a split the database refused to bill stays open.
+  const canEditSplit = canEditBillSplit(role, order?.status);
 
   return (
     <div className="space-y-4">
@@ -2010,7 +2012,7 @@ export default function OrderDetail() {
       ))}
 
       {/* Order Shares (Bill Splitting) */}
-      {(shares.length > 0 || lineShares.length > 0 || canEdit) && (
+      {(shares.length > 0 || lineShares.length > 0 || canEditSplit) && (
         <Card>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -2020,7 +2022,7 @@ export default function OrderDetail() {
                 <span className="text-xs text-secondary">({shares.length} customer{shares.length !== 1 ? 's' : ''})</span>
               )}
             </div>
-            {canEdit && !showShareEditor && !sharesLocked && (
+            {canEditSplit && !showShareEditor && !sharesLocked && (
               <Button variant="secondary" size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={openShareEditor}>
                 Add Split
               </Button>
@@ -2081,7 +2083,7 @@ export default function OrderDetail() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-blue-600">{share.split_percentage}%</span>
-                    {canEdit && !sharesLocked && (
+                    {canEditSplit && !sharesLocked && (
                       <button onClick={() => handleRemoveShare(share.id)} className="text-red-400 hover:text-red-600 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -2093,9 +2095,9 @@ export default function OrderDetail() {
                 <span className="text-xs font-medium text-blue-700">Total Allocated</span>
                 <span className="text-xs font-semibold text-blue-700">
                   {shares.reduce((s, sh) => s + sh.split_percentage, 0)}%
-                  {shares.reduce((s, sh) => s + sh.split_percentage, 0) < 100 && (
+                  {sharesLeft(shares.map((sh) => sh.split_percentage)) > 0 && (
                     <span className="text-amber-600 ml-2">
-                      (the other {Math.round((100 - shares.reduce((s, sh) => s + sh.split_percentage, 0)) * 100) / 100}% stays with {customer?.farm_name || 'the main customer'})
+                      (the other {Math.round(sharesLeft(shares.map((sh) => sh.split_percentage)) * 100) / 100}% stays with {customer?.farm_name || 'the main customer'})
                     </span>
                   )}
                 </span>
@@ -2150,7 +2152,7 @@ export default function OrderDetail() {
               lineShares={lineShares}
               hasCard={shares.length > 0}
               mainCustomerName={customer?.farm_name || 'the main customer'}
-              canEdit={canEdit}
+              canEdit={canEditSplit}
               locked={sharesLocked}
               onChanged={() => void fetchOrder()}
             />

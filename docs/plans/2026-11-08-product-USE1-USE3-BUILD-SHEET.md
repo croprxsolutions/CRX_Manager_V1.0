@@ -395,3 +395,8 @@ Today no product has a quote note, so 442 products put their general description
 
 **Codex GitHub review** (head `c91e12949`): 1 finding (P2).
 - P2 a label equal to another option's code (for example `post_emergence` on a wheat pair) would re-import as the wrong option, because the workbook parser matches label or code with one `find`: confirmed against `productSetupWorkbook.ts:500`. Fixed: `add_use_timing_option` refuses a label equal to any option code and never generates a code equal to another label (3.3); the parser resolves label first (section 5); an unchanged round-trip test covers it.
+
+**Build reviews (USE-1 database PR, 2026-11-09).**
+- Luna build round 1 (head `d51399b1e`): 1 MED, refuted: the claimed prover failure in the one-pair-once case was a misread of the option state; the real-schema proof passed.
+- Sol round 1 (head `769d75d71`): 1 HIGH, fixed in `44cffd7f9`: a product or parent save could take a choice an admin was turning off at the same moment. The size trigger and the parent guard now wait for an open add or turn-off (shared advisory lock) before checking it; the proof's race case covers a size save and a parent save.
+- Luna build round 2 (head `44cffd7f9`): 1 MED, refuted: "two same-key requests at once: the second errors instead of replaying". `_product_parent_replay` (`20261108120000_product_parents.sql`) takes a per-key transaction lock before reading the receipt, so the twin waits for the first to commit and then replays its result.

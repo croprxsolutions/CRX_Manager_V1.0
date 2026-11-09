@@ -8,6 +8,8 @@
 --   D  As rep 2, on payer 2's invoice: both payers; on payer 1's invoice (not theirs): INVOICE_NOT_VISIBLE
 --   E  A driver: INVOICE_NOT_VISIBLE; anon: no EXECUTE
 --   F  An invoice with no split group: no rows
+--   G  A payer invoice with no sales rep (an office sale): a driver and another rep are still refused, and a
+--      call with no signed-in claims at all is refused (a NULL in the check must never let a caller through)
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -143,6 +145,43 @@ BEGIN
   IF v_plain IS NOT NULL AND (SELECT count(*) FROM get_bill_split_payers(v_plain)) <> 0 THEN
     v_fails := v_fails || ' (F) an invoice with no split group returned payers;';
   END IF;
+
+  -- G: payer 1's draft with no sales rep, saved by the admin as the invoice screen does.
+  SELECT jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type, 'status', i.status,
+           'season', i.season, 'salesman_id', NULL, 'invoice_date', i.invoice_date, 'payment_terms', i.payment_terms,
+           'header_notes', i.header_notes, 'footer_notes', i.footer_notes)
+    INTO v_header FROM invoices i WHERE i.id = v_inv1;
+  SELECT jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
+           'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
+           'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
+           'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order)
+    INTO v_items FROM invoice_items it WHERE it.invoice_id = v_inv1;
+  PERFORM save_invoice(v_header, v_items, 'smk-bsp-norep-' || v_suffix);
+  IF (SELECT salesman_id FROM invoices WHERE id = v_inv1) IS NOT NULL THEN
+    v_fails := v_fails || ' (G) payer 1''s draft still has a sales rep;';
+  END IF;
+  FOREACH v_plain IN ARRAY ARRAY[v_driver, v_rep2] LOOP
+    PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_plain, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_plain::text, true);
+    SET LOCAL ROLE authenticated;
+    BEGIN
+      PERFORM count(*) FROM get_bill_split_payers(v_inv1);
+      v_fails := v_fails || format(' (G) %s read the payers of an invoice with no sales rep;', CASE WHEN v_plain = v_driver THEN 'a driver' ELSE 'another rep' END);
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'INVOICE_NOT_VISIBLE:%' THEN v_fails := v_fails || ' (G) wrong refusal: ' || SQLERRM || ';'; END IF;
+    END;
+    RESET ROLE;
+  END LOOP;
+  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM count(*) FROM get_bill_split_payers(v_inv1);
+    v_fails := v_fails || ' (G) a call with no claims read the payers;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVOICE_NOT_VISIBLE:%' THEN v_fails := v_fails || ' (G) wrong refusal with no claims: ' || SQLERRM || ';'; END IF;
+  END;
+  RESET ROLE;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL bill split payers read:%', v_fails;

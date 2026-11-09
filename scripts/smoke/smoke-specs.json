@@ -2090,7 +2090,7 @@
     },
     "bill_split_payers_read": {
       "chain": "smoke-bill-split-payers-read.sql",
-      "description": "Migration 20261221110000 (#1534): rep 1 sells a Bill Split 50/50 and an admin moves payer 2's draft to rep 2 through save_invoice; rep 1's direct group read now sees one invoice (the gap); get_bill_split_payers on payer 1's invoice gives rep 1 both payers totalling the sale; rep 2 gets both on their own invoice and INVOICE_NOT_VISIBLE on payer 1's; a driver gets INVOICE_NOT_VISIBLE; anon has no EXECUTE; an invoice with no split group returns no rows. Terminal rollback.",
+      "description": "Migration 20261221110000 (#1534): rep 1 sells a Bill Split 50/50 and an admin moves payer 2's draft to rep 2 through save_invoice; rep 1's direct group read now sees one invoice (the gap); get_bill_split_payers on payer 1's invoice gives rep 1 both payers totalling the sale; rep 2 gets both on their own invoice and INVOICE_NOT_VISIBLE on payer 1's; a driver gets INVOICE_NOT_VISIBLE; anon has no EXECUTE; an invoice with no split group returns no rows; with payer 1's draft moved to no sales rep, a driver, another rep and a call with no claims are all refused (a NULL in the check never lets a caller through). Terminal rollback.",
       "covers": ["get_bill_split_payers", "save_invoice", "complete_delivery"],
       "area": ["billing", "security", "regression"]
     }

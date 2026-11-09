@@ -11,6 +11,7 @@
 --   Who may call: the invoice's read rule, mirrored exactly (invoices_select: an admin, its creator or its
 --   sales rep; pinned below, so drift stops the apply), or the service role (the email sender).
 --   A caller who may not read the invoice gets INVOICE_NOT_VISIBLE, never another invoice's payers.
+--   A test that comes out NULL (no sales rep, no claims) refuses.
 --   Read only. SECURITY DEFINER, owner postgres, search_path public, pg_temp, EXECUTE for authenticated
 --   and service_role only.
 --
@@ -59,9 +60,11 @@ DECLARE
 BEGIN
   SELECT * INTO v_inv FROM invoices WHERE invoices.id = p_invoice_id;
   -- invoices_select, mirrored: the service role (no user) reads every invoice, as it does today.
+  -- IS NOT TRUE, not NOT: an invoice with no sales rep, or a call with no claims, makes the test NULL,
+  -- and NULL must refuse (independent review, 2026-11-09).
   IF NOT FOUND
-     OR NOT (auth.role() = 'service_role'
-             OR (v_uid IS NOT NULL AND (public.is_admin() OR v_inv.created_by = v_uid OR v_inv.salesman_id = v_uid))) THEN
+     OR (auth.role() = 'service_role'
+         OR (v_uid IS NOT NULL AND (public.is_admin() OR v_inv.created_by = v_uid OR v_inv.salesman_id = v_uid))) IS NOT TRUE THEN
     RAISE EXCEPTION 'INVOICE_NOT_VISIBLE: this invoice can''t be read by this user' USING ERRCODE = '42501';
   END IF;
   IF v_inv.invoice_group_id IS NULL THEN

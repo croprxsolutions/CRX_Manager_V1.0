@@ -41,7 +41,7 @@
 --   - A Bill Split bills the real delivered amount, as a plain sale does (Mason, 2026-11-09). Only a delivered
 --     amount finer than an invoice line holds (more than 4 places) refuses (BILL_SPLIT_QUANTITY_TOO_FINE), since
 --     it couldn't be split exactly. A one-customer sale is unchanged.
---   - A return holds 2 places (return_items.quantity). create_return now refuses a finer quantity
+--   - A return holds 2 places (return_items.quantity). Creating a return now refuses a finer quantity
 --     (RETURN_QUANTITY_TOO_FINE): stored rounded but priced in full, it was refused at receive and left stuck, on
 --     a plain 2.125 line too. A payer returns their share to 2 places, so as on a plain sale a sliver under 0.01
 --     isn't returnable.
@@ -114,7 +114,7 @@ BEGIN
     ('public.prevent_order_shares_edit_after_post()', 'f21012312edbc966076a3318a3214abb', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.delete_invoices(uuid[],uuid,text)', '24c271164caa2369c57c3bdc5d88c50a', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.unpost_invoice(uuid,uuid,text)', '1d886fac647db1ac12e0972ff26664c2', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.create_return(jsonb,jsonb,text)', 'd535f68ffd3ee478d0516a0eb65830f9', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', '5a04a82127e6181aa8e95d74e23216c7', ARRAY['postgres=X/postgres']::aclitem[])
   ) AS v(sig, body_md5, acl)
   LOOP
     IF NOT EXISTS (
@@ -1895,8 +1895,8 @@ BEGIN
 END;
 $function$;
 
--- create_return: the 20260812130145 wrapper, plus a refusal of a quantity finer than a return holds.
-CREATE OR REPLACE FUNCTION public.create_return(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)
+-- _create_return_intent_impl_20260812: the 20261021155000 body, plus a refusal of a quantity finer than a return holds.
+CREATE OR REPLACE FUNCTION public._create_return_intent_impl_20260812(p_return jsonb, p_items jsonb DEFAULT '[]'::jsonb, p_idempotency_key text DEFAULT NULL::text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -1904,50 +1904,213 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
-  v_fingerprint text;
-  v_replay jsonb;
-  v_result jsonb;
+  v_return_id uuid;
+  v_return_number text;
+  v_order_id uuid;
+  v_customer_id uuid;
+  v_order_status text;
+  v_item jsonb;
+  v_order_item record;
+  v_qty numeric;
+  v_prior_qty numeric;
+  v_count integer := 0;
+  v_existing jsonb;
+  -- Phase 3 addition: sorted advisory locks cover all products in this request.
+  v_product_ids uuid[];
+  -- Split-payer return (20261021155000): see the order check and the per-line share below.
+  v_order_customer_id uuid;
+  v_share record;
+  v_extended bigint;
+  v_unit_price bigint;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
-  END IF;
-  IF p_idempotency_key IS NULL OR p_idempotency_key !~ '[^[:space:]]' OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN
-    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: create_return requires p_idempotency_key';
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
+  ) THEN RAISE EXCEPTION 'INSUFFICIENT_ROLE'; END IF;
+
+  IF p_idempotency_key IS NOT NULL THEN
+    v_existing := public.check_idempotency(p_idempotency_key, 'create_return');
+    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   END IF;
 
-  v_fingerprint := encode(extensions.digest(convert_to(jsonb_build_object(
-    'actor_id', v_actor,
-    'return', p_return,
-    'items', p_items
-  )::text, 'UTF8'), 'sha256'), 'hex');
-  v_replay := public.check_idempotency_intent(p_idempotency_key, 'create_return', v_actor, v_fingerprint);
-  IF v_replay IS NOT NULL THEN
-    IF v_replay -> 'result' IS NULL OR jsonb_typeof(v_replay -> 'result') = 'null' THEN
-      RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  v_customer_id := nullif(p_return->>'customer_id', '')::uuid;
+  v_order_id := nullif(p_return->>'order_id', '')::uuid;
+  IF v_customer_id IS NULL THEN RAISE EXCEPTION 'CUSTOMER_REQUIRED'; END IF;
+  IF v_order_id IS NULL THEN RAISE EXCEPTION 'RETURN_ORDER_REQUIRED'; END IF;
+  IF coalesce(btrim(p_return->>'reason'), '') = '' THEN RAISE EXCEPTION 'REASON_REQUIRED'; END IF;
+  IF jsonb_array_length(COALESCE(p_items, '[]'::jsonb)) = 0 THEN RAISE EXCEPTION 'ITEMS_REQUIRED'; END IF;
+
+  -- Split-payer return (20261021155000): the order's customer, or a customer a posted governed
+  -- split invoice of this order bills (a field owner such as a landlord), may return its goods.
+  SELECT status, customer_id INTO v_order_status, v_order_customer_id FROM public.orders
+  WHERE id = v_order_id AND deleted_at IS NULL
+  FOR UPDATE;
+  IF NOT FOUND OR (
+    v_order_customer_id IS DISTINCT FROM v_customer_id
+    AND NOT public._return_customer_is_split_payer(v_order_id, v_customer_id)
+  ) THEN RAISE EXCEPTION 'RETURN_ORDER_CUSTOMER_MISMATCH'; END IF;
+  IF v_order_status IN ('voided', 'cancelled') THEN
+    RAISE EXCEPTION 'RETURN_SOURCE_ORDER_INACTIVE';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) item WHERE nullif(item->>'order_item_id', '') IS NULL) THEN
+    RAISE EXCEPTION 'RETURN_ORDER_ITEM_REQUIRED';
+  END IF;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <>
+     (SELECT count(DISTINCT item->>'order_item_id') FROM jsonb_array_elements(p_items) item) THEN
+    RAISE EXCEPTION 'DUPLICATE_RETURN_ORDER_ITEM';
+  END IF;
+
+  PERFORM 1
+  FROM public.order_items oi
+  JOIN jsonb_array_elements(p_items) item
+    ON oi.id = (item->>'order_item_id')::uuid
+  WHERE oi.order_id = v_order_id
+  ORDER BY oi.id
+  FOR UPDATE OF oi;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <>
+     (SELECT count(*) FROM public.order_items oi
+      JOIN jsonb_array_elements(p_items) item ON oi.id = (item->>'order_item_id')::uuid
+      WHERE oi.order_id = v_order_id) THEN
+    RAISE EXCEPTION 'RETURN_ORDER_ITEM_MISMATCH';
+  END IF;
+
+  -- Phase 3 addition: UUID-order locks and a policy re-read happen after all
+  -- source order-item locks/validation and before creating any return rows.
+  SELECT array_agg(DISTINCT oi.product_id ORDER BY oi.product_id)
+    INTO v_product_ids
+  FROM public.order_items oi
+  JOIN jsonb_array_elements(p_items) item
+    ON oi.id = (item->>'order_item_id')::uuid
+  WHERE oi.order_id = v_order_id;
+  PERFORM public.lock_phase3_product_policy_products(v_product_ids);
+  PERFORM public.assert_phase3_return_policy(v_product_ids);
+
+  v_return_number := public.next_return_number();
+  INSERT INTO public.returns (
+    return_number, customer_id, order_id, reason, reason_notes, notes, requested_by, status
+  ) VALUES (
+    v_return_number, v_customer_id, v_order_id, p_return->>'reason',
+    p_return->>'reason_notes', p_return->>'notes', v_actor, 'requested'
+  ) RETURNING id INTO v_return_id;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
+    SELECT * INTO v_order_item
+    FROM public.order_items
+    WHERE id = (v_item->>'order_item_id')::uuid AND order_id = v_order_id;
+
+    v_qty := coalesce((v_item->>'quantity')::numeric, 0);
+    IF v_qty <= 0 THEN RAISE EXCEPTION 'RETURN_QUANTITY_MUST_BE_POSITIVE'; END IF;
+    -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill
+    -- Split payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
+    -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09). After the wrapper's
+    -- replay, so a retry of an earlier accepted request still answers as before.
+    IF v_qty <> round(v_qty, 2) THEN
+      RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
+        USING ERRCODE = 'check_violation';
     END IF;
-    RETURN v_replay -> 'result';
-  END IF;
-  -- After the replay, so a retry of an earlier accepted request still answers as before.
-  -- A return holds 2 decimal places (return_items.quantity numeric(10,2)). A finer quantity, such as a Bill Split
-  -- payer's 4-place share or a plain 2.125 line, would be stored rounded but priced in full, then refused at
-  -- receive and left stuck; refuse it here in plain words (billing plan M2, 2026-11-09).
-  IF EXISTS (
-    SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_items) = 'array' THEN p_items ELSE '[]'::jsonb END) e
-     -- Any text numeric accepts, exponent form included ("1.005e0"), so none slips past as a string.
-     WHERE (e ->> 'quantity') ~ '^\s*[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$'
-       AND (e ->> 'quantity')::numeric <> round((e ->> 'quantity')::numeric, 2)
-  ) THEN
-    RAISE EXCEPTION 'RETURN_QUANTITY_TOO_FINE: a return holds 2 decimal places; return a quantity like 0.70'
-      USING ERRCODE = 'check_violation';
-  END IF;
+    IF coalesce(v_order_item.quantity_delivered, 0) <= 0 THEN
+      RAISE EXCEPTION 'RETURN_SOURCE_NOT_DELIVERED';
+    END IF;
+    IF v_order_item.price_per_unit IS NULL THEN
+      RAISE EXCEPTION 'RETURN_SOURCE_PRICE_MISSING';
+    END IF;
 
-  v_result := public._create_return_intent_impl_20260812(p_return, p_items, p_idempotency_key);
-  UPDATE public.idempotency_keys
-     SET request_actor_id = v_actor, request_fingerprint = v_fingerprint
-   WHERE idempotency_key = p_idempotency_key AND operation = 'create_return';
-  IF NOT FOUND THEN RAISE EXCEPTION 'IDEMPOTENCY_RECEIPT_MISSING'; END IF;
-  RETURN v_result;
+    SELECT coalesce(sum(ri.quantity), 0) INTO v_prior_qty
+    FROM public.return_items ri
+    JOIN public.returns r ON r.id = ri.return_id
+    WHERE ri.order_item_id = v_order_item.id
+      AND r.deleted_at IS NULL
+      AND r.status NOT IN ('rejected', 'cancelled');
+
+    IF v_prior_qty + v_qty > v_order_item.quantity_delivered THEN
+      RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_DELIVERED';
+    END IF;
+
+    -- Split-payer return (20261021155000): on a split order, or when the returner is not the
+    -- order's customer, the returner may return only what it was billed, and its credit is what is
+    -- left of its own billed cents for that quantity, so its full share credits exactly.
+    SELECT * INTO v_share
+      FROM public._return_customer_line_share(v_order_id, v_order_item.id, v_customer_id, v_return_id);
+    IF v_share.share_mode THEN
+      -- A share-mode return stores a price derived from the returner's own invoices on this order,
+      -- so a non-admin may create one only when invoices_select lets it read every active invoice
+      -- billing the returner here (it created it or is its salesperson), as the Returns lookups do.
+      IF NOT public.is_admin() AND EXISTS (
+        SELECT 1 FROM public.invoices hidden
+         WHERE hidden.order_id = v_order_id
+           AND hidden.customer_id = v_customer_id
+           AND hidden.invoice_type <> 'credit_memo'
+           AND hidden.deleted_at IS NULL
+           AND hidden.status IN ('posted', 'overdue', 'paid')
+           AND NOT (hidden.created_by IS NOT DISTINCT FROM auth.uid()
+                    OR hidden.salesman_id IS NOT DISTINCT FROM auth.uid())
+      ) THEN RAISE EXCEPTION 'RETURN_SPLIT_INVOICE_NOT_VISIBLE'; END IF;
+      -- A posted sale line of this order line whose unit differs from the return's (an order line
+      -- with no unit is returned as 'ea', and its invoice lines carry no unit) can never back the
+      -- credit: _issue_return_credit_impl refuses every such return with this same code. Refuse it
+      -- here, before anything is restocked, rather than as "not billed".
+      IF EXISTS (
+        SELECT 1
+          FROM public.invoice_items ii
+          JOIN public.invoices i ON i.id = ii.invoice_id
+         WHERE ii.order_item_id = v_order_item.id
+           AND ii.product_id = v_order_item.product_id
+           AND ii.quantity > 0
+           AND i.invoice_type <> 'credit_memo'
+           AND i.status IN ('posted', 'overdue', 'paid')
+           AND i.deleted_at IS NULL
+           AND ii.unit_size IS DISTINCT FROM coalesce(v_order_item.unit_size, 'ea')
+      ) THEN RAISE EXCEPTION 'RETURN_CREDIT_UNIT_MISMATCH'; END IF;
+      IF v_share.billed_qty <= 0 THEN RAISE EXCEPTION 'RETURN_SPLIT_SHARE_NOT_BILLED'; END IF;
+      IF v_share.other_returned_qty + v_qty > v_share.billed_qty THEN
+        RAISE EXCEPTION 'RETURN_QUANTITY_EXCEEDS_BILLED_SHARE';
+      END IF;
+      v_extended := greatest(0,
+        round(v_share.billed_cents * (v_share.other_returned_qty + v_qty) / v_share.billed_qty)::bigint
+        - v_share.other_returned_cents);
+      IF v_share.other_returned_cents + v_extended > v_share.billed_cents THEN
+        RAISE EXCEPTION 'RETURN_CREDIT_EXCEEDS_BILLED_SHARE';
+      END IF;
+      -- The unit price the return and its credit memo show is the returner's own billed rate, not
+      -- the order price (a split invoice may bill a share at another rate).
+      v_unit_price := round(v_share.billed_cents / v_share.billed_qty)::bigint;
+    ELSE
+      v_extended := round(v_qty * v_order_item.price_per_unit * 100)::bigint;
+      v_unit_price := round(v_order_item.price_per_unit * 100)::bigint;
+    END IF;
+
+    INSERT INTO public.return_items (
+      return_id, order_item_id, product_id, product_name, quantity, unit,
+      unit_price_cents, extended_cents, condition, restock, sort_order, notes
+    ) VALUES (
+      v_return_id, v_order_item.id, v_order_item.product_id, v_order_item.product_name,
+      v_qty, coalesce(v_order_item.unit_size, 'ea'),
+      v_unit_price,  -- Split-payer return (20261021155000): priced above
+      v_extended,
+      coalesce(v_item->>'condition', 'unopened'),
+      coalesce((v_item->>'restock')::boolean, false),
+      coalesce((v_item->>'sort_order')::integer, v_count), v_item->>'notes'
+    );
+    v_count := v_count + 1;
+  END LOOP;
+
+  INSERT INTO public.activity_feed (
+    event_type, description, performed_by, related_entity_type, related_entity_id, customer_id
+  ) VALUES (
+    'return_requested', 'Return ' || v_return_number || ' requested for ' || v_count || ' product(s)',
+    v_actor, 'return', v_return_id, v_customer_id
+  );
+
+  v_existing := jsonb_build_object(
+    'success', true, 'return_id', v_return_id,
+    'return_number', v_return_number, 'item_count', v_count
+  );
+  IF p_idempotency_key IS NOT NULL THEN
+    PERFORM public.save_idempotency(p_idempotency_key, 'create_return', v_existing);
+  END IF;
+  RETURN v_existing;
 END;
 $function$;
 
@@ -1964,7 +2127,7 @@ BEGIN
     ('public.prevent_order_shares_edit_after_post()', '_refuse_bill_split_change', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.delete_invoices(uuid[],uuid,text)', 'BILL_SPLIT_GROUP_DELETE_PARTIAL', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
     ('public.unpost_invoice(uuid,uuid,text)', 'GROUP_UNPOST_REQUIRED', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[]),
-    ('public.create_return(jsonb,jsonb,text)', 'RETURN_QUANTITY_TOO_FINE', ARRAY['postgres=X/postgres','authenticated=X/postgres','service_role=X/postgres']::aclitem[])
+    ('public._create_return_intent_impl_20260812(jsonb,jsonb,text)', 'RETURN_QUANTITY_TOO_FINE', ARRAY['postgres=X/postgres']::aclitem[])
   ) AS v(sig, marker, acl)
   LOOP
     IF NOT EXISTS (

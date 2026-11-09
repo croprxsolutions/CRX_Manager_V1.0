@@ -384,15 +384,17 @@ BEGIN
     v_base := v;
     v_basis := 'per_acre';
   END IF;
-  -- "dry oz" and "fl oz" name their kind; normalize_rate_unit would drop "fl" and keep "dry oz" unknown.
+  -- Only a bare ounce takes the row's kind. A spelling that names its kind (dry or fluid) keeps it;
+  -- any other spelling normalize_rate_unit folds into 'oz' is not comparable.
   v_code := CASE
-    WHEN v_base ~ '^dry\.? ?oz\.?$' THEN 'dry_oz'
-    WHEN v_base ~ '^fl\.? ?oz\.?$' THEN 'fl_oz'
+    WHEN v_base ~ '^dry\.? ?(oz|ounces?)\.?$' THEN 'dry_oz'
+    WHEN v_base ~ '^(fl\.? ?oz\.?|fluid ?(oz|ounces?)\.?)$' THEN 'fl_oz'
+    WHEN v_base ~ '^(oz\.?|ounces?)$' THEN CASE p_kind WHEN 'volume' THEN 'fl_oz' WHEN 'weight' THEN 'dry_oz' END
   END;
   v_base := public.normalize_rate_unit(v_base);
   v_code := CASE
     WHEN v_code IS NOT NULL THEN v_code
-    WHEN v_base = 'oz' THEN CASE p_kind WHEN 'volume' THEN 'fl_oz' WHEN 'weight' THEN 'dry_oz' END
+    WHEN v_base = 'oz' THEN NULL
     WHEN v_base IN ('pt', 'qt', 'gal', 'lb', 'g', 'mg') THEN v_base
   END;
   IF v_code IS NOT NULL AND (SELECT u.kind FROM public.product_rate_units u WHERE u.code = v_code) IS DISTINCT FROM p_kind THEN

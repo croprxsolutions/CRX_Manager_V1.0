@@ -465,6 +465,12 @@ try {
   assert.equal(scalar(`SELECT concat_ws(',', public._product_rate_max_unit('Dry oz/acre', 'weight')->>'unit', public._product_rate_max_unit('fl oz/acre', 'volume')->>'unit',
     COALESCE(public._product_rate_max_unit('fl oz/acre', 'weight')->>'unit', '-'), COALESCE(public._product_rate_max_unit('Dry oz', 'volume')->>'unit', '-'));`),
   'dry_oz,fl_oz,-,-');
+  // Every fluid-ounce spelling normalize_rate_unit folds into 'oz' keeps its volume kind; only a bare ounce takes the row's kind.
+  for (const [spelling, kind, want] of [['fluid ounce/acre', 'weight', '-'], ['Fluid Ounces/acre', 'weight', '-'], ['floz/acre', 'weight', '-'],
+    ['fluid ounce/acre', 'volume', 'fl_oz'], ['floz', 'volume', 'fl_oz'], ['ounce/acre', 'weight', 'dry_oz'], ['ounces', 'volume', 'fl_oz'],
+    ['dry ounces/acre', 'weight', 'dry_oz'], ['oz', 'weight', 'dry_oz']]) {
+    assert.equal(scalar(`SELECT COALESCE(public._product_rate_max_unit(${sq(spelling)}, ${sq(kind)})->>'unit', '-');`), want, `${spelling} on ${kind}`);
+  }
   assert.equal(scalar(`SELECT (0.25 * 128 = 32 AND 18 * 1000 = 18000 AND 6 * 1 = 6 AND 2 * 32 = 64
     AND 17 * 453592.37 = 7711070.29 AND 17 * 453592.37 / 28349.523125 = 272
     AND 0.035273961 * 28349.523125 = 999.999973079848125)::text;`), 'true');

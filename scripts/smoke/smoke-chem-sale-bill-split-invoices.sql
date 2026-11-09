@@ -40,7 +40,7 @@
 --   AB A three-decimal delivery (2.125) bills like a plain sale: each payer to 4 places, exact cents (Mason, 2026-11-09)
 --   AK A restricted-use line finer than an invoice line holds (5 places) refuses, so the register misses nothing
 --   AC A line finer than an invoice line holds but worth cents refuses, so no billed money is dropped
---   AD A payer's quantity is their share to 4 places, as an invoice line holds it; the main customer takes the rest
+--   AD A payer's quantity is whole hundredths when the delivery allows, so it returns in full; the main customer takes the rest
 --   AE A payer draft's unit follows the split; re-saving a tote line as read still works
 --   AF A card plus a field allocation, part delivered, then the allocation removed: Create Invoice drafts per payer
 --   AG A payer's invoice takes its season from its date, as a plain delivery invoice does
@@ -94,8 +94,8 @@ BEGIN
   SELECT * INTO v_p1 FROM products WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2) ORDER BY created_at LIMIT 1;
   SELECT * INTO v_p2 FROM products WHERE is_active = true AND current_cost > 0 AND current_cost = round(current_cost, 2) AND id <> v_p1.id ORDER BY created_at LIMIT 1;
   IF v_admin IS NULL OR v_payer3 IS NULL OR v_p2.id IS NULL
-     OR (SELECT count(*) FROM customers WHERE is_active = true) < 4 THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, four active customers and two active products with a cost';
+     OR (SELECT count(*) FROM customers WHERE is_active = true) < 3 THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, three active customers and two active products with a cost';
   END IF;
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
@@ -375,7 +375,7 @@ BEGIN
   END IF;
 
   -- B: shares unevenly three ways. Each other payer pays exactly their percentage of the line, rounded down
-  -- to the cent, on 3.3333 of the 10 units (4 places, Mason 2026-11-09); the main customer takes the rest.
+  -- to the cent, on 3.33 of the 10 units (whole hundredths, so it can be returned in full); the main customer takes the rest.
   PERFORM pg_temp.smk_new_sale('b' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_main, 33.3334);
@@ -390,7 +390,7 @@ BEGIN
      OR EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
                  WHERE i.delivery_id = v_d AND i.customer_id = v_payer2
                    AND (ii.extended_cents <> floor((SELECT total_price * 100 FROM order_items WHERE id = ii.order_item_id) * 33.3333 / 100)
-                        OR ii.quantity <> 3.3333)) THEN
+                        OR ii.quantity <> 3.33)) THEN
     v_fails := v_fails || ' (B) three-way shares are wrong;';
   END IF;
 
@@ -877,16 +877,17 @@ BEGIN
     v_fails := v_fails || ' (AC) a line worth cents was dropped from the billing;';
   END IF;
 
-  -- AD: a payer's quantity is their share to 4 places, as an invoice line holds it; the main customer takes the rest.
+  -- AD: a payer's quantity is whole hundredths when the delivery allows (3.33 of 10 at 33.33%), so it can be returned
+  -- in full; only a share under 0.01 falls back to 4 places (AJ). The main customer takes the rest.
   PERFORM pg_temp.smk_new_sale('ad' || v_suffix);
   SELECT o, l1, l2, d INTO v_o, v_l1, v_l2, v_d FROM smk_sale;
   PERFORM pg_temp.smk_card(v_o, v_payer2, 33.33);
   PERFORM pg_temp.smk_done(v_d, 'ad' || v_suffix);
   IF EXISTS (SELECT 1 FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
-              WHERE i.delivery_id = v_d AND ii.quantity <> CASE WHEN i.customer_id = v_payer2 THEN 3.333 ELSE 6.667 END)
+              WHERE i.delivery_id = v_d AND ii.quantity <> CASE WHEN i.customer_id = v_payer2 THEN 3.33 ELSE 6.67 END)
      OR (SELECT sum(total_amount_cents) FROM invoices WHERE delivery_id = v_d)
           IS DISTINCT FROM (SELECT round(sum(total_price) * 100)::bigint FROM order_items WHERE order_id = v_o) THEN
-    v_fails := v_fails || ' (AD) a payer''s quantity is not their share to 4 places, or the line no longer adds up;';
+    v_fails := v_fails || ' (AD) a payer''s quantity is not whole hundredths, or the line no longer adds up;';
   END IF;
 
   -- AJ: a payer's share under 0.01 of a unit now bills (Mason, 2026-11-09): 99% of 0.01 is 0.0099, the main

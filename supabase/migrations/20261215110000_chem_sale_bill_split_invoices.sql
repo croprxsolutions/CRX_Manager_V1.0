@@ -9,9 +9,10 @@
 --   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
---     the rest with the main customer. Another payer's quantity rounds down to 4 places, as an invoice line
---     holds it, so a three-decimal delivery (2.125) bills like a plain sale (Mason, 2026-11-09, replacing the
---     Nov 6 whole-hundredths rule). Each payer's cents are exactly its percentage rounded down. A share under
+--     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, so they can
+--     return it in full; only a share under 0.01 falls back to 4 places, as an invoice line holds it. The main
+--     customer takes the rest, so a three-decimal delivery (2.125) bills like a plain sale (Mason, 2026-11-09,
+--     replacing the Nov 6 refusal of deliveries not in whole hundredths). Each payer's cents are exactly its percentage rounded down. A share under
 --     0.0001 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL), so no billed money
 --     sits on no quantity; the office adjusts the shares.
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
@@ -449,9 +450,9 @@ $function$;
 -- One line's shares of p_cents and p_units (ten-thousandths): the line's own shares, else the card; any
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
--- exactly their percentage, rounded down. Other payers' quantity rounds down to 4 places, as an invoice line
--- holds it (Mason, 2026-11-09), so a share under 0.0001 comes back as 0 units with its cents, and the invoice
--- writer refuses it. The taker comes first. A line
+-- exactly their percentage, rounded down. Other payers' quantity rounds down to whole hundredths, as a return
+-- holds it; a share under 0.01 falls back to 4 places, as an invoice line holds it (Mason, 2026-11-09), so only a
+-- share under 0.0001 comes back as 0 units with its cents, and the invoice writer refuses it. The taker comes first. A line
 -- delivered past its planned quantity bills a capped total; each payer takes their percentage of it
 -- (Mason restored exact cents over quantity times price, 2026-11-06).
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
@@ -481,7 +482,10 @@ AS $function$
   ), ranked AS (
     SELECT p.customer_id,
            floor(p_cents * p.pct / 100)::bigint AS floor_cents,
-           floor(p_units * p.pct / 100)::bigint AS floor_units,
+           -- Whole hundredths when the share allows, so a return (2 places) takes it back in full; a share too
+           -- small for 0.01 falls back to 4 places so it still bills (Mason, 2026-11-09).
+           CASE WHEN floor(p_units * p.pct / 10000) > 0 THEN floor(p_units * p.pct / 10000)::bigint * 100
+                ELSE floor(p_units * p.pct / 100)::bigint END AS floor_units,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )

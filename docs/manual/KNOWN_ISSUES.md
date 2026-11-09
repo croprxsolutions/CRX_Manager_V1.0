@@ -480,10 +480,16 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (deliberately deferred) · UI/database · unassigned (next Goal 5/6 change)**
-After completion the phone sends the receipt email. If signal drops between, the delivery is complete with no
-receipt; the driver is warned and the office can resend by hand. A queue table plus scheduled sender was designed
-and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
+**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
+check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
+that waits on Mason's approval to
+deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
+provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
+and should land before the app switch.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**
@@ -496,10 +502,14 @@ The four older signature policies (fixed path `signatures/<id>.png`) are narrowe
 and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · OPEN · database · unassigned**
-The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
-add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`);
-the write-path fix is not built. Older record counted 0 missing rows live.
+**MED · FIXED 2026-11-08 5:58 PM Central (PR #1652, migration `20261215100000`, ledger `20261108235833`) · database · Claude**
+The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later did not
+add the job back. Fix: a `profiles` trigger dispatches the open jobs' undispatched locations to a person the moment
+they become an active applicator, whatever their license (Mason, 2026-11-08, DECISION_LOG), and the apply backfills
+any already waiting (board splits and undispatched locations left alone; a job assignment or location add at the
+same instant waits for the activation instead of being missed; proof
+`scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
+`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**
@@ -511,9 +521,11 @@ invoice, five empty deliveries). Counts are older records' claims, not re-measur
 
 ### KI-30 — Customer/vendor/product data hygiene waiting on Mason
 **LOW-MED · UNVERIFIED · database/process · Mason / unassigned**
-**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). On 2026-11-08, 48 products' EPA numbers (40 wrong, 8 blank) were corrected live from EPA's registry (PR #1653); 4 still need a jug-label read. Two `epa-lookup` limits make `LabelDataQuality` misreport some numbers: a number EPA moved returns a lookup error instead of the new number, and a three-part distributor number returns "not found" even when valid. Earlier count: about 105 of 204 stored EPA registration numbers were wrong (MED, compliance data; the
-`LabelDataQuality` screen exists, data entry is not done). CRM has no data entered; 146 of 150 customers lack a
-sales rep (older counts).
+**Vendor-name merges and category remap are closed** (Mason 2026-10-25, recorded in PR #1100; To-Do 0.12/0.16). That read-only check found no duplicate vendor names and all 595 active products in the intended 11 categories. **Still open:** junk-row deletes and remaining live-data cleanup need Mason's decisions (they change history or delete real rows). EPA registration numbers (MED, compliance data): a read-only check on 2026-11-08 against EPA PPLS found 30 wrong numbers (9 moved by EPA to a new number, 21 belonging to another brand or not in the registry) and 8 products with no number but a registry match; on 2026-11-08 those 48 products were corrected live from EPA's registry (PR #1653). 4 numbers still need a person to read the jug label. Two `epa-lookup` limits make `LabelDataQuality` misreport some numbers: a number EPA moved returns a
+lookup error instead of the new number, and a three-part distributor number returns "not found" even when
+valid. CRM has no data entered; 146 of 151 active customers lack a
+sales rep (live read-only count, 2026-11-08). The tool exists: an admin ticks customers on the Customers list and uses
+**Assign sales rep** (PR #381), so what remains is Mason choosing each customer's rep.
 WP-PM-8a (2026-11-02) found 16 of 604 live products that miss its new setup checks. They stay unchanged and keep working; the list is in Mason's private Product Master review notes.
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
@@ -529,8 +541,9 @@ Board still lists the newest 500 jobs but now says how many match (PRs #1537, #1
 PO/Order/Quote Import read every product and match names against all of them (PR #1441); Label Data Quality, Product
 Detail vendor/maker choices and the Invoice Detail customer picker read every row (PR #1512); the Field Customer
 Assignment dropdown lists an exact or starting-with name first and says "Showing 20 of N" (2026-11-06). Each was shown
-in the local test copy with 1,053 products and 26 customers. Still capped: the blend-ticket scanner Edge Function
-(needs a deploy).
+in the local test copy with 1,053 products and 26 customers. The blend-ticket scanner Edge Function
+(`process-blend-ticket`) now reads every active product and customer in id-ordered pages, so a scanned line can match
+product 1,001 and beyond (2026-11-08; live only once the function is redeployed, which needs Mason's approval).
 
 ---
 
@@ -633,9 +646,16 @@ quote changes the tier label without repricing its locked lines.
 ## Database and release process
 
 ### KI-35 — Live ledger vs files on `main` is checked only by noticing
-**MED · UNVERIFIED · process/database · unassigned**
-Nothing automatically compares migrations applied live with migration files on `main` (four past mismatches). The
-live ledger also has older entries with no file (ACCEPTED, pre-existing drift; see KI-62).
+**MED · FIXED (tool), run by hand · process/database · unassigned**
+Nothing compared migrations applied live with migration files on `main` (four past mismatches). Now
+`npm run db-drift:live` (`scripts/check-migration-drift.mjs`, read-only) lists live rows with no file on `main`, files
+on `main` never applied (parked drafts named in `scripts/migration-drift-allowlist.json` are shown apart), and live
+rows whose name or SQL differs from the file, or whose SQL cannot be compared. It reuses the pending-set guard's row
+matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version, and 13
+rows whose files had only a header comment edited after the apply are allowlisted pinned to both hashes.
+First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared; one row with no
+file, `20261214100000_ki30_epa_registration_corrections`, applied before its PR #1653 merged (clean against that
+branch). Not yet scheduled: it needs Mason's PC token, so run it after each live apply or merge.
 
 ### KI-36 — A table lock does not serialize the OLD body of a replaced function
 **MED (rule) · ACCEPTED as guidance (same as KI-61) · database · Mason (2026-09-03)**
@@ -802,6 +822,11 @@ times, money formatting in a dozen files (two print "$-5.00"), customer-notifica
 invoice pages. `src/pages/QuoteBuilder.tsx` (~6,000 lines) and the job page (~5,400) mix loading, pricing, saving,
 status actions and PDF/email; moving status actions and PDF/email into their own files changes nothing for users.
 Delete with a grep of every reference first; keep one copy of each helper.
+**Part 1 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-delete-unreferenced-tooling.md`): the seven
+never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpclaude-*` files are gone. Still open:
+the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
+deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
+them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
 
 ---
 
@@ -935,8 +960,10 @@ concurrent changes, load/count cost grows on large tables (the Orders list now r
 still recomputes the season's line, invoice and delivery totals), more than 20 identical-name search results are hard to
 reach, a trigram index may be needed (LOW). Commission Payments: an older refresh can report success after a newer
 one fails (LOW). `SelectLocationsModal` map/list split stays 50/50 on tablets (LOW). CRM gaps: applicator-license
-visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate-customer detection, bulk
-import/assignment of sales reps, outbound-email logging (MED). Offline recovery also lacks notification replay,
+visibility on customer/prep-card/quote surfaces, a pre-quote pipeline, duplicate detection in the bulk customer
+import, bulk import of sales reps from a file, outbound-email logging (MED). Bulk rep assignment exists on the Customers
+list (PR #381); the customer form warns, without blocking, when a new or renamed customer has a similar name or the
+same phone or email as one on file (2026-11-08). Offline recovery also lacks notification replay,
 operation-specific conflict checks, automatic discovery of an office resolution on the device, a general
 duplicate-action policy, and carries the risk of losing device-local work before reconnection (MED). Completion
 evidence: photo proof is not tied to who took it, and storage-rule guarantees do not cover dashboard or
@@ -977,7 +1004,7 @@ service-role tools (LOW).
 
 KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
-(live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
+(live-data counts), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.
 
 ---

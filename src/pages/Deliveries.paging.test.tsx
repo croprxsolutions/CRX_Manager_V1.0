@@ -155,6 +155,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 vi.mock('../components/deliveries/BatchCancelModal', () => ({ default: () => null }));
 vi.mock('../components/deliveries/QuickDeliveryModal', () => ({ default: () => null }));
+vi.mock('../components/deliveries/ReceiptsToCheck', () => ({ default: () => null }));
 vi.mock('../components/deliveries/DeliveryCalendar', () => ({ default: () => null }));
 vi.mock('../components/customers/CustomerDrawer', () => ({ default: () => null }));
 // The table only reports the rows it was given and the first delivery number.

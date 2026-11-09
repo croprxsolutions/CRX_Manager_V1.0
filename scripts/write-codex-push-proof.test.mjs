@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildCarryForwardProof,
   codeHealthBeforeSol,
+  docsCheckBeforeSol,
   buildCodexExecArgs,
   buildCollisionCheckPrompt,
   CARRY_SOURCE_MAX_AGE_MS,
@@ -2165,6 +2166,22 @@ not json
   assert.match(failed.output, /max-lines/, "code health: the refusal carries the check's output");
   const unreadable = codeHealthBeforeSol("root", "base", "head", { git: () => null, spawn: () => ({ status: 0, stdout: "PASS", stderr: "" }) });
   assert.deepEqual([unreadable.ok, unreadable.ran], [true, true], "code health: an unreadable diff runs the check anyway");
+}
+
+{
+  // The docs check runs before Sol against the reviewed base; its failure refuses and names only the FAIL lines.
+  const calls = [];
+  const spawn = (bin, args, opts) => {
+    calls.push({ script: args[0], base: opts.env.DOCS_FRESHNESS_BASE });
+    return { status: 1, stdout: "PASS manual doc x\nFAIL manual freshness KNOWN_ISSUES.md: stamp 20261107\n", stderr: "" };
+  };
+  const failed = docsCheckBeforeSol("root", "base123", { spawn });
+  assert.deepEqual([failed.ok, calls[0]], [false, { script: "scripts/check-doc-drift.mjs", base: "base123" }], "docs check: a failing check refuses Sol, on the reviewed base");
+  assert.equal(failed.output, "FAIL manual freshness KNOWN_ISSUES.md: stamp 20261107", "docs check: the refusal names only the failing lines");
+  const passed = docsCheckBeforeSol("root", "b", { spawn: () => ({ status: 0, stdout: "PASS x", stderr: "" }) });
+  assert.equal(passed.ok, true, "docs check: a passing check lets Sol run");
+  const crashed = docsCheckBeforeSol("root", "b", { spawn: () => ({ status: null, stdout: "", stderr: "boom" }) });
+  assert.deepEqual([crashed.ok, crashed.output], [false, "boom"], "docs check: a check that cannot run refuses");
 }
 
 console.log("OK - write-codex-push-proof helpers passed.");

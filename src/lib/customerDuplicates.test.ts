@@ -18,6 +18,8 @@ describe('customer duplicate matching', () => {
     expect(namesLookAlike('Smith Farms, LLC', 'smith farm')).toBe(true);
     expect(namesLookAlike('Wells & Sons', 'Wells and Sons Inc')).toBe(true);
     expect(namesLookAlike('José Farms', 'Jose Farms')).toBe(true);
+    expect(namesLookAlike('牧场有限公司', '牧场有限公司 LLC')).toBe(true);
+    expect(namesLookAlike('牧场有限公司', '果园')).toBe(false);
   });
 
   it('flags a name inside another and small typos, but not unrelated names', () => {
@@ -36,6 +38,8 @@ describe('customer duplicate matching', () => {
     )).toEqual(['same phone', 'same email']);
     expect(duplicateReasons({ farm_name: 'Alpha', phone: '123' }, { farm_name: 'Zulu', phone: '123' })).toEqual([]);
     expect(duplicateReasons({ farm_name: 'Alpha', phone: '123-4567' }, { farm_name: 'Zulu', phone: '(555) 123-4567' })).toEqual(['same phone']);
+    expect(duplicateReasons({ farm_name: 'Alpha', phone: '555-123-4567' }, { farm_name: 'Zulu', phone: '+1 (555) 123-4567 ext. 89' })).toEqual(['same phone']);
+    expect(duplicateReasons({ farm_name: 'Alpha', phone: '555-123-4567' }, { farm_name: 'Zulu', phone: '555-123-4567x89' })).toEqual(['same phone']);
   });
 });
 

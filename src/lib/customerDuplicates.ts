@@ -10,14 +10,15 @@ function normalizeFarmName(name: string): string {
     .replace(/[\u0300-\u036f]/g, '') // "José" and "Jose" are the same name
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .split(' ')
     .filter((w) => w && !FILLER_WORDS.has(w))
     .join(' ');
 }
 
 function phoneDigits(phone: string | null | undefined): string {
-  return (phone ?? '').replace(/\D/g, '').slice(-10);
+  // An extension ("ext. 89", "x89") is not part of the number.
+  return (phone ?? '').replace(/\s*(?:ext\.?|x)\s*\d+\s*$/i, '').replace(/\D/g, '').slice(-10);
 }
 
 function editDistance(a: string, b: string): number {

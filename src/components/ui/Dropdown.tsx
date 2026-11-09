@@ -78,7 +78,7 @@ export default function Dropdown({
         ref={triggerRef}
         className={`
           ${height} ${inline ? 'w-auto' : 'w-full'} flex items-center justify-between gap-2 px-3 text-sm
-          border rounded-lg text-left focus:outline-none focus-visible:ring-2
+          border ${inline ? 'rounded-full md:rounded-lg' : 'rounded-lg'} text-left focus:outline-none focus-visible:ring-2
           disabled:opacity-50 disabled:bg-gray-50
           transition-colors duration-150
           ${error

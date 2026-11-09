@@ -33,7 +33,6 @@ import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/bel
 import { Sentry } from '../lib/sentry';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
-import PageHeader from '../components/ui/PageHeader';
 import { notifyLargeOrder, notifyCreditLimitExceeded } from '../lib/notificationTriggers';
 import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
@@ -673,27 +672,35 @@ export default function Quotes() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Quotes"
-        accent="& Bookings"
-        subtitle="Build quotes, send them to growers and track booked product."
-        actions={
-          <>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                icon={<Upload className="w-4 h-4" />}
-                onClick={() => setImportModalOpen(true)}
-              >
-                Import quotes
-              </Button>
-              <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/quotes/new')}>
-                New quote
-              </Button>
-            </div>
-          </>
-        }
-      />
+      {/* PageHeader's markup, laid out like the boards: on phones the title and New quote share a row,
+          the description and accent word hide, and Import quotes moves into a ⋯ menu. */}
+      <header className="flex min-w-0 items-center justify-between gap-3 md:items-end">
+        <div className="min-w-0">
+          <h1 className="truncate font-heading text-2xl font-semibold text-nav-dark">
+            Quotes<span className="max-md:hidden"> <span className="split-heading-accent">&amp; Bookings</span></span>
+          </h1>
+          <p className="mt-1 text-sm text-secondary max-md:hidden">Build quotes, send them to growers and track booked product.</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="secondary"
+            icon={<Upload className="w-4 h-4" />}
+            onClick={() => setImportModalOpen(true)}
+            className="h-10 max-md:hidden"
+          >
+            Import quotes
+          </Button>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/quotes/new')} className="h-11 md:h-10">
+            New quote
+          </Button>
+          <span className="md:hidden">
+            <ActionMenu
+              label="More quote actions"
+              items={[{ id: 'import', label: 'Import quotes', icon: <Upload className="w-4 h-4" />, onAction: () => setImportModalOpen(true) }]}
+            />
+          </span>
+        </div>
+      </header>
 
       <BulkQuoteImport
         open={importModalOpen}
@@ -802,7 +809,8 @@ export default function Quotes() {
             data={filtered}
             columns={columns}
             searchable
-            searchPlaceholder="Search by quote number, customer or product"
+            searchPlaceholder="Quote, customer or product"
+            searchLabel="Search by quote number, customer or product"
             searchKeys={SEARCH_KEYS}
             searchValue={search}
             onSearchChange={setSearch}

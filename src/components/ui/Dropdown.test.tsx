@@ -47,6 +47,7 @@ describe('Dropdown', () => {
     const { container } = render(<Dropdown inline label="Status" value="draft" onChange={onChange} options={options} helper="Never shown" />);
     const trigger = screen.getByRole('button', { name: /Status/ });
     expect(trigger).toHaveTextContent('StatusDraft');
+    expect(trigger).toHaveClass('rounded-full', 'md:rounded-lg'); // a pill on phones, like the filter chips
     expect(screen.queryByText('Never shown')).not.toBeInTheDocument();
     expect(container.querySelector('.min-h-5')).toBeNull();
     fireEvent.click(trigger);

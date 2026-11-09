@@ -18,6 +18,8 @@ interface DataTableProps<T> {
   columns: Column<T>[];
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Accessible name for the search box when the placeholder is too short to be one (defaults to the placeholder). */
+  searchLabel?: string;
   searchKeys?: string[];
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
@@ -107,6 +109,7 @@ export default function DataTable<T extends Record<string, any>>({
   columns,
   searchable,
   searchPlaceholder = 'Search...',
+  searchLabel,
   searchKeys = [],
   onRowClick,
   emptyTitle = 'No data found',
@@ -169,7 +172,7 @@ export default function DataTable<T extends Record<string, any>>({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
+                aria-label={searchLabel ?? searchPlaceholder}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg
                   focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green
                   transition-colors"

@@ -153,6 +153,17 @@ describe('Quotes list', () => {
     expect(options).toEqual(['All', 'Draft', 'Sent', 'Revised', 'Accepted', 'Declined', 'Expired', 'Cancelled', 'Fulfilled', 'Closed short']);
   });
 
+  it('search keeps its long accessible name with the short board placeholder, and Import quotes is reachable on phone too', async () => {
+    H.tables.quotes = [quote(1, 'draft')];
+    at('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' })).toHaveAttribute('placeholder', 'Quote, customer or product');
+    // Desktop button, plus a ⋯ next to New quote for phones (CSS picks one).
+    expect(screen.getByRole('button', { name: 'Import quotes' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More quote actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Import quotes' })).toBeInTheDocument();
+  });
+
   it('the status filter is green-tinted only while a status is picked', async () => {
     H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent')];
     at('/quotes');

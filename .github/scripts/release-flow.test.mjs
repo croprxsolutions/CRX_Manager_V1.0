@@ -29,6 +29,10 @@ test('proofLink finds the first https "Staging proof:" line in the body or any c
   assert.equal(proofLink(['Staging proof: http://insecure.example']), null);
   assert.equal(proofLink(['Staging proof: <link>']), null);
   assert.equal(proofLink(['Staging proof: soon']), null);
+  assert.equal(proofLink(['Staging proof:\nhttps://a.example/1']), null); // link must be on the same line
+  assert.equal(proofLink(['Staging proof: https://']), null);
+  assert.equal(proofLink(['Staging proof: https://localhost/x']), null);
+  assert.equal(proofLink(['Staging proof: nope\nStaging proof: https://c.example/2']), 'https://c.example/2');
   assert.equal(proofLink([null, undefined, '']), null);
 });
 
@@ -52,4 +56,7 @@ test('labelProblem explains what is missing, or returns null', () => {
   assert.equal(labelProblem({ ...merged, label: 'held-off', texts: ['Held off: #1712'] }), null);
   assert.match(labelProblem({ ...merged, label: 'held-off', texts: [] }), /Held off: <revert PR or flag name>/);
   assert.equal(labelProblem({ ...merged, label: 'on-staging', texts: [] }), null);
+  assert.match(labelProblem({ merged: false, baseRef: 'staging', label: 'on-staging', texts: [] }), /after the PR is merged into staging/);
+  assert.match(labelProblem({ ...merged, headRef: 'main', label: 'verified-on-staging', texts: ['Staging proof: https://x.example'] }), /back-merge/);
+  assert.equal(labelProblem({ ...merged, label: 'bug', texts: [] }), null);
 });

@@ -7,6 +7,8 @@ on:
   pull_request:
     branches: [staging]
     types: [closed, labeled]
+# Deleting a proof line later doesn't remove the label, but the weekly release gate re-reads the
+# proof itself, so the release can't merge without it.
 
 permissions: {}
 
@@ -18,7 +20,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       ((github.event.action == 'closed' && github.event.pull_request.merged) ||
        (github.event.action == 'labeled' &&
-        contains(fromJSON('["verified-on-staging","held-off"]'), github.event.label.name)))
+        contains(fromJSON('["on-staging","verified-on-staging","held-off"]'), github.event.label.name)))
     runs-on: ubuntu-latest
     concurrency:
       group: release-labels-${{ github.event.pull_request.number }}

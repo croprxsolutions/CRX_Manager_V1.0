@@ -19,10 +19,17 @@ export function flowEnabled(env) {
 }
 
 // The first line "Staging proof: https://…" in the PR body or any comment (key case-insensitive).
+// The link must be on the same line and be a real https URL with a host.
 export function proofLink(texts) {
   for (const t of texts) {
-    const m = /^\s*staging proof:\s*(https:\/\/\S+)/im.exec(t ?? '');
-    if (m) return m[1];
+    for (const m of (t ?? '').matchAll(/^[ \t]*staging proof:[ \t]*(\S+)/gim)) {
+      try {
+        const url = new URL(m[1]);
+        if (url.protocol === 'https:' && url.hostname.includes('.')) return m[1];
+      } catch {
+        // not a URL; keep looking
+      }
+    }
   }
   return null;
 }
@@ -30,7 +37,7 @@ export function proofLink(texts) {
 // "Held off: <revert PR or flag name>": why a PR on staging isn't shipping this week.
 export function heldOffNote(texts) {
   for (const t of texts) {
-    const m = /^\s*held off:[ \t]*(\S.*?)\s*$/im.exec(t ?? '');
+    const m = /^[ \t]*held off:[ \t]*(\S.*?)[ \t]*$/im.exec(t ?? '');
     if (m) return m[1];
   }
   return null;
@@ -47,9 +54,11 @@ export const LABELS = {
   'held-off': { color: 'f59e0b', description: 'On staging but not shipping: "Held off: <revert PR or flag>"' },
 };
 
-// Why a manually added label can't stay, or null when it can.
-export function labelProblem({ label, merged, baseRef, texts }) {
-  if (label !== 'verified-on-staging' && label !== 'held-off') return null;
+// Why a label can't stay, or null when it can. on-staging is the bot's; added by hand to an
+// unmerged PR or a back-merge, it goes.
+export function labelProblem({ label, merged, baseRef, headRef, texts }) {
+  if (!(label in LABELS)) return null;
+  if (isBackMerge(headRef)) return `The back-merge PR (main into staging) isn't release work, so I removed \`${label}\`.`;
   if (!merged || baseRef !== 'staging') {
     return `\`${label}\` goes on after the PR is merged into staging and tried there, so I removed it.`;
   }
@@ -63,7 +72,7 @@ export function labelProblem({ label, merged, baseRef, texts }) {
 }
 
 // Minimal GitHub REST helper (GITHUB_TOKEN, GITHUB_REPOSITORY from the Actions environment).
-async function gh(path, { method = 'GET', body } = {}) {
+async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE' } = {}) {
   const res = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${path}`, {
     method,
     headers: {
@@ -74,26 +83,36 @@ async function gh(path, { method = 'GET', body } = {}) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok && !(method === 'DELETE' && res.status === 404)) {
-    throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
-  }
+  if (res.status === 404 && allow404) return null;
+  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
   return res.status === 204 || method === 'DELETE' ? null : res.json();
 }
 
 async function ensureLabels() {
-  const have = new Set((await gh('/labels?per_page=100')).map((l) => l.name));
   for (const [name, spec] of Object.entries(LABELS)) {
-    if (!have.has(name)) await gh('/labels', { method: 'POST', body: { name, ...spec } });
+    if (!(await gh(`/labels/${encodeURIComponent(name)}`, { allow404: true }))) {
+      await gh('/labels', { method: 'POST', body: { name, ...spec } });
+    }
   }
 }
 
-async function humanComments(number) {
-  const texts = [];
+async function allPages(path) {
+  const out = [];
   for (let page = 1; ; page++) {
-    const batch = await gh(`/issues/${number}/comments?per_page=100&page=${page}`);
-    texts.push(...batch.filter((c) => c.user?.type !== 'Bot').map((c) => c.body));
-    if (batch.length < 100) return texts;
+    const batch = await gh(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    out.push(...batch);
+    if (batch.length < 100) return out;
   }
+}
+
+// Conversation comments, review summaries and inline review comments written by people.
+async function humanComments(number) {
+  const all = [
+    ...(await allPages(`/issues/${number}/comments`)),
+    ...(await allPages(`/pulls/${number}/reviews`)),
+    ...(await allPages(`/pulls/${number}/comments`)),
+  ];
+  return all.filter((c) => c.user?.type !== 'Bot' && c.body).map((c) => c.body);
 }
 
 async function readEvent() {
@@ -123,7 +142,7 @@ const commands = {
   async 'check-label'() {
     const { pull_request: pr, label } = await readEvent();
     const texts = [pr.body, ...(await humanComments(pr.number))];
-    const problem = labelProblem({ label: label?.name, merged: pr.merged, baseRef: pr.base.ref, texts });
+    const problem = labelProblem({ label: label?.name, merged: pr.merged, baseRef: pr.base.ref, headRef: pr.head.ref, texts });
     if (!problem) return 0;
     await gh(`/issues/${pr.number}/labels/${encodeURIComponent(label.name)}`, { method: 'DELETE' });
     await gh(`/issues/${pr.number}/comments`, { method: 'POST', body: { body: problem } });

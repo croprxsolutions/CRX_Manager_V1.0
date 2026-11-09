@@ -112,7 +112,7 @@
 
 ### 3.2 Brand-list resolution (one internal helper)
 
-`_delivery_line_brand_list(p_product_id uuid) RETURNS TABLE(source, parent_id, brand_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version)` (no grant). It uses `get_product_brands`'s rule: the parent's active brands when the size is grouped **and** `_product_parent_grouping_open()` is true; otherwise the size's legacy rows. A product **has brands** when this returns at least one row, whether or not each brand is currently sourced. The picker offers only currently sourced brands. A typed name that matches a listed brand is stored as that listed pick (4.A).
+`_delivery_line_brand_list(p_product_id uuid) RETURNS TABLE(source, parent_id, brand_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version)` (no grant). It uses `get_product_brands`'s rule: the parent's active brands when the size is grouped **and** `_product_parent_grouping_open()` is true; otherwise the size's legacy rows. A product **has brands** when this returns at least one row, whether or not each brand is currently sourced. The picker shows currently sourced brands first and the rest under "Not currently bought (old stock)", so the screen offers exactly what the RPC accepts: any brand on the list. A typed name that matches a listed brand is stored as that listed pick (4.A).
 
 ### 3.3 Locking
 
@@ -124,7 +124,7 @@ PR B keeps REG-DB's lock order (REG-1 sheet §3.2), and every writer takes its l
 5. Picks.
 6. Then invoices and their lines, then RUP records, as REG-DB orders them.
 
-`correct_delivery_brands` locks the delivery first, then the invoices it touches (ID order), so it never inverts with posting.
+`correct_delivery_brands` follows the same order: the registration lock first, then the delivery, then the invoices it touches (ID order), then their RUP records. It never takes the delivery before the registration lock, so it cannot deadlock with posting.
 
 ### 3.4 Retry safety and authorization (every public RPC)
 
@@ -145,9 +145,10 @@ PR B keeps REG-DB's lock order (REG-1 sheet §3.2), and every writer takes its l
 
 Built from each re-issued function's body **on live at build time** (after REG-DB). Each re-issue is diffed against `pg_get_functiondef` before review. The migration stamp must sort after REG-DB's claimed stamps (`20261218100000` to `20261218130000`) and any peer claim. Grep the peer worktrees and the shared notes folder at build.
 
-### 4.A `set_delivery_brands(p_delivery_id uuid, p_lines jsonb, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
+### 4.A `set_delivery_brands(p_delivery_id uuid, p_lines jsonb, p_base_event_id uuid, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 - **Who:** admin, sales rep, or the delivery's assigned driver. This is the completion rule (`_complete_delivery_authorized_impl:1015`), not a new one.
 - **When:** while the delivery is `scheduled` or `in_progress`. Otherwise `DELIVERY_BRANDS_LOCKED` (after completion, use 4.F).
+- **Stale-save guard:** `p_base_event_id` is the delivery's latest brand event the screen loaded (NULL when it has none). If the delivery's latest event is different, the save is refused (`BRAND_PICKS_CHANGED`) and the screen reloads. So an old save that lands after a newer one can never overwrite it, even after the screen was closed and reopened. A replay with the same key returns the original result before this check runs.
 - **Input:** `p_lines` is `[{delivery_item_id, picks: [{brand_id?, typed_name?, typed_epa?, typed_manufacturer?, quantity}]}]`. Each named line's current picks are replaced in one step. Lines that are not named are untouched. An empty `picks` array clears that line.
 - **Rules:**
   - Each line belongs to the delivery (`DELIVERY_ITEM_NOT_ON_DELIVERY`).
@@ -155,7 +156,7 @@ Built from each re-issued function's body **on live at build time** (after REG-D
   - A typed pick needs a name. Its number must pass the strict CHECK if given. A typed name equal to a listed brand (case-insensitive) is stored as the listed pick when the numbers agree or the typed number is blank. When the numbers differ, it is stored as typed and flagged on the review list ("number differs from the list").
   - The pick amounts must each be above zero, and their sum must be at most the line's loaded `quantity` (`BRAND_SPLIT_OVER_LOADED`). While scheduled they are normally equal to it. A smaller sum is allowed so a short split can be saved just before completion (4.C).
   - Snapshots come from the brand row (or from the typed values), never from the client for a listed pick.
-- **Writes:** one `set` event. Replacing picks before completion deletes the old rows outright, because nothing has been issued yet (as step 1 allowed). The event keeps them.
+- **Writes:** one `set` event; its ID is returned as the next base. Replacing picks before completion deletes the old rows outright, because nothing has been issued yet (as step 1 allowed). The event keeps them.
 - **Returns:** the line's current picks.
 
 ### 4.B `edit_delivery` (re-issued)
@@ -191,7 +192,7 @@ Stock shortages still never block (To-Do 2.6). Lot and tote numbers are not read
 ### 4.D Snapshot onto invoice lines
 **Which picks belong to an invoice line** (used here, by RUP in 4.E and by the correction in 4.F):
 - **An invoice with a `delivery_id`** (the automatic invoice, the quick-delivery draft, the unbilled-recovery invoice, each Bill Split payer invoice): the current picks of **that** delivery's line for the same `order_item_id`. Never a sibling delivery's.
-- **An invoice with no `delivery_id`** (whole-order, landlord split): the current picks of every completed, not-voided delivery of that order line, added up per brand (same name and number).
+- **An invoice with no `delivery_id`** (whole-order, landlord split): the current picks of every completed, not-voided delivery of that order line, added up per brand (same name and number). Completion also re-copies `brand_lines` on the open **draft** lines of these order-level invoices that cover the order lines it just completed, so a draft made before the delivery does not keep showing "Brand not recorded".
 
 **Writing it.** REG-DB routes every invoice-line insert through `_capture_invoice_line_sale`. PR B extends that one helper to:
 - compute `brand_lines` for a line that has an `order_item_id`, by the rule above. `NULL` when the product has no brands and no typed pick exists; `[]` when it is branded but unpicked;
@@ -210,7 +211,7 @@ Every insert path gets this through the helper, including `_create_bill_split_de
   - **Quantity:** the line's quantity divided across the entries in proportion to `delivered_quantity`.
   - **Cents:** `extended_cents` divided the same way in whole cents.
   - **Remainders:** the last entry in the fixed order takes the remainder of both, so the records add up to the line exactly. A Bill Split payer's line therefore records its share of each brand, and a line whose quantity the office changed is divided in the delivered proportion. The draft invoice warns before posting when a non-Bill-Split line's quantity no longer matches the delivered total.
-  - **Which entries need a record:** the entry's `rup_status` is `yes`, or REG-DB's posting rule finds the number's registration `yes` at posting; when the entry is `unknown` **and** either the generic product is restricted-use or the entry is a **typed** brand, it is recorded too, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed brand whose status is unknown under a non-RUP generic is not recorded; its brand row is the place to fix that.
+  - **Which entries need a record:** the entry's captured `rup_status` is `yes`. The status captured at completion (4.C) is the fact for that sale; a later change to the brand or its registration never adds or removes a record; when the entry is `unknown` **and** either the generic product is restricted-use or the entry is a **typed** brand, it is recorded too, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed brand whose status is unknown under a non-RUP generic is not recorded; its brand row is the place to fix that.
   - **What each record holds:** the entry's EPA number, signal word and `brand_name`.
 - **A line with `brand_lines = []` on a restricted-use product:** one record with a blank EPA number, `compliance_status = 'warning'` and note "Brand not recorded at delivery" (Question 3). The sale is never silently dropped.
 - **Grouping:** REG-DB's key `(invoice, product, sold number, signal word)`, with each brand entry treated as its own sold number. Entries sharing a key are added into one record, and their brand names joined. REG-DB's "an existing active record that disagrees is an error" rule and its posting lock stay.
@@ -264,6 +265,8 @@ Every insert path gets this through the helper, including `_create_bill_split_de
   - the refusal codes from 4.C are shown as plain sentences naming the line.
 - **Screen state is keyed by delivery:** the picks, the pending save and its request number belong to one delivery ID and are cleared when the screen opens another delivery, closes, or reloads after a reopen; a reply whose delivery ID or request number is not the current one is ignored.
 - **Retries reuse their key:** each save intent gets one retry key when the user saves, kept with the pending save (in the offline queue when offline) and reused on every retry until a reply confirms it. Changing the choices makes a new save with a new key, which supersedes the older one on screen; an older save that still lands is overwritten by the newer one, because saves are applied in queue order.
+- **Completion in flight:** after Complete is pressed, the picker, Split and Complete stay disabled until completion replies, and a second press is ignored. The database also refuses brand saves once the delivery is completed (`DELIVERY_BRANDS_LOCKED`, 4.A), so a save cannot slip in.
+- **Offline:** the queue keeps only the latest pending brand save per delivery, carrying the base event it was made from; a refused stale save is shown for follow-up like other refused replays.
 - **One save at a time per delivery:** while a brand save is in flight, the picker and the Complete button are disabled; each save carries a request number and a reply for an older number is ignored. Completion is offered only after the latest save has come back, and it sends nothing about brands (the database reads the saved picks). A failed save leaves the screen's choices in place, shows the error, and keeps Complete disabled until a save succeeds.
 - **Offline (`src/lib/offlineQueue.ts`, `src/lib/offlineSync.ts`):** `set_delivery_brands` is its own queued action, ordered before that delivery's completion action, with its own retry key. A queued completion that is refused after the switch went on is shown for office follow-up, as other refused replays are today.
 - **Deliveries list** (`src/pages/Deliveries.tsx`): one-click **Mark Delivered** shows "Pick the brand on the delivery page first" for `BRAND_REQUIRED`.
@@ -341,6 +344,11 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - P32. A typed restricted-use brand delivered under a non-RUP generic, before the seed, gets a warning RUP record.
 - P33. After a posted-invoice correction, the rebuilt records name the corrected brand and the invoice's `brand_lines` is unchanged.
 - P34. Every PR B `SECURITY DEFINER` function has the pinned `search_path`; every superseded pick points at an existing event.
+- P35. Correction and posting on the same delivery run in both orders at once with no deadlock.
+- P36. A brand captured `no` whose registration flips to `yes` before posting gets no RUP record; one captured `yes` keeps its record after a flip to `no`.
+- P37. A whole-order draft made before the delivery shows the delivered brands after completion.
+- P38. A listed brand that is not currently sourced is accepted and shown in the old-stock group.
+- P39. A save with an old `p_base_event_id` is refused after a newer save, and a same-key replay of the older save returns its original result.
 
 ---
 
@@ -416,3 +424,11 @@ Every insert path gets this through the helper, including `_create_bill_split_de
 - MED, screen state not isolated by delivery: keyed by delivery and cleared on switch (section 5).
 - MED, retries could mint new keys: one key per save intent until confirmed (section 5).
 - LOW, no `updated_at` on picks: added with the shared trigger (3.1).
+
+**Luna round 3** (head `5b0923c2f`): 6 findings, all **fixed**.
+- HIGH, correction took the delivery lock before the registration lock: it now follows the shared order (3.3, P35).
+- HIGH, a registration change before posting could add an RUP record: the captured status decides (4.E, P36).
+- MED, an order-level draft made before delivery stayed "Brand not recorded": completion refreshes it (4.D, P37).
+- MED, the RPC accepted unsourced brands the picker hid: the picker now shows them as old stock (3.2, P38).
+- MED, edits during an in-flight completion: controls stay locked and the database refuses late saves (section 5).
+- MED, an old save could land after a newer one: `p_base_event_id` stale-save guard (4.A, P39).

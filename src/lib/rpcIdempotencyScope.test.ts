@@ -294,7 +294,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _save_invoice_split_provenance_impl_20260719: ['save_invoice'],
   _save_invoice_below_cost_impl_20260810: ['save_invoice'],
   // Postgres-only layer behind save_invoice; it reads the public receipt that save_invoice already
-  // matched, so a retry replays before the Bill Split draft checks (20261208110000).
+  // matched, so a retry replays before the Bill Split draft checks (20261215110000).
   _save_invoice_intent_impl_20260802: ['save_invoice'],
   _post_invoice_public_impl_20260718: ['post_invoice'],
   // Direct EXECUTE is revoked (live 2026-11-06: proacl `postgres=X/postgres`). Private layers behind the

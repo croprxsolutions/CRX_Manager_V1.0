@@ -236,7 +236,7 @@ const id = (n) => `7a7e5000-0000-4000-8000-${n.padStart(12, '0')}`;
 const ADMIN = id('a1'), REP = id('a2');
 const P1 = id('f1'), P2 = id('f2'), P3 = id('f3'), P4 = id('f4'), P5 = id('f5'), P6 = id('f6');
 const B1 = id('b1'), PP1 = id('c1');
-const CUST = id('d1'), ORD = id('e1'), INV1 = id('11'), INV2 = id('12'), INV3 = id('13');
+const CUST = id('d1'), ORD = id('e1'), INV1 = id('11'), INV2 = id('12'), INV3 = id('13'), INV4 = id('15'), L8 = id('28');
 const L1 = id('21'), L2 = id('22'), L3 = id('23'), L4 = id('24'), L5 = id('25'), L6 = id('26'), L7 = id('27');
 const N1 = '524-475', N2 = '100-1', N3 = '200-2', N4 = '300-3';
 
@@ -603,7 +603,7 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   const check = Object.fromEntries(okJ(ADMIN, 'SELECT public.get_epa_sales_to_check();').map((x) => [x.line_id, x.reasons]));
   assert.deepEqual(check[L3], ['restricted_use_to_record', 'posted_before_seed']);
   assert.deepEqual(check[L2], ['no_epa_number']);
-  assert.deepEqual(check[L4], ['seed_assumed']);
+  assert.deepEqual(check[L4], ['seed_assumed', 'no_epa_number']);
   assert.equal(check[L5], undefined);
   assert.equal(check[L7], undefined);
   // A record covers only its own price: with the second-price record voided, that line is listed and L5 is not.
@@ -617,6 +617,17 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.ok(check3[L7]?.includes('restricted_use_to_record'), JSON.stringify(check3[L7]));
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L7}"}]' AND NOT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L5}"}]';`), 't');
+  // 14. save_invoice: a quantity change on a kept Yes line takes today's facts and keeps the Yes.
+  raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by)
+      VALUES ('${INV4}', '${CUST}', '${ORD}', 'E2-I4', 'draft', current_date, '${ADMIN}');`);
+  ownerOk(line(L8, INV4, P4, 2));
+  raw(`UPDATE public.epa_registrations SET signal_word = 'Warning', rup_status = 'no' WHERE epa_registration = '${N2}';`);
+  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
+    ${J([{ id: L8, product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500 }])}, 'k-save14');`);
+  assert.equal(scalar(`SELECT quantity || '|' || sale_rup_status || '|' || sale_signal_word || '|' || sale_facts_source FROM public.invoice_items WHERE invoice_id = '${INV4}';`),
+    `5.0000|yes|Warning|registration:${N2}@1`);
+  raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
+  console.log('[prover] case 14: save_invoice re-captures a kept Yes line on a quantity change with the current facts and keeps the Yes');
   console.log('[prover] case 13: Sales to check lists a restricted-use sale posted before the seed, a numberless sale and a seed-assumed one, and not a recorded one');
   console.log('EPA_REGISTRATION_STEP2_PROOF_PASS');
 }

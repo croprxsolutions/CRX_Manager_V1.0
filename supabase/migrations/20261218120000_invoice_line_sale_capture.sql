@@ -235,6 +235,8 @@ DECLARE
   v_pay text;
   v_line_epa text;
   v_cap jsonb;
+  v_keep_yes boolean;
+  v_new_line_id uuid;
   v_prod_epa text;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -488,6 +490,7 @@ BEGIN
     -- REG-1 (sheet 4.C): before the seed the payload's number is stored as today and nothing is captured.
     v_line_epa := v_item->>'epa_registration';
     v_cap := NULL;
+    v_keep_yes := false;
     IF v_seeded AND NULLIF(btrim(v_item->>'product_id'), '') IS NOT NULL THEN
       v_pay := public._normalize_epa_registration(v_item->>'epa_registration');
       v_old_line := v_old -> lower(NULLIF(v_item->>'id', ''));
@@ -499,9 +502,9 @@ BEGIN
         IF v_pay IS NOT NULL AND v_pay IS DISTINCT FROM public._normalize_epa_registration(v_old_line->>'epa_registration') THEN
           RAISE EXCEPTION 'INVOICE_LINE_EPA_MISMATCH: a line''s EPA number changed since this invoice was loaded; reload the invoice';
         END IF;
-        IF v_qty IS DISTINCT FROM (v_old_line->>'quantity')::numeric
-           AND (v_old_line->>'sale_rup_status') IS DISTINCT FROM 'yes' THEN
+        IF v_qty IS DISTINCT FROM (v_old_line->>'quantity')::numeric THEN
           v_line_epa := NULL;  -- a quantity change re-captures from the product's current label (Mason, 2026-11-06)
+          v_keep_yes := (v_old_line->>'sale_rup_status') = 'yes';  -- with today's facts, but a Yes is never lowered
         ELSE
           v_line_epa := v_old_line->>'epa_registration';
           v_cap := v_old_line;
@@ -543,7 +546,12 @@ BEGIN
       v_charge_type,
       v_order_item_id,
       v_cap->>'sale_rup_status', v_cap->>'sale_signal_word',
-      (v_cap->>'sale_facts_captured_at')::timestamptz, v_cap->>'sale_facts_source');
+      (v_cap->>'sale_facts_captured_at')::timestamptz, v_cap->>'sale_facts_source')
+    RETURNING id INTO v_new_line_id;
+    IF v_keep_yes THEN
+      -- The re-capture took today's facts; hold the Yes (the pass lets the capture trigger keep this value).
+      UPDATE invoice_items SET sale_rup_status = 'yes' WHERE id = v_new_line_id AND sale_rup_status IS DISTINCT FROM 'yes';
+    END IF;
     v_total_cents := v_total_cents + v_extended;
     v_total_cost := v_total_cost + CASE
       WHEN v_is_fee THEN v_cost_cents
@@ -967,7 +975,7 @@ BEGIN
              CASE WHEN sale_rup_status = 'unknown' AND NOT has_record THEN 'not_reviewed_no_record' END,
              CASE WHEN sale_facts_captured_at IS NULL THEN 'posted_before_seed' END,
              CASE WHEN sale_facts_source LIKE 'seed-assumed:%' THEN 'seed_assumed' END,
-             CASE WHEN sale_facts_source LIKE 'product:%' THEN 'no_epa_number' END], NULL)))
+             CASE WHEN sale_facts_source ~ '^(seed-assumed:)?product:' THEN 'no_epa_number' END], NULL)))
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
     FROM lines
@@ -975,7 +983,7 @@ BEGIN
       OR (sale_rup_status = 'unknown' AND NOT has_record)
       OR sale_facts_captured_at IS NULL
       OR sale_facts_source LIKE 'seed-assumed:%'
-      OR sale_facts_source LIKE 'product:%';
+      OR sale_facts_source ~ '^(seed-assumed:)?product:';
   RETURN v_out;
 END;
 $function$;

@@ -86,7 +86,7 @@ ALTER TABLE public.invoice_items
   ADD COLUMN sale_facts_source text,
   ADD CONSTRAINT invoice_items_sale_capture_whole CHECK (
     (sale_facts_captured_at IS NULL AND sale_rup_status IS NULL AND sale_signal_word IS NULL AND sale_facts_source IS NULL)
-    OR (sale_facts_captured_at IS NOT NULL AND sale_rup_status IS NOT NULL
+    OR (sale_facts_captured_at IS NOT NULL AND sale_rup_status IS NOT NULL AND sale_facts_source IS NOT NULL
         AND sale_facts_source ~ '^(seed-assumed:)?(registration:[0-9A-Z-]+@[1-9][0-9]*|product:[0-9a-f-]{36})$'));
 -- invoice_items is column-carved (20261022101000): read grants match its other non-cost columns; no write grants.
 GRANT SELECT (sale_rup_status, sale_signal_word, sale_facts_captured_at, sale_facts_source)
@@ -788,17 +788,19 @@ BEGIN
       END IF;
     END LOOP;
     -- A line needs a record when its capture or its sold number's registration says Yes (sheet 4.C).
+    -- One record per unit and unit price too, so a record never merges lines sold at different prices or units.
     OPEN v_items FOR
-      SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity, min(ii.unit_size) AS unit_size,
-             min(ii.unit_price_cents) AS unit_price_cents, sum(ii.extended_cents)::bigint AS extended_cents,
+      SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity, ii.unit_size,
+             ii.unit_price_cents, sum(ii.extended_cents)::bigint AS extended_cents,
              public._normalize_epa_registration(ii.epa_registration) AS epa_registration, ii.sale_signal_word AS signal_word
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(ii.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
          AND (ii.sale_rup_status = 'yes' OR r.rup_status = 'yes')
-       GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration), ii.sale_signal_word
-       ORDER BY ii.product_id, 7, 8;
+       GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(ii.epa_registration), ii.sale_signal_word,
+                ii.unit_size, ii.unit_price_cents
+       ORDER BY ii.product_id, 7, 8, 4, 5;
   ELSE
     OPEN v_items FOR
     SELECT ii.product_id, p.product_name, ii.quantity, ii.unit_size,
@@ -839,12 +841,14 @@ BEGIN
     END IF;
 
     IF v_seeded THEN
-      -- REG-1: one active record per invoice, product, sold number and captured signal word; one that
-      -- disagrees with what this posting would write is an error, never skipped.
+      -- REG-1: one active record per invoice, product, sold number, captured signal word, unit and unit price;
+      -- one that disagrees with what this posting would write is an error, never skipped.
       SELECT r.quantity INTO v_rec_qty FROM rup_sales_records r
        WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id
          AND public._normalize_epa_registration(r.epa_registration) IS NOT DISTINCT FROM v_item.epa_registration
          AND r.signal_word IS NOT DISTINCT FROM v_item.signal_word
+         AND r.unit IS NOT DISTINCT FROM v_item.unit_size
+         AND r.unit_price_cents IS NOT DISTINCT FROM v_item.unit_price_cents
          AND r.voided_at IS NULL
        ORDER BY r.id LIMIT 1;
       IF FOUND THEN

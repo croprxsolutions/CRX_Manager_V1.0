@@ -36,7 +36,13 @@ const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
   '20261016030000_staff_photo_buckets_private.sql',
+  // Job access (#1650) refuses unless storage.objects carries live's policies, which the parked storage files above
+  // would install; it changes job and storage access only, never what this proof covers (asserted below).
+  '20261217100000_job_access_ends_with_the_job.sql',
 ]);
+// Parked files whose only match is a read of products.epa_registration (complete_job copies it onto the
+// applied record); they redefine nothing this proof covers.
+const PARKED_READS_ONLY = new Set(['20261217100000_job_access_ends_with_the_job.sql']);
 // PR #889's data migrations rewrite live rows this disposable database does not have; they are
 // recorded in the ledger (as live has them) instead of replayed.
 const LEDGER_ONLY = new Set([
@@ -166,7 +172,8 @@ function plan() {
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
-    assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
+    const text = PARKED_READS_ONLY.has(name) ? lf(file).replace(/'epa_registration', p\.epa_registration/g, '') : lf(file);
+    assert.ok(!TOUCHED.test(text), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
   return before;
 }
@@ -230,7 +237,7 @@ const ADMIN = id('a1'), REP = id('a2');
 const P1 = id('f1'), P2 = id('f2'), P3 = id('f3'), P4 = id('f4'), P5 = id('f5'), P6 = id('f6');
 const B1 = id('b1'), PP1 = id('c1');
 const CUST = id('d1'), ORD = id('e1'), INV1 = id('11'), INV2 = id('12'), INV3 = id('13');
-const L1 = id('21'), L2 = id('22'), L3 = id('23'), L4 = id('24'), L5 = id('25'), L6 = id('26');
+const L1 = id('21'), L2 = id('22'), L3 = id('23'), L4 = id('24'), L5 = id('25'), L6 = id('26'), L7 = id('27');
 const N1 = '524-475', N2 = '100-1', N3 = '200-2', N4 = '300-3';
 
 function asOwner(sql) { psql(sql, { user: 'supabase_admin' }); }
@@ -536,6 +543,14 @@ async function main() {
   assert.equal(capture(L5), `${N2}|yes|Danger|registration:${N2}@1|true`);
   ownerRefused(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, sale_rup_status, sale_facts_captured_at, sale_facts_source)
     VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, 'no', now(), 'product:${P1}');`, /INVOICE_LINE_SALE_CAPTURE/);
+  // A capture with no source is never whole (a NULL in the CHECK must not pass it).
+  {
+    const r = psql(`SET session_replication_role = replica; UPDATE public.invoice_items SET sale_facts_source = NULL WHERE id = '${L5}';`,
+      { allowFailure: true, user: 'supabase_admin' });
+    assert.notEqual(r.status, 0, 'a capture with no source was accepted');
+    assert.match(`${r.stdout}
+${r.stderr}`, /invoice_items_sale_capture_whole/);
+  }
   ownerRefused(`UPDATE public.invoice_items SET sale_rup_status = 'no' WHERE id = '${L5}';`, /INVOICE_LINE_SALE_CAPTURE/);
   ownerRefused(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
     VALUES ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1500, 1500, '999-9');`, /INVOICE_LINE_NO_REGISTRATION/);
@@ -564,7 +579,15 @@ async function main() {
     INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L6}', '${INV1}', '${P2}', 'x', 1, 'Gal', 1500, 1500);`);
   refused(ADMIN, GEN('g4'), /INVOICE_LINE_NOT_CAPTURED/);
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
-  console.log('[prover] case 12: posting refuses a numberless line whose product is now restricted-use, writes one restricted-use record per sold number, skips it on a repeat, refuses a record that disagrees and a line with no capture');
+  // The same product and number sold at a second price gets its own record; neither merges price nor total.
+  raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
+  ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L7}', '${INV1}', '${P4}', 'x', 2, 'Gal', 1700, 3400);`);
+  raw(`UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${INV1}';`);
+  assert.equal(ok(ADMIN, GEN('g5')), '1');
+  assert.equal(scalar(`SELECT string_agg(quantity || '@' || unit_price_cents || '=' || total_cents, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`),
+    '3.0000@1500=4500,2.0000@1700=3400');
+  assert.equal(ok(ADMIN, GEN('g6')), '0');
+  console.log('[prover] case 12: posting refuses a numberless line whose product is now restricted-use, writes one restricted-use record per sold number, unit and price, skips it on a repeat, refuses a record that disagrees and a line with no capture');
 
   // 13. Sales to check.
   refused(REP, 'SELECT public.get_epa_sales_to_check();', /ADMIN_REQUIRED/);

@@ -1,0 +1,164 @@
+-- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- docs/reference/migrations.d/20261216100000_close_delivery_receipt.md.
+-- Re-read the live ledger before applying.
+--
+-- WHAT (KI-25 follow-up, Sol MED on PRs #1647 and #1649): one new office call, close_delivery_receipt, so the server
+--   sender (send-delivery-receipts) never emails a customer receipt the office has dealt with, and never a second copy
+--   after the office sends one by hand with Email Confirmation.
+--   p_reason 'handled': the receipt is dealt with (from the "Customer receipts to check" list, or by Email Confirmation
+--     after its hand send went out). A pending, needs_check or not-in-flight sending row becomes 'cancelled' (claim
+--     cleared, so the worker's confirm answers 'stale' and sends nothing) and leaves the office list.
+--   p_reason 'manual_send': called by Email Confirmation BEFORE the hand send. The same rows become 'needs_check'
+--     (paused: the worker never claims needs_check, and the row is on the office list) rather than cancelled, so a
+--     hand send that then fails leaves the receipt on the list instead of lost (Mason, 2026-11-05: a duplicate is
+--     preferred to a lost receipt). After the hand send succeeds the screen calls 'handled'.
+--   last_error says who did it and why (keeping a needs_check row's earlier message once).
+--   A row whose send the worker has confirmed and may be emailing right now (inside its 10-minute lease) is refused
+--   with DELIVERY_RECEIPT_SENDING (try again in a minute). A sent row is unchanged and answered 'sent'. No row, or a
+--   cancelled one: 'none'. Every answer carries sent_at and send_authorized_at (an email may already have gone out),
+--   so the screen can ask before sending another copy; never the address (the screen has it).
+--   Who: an active admin or sales rep, or the delivery's assigned driver (the people who may complete it).
+--   The worker's three calls, the queue table, its triggers and grants are not changed.
+--   A cancelled receipt whose delivery is later completed again, with no send ever authorized, gets a fresh receipt,
+--   as _enqueue_delivery_receipt already does for any cancelled row.
+--
+-- idempotency-body-check: exempt -- close_delivery_receipt requires p_idempotency_key and checks it with
+--   check_idempotency_intent (bound to the caller and request: delivery and reason), after authorizing the caller;
+--   it saves its answer with save_idempotency and binds it with _bind_replay_receipt_20261015 in the same
+--   transaction. A refused call (DELIVERY_RECEIPT_SENDING) rolls back and saves nothing.
+--
+-- actor-binding-check: exempt -- the actor is auth.uid() only; there is no p_performed_by parameter.
+--
+-- NOT CHANGED: delivery_receipt_queue (columns, CHECKs, RLS, grants, triggers), complete_delivery,
+--   _enqueue_delivery_receipt, claim_delivery_receipts, confirm_delivery_receipt_send, finish_delivery_receipt,
+--   the timer. No existing row changes at apply.
+--
+-- ROLLBACK (its own reviewed migration): DROP FUNCTION public.close_delivery_receipt(uuid, text, text). Rows it
+--   closed stay cancelled and rows it paused stay on the office list (ordinary queue rows).
+
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  IF to_regprocedure('public.close_delivery_receipt(uuid, text, text)') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'close_delivery_receipt') THEN
+    RAISE EXCEPTION 'PREFLIGHT_CLOSE_DELIVERY_RECEIPT_DRIFT: close_delivery_receipt already exists';
+  END IF;
+  IF to_regclass('public.delivery_receipt_queue') IS NULL
+     OR to_regprocedure('public.confirm_delivery_receipt_send(uuid, uuid, text)') IS NULL
+     OR to_regprocedure('public.check_idempotency_intent(text, text, uuid, text)') IS NULL
+     OR to_regprocedure('public.save_idempotency(text, text, jsonb)') IS NULL
+     OR to_regprocedure('public._bind_replay_receipt_20261015(text, text, text)') IS NULL
+     OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_CLOSE_DELIVERY_RECEIPT_DRIFT: the receipt queue (20261113140000) or an idempotency helper is missing';
+  END IF;
+  -- The statuses this file writes and reads must be the queue's own.
+  IF (SELECT count(*) FROM pg_constraint
+       WHERE conrelid = 'public.delivery_receipt_queue'::regclass AND contype = 'c'
+         AND pg_get_constraintdef(oid) = 'CHECK ((status = ANY (ARRAY[''pending''::text, ''sending''::text, ''sent''::text, ''needs_check''::text, ''cancelled''::text])))') <> 1 THEN
+    RAISE EXCEPTION 'PREFLIGHT_CLOSE_DELIVERY_RECEIPT_DRIFT: delivery_receipt_queue status values differ from 20261113140000';
+  END IF;
+END;
+$preflight$;
+
+CREATE FUNCTION public.close_delivery_receipt(
+  p_delivery_id uuid,
+  p_reason text,
+  p_idempotency_key text DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_role text;
+  v_name text;
+  v_driver uuid;
+  v_fingerprint text;
+  v_replay jsonb;
+  v_row public.delivery_receipt_queue%ROWTYPE;
+  v_result jsonb;
+  v_outcome text;
+BEGIN
+  IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: close_delivery_receipt requires p_idempotency_key' USING ERRCODE = '22023';
+  END IF;
+  IF p_delivery_id IS NULL OR p_reason IS NULL OR p_reason NOT IN ('handled', 'manual_send') THEN
+    RAISE EXCEPTION 'RECEIPT_CLOSE_INVALID: p_delivery_id and p_reason (handled or manual_send) are required' USING ERRCODE = '22023';
+  END IF;
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'AUTH_REQUIRED';
+  END IF;
+  -- FOR SHARE: a concurrent demotion, deactivation or reassignment waits until this call ends.
+  SELECT p.role, p.full_name INTO v_role, v_name FROM public.profiles p WHERE p.id = v_actor AND p.is_active = true FOR SHARE;
+  SELECT d.assigned_driver INTO v_driver FROM public.deliveries d WHERE d.id = p_delivery_id FOR SHARE;
+  -- IS NOT DISTINCT FROM: an unassigned delivery (NULL driver) must refuse a driver, not slip through as NULL.
+  IF v_role IS NULL OR NOT (v_role IN ('admin', 'sales_rep')
+                            OR (v_role = 'driver' AND v_driver IS NOT DISTINCT FROM v_actor)) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only the office or this delivery''s driver can close its receipt'
+      USING ERRCODE = '42501';
+  END IF;
+
+  v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
+    'actor_id', v_actor, 'delivery_id', p_delivery_id, 'reason', p_reason));
+  v_replay := public.check_idempotency_intent(p_idempotency_key, 'close_delivery_receipt', v_actor, v_fingerprint);
+  IF v_replay IS NOT NULL THEN
+    RETURN v_replay -> 'result';
+  END IF;
+
+  -- Same lock confirm_delivery_receipt_send takes first, so the two never interleave: whichever commits first wins.
+  SELECT * INTO v_row FROM public.delivery_receipt_queue q WHERE q.delivery_id = p_delivery_id FOR UPDATE;
+  IF v_row.id IS NULL OR v_row.status = 'cancelled' THEN
+    v_outcome := 'none';
+  ELSIF v_row.status = 'sent' THEN
+    v_outcome := 'sent';
+  ELSIF v_row.status = 'sending' AND v_row.send_confirmed_token = v_row.claim_token
+        AND v_row.claimed_at > clock_timestamp() - interval '10 minutes' THEN
+    -- The worker was told to send and may be emailing it now (the same window _delivery_receipt_hold_while_sending holds).
+    RAISE EXCEPTION 'DELIVERY_RECEIPT_SENDING: this delivery''s receipt is being emailed right now; try again in a minute'
+      USING ERRCODE = '55006';
+  ELSE
+    v_outcome := CASE WHEN p_reason = 'handled' THEN 'closed' ELSE 'paused' END;
+    UPDATE public.delivery_receipt_queue
+       SET status = CASE WHEN p_reason = 'handled' THEN 'cancelled' ELSE 'needs_check' END,
+           claim_token = NULL, claimed_at = NULL,
+           last_error = left(CASE WHEN p_reason = 'handled'
+                                  THEN 'Marked handled by ' || COALESCE(v_name, 'staff') || '; the server will not send it.'
+                                  ELSE 'Email Confirmation started by ' || COALESCE(v_name, 'staff')
+                                       || '; the server will not send it. If the customer did not get it, send it again.' END
+                             || CASE WHEN v_row.status = 'needs_check' AND v_row.last_error IS NOT NULL
+                                          AND v_row.last_error NOT LIKE 'Email Confirmation started by %'
+                                     THEN ' Was: ' || v_row.last_error ELSE '' END, 500)
+     WHERE id = v_row.id;
+  END IF;
+  v_result := jsonb_build_object('delivery_id', p_delivery_id, 'outcome', v_outcome, 'previous_status', v_row.status,
+                                 'sent_at', v_row.sent_at, 'send_authorized_at', v_row.send_authorized_at);
+
+  PERFORM public.save_idempotency(p_idempotency_key, 'close_delivery_receipt', v_result);
+  PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'close_delivery_receipt', v_fingerprint);
+  RETURN v_result;
+END;
+$function$;
+ALTER FUNCTION public.close_delivery_receipt(uuid, text, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.close_delivery_receipt(uuid, text, text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.close_delivery_receipt(uuid, text, text) TO authenticated;
+COMMENT ON FUNCTION public.close_delivery_receipt(uuid, text, text) IS
+  'KI-25 office call: handled = cancel a queued customer receipt so the server never sends it; manual_send = pause it on the office list (needs_check) before Email Confirmation sends by hand. Outcome closed / paused / sent / none, with sent_at and send_authorized_at; refuses DELIVERY_RECEIPT_SENDING while a confirmed send may be in flight. Active admin, sales rep, or the assigned driver. Key required, bound to caller and request.';
+
+DO $postflight$
+DECLARE
+  p pg_proc%ROWTYPE;
+BEGIN
+  SELECT * INTO p FROM pg_proc WHERE oid = 'public.close_delivery_receipt(uuid, text, text)'::regprocedure;
+  IF NOT p.prosecdef OR p.proowner <> 'postgres'::regrole
+     OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+     OR NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+     OR has_function_privilege('anon', p.oid, 'EXECUTE')
+     OR has_function_privilege('service_role', p.oid, 'EXECUTE')
+     OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0) THEN
+    RAISE EXCEPTION 'POSTFLIGHT: close_delivery_receipt lost its owner, mode, search_path or grants';
+  END IF;
+END;
+$postflight$;

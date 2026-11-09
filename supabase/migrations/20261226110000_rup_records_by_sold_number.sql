@@ -105,8 +105,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
            'invoice_number', i.invoice_number, 'product_id', ii.product_id) ORDER BY ii.id), '[]'::jsonb)
     FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+    LEFT JOIN public.products p ON p.id = ii.product_id
    WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
-     AND public._normalize_epa_registration(ii.epa_registration) = p_number
+     -- the sold number, or the product's own number (posting's any-Yes rule reads both)
+     AND (public._normalize_epa_registration(ii.epa_registration) = p_number
+          OR public._normalize_epa_registration(p.epa_registration) = p_number)
      AND NOT public._rup_record_covers_line(ii);
 $function$;
 

@@ -611,6 +611,12 @@ async function main() {
   assert.equal(reasons()[L7], 'restricted_use_to_record');
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L7}"}]' AND NOT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L5}"}]';`), 't');
+  // A label turning Yes lists a sale whose PRODUCT's own number it is, not only its sold number (Luna r15 MED).
+  raw(`UPDATE public.rup_sales_records SET voided_at = '2000-01-01' WHERE invoice_id = '${INV1}' AND product_id = '${P1}' AND voided_at IS NULL;
+       UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P1}';`);
+  assert.equal(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L1}"}]';`), 't');
+  raw(`UPDATE public.products SET epa_registration = '${N1}' WHERE id = '${P1}';
+       UPDATE public.rup_sales_records SET voided_at = NULL WHERE voided_at = '2000-01-01';`);
   // A recorded numberless sale stays listed after its product is unticked (Sol r2 HIGH).
   assert.equal(ok(ADMIN, `SELECT public.generate_rup_sales_records('${INV3}', 'g-inv3');`), '1');
   raw(`UPDATE public.products SET is_rup = false WHERE id = '${P5}';`);

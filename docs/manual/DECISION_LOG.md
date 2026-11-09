@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
+
+**Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
+**Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
+**What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
 ## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
 
 **Decision (Mason, in session, 2026-11-08: "sometimes the same field is sprayed by both sprayers"; "any sprayer should be able to just pick up field and start spraying, not wait on someone from office"):** when a job already on sprayer A's board is reassigned to B while B is inactive, re-activating B does not move the field off A's board. B, as the job's applicator, already sees the job in the field app and can start and complete it; A keeps the field and can start it.

@@ -80,12 +80,11 @@ Customers, contacts, addresses, terms, tier and farm-group parent.
 
 ## 4. Seasons and price rules
 
-**Done when:** the server alone sets the season, from the Chicago business date, on every money record; a quote's tier is checked against the customer's assigned tier (KI-105); invoices bill the price that was sent (KI-81).
+**Done when:** the server alone sets the season, from the Chicago business date, on every money record; invoices bill the price that was sent (KI-81). The quote-tier check stays screen-only, as settled (Mason, 2026-11-05, KI-105; built in PR #1605): anyone may quote at another tier, and there is no database refusal.
 
 **Today:**
 - No seasons table; season is a bare integer on about 18 tables.
 - The invoice save still accepts a season sent by the screen (`20261106140000_invoice_resave_keeps_cost.sql:136,201`); `src/pages/InvoiceDetail.tsx:1161` sends it.
-- `save_quote` (`20261104130000`) takes the quote tier from the screen without checking it.
 - Tier prices are three plain columns on `products`.
 
 ## 5. Permissions, one model

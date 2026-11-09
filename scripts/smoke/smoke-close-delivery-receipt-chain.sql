@@ -1,5 +1,5 @@
 -- ============================================================================
--- SMOKE CHAIN: close_delivery_receipt (migration 20261216100000, KI-25 follow-up)
+-- SMOKE CHAIN: close_delivery_receipt (migration 20261221100000, KI-25 follow-up)
 -- ----------------------------------------------------------------------------
 -- Live-safe, rolled back by design. Plants no rows: it calls the RPC as a real active admin on a delivery id that
 -- does not exist, and (when one exists) on a real receipt the server already sent, then rolls everything back.

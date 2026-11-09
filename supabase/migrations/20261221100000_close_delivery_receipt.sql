@@ -1,5 +1,5 @@
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261216100000_close_delivery_receipt.md.
+-- docs/reference/migrations.d/20261221100000_close_delivery_receipt.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-25 follow-up, Sol MED on PRs #1647 and #1649): one new office call, close_delivery_receipt, so the server

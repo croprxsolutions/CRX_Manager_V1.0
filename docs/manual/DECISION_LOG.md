@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in session, 2026-11-09: "Yes, allow it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Two rare cases are accepted, as they were before this work: two office users pressing it for the same delivery within seconds can both email the customer, and a void in the seconds between the go-ahead and the hand send does not stop that send.
 **Why:** Sol (round 4) and Luna both asked for the go-ahead to be an exclusive permission that also holds the delivery until the email leaves. That needs a "sending now" lock plus rules for a failed send, or moving the hand send into the server sender: a redesign. The duplicate this work exists to stop, the server emailing a copy after the office sent one, is closed; a delivery that is already not completed is refused (`DELIVERY_NOT_COMPLETED`, checked before any replay).
-**What this forbids/implies:** don't add a sending-now lock or make `paused` an exclusive send permission in `close_delivery_receipt` (`20261216100000`) without re-deciding this; a replay may return an earlier `paused` for a still-completed delivery. Closing these fully means sending Email Confirmation through the server sender.
+**What this forbids/implies:** don't add a sending-now lock or make `paused` an exclusive send permission in `close_delivery_receipt` (`20261221100000`) without re-deciding this; a replay may return an earlier `paused` for a still-completed delivery. Closing these fully means sending Email Confirmation through the server sender.
 
 ## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261216100000_close_delivery_receipt (KI-25 follow-up): Email Confirmation pauses a
+ * Real-schema proof for 20261221100000_close_delivery_receipt (KI-25 follow-up): Email Confirmation pauses a
  * delivery's queued customer receipt on the office list before its hand send, and "handled" closes it, so the server
  * sender never emails it afterwards. Builds the checked-in schema baseline in a network-disabled PostgreSQL container,
  * replays every migration before the candidate (the receipt queue 20261113140000 included), applies the candidate (a
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261216100000_close_delivery_receipt.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261221100000_close_delivery_receipt.sql');
 const FOLLOW_UPS = [];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -40,6 +40,9 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
   // DATA-11 rewrites live rows only (every product gets one preferred link); the proof seeds that state.
   '20261105170000_data11_preferred_vendor_links.sql',
+  // KI-01 part C changes job and storage access only; its preflight needs live's storage.objects policies, which this
+  // database does not have. Its own proof is prove-job-access-ends-with-the-job-real-schema.mjs.
+  '20261217100000_job_access_ends_with_the_job.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(close_delivery_receipt|delivery_receipt_queue|confirm_delivery_receipt_send|finish_delivery_receipt|claim_delivery_receipts|check_idempotency_intent|_bind_replay_receipt_20261015|_replay_fingerprint_20261015)\b/i;

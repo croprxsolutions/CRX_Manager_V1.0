@@ -889,12 +889,10 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 - Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
   can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). Part C (written
   2026-11-08, NOT APPLIED, needs Mason's approval: `20261213100000`) ends the whole-job applicator's access when
-  the job is cancelled, deleted, or completed/invoiced with its scheduled date more than 7 days from today (Central), in
-  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access ends on
-  deletion or cancellation. Proven per role in a disposable copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`).
-  Left after part C (MED per Sol, 2026-11-08; deferred): an assignee can still read their own `job_location_dispatches` row (IDs, status,
-  timestamps; no job content) after the job is soft-deleted, because that table's own select policy does not look
-  at the job.
+  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
+  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation. Proven per role in a disposable
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
   `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,

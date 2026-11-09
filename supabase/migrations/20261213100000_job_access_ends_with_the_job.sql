@@ -31,13 +31,16 @@
 -- HOW:
 --   * NEW public._is_job_applicator(job id): the caller is an active applicator, is the job's whole-job
 --     applicator, the job is not soft-deleted, and the job is scheduled or in progress, or completed or
---     invoiced with a scheduled date (job_date) within 7 days of today, either side (Central). Cancelled: never.
---     The clock is job_date, not updated_at or actual_end_time: printing a job (stamp_job_printed, open
---     to the applicator) bumps updated_at, and actual_end_time is typed by the applicator, so either
---     would let the applicator keep the job open forever; only office staff change job_date. It is the
---     same 7-day job_date window customers_select already gives the whole-job applicator. The usual
---     whole-job applicator also holds the per-field dispatch rows the assign trigger writes, whose
---     "completed within 7 days" tail (_is_dispatched_to_me) still applies on its own.
+--     invoiced within the last 7 days (jobs.completed_at). Cancelled: never.
+--   * NEW column jobs.completed_at, owned by the NEW trigger trg_stamp_job_completed_at: the server clock
+--     when the job first reaches completed or invoiced, kept while it stays there, cleared if it leaves.
+--     Nothing a client sends can set or move it. Not updated_at (printing a job bumps it), not
+--     actual_end_time (typed by the applicator), and not job_date: a job completed long before or long
+--     after its scheduled date must close 7 days after the work, not when the date comes round. Existing
+--     completed or invoiced jobs keep NULL, which grants nothing (live 2026-11-08: one invoiced job, its
+--     date long past, so nobody loses access they have today). The usual whole-job applicator also holds
+--     the per-field dispatch rows the assign trigger writes, whose "completed within 7 days" tail
+--     (_is_dispatched_to_me) still applies on its own.
 --   * jobs_select: the whole-job leg becomes _is_job_applicator(id). Every policy that reaches the job
 --     through a subquery on `jobs` (job_fields, job_chemicals, job_tag_assignments,
 --     job_loader_worksheets, job_location_dispatches, customers, the job_applied_* and job_attachments
@@ -45,6 +48,9 @@
 --     so it inherits the window without being edited (the prover checks each one).
 --   * _is_dispatched_to_me, _can_see_field's dispatch leg and get_dispatched_list: the job must also not be
 --     soft-deleted or cancelled (a dispatch completed before an office cancel no longer keeps it open).
+--   * job_location_dispatches_select: its two dispatchee legs (the assigned applicator, an active crew
+--     member) also need _is_dispatched_to_me(job_id), so a soft-deleted job's open dispatch row is not
+--     readable. Its whole-job leg already reaches the job through jobs' row security.
 --   * The SECURITY DEFINER functions above: only their whole-job leg changes, to _is_job_applicator
 --     (each line marked "KI-73 part C"). _can_see_field's whole-job leg likewise.
 --   * addresses_select: an address is readable exactly when its customer is (customers_select and
@@ -61,14 +67,17 @@
 --   commission function (_save_field_app_split_invoice_impl, _save_job_cost_step2_impl,
 --   _transfer_job_to_invoice_intent_impl_20260908 are office-only and untouched); function signatures,
 --   return types, owner, grants, search_path, volatility, SECURITY DEFINER (CREATE OR REPLACE keeps each
---   OID); policy names, roles and commands; no rows change.
+--   OID); policy names, roles and commands; no existing row changes (the new column starts NULL).
 --
 -- EXPECTED NARROWING (by design): a whole-job applicator loses a cancelled or deleted job at once, and a
---   completed one 7 days after its scheduled date; a driver or entity recipient loses customer addresses
---   outside their current deliveries. A dispatch-only applicator gains the reads above.
+--   completed one 7 days after it was completed; a driver or entity recipient loses customer addresses
+--   outside their current deliveries; nobody reads a deleted job's dispatch rows. A dispatch-only
+--   applicator gains the reads above.
 --
 -- ROLLBACK: re-run the pinned live bodies and policy texts (the preflight's pins; bodies in the git history
---   of this file's parents), then DROP FUNCTION public._is_job_applicator(uuid).
+--   of this file's parents), then DROP FUNCTION public._is_job_applicator(uuid); DROP TRIGGER
+--   trg_stamp_job_completed_at ON public.jobs; DROP FUNCTION public._stamp_job_completed_at();
+--   ALTER TABLE public.jobs DROP COLUMN completed_at (it holds only the server's completion stamps).
 
 SET LOCAL lock_timeout = '5s';
 -- Policy expressions are printed relative to the search_path; fix it so the pinned texts compare.
@@ -98,6 +107,11 @@ BEGIN
   END IF;
   IF to_regprocedure('public._is_job_applicator(uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_ACCESS_BASELINE_DRIFT: public._is_job_applicator(uuid) already exists (already applied?)';
+  END IF;
+  IF to_regprocedure('public._stamp_job_completed_at()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.jobs'::regclass AND attname = 'completed_at')
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.jobs'::regclass AND tgname = 'trg_stamp_job_completed_at') THEN
+    RAISE EXCEPTION 'JOB_ACCESS_BASELINE_DRIFT: jobs.completed_at or its trigger already exists';
   END IF;
 
   -- The eleven functions this file replaces, exactly as live has them (2026-11-08).
@@ -136,6 +150,7 @@ BEGIN
     SELECT * FROM (VALUES
       ('public', 'jobs', 'jobs_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR (is_applicator() AND (applicator_id = ( SELECT auth.uid() AS uid))))', 2),
       ('public', 'customer_addresses', 'addresses_select', '{authenticated}', '( SELECT is_active_profile() AS is_active_profile)', 1),
+      ('public', 'job_location_dispatches', 'job_location_dispatches_select', '{authenticated}', E'(is_admin() OR is_sales_rep() OR ((dispatch_status = \'dispatched\'::text) AND (applicator_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active)))) OR ((dispatch_status = \'dispatched\'::text) AND (crew_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active))) AND (EXISTS ( SELECT 1\n   FROM (ground_crew_members gcm\n     JOIN ground_crews gc ON ((gc.id = gcm.crew_id)))\n  WHERE ((gcm.crew_id = job_location_dispatches.crew_id) AND (gcm.profile_id = ( SELECT auth.uid() AS uid)) AND gcm.is_active AND gc.is_active)))) OR (EXISTS ( SELECT 1\n   FROM jobs j\n  WHERE ((j.id = job_location_dispatches.job_id) AND is_applicator() AND (j.applicator_id = ( SELECT auth.uid() AS uid))))))', 1),
       ('public', 'job_field_shares', 'job_field_shares_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM jobs\n  WHERE ((jobs.id = job_field_shares.job_id) AND (is_admin() OR is_sales_rep() OR (is_applicator() AND (jobs.applicator_id = ( SELECT auth.uid() AS uid)))))))', 1),
       ('public', 'job_applied_info', 'job_applied_info_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM jobs\n  WHERE ((jobs.id = job_applied_info.job_id) AND (is_admin() OR is_sales_rep() OR (is_applicator() AND (jobs.applicator_id = ( SELECT auth.uid() AS uid)))))))', 1),
       ('public', 'job_applied_records', 'job_applied_records_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM jobs\n  WHERE ((jobs.id = job_applied_records.job_id) AND (is_admin() OR is_sales_rep() OR (is_applicator() AND (jobs.applicator_id = ( SELECT auth.uid() AS uid)))))))', 1),
@@ -169,7 +184,6 @@ BEGIN
       ('public', 'job_chemicals', 'job_chemicals_select', '19756e2ab11defccc01ccf5a197b994a'),
       ('public', 'job_tag_assignments', 'job_tag_assignments_select', '82b9f4bc2284b2fa1e90110f6bea9611'),
       ('public', 'job_loader_worksheets', 'job_loader_worksheets_select', '11e167cb56795204be6deb2c68645af1'),
-      ('public', 'job_location_dispatches', 'job_location_dispatches_select', '12d1cc1ac26563237a1ce889a591070d'),
       ('public', 'job_applied_info', 'job_applied_info_insert', '4131e0e65b640b0e9c7471121f5f34ab'),
       ('public', 'job_applied_info', 'job_applied_info_update', '09e8bbf2cf5f96df3281bdf775be58db'),
       ('public', 'job_applied_records', 'job_applied_records_insert', 'a473ebbbdef7f9aecf84f7d2597d1328'),
@@ -200,6 +214,42 @@ BEGIN
 END;
 $preflight$;
 
+-- When the job was completed, by the server's clock. ----------------------------------------------------
+ALTER TABLE public.jobs ADD COLUMN completed_at timestamptz;
+
+COMMENT ON COLUMN public.jobs.completed_at IS
+  'KI-73 part C: server time the job first reached completed or invoiced; NULL otherwise. Set only by trg_stamp_job_completed_at, never by a client.';
+-- jobs is column-carved (cost columns hidden): read it like every other column; no INSERT/UPDATE, the trigger owns it.
+GRANT SELECT (completed_at) ON public.jobs TO authenticated, anon;
+GRANT REFERENCES (completed_at) ON public.jobs TO authenticated;
+
+CREATE FUNCTION public._stamp_job_completed_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  -- KI-73 part C: the whole-job applicator's 7-day window runs from here, so nothing a client sends counts.
+  IF NEW.status IN ('completed', 'invoiced') THEN
+    IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') THEN
+      NEW.completed_at := OLD.completed_at;
+    ELSE
+      NEW.completed_at := now();
+    END IF;
+  ELSE
+    NEW.completed_at := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._stamp_job_completed_at() FROM PUBLIC, anon, authenticated;
+
+-- Named to run after every other BEFORE trigger on jobs (they fire in name order), so it sees the final status.
+CREATE TRIGGER trg_stamp_job_completed_at
+  BEFORE INSERT OR UPDATE ON public.jobs
+  FOR EACH ROW EXECUTE FUNCTION public._stamp_job_completed_at();
+
 -- The whole-job applicator, while the job is current. -------------------------------------------------
 CREATE FUNCTION public._is_job_applicator(p_job_id uuid)
 RETURNS boolean
@@ -210,9 +260,9 @@ SET search_path = public, pg_temp
 AS $function$
   -- KI-73 part C: is the caller this job's whole-job applicator (jobs.applicator_id) while the job is
   -- current? is_applicator() requires an ACTIVE applicator profile. Never a soft-deleted or cancelled
-  -- job; a completed or invoiced job only while its scheduled date is within 7 days of today (Central),
-  -- either side, so a job completed long before its date does not stay open until that date.
-  -- job_date is the clock because only office staff change it (DECISION_LOG 2026-10-25).
+  -- job; a completed or invoiced job only for 7 days after it was completed (DECISION_LOG 2026-10-25).
+  -- completed_at is the server's stamp (trg_stamp_job_completed_at); NULL (completed before it existed)
+  -- grants nothing.
   SELECT public.is_applicator() AND EXISTS (
     SELECT 1
       FROM public.jobs j
@@ -221,9 +271,7 @@ AS $function$
        AND j.deleted_at IS NULL
        AND (
          j.status IN ('scheduled', 'in_progress')
-         OR (j.status IN ('completed', 'invoiced')
-             AND j.job_date BETWEEN ((now() AT TIME ZONE 'America/Chicago')::date - 7)
-                                AND ((now() AT TIME ZONE 'America/Chicago')::date + 7))
+         OR (j.status IN ('completed', 'invoiced') AND j.completed_at >= now() - interval '7 days')
        )
   );
 $function$;
@@ -232,7 +280,7 @@ REVOKE ALL ON FUNCTION public._is_job_applicator(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public._is_job_applicator(uuid) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public._is_job_applicator(uuid) IS
-  'KI-73 part C: the caller is the active whole-job applicator of a job that is not deleted or cancelled, and is scheduled, in progress, or completed/invoiced with job_date within 7 days of today, either side (Central).';
+  'KI-73 part C: the caller is the active whole-job applicator of a job that is not deleted or cancelled, and is scheduled, in progress, or completed/invoiced within the last 7 days (jobs.completed_at).';
 
 -- The replaced functions (only the lines marked "KI-73 part C" differ from live). ----------------------
 CREATE OR REPLACE FUNCTION public._is_dispatched_to_me(p_job_id uuid)
@@ -1946,6 +1994,23 @@ $function$;
 ALTER POLICY jobs_select ON public.jobs
   USING (is_admin() OR is_sales_rep() OR public._is_job_applicator(id));
 
+-- A dispatchee reads a dispatch row only while its job is not deleted or cancelled (_is_dispatched_to_me).
+ALTER POLICY job_location_dispatches_select ON public.job_location_dispatches
+  USING (is_admin() OR is_sales_rep()
+         OR (public._is_dispatched_to_me(job_id)
+             AND ((dispatch_status = 'dispatched' AND applicator_id = (SELECT auth.uid())
+                   AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = (SELECT auth.uid()) AND p.is_active))
+                  OR (dispatch_status = 'dispatched' AND crew_id IS NOT NULL
+                      AND EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = (SELECT auth.uid()) AND p.is_active)
+                      AND EXISTS (SELECT 1 FROM public.ground_crew_members gcm
+                                    JOIN public.ground_crews gc ON gc.id = gcm.crew_id
+                                   WHERE gcm.crew_id = job_location_dispatches.crew_id
+                                     AND gcm.profile_id = (SELECT auth.uid())
+                                     AND gcm.is_active AND gc.is_active))))
+         OR EXISTS (SELECT 1 FROM public.jobs j
+                     WHERE j.id = job_location_dispatches.job_id AND is_applicator()
+                       AND j.applicator_id = (SELECT auth.uid())));
+
 -- An address is readable exactly when its customer is (To-Do 11.7).
 ALTER POLICY addresses_select ON public.customer_addresses
   USING (EXISTS (SELECT 1 FROM public.customers c WHERE c.id = customer_addresses.customer_id));
@@ -2045,7 +2110,7 @@ BEGIN
        AND p.prosecdef AND p.provolatile = 's' AND p.prorettype = 'boolean'::regtype
        AND pg_get_userbyid(p.proowner) = 'postgres'
        AND p.proconfig = ARRAY['search_path=public, pg_temp']
-       AND md5(replace(p.prosrc, chr(13), '')) = '72f2ae43ef9e277a406f80c40a1a905d')
+       AND md5(replace(p.prosrc, chr(13), '')) = '68a07dc00ab865fc43890f9ed40aadc2')
      OR has_function_privilege('anon', 'public._is_job_applicator(uuid)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public._is_job_applicator(uuid)', 'EXECUTE')
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
@@ -2053,9 +2118,32 @@ BEGIN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: public._is_job_applicator(uuid) is not the expected function or grants';
   END IF;
 
+  -- The completion clock: the column, its trigger (BEFORE INSERT OR UPDATE, row, enabled), and a function
+  -- no signed-in user can call.
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                  WHERE attrelid = 'public.jobs'::regclass AND attname = 'completed_at' AND NOT attisdropped
+                    AND atttypid = 'timestamptz'::regtype AND NOT attnotnull AND NOT atthasdef AND attgenerated = '')
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t
+                     WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'trg_stamp_job_completed_at'
+                       AND t.tgenabled = 'O' AND t.tgtype = 23
+                       AND t.tgfoid = to_regprocedure('public._stamp_job_completed_at()'))
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p
+                     WHERE p.oid = to_regprocedure('public._stamp_job_completed_at()')
+                       AND NOT p.prosecdef AND p.prorettype = 'trigger'::regtype
+                       AND p.proconfig = ARRAY['search_path=public, pg_temp']
+                       AND md5(replace(p.prosrc, chr(13), '')) = '50f49554b6ca17ca9dd822ef0ee285cf')
+     OR has_function_privilege('authenticated', 'public._stamp_job_completed_at()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._stamp_job_completed_at()', 'EXECUTE')
+     OR NOT has_column_privilege('authenticated', 'public.jobs', 'completed_at', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.jobs', 'completed_at', 'INSERT')
+     OR has_column_privilege('authenticated', 'public.jobs', 'completed_at', 'UPDATE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: jobs.completed_at or its trigger is not the expected one';
+  END IF;
+
   FOR v_pol IN
     SELECT * FROM (VALUES
       ('public', 'jobs', 'jobs_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(id))'),
+      ('public', 'job_location_dispatches', 'job_location_dispatches_select', '{authenticated}', E'(is_admin() OR is_sales_rep() OR (_is_dispatched_to_me(job_id) AND (((dispatch_status = \'dispatched\'::text) AND (applicator_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active)))) OR ((dispatch_status = \'dispatched\'::text) AND (crew_id IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles p\n  WHERE ((p.id = ( SELECT auth.uid() AS uid)) AND p.is_active))) AND (EXISTS ( SELECT 1\n   FROM (ground_crew_members gcm\n     JOIN ground_crews gc ON ((gc.id = gcm.crew_id)))\n  WHERE ((gcm.crew_id = job_location_dispatches.crew_id) AND (gcm.profile_id = ( SELECT auth.uid() AS uid)) AND gcm.is_active AND gc.is_active)))))) OR (EXISTS ( SELECT 1\n   FROM jobs j\n  WHERE ((j.id = job_location_dispatches.job_id) AND is_applicator() AND (j.applicator_id = ( SELECT auth.uid() AS uid))))))'),
       ('public', 'customer_addresses', 'addresses_select', '{authenticated}', E'(EXISTS ( SELECT 1\n   FROM customers c\n  WHERE (c.id = customer_addresses.customer_id)))'),
       ('public', 'job_field_shares', 'job_field_shares_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(job_id) OR (is_applicator() AND _is_dispatched_to_me(job_id)))'),
       ('public', 'job_applied_info', 'job_applied_info_select', '{authenticated}', '(is_admin() OR is_sales_rep() OR _is_job_applicator(job_id) OR (is_applicator() AND _is_dispatched_to_me(job_id)))'),
@@ -2071,7 +2159,8 @@ BEGIN
        WHERE pp.schemaname = v_pol.sch AND pp.tablename = v_pol.tbl AND pp.policyname = v_pol.pol
          AND pp.cmd = 'SELECT' AND pp.permissive = 'PERMISSIVE' AND pp.roles::text = v_pol.roles
          AND pp.qual = v_pol.new_qual AND pp.with_check IS NULL) THEN
-      RAISE EXCEPTION 'POSTFLIGHT_FAIL: policy % on %.% is not the expected one', v_pol.pol, v_pol.sch, v_pol.tbl;
+      RAISE EXCEPTION 'POSTFLIGHT_FAIL: policy % on %.% is not the expected one: %', v_pol.pol, v_pol.sch, v_pol.tbl,
+        (SELECT pp.qual FROM pg_policies pp WHERE pp.schemaname = v_pol.sch AND pp.tablename = v_pol.tbl AND pp.policyname = v_pol.pol);
     END IF;
   END LOOP;
   RAISE NOTICE 'POSTFLIGHT_OK: job access ends with the job (KI-73 part C)';

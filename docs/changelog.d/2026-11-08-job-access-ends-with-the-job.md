@@ -18,12 +18,17 @@ assignment is current.
 
 ### What changed
 
+* New column `jobs.completed_at`, set only by the new trigger `trg_stamp_job_completed_at`: server time
+  when the job first reaches completed or invoiced, kept while it stays there, cleared if it leaves. A
+  value sent by the app is ignored. Existing jobs start empty (no backfill).
 * New `_is_job_applicator(job)`: the active whole-job applicator, job not deleted, and scheduled, in
-  progress, or completed/invoiced with `job_date` within 7 days of today, either side (Central), so a job
-  completed long before its date does not stay open until then. Never cancelled. The
-  clock is `job_date` because only office staff change it. The applicator's own dispatch rows (written by
-  the assignment trigger, marked completed when the job is) still give them 7 days from the actual
-  completion, as part B set.
+  progress, or completed/invoiced with `completed_at` in the last 7 days. Never cancelled. The scheduled
+  date no longer matters (Sol, 2026-11-08: a date near today must not reopen an old job, and an
+  applicator can edit their own completion notes, so neither is a trustworthy clock). A completed job
+  with no `completed_at` (finished before this change) grants nothing through this leg; today that is one
+  invoiced job, which its dispatch row already closes.
+* `job_location_dispatches_select`: an assignee reads their own dispatch row only while
+  `_is_dispatched_to_me(job)` holds, so not after the job is deleted or cancelled.
 * `jobs_select` uses it, and every policy that looks the job up through `jobs` inherits it. The
   eleven SECURITY DEFINER functions above change only their whole-job line.
 * `_is_dispatched_to_me`, `_can_see_field`'s dispatch leg and `get_dispatched_list` refuse a deleted or
@@ -34,9 +39,11 @@ assignment is current.
 
 ### Proof (disposable copy of the real schema, each role signed in)
 
-Whole-job applicator: 9 jobs before, 4 after (scheduled; completed 2 days ago; invoiced yesterday; done
-today but dated 30 days out); loses completed 10 days ago, done 8 days ago but dated 30 days out,
-cancelled, and the two deleted ones in every table and function. The fixture includes the dispatch rows
+Whole-job applicator: 11 jobs before, 5 after (scheduled; completed 2 days ago; invoiced yesterday; done
+today but dated 30 days out; done today but dated 20 days ago with no dispatch row); loses completed 10
+days ago, done 8 days ago but dated 30 days out, done 10 days ago but dated in 3 days, cancelled, and the
+two deleted ones in every table and function. The trigger stamps server time on completion and ignores
+a value the client sends. Dispatch rows: an assignee no longer reads the rows of deleted or cancelled jobs. The fixture includes the dispatch rows
 the assignment triggers would write.
 Dispatch-only applicator: before 3 jobs and none of their records; after 1 job (not the deleted one,
 nor one cancelled after its dispatch was completed) and all of its records. Driver: addresses 14 → 1 (their delivery customer). Entity recipient and an
@@ -45,7 +52,9 @@ unassigned applicator: addresses 14 → 0. Admin and sales rep: identical before
 ### Not changed
 
 What office staff read or write; `application_records` (an applicator's own spray records); every
-billing, invoice, quote, sale and commission function. No rows change.
+billing, invoice, quote, sale and commission function. No existing row changes (the new column starts empty). `customers_select` keeps its own rule: an
+applicator sees a customer only through a job scheduled no more than 7 days ago, so a job finished
+today but scheduled earlier shows without its customer name, as it does today.
 
 ### Doc stamps
 

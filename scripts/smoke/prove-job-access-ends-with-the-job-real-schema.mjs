@@ -16,9 +16,11 @@
  *   3. the candidate applies as one transaction and prints POSTFLIGHT_OK; each replaced body differs
  *      from the replayed one only on the marked lines;
  *   4. AFTER: the same table, checked exactly: the whole-job applicator keeps a scheduled or in-progress
- *      job, and a completed/invoiced one scheduled within 7 days of today or actually completed in the last
- *      7 days (its own dispatch row), and loses the rest (cancelled, deleted, done 8+ days ago even when dated
- *      in the future); a dispatch-only applicator reads the rest of the job it is sent to but never a deleted one; drivers and entity
+ *      job, and a completed/invoiced one completed in the last 7 days (jobs.completed_at, stamped by the new
+ *      trigger, which ignores what a client sends), whatever its scheduled date and with or without a dispatch
+ *      row, and loses the rest (cancelled, deleted, done 8+ days ago even when dated within 7 days or in the
+ *      future); a dispatch-only applicator reads the rest of the job it is sent to but never a deleted one,
+ *      nor its dispatch row; drivers and entity
  *      recipients read only the addresses of customers they can already see; admin and sales rep get
  *      exactly what they got before;
  *   5. RE-APPLY: refused by the preflight.
@@ -62,6 +64,9 @@ const JOBS = {
   13: { who: W, status: 'completed', days: 30, done: 0, note: 'done today, dated in 30 days' },
   // An office override cancels a job after its dispatch completed: the terminal trigger leaves the row completed.
   14: { who: null, dispatch: D, dispatchStatus: 'completed', done: 1, status: 'cancelled', days: 0, note: 'dispatch done yesterday, job then cancelled' },
+  // Sol, 2026-11-08: a scheduled date near today must not reopen an old job, nor an old date close a fresh one.
+  15: { who: W, status: 'completed', days: 3, done: 10, note: 'done 10 days ago, dated in 3 days' },
+  16: { who: W, status: 'completed', days: -20, done: 0, noDispatch: true, note: 'done today, dated 20 days ago, no dispatch row' },
 };
 const uid = (n) => id(String(n));
 const today = "((now() AT TIME ZONE 'America/Chicago')::date)";
@@ -97,7 +102,7 @@ function seed() {
       INSERT INTO public.job_applied_record_crew (id, application_record_id, member_name_snapshot) VALUES ('${uid(900 + n)}', '${uid(700 + n)}', 'crew ${n}');
       INSERT INTO public.job_attachments (id, job_id, storage_path, file_name) VALUES ('${uid(1000 + n)}', '${uid(100 + n)}', '${uid(100 + n)}/a.jpg', 'a.jpg');
       INSERT INTO storage.objects (bucket_id, name) VALUES ('job-attachments', '${uid(100 + n)}/a.jpg');
-      ${j.who ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.who}', '${j.status === 'cancelled' ? 'cancelled' : j.done === undefined ? 'dispatched' : 'completed'}', now() - interval '${j.done ?? 0} days');` : ''}
+      ${j.who && !j.noDispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.who}', '${j.status === 'cancelled' ? 'cancelled' : j.done === undefined ? 'dispatched' : 'completed'}', now() - interval '${j.done ?? 0} days');` : ''}
       ${j.dispatch ? `INSERT INTO public.job_location_dispatches (id, job_field_id, job_id, applicator_id, dispatch_status, updated_at) VALUES ('${uid(1200 + n)}', '${uid(400 + n)}', '${uid(100 + n)}', '${j.dispatch}', '${j.dispatchStatus ?? 'dispatched'}', now() - interval '${j.done ?? 0} days');` : ''}`);
   }
   // Customer 11: the driver's delivery today (the only customer a driver may see).
@@ -133,6 +138,7 @@ const TABLES = {
   record_crew: 'SELECT right(application_record_id::text, 4)::int - 700 FROM public.job_applied_record_crew',
   attachments: 'SELECT right(job_id::text, 4)::int - 100 FROM public.job_attachments',
   photos: "SELECT right(split_part(name, '/', 1), 4)::int - 100 FROM storage.objects WHERE bucket_id = 'job-attachments'",
+  dispatches: 'SELECT right(job_id::text, 4)::int - 100 FROM public.job_location_dispatches',
 };
 const seen = (who) => JSON.parse(probe(who, `SET LOCAL ROLE authenticated;
   v := json_build_object(${Object.entries(TABLES).map(([k, q]) => `'${k}', (SELECT COALESCE(string_agg(k::text, ',' ORDER BY k), '-') FROM (${q}) s(k))`).join(', ')})::text;
@@ -165,7 +171,7 @@ const canAttach = (who, n) => probe(who, `BEGIN SET LOCAL ROLE authenticated;
   RAISE EXCEPTION 'PROBE_OK';
   EXCEPTION WHEN OTHERS THEN v := CASE WHEN SQLERRM = 'PROBE_OK' THEN 'yes' WHEN SQLERRM ~ 'row-level security' THEN 'no' ELSE 'ERR:' || SQLERRM END; END;`);
 
-const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12, 13], D: [9, 10, 14], X: [1], OFF: [8] };
+const FIELD_CASES = { W: [1, 2, 3, 4, 5, 6, 7, 12, 13, 15, 16], D: [9, 10, 14], X: [1], OFF: [8] };
 function snapshot() {
   const reads = Object.fromEntries(Object.entries(ROLES).map(([r, u]) => [r, seen(u)]));
   const fns = {};
@@ -222,31 +228,54 @@ try {
   }
   console.log('BODIES: each replaced function differs only on its marked whole-job lines');
 
+  // The completion clock: the server stamps it on reaching completed, and a client value never lands.
+  const stamp = psql(`BEGIN;
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, completed_at)
+      VALUES ('${uid(199)}', 'KI73-T', '${uid(201)}', ${today}, 'scheduled', now() - interval '1 day');
+    SELECT 'STAMP_A:' || (completed_at IS NULL) FROM public.jobs WHERE id = '${uid(199)}';
+    UPDATE public.jobs SET status = 'in_progress' WHERE id = '${uid(199)}';
+    UPDATE public.jobs SET status = 'completed' WHERE id = '${uid(199)}';
+    SELECT 'STAMP_B:' || (completed_at = now()) FROM public.jobs WHERE id = '${uid(199)}';
+    UPDATE public.jobs SET completed_at = now() + interval '30 days' WHERE id = '${uid(199)}';
+    SELECT 'STAMP_C:' || (completed_at = now()) FROM public.jobs WHERE id = '${uid(199)}';
+    ROLLBACK;`).stdout;
+  for (const mark of ['STAMP_A:true', 'STAMP_B:true', 'STAMP_C:true']) assert.ok(stamp.includes(mark), `completion stamp: ${mark} missing in\n${stamp}`);
+  console.log('STAMP: NULL on insert whatever the client sends, server time on completion, client update ignored');
+  // Fixtures were written with triggers off (before the column existed): stamp them as the trigger would have.
+  psql(`BEGIN; SET LOCAL session_replication_role = replica;
+    ${Object.entries(JOBS).filter(([, j]) => ['completed', 'invoiced'].includes(j.status)).map(([k, j]) => `UPDATE public.jobs SET completed_at = now() - interval '${j.done} days' WHERE id = '${uid(100 + Number(k))}';`).join('\n    ')}
+    COMMIT;`);
+
   // 4. After.
   const after = snapshot();
   print('AFTER', after);
   for (const r of ['admin', 'rep']) assert.deepEqual(after.reads[r], before.reads[r], `${r} reads must not change`);
-  const all = '1,2,3,4,5,6,7,8,9,10,12,13,14';
-  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12,13,14", addresses: "1,2,3,4,5,6,7,8,9,10,11,12,13,14",
-    shares: all, applied_info: all, records: all, record_fields: all, record_crew: all, attachments: all, photos: all });
+  const all = '1,2,3,4,5,6,7,8,9,10,12,13,14,15,16';
+  assert.deepEqual(after.reads.admin, { jobs: all, fields: all, job_fields: all, customers: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", addresses: "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16",
+    shares: all, applied_info: all, records: all, record_fields: all, record_crew: all, attachments: all, photos: all,
+    dispatches: '1,2,3,4,5,6,7,8,9,10,12,13,14,15' });
+  // Before: the open dispatch rows of deleted jobs (5, 7 and 10) were readable by their dispatchee.
+  assert.deepEqual([before.reads.W.dispatches, before.reads.D.dispatches], ['1,2,3,4,5,6,7,12,13,15', '9,10']);
   const job = (s) => ({ jobs: s, job_fields: s, shares: s, applied_info: s, records: s, record_fields: s, record_crew: s, attachments: s, photos: s });
-  assert.deepEqual(after.reads.W, { ...job('1,2,6,13'), fields: '1,2,6,13', customers: '1,2,6,13', addresses: '1,2,6,13' }, 'whole-job applicator keeps only current jobs');
-  assert.deepEqual(after.reads.D, { ...job('9'), fields: '9', customers: '9', addresses: '9' }, 'dispatch-only applicator reads the rest of the job, never a deleted or cancelled one');
-  const none = { ...job('-'), fields: '-', customers: '-', addresses: '-' };
+  // Job 16's customer stays hidden: customers_select (unchanged) still asks for a scheduled date in the last 7 days.
+  assert.deepEqual(after.reads.W, { ...job('1,2,6,13,16'), fields: '1,2,6,13,16', customers: '1,2,6,13', addresses: '1,2,6,13', dispatches: '1,2,6,13' },
+    'whole-job applicator keeps only jobs not yet done or done in the last 7 days, whatever their date');
+  assert.deepEqual(after.reads.D, { ...job('9'), fields: '9', customers: '9', addresses: '9', dispatches: '9' }, 'dispatch-only applicator reads the rest of the job, never a deleted or cancelled one');
+  const none = { ...job('-'), fields: '-', customers: '-', addresses: '-', dispatches: '-' };
   for (const r of ['X', 'OFF', 'recip']) assert.deepEqual(after.reads[r], none, `${r} reads nothing`);
-  assert.deepEqual(after.reads.driver, { ...job('-'), fields: '-', customers: '11', addresses: '11' }, 'a driver reads only their delivery customer and its addresses');
+  assert.deepEqual(after.reads.driver, { ...job('-'), fields: '-', customers: '11', addresses: '11', dispatches: '-' }, 'a driver reads only their delivery customer and its addresses');
   // Calls: start/complete/offline/print/map/billed. The whole-job leg follows the window; dispatch never reaches a deleted job.
   const yes = 'yes yes yes yes yes yes', no = 'no no no no no no';
   assert.deepEqual(after.fns, {
     'W job 1': yes, 'W job 2': yes, 'W job 3': no, 'W job 4': no, 'W job 5': no, 'W job 6': yes, 'W job 7': no, 'W job 12': no,
-    // Job 13 is reached only through its completed dispatch row: read, print, map and billed; completing it again
-    // needs an open dispatch (part B), and it is already completed. start counts as allowed (status refusal).
-    'W job 13': 'yes no no yes yes yes',
+    'W job 15': no, 'W job 16': yes,
+    // Job 13 was completed today, so the whole-job leg admits it like job 2.
+    'W job 13': yes,
     'D job 9': yes, 'D job 10': no, 'D job 14': no, 'X job 1': no, 'OFF job 8': before.fns['OFF job 8'],
   });
   // "<dispatched list> <dispatch board>" per applicator; the board never showed deleted jobs.
-  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,2,3,4,6', D: '14,9 9' }); // text order
-  assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,2,6', D: '9 9' }, 'the board drops the ended jobs');
+  assert.deepEqual(before.dispatchLists, { W: '1,13,2,6 1,12,13,15,16,2,3,4,6', D: '14,9 9' }); // text order
+  assert.deepEqual(after.dispatchLists, { W: '1,13,2,6 1,13,16,2,6', D: '9 9' }, 'the board drops the ended jobs');
   assert.deepEqual(before.attach, { 'W job 1': 'yes', 'W job 4': 'yes', 'D job 9': 'no' }, 'before: the whole-job applicator writes to a cancelled job');
   assert.deepEqual(after.attach, { 'W job 1': 'yes', 'W job 4': 'no', 'D job 9': 'no' }, 'writes reaching the job through jobs inherit the window; dispatch stays read-only');
 

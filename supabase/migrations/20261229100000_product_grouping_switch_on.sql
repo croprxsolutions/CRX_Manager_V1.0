@@ -15,6 +15,8 @@
 --   PRODUCT_PARENT_GROUPING_NOT_OPEN, and get_product_grouping_open() reads true, so the screen shows Approve. No row
 --   changes here: a product is grouped only when an admin approves a group on the screen. Approval never changes a
 --   product ID, unit, price, cost, stock or any old record, and refuses a live rate change while the rate lock is on.
+--   Also, for a grouped size, get_product_brands returns the parent's brand list and upsert_product_brand refuses
+--   (PRODUCT_BRANDS_BELONG_TO_PARENT).
 --
 -- NOT CHANGED: every table, row, grant and other function.
 --
@@ -24,6 +26,10 @@
 -- ORDERING: apply after every older pending migration.
 
 SET LOCAL lock_timeout = '5s';
+
+-- Hold brand and membership writes until commit, so no brand row can land on a grouped size between the check
+-- below and the switch turning on.
+LOCK TABLE public.product_brands, public.product_parent_members IN SHARE MODE;
 
 DO $preflight$
 BEGIN
@@ -35,6 +41,25 @@ BEGIN
      OR to_regprocedure('public._product_parent_identity_name(text)') IS NULL
      OR to_regprocedure('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)') IS NULL THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping function this depends on is missing';
+  END IF;
+  -- Opening the switch changes how these six behave; refuse unless their installed bodies are the reviewed ones
+  -- (read from live 2026-11-09).
+  IF EXISTS (
+    SELECT 1 FROM (VALUES
+      ('public.approve_product_parent_groups(uuid,bigint,jsonb,text)', '41662a1cbf2669bab62b897fddbcdc23'),
+      ('public._approve_product_parent_group(public.product_parent_proposals,jsonb,boolean)', 'a68e4a14ff095379e361c2735dcdac44'),
+      ('public._move_group_brands(uuid,uuid[],jsonb,boolean,text)', 'd16a8c2861ecebe7d0463e77e8c17181'),
+      ('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)', 'f18b13871f36097d515c8c6860ab48b1'),
+      ('public.upsert_product_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,text)', '7cf9cf1ebf7e77f3cedba8ed7456b2bd'),
+      ('public.get_product_brands(uuid)', '81e64a4d2ccd638670407581310c57cb')
+    ) AS pin(fn, h)
+    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(pin.fn)) IS DISTINCT FROM pin.h
+  ) THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a function this switch opens changed since review; re-review it first';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc WHERE proname IN ('upsert_parent_brand', 'approve_product_parent_groups')
+        AND pronamespace = 'public'::regnamespace) <> 2 THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: expected exactly one upsert_parent_brand and one approve_product_parent_groups';
   END IF;
   IF public._product_parent_grouping_open() THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: grouping is already switched on';
@@ -59,10 +84,14 @@ BEGIN
   IF NOT public._product_parent_grouping_open() THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_POSTFLIGHT: the switch did not turn on';
   END IF;
-  IF has_function_privilege('authenticated', 'public._product_parent_grouping_open()', 'EXECUTE')
-     OR has_function_privilege('anon', 'public._product_parent_grouping_open()', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public._product_parent_grouping_open()', 'EXECUTE') THEN
-    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_POSTFLIGHT: the switch is callable by an API role';
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+     WHERE p.oid = 'public._product_parent_grouping_open()'::regprocedure
+       AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 's'
+       AND p.proconfig = ARRAY['search_path=public, pg_temp']
+       AND array_to_string(p.proacl, ',') = 'postgres=X/postgres'
+  ) THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_POSTFLIGHT: the switch is not owner-only with its original settings';
   END IF;
 END
 $postflight$;

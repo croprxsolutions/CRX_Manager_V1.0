@@ -44,7 +44,7 @@ Sol's findings 14, 22, 23, 26 and 35: these rules must be fixed before any accep
 
 ### Wave 0: before building (no PR from us)
 
-- **Mason answers Q1–Q5 (§5).** Q1 (KI-76) and Q4 block FP-1.
+- **Mason answered Q1–Q5 on 2026-11-08 (§5):** question 2 with his own wording, the other four as recommended. Nothing in Wave 0 is waiting on him now except the go-ahead to build.
 - **PR #1650 lands** (job access ends with the job, KI-01 part C, KI-73; backlog 24). Not redone here. Its policies are the baseline for applicator access in FP-1 and FP-4.
 - **Taha's PRs #1524 and #1534 land** before FP-6 only.
 
@@ -183,11 +183,13 @@ About 8 PRs in 3 waves (the roadmap guessed 5–6; history and the second field-
 
 ## 5. Questions for Mason (each with a recommended answer)
 
-1. **Which customers may a field split bill? (KI-76)** *Recommend:* only payers saved on that field's split (or an office change on one job); to bill someone else, the office adds them to the field's split first (any active customer). This stops a field invoice landing on an unrelated account by mistake.
+All five answered by Mason in chat, 2026-11-08: question 2 in his own words (below), and "I agree with all rest" for 1, 3, 4 and 5, so their recommended answers are now the decisions.
+
+1. **Which customers may a field split bill? (KI-76)** **DECIDED (as recommended):** only payers saved on that field's split (or an office change on one job); to bill someone else, the office adds them to the field's split first (any active customer). This stops a field invoice landing on an unrelated account by mistake. With question 2, a line changed before posting may re-weight these payers (including down to 0%) but not add someone outside them.
 2. **Can a payer share a field but not pay the application charge?** **DECIDED (Mason, 2026-11-08):** yes, and more: "field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares." Each payer has "pays application" yes/no on the field; every invoice line starts from the field's split; before posting, the office can set any line to its own percentages (FP-5a).
-3. **When a field's split changes, which work uses the new split?** *Recommend:* you pick the date it starts (today or earlier at first; future dates once the work is finished); work with a billing date on or after it uses the new split; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
-4. **When a split doesn't divide evenly (thirds), who gets the extra penny?** *Recommend:* the primary payer (usually the grower), the same as Taha's chemical-sale split, so all invoices follow one rule.
-5. **Who may archive a field, and when is it blocked?** *Recommend:* admins and sales reps can archive; it is blocked while the field has open or unbilled work (a job, an unposted invoice, an undelivered order line, an open blend ticket); only admins can restore.
+3. **When a field's split changes, which work uses the new split?** **DECIDED (as recommended):** you pick the date it starts (today or earlier at first; future dates once the work is finished); work with a billing date on or after it uses the new split; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+4. **When a split doesn't divide evenly (thirds), who gets the extra penny?** **DECIDED (as recommended):** the primary payer (usually the grower), the same as Taha's chemical-sale split, so all invoices follow one rule.
+5. **Who may archive a field, and when is it blocked?** **DECIDED (as recommended):** admins and sales reps can archive; it is blocked while the field has open or unbilled work (a job, an unposted invoice, an undelivered order line, an open blend ticket); only admins can restore.
 
 ## 6. Sol review record (2026-11-08)
 

@@ -938,7 +938,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 - `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
 - Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
-  defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
+  defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
+  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - `create_invoice_from_order` copies a blank unit, so a mono-billed order line with no unit cannot get a return
   credit (MED). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a

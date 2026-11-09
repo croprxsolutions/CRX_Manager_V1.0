@@ -10,6 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-08 — Field split rules: who may be billed, split dates, the extra penny, archiving fields
+
+**Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
+- **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
+- **Split changes:** a new split starts on a date the office picks; work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
+- **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
+**Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
+**What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
+
 ## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
 
 **Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.

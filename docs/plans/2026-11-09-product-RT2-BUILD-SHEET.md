@@ -314,6 +314,8 @@ No screen PR: dropdowns read the live table (1.5). No `src/types/index.ts` chang
 
 ## 11. Questions for Mason
 
+**Answered (Mason, 2026-11-09): "Yes, all three".** `oz`, `qt` and `Lb` stay and `Oz`, `Qt`, `LB` go; `Unit` and `Ea` stay separate; Autumn Super 51 WDG and Cimarron Plus 10 oz move to `Dry oz` in step 1 (22 products in step 1).
+
 1. **Which spelling stays for each pair?** Recommended: `oz`, `qt` and `Lb` stay; `Oz`, `Qt` and `LB` go. This moves 20 products (11 "oz" stock units, 8 "qt" stock units, 1 rate unit). The only visible change: those products show "oz" or "qt" instead of "Oz" or "Qt" on new paperwork. The alternative, keeping capital `Qt`, moves 30 products and changes 18 rate units instead of 8 stock units.
 2. **Are "Unit" and "Ea" the same thing?** The August plan merged them. In today's catalog, "Unit" is used only by 7 seed treatments sold per **seed unit** (a bag of seed), and "Ea" means **each** (a bottle). Recommended: keep both; RT-2 does not touch them. The alternative (merge into one) would make "per seed unit" and "per each" read the same on paperwork and in RT-1's rates.
 3. **Two dry products have a liquid-ounce rate unit.** Autumn Super 51 WDG and Cimarron Plus 10 oz are dry, stocked in dry ounces, but their rate unit is `oz` (a liquid ounce). Recommended: change both to `Dry oz` in step 1. Their price per acre does not change (both units count as 1 ounce today), and neither is on any quote or order. The alternative is leaving them for RT-3's rate review.

@@ -80,7 +80,7 @@ Customers, contacts, addresses, terms, tier and farm-group parent.
 
 ## 4. Seasons and price rules
 
-**Done when:** the server alone sets the season, from the Chicago business date, on every money record; invoices bill the price that was sent (KI-81). The quote-tier check stays screen-only, as settled (Mason, 2026-11-05, KI-105; built in PR #1605): anyone may quote at another tier, and there is no database refusal.
+**Done when:** the server alone sets the season on every money record, never the screen. It derives it under the settled rules, not from today's date: a new generic invoice takes its season from its own date (read in Chicago time), dedicated job and blend creators keep their documented exception, and an existing field-application invoice keeps its filed season, so its date may not move across October 1 (DECISION_LOG 2026-09-08; `guard_field_app_invoice_season_date()`). Invoices bill the price that was sent (KI-81). The quote-tier check stays screen-only, as settled (Mason, 2026-11-05, KI-105; built in PR #1605): anyone may quote at another tier, and there is no database refusal.
 
 **Today:**
 - No seasons table; season is a bare integer on about 18 tables.

@@ -166,7 +166,7 @@ One migration, `<stamp>_unit_spellings_remap.sql` (stamp claimed in the notes fo
 - `product_rate_lock.is_locked = false`.
 - The products to move are exactly the listed ids (pinned in the migration by id **and** current spelling): 11 with `inventory_unit = unit_size = 'Oz'`, 8 with `'Qt'`, 1 with `rate_unit = 'LB'` (and the 2 dry `oz` rows if question 3 is yes). Any other product found with `Oz`, `Qt` or `LB` in any product unit column refuses (it would be left behind).
 - None of them is a `product_parent_members` row; none has a `product_size_net_weight_values` row.
-- Record, inside the transaction, the md5 of every product's `(id, rate_per_acre, rate_unit lower, tier1/2/3_price, tier1/2/3_price_per_acre, current_cost)` and of the 14 function bodies in 1.3.
+- Record, inside the transaction, the md5 of every product's money fields only, `(id, rate_per_acre, tier1/2/3_price, tier1/2/3_price_per_acre, current_cost)` (no unit column, so an approved unit change can never fail it), a copy of every product's four unit columns, and of the 14 function bodies in 1.3.
 
 ### 4.B The remap
 - `ALTER TABLE products DISABLE TRIGGER trg_validate_product_setup_fields;` then one `UPDATE` per map row by pinned id, then `ENABLE TRIGGER`, all in the migration's single transaction. Every other trigger runs normally, so `validate_product_units` checks each new spelling, the rate-unit row goes through the rate-lock and pricing guards, and the history trigger records each change. No guard function is edited, so no permanent bypass exists afterwards. (Disabling a trigger takes a table lock until commit, so no other session sees the gap.)
@@ -177,7 +177,8 @@ One migration, `<stamp>_unit_spellings_remap.sql` (stamp claimed in the notes fo
 - The setup trigger is enabled again (`pg_trigger.tgenabled = 'O'`).
 - No product unit column holds `Oz`, `Qt` or `LB`.
 - Every product's `inventory_unit` and `container_unit` exact-matches a `unit_conversions` row of its form (or `product_form_units` for seed/each): the `validate_product_units` rule, checked for all 604 rows.
-- The price md5 from 4.A is unchanged, apart from Imazuron's `pricing_version` bump.
+- The price md5 from 4.A is unchanged (`pricing_version` is not in it; Imazuron's and, with question 3, the two dry products' versions bump).
+- Unit columns: compared with the 4.A copy, exactly the pinned ids changed, each from its pinned old spelling to its pinned new one (the section 3 map, including the two `oz`→`Dry oz` rows if Mason approved them), and no other product's unit column changed.
 - The 14 function bodies are unchanged.
 - `unit_conversions` is **exactly** the 14 rows of 1.1 (id, spelling, factor, type, note): no factor moved and the aliases are still there, so both old and new spellings work.
 
@@ -329,3 +330,6 @@ No screen PR: dropdowns read the live table (1.5). No `src/types/index.ts` chang
 - Step 2's lock order (units table before products) could deadlock with a product save: fixed, product tables first (5.A, U12b).
 - Step 1 did not lock `unit_conversions`, and its postflight did not compare the rows: fixed, `SHARE` lock and an exact 14-row compare (4.A, 4.C).
 - The lower-case index missed space variants that `_weight_unit_factors` folds together: fixed, a trimmed CHECK beside the index; the sheet now says it blocks spelling duplicates only (5.B, U12).
+
+**Codex GitHub App, PR #1703:** 1 P2 finding, fixed.
+- The 4.A price checksum included `lower(rate_unit)`, so an approved `oz`→`Dry oz` change (question 3) would fail postflight and roll back. Fixed: the checksum covers money fields only, and unit changes are checked separately against the pinned map (4.A, 4.C).

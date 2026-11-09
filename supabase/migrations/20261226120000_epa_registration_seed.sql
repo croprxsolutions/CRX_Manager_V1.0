@@ -65,7 +65,8 @@ BEGIN
   WITH carriers AS (
     SELECT public._normalize_epa_registration(p.epa_registration) AS n, 'products' AS t, p.id,
            p.signal_word AS sw, p.is_rup AS rup, p.rei_hours AS rei, p.phi_days AS phi,
-           CASE WHEN p.max_label_rate IS NOT NULL OR p.max_label_rate_unit IS NOT NULL
+           -- only a complete rate and unit is a fact (a unit with no rate is allowed on a size, not on a registration)
+           CASE WHEN p.max_label_rate IS NOT NULL AND p.max_label_rate_unit IS NOT NULL
                 THEN jsonb_build_object('max_label_rate', p.max_label_rate, 'max_label_rate_unit', p.max_label_rate_unit) END AS mlr
       FROM public.products p
     UNION ALL

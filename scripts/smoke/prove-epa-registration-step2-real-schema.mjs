@@ -405,7 +405,8 @@ async function main() {
   assert.equal(regCount(), '0');
   console.log('[prover] case 3: before the seed a size\'s facts still edit directly, a new line saves as today, and the tools refuse');
 
-  // 4. Preview.
+  // 4. Preview. A size with a max-rate unit and no rate seeds no max rate (Codex App P2 4517423220).
+  ownerOk(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = 'fl oz/A' WHERE id = '${P1}';`);
   refused(REP, PREVIEW_SEED('no'), /ADMIN_REQUIRED/);
   refused(null, PREVIEW_SEED('no'), /permission denied/);
   refused(ADMIN, PREVIEW_SEED('yes'), /EPA_REGISTRATION_SEED_DEFAULT/);

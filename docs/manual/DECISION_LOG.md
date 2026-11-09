@@ -37,6 +37,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
 **Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
 **What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
+## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
+
+**Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
+**Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
+**What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
 ## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
 
 **Decision (Mason, in session, 2026-11-08: "sometimes the same field is sprayed by both sprayers"; "any sprayer should be able to just pick up field and start spraying, not wait on someone from office"):** when a job already on sprayer A's board is reassigned to B while B is inactive, re-activating B does not move the field off A's board. B, as the job's applicator, already sees the job in the field app and can start and complete it; A keeps the field and can start it.

@@ -14,6 +14,8 @@
 // LF-normalization is safe — and it keeps every index self-consistent for the
 // length-preserving maskers that slice content by index.
 
+import { existsSync, readFileSync } from "node:fs";
+
 /** Normalize CRLF (and lone CR) to LF. */
 export function toLF(s) {
   return String(s).replace(/\r\n?/g, "\n");
@@ -38,4 +40,32 @@ export function applyEditsForAnalysis(diskText, toolInput) {
     applyOne(toolInput?.old_string, toolInput?.new_string);
   }
   return text;
+}
+
+/**
+ * The text a content guard should judge for a Write / Edit call: the Write
+ * `content`, or for an Edit the full post-edit file spliced from disk followed by
+ * the fragment (`new_string`, or every MultiEdit `edits[i].new_string`), so the new
+ * text is judged even when the splice cannot place it (the harness may match an
+ * old_string this exact splice misses). An unreadable file judges the fragment
+ * alone. LF-normalized.
+ * Used by env-guard only; the other content guards keep `content || new_string`
+ * (KI-78, accepted 2026-11-02).
+ */
+export function judgedContent(filePath, toolInput) {
+  const input = toolInput || {};
+  if (typeof input.content === "string") return toLF(input.content);
+  const isFragmentEdit = typeof input.old_string === "string" || Array.isArray(input.edits);
+  if (!isFragmentEdit) return "";
+  const fragments = Array.isArray(input.edits)
+    ? input.edits.map((e) => (typeof e?.new_string === "string" ? e.new_string : "")).join("\n")
+    : (typeof input.new_string === "string" ? input.new_string : "");
+  try {
+    if (filePath && existsSync(filePath)) {
+      return applyEditsForAnalysis(readFileSync(filePath, "utf8"), input) + "\n" + toLF(fragments);
+    }
+  } catch {
+    /* fall through to the fragments */
+  }
+  return toLF(fragments);
 }

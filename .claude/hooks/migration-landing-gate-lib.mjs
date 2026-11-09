@@ -40,6 +40,7 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { readTeammateComments, teammateCommentsDenial } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -279,6 +280,25 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   if (coderabbitOpen > 0) {
     return refuse(`${number} has ${coderabbitOpen} unresolved CodeRabbit comment thread(s). Reply on each (the fix or the reason) and resolve it before applying.`);
+  }
+  // A teammate's unanswered PR comment blocks the merge, so it blocks the apply
+  // that runs before the merge (Mason, 2026-11-08): Taha usually posts plain
+  // comments, which the CHANGES_REQUESTED check above never sees. Fails closed.
+  let teammates;
+  try {
+    teammates = readTeammateComments(gh, { owner: "{owner}", name: "{repo}", number: pr.number });
+  } catch (error) {
+    if (OUT(error)) throw error;
+    teammates = null;
+  }
+  if (!teammates) {
+    return refuse(`could not read ${number}'s comments, so an unanswered teammate comment (e.g. Taha's) cannot be ruled out (fail closed). Retry; if it keeps failing, read them by hand (gh pr view ${pr.number} --comments).`);
+  }
+  if (teammates.comments.length > 0) {
+    return refuse(teammateCommentsDenial(`${number} — answer before the live apply`, pr.number, teammates.comments));
+  }
+  if (teammates.truncated) {
+    return refuse(`${number} has more comments than the gate reads at once, so an unanswered teammate comment cannot be ruled out (fail closed). Read them by hand and ask Mason.`);
   }
 
   const baseSha = String(pr?.baseRefOid || "").trim();

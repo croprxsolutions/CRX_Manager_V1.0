@@ -474,6 +474,8 @@ try {
   assert.deepEqual([laHouse.unit, laHouse.recommended, laHouse.is_quoting_default], ['pt', 1.5, true]);
   expectCode(refused(save(P['Liquid A'], { rate: laHouse.id, ver: 1, basis: 'per_acre', source: 'house_standard', rec: 1.6, unit: 'pt', def: true })),
     'PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED: 1.6 pt is above the label maximum 24 oz/acre on EPA 100-1');
+  expectCode(refused(save(P['Liquid A'], { rate: laHouse.id, ver: 1, basis: 'per_acre', source: 'house_standard', rec: 1.6, unit: 'pt', def: true, reason: '\t\n' })),
+    'PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED');
   assert.equal(probe(`${asUser(`r := ${save(P['Liquid A'], { rate: laHouse.id, ver: 1, basis: 'per_acre', source: 'house_standard', rec: 1.6, unit: 'pt', def: true, reason: '  Grower trial  ' })};`)}
     v := (r->'label_check'->>'status') || '|' || (SELECT over_label_reason || '|' || row_version FROM public.product_rates WHERE id = '${laHouse.id}');`),
   'above|Grower trial|2');
@@ -573,6 +575,7 @@ try {
   assert.match(probe(`${approve} BEGIN UPDATE public.product_rates SET recommended = 1 WHERE id = '${msoHouse.id}'; v := 'NOT REFUSED';
     EXCEPTION WHEN OTHERS THEN v := SQLERRM; END;`), /^PRODUCT_RATE_APPROVED/);
   expectCode(refused(del(msoHouse.id, 1, '   ')), 'PRODUCT_RATE_REASON_REQUIRED');
+  expectCode(refused(del(msoHouse.id, 1, ' \t\r\n ')), 'PRODUCT_RATE_REASON_REQUIRED');
   console.log('R17: a stale version and an approved row are refused for edit and delete');
 
   // R18: events.

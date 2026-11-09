@@ -151,7 +151,7 @@ CREATE TABLE public.product_rates (
   basis_confirmed boolean NOT NULL DEFAULT true,
   source_text text CHECK (source_text IS NULL OR length(source_text) <= 200),
   over_label_reason text CHECK (over_label_reason IS NULL
-    OR (btrim(over_label_reason) <> '' AND over_label_reason = btrim(over_label_reason) AND length(over_label_reason) <= 500)),
+    OR (btrim(over_label_reason, E' \t\r\n') <> '' AND over_label_reason = btrim(over_label_reason, E' \t\r\n') AND length(over_label_reason) <= 500)),
   row_version bigint NOT NULL DEFAULT 1 CHECK (row_version >= 1),
   created_by uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -704,7 +704,7 @@ DECLARE
   v_existing jsonb;
   v_unit public.product_rate_units%ROWTYPE;
   v_unit_text text := btrim(COALESCE(p_unit, ''));
-  v_reason text := NULLIF(btrim(COALESCE(p_over_label_reason, '')), '');
+  v_reason text := NULLIF(btrim(COALESCE(p_over_label_reason, ''), E' \t\r\n'), '');
   v_default boolean := COALESCE(p_is_quoting_default, false);
   v_parent public.product_parents%ROWTYPE;
   v_old public.product_rates%ROWTYPE;
@@ -815,7 +815,7 @@ DECLARE
   v_actor uuid;
   v_fp text;
   v_existing jsonb;
-  v_reason text := btrim(COALESCE(p_reason, ''));
+  v_reason text := btrim(COALESCE(p_reason, ''), E' \t\r\n');
   v_parent_id uuid;
   v_old public.product_rates%ROWTYPE;
   v_result jsonb;

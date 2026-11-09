@@ -15,13 +15,14 @@ Every number was checked against EPA's record (`ordspub.epa.gov` product search,
 
 ## Fix first (Mason decides)
 
-1. **Restricted-use flag is off on these generic rows (every listed brand is restricted-use per EPA):** Gen Paraquat (Bulk, Full Tote); Gen Warrior 1LB (2 rows); Gen Warrior 2LB (2 rows); Gen Capture (2.5G, Bulk); Gen Capture LFR (2.5 Gal, Bulk); Gen Capture LFR 1.75#; Gen Lorsban (2.5 Gal, Bulk); Gen Permethrin. **Gen Mustang Maxx** is mixed: Datsun is restricted-use, Cortes Maxx is not. (Gen Baythroid XL is already flagged.) Recommended: turn the flag on for the 15 rows (Mustang Maxx too, since you can't know which brand goes out until loading). This is DATA-7 work and a live data change, so it needs your `approve <code>`.
+1. **Restricted-use flag is off on these generic rows (every listed brand is restricted-use per EPA):** Gen Paraquat (Bulk, Full Tote); Gen Warrior 1LB (2 rows); Gen Warrior 2LB (2 rows); Gen Capture (2.5G, Bulk); Gen Capture LFR (2.5 Gal, Bulk); Gen Capture LFR 1.75#; Gen Lorsban (2.5 Gal, Bulk); Gen Permethrin; Gen Mustang Maxx (Datsun and Cortes MAXX are both restricted-use on their labels). (Gen Baythroid XL and Gen Leverage 360 are already flagged.) Recommended: turn the flag on for these 15 rows. This is DATA-7 work and a live data change, so it needs your `approve <code>`.
 2. **Two test rows are active on live:** "[UI-TEST] Acuron GT" and "1A TEST PRODUCT - FAKE PRODUCT" (both have orders and invoice lines). Not touched here; DATA-1 owns test rows.
-3. **LI 700 is filed as Herbicide**; it is an adjuvant (no EPA number). Category fix, not an EPA number.
+3. **Two brand-name rows have the restricted-use flag off but are restricted-use on their EPA labels:** Leverage 360 - 1 Gal (264-1104) and Mustang Maxx - 1 Gal (279-3426). They already have numbers, so they are outside DATA-2's blank list; add them to the same restricted-use fix.
+4. **LI 700 is filed as Herbicide**; it is an adjuvant (no EPA number). Category fix, not an EPA number.
 
 ## A. Ready to approve (high confidence)
 
-Grouped by the generic row, busiest first. RUP = restricted-use per EPA. Each brand goes on every size of that generic (2.5 Gal, Bulk, No Return, Tote) that lists it.
+Grouped by the generic row, busiest first. RUP = restricted-use, read from the front panel of the latest EPA-accepted label for every row (EPA's database flag said "No" for Cryptonyx 360 and Cortes MAXX, but both labels say restricted-use; the label wins). Each brand goes on every size of that generic (2.5 Gal, Bulk, No Return, Tote) that lists it.
 
 | Generic row | Brand | EPA No. | RUP |
 |---|---|---|---|
@@ -41,7 +42,7 @@ Grouped by the generic row, busiest first. RUP = restricted-use per EPA. Each br
 | Gen Valor EZ | Zaltus SC | 91234-203 | No |
 | Gen Paraquat | Para-Shot 3.0 ("Parashot 3.0") | 83529-27 | **Yes** |
 | Gen Paraquat | Helmquat 3SL | 74530-48 | **Yes** |
-| Gen Leverage 360 | Cryptonyx 360 | 91234-292 | No |
+| Gen Leverage 360 | Cryptonyx 360 | 91234-292 | **Yes** |
 | Gen Sencor Liquid 4# | Me-Try-Buzin 4L | 19713-706 | No |
 | Gen Sencor Liquid 4# | Metricor 4F | 70506-68 | No |
 | Gen Sencor Liquid 4# | Rancor 4F | 91234-73 | No |
@@ -96,7 +97,7 @@ Grouped by the generic row, busiest first. RUP = restricted-use per EPA. Each br
 | Gen Gaucho 5# ST | Sharda Imida 5SC | 83529-14 | No |
 | Gen Lorsban | Pilot 4E | 93182-7 | **Yes** |
 | Gen Lorsban | Warhawk | 34704-857 | **Yes** |
-| Gen Mustang Maxx | Cortes MAXX | 91234-259 | No |
+| Gen Mustang Maxx | Cortes MAXX | 91234-259 | **Yes** |
 | Gen Mustang Maxx | Datsun | 83529-234 | **Yes** |
 | Gen Permit | Promote (the halosulfuron one) | 91234-31 | No |
 | Gen Proline 480 SC | Provixo 480 SC ("Prvixo") | 91234-345 | No |

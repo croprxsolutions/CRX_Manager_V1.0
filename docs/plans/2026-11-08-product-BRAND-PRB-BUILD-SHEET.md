@@ -93,7 +93,7 @@
   - `size`: `legacy_brand_id` set, with a composite key `(product_id, legacy_brand_id)` to `product_brands(product_id, id)`, so a Roundup line can never carry a Liberty brand;
   - `typed`: no brand reference.
   - A CHECK enforces exactly this shape.
-- **Snapshot:** `brand_name text NOT NULL` (same trim and length rules as the brand tables), `epa_registration text` (strict EPA-number CHECK when not null; NULL only for a typed pick whose number could not be read), `manufacturer text`.
+- **Snapshot:** `brand_name text NOT NULL` (same trim and length rules as the brand tables), `epa_registration text` (strict EPA-number CHECK when not null; NULL for a typed pick whose number could not be read, or a listed brand whose row has no number; either is treated as "EPA number not recorded": warned, no RUP record, listed (4.E)), `manufacturer text`.
 - `quantity numeric NOT NULL CHECK (quantity > 0)`, in the line's own unit.
 - **Sale facts, captured at completion** (4.C): `rup_status text` in (`yes`, `no`, `unknown`), `signal_word text`, `facts_source text` (`registration:<number>@<version>` once seeded, `brand:<id>@<row_version>` before the seed, `typed`), `captured_at timestamptz`. All are NULL before completion.
 - **Review (typed picks only):** `review_state text` in (`pending`, `added`, `dismissed`), `reviewed_by`, `reviewed_at`, `review_brand_ref uuid` (the brand it was added as).
@@ -119,7 +119,7 @@
 ### 3.3 Locking
 
 **One order for everyone: REG-DB's** (REG-1 sheet §3.2: invoices first, then the registration lock, then the rest). No writer ever takes an invoice lock after the registration lock, so delivery work and posting cannot wait on each other in a cycle.
-- **Delivery-side writers** (`set_delivery_brands`, `edit_delivery`, completion, `correct_delivery_brands`):
+- **Delivery-side writers** (`set_delivery_brands`, `edit_delivery`, completion, `correct_delivery_brands`, `review_typed_brand`). Every writer of a delivery's brand events holds that delivery row `FOR UPDATE` (step 3) before writing its event, so one delivery's events commit one at a time and their `seq` order is their commit order:
   1. read, without locking, the **draft or unposted** invoices whose lines they may re-copy (4.D), then lock them `FOR UPDATE` in ID order and drop any that is no longer draft or unposted;
   2. REG-DB's shared registration lock;
   3. the delivery row `FOR UPDATE`, its lines (ID order), brand rows `FOR SHARE` (legacy, then parent, ID order), picks.
@@ -185,7 +185,7 @@ The `completed` event records, for every line, its delivered amount and the size
    - **before the seed:** from the brand row (`is_rup` true → `yes`, false → `no`, NULL → `unknown`);
    - **typed:** `unknown`, unless seeded and its number has a registration.
 
-A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` (`0` when it has no events) differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens and the list always send it, as `0` for a delivery with no brand events, so NULL means only "an old caller that asked for no check" and a first save after the screen loaded is still caught. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Old queued replays do not send it and complete against the current picks. The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
+A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` (`0` when it has no events) differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens and the list always send it, as `0` for a delivery with no brand events, so NULL means only "an old caller that asked for no check" and a first save after the screen loaded is still caught. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. A caller that sends NULL (an old queued replay, or an app bundle cached from before B-2) completes against the current picks rather than being refused, because Mason's rule is warn, never block (Question 5). The `completed` event records "picks not confirmed on the completing screen", and the draft invoice shows the warning "Brands not checked at completion". The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
 
 **Not chosen:** a reserved key inside `p_quantities` (step 1's plan). It would change the parsing and fingerprints of every function that reads `p_quantities`, for a rare case.
 
@@ -233,7 +233,7 @@ A line the office adds by hand gets `brand_lines` NULL.
   - **What each record holds:** the entry's EPA number, signal word and `brand_name`.
 - **Brand problems never refuse posting** (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"). A record still never has a blank EPA number and never a guessed split (REG-1's rule), so posting records only what is known and puts the rest on the **RUP brand gaps** list (4.H):
   - an entry with no brand recorded, or `brand_lines = []`: no record for that amount; listed "brand not recorded";
-  - a typed entry with no EPA number: no record for that entry; listed "EPA number not recorded" (its restricted-use status cannot be known);
+  - an entry with no EPA number (typed, or a listed brand whose row has none): no record for that entry; listed "EPA number not recorded" (its restricted-use status cannot be known);
   - a line whose entries add up to **less** than delivered: each entry is recorded at its own amount (those brands are known), and the rest gets no record; listed "brand amounts do not match delivered", with both amounts. A line whose entries add up to **more** than delivered: no record for the line, because nobody can say which brand was short; listed the same way;
   - a line billed above the delivered total: the delivered part is recorded as above, the extra is listed "billed above delivered".
   Every posted branded line with a brand problem is listed, whatever its generic's restricted-use status, because a restricted-use brand can sit under a generic that is not (the hole behind Question 5). For a line with `brand_lines` not NULL, REG-DB's numberless-line refusal (`INVOICE_LINE_RUP_NO_EPA`) is replaced by this listing. **Mason, 2026-11-09: "we should never block a sale due to missing epa number"**, so REG-DB is to drop that refusal for lines with `brand_lines` NULL too (passed to the REG-1 session for PR #1688); PR B re-issues whatever REG-DB has live and never adds a missing-number refusal of its own.
@@ -248,7 +248,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **What it does:** it never overwrites a completed pick. It marks the old current picks superseded (`superseded_*`) and inserts the new ones. Sale facts: a new pick for the **same brand** (name and number) as a superseded pick of that line copies that pick's captured facts; a **different** brand is captured now, and its `facts_source` is marked `corrected:<date>`. The new picks must add up to the delivered amount, and each listed pick must be on the line's **current** brand list (3.2), checked by source, parent and product (`BRAND_NOT_FOR_PRODUCT`). A typed pick follows the 4.A rules.
 - **Then:** re-copies the affected `draft` and `unposted` invoice lines (4.D). Voided and cancelled invoices are left alone.
 - **Logging:** one `corrected` event with every invoice ID it re-copied.
-- **Receipts:** a receipt already queued or sent keeps the brands as recorded at completion, and nothing is re-sent automatically. A reprint or resend from the delivery page reads the current picks, so it shows the correction.
+- **Receipts:** a receipt already queued or sent keeps the brands as recorded at completion, and nothing is re-sent automatically. A reprint reads the current picks. A resend from the delivery page queues a **new** receipt through `_enqueue_delivery_receipt`, which builds the brands from the current picks when it is queued, so it carries the correction; the builder confirms the live resend path does this and, if it re-sends a saved body instead, changes it to queue a fresh snapshot (P27).
 
 ### 4.G `review_typed_brand(p_pick_id uuid, p_action text, p_brand_id uuid DEFAULT NULL, p_reason text DEFAULT NULL, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 - **Who:** admin only.
@@ -368,7 +368,7 @@ Removed by Question 5 (Mason, 2026-11-09: "do not be strict on RUP license don't
 
 **Editing, receipts, grants, concurrency**
 - P26. Changing only a scheduled delivery's date keeps the picks under the new line IDs; changing one line's quantity or unit size drops only that line's picks; both write an `edited` event. An error in the brand step during a Bill Split completion fails the completion instead of falling back.
-- P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none) and service_role has no table privilege on the new tables.
+- P27. The receipt snapshot from `_enqueue_delivery_receipt` carries each line's brands (single, split, typed, none); a resend after a correction carries the corrected brand and service_role has no table privilege on the new tables.
 - P28. Grants and policies read directly from `information_schema` and `pg_policy`: `authenticated` can only SELECT the new tables under the delivery rule; `anon`, `service_role` and `PUBLIC` have nothing; the `brand_lines` column grant is revoked; every `_` helper is not executable by `PUBLIC`, `anon`, `authenticated` or `service_role`; every PR B `SECURITY DEFINER` function has the pinned `search_path`; the receipt-binding trigger lists the three new operations. An admin session cannot reveal a missing grant (August C-25), so this is checked directly.
 - P30. A line whose picks do not add up to delivered is on the missing-brands report until corrected. A line delivered at zero is not on the report; a line completed with no pick while its brand was listed stays on the report after that brand is retired.
 - P32. A posting of a draft whose stored `brand_lines` no longer matches the picks is refused with `BRAND_LINES_STALE` and changes nothing; after a re-save it posts. Completion and posting of the same order-level draft, run at once in both orders, never deadlock.
@@ -395,6 +395,7 @@ Removed by Question 5 (Mason, 2026-11-09: "do not be strict on RUP license don't
 |---|---|---|
 | **PAR-2 brand move live and verified** | Grand plan Stage 3 and overlap 13. PR B is designed against parent brand lists. | Not started on live: `_product_parent_grouping_open()` is `false`; 0 parents, 0 brands. Mason's grouping data step is in progress. |
 | **REG-1 step 2 (REG-DB) merged and live** | PR B extends REG-DB's `_capture_invoice_line_sale`, invoice-line guard, `generate_rup_sales_records`, lock order and every invoice writer it re-issues. Building PR B first would re-issue the same functions twice. | Unblocked now that #1524 is merged; being built on branch `claude/reg1-step2-db` (stamps `20261218100000`–`20261218130000`) |
+| **REG-DB follows Mason's "never block a sale due to missing epa number"** | PR B promises no posting is refused for a missing number (4.E) | Passed to the REG-1 session for #1688 on 2026-11-09. B-1's preflight reads the live `post_invoice` and `generate_rup_sales_records` bodies and **fails the build** if `INVOICE_LINE_RUP_NO_EPA` is still raised; P21 proves it. |
 | REG-1 seed | Not required. PR B captures from brand rows before the seed and from registrations after it (4.C step 6). | Mason-gated, not run |
 | #1649, #1678 (receipt sending) | B-1 adds brands to the receipt snapshot wherever these leave it (3.5) | Open |
 | Brand data | Admins enter brands (on parents once grouped). Until a generic has a list, it has no brands and nothing is asked. | Mason |
@@ -549,3 +550,10 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - MED, receipts after a correction: kept as recorded; reprint and resend read current picks (4.F).
 - MED, `edit_delivery` retry safety: keeps its live key and bound receipt (4.B).
 - MED, typed-brand review two-step retry: per-step keys, buttons locked, reload and "Link to existing" (section 5).
+
+**Luna round 13** (whole branch, head `95e67ba91`): 1 HIGH, 3 MED, 1 LOW, all **fixed**.
+- HIGH, the never-block promise depended on REG-DB without a check: new dependency row; B-1's preflight fails if `INVOICE_LINE_RUP_NO_EPA` is still live (section 9, P21).
+- MED, a listed brand with no EPA number could not be stored: the snapshot allows it and it is treated as "EPA number not recorded" (3.1, 4.E).
+- MED, completion without the base `seq` skipped the stale check: kept as warn-not-block per Question 5, recorded on the event and warned on the invoice (4.C).
+- MED, a resend could repeat the old snapshot: a resend queues a fresh snapshot from current picks (4.F, P27).
+- LOW, event `seq` order versus commit order: every event writer, `review_typed_brand` included, holds the delivery row first (3.3).

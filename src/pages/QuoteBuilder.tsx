@@ -218,6 +218,8 @@ interface ActivePlannedHold {
 const NO_UNIT = '__none__';
 // Text-link buttons in the Products tab: 44 px tall below 768 px; from 768 px a 40 px hit area
 // (an invisible ::after) so the link does not stretch its row.
+// Real box (no pseudo area) for links that sit next to each other, so hit areas can't overlap.
+const LINK_BOX = 'min-h-11 md:inline-flex md:min-h-10 md:items-center';
 const LINK_HIT = "relative min-h-11 md:min-h-0 after:absolute after:inset-x-0 after:top-1/2 after:h-10 after:-translate-y-1/2 after:content-['']";
 // Number boxes in the line table and cards: 44 px below 768 px, 40 px above.
 const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
@@ -4809,7 +4811,7 @@ export default function QuoteBuilder() {
                   className={`${LINK_HIT} inline-flex items-center gap-1 font-medium text-crx-green hover:underline`}
                 >
                   <Search className="w-3.5 h-3.5" />
-                  Select Product
+                  Select product
                 </button>
               )}
               {prod && <ProductOptionDetails product={prod} />}
@@ -4829,7 +4831,7 @@ export default function QuoteBuilder() {
                   <button
                     type="button"
                     onClick={() => setEditingLineNote(null)}
-                    className={`${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
+                    className={`${LINK_BOX} text-xs font-medium text-crx-green hover:underline`}
                   >
                     Done
                   </button>
@@ -4842,7 +4844,7 @@ export default function QuoteBuilder() {
                   type="button"
                   onClick={() => updateItem(sec._key, item._key, { notes: defaultNote })}
                   title="Reset to default"
-                  className={`mt-2 ${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
+                  className={`${LINK_BOX} text-xs font-medium text-crx-green hover:underline`}
                 >
                   Reset note
                 </button>
@@ -4998,7 +5000,7 @@ export default function QuoteBuilder() {
                       ? 'Reset to the price saved on this line'
                       : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
                     aria-label="Reset the manual price"
-                    className={`${LINK_HIT} md:after:h-8 font-semibold text-crx-green hover:underline`}
+                    className={`${LINK_BOX} font-semibold text-crx-green hover:underline`}
                   >
                     Reset
                   </button>
@@ -5051,7 +5053,7 @@ export default function QuoteBuilder() {
                           });
                         }}
                         disabled={formLocked}
-                        className={`${LINK_HIT} md:after:h-8 font-semibold text-crx-green hover:underline disabled:opacity-50`}
+                        className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
                       >
                         Use today {fmt(todayPriceOffer)}
                       </button>
@@ -5626,7 +5628,7 @@ export default function QuoteBuilder() {
                     showChevron={false}
                     onClick={() => setCompareMode(false)}
                   >
-                    Exit Compare
+                    Exit compare
                   </Button>
                   <Button
                     size="sm"
@@ -6104,7 +6106,7 @@ export default function QuoteBuilder() {
               Cancel
             </Button>
             <Button onClick={handleRollover} className="min-h-11 w-full sm:w-auto">
-              Roll Over
+              Roll over
             </Button>
           </div>
         }>

@@ -123,7 +123,7 @@ async function fillInNewQuote() {
   fireEvent.change(customerBox, { target: { value: 'North' } });
   fireEvent.click(await screen.findByRole('option', { name: /North Farm/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
-  fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Select product/ }));
   const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
   fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getByText('Alpha Chem'));
   fireEvent.change(await screen.findByLabelText('Quantity'), { target: { value: '2' } });

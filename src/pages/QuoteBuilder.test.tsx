@@ -3495,6 +3495,15 @@ describe('QuoteBuilder', () => {
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, price_override: null, use_todays_price: false });
     });
 
+    it('gives the Use today link a real 40px box at md, with no pseudo hit area', async () => {
+      const { quote } = configureLockedQuote();
+      renderQuoteBuilder(quote.id);
+      const link = await screen.findByRole('button', { name: 'Use today $12.00' });
+      expect(link.className).toContain('md:min-h-10');
+      expect(link.className).not.toContain('md:after:h-8');
+      expect(link.className).not.toContain('after:');
+    });
+
     // Item 10b (Mason 2026-10-27, 20261029120000): a changed price applies without a re-send; a
     // higher one needs the rep's "grower agreed" tick. Until then (#1105) it needed a re-send.
     it('takes today\'s price on one line only when asked, with no re-send but the grower\'s OK', async () => {
@@ -3610,7 +3619,7 @@ describe('QuoteBuilder', () => {
       fireEvent.change(customerBox, { target: { value: 'Farm' } });
       fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
       fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
-      fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
+      fireEvent.click(await screen.findByRole('button', { name: /Select product/ }));
       const picker = await screen.findByRole('dialog');
       fireEvent.click(await within(picker).findByRole('button', { name: /T1 price/ }));
       fireEvent.change(await screen.findByRole('spinbutton', { name: 'Quantity' }), { target: { value: '2' } });
@@ -5427,7 +5436,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(await screen.findByText('v2'));
       fireEvent.click(screen.getByRole('button', { name: /Compare/ }));
       expect(screen.getByText('Comparing V2 vs Current')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: /Exit Compare/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Exit compare/ }));
       fireEvent.click(screen.getByRole('button', { name: /^Restore$/ }));
       expect(screen.getByText('Restore V2?')).toBeInTheDocument();
     });
@@ -5504,12 +5513,12 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('products'));
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
       fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
-      expect(await screen.findByRole('button', { name: /Select Product/ })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Select product/ })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1 in Section 1' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /^Remove line/ }));
       expect(screen.queryByRole('dialog', { name: 'Remove this line?' })).not.toBeInTheDocument();
-      await waitFor(() => expect(screen.queryByRole('button', { name: /Select Product/ })).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /Select product/ })).not.toBeInTheDocument());
       expect(screen.getByRole('button', { name: 'Add one' })).toBeInTheDocument();
     });
 

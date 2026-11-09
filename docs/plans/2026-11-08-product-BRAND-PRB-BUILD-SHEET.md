@@ -152,7 +152,7 @@ Built from each re-issued function's body **on live at build time** (after REG-D
 ### 4.A `set_delivery_brands(p_delivery_id uuid, p_lines jsonb, p_base_event_seq bigint, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 - **Who:** admin, sales rep, or the delivery's assigned driver. This is the completion rule (`_complete_delivery_authorized_impl:1013-1019`), not a new one.
 - **When:** while the delivery is `scheduled` or `in_progress`. Otherwise `DELIVERY_BRANDS_LOCKED` (after completion, use 4.F).
-- **Stale-save guard:** `p_base_event_seq` is the delivery's highest event `seq` the screen loaded (NULL when it has none). If the delivery's highest `seq` is different, the save is refused (`BRAND_PICKS_CHANGED`) and the screen reloads. A replay with the same key returns the original result before this check runs.
+- **Stale-save guard:** `p_base_event_seq` is the delivery's highest event `seq` the screen loaded (`0` when it has none; NULL is refused). If the delivery's highest `seq` is different, the save is refused (`BRAND_PICKS_CHANGED`) and the screen reloads. A replay with the same key returns the original result before this check runs.
 - **Input:** `p_lines` is `[{delivery_item_id, picks: [{brand_id?, typed_name?, typed_epa?, typed_manufacturer?, quantity}]}]`. Each named line's current picks are replaced in one step. Lines that are not named are untouched. An empty `picks` array clears that line.
 - **Rules:**
   - Each line belongs to the delivery (`DELIVERY_ITEM_NOT_ON_DELIVERY`).
@@ -191,7 +191,7 @@ The `completed` event records, for every line, its delivered amount and the size
    - **before the seed:** from the brand row (`is_rup` true → `yes`, false → `no`, NULL → `unknown`);
    - **typed:** `unknown`, unless seeded and its number has a registration.
 
-A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens always send it. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Old queued replays do not send it and complete against the current picks, which the switch rules still check. The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
+A **short split** is saved with `set_delivery_brands` first and completion second: two calls from the screen, both online. **Completion checks the screen saw the current picks:** `complete_delivery` and `start_and_complete_delivery` gain one trailing `p_brand_base_seq bigint DEFAULT NULL`. As `20261113140000` did, each old signature is **dropped** and the new one created with the same grants, so no overload without the check remains; the migration's caller analysis lists every caller (screens, `process_offline_action`) and the postflight asserts one signature each. When given, completion is refused with `BRAND_PICKS_CHANGED` if the delivery's highest brand event `seq` (`0` when it has no events) differs, so a driver never completes with picks someone else saved after the screen loaded. The capture screens and the list always send it, as `0` for a delivery with no brand events, so NULL means only "an old caller that asked for no check" and a first save after the screen loaded is still caught. It joins the request fingerprint only when not NULL, so existing retries keep their fingerprints. Old queued replays do not send it and complete against the current picks, which the switch rules still check. The one-click **Mark Delivered** on the Deliveries list sends the `seq` it loaded with the list, so it is refused too if the picks changed after the list loaded.
 
 **Not chosen:** a reserved key inside `p_quantities` (step 1's plan). It would change the parsing and fingerprints of every function that reads `p_quantities`, for a rare case.
 
@@ -205,7 +205,7 @@ Stock shortages still never block (To-Do 2.6). Lot and tote numbers are not read
 **Which picks belong to an invoice line** (used here and by the correction in 4.F):
 - **Credit memos** (`invoice_type = 'credit_memo'`): never. `brand_lines` stays NULL, the same exclusion the tote copy uses (`20261215110000:1159-1168`).
 - **An invoice with a `delivery_id`** (the automatic invoice, the quick-delivery draft, the unbilled-recovery invoice, each Bill Split payer invoice): the current picks of **that** delivery's line for the same `order_item_id`. Never a sibling delivery's.
-- **An invoice with no `delivery_id`** (whole-order, landlord split): the current picks of every completed, not-voided delivery of that order line. Picks merge into one entry only when name, number, captured `rup_status` and signal word all match. A completed trip with no picks adds a "no brand recorded" entry for its delivered amount.
+- **An invoice with no `delivery_id`** (whole-order, landlord split): the current picks of every completed, not-voided delivery of that order line. Each trip's picks stay **separate entries in trip order**, even when two trips delivered the same brand, so 4.E can allocate by trip; RUP records are merged afterwards by record key (4.E Grouping). A completed trip with no picks adds a "no brand recorded" entry for its delivered amount.
 
 **Writing it.** REG-DB routes every invoice-line insert through `_capture_invoice_line_sale`. PR B extends that one helper:
 - It computes `brand_lines` for a line that has an `order_item_id`, by the rule above: `NULL` when the product has no brands and no typed pick exists, `[]` when it is branded but unpicked.
@@ -232,7 +232,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - **A line with `brand_lines` NULL:** exactly REG-DB's behaviour.
 - **A line with brand entries:** one candidate record per entry, read from the stored `brand_lines`.
   - **Allocating the line's quantity and cents to entries:**
-    - a Bill Split payer's line: in proportion to `delivered_quantity`;
+    - a Bill Split payer's line, and a **landlord split** payer's line: in proportion to `delivered_quantity`, so each payer gets the same share of every brand. The per-brand amounts across all payer lines of one order line are allocated together (largest remainder on the last payer), so for each brand they add up exactly to what was delivered;
     - any other line: in entry order (trip order), each entry taking up to its delivered amount until the line's quantity is used up. A restricted-use line whose quantity is **above** the delivered total (outside Bill Split) refuses posting with `BRAND_QTY_OVER_DELIVERED: <product> is billed for more than was delivered by brand; fix the quantity or the brand amounts`, because no brand can be named for the extra. So a whole-order line still at 60 after trips of A 60 and B 40 records A 60, not A 36 and B 24.
     - Cents follow the quantity in whole cents; quantities are rounded to the line quantity's own scale (the builder confirms the column's scale from live). The last entry takes both remainders, so the records add up to the line exactly.
   - **Which entries need a record (REG-1's rule, per entry):** the entry's captured `rup_status` is `yes`, **or** the registration of that entry's number says `yes` at posting. Over-recording is the safe side; a captured `yes` is never lowered by a later change. An entry captured `unknown` under a restricted-use generic, or a typed entry captured `unknown`, is also recorded, with `compliance_status = 'warning'` and the note "RUP status of delivered brand not confirmed" (Question 2). A listed entry `unknown` under a non-RUP generic is not recorded, and shows on REG-DB's Compliance not-reviewed list (4.D).
@@ -354,8 +354,8 @@ A line the office adds by hand gets `brand_lines` NULL.
 
 **Invoices**
 - P12. Automatic invoice: one-brand line → the line's number is the brand's, its capture is copied from the pick (`brand_pick`), and REG-DB's posting check treats it as captured; split line → no single number, two entries, captured per entry; unbranded product → as REG-DB.
-- P13. Bill Split: each payer's invoice line carries all the load's brands; RUP divides each payer's share by brand in proportion, and the cents add up exactly per payer.
-- P14. One order line delivered in two trips with different brands, each trip billed alone: each invoice shows only its own trip's brands. A whole-order invoice and a landlord split invoice list both trips; two trips of one brand with different captured status stay separate entries; a trip with no picks adds a no-brand entry.
+- P13. Bill Split and landlord split: each payer's invoice line carries all the load's brands; RUP divides each payer's share by brand in proportion, the cents add up exactly per payer, and for each brand the quantities across all payers add up exactly to delivered (A 60 and B 40 split in half gives A 30 and B 20 on each).
+- P14. One order line delivered in two trips with different brands, each trip billed alone: each invoice shows only its own trip's brands. A whole-order invoice and a landlord split invoice list both trips; two trips of one brand stay separate entries; trips A 30, B 40, A 30 billed at 60 record A 30 and B 30; a trip with no picks adds a no-brand entry.
 - P15. Quick-delivery draft, partial-delivery trim and a whole-order draft made before the delivery are all re-copied at completion. A credit memo line keeps `brand_lines` NULL.
 - P16. `save_invoice` keeps `brand_lines` through a save; a quantity change keeps the brand, number and capture; a product change clears `brand_lines` and captures as new. A client write to `brand_lines` is refused. A posted line's `brand_lines` cannot change.
 - P17. Posting changes no line (the posting hash check passes) and reads the stored `brand_lines`.
@@ -381,7 +381,7 @@ A line the office adds by hand gets `brand_lines` NULL.
 - P33. `edit_delivery` with an unchanged line keeps its picks across the delete and re-insert; it refuses a completed delivery with picks.
 - P34. A direct write to `delivery_brand_settings` from `authenticated` is refused, and no function other than `set_delivery_brand_required` writes it. With the switch on, a no-pick completion is refused through every entry point, `process_offline_action` included, and the refused replay appears on the offline work review page.
 - P35. A `yes` listed entry and a typed `unknown` entry sharing one record key give one record with `warning` and both notes.
-- P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. The settings row is readable by an active user.
+- P36. A completion sent with an old `p_brand_base_seq` is refused with `BRAND_PICKS_CHANGED`; one with the current `seq` completes; one without it completes as today and its fingerprint is unchanged. A list loaded with no brand events (sends `0`), then a first save, then Mark Delivered: refused. The settings row is readable by an active user.
 - P31. Two corrections from the same base: the second is refused with `BRAND_PICKS_CHANGED`.
 - P29. Completion re-copying an order-level draft while that draft is being posted, in both orders at once: no deadlock, and the posted invoice is skipped, not changed.
 
@@ -534,3 +534,8 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 - HIGH, a trailing argument could leave an old overload without the check: **fixed**; old signatures dropped, one signature asserted (4.C).
 - MED, Mark Delivered on the list skipped the stale check: **fixed**; it sends the `seq` it loaded (4.C).
 - MED, the 30-day backlog window could miss older gaps: **fixed**; all dates (4.J).
+
+**Codex GitHub review** (head `fd673f866`): 3 P2, all **fixed**.
+- Landlord split lines allocated each payer from the first trip, over-recording one brand: landlord splits use the proportional rule, reconciled across payers (4.E, P13).
+- Merging same-brand trips lost the trip order allocation needs: trips stay separate entries; records merge afterwards (4.D, P14).
+- NULL meant both "no events yet" and "no check": empty history is `0`, NULL only for old callers (4.A, 4.C, P36).

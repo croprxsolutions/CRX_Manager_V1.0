@@ -110,7 +110,7 @@ Why this is the smallest complete design: the copy-down, the grouped-size guard,
 - `ADD CONSTRAINT product_use_timing_options_crop_fkey FOREIGN KEY (crop) REFERENCES product_crop_options(code)`.
 - `CREATE UNIQUE INDEX product_use_timing_options_active_pair_key ON product_use_timing_options (category, timing_code, crop) NULLS NOT DISTINCT WHERE is_active` (live is Postgres 17).
 - `ADD CONSTRAINT product_use_timing_options_timing_code_check CHECK (timing_code ~ '^[a-z][a-z0-9_]*$')` (all 9 live codes pass).
-- `ADD COLUMN created_by uuid NULL`, `ADD COLUMN changed_by uuid NULL`, `ADD COLUMN changed_at timestamptz NULL`, `ADD COLUMN option_version bigint NOT NULL DEFAULT 1`. With the existing `created_at` (default `now()`), each admin add records who and when, and each turn-off or turn-on records who and when and moves `option_version`. The 9 seeded rows keep null `created_by`.
+- `ADD COLUMN created_by uuid NULL`, `ADD COLUMN updated_by uuid NULL`, `ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now()`, `ADD COLUMN option_version bigint NOT NULL DEFAULT 1`. With the existing `created_at` (default `now()`), each admin add records who and when, and each turn-off or turn-on records who and when and moves `option_version`. The 9 seeded rows keep null `created_by`.
 - **Two options re-filed (question 2), only as Mason answers:** Volunteer Corn's `crop` set to null ("Any crop"), and Range/Pasture/Turf's `crop` set to `range_pasture_turf`, so it is not shown as "Any crop". Products store the code, not the crop, and both labels stay, so no product row changes (the postflight md5s prove it). Any option Mason says to keep is left as it is.
 - **No grant, revoke or policy change** on this existing table (so no Mason permission approval is needed for it).
 
@@ -123,17 +123,17 @@ Both follow the Stage 2 sheet §3 rules 2 and 3: `SECURITY DEFINER`, `SET search
 2. Category must be `Herbicide` or `Foliar Fertilizer` (the existing CHECK; Mason, 2026-10-28) — `USE_TIMING_CATEGORY`.
 3. Timing code matches the code pattern — `USE_TIMING_CODE_INVALID`. A new timing code is allowed (for example `burndown`); the label is what people see.
 4. Crop null, or an **active** `product_crop_options` code — `USE_TIMING_CROP_UNKNOWN`.
-5. Label trimmed, 1–60 characters, starting with a letter (so its generated code always matches the code pattern), no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
+5. Label trimmed, 1–60 characters, starting with an ASCII letter A–Z or a–z (the code is built from ASCII letters and digits only, so it always matches the code pattern), no `;` — `USE_TIMING_LABEL_INVALID`; not already used, ignoring case — `USE_TIMING_LABEL_TAKEN`.
 6. No **active** option already has this pair — `USE_TIMING_PAIR_EXISTS`, naming its label. A turned-off option with the same pair is allowed, so a misspelled label is fixed by turning it off and adding the corrected one.
 7. Code: a slug of the label (`lower`, non-letters to `_`, trimmed of `_`), with `_2`, `_3` added if taken. Sort order: the category's current largest plus 10.
 8. Insert with `created_by`; return `{code, label, timing_code, crop, category, sort_order}`.
 
 **`set_use_timing_option_active(p_code text, p_is_active boolean, p_expected_option_version bigint, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`**
-1. Admin, key, replay.
+1. Admin, key, replay (scope `set_use_timing_option_active`; fingerprint covers `p_code`, `p_is_active` and `p_expected_option_version`, so the same key with a different request is refused).
 2. `p_code`, `p_is_active` and `p_expected_option_version` are all required (not null) — `USE_TIMING_INVALID`. Option must exist — `USE_TIMING_NOT_FOUND`. Locked `FOR UPDATE`; `option_version` must equal `p_expected_option_version` — `USE_TIMING_STALE` (so an earlier click that arrives late cannot undo a later one). Same value already — `USE_TIMING_NO_CHANGE`.
 3. Turning **off**: allowed even while products hold it (they keep it). The result reports how many sizes and parents still hold it, so the screen can say so.
 4. Turning **on** a pair whose crop is now inactive — `USE_TIMING_CROP_UNKNOWN`; turning on a pair another active option already has — `USE_TIMING_PAIR_EXISTS`, naming it.
-5. Update `is_active`, `changed_by`, `changed_at`, `option_version + 1`; return the row (with its new version) and the holder counts.
+5. Update `is_active`, `updated_by`, `updated_at = now()`, `option_version + 1`; return the row (with its new version) and the holder counts.
 
 No change to `sync_product_use_timings`, `_product_parent_timings`, `update_product_parent`, the guards, or any reader: they already read the options table at run time, so a new option works everywhere at once.
 
@@ -200,7 +200,7 @@ Lands after the database PR is applied (`docs/workflows/DATABASE_CHANGE_CHECKLIS
 
 **Files:**
 - `src/lib/productUseTimings.ts`: `listProductCropOptions()`, `addUseTimingOption(...)`, `setUseTimingOptionActive(...)`, each through `src/lib/db.ts` with `assertRpcResult()` and a retry key per intent (the existing `getCreateKeyFor` pattern).
-- `src/pages/ProductDetail.tsx` and `src/components/products/ProductParentPanel.tsx`: the existing multi-select shows options **grouped by crop** ("Any crop", "Corn", "Soybeans", …) with the timing label in each group. Admins get an **"Add a crop and timing"** link under the picker: a small modal (category fixed to the product's, timing chosen from existing timing codes or typed new, crop from the crop list or "Any crop", label pre-filled as "<Timing> <Crop>", editable). A turned-off option a product still holds shows with "(retired)", as today.
+- `src/pages/ProductDetail.tsx` and `src/components/products/ProductParentPanel.tsx`: the existing multi-select shows options **grouped by crop** ("Any crop", "Corn", "Soybeans", …) with the timing label in each group. Admins get an **"Add a crop and timing"** link under the picker: a small modal (category fixed to the product's, timing chosen from existing timing codes or typed new, crop from the crop list or "Any crop", label pre-filled as "<Timing> <Crop>", editable). A turned-off option a product still holds shows with "(retired)", as today. The picker does not offer an active option whose (crop, timing) pair the product already holds through a retired one; instead the retired one shows a "Switch to <new label>" button that swaps the code in one save, so a product never shows the same pair twice. The add modal disables its submit and close buttons while its request is in flight, uses one retry key per opened form, and ignores a reply that arrives after the form it belongs to was closed.
 - A **"Manage crop and timing choices"** list for admins (the same modal file) to turn a choice off or back on, showing how many products hold it. `ConfirmModal` before turning one off. The button is disabled while its request is in flight, sends the version it was loaded with, and reloads the list after every answer (a `USE_TIMING_STALE` refusal says "someone else just changed this; refreshed").
 - `src/lib/productSetupWorkbook.ts` and `src/components/products/ProductSetupWorkbookModal.tsx`: a fourth visible tab, **Crop Uses**, one row per parent: `parent_id`, `parent_version` (hidden), `parent_name`, `category` (read-only), `sizes` (read-only), `use_timings` (editable labels, `;`-separated, the same format as the Setup tab). On upload, each row's labels are turned into option codes with the same parser the Setup tab uses (`parseSetupValue('use_timings', …)`, matching labels ignoring case); an unknown label, or one the parent's category does not take, makes that row invalid in the preview, as on the Setup tab. Saving calls `update_product_parent` once per changed row, one at a time, with `{use_timings: [<codes>]}`, the reason `"Setup workbook: crop uses"`, the downloaded `parent_version` and a per-row retry key derived from the upload. The format version moves to `crx-product-setup-v3`; a v2 file is refused whole (the existing old-version rule), because it has no Crop Uses tab.
   - **Why per row and not one batch RPC:** `update_product_parent` already does the lock, stale check, copy-down and event. A batch RPC would need a new private helper re-emitted from that live function, a larger and riskier change for a non-money field. The cost: if row 40 of 100 is refused (stale), rows 1–39 have saved. The result screen lists exactly which rows saved and which were refused and why, as the grand plan requires ("the result screen shows exactly which rows saved"), and a re-upload skips saved rows because they no longer differ.
@@ -232,7 +232,7 @@ Filling quoting notes from the setup workbook works today. What the preview does
 
 ### 6.3 Filling the notes (the data step, not code)
 This is catalog work under the grand plan's data rules, after Mason answers question 3:
-1. An agent drafts the quoting note for each product into a private review list kept **outside this repo**, in the private review location the Stage 2 sheet §3 rule 8 names. The repo's code and agents working from it only read Mason's private vault; the list is filed there through the `brain` skill's own Ingest workflow with Mason's go, or, if he prefers, handed to him as a file in the session's scratchpad. Never into this repo or a PR; the repo carries counts only.
+1. An agent drafts the quoting note for each product into a review spreadsheet in its own session scratchpad and sends it to Mason as a file. The agent never writes to Mason's private vault (read-only from this repo); if Mason wants a copy there, he files it himself. Never into this repo or a PR; the repo carries counts only.
 2. Mason reviews and approves a batch.
 3. The approved batch is pasted into a fresh setup workbook download's `quoting_notes` column and uploaded. The preview's count must equal the batch size; then Mason (or an admin, with Mason's go for that batch) confirms the Setup tab.
 4. The repo records only the batch count and date in `docs/manual/CURRENT_STATE.md`.
@@ -260,7 +260,7 @@ Writing live catalog rows is a Mason-gated data step (Stage 2 sheet §3 rule 11)
 **USE-1, in the harness (`prove-product-crop-use-pairs-real-schema.mjs`, against the schema-matched copy):**
 1. **Counts match:** before and after the migration, 317 products hold timings with the same per-code counts as section 1, every product's `use_timings`, `use_timing` and `pricing_version` unchanged (postflight, re-run by the script).
 2. An admin adds "Post-Emerge Wheat" (Herbicide, `post_emergence`, `wheat`); a non-admin and a direct table insert are refused and write nothing; a repeat with the same key returns the first result and writes once; the same key with a different label is refused.
-3. Adding a second label for an existing active pair is refused, naming the existing label; after that option is turned off, the corrected label is accepted, and turning the old one back on is refused while the new one is active; a crop not on the list is refused; a label with `;` or not starting with a letter is refused.
+3. Adding a second label for an existing active pair is refused, naming the existing label; after that option is turned off, the corrected label is accepted, and turning the old one back on is refused while the new one is active; a crop not on the list is refused; a label with `;` or not starting with an ASCII letter is refused.
 4. A product with "Pre-Emerge Corn" and "Post-Emerge Soybeans" keeps both after save and reload (ungrouped size, then a grouped parent).
 5. Two sizes of one parent show the same pairs after a parent edit; editing one size's timings directly is refused, naming the parent.
 6. A category change on a parent with timings is refused until timings are cleared; the screen's confirm then clears them on every size in one event.
@@ -340,3 +340,11 @@ Today no product has a quote note, so 442 products put their general description
 - MED a null expected version could slip past the stale check: fixed; all three arguments required (3.3).
 - LOW a null `p_is_active` would fail with a raw database error: fixed by the same rule.
 - LOW `updated_at` on crop options: added this time (3.2), ending the repeat finding.
+
+**Luna round 4** (gpt-6-luna xhigh, head `7a9051bbf`): 6 findings (1 HIGH, 2 MED, 3 LOW).
+- HIGH the round 3 fix still let an agent file the list in the private vault: fixed; the list only goes to Mason as a scratchpad file, and the agent never writes to the vault (6.3).
+- MED a product holding a retired option could also pick its replacement and show one pair twice: fixed; the picker hides the duplicate and offers "Switch to <new label>" (section 5).
+- MED the toggle's retry fingerprint was not stated: fixed; it covers all three arguments (3.3).
+- LOW the add modal had no in-flight rule: fixed; submit and close disabled, one key per form, late replies ignored (section 5).
+- LOW options had `changed_at` but no `updated_at`: fixed by naming the columns `updated_by` and `updated_at` (3.2, 3.3).
+- LOW a label starting with a non-ASCII letter could produce an empty code: fixed; the label must start with an ASCII letter (3.3, case 3).

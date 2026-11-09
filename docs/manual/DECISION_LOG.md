@@ -16,6 +16,16 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** the capture and the guards drove twelve Luna rounds of new HIGHs on the same mechanism (passes, triggers, wrappers). The SQL fell from about 2,800 lines to about 1,000 with nothing on the posting path depending on what was removed.
 **What this forbids/implies:** sizes and brands keep their own label facts and can differ from their registration; don't add guards, passes or fact-copying to bring them back into line without re-deciding this. Accepted: a label corrected between saving and posting posts by the registration as it is at posting; a registration turned from No to Yes lists its old unrecorded posted sales on Sales to check; a re-saved split-billed field-application invoice takes its product's current number (KI-113).
 
+## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
+## 2026-11-09 — Taha's merge hold covers a fixed list, not every PR
+
+**Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.
+**Why:** Mason's EPA, docs and field work was waiting 4 hours with nothing of Taha's at stake. Taha asked to keep the database, orders, deliveries, customers, products and shared plumbing on the list, because billing reads them or depends on them.
+**What this forbids/implies:** when unsure whether a PR is on the list, hold it. Rule: `.claude/commands/ship.md` Step 8 item 4a. The merge hold is still a written rule only; the apply hold is enforced by `tahaHoldProblem` in `.claude/hooks/migration-landing-gate-lib.mjs`.
 ## 2026-11-09 — Email Confirmation stays a hand send from the screen; two rare duplicates are accepted (KI-25 follow-up)
 
 **Decision (Mason, in session, 2026-11-09: "Yes, allow it"; widened the same morning: "Yes, accept it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Three rare cases are accepted: two office users pressing it for the same delivery within seconds can both email the customer; a void in the seconds between the go-ahead and the hand send does not stop that send; and a second office user may mark the paused receipt handled while a hand send is still going, so if that send then fails the receipt is off the list (the sender sees the failure and can press Email Confirmation again).
@@ -26,6 +36,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-09: "drop the check").** The check-only follow-up migration `20261215120000_ki30_epa_followup_checks` (never applied) is dropped from PR #1653. The restore data proof in `supabase/baselines/README.md` keeps requiring a change-history row that set each of the 48 corrected numbers; it does not compare each product's current number.
 **Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
 **What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
+## 2026-11-09 — Sol round 5 is a hard stop until Mason's trade-off is recorded
+
+**Decision (Mason, 2026-11-09 overnight-run retro: "spin both up in fresh sessions"):** from Sol round 5, `scripts/write-codex-push-proof.mjs` refuses a full Sol run until this log has an entry dated that day or later naming the PR as `#<n>`. Rounds 3–4 keep the warning line.
+**Why:** PR 1653 reached Sol round 8 past the round-3 warning before Mason was asked; he then decided in one message.
+**What this forbids/implies:** at round 5, ask Mason the business trade-off (AGENTS.md Operating Contract), record his answer here naming the PR, commit, then re-run. `--dry-run` and the carries are unaffected. Supersedes the warning-only part of the 2026-11-06 round-count entry.
 
 ## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
 

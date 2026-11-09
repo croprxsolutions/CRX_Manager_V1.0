@@ -5,11 +5,10 @@ import {
   PAPER_TICKET_PHOTO_CAPTION,
 } from './paperTicket';
 import {
-  completionRefusalCode, fetchReceiptRecipientWithin, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto,
+  completionRefusalCode, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto,
   mergePhotosById, signatureImagePathFor,
 } from './deliveryEvidence';
 import { sanitizeError } from './errorSanitizer';
-import { supabase } from './db';
 
 // The captions and the signature path must match complete_delivery's evidence check
 // (migration 20261022075000) exactly, or every photo or signature completion is refused.
@@ -114,14 +113,6 @@ describe('Goal 5 completion evidence', () => {
     expect(sanitizeError({ message: 'SIGNATURE_IMAGE_MISSING: x' })).toMatch(/then try again$/);
   });
 
-  it('gives up on the receipt lookup after the timeout instead of holding the completion', async () => {
-    vi.useFakeTimers();
-    const client = supabase as unknown as { rpc: (...args: unknown[]) => unknown };
-    vi.spyOn(client, 'rpc').mockReturnValue(new Promise(() => { /* never answers */ }));
-    const pending = fetchReceiptRecipientWithin('d-1', 5000);
-    await vi.advanceTimersByTimeAsync(5000);
-    await expect(pending).resolves.toBeNull();
-  });
 });
 
 // The server measures the reason after btrim(regexp_replace(reason, '[[:space:]]+', ' ', 'g')).

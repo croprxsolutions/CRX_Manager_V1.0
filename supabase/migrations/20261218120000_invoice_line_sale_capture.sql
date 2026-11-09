@@ -907,6 +907,33 @@ ALTER FUNCTION public.generate_rup_sales_records(uuid, text) OWNER TO postgres;
 -- 6. Posted sales a person should check (admin, read-only; sheet 4.C "Not reviewed at posting")
 -- ---------------------------------------------------------------------------------------------
 
+-- The one rule for "this posted line has its restricted-use record": an active record with the line's invoice,
+-- product, sold number, unit and unit price (posting writes one per each), and its captured signal word when
+-- it has a capture (a line posted before the seed has none). Both lists below use only this.
+CREATE FUNCTION public._rup_record_covers_line(p_line public.invoice_items) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.rup_sales_records s
+                  WHERE s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+                    AND public._normalize_epa_registration(s.epa_registration)
+                        IS NOT DISTINCT FROM public._normalize_epa_registration(p_line.epa_registration)
+                    AND s.unit IS NOT DISTINCT FROM p_line.unit_size
+                    AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents
+                    AND (p_line.sale_facts_captured_at IS NULL OR s.signal_word IS NOT DISTINCT FROM p_line.sale_signal_word));
+$function$;
+ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Re-issued from 20261218100000 (same signature and grants) to use the one coverage rule above.
+CREATE OR REPLACE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
+           'invoice_number', i.invoice_number, 'product_id', ii.product_id) ORDER BY ii.id), '[]'::jsonb)
+    FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+   WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
+     AND public._normalize_epa_registration(ii.epa_registration) = p_number
+     AND NOT public._rup_record_covers_line(ii);
+$function$;
+
 CREATE FUNCTION public.get_epa_sales_to_check() RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -920,11 +947,7 @@ BEGIN
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            public._normalize_epa_registration(ii.epa_registration) AS epa_registration,
            ii.quantity, ii.sale_rup_status, ii.sale_facts_source, ii.sale_facts_captured_at, r.rup_status AS registration_rup_status,
-           EXISTS (SELECT 1 FROM rup_sales_records s
-                    WHERE s.invoice_id = ii.invoice_id AND s.product_id = ii.product_id AND s.voided_at IS NULL
-                      AND s.unit IS NOT DISTINCT FROM ii.unit_size AND s.unit_price_cents IS NOT DISTINCT FROM ii.unit_price_cents
-                      AND public._normalize_epa_registration(s.epa_registration)
-                          IS NOT DISTINCT FROM public._normalize_epa_registration(ii.epa_registration)) AS has_record
+           public._rup_record_covers_line(ii) AS has_record
       FROM invoice_items ii
       JOIN invoices i ON i.id = ii.invoice_id
       JOIN products p ON p.id = ii.product_id
@@ -937,7 +960,7 @@ BEGIN
            'quantity', quantity, 'sale_rup_status', sale_rup_status, 'sale_facts_source', sale_facts_source,
            'registration_rup_status', registration_rup_status, 'has_record', has_record,
            'reasons', to_jsonb(array_remove(ARRAY[
-             CASE WHEN registration_rup_status = 'yes' AND NOT has_record THEN 'restricted_use_to_record' END,
+             CASE WHEN (registration_rup_status = 'yes' OR sale_rup_status = 'yes') AND NOT has_record THEN 'restricted_use_to_record' END,
              CASE WHEN sale_rup_status = 'unknown' AND NOT has_record THEN 'not_reviewed_no_record' END,
              CASE WHEN sale_facts_captured_at IS NULL THEN 'posted_before_seed' END,
              CASE WHEN sale_facts_source LIKE 'seed-assumed:%' THEN 'seed_assumed' END,
@@ -945,7 +968,7 @@ BEGIN
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
     FROM lines
-   WHERE (registration_rup_status = 'yes' AND NOT has_record)
+   WHERE ((registration_rup_status = 'yes' OR sale_rup_status = 'yes') AND NOT has_record)
       OR (sale_rup_status = 'unknown' AND NOT has_record)
       OR sale_facts_captured_at IS NULL
       OR sale_facts_source LIKE 'seed-assumed:%'
@@ -978,6 +1001,8 @@ BEGIN
   IF has_function_privilege('authenticated', 'public._capture_invoice_line_sale()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._fill_invoice_line_epa()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._save_invoice_lineage_unaware_impl_20260827(jsonb,jsonb,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._rup_record_covers_line(public.invoice_items)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._epa_registration_unrecorded_posted_lines(text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.get_epa_sales_to_check()', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.get_epa_sales_to_check()', 'EXECUTE')
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.invoice_items'::regclass

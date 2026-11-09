@@ -353,6 +353,7 @@ END;
 $function$;
 
 -- Posted invoice lines sold under p_number with no active RUP record (shown when a label turns Yes).
+-- 20261218120000 re-issues it with the one coverage rule once the capture columns exist.
 CREATE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,

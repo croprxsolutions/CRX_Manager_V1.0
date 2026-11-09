@@ -456,6 +456,8 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 
 ## 11. Questions for Mason
 
+**Answered (Mason, 2026-11-09): all three recommended answers accepted.** The suggested-rate text is filed as the label rate; seed-treatment numbers are copied as flagged, unconfirmed per-acre drafts that are never the quoting default; the warning fires when a rate is above any linked registration's maximum.
+
 1. **Is today's "suggested rate" text the label rate?** The plan files it as the **label** rate in the draft (MSO XL's `2 qt/100 Gal`, as the grand plan says). Recommended: yes, because RT-3 has you confirm every row anyway. The alternative is filing it as "unknown source", which adds a third source value for you to sort later.
 2. **Seed treatments:** their "per acre" number is really an amount per seed unit (for example Ilevo, 1.18 oz). The plan copies it as a house per-acre draft but does **not** make it the quoting default, marks its basis unconfirmed (so it is never checked against a per-acre label maximum), and flags it for your review. Recommended. The alternative (file it as a per-seed-unit house rate) is cleaner but means the draft no longer matches what quotes do today, which makes RT-3's comparison harder.
 3. **Which label maximum counts** when a product has more than one EPA number (a generic and a brand): the plan warns if the house rate is above **any** of them. Recommended, because it never misses a warning. The alternative (only the parent's own generic number) gives fewer warnings but could miss a brand's lower maximum.

@@ -1784,6 +1784,44 @@ export function solRoundLine(round, prNumber) {
     : line;
 }
 
+// ── Sol round hard stop (Mason, 2026-11-09) ─────────────────────────────────
+// PR 1653 reached Sol round 8 while the round-3 line above only warned. From
+// round 5 a full Sol run refuses, spending nothing, until DECISION_LOG.md on the
+// reviewed head has an entry dated today (Central) or later that names the PR.
+// --dry-run reports the refusal but still exits 0; carries never count rounds.
+export const SOL_ROUND_HARD_STOP = 5;
+
+export function centralDate(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(now);
+}
+
+// True when a "## <date> — …" entry dated `today` or later has a **Decision line naming Mason and mentions #<prNumber>.
+// A text check cannot prove he decided; it stops placeholders, and the entry is visible in the PR diff.
+export function decisionLogNamesPr(decisionLog, prNumber, today) {
+  if (!Number.isInteger(prNumber)) return false;
+  const names = new RegExp(`(?<![\\w&])#${prNumber}(?!\\w)`);
+  const realDate = (date) => !Number.isNaN(Date.parse(`${date}T00:00:00Z`)) && new Date(`${date}T00:00:00Z`).toISOString().startsWith(date);
+  return String(decisionLog || "").split(/^## /m).slice(1).some((entry) => {
+    const heading = entry.split(/\r?\n/, 1)[0];
+    return (heading.match(/\d{4}-\d{2}-\d{2}/g) || []).some((date) => date >= today && realDate(date))
+      && /^\*\*Decision\b[^\n]*\bMason\b/m.test(entry) && names.test(entry);
+  });
+}
+
+// { refuse, message }: refuse is never true for a dry run; message is null when the round may run.
+export function solRoundGate({ round, prNumber, decisionLog, today, dryRun = false }) {
+  if (round < SOL_ROUND_HARD_STOP || decisionLogNamesPr(decisionLog, prNumber, today)) return { refuse: false, message: null };
+  const pr = Number.isInteger(prNumber) ? `#${prNumber}` : null;
+  const message =
+    `SOL ROUND STOP: this would be Sol round ${round} on ${pr ? `PR ${pr}` : "this branch"}, so no Sol tokens were spent. ` +
+    "Stop patching: ask Mason the business trade-off that would delete the mechanism that keeps coming back " +
+    "(AGENTS.md, Operating Contract), " +
+    (pr
+      ? `record his answer in docs/manual/DECISION_LOG.md as an entry dated ${today} or later, with a "**Decision (Mason, …)" line, that names ${pr}, commit it, then re-run this command.`
+      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>, commit it, then re-run this command.");
+  return { refuse: !dryRun, message };
+}
+
 function solRound(root, headSha, baseSha) {
   const ledger = solRoundsLedgerPath(root);
   let text = "";
@@ -2858,6 +2896,14 @@ export function run(argv = process.argv.slice(2)) {
     );
     const { round } = solRound(root, head, reviewBase);
     process.stdout.write(`[dry-run] Would be: ${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
+    const gate = solRoundGate({
+      round,
+      prNumber: preflight.facts?.pr?.number,
+      decisionLog: runGit(["show", `${head}:docs/manual/DECISION_LOG.md`], { cwd: root }),
+      today: centralDate(),
+      dryRun: true,
+    });
+    if (gate.message) process.stdout.write(`[dry-run] Would REFUSE: ${gate.message}\n`);
     return 0;
   }
 
@@ -2911,6 +2957,16 @@ export function run(argv = process.argv.slice(2)) {
   }
   const reviewPrompt = buildCodexReviewPrompt({ base: GUARDED_BASE, appliedHistory });
   const { ledger, round } = solRound(root, headBefore, baseBefore);
+  const roundGate = solRoundGate({
+    round,
+    prNumber: preflight.facts?.pr?.number,
+    decisionLog: runGit(["show", `${headBefore}:docs/manual/DECISION_LOG.md`], { cwd: root }),
+    today: centralDate(),
+  });
+  if (roundGate.refuse) {
+    process.stderr.write(`${roundGate.message}\n`);
+    return 1;
+  }
   process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
   recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
   let reviewWorkspace;

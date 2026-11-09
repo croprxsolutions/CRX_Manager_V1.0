@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-09",
+    "generated_at": "2026-11-08",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261109152447",
+    "migrations_high_water": "20261108043505",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -553,13 +553,6 @@
       "20261209100000_product_chemistry",
       "20261210100000_epa_registrations",
       "20261211100000_product_chemistry_confirmed_swaps",
-      "20261211110000_loader_weights_getter_job_schedule",
-      "20261214100000_ki30_epa_registration_corrections",
-      "20261215100000_dispatch_sync_on_applicator_qualify",
-      "20261215110000_chem_sale_bill_split_invoices",
-      "20261217100000_job_access_ends_with_the_job",
-      "20261220100000_applicator_keeps_own_record_fields",
-      "20261221100000_close_delivery_receipt",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1587,6 +1580,7 @@
     "order_item_field_allocations",
     "order_items",
     "order_line_allocations",
+    "order_shares",
     "payments",
     "prepay_applications",
     "pricing_change_set_preview_rows",
@@ -4579,12 +4573,6 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
-      "table": "order_item_shares",
-      "constraint": "order_item_shares_split_percentage_check",
-      "def": "CHECK (((split_percentage > (0)::numeric) AND (split_percentage <= (100)::numeric)))",
-      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
-    },
-    {
       "table": "order_items",
       "constraint": "chk_oi_qty_delivered",
       "def": "CHECK ((quantity_delivered >= (0)::numeric))",
@@ -7110,18 +7098,6 @@
         "created_at"
       ]
     },
-    "order_item_shares": {
-      "no_default": [
-        "order_item_id",
-        "customer_id",
-        "split_percentage"
-      ],
-      "with_default": [
-        "id",
-        "created_at",
-        "updated_at"
-      ]
-    },
     "order_items": {
       "no_default": [
         "order_id",
@@ -7164,8 +7140,7 @@
       ],
       "with_default": [
         "id",
-        "created_at",
-        "updated_at"
+        "created_at"
       ]
     },
     "orders": {
@@ -9962,8 +9937,7 @@
       "last_printed_by",
       "carrier_rate_gpa",
       "loader_tank_capacity",
-      "commission_split",
-      "completed_at"
+      "commission_split"
     ],
     "label_draft_targets": [
       "draft_id",
@@ -10065,14 +10039,6 @@
       "acres",
       "created_at"
     ],
-    "order_item_shares": [
-      "id",
-      "order_item_id",
-      "customer_id",
-      "split_percentage",
-      "created_at",
-      "updated_at"
-    ],
     "order_items": [
       "id",
       "order_id",
@@ -10118,8 +10084,7 @@
       "amount_cents",
       "is_primary",
       "sort_order",
-      "created_at",
-      "updated_at"
+      "created_at"
     ],
     "orders": [
       "id",

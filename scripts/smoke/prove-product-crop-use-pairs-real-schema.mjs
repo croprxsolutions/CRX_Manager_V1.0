@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -459,6 +459,39 @@ function main() {
   refused(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emerge_wheat', 'wheat_post'] WHERE id = '${P('b9')}';`, /USE_TIMING_PAIR_TWICE: "Post-Emerge Wheat" and "Wheat Post"/);
   ownerOkPair(PC.parent_id);
   console.log('[prover] one pair once per row: a size and a parent holding a retired option cannot also take its replacement');
+
+  // Race (Sol round 1): a save that starts while an admin's turn-off is still open waits for it, then sees it off.
+  const RACE = addOpt('Herbicide', 'post_emergence', 'cotton', 'Post-Emerge Cotton', 'k-cotton').code;
+  const raceOff = (tag) => {
+    const bg = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT, stdio: ['pipe', 'ignore', 'ignore'] });
+    bg.stdin.end(`BEGIN;
+SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+SET LOCAL ROLE authenticated;
+${setSql(RACE, false, optVersion(RACE), tag)}
+SELECT pg_sleep(4);
+COMMIT;
+`);
+    for (let i = 0; i < 100 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();") === '0'; i += 1) wait(100);
+    return Date.now();
+  };
+  const raceDone = () => {
+    for (let i = 0; i < 200 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();") !== '0'; i += 1) wait(100);
+    assert.equal(scalar(`SELECT is_active FROM public.product_use_timing_options WHERE code = '${RACE}';`), 'f');
+  };
+  const h3Before = timings(H3);
+  let t0 = raceOff('k-race-off1');
+  refused(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', '${RACE}'] WHERE id = '${H3}';`, UNAVAILABLE);
+  assert.ok(Date.now() - t0 > 1500, 'the size save did not wait for the open turn-off');
+  raceDone();
+  assert.equal(timings(H3), h3Before);
+  setOpt(RACE, true, 'k-race-on1');
+  const vRace = version(PD.parent_id);
+  t0 = raceOff('k-race-off2');
+  refused(ADMIN, editParent(PD.parent_id, { use_timings: ['post_emergence', RACE] }, 'k-race-pd', vRace), /PRODUCT_PARENT_TIMING_RETIRED: "Post-Emerge Cotton"/);
+  assert.ok(Date.now() - t0 > 1500, 'the parent save did not wait for the open turn-off');
+  raceDone();
+  assert.equal(version(PD.parent_id), vRace);
+  console.log('[prover] race: a size save and a parent save that start while a turn-off is open wait for it and are refused');
 
   // Rerun refused; the parent trigger function is not callable.
   refused(ADMIN, 'SELECT public.guard_product_parent_retired_timings();', /permission denied|trigger functions can only be called as triggers/);

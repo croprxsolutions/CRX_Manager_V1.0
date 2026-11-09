@@ -380,6 +380,13 @@ BEGIN
     END IF;
   END IF;
 
+  -- USE-1: wait out an in-flight turn-off or add (they hold this key exclusively) before reading
+  -- is_active, so a choice turned off mid-save is seen as off; each read below is a new snapshot.
+  IF cardinality(v_codes) > 0 AND (TG_OP = 'INSERT' OR v_codes_changed
+                                   OR NEW.category IS DISTINCT FROM OLD.category) THEN
+    PERFORM pg_advisory_xact_lock_shared(hashtext('crx_use_timing_options'));
+  END IF;
+
   FOR v_code IN SELECT DISTINCT x FROM unnest(v_codes) x LOOP
     IF TG_OP = 'UPDATE' AND NOT v_codes_changed AND NEW.category IS NOT DISTINCT FROM OLD.category THEN
       CONTINUE;
@@ -455,6 +462,8 @@ BEGIN
     IF NEW.use_timings IS NOT DISTINCT FROM OLD.use_timings THEN RETURN NEW; END IF;
     v_old := OLD.use_timings;
   END IF;
+  -- USE-1: same wait as the size trigger, so a choice turned off mid-save is seen as off.
+  PERFORM pg_advisory_xact_lock_shared(hashtext('crx_use_timing_options'));
   SELECT o.label INTO v_label FROM public.product_use_timing_options o
    WHERE o.code = ANY(NEW.use_timings) AND NOT o.is_active AND NOT (o.code = ANY(v_old))
    ORDER BY o.sort_order, o.code LIMIT 1;

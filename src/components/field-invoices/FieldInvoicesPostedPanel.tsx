@@ -5,7 +5,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import MultiSelectDropdown, { type MultiSelectOption } from '../jobs/MultiSelectDropdown';
 import { useToast } from '../ui/Toast';
-import { supabase, assertRpcResult } from '../../lib/db';
+import { supabase, assertRpcResult, sanitizeError } from '../../lib/db';
 import { assertInvoiceSendable } from '../../lib/invoiceSendDisposition';
 import { Sentry } from '../../lib/sentry';
 import { INVOICE_COLUMNS } from '../../lib/costFields';
@@ -479,8 +479,7 @@ export default function FieldInvoicesPostedPanel() {
           delete unpostKeysRef.current[row.id];
         } catch (err) {
           Sentry.captureException(err, { tags: { rpc: 'unpost_invoice', page: 'field-invoices-posted' } });
-          const msg = err instanceof Error ? err.message : String(err);
-          failures.push(`${row.invoice_number}: ${msg}`);
+          failures.push(`${row.invoice_number}: ${sanitizeError(err)}`);
           // Keep the failed invoice's key cached so a retry reuses it, unless the server proved nothing ran
           // under it (key used for another request or person): retire it, since an unpost cannot repeat
           // (the body refuses an invoice no longer posted) and the list reloads below.

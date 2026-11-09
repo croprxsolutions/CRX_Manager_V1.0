@@ -2076,6 +2076,12 @@
       "covers": ["_create_bill_split_delivery_invoices", "_bill_split_line_shares", "_order_has_bill_split", "_refuse_bill_split_change", "guard_invoice_terminal_order", "_complete_delivery_authorized_impl", "save_invoice", "create_invoice_for_unbilled_delivery", "post_invoice_group", "void_delivery", "delete_invoices", "unpost_invoice", "void_invoice_group", "unpost_invoice_group", "void_invoice", "complete_delivery", "price_order"],
       "area": ["billing", "regression"]
     },
+    "unpost_invoice_rep_scope": {
+      "chain": "smoke-unpost-invoice-rep-scope.sql",
+      "description": "Migration 20261125120000: a rep unposts only invoices and groups under their own name; an admin unposts any.",
+      "covers": ["unpost_invoice", "unpost_invoice_group"],
+      "area": ["billing", "security", "regression"]
+    },
     "sale_line_vendor": {
       "chain": "smoke-sale-line-vendor.sql",
       "description": "Migration 20261118110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",

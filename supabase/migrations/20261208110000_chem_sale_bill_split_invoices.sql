@@ -9,10 +9,11 @@
 --   - Each line shares its delivered cents and quantity: every other payer gets their share rounded
 --     down and the main customer (the sale's customer) gets the rest, so each line bills exactly. If
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
---     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
---     holds it, so a payer can return a share in full. Each payer's cents are exactly its percentage rounded
---     down. A share under 0.01 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL),
---     so every billed quantity can be returned; the office adjusts the shares (Mason, 2026-11-06, option B).
+--     the rest with the main customer. Another payer's quantity rounds down to 4 places, as an invoice line
+--     holds it, so a three-decimal delivery (2.125) bills like a plain sale (Mason, 2026-11-09, replacing the
+--     Nov 6 whole-hundredths rule). Each payer's cents are exactly its percentage rounded down. A share under
+--     0.0001 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL), so no billed money
+--     sits on no quantity; the office adjusts the shares.
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -30,16 +31,19 @@
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
---   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED). Option B means the
---     split never drafts one; the lock stays as a backstop.
+--   - A payer's draft holding a product line with no quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED). The split
+--     never drafts one (BILL_SPLIT_QUANTITY_TOO_SMALL); the lock stays as a backstop.
 --   - A posted group unposts together: unpost_invoice refuses any group member (GROUP_UNPOST_REQUIRED), as
 --     post_invoice does (GROUP_POST_REQUIRED). This covers field-split groups too: the screens already send
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
 --   - A line bills in the order line's unit, as the return checks compare it, so every payer can return it.
---   - A Bill Split bills only delivered quantities in whole hundredths, as a return holds them, so every payer's
---     share, the remainder included, can be returned in full (Mason, 2026-11-06). Any other line refuses the split
---     (BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS): the delivery completes, the office is told and corrects it with Fix
---     Delivery, then Create Invoice drafts the payers. A one-customer sale is unchanged.
+--   - A Bill Split bills the real delivered amount, as a plain sale does (Mason, 2026-11-09). Only a delivered
+--     amount finer than an invoice line holds (more than 4 places) refuses (BILL_SPLIT_QUANTITY_TOO_FINE), since
+--     it couldn't be split exactly. Returns hold 2 places, so as on a plain sale a sliver under 0.01 may not be
+--     returnable. A one-customer sale is unchanged.
+--   - Dates (Mason, 2026-11-09): completing a delivery dates the payers by the completion, as a plain sale. Create
+--     Invoice dates them the day it runs, as a plain Create Invoice does, so a rush sale billed after pricing
+--     lands in the month it was billed. Nothing is ever dated into a closed month (check_period_open).
 --   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
 --     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
@@ -441,9 +445,9 @@ $function$;
 -- One line's shares of p_cents and p_units (ten-thousandths): the line's own shares, else the card; any
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
--- exactly their percentage, rounded down. Other payers' quantity is whole hundredths (100 of p_units),
--- because return_items.quantity holds two decimals, so a share under 0.01 comes back as 0 units with its
--- cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker comes first. A line
+-- exactly their percentage, rounded down. Other payers' quantity rounds down to 4 places, as an invoice line
+-- holds it (Mason, 2026-11-09), so a share under 0.0001 comes back as 0 units with its cents, and the invoice
+-- writer refuses it. The taker comes first. A line
 -- delivered past its planned quantity bills a capped total; each payer takes their percentage of it
 -- (Mason restored exact cents over quantity times price, 2026-11-06).
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
@@ -473,7 +477,7 @@ AS $function$
   ), ranked AS (
     SELECT p.customer_id,
            floor(p_cents * p.pct / 100)::bigint AS floor_cents,
-           floor(p_units * p.pct / 10000)::bigint * 100 AS floor_units,
+           floor(p_units * p.pct / 100)::bigint AS floor_units,
            row_number() OVER (ORDER BY p.customer_id = line.main DESC, p.pct DESC, p.customer_id) AS rn
       FROM payers p, line
   )
@@ -515,6 +519,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM order_items WHERE order_id = v_order.id AND pricing_pending) THEN
     RAISE EXCEPTION 'PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted';
   END IF;
+  -- Never dated into a closed month (Mason, 2026-11-09).
+  PERFORM check_period_open(p_invoice_date);
 
   INSERT INTO split_invoice_creation_claims (transaction_id, order_id) VALUES (pg_current_xact_id(), v_order.id);
   v_base := next_invoice_number('chemical_sale');
@@ -532,10 +538,9 @@ BEGIN
   LOOP
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
-    -- Whole hundredths only, as a return holds them: every payer's share then lands on hundredths too, so each
-    -- can be returned in full (Mason, 2026-11-06). The office corrects the delivery with Fix Delivery.
-    IF v_item.quantity_delivered <> round(v_item.quantity_delivered, 2) THEN
-      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery % delivered % of %, which is not in whole hundredths; correct it with Fix Delivery',
+    -- The real delivered amount bills (Mason, 2026-11-09); only one finer than an invoice line holds can't split exactly.
+    IF v_item.quantity_delivered <> round(v_item.quantity_delivered, 4) THEN
+      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_FINE: delivery % delivered % of %, finer than an invoice line holds (4 places); correct it with Fix Delivery',
         v_delivery.delivery_number, v_item.quantity_delivered, COALESCE(v_item.oi_product_name, v_item.p_name)
         USING ERRCODE = 'check_violation';
     END IF;
@@ -546,10 +551,10 @@ BEGIN
        ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
-      -- A share worth cents on no returnable quantity refuses, so every billed quantity can be returned
-      -- (Mason, 2026-11-06, option B); the office adjusts the shares.
+      -- A share worth cents on no quantity an invoice line can hold refuses, so no billed money sits on nothing;
+      -- the office adjusts the shares.
       IF v_share.units = 0 THEN
-        RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: on delivery % a payer''s share of % is under 0.01 of a unit; change the shares so each payer gets at least 0.01',
+        RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: on delivery % a payer''s share of % is under 0.0001 of a unit; change the shares so each payer gets at least 0.0001',
           v_delivery.delivery_number, COALESCE(v_item.oi_product_name, v_item.p_name)
           USING ERRCODE = 'check_violation';
       END IF;
@@ -1562,8 +1567,9 @@ BEGIN
   IF public._order_has_bill_split(v_delivery.order_id) THEN
     v_invoice_ids := public._create_bill_split_delivery_invoices(
       p_delivery_id,
-      -- Dated by the delivery, as completing it would have been, not by the day Create Invoice runs.
-      COALESCE((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, (now() AT TIME ZONE 'America/Chicago')::date),
+      -- Dated the day it runs, as a plain Create Invoice is (Mason, 2026-11-09): a rush sale billed after pricing
+      -- lands in the month it was billed.
+      (now() AT TIME ZONE 'America/Chicago')::date,
       v_actor);
     IF cardinality(v_invoice_ids) = 0 THEN
       RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
@@ -1676,13 +1682,13 @@ BEGIN
        AND i.invoice_group_id IS NOT NULL
        AND public._order_has_bill_split(i.order_id);
     v_bill_split_draft := FOUND;
-    -- A line on 0.00 quantity (a share under 0.01) can't pass the save path, which needs a quantity on every
-    -- line. Refuse here in plain words; the group still posts as drafted, or a group void redrafts it.
+    -- A product line with no quantity can't pass the save path, which needs a quantity on every line. Refuse
+    -- here in plain words; the group still posts as drafted, or a group void redrafts it.
     IF v_bill_split_draft AND EXISTS (
       SELECT 1 FROM public.invoice_items ii
        WHERE ii.invoice_id = v_invoice_id AND ii.charge_type IS NULL AND ii.quantity = 0
     ) THEN
-      RAISE EXCEPTION 'BILL_SPLIT_SLIVER_LOCKED: this payer''s share is under 0.01 of a unit, so its draft can''t be edited. Post it as drafted, or void the group'
+      RAISE EXCEPTION 'BILL_SPLIT_SLIVER_LOCKED: this payer''s draft has a product line with no quantity, so it can''t be edited. Post it as drafted, or void the group'
         USING ERRCODE = 'check_violation';
     END IF;
 

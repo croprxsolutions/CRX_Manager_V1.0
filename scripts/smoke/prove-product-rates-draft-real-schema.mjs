@@ -575,7 +575,7 @@ try {
   assert.match(probe(`${approve} BEGIN UPDATE public.product_rates SET recommended = 1 WHERE id = '${msoHouse.id}'; v := 'NOT REFUSED';
     EXCEPTION WHEN OTHERS THEN v := SQLERRM; END;`), /^PRODUCT_RATE_APPROVED/);
   expectCode(refused(del(msoHouse.id, 1, '   ')), 'PRODUCT_RATE_REASON_REQUIRED');
-  expectCode(refused(del(msoHouse.id, 1, ' \t\r\n ')), 'PRODUCT_RATE_REASON_REQUIRED');
+  expectCode(refused(del(msoHouse.id, 1, ' \t\r\n  ')), 'PRODUCT_RATE_REASON_REQUIRED');
   console.log('R17: a stale version and an approved row are refused for edit and delete');
 
   // R18: events.

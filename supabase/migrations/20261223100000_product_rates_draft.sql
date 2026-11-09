@@ -151,7 +151,7 @@ CREATE TABLE public.product_rates (
   basis_confirmed boolean NOT NULL DEFAULT true,
   source_text text CHECK (source_text IS NULL OR length(source_text) <= 200),
   over_label_reason text CHECK (over_label_reason IS NULL
-    OR (btrim(over_label_reason, E' \t\r\n') <> '' AND over_label_reason = btrim(over_label_reason, E' \t\r\n') AND length(over_label_reason) <= 500)),
+    OR (btrim(over_label_reason, E' \t\r\n ') <> '' AND over_label_reason = btrim(over_label_reason, E' \t\r\n ') AND length(over_label_reason) <= 500)),
   row_version bigint NOT NULL DEFAULT 1 CHECK (row_version >= 1),
   created_by uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -704,7 +704,7 @@ DECLARE
   v_existing jsonb;
   v_unit public.product_rate_units%ROWTYPE;
   v_unit_text text := btrim(COALESCE(p_unit, ''));
-  v_reason text := NULLIF(btrim(COALESCE(p_over_label_reason, ''), E' \t\r\n'), '');
+  v_reason text := NULLIF(btrim(COALESCE(p_over_label_reason, ''), E' \t\r\n '), '');
   v_default boolean := COALESCE(p_is_quoting_default, false);
   v_parent public.product_parents%ROWTYPE;
   v_old public.product_rates%ROWTYPE;
@@ -815,7 +815,7 @@ DECLARE
   v_actor uuid;
   v_fp text;
   v_existing jsonb;
-  v_reason text := btrim(COALESCE(p_reason, ''), E' \t\r\n');
+  v_reason text := btrim(COALESCE(p_reason, ''), E' \t\r\n ');
   v_parent_id uuid;
   v_old public.product_rates%ROWTYPE;
   v_result jsonb;
@@ -903,7 +903,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.product_parents WHERE id = p_parent_id) THEN RAISE EXCEPTION 'PARENT_NOT_FOUND'; END IF;
   RETURN jsonb_build_object('parent_id', p_parent_id,
     'rates', COALESCE((SELECT jsonb_agg(to_jsonb(r) || jsonb_build_object('unit_label', u.label, 'unit_kind', u.kind,
-                 'label_check', public._product_rate_label_check(r.id)) ORDER BY r.source, r.basis)
+                 -- checked from this same row read, so the rate and its check describe one version
+                 'label_check', public._product_rate_check_values(r.parent_id, r.source, r.basis, r.unit, r.low, r.recommended, r.high,
+                   r.basis_confirmed, r.over_label_reason)) ORDER BY r.source, r.basis)
                FROM public.product_rates r JOIN public.product_rate_units u ON u.code = r.unit
               WHERE r.parent_id = p_parent_id), '[]'::jsonb),
     'notes', COALESCE((SELECT jsonb_agg(e.after_values || jsonb_build_object('event_id', e.id, 'changed_at', e.changed_at) ORDER BY e.id)

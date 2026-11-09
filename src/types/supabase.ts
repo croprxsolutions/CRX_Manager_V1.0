@@ -4480,6 +4480,10 @@ export type Database = {
           rate_unit: string | null
           return_credit_cogs_cents: number | null
           return_credit_source_item_id: string | null
+          sale_facts_captured_at: string | null
+          sale_facts_source: string | null
+          sale_rup_status: string | null
+          sale_signal_word: string | null
           sort_order: number
           total_applied: number | null
           total_applied_gl_lb: number | null
@@ -4516,6 +4520,10 @@ export type Database = {
           rate_unit?: string | null
           return_credit_cogs_cents?: number | null
           return_credit_source_item_id?: string | null
+          sale_facts_captured_at?: string | null
+          sale_facts_source?: string | null
+          sale_rup_status?: string | null
+          sale_signal_word?: string | null
           sort_order?: number
           total_applied?: number | null
           total_applied_gl_lb?: number | null
@@ -4552,6 +4560,10 @@ export type Database = {
           rate_unit?: string | null
           return_credit_cogs_cents?: number | null
           return_credit_source_item_id?: string | null
+          sale_facts_captured_at?: string | null
+          sale_facts_source?: string | null
+          sale_rup_status?: string | null
+          sale_signal_word?: string | null
           sort_order?: number
           total_applied?: number | null
           total_applied_gl_lb?: number | null
@@ -16181,6 +16193,7 @@ export type Database = {
           p_is_currently_sourced: boolean
           p_is_rup: boolean
           p_manufacturer: string
+          p_new_registration?: Json
           p_product_id: string
           p_signal_word: string
         }

@@ -198,9 +198,21 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
   it('DRY + Dry oz → POUNDS (16 Dry oz = 1 lb), equal to the server; Dry oz on a liquid stays a dash (RT-2)', () => {
     expect(toGallonOrLbEquivalent(16, 'Dry oz', 'dry')).toEqual({ value: 1, unit: 'lb' });
     expect(toGallonOrLbEquivalent(4.8, 'DRY OZ', 'dry')).toEqual(serverGlLb(4.8, 'DRY OZ', 'dry'));
-    expect(toGallonOrLbEquivalent(16, 'Dry oz')).toEqual({ value: 1, unit: 'lb' }); // no-form path
+    expect(toGallonOrLbEquivalent(16, 'Dry oz')).toBeNull(); // no form: the server reads it as liquid, so no figure
     expect(toGallonOrLbEquivalent(16, 'Dry oz', 'liquid')).toBeNull();
     expect(serverGlLb(16, 'Dry oz', 'liquid')).toBeNull();
+  });
+
+  // RT-2 step 1 moves Autumn Super 51 WDG and Cimarron Plus (dry, stock 'Dry oz') from rate 'oz' to 'Dry oz'.
+  // Job billing must not move: the line keeps its stock unit, the hazard guard sees equal units, and the
+  // priced quantity is the applied ounces both before and after (SQL field_app_priced_quantity agrees: oz == dry oz == 1).
+  it('RT-2: a dry Dry-oz-stock product bills the same on an oz rate and on a Dry oz rate', () => {
+    for (const rate of ['oz', 'Dry oz']) {
+      expect(reconcileChemAutofillUnits('Dry oz', rate, 125, 250, 'dry')).toEqual(
+        { unit: 'Dry oz', costPerUnitCents: 125, pricePerUnitCents: 250, priceIsExact: true });
+      expect(fieldAppPricedQuantity(30, rate, 'Dry oz', 'dry')).toBe(30);
+    }
+    expect(chemLineBillingHazard({ quantity: '30', rate_per_acre: '0.3', rate_unit: 'Dry oz/ac', unit: 'Dry oz' }, 100, 'dry').hazard).toBe(false);
   });
 
   it('LIQUID qt / pt / gal → GALLONS, equal to the server', () => {

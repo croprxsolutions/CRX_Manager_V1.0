@@ -449,7 +449,6 @@ export function toGallonOrLbEquivalent(
   // Legacy path (product_form unknown): infer liquid-vs-dry from the unit text.
   if (key in TO_GALLONS) return { value: round4(quantity * TO_GALLONS[key]), unit: 'gal' };
   if (key in TO_POUNDS) return { value: round4(quantity * TO_POUNDS[key]), unit: 'lb' };
-  if (key === 'dry oz') return { value: round4(quantity / 16), unit: 'lb' };
   return null;
 }
 

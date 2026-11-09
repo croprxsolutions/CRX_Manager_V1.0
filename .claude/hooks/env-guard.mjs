@@ -7,8 +7,10 @@
 //      into ANY file under src/ — service_role must NEVER ship to the frontend.
 //
 // Rules match the existing hook style: fail-open if no content visible.
+// For an Edit the content judged is the FULL post-edit file (spliced from disk).
 
 import { readFileSync } from "node:fs";
+import { judgedContent } from "./edit-splice-lib.mjs";
 
 function out(decision, reason) {
   const payload = decision === "block"
@@ -44,28 +46,31 @@ if (isEnvFile && !isExample) {
 }
 
 // RULE 2 — block service_role literals in frontend code
-const content = payload?.tool_input?.content || payload?.tool_input?.new_string || "";
+const content = judgedContent(filePath, payload?.tool_input);
 if (!content) out("allow");
 
-const inSrc = filePath.includes("/src/");
-const isFrontendFile = inSrc && /\.(ts|tsx|js|jsx)$/.test(filePath);
+// Anchored at a path-segment boundary so a repo-relative `src/lib/x.ts` counts; case-insensitive
+// because Windows paths are.
+const inSrc = /(?:^|\/)src\//i.test(filePath);
+const isFrontendFile = inSrc && /\.(ts|tsx|js|jsx)$/i.test(filePath);
+// Test files never ship to the browser, and several assert database grants by quoting the role.
+const isTestFile = /\.test\.(ts|tsx)$/i.test(filePath);
 
 if (isFrontendFile) {
-  // Look for the service_role token. Allow comments explaining "do not use service_role" — the
-  // pattern that's dangerous is an actual env-var lookup or string literal.
+  // Every scan judges the raw text, comments included: a comment that names the key or quotes
+  // the role is refused, and the author rewords it.
   const violations = [];
 
-  if (/SUPABASE_SERVICE_ROLE_KEY/.test(content) && !/\/\/.*never.*service_role/i.test(content)) {
-    violations.push("SUPABASE_SERVICE_ROLE_KEY referenced in a src/ file.");
+  if (/SUPABASE_SERVICE_ROLE_KEY/.test(content)) {
+    violations.push("SUPABASE_SERVICE_ROLE_KEY referenced in a src/ file (comments count too; reword a comment that names it).");
   }
   // eyJ... is the JWT prefix all Supabase keys share; flag a long literal that looks like one.
   // Anon keys are also eyJ... but a long literal in source is suspicious regardless — use env vars.
   if (/['"`]eyJ[A-Za-z0-9_-]{40,}['"`]/.test(content)) {
     violations.push("Hard-coded JWT-shaped literal (eyJ...) in source — keys must come from import.meta.env.");
   }
-  // 'service_role' as a string value (not a comment) — heuristic
-  if (/['"`]service_role['"`]/.test(content) && !/\/\/.*service_role/i.test(content)) {
-    violations.push("'service_role' string literal in src/ — this role belongs only in Edge Functions.");
+  if (!isTestFile && /['"`]service_role['"`]/.test(content)) {
+    violations.push("'service_role' string literal in src/ — this role belongs only in Edge Functions (a comment quoting it is refused too; reword it).");
   }
 
   if (violations.length > 0) {

@@ -980,9 +980,17 @@ service-role tools (LOW).
   stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
   approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
   advisory).
-- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
-  `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
-  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
+- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables` and `generated-column-check`
+  still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
+  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching, `.env` aliases in
+  `env-guard` included (LOW). Revisit trigger: if Claude Code regains a MultiEdit tool, reopen the 2026-11-02
+  acceptance for these three content guards.
+- `env-guard` service-role scan: FIXED 2026-11-08 (branch `claude/guard-port-envguard-ki107-7aecfa`). An Edit is
+  judged as the whole file after the edit, comments are scanned like code, and a repo-relative or upper-case `src/`
+  path counts. `*.test.ts(x)` files may quote `'service_role'` (several assert database grants) but still may not
+  name the key or hold a JWT-shaped literal. Still not caught (LOW): frontend files with other extensions (`.mjs`,
+  `.vue`, `.html`), a key name or role built at run time from pieces, keys not shaped like a JWT, and the `.env`
+  path aliases accepted above.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

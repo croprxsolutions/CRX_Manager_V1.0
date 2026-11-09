@@ -2283,6 +2283,10 @@ describe('QuoteBuilder', () => {
       mockRpc.mockImplementation(() => Promise.resolve({ data: { quote_id: served.id, row_version: 8 }, error: null }));
       return served;
     }
+    // Expires is a kit Dropdown (trigger button + listbox); a picked date shows in the kit DatePicker.
+    const expiresTrigger = () => screen.getByRole('button', { name: /Expires/ });
+    const expiryDay = () => ['month', 'day', 'year'].map((t) => within(screen.getByRole('group', { name: 'Expiry date' }))
+      .getAllByRole('spinbutton').find((el) => el.getAttribute('data-type') === t)!.textContent).join('/');
     async function saveDraftPayload() {
       fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
@@ -2297,8 +2301,8 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       await screen.findByText('Save draft');
 
-      expect(screen.getByLabelText('Expires')).toHaveValue('date');
-      expect(screen.getByLabelText('Expiry date')).toHaveValue('2026-12-15');
+      expect(expiresTrigger()).toHaveTextContent('Pick a date');
+      expect(expiryDay()).toBe('12/15/2026');
       const payload = await saveDraftPayload();
       expect(payload.chosen_expiry_date).toBe('2026-12-15');
       expect(payload.expires_at).toBe('2026-12-15');
@@ -2309,14 +2313,33 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       await screen.findByText('Save draft');
 
-      fireEvent.change(screen.getByLabelText('Expires'), { target: { value: 'season' } });
-      expect(screen.queryByLabelText('Expiry date')).not.toBeInTheDocument();
+      fireEvent.click(expiresTrigger());
       // "Today" is pinned to 2026-03-16 above: season 2026, which ends Sept 30, 2026.
-      expect(screen.getByRole('option', { name: 'Sep 30, 2026 (season end)' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('option', { name: 'Sep 30, 2026 (season end)' }));
+      expect(screen.queryByRole('group', { name: 'Expiry date' })).not.toBeInTheDocument();
+      expect(expiresTrigger()).toHaveTextContent('Sep 30, 2026 (season end)');
       const payload = await saveDraftPayload();
       expect(payload.chosen_expiry_date).toBeNull();
       expect(payload.expires_at).toBe('2026-09-30');
       expect(payload).not.toHaveProperty('valid_days');
+    });
+
+    it('expiry "Pick a date" opens the DatePicker', async () => {
+      const quote = serveDraft({ chosen_expiry_date: null });
+      renderQuoteBuilder(quote.id);
+      await screen.findByText('Save draft');
+      expect(screen.queryByRole('group', { name: 'Expiry date' })).not.toBeInTheDocument();
+
+      fireEvent.click(expiresTrigger());
+      fireEvent.click(screen.getByRole('option', { name: 'Pick a date' }));
+      expect(expiresTrigger()).toHaveTextContent('Pick a date');
+      expect(await screen.findByRole('group', { name: 'Expiry date' })).toBeInTheDocument();
+      const payload = await saveDraftPayload();
+      expect(payload.chosen_expiry_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(payload.expires_at).toBe(payload.chosen_expiry_date);
+      // The DatePicker shows the same plain day the quote stores.
+      const [y, m, d] = String(payload.chosen_expiry_date).split('-').map(Number);
+      expect(expiryDay()).toBe(`${m}/${d}/${y}`);
     });
 
     it('a quote with no pick opens on season end', async () => {
@@ -2324,7 +2347,7 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       await screen.findByText('Save draft');
 
-      expect(screen.getByLabelText('Expires')).toHaveValue('season');
+      expect(expiresTrigger()).toHaveTextContent('Sep 30, 2026 (season end)');
       expect((await saveDraftPayload()).chosen_expiry_date).toBeNull();
     });
   });
@@ -3447,7 +3470,7 @@ describe('QuoteBuilder', () => {
       const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
       await waitFor(() => expect(price).toBeEnabled());
       expect(price).toHaveValue(10);
-      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Switch to Tier 1' }));
 
       expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
       expect(price).toHaveValue(12);
@@ -3462,12 +3485,12 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
       await waitFor(() => expect(price).toBeEnabled());
-      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Switch to Tier 1' }));
       expect(price).toHaveValue(12);
       fireEvent.change(screen.getByDisplayValue('Tier 1'), { target: { value: '2' } });
 
       expect(price).toHaveValue(10);
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Keep Tier 2' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, use_todays_price: false });
@@ -3476,7 +3499,7 @@ describe('QuoteBuilder', () => {
     it('keeps the sent price through an edit after the catalog price rose', async () => {
       const { quote } = configureLockedQuote();
       renderQuoteBuilder(quote.id);
-      expect(await screen.findByText(/Prices stay as sent in V1/)).toBeInTheDocument();
+      expect(await screen.findByText(/Prices stay as sent in version 1/)).toBeInTheDocument();
       const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
       await waitFor(() => expect(units).toBeEnabled());
       fireEvent.change(units, { target: { value: '3' } });
@@ -3496,7 +3519,7 @@ describe('QuoteBuilder', () => {
 
       expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toHaveValue(12);
       expect(screen.getByText('Sent at $10.00')).toBeInTheDocument();
-      expect(screen.queryByText(/Prices or lines changed after V1 was sent/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Prices or lines changed after version 1 was sent/)).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
@@ -3552,7 +3575,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
 
       await waitFor(() => expect(screen.queryByText('New since V1')).not.toBeInTheDocument());
-      expect(screen.queryByText(/Prices or lines changed after V1 was sent/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Prices or lines changed after version 1 was sent/)).not.toBeInTheDocument();
     });
 
     it('asks for a reload when the database stored a different price than the screen shows', async () => {
@@ -3641,7 +3664,7 @@ describe('QuoteBuilder', () => {
       // A line the customer was not sent still needs a re-send (a changed price no longer does).
       sentVersion.snapshot_data.sections[0].items[0].quote_item_id = 'item-2';
       renderQuoteBuilder(quote.id);
-      fireEvent.click(await screen.findByRole('button', { name: 'Rewind to V1' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Rewind to version 1' }));
       const dialog = await screen.findByRole('dialog', { name: 'Rewind to V1' });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Rewind to V1' }));
 
@@ -3684,7 +3707,7 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 1.')));
       expect(saveCalls()).toHaveLength(0);
 
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Keep Tier 2' }));
       save();
       await waitFor(() => expect(saveCalls()).toHaveLength(1));
       expect(saveCalls()[0][1]).toMatchObject({ p_quote_payload: expect.objectContaining({ tier: 2 }) });
@@ -3695,7 +3718,7 @@ describe('QuoteBuilder', () => {
       const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
       await waitFor(() => expect(price).toBeEnabled());
       expect(price).toHaveValue(9);
-      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Switch to Tier 1' }));
       expect(price).toHaveValue(10);
       expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
       save();
@@ -3717,12 +3740,12 @@ describe('QuoteBuilder', () => {
     it('a tick for the old assigned tier does not carry over when the assigned tier changes', async () => {
       renderDraftAtTier(2);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
-      fireEvent.click(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Keep Tier 2' }));
       mockReadAssignedTier.mockResolvedValueOnce(3);
       save();
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 3.')));
       expect(saveCalls()).toHaveLength(0);
-      expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Keep Tier 2' })).not.toBeChecked();
     });
 
     it('abandons a save whose tier changed while the assigned tier was being read (Luna, #1605)', async () => {
@@ -3759,13 +3782,13 @@ describe('QuoteBuilder', () => {
           <Routes><Route path="/quotes/:id/edit" element={<QuoteBuilder />} /></Routes>
         </MemoryRouter>,
       );
-      fireEvent.click(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
-      expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).toBeChecked();
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Keep Tier 2' }));
+      expect(screen.getByRole('checkbox', { name: 'Keep Tier 2' })).toBeChecked();
       fireEvent.click(screen.getByRole('link', { name: 'To B' }));
       await screen.findByDisplayValue('Quote B header');
       fireEvent.click(screen.getByRole('link', { name: 'To A' }));
       await waitFor(() => expect(screen.queryByDisplayValue('Quote B header')).not.toBeInTheDocument());
-      expect(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
+      expect(await screen.findByRole('checkbox', { name: 'Keep Tier 2' })).not.toBeChecked();
     });
 
     it('refuses Save when the assigned tier cannot be read', async () => {
@@ -4095,7 +4118,7 @@ describe('QuoteBuilder', () => {
 
     // An edit made now would not be in the order, and the page leaves for it afterwards.
     expect(screen.getByDisplayValue(quote.header_notes)).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: /Planned Program/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /^Planned program/ })).toBeDisabled();
     releaseConvert();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/orders/order-2'));
@@ -5118,6 +5141,110 @@ describe('QuoteBuilder', () => {
       },
     );
   });
+
+  describe('notices, summary strip and details (Quotes UI redesign)', () => {
+    function serve(status: 'draft' | 'sent', settlement: Record<string, unknown> | null = null, quoteOverrides: Record<string, unknown> = {}) {
+      const fixture = makeQuoteFixture(status, 7);
+      const quote = { ...fixture.quote, ...quoteOverrides };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [fixture.item]
+              : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER]
+                : table === 'products' ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_booking_settlement'
+        ? { data: settlement, error: null }
+        : { data: null, error: null }));
+      renderQuoteBuilder(quote.id);
+      return quote;
+    }
+    const summary = () => screen.getByRole('region', { name: 'Summary' });
+    // Each figure is a label with its value right after it.
+    const figure = (label: string) => within(summary()).queryByText(label)?.nextElementSibling?.textContent ?? null;
+
+    it('summary shows total, cost, profit and margin for admin', async () => {
+      serve('draft');
+      // The fixture line: 2 gal at $10.00 (cost $6.00), so $20.00, cost $12.00, profit $8.00, 40.0%.
+      await waitFor(() => expect(figure('Quote total')).toBe('$20.00'));
+      expect(figure('Total cost')).toBe('$12.00');
+      expect(figure('Profit · margin')).toBe('$8.00 · 40.0%');
+    });
+
+    it('summary hides cost, profit and margin for a sales rep and in Customer view', async () => {
+      authState.role = 'sales_rep';
+      serve('draft');
+      await waitFor(() => expect(figure('Quote total')).toBe('$20.00'));
+      expect(within(summary()).queryByText('Total cost')).not.toBeInTheDocument();
+      expect(within(summary()).queryByText('Profit · margin')).not.toBeInTheDocument();
+      expect(summary().textContent).not.toMatch(/\$12\.00|\$8\.00|40\.0%/);
+      cleanup();
+
+      authState.role = 'admin';
+      serve('draft');
+      await waitFor(() => expect(figure('Total cost')).toBe('$12.00'));
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
+      expect(figure('Quote total')).toBe('$20.00');
+      expect(within(summary()).queryByText('Total cost')).not.toBeInTheDocument();
+      expect(within(summary()).queryByText('Profit · margin')).not.toBeInTheDocument();
+      expect(summary().textContent).not.toMatch(/\$12\.00|\$8\.00|40\.0%/);
+    });
+
+    it('booking figures show only when the settlement shows today', async () => {
+      const settlement = { found: true, booked_cents: 10000, drawn_cents: 2500, remaining_cents: 7500, prepay_remaining_cents: 0, prepay_earmarked_cents: 0, prepay_applied_cents: 0, lines: [] };
+      serve('sent', settlement);
+      await waitFor(() => expect(figure('Booked')).toBe('$100.00'));
+      expect(figure('Drawn')).toBe('$25.00');
+      expect(figure('Left to draw')).toBe('$75.00');
+      expect(within(summary()).getByRole('progressbar', { name: 'Drawn of booked' })).toHaveAttribute('aria-valuenow', '25');
+      cleanup();
+
+      // Not found: no booking figures, as the settlement card is hidden today.
+      serve('sent', { found: false });
+      await waitFor(() => expect(figure('Quote total')).toBe('$20.00'));
+      expect(within(summary()).queryByText('Booked')).not.toBeInTheDocument();
+      cleanup();
+
+      // A draft cannot be drawn from, so the settlement never shows.
+      serve('draft', settlement);
+      await waitFor(() => expect(figure('Quote total')).toBe('$20.00'));
+      expect(within(summary()).queryByText('Booked')).not.toBeInTheDocument();
+      expect(within(summary()).queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+
+    it('tier mismatch appears in the tier helper line with Switch to Tier N and Keep Tier M', async () => {
+      serve('draft', null, { tier: 2 });
+      const field = await screen.findByTestId('tier-field');
+      expect(await within(field).findByText('This customer is assigned Tier 1; this quote uses Tier 2.')).toBeInTheDocument();
+      const keep = within(field).getByRole('checkbox', { name: 'Keep Tier 2' });
+      fireEvent.click(keep);
+      expect(keep).toBeChecked();
+      fireEvent.click(within(field).getByRole('button', { name: 'Switch to Tier 1' }));
+      await waitFor(() => expect(within(field).queryByText(/this quote uses Tier/)).not.toBeInTheDocument());
+      expect(within(field).getByRole('button', { name: /Pricing tier/ })).toHaveTextContent('Tier 1');
+    });
+
+    it('Planned program switch keeps its disabled rules', async () => {
+      serve('draft');
+      const draftSwitch = await screen.findByRole('switch', { name: /^Planned program/ });
+      await waitFor(() => expect(draftSwitch).toBeEnabled());
+      // Moved off the header: only the Planned chip shows there.
+      expect(within(screen.getByTestId('quote-header')).queryByRole('switch')).not.toBeInTheDocument();
+      fireEvent.click(draftSwitch);
+      expect(draftSwitch).toBeChecked();
+      expect(within(screen.getByTestId('quote-header')).getByText('Planned')).toBeInTheDocument();
+      cleanup();
+
+      // A sent quote cannot be edited until it is revised (!canEdit && isEditing).
+      serve('sent');
+      const sentSwitch = await screen.findByRole('switch', { name: /^Planned program/ });
+      await screen.findByRole('button', { name: 'Revise quote' });
+      expect(sentSwitch).toBeDisabled();
+    });
+  });
 });
 
 // To-Do 10.5: a saved quote whose reads fail says so; it never shows an empty quote
@@ -5201,7 +5328,8 @@ describe('QuoteBuilder load failures', () => {
       ? { data: { found: true, booked_cents: 12345, drawn_cents: 0, remaining_cents: 12345, prepay_remaining_cents: 0, prepay_earmarked_cents: 0, prepay_applied_cents: 0, lines: [] }, error: null }
       : { data: null, error: null }));
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
-    expect(await screen.findByText('Booked')).toBeInTheDocument();
+    // "Booked" now shows in the settlement card and in the summary strip.
+    expect(await screen.findAllByText('Booked')).toHaveLength(2);
     expect(screen.queryByText('The booking settlement could not be loaded')).not.toBeInTheDocument();
   });
 });

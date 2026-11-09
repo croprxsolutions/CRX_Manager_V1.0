@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
@@ -25,6 +25,7 @@ import {
   Undo2,
   ArrowLeft,
   Clock,
+  Lock,
 } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
@@ -93,6 +94,9 @@ import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow
 import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine, type QuotePriceChange } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
+import Dropdown from '../components/ui/Dropdown';
+import DatePicker from '../components/ui/DatePicker';
+import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
 import { useIsPhone } from '../hooks/useIsPhone';
@@ -2769,8 +2773,7 @@ export default function QuoteBuilder() {
   };
 
   // Create from template handler
-  const handleSelectTemplate = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const templateId = e.target.value;
+  const handleSelectTemplate = async (templateId: string) => {
     if (!templateId || !customerId || !profile) return;
     // One key per customer until a quote is confirmed: this RPC checks only the key, so an edited retry after a
     // lost reply must replay the quote it already created rather than create a second one.
@@ -4300,20 +4303,6 @@ export default function QuoteBuilder() {
       Unsaved changes
     </span>
   );
-  // Task 11 moves this into the Details card as a Switch.
-  const plannedToggle = (
-    <label className="inline-flex min-h-11 md:min-h-0 items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={isPlanned}
-        onChange={(e) => setIsPlanned(e.target.checked)}
-        className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
-        disabled={formLocked || (!canEdit && isEditing)}
-      />
-      <span className="font-medium">Planned Program</span>
-      <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="ml-1" />
-    </label>
-  );
   // A new quote's number, held until its first save.
   const pendingNumber = !isEditing && quoteNumber && <span className="text-secondary tabular-nums">{quoteNumber}</span>;
   const retryNumber = !isEditing && !quoteNumber && !quoteNumberLoading && (
@@ -4327,6 +4316,44 @@ export default function QuoteBuilder() {
     `Expires ${parseLocalDate(chosenExpiryDate ?? seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
   ].filter(Boolean).join(' · ');
   const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
+  // Summary strip: the totals memo and the booking settlement, as the Totals and Settlement cards show them.
+  const settlement = isEditing && canDraw && bookingSettlement?.found ? bookingSettlement : null;
+  const bookedCents = settlement?.booked_cents ?? 0;
+  const drawnPct = bookedCents > 0 ? Math.min(100, Math.max(0, Math.round(((settlement?.drawn_cents ?? 0) / bookedCents) * 100))) : 0;
+  const summaryFigures: { label: string; value: ReactNode }[] = [{ label: 'Quote total', value: fmt(totals.totalPrice) }];
+  if (!hideCost) {
+    summaryFigures.push(
+      { label: 'Total cost', value: fmt(totals.totalCost) },
+      { label: 'Profit · margin', value: <>{fmt(totals.totalProfit)} <span className="text-[15px] font-medium text-secondary">· {totals.totalMarginPct.toFixed(1)}%</span></> },
+    );
+  }
+  if (settlement) {
+    summaryFigures.push(
+      { label: 'Booked', value: formatCents(settlement.booked_cents ?? 0) },
+      { label: 'Drawn', value: formatCents(settlement.drawn_cents ?? 0) },
+      { label: 'Left to draw', value: formatCents(settlement.remaining_cents ?? 0) },
+    );
+  }
+  const drawnBar = settlement && (
+    <div role="progressbar" aria-label="Drawn of booked" aria-valuemin={0} aria-valuemax={100} aria-valuenow={drawnPct} className="h-1.5 rounded-full bg-cream-dark">
+      <div className="h-1.5 rounded-full bg-crx-green" style={{ width: `${drawnPct}%` }} />
+    </div>
+  );
+  // Desktop: one row of cells split by 1px rules. Phone: a stacked card.
+  const summaryStrip = (
+    <section aria-label="Summary" className={isPhone ? 'rounded-xl border border-gray-200 bg-white p-3.5' : 'overflow-hidden rounded-xl border border-gray-200 bg-gray-200'}>
+      <dl className={isPhone ? 'flex flex-col gap-2' : 'flex flex-wrap gap-px'}>
+        {summaryFigures.map((f, i) => (
+          <div key={f.label} className={isPhone ? 'flex items-baseline justify-between gap-3' : 'flex flex-[1_1_10rem] flex-col gap-0.5 bg-white px-4 py-3.5'}>
+            <dt className={`text-secondary ${isPhone && i > 0 ? 'text-sm' : 'text-[13px]'}`}>{f.label}</dt>
+            <dd className={`tabular-nums text-nav-dark ${isPhone && i > 0 ? 'text-sm font-medium' : 'text-[22px] font-semibold leading-tight'}`}>{f.value}</dd>
+            {!isPhone && f.label === 'Left to draw' && <div className="mt-1.5">{drawnBar}</div>}
+          </div>
+        ))}
+      </dl>
+      {isPhone && drawnBar && <div className="mt-2.5">{drawnBar}</div>}
+    </section>
+  );
   const hasBottomBar = isPhone && (showSaveDraft || !!greenAction);
   // The shared component carries its own mb-4; the wrapper drops it inside the header.
   const thread = isEditing && threadOrders.length > 0 && (
@@ -4371,7 +4398,6 @@ export default function QuoteBuilder() {
               {retryNumber}
             </div>
             {selectedCustomer?.farm_name && <span className="text-base font-semibold text-nav-dark break-words">{selectedCustomer.farm_name}</span>}
-            {plannedToggle}
           </div>
           {thread}
         </>
@@ -4395,10 +4421,7 @@ export default function QuoteBuilder() {
                 {plannedChip}
                 {unsavedNote}
               </div>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <p className="text-secondary">{subline}</p>
-                {plannedToggle}
-              </div>
+              <p className="text-secondary">{subline}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {showRevise && (
@@ -4421,49 +4444,38 @@ export default function QuoteBuilder() {
         </div>
       )}
 
+      {summaryStrip}
+
       {/* Covers a stale warning left active when the convert-confirm modal closes; draw-down no longer raises it. */}
       {!confirmConvertOpen && (
         <GuardrailBanner warning={staleWarning} onDismiss={dismissStaleWarning} />
       )}
 
       {isEditing && !canEdit && currentStatus !== 'sent' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm">
-          This quote is in <strong>{currentStatus}</strong> status and cannot be edited.
-        </div>
+        <Notice tone="warn" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span>This quote is in <strong>{quoteStatusLabel(currentStatus)}</strong> status and cannot be edited.</span>
+        </Notice>
       )}
 
       {isEditing && currentStatus === 'sent' && !canEdit && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm flex items-center justify-between">
-          <span>This quote has been sent. Click <strong>Revise Quote</strong> to make changes, then re-send.</span>
-        </div>
+        <Notice tone="info" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span>This quote has been sent. Click <strong>Revise quote</strong> to make changes, then re-send.</span>
+        </Notice>
       )}
 
       {isEditing && currentStatus === 'revised' && priceLocked && (lastSentVersion || unsentChange === 'unreadable') && (
-        <div
+        <Notice
           role="status"
-          className={`rounded-lg border p-3 text-sm flex flex-wrap items-center justify-between gap-2 ${
-            unsentChange ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}
-        >
-          <span>
-            {unsentChange === 'unreadable' || !lastSentVersion
-              ? 'The version last sent to the customer cannot be shown here. '
-              : unsentChange === 'customer'
-                ? `The customer changed after V${lastSentVersion.version_number} was sent. `
-                : unsentChange === 'prices'
-                  ? `Prices or lines changed after V${lastSentVersion.version_number} was sent. `
-                  : `Prices stay as sent in V${lastSentVersion.version_number} unless you change them. `}
-            {unsentChange
-              ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
-              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
-          </span>
-          <span className="flex flex-wrap gap-2">
+          tone={unsentChange ? 'warn' : 'info'}
+          icon={unsentChange ? <AlertTriangle className="h-4.5 w-4.5" aria-hidden="true" /> : <Lock className="h-4.5 w-4.5" aria-hidden="true" />}
+          actions={<>
             <Button
               variant="secondary"
               size="sm"
               showChevron={false}
               onClick={applyTodaysPricesToAllLines}
               disabled={!canEdit || formLocked}
+              className={tall}
             >
               Use today&apos;s prices
             </Button>
@@ -4475,19 +4487,34 @@ export default function QuoteBuilder() {
                 icon={<RotateCcw className="w-3.5 h-3.5" />}
                 onClick={() => setConfirmRewindOpen(true)}
                 disabled={formLocked}
+                className={tall}
               >
-                Rewind to V{lastSentVersion.version_number}
+                Rewind to version {lastSentVersion.version_number}
               </Button>
             )}
+          </>}
+        >
+          <span>
+            {unsentChange === 'unreadable' || !lastSentVersion
+              ? 'The version last sent to the customer cannot be shown here.'
+              : unsentChange === 'customer'
+                ? `The customer changed after version ${lastSentVersion.version_number} was sent.`
+                : unsentChange === 'prices'
+                  ? `Prices or lines changed after version ${lastSentVersion.version_number} was sent.`
+                  : `Prices stay as sent in version ${lastSentVersion.version_number} unless you change them.`}
           </span>
-        </div>
+          <HelpTip
+            text={unsentChange
+              ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
+              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
+          />
+        </Notice>
       )}
 
       {customerView && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-crx-green/20 rounded-lg text-sm text-crx-green font-medium">
-          <EyeOff className="w-4 h-4" />
-          Customer View — cost, profit, and margin columns hidden
-        </div>
+        <Notice tone="brand" icon={<EyeOff className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span className="font-medium">Customer view: cost, profit, and margin columns hidden</span>
+        </Notice>
       )}
 
       {/* Booking settlement (roadmap #6c): open-booking position. Read-only. */}
@@ -4849,28 +4876,24 @@ export default function QuoteBuilder() {
 
       <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
       {!id && quoteTemplates.length > 0 && (
-        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-          <label className="text-sm font-medium">Start from Template:</label>
-          <select
+        <div className="max-w-sm">
+          <Dropdown
+            label="Start from a template"
+            value={null}
+            placeholder="Blank quote"
             onChange={handleSelectTemplate}
-            defaultValue=""
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
-          >
-            <option value="">Blank Quote</option>
-            {quoteTemplates.map((t) => (
-              <option key={t.id} value={t.id}>{t.template_name}</option>
-            ))}
-          </select>
-          {!customerId && (
-            <span className="text-xs text-secondary">Select a customer first to use a template</span>
-          )}
+            options={quoteTemplates.map((t) => ({ value: t.id, label: t.template_name }))}
+            helper={!customerId && 'Select a customer first to use a template'}
+            disabled={formLocked}
+          />
         </div>
       )}
 
+      {/* RAC controls ignore the disabled fieldset, so each one also takes formLocked. */}
       <Card>
-        <CardHeader title="Quote" accent="Details" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
+        <h2 className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
+        <div className="grid grid-cols-1 gap-x-5 gap-y-1 md:grid-cols-2 lg:grid-cols-4">
+          <div className="md:col-span-2">
             <label htmlFor="quote-customer" className="block text-sm font-medium text-secondary mb-1">
               Customer
             </label>
@@ -4884,106 +4907,117 @@ export default function QuoteBuilder() {
               placeholder="Select a customer..."
               ariaLabel="Customer"
             />
-            {customerLoadError && (
-              <p role="alert" className="mt-1 text-sm text-red-600">{customerLoadError}</p>
-            )}
-            {fieldLoadError && unresolvedFieldIds.length > 0 && (
-              <p role="alert" className="mt-1 text-sm text-red-600">{fieldLoadError}</p>
-            )}
-            {productsLoadFailed && (
-              <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
-            )}
-            {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
+            <div className="min-h-5">
+              {customerLoadError && (
+                <p role="alert" className="mt-1 text-sm text-red-600">{customerLoadError}</p>
+              )}
+              {fieldLoadError && unresolvedFieldIds.length > 0 && (
+                <p role="alert" className="mt-1 text-sm text-red-600">{fieldLoadError}</p>
+              )}
+              {productsLoadFailed && (
+                <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
+              )}
+              {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">
-              Pricing Tier
-            </label>
-            <select
-              value={tier}
-              onChange={(e) => applyTier(parseInt(e.target.value))}
-              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            >
-              <option value={1}>Tier 1</option>
-              <option value={2}>Tier 2</option>
-              <option value={3}>Tier 3</option>
-            </select>
+          <div data-testid="tier-field">
+            <Dropdown
+              label="Pricing tier"
+              value={String(tier)}
+              onChange={(v) => applyTier(parseInt(v))}
+              options={[1, 2, 3].map((n) => ({ value: String(n), label: `Tier ${n}` }))}
+              disabled={formLocked}
+            />
+            {/* The note takes the Dropdown's empty helper line (mt-1 + min-h-5). */}
             {!customerView && tierMismatch && (
-              <TierMismatchNote
-                tier={tier}
-                assignedTier={assignedTier}
-                acknowledged={tierChosen}
-                onUseAssigned={() => applyTier(assignedTier, true)}
-                onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
-              />
+              <div className="-mt-5">
+                <TierMismatchNote
+                  tier={tier}
+                  assignedTier={assignedTier}
+                  acknowledged={tierChosen}
+                  onUseAssigned={() => applyTier(assignedTier, true)}
+                  onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
+                />
+              </div>
             )}
           </div>
-          <div>
-            <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">
-              Expires
-            </label>
-            <select
-              id="quote-expires"
+          <div className="flex flex-col">
+            <Dropdown
+              label="Expires"
               value={chosenExpiryDate ? 'date' : 'season'}
-              onChange={(e) => {
-                const pickDate = e.target.value === 'date';
+              onChange={(v) => {
+                const pickDate = v === 'date';
                 pickedBeforeValidDaysRef.current = pickDate && !validDaysLoadedRef.current;
                 setChosenExpiryDate(pickDate ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null);
               }}
-              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            >
-              <option value="season">
-                {parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)
-              </option>
-              <option value="date">Pick a date</option>
-            </select>
+              options={[
+                { value: 'season', label: `${parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)` },
+                { value: 'date', label: 'Pick a date' },
+              ]}
+              helper={!chosenExpiryDate && status !== 'draft' && 'A change applies when the quote is sent again.'}
+              disabled={formLocked}
+            />
             {chosenExpiryDate && (
-              <input
-                type="date"
+              <DatePicker
                 aria-label="Expiry date"
                 value={chosenExpiryDate}
-                min={todayInBusinessTz()}
-                onChange={(e) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(e.target.value || seasonEnd); }}
-                className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                minValue={todayInBusinessTz()}
+                onChange={(v) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(v || seasonEnd); }}
+                helper={status !== 'draft' && 'A change applies when the quote is sent again.'}
+                disabled={formLocked}
               />
             )}
-            {status !== 'draft' && (
-              <p className="mt-1 text-xs text-secondary">A change applies when the quote is sent again.</p>
-            )}
-          </div>
-          <div className="sm:col-span-2 lg:col-span-4">
-            <CommissionSplitEditor
-              value={commissionSplit}
-              onChange={(val) => {
-                commissionSplitTouchedRef.current = true;
-                setCommissionSplit(val);
-              }}
-            />
           </div>
         </div>
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-secondary mb-1">
-            Header Notes
-          </label>
-          <textarea
-            value={headerNotes}
-            onChange={(e) => setHeaderNotes(e.target.value)}
-            rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            placeholder="Notes visible at the top of the quote..."
+        <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
+          <CommissionSplitEditor
+            label="Commission split"
+            value={commissionSplit}
+            onChange={(val) => {
+              commissionSplitTouchedRef.current = true;
+              setCommissionSplit(val);
+            }}
+            disabled={formLocked}
           />
+          <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
+            <Switch
+              label="Planned program"
+              description="Holds product for a grower who hasn't committed yet."
+              isSelected={isPlanned}
+              onChange={setIsPlanned}
+              isDisabled={formLocked || (!canEdit && isEditing)}
+            />
+            <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="mt-2" />
+          </div>
+          <label className="flex flex-col gap-1 text-sm font-medium text-secondary">
+            Note at the top of the quote
+            <textarea
+              value={headerNotes}
+              onChange={(e) => setHeaderNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-normal text-nav-dark border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              placeholder="Notes visible at the top of the quote..."
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-secondary">
+            Note at the bottom of the quote
+            <textarea
+              value={footerNotes}
+              onChange={(e) => setFooterNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-normal text-nav-dark border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              placeholder="Notes visible at the bottom of the quote (terms, disclaimers, etc.)..."
+            />
+          </label>
         </div>
       </Card>
 
       {rupWarnings.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-sm text-amber-800">
-              {rupWarnings.map((w, i) => <p key={i}>{w}</p>)}
-            </div>
+        <Notice tone="warn" icon={<AlertTriangle className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <div className="flex flex-col gap-1">
+            {rupWarnings.map((w, i) => <p key={i}>{w}</p>)}
           </div>
-        </div>
+        </Notice>
       )}
 
       {sections.map((sec) => {
@@ -5524,20 +5558,6 @@ export default function QuoteBuilder() {
         </Button>
       </div>
 
-      <Card>
-        <div>
-          <label className="block text-sm font-medium text-secondary mb-1">
-            Footer Notes
-          </label>
-          <textarea
-            value={footerNotes}
-            onChange={(e) => setFooterNotes(e.target.value)}
-            rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            placeholder="Notes visible at the bottom of the quote (terms, disclaimers, etc.)..."
-          />
-        </div>
-      </Card>
       </fieldset>
 
       {/* To-Do 0.3: what this customer was charged before. Staff only; never in Customer View. */}
@@ -5552,50 +5572,6 @@ export default function QuoteBuilder() {
           })))}
         />
       )}
-
-      <Card>
-        <CardHeader title="Quote" accent="Totals" />
-        <div className={`grid grid-cols-2 ${hideCost ? 'sm:grid-cols-1' : 'sm:grid-cols-4'} gap-4`}>
-          <div>
-            <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-              Total Price
-            </p>
-            <p className="text-xl font-semibold font-heading text-nav-dark font-mono">
-              {fmt(totals.totalPrice)}
-            </p>
-          </div>
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Total Cost
-              </p>
-              <p className="text-xl font-semibold font-heading text-secondary font-mono">
-                {fmt(totals.totalCost)}
-              </p>
-            </div>
-          )}
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Total Profit
-              </p>
-              <p className="text-xl font-semibold font-heading text-emerald-600 font-mono">
-                {fmt(totals.totalProfit)}
-              </p>
-            </div>
-          )}
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Overall Margin
-              </p>
-              <p className="text-xl font-semibold font-heading text-crx-green font-mono">
-                {totals.totalMarginPct.toFixed(1)}%
-              </p>
-            </div>
-          )}
-        </div>
-      </Card>
 
       <Modal
         open={productSearchOpen !== null}
@@ -6156,6 +6132,31 @@ export default function QuoteBuilder() {
           {greenAction && <div className="flex flex-[1.4] [&>*]:w-full">{greenAction}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+const NOTICE_TONES = {
+  info: 'bg-blue-50 border-blue-100 text-blue-900',
+  warn: 'bg-amber-50 border-amber-200 text-amber-800',
+  brand: 'bg-crx-green-tint border-crx-green/20 text-crx-green',
+} as const;
+
+/** One-line page notice: icon, text (long help behind a HelpTip in the text), then its actions. */
+function Notice({ tone, icon, actions, role, children }: {
+  tone: keyof typeof NOTICE_TONES;
+  icon: ReactNode;
+  actions?: ReactNode;
+  role?: 'status';
+  children: ReactNode;
+}) {
+  return (
+    <div role={role} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 text-sm ${NOTICE_TONES[tone]}`}>
+      <div className="flex min-w-0 flex-[1_1_20rem] items-start gap-2">
+        <span className="mt-0.5 shrink-0">{icon}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1">{children}</div>
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

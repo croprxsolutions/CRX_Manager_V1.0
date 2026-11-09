@@ -174,7 +174,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     expect(screen.getByPlaceholderText(/Notes visible at the top of the quote/)).toBeDisabled();
     expect(screen.getByLabelText('Units needed')).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Customer' })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: /Planned Program/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /^Planned program/ })).toBeDisabled();
     releaseSave();
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
         : { data: null, error: null }));
     const router = renderNewQuote();
     await fillInNewQuote();
-    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /^Planned program/ }));
 
     fireEvent.click(screen.getByText('Save draft'));
 
@@ -209,7 +209,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'generate_quote_number')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /^Planned program/ }));
     fireEvent.click(screen.getByText('Quotes list'));
 
     expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();

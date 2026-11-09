@@ -25,8 +25,11 @@
 --
 -- idempotency-body-check: exempt -- close_delivery_receipt requires p_idempotency_key and checks it with
 --   check_idempotency_intent (bound to the caller and request: delivery and reason), after authorizing the caller;
---   it saves its answer with save_idempotency and binds it with _bind_replay_receipt_20261015 in the same
---   transaction. A refused call (DELIVERY_RECEIPT_SENDING) rolls back and saves nothing.
+--   it saves its first answer with save_idempotency and binds it with _bind_replay_receipt_20261015 in the same
+--   transaction. A retry with a used key is refused unless it is the same caller and request, and then re-checks the
+--   receipt as it is now instead of returning the saved answer (both transitions are safe to repeat), so a stale
+--   answer can never stand for a receipt that changed since (Sol HIGH, PR #1678). A refused call
+--   (DELIVERY_RECEIPT_SENDING) rolls back and saves nothing.
 --
 -- actor-binding-check: exempt -- the actor is auth.uid() only; there is no p_performed_by parameter.
 --
@@ -111,13 +114,12 @@ BEGIN
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'delivery_id', p_delivery_id, 'reason', p_reason));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'close_delivery_receipt', v_actor, v_fingerprint);
-  -- A replay returns the first answer even if the row moved since. 'paused' is a go-ahead, not an exclusive permission:
-  -- two office users pressing Email Confirmation at once may both send, and a void after the go-ahead does not stop the
-  -- hand send; another office user may mark it handled while a hand send is still going (the sender sees a failure
-  -- and can press again). Mason accepted all three on 2026-11-09 (DECISION_LOG.md, "Email Confirmation stays a hand send").
-  IF v_replay IS NOT NULL THEN
-    RETURN v_replay -> 'result';
-  END IF;
+  -- A matching retry (v_replay found) is not answered from the saved result: it re-checks the receipt below, so a row
+  -- that changed since (closed by someone else, or re-queued by a second completion) gets its current answer. Closing
+  -- and pausing are both safe to repeat. 'paused' is a go-ahead, not an exclusive permission: two office users
+  -- pressing Email Confirmation at once may both send, a void after the go-ahead does not stop the hand send, and
+  -- another office user may mark it handled while a hand send is still going (the sender sees a failure and can press
+  -- again). Mason accepted all three on 2026-11-09 (DECISION_LOG.md, "Email Confirmation stays a hand send").
 
   -- Same lock confirm_delivery_receipt_send takes first, so the two never interleave: whichever commits first wins.
   SELECT * INTO v_row FROM public.delivery_receipt_queue q WHERE q.delivery_id = p_delivery_id FOR UPDATE;
@@ -150,8 +152,10 @@ BEGIN
   v_result := jsonb_build_object('delivery_id', p_delivery_id, 'outcome', v_outcome, 'previous_status', v_row.status,
                                  'sent_at', v_row.sent_at, 'send_authorized_at', v_row.send_authorized_at);
 
-  PERFORM public.save_idempotency(p_idempotency_key, 'close_delivery_receipt', v_result);
-  PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'close_delivery_receipt', v_fingerprint);
+  IF v_replay IS NULL THEN  -- first use of the key: save and bind its answer (a retry's key is already bound)
+    PERFORM public.save_idempotency(p_idempotency_key, 'close_delivery_receipt', v_result);
+    PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'close_delivery_receipt', v_fingerprint);
+  END IF;
   RETURN v_result;
 END;
 $function$;

@@ -4,7 +4,7 @@
 -- Live-safe, rolled back by design. Plants no rows: it calls the RPC as a real active admin on a delivery id that
 -- does not exist, and (when one exists) on a real receipt the server already sent, then rolls everything back.
 --   1. no signed-in user -> AUTH_REQUIRED; no key -> IDEMPOTENCY_KEY_REQUIRED; bad reason -> RECEIPT_CLOSE_INVALID
---   2. admin, unknown delivery, 'handled' -> outcome none; same key replays the same answer; 'manual_send' on a
+--   2. admin, unknown delivery, 'handled' -> outcome none; a retry with the same key gives the same (current) answer; 'manual_send' on a
 --      delivery that is not completed -> DELIVERY_NOT_COMPLETED (checked before any replay)
 --   3. an active driver -> INSUFFICIENT_ROLE (office only)
 --   4. admin, a real sent receipt of a completed delivery, 'manual_send' -> outcome sent with sent_at, row unchanged,

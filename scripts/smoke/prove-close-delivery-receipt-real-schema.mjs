@@ -407,8 +407,9 @@ async function main() {
   assert.match(row(1, "status || '|' || last_error"), /^needs_check\|Email Confirmation started by \[PROVER\] admin 0; the server will not send it/);
   assert.equal(listed(1), '1');
   due(1); assert.equal(claim().filter((c) => c.delivery_id === D(1)).length, 0);
-  // A retry with the same key returns the first answer; the key is bound to its caller and request.
-  assert.deepEqual(closed(ADMIN, 1, 'manual_send', 'k-1'), r1);
+  // A retry with the same key re-checks the receipt as it is now (here: already paused); the key is bound to its
+  // caller and request.
+  assert.deepEqual(closed(ADMIN, 1, 'manual_send', 'k-1'), answer(1, 'paused', 'needs_check'));
   refused(close(ADMIN, 1, 'handled', 'k-1'), /IDEMPOTENCY_INTENT_MISMATCH/);
   refused(close(REP, 1, 'manual_send', 'k-1'), /IDEMPOTENCY_ACTOR_MISMATCH/);
   assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE operation = 'close_delivery_receipt' AND request_actor_id IS NULL;"), '0');
@@ -417,7 +418,14 @@ async function main() {
   assert.equal(row(1, "status || '|' || last_error"), 'cancelled|Marked handled by [PROVER] admin 0; the server will not send it.');
   // Already closed: nothing to do.
   assert.deepEqual(closed(REP, 1, 'handled', 'k-1b'), { delivery_id: D(1), outcome: 'none', previous_status: 'cancelled', sent_at: null, send_authorized_at: null });
-  console.log('[prover] Email Confirmation pauses a pending receipt on the list; handled then closes it; keys replay and are bound');
+  // A late retry of the first Email Confirmation key no longer gets its old go-ahead: the receipt is closed now (Sol HIGH, #1678).
+  assert.equal(closed(ADMIN, 1, 'manual_send', 'k-1').outcome, 'none');
+  // The receipt is queued again (as a second completion would): a late retry of the old 'handled' key closes the new one.
+  psql(`SET session_replication_role = replica; UPDATE public.delivery_receipt_queue SET status = 'pending', last_error = NULL WHERE delivery_id = '${D(1)}';`);
+  assert.deepEqual(closed(ADMIN, 1, 'handled', 'k-1h'), answer(1, 'closed', 'pending'));
+  assert.equal(row(1, 'status'), 'cancelled');
+  assert.equal(scalar("SELECT count(*) FROM public.idempotency_keys WHERE idempotency_key IN ('k-1', 'k-1h');"), '2');
+  console.log('[prover] Email Confirmation pauses a pending receipt on the list; handled then closes it; keys are bound and a retry re-checks the receipt');
 
   // A needs_check receipt (no email on file) on the office list, marked handled by a sales rep: it leaves the list.
   assert.equal(listed(2), '1');

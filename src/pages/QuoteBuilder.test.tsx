@@ -202,7 +202,13 @@ vi.mock('../lib/db', async () => {
 const authState = vi.hoisted(() => ({ role: 'admin' }));
 
 // The credit line (To-Do 1.8) has its own tests; its RPC would consume these tests' save_quote answers.
-vi.mock('../components/quotes/QuoteCustomerChecks', () => ({ QuoteCreditStatus: () => null }));
+// The saved tier re-read (KI-105) answers Tier 1, like the fixtures' customers; a test overrides it.
+const mockReadAssignedTier = vi.hoisted(() => vi.fn(async (_customerId: string) => 1));
+vi.mock('../components/quotes/QuoteCustomerChecks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../components/quotes/QuoteCustomerChecks')>()),
+  QuoteCreditStatus: () => null,
+}));
+vi.mock('../lib/customerTier', () => ({ readAssignedTier: mockReadAssignedTier }));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({ profile: { id: 'user-1', role: authState.role, full_name: 'Test Admin' }, role: authState.role }),
@@ -274,6 +280,10 @@ vi.mock('../lib/sentry', () => ({
   Sentry: { captureMessage: mockSentryCaptureMessage, captureException: mockSentryCaptureException },
 }));
 
+vi.mock('../lib/productParents', () => {
+  const empty = { parents: [], byProduct: new Map(), index: new Map() };
+  return { useProductParents: () => empty, searchProductParents: async () => [] };
+});
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyLargeOrder: mockNotifyLargeOrder, notifyCreditLimitExceeded: vi.fn() }));
 vi.mock('../lib/metrics', () => ({ trackBusinessEvent: mockTrackBusinessEvent }));
@@ -2522,7 +2532,8 @@ describe('QuoteBuilder', () => {
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('Save Draft'));
-    await waitFor(() => expect(mockRpc).toHaveBeenLastCalledWith('save_quote', expect.objectContaining({
+    // The fresh key's save; a cost refresh may follow it.
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quote.id}-1`,
     })));
   });
@@ -3365,9 +3376,9 @@ describe('QuoteBuilder', () => {
 
   describe('sent-price lock (To-Do 1.2)', () => {
     // A revised quote whose V1 was sent at 10.00; the catalog tier 1 price is 12.00 today.
-    function configureLockedQuote() {
+    function configureLockedQuote(quoteTier = 1) {
       const fixture = makeQuoteFixture('sent', 7);
-      const quote = { ...fixture.quote, status: 'revised', created_at: new Date().toISOString() };
+      const quote = { ...fixture.quote, status: 'revised', created_at: new Date().toISOString(), tier: quoteTier };
       const product = { ...fixture.product, tier1_price: 12 };
       const item = { ...fixture.item, product };
       const sentVersion = {
@@ -3419,6 +3430,39 @@ describe('QuoteBuilder', () => {
     const savedLine = () => (mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
       p_sections: Array<{ items: Array<{ id: string | null; price_per_unit: number; price_override: number | null; use_todays_price: boolean }> }>;
     }).p_sections[0].items[0];
+
+    // KI-105 (Sol): "Use Tier N" must not change only the label while the lines keep another tier's price.
+    it('"Use Tier 1" on a sent Tier 2 quote moves its locked lines to the current Tier 1 price', async () => {
+      const { quote } = configureLockedQuote(2);
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      expect(price).toHaveValue(10);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+
+      expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
+      expect(price).toHaveValue(12);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 12, use_todays_price: true });
+    });
+
+    it('picking the sent tier again after "Use Tier 1" puts back the sent price (Sol, #1605)', async () => {
+      const { quote } = configureLockedQuote(2);
+      renderQuoteBuilder(quote.id);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      expect(price).toHaveValue(12);
+      fireEvent.change(screen.getByDisplayValue('Tier 1'), { target: { value: '2' } });
+
+      expect(price).toHaveValue(10);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      expect(savedLine()).toMatchObject({ id: 'item-1', price_per_unit: 10, use_todays_price: false });
+    });
 
     it('keeps the sent price through an edit after the catalog price rose', async () => {
       const { quote } = configureLockedQuote();
@@ -3597,6 +3641,131 @@ describe('QuoteBuilder', () => {
         expect.objectContaining({ p_quote_id: quote.id, p_version_id: 'version-1' }),
       ));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Restored from V1'));
+    });
+  });
+
+  // KI-105 (Mason, 2026-11-05): anyone may quote at a tier other than the customer's assigned one, but
+  // only on purpose: Save needs "Use Tier N" or the "Quote at Tier M anyway" tick. Screen only.
+  describe('tier check (KI-105)', () => {
+    function renderDraftAtTier(quoteTier: number) {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quote = { ...fixture.quote, tier: quoteTier };
+      const product = { ...fixture.product, tier2_price: 9 };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [{ ...fixture.item, product, price_per_unit: quoteTier === 2 ? 9 : 10 }]
+              : table === 'products' ? [product]
+                : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { quote_id: quote.id, row_version: 8 }, error: null }
+        : { data: null, error: null }));
+      renderQuoteBuilder(quote.id);
+    }
+    const save = () => fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
+    const saveCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
+
+    it('refuses Save at another tier until "Quote at Tier 2 anyway" is ticked', async () => {
+      renderDraftAtTier(2);
+      expect(await screen.findByText('This customer is assigned Tier 1; this quote uses Tier 2.')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      save();
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 1.')));
+      expect(saveCalls()).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      save();
+      await waitFor(() => expect(saveCalls()).toHaveLength(1));
+      expect(saveCalls()[0][1]).toMatchObject({ p_quote_payload: expect.objectContaining({ tier: 2 }) });
+    });
+
+    it('"Use Tier 1" switches the quote and its prices back, and Save needs nothing more', async () => {
+      renderDraftAtTier(2);
+      const price = await screen.findByRole('spinbutton', { name: 'Price per unit' });
+      await waitFor(() => expect(price).toBeEnabled());
+      expect(price).toHaveValue(9);
+      fireEvent.click(await screen.findByRole('button', { name: 'Use Tier 1' }));
+      expect(price).toHaveValue(10);
+      expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
+      save();
+      await waitFor(() => expect(saveCalls()).toHaveLength(1));
+      expect(saveCalls()[0][1]).toMatchObject({ p_quote_payload: expect.objectContaining({ tier: 1 }) });
+    });
+
+    it('checks the tier the customer has now, not the one loaded with the quote (Sol)', async () => {
+      renderDraftAtTier(1);
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
+      mockReadAssignedTier.mockResolvedValueOnce(2);
+      save();
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 2.')));
+      expect(saveCalls()).toHaveLength(0);
+      expect(await screen.findByText('This customer is assigned Tier 2; this quote uses Tier 1.')).toBeInTheDocument();
+    });
+
+    it('a tick for the old assigned tier does not carry over when the assigned tier changes', async () => {
+      renderDraftAtTier(2);
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      mockReadAssignedTier.mockResolvedValueOnce(3);
+      save();
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 3.')));
+      expect(saveCalls()).toHaveLength(0);
+      expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
+    });
+
+    it('abandons a save whose tier changed while the assigned tier was being read (Luna, #1605)', async () => {
+      renderDraftAtTier(1);
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      let answer: (tier: number) => void = () => {};
+      mockReadAssignedTier.mockImplementationOnce(() => new Promise<number>((resolve) => { answer = resolve; }));
+      save();
+      await waitFor(() => expect(mockReadAssignedTier).toHaveBeenCalled());
+      fireEvent.change(screen.getByDisplayValue('Tier 1'), { target: { value: '2' } });
+      answer(1);
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'The price tier or customer changed while saving. Save again.'));
+      expect(saveCalls()).toHaveLength(0);
+    });
+
+    it('a tick does not survive leaving the quote and coming back (Luna, #1605)', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quoteA = { ...fixture.quote, tier: 2 };
+      const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header' };
+      const reads = [quoteA, quoteA, quoteB, quoteB, quoteA]; // each load reads the quote twice
+      let quoteReads = 0;
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? reads[Math.min(quoteReads++, reads.length - 1)]
+          : table === 'quote_sections' ? [fixture.section]
+            : table === 'quote_items' ? [{ ...fixture.item, price_per_unit: 9 }]
+              : table === 'products' ? [{ ...fixture.product, tier2_price: 9 }]
+                : [],
+        error: null,
+      }));
+      render(
+        <MemoryRouter initialEntries={[`/quotes/${quoteA.id}/edit`]}>
+          <Link to={`/quotes/${quoteB.id}/edit`}>To B</Link>
+          <Link to={`/quotes/${quoteA.id}/edit`}>To A</Link>
+          <Routes><Route path="/quotes/:id/edit" element={<QuoteBuilder />} /></Routes>
+        </MemoryRouter>,
+      );
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' }));
+      expect(screen.getByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).toBeChecked();
+      fireEvent.click(screen.getByRole('link', { name: 'To B' }));
+      await screen.findByDisplayValue('Quote B header');
+      fireEvent.click(screen.getByRole('link', { name: 'To A' }));
+      await waitFor(() => expect(screen.queryByDisplayValue('Quote B header')).not.toBeInTheDocument());
+      expect(await screen.findByRole('checkbox', { name: 'Quote at Tier 2 anyway' })).not.toBeChecked();
+    });
+
+    it('refuses Save when the assigned tier cannot be read', async () => {
+      renderDraftAtTier(1);
+      await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      mockReadAssignedTier.mockRejectedValueOnce(new Error('network'));
+      save();
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', "The customer's price tier could not be checked. Try again in a moment."));
+      expect(saveCalls()).toHaveLength(0);
     });
   });
 

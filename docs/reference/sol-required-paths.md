@@ -21,7 +21,8 @@ answer "Sol required".
 ## Always
 
 **Money and inventory code:** any file under `src/` whose name carries a money word
-(`MONEY_PATH_WORDS` in `.claude/hooks/codex-bot-review-lib.mjs`, deliberately broad).
+(`MONEY_PATH_WORDS` in `.claude/hooks/codex-bot-review-lib.mjs`, deliberately broad). A test or spec (`__tests__/`, `*.test.*`,
+`*.spec.*`) is not money code by its name alone (Mason, 2026-11-07); a test under a listed path below still needs Sol.
 
 ## Paths
 

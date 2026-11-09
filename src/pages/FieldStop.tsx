@@ -22,6 +22,7 @@ import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
 import { billSplitCompletion } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
+import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed } from '../lib/deliverySplitBilling';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -501,6 +502,7 @@ export default function FieldStop() {
       } else toast('success', invoiceNum
         ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
+      if (billSplitFailed(result)) toast('warning', forThisStop(BILL_SPLIT_FAILED_MESSAGE));
 
       logActivity({
         event: 'delivery_completed',

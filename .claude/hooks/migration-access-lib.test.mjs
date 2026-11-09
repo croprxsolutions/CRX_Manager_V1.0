@@ -186,6 +186,15 @@ const VIEW_HISTORY = [file("20260101000000_view", `CREATE VIEW public.widget_tot
 REVOKE ALL ON public.widget_totals FROM anon;`)];
 routine(`CREATE OR REPLACE VIEW public.widget_totals AS SELECT 2 AS n;
 GRANT SELECT ON public.widget_totals TO authenticated;`, "replacing a view authenticated could already read", { history: VIEW_HISTORY });
+// 20261123130000 changed the defaults but revoked the same rights everywhere, so it is absorbed, not unknown.
+const TTM_FILE = file("20261123130000_revoke_truncate_trigger_maintain",
+  "REVOKE TRUNCATE, TRIGGER, MAINTAIN ON ALL TABLES IN SCHEMA public FROM authenticated, anon;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE TRUNCATE, TRIGGER, MAINTAIN ON TABLES FROM authenticated, anon;");
+routine(`CREATE OR REPLACE VIEW public.widget_totals AS SELECT 2 AS n;
+GRANT SELECT ON public.widget_totals TO authenticated;`, "the table-maintenance default change is absorbed, so older access stays known",
+  { history: [...VIEW_HISTORY, TTM_FILE] });
+masons(`CREATE OR REPLACE VIEW public.widget_totals AS SELECT 2 AS n;
+GRANT SELECT ON public.widget_totals TO authenticated;`, "cannot confirm", "the same default change under another file name stays unknown",
+  { history: [...VIEW_HISTORY, { ...TTM_FILE, name: "20261123000000_other_defaults.sql" }] });
 masons(`DROP VIEW public.widget_totals;
 CREATE VIEW public.widget_totals AS SELECT 2 AS n;`, "anon", "drop + create of a view hands anon SELECT back", { history: VIEW_HISTORY });
 masons(`DROP FUNCTION public.widget_source() CASCADE;

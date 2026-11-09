@@ -1,5 +1,5 @@
 -- Written 2026-11-06. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261125110000_chem_sale_bill_split_invoices.md.
+-- docs/reference/migrations.d/20261208110000_chem_sale_bill_split_invoices.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (billing plan M2, Mason 4 Nov: "splits work line by line"): the Bill Split card now bills. When
@@ -11,7 +11,8 @@
 --     the main customer has no share of a line, the largest share gets the rest. Shares under 100% leave
 --     the rest with the main customer. Another payer's quantity rounds down to whole hundredths, as a return
 --     holds it, so a payer can return a share in full. Each payer's cents are exactly its percentage rounded
---     down, so a share under 0.01 bills its cents on 0.00 quantity (Mason, 2026-11-06: money exact).
+--     down. A share under 0.01 of a unit that is worth cents refuses the split (BILL_SPLIT_QUANTITY_TOO_SMALL),
+--     so every billed quantity can be returned; the office adjusts the shares (Mason, 2026-11-06, option B).
 --   - Each payer's cost is the sum of its own lines, ROUND(cost_cents * quantity), as on every other
 --     invoice and in the month-end report (Mason, 2026-11-05, Option 1). Summed across payers it can top
 --     the line's cost by about a cent where a share splits a unit, and more where the unit cost itself has
@@ -29,15 +30,16 @@
 --     still can't). Its product lines (product, description, quantity, price, cents and cost) follow the
 --     split: changing them means voiding the group, so the cost the save recomputes stays the same.
 --   - The payers' drafts stand or fall together: delete_invoices refuses one member of a Bill Split group.
---   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED): every layer of the
---     save path needs a quantity. It posts as drafted, and a group void redrafts it.
+--   - A payer's draft holding a line on 0.00 quantity refuses edits (BILL_SPLIT_SLIVER_LOCKED). Option B means the
+--     split never drafts one; the lock stays as a backstop.
 --   - A posted group unposts together: unpost_invoice refuses any group member (GROUP_UNPOST_REQUIRED), as
 --     post_invoice does (GROUP_POST_REQUIRED). This covers field-split groups too: the screens already send
 --     them to unpost_invoice_group, which calls the inner function and isn't changed.
 --   - A line bills in the order line's unit, as the return checks compare it, so every payer can return it.
---   - A line too small to show (under 0.00005) and worth no cents is left off; the rest of the delivery bills.
---     A restricted-use line that small refuses instead, since the register reads invoice lines (Mason, 2026-11-06).
---     If it is worth cents, or nothing else bills, the split refuses, so no billed money is dropped.
+--   - A Bill Split bills only delivered quantities in whole hundredths, as a return holds them, so every payer's
+--     share, the remainder included, can be returned in full (Mason, 2026-11-06). Any other line refuses the split
+--     (BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS): the delivery completes, the office is told and corrects it with Fix
+--     Delivery, then Create Invoice drafts the payers. A one-customer sale is unchanged.
 --   - A price-later (rush) sale drafts nothing until it is priced (PRICING_INCOMPLETE, as for field
 --     splits): the delivery completes, the office is told, and Create Invoice drafts per payer after.
 --   - A failed split doesn't stop the delivery completing: it leaves an activity record and a flag in the
@@ -51,6 +53,14 @@
 -- MASON'S DECISIONS (2026-11-06, #crx-work): the restricted-use register keeps the main customer as buyer on a
 --   payer's share (the farmer takes delivery and applies; the landlord only pays). Sales reports stay under
 --   the main customer until M15.
+--   Per-line rounding is accepted (Mason, 2026-11-06, "Yes, accept it"): each line splits on its own, so up
+--   to one cent per line goes to the main customer instead of another payer; billed totals stay exact.
+--   Per-payer cost follows Option 1 above (Mason, 2026-11-05).
+--
+-- SCREENS (the next PR; this one lands the database first, as planned): the completion screens show
+--   bill_split_failed and every drafted invoice, Create Invoice is offered for a split backfill while
+--   needs_split_billing is set, and the card shows each payer's live amount. Until then a failed split is
+--   reported by the admin notification and the activity record, and the server-side paths are complete.
 --
 -- NOT CHANGED: a sale with no other payers bills exactly as before. Field/acre splits keep their own
 --   engine and win over a card until it freezes. Posting, payments and the overbilling caps. Who may unpost
@@ -84,6 +94,8 @@ BEGIN
   END IF;
   -- Held to commit, so no card can change between the checks below and the new guard.
   LOCK TABLE public.order_shares IN ACCESS EXCLUSIVE MODE;
+  -- And no invoice can be created on a sale with a card before the new guard takes effect.
+  LOCK TABLE public.invoices IN SHARE ROW EXCLUSIVE MODE;
   -- Each re-emitted function, pinned to its current body, owner, mode, search_path and grants.
   FOR r IN SELECT * FROM (VALUES
     ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', '6665c5841f047c9ca165c8a20c68f4f9', ARRAY['postgres=X/postgres']::aclitem[]),
@@ -122,7 +134,9 @@ BEGIN
       JOIN public.orders o ON o.id = s.order_id
       JOIN public.invoices i ON i.order_id = o.id
      WHERE s.customer_id <> o.customer_id
-       AND i.invoice_type IN ('chemical_sale', 'misc_charge') AND i.invoice_group_id IS NULL
+       AND i.invoice_type IN ('chemical_sale', 'misc_charge')
+       AND (i.invoice_group_id IS NULL
+            OR NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.invoice_id = i.id))
        AND i.deleted_at IS NULL AND i.status IN ('draft', 'unposted', 'posted', 'paid', 'overdue')
   ) THEN
     RAISE EXCEPTION 'CHEM_SALE_BILL_SPLIT_PREFLIGHT: a sale with other payers has a one-customer invoice; resolve it before applying';
@@ -176,7 +190,7 @@ CREATE POLICY order_shares_select ON public.order_shares FOR SELECT TO authentic
                   WHERE o.id = order_shares.order_id AND o.deleted_at IS NULL
                     AND (public.is_admin() OR public.is_sales_rep())));
 
--- Refuses a split change once an invoice is posted or a delivery is complete, or while a one-customer
+-- Refuses a split change once an invoice is posted or a completed delivery is billed, or while a one-customer
 -- draft is on the sale (it would post without the new payer). Locks the order, so a change and a delivery
 -- completing can't pass each other.
 CREATE FUNCTION public._refuse_bill_split_change(p_order_id uuid)
@@ -204,16 +218,21 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
+  -- A completed delivery freezes the split once it is billed. One the split refused (a share too small to
+  -- return, Mason 2026-11-06 option B, or a price-later sale) stays open, so the office can fix the shares.
   SELECT d.delivery_number INTO v_blocking
     FROM deliveries d
    WHERE d.order_id = p_order_id
      AND d.status = 'completed'
      AND d.deleted_at IS NULL
+     AND EXISTS (SELECT 1 FROM invoices i
+                  WHERE i.delivery_id = d.id AND i.deleted_at IS NULL
+                    AND i.status NOT IN ('voided', 'cancelled') AND i.invoice_type <> 'credit_memo')
    ORDER BY d.completed_at
    LIMIT 1;
   IF v_blocking IS NOT NULL THEN
     RAISE EXCEPTION
-      'BILL_SPLIT_FROZEN: delivery % is complete, so this sale''s bill split can''t change. Void the delivery to change it.',
+      'BILL_SPLIT_FROZEN: delivery % is complete and billed, so this sale''s bill split can''t change. Void its invoices or the delivery to change it. Unpost a posted group first, so the sale keeps its commission.',
       v_blocking
       USING ERRCODE = 'check_violation';
   END IF;
@@ -222,7 +241,9 @@ BEGIN
     FROM invoices i
    WHERE i.order_id = p_order_id
      AND i.invoice_type IN ('chemical_sale', 'misc_charge')
-     AND i.invoice_group_id IS NULL
+     -- Only the split writer's invoices stand as a group: a group id with no split record is still one customer's draft.
+     AND (i.invoice_group_id IS NULL
+          OR NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.invoice_id = i.id))
      AND i.deleted_at IS NULL
      AND i.status IN ('draft', 'unposted')
    ORDER BY i.created_at
@@ -257,9 +278,7 @@ BEGIN
     RAISE EXCEPTION 'BILL_SPLIT_CUSTOMER_INACTIVE: an inactive customer can''t be added to a bill split'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_OP = 'UPDATE' THEN
-    NEW.updated_at := now();
-  END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $function$;
@@ -298,6 +317,8 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_item_id uuid := COALESCE(NEW.order_item_id, OLD.order_item_id);
+  v_order_id uuid := (SELECT order_id FROM order_items WHERE id = COALESCE(NEW.order_item_id, OLD.order_item_id));
+  v_line_held boolean;
   v_total numeric;
 BEGIN
   -- A share that moved would leave a frozen sale without the check on it.
@@ -305,8 +326,26 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_IMMUTABLE: a line share cannot move to another line'
       USING ERRCODE = 'check_violation';
   END IF;
-  -- FOR SHARE holds the line on its sale until commit (trg_order_items_bill_split_move).
-  PERFORM public._refuse_bill_split_change((SELECT order_id FROM order_items WHERE id = v_item_id FOR SHARE));
+  -- The sale is locked before its line, as Create Invoice locks them. Completion updates its lines before
+  -- the sale, so the line is taken NOWAIT: a share write that meets a completing delivery gives up and asks
+  -- for a retry instead of deadlocking it. FOR SHARE then holds the line on its sale until commit
+  -- (trg_order_items_bill_split_move).
+  -- A line being deleted takes its shares with it; trg_order_items_bill_split_move checked its sale.
+  IF v_order_id IS NULL AND TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  PERFORM 1 FROM orders WHERE id = v_order_id FOR UPDATE;
+  BEGIN
+    v_line_held := EXISTS (SELECT 1 FROM order_items WHERE id = v_item_id AND order_id = v_order_id FOR SHARE NOWAIT);
+  EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_BUSY: a delivery on this sale is being completed; try again'
+      USING ERRCODE = 'serialization_failure';
+  END;
+  IF NOT v_line_held THEN
+    RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again'
+      USING ERRCODE = 'serialization_failure';
+  END IF;
+  PERFORM public._refuse_bill_split_change(v_order_id);
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
@@ -322,9 +361,7 @@ BEGIN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_OVER_100: a line''s shares can''t total more than 100%%'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF TG_OP = 'UPDATE' THEN
-    NEW.updated_at := now();
-  END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $function$;
@@ -334,6 +371,7 @@ CREATE TRIGGER trg_guard_order_item_shares
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_shares();
 
 -- A line with its own shares can't move to another sale: the override would bill the other sale's payers.
+-- Deleting it is checked here, on its sale: the cascade to its shares runs after the line is gone.
 CREATE FUNCTION public.guard_order_item_bill_split_move()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -341,17 +379,29 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
+      PERFORM public._refuse_bill_split_change(OLD.order_id);
+    END IF;
+    RETURN OLD;
+  END IF;
   IF NEW.order_id IS DISTINCT FROM OLD.order_id
      AND EXISTS (SELECT 1 FROM order_item_shares WHERE order_item_id = OLD.id) THEN
     RAISE EXCEPTION 'ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split; remove its shares before moving it to another order'
       USING ERRCODE = 'check_violation';
+  END IF;
+  -- A line with a field allocation would switch the sale it joins to the field split, as adding one does.
+  IF NEW.order_id IS DISTINCT FROM OLD.order_id
+     AND EXISTS (SELECT 1 FROM order_item_field_allocations WHERE order_item_id = OLD.id)
+     AND public._order_has_bill_split(NEW.order_id) THEN
+    PERFORM public._refuse_bill_split_change(NEW.order_id);
   END IF;
   RETURN NEW;
 END;
 $function$;
 
 CREATE TRIGGER trg_order_items_bill_split_move
-  BEFORE UPDATE OF order_id ON public.order_items
+  BEFORE UPDATE OF order_id OR DELETE ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public.guard_order_item_bill_split_move();
 
 -- True when a sale bills someone other than its customer. Field/acre splits win over a card.
@@ -392,8 +442,10 @@ $function$;
 -- share left over belongs to the main customer. The taker (the main customer, else the largest share)
 -- gets the rest after everyone else rounds down, so each line adds up exactly. Each payer's cents are
 -- exactly their percentage, rounded down. Other payers' quantity is whole hundredths (100 of p_units),
--- because return_items.quantity holds two decimals, so a share under 0.01 bills its cents on 0.00 (Mason,
--- 2026-11-06: money exact; such a sliver is credited, not returned). The taker comes first.
+-- because return_items.quantity holds two decimals, so a share under 0.01 comes back as 0 units with its
+-- cents, and the invoice writer refuses it (Mason, 2026-11-06, option B). The taker comes first. A line
+-- delivered past its planned quantity bills a capped total; each payer takes their percentage of it
+-- (Mason restored exact cents over quantity times price, 2026-11-06).
 CREATE FUNCTION public._bill_split_line_shares(p_order_item_id uuid, p_cents bigint, p_units bigint)
 RETURNS TABLE (customer_id uuid, cents bigint, units bigint)
 LANGUAGE sql
@@ -454,7 +506,6 @@ DECLARE
   v_ids uuid[] := '{}';
   v_line_cents bigint;
   v_line_units bigint;
-  v_too_small boolean := false;
 BEGIN
   SELECT * INTO STRICT v_delivery FROM deliveries WHERE id = p_delivery_id;
   SELECT * INTO STRICT v_order FROM orders WHERE id = v_delivery.order_id;
@@ -481,15 +532,11 @@ BEGIN
   LOOP
     v_line_cents := _allocated_delivery_cents(v_item.order_item_id, v_item.quantity_delivered, NULL);
     v_line_units := round(v_item.quantity_delivered * 10000)::bigint;
-    -- An invoice line holds four decimals of quantity, so this line can't be shown or shared. Worth no
-    -- cents, it stays off the invoices; worth cents, it refuses, so no billed money is dropped. A
-    -- restricted-use line always refuses: the register reads invoice lines (Mason, 2026-11-06).
-    IF v_line_units = 0 AND v_line_cents = 0 AND NOT v_item.is_rup THEN
-      v_too_small := true;
-      CONTINUE;
-    END IF;
-    IF v_line_units = 0 THEN
-      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little of a line to bill it', v_delivery.delivery_number
+    -- Whole hundredths only, as a return holds them: every payer's share then lands on hundredths too, so each
+    -- can be returned in full (Mason, 2026-11-06). The office corrects the delivery with Fix Delivery.
+    IF v_item.quantity_delivered <> round(v_item.quantity_delivered, 2) THEN
+      RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery % delivered % of %, which is not in whole hundredths; correct it with Fix Delivery',
+        v_delivery.delivery_number, v_item.quantity_delivered, COALESCE(v_item.oi_product_name, v_item.p_name)
         USING ERRCODE = 'check_violation';
     END IF;
     FOR v_share IN
@@ -499,6 +546,13 @@ BEGIN
        ORDER BY c.n
     LOOP
       CONTINUE WHEN v_share.cents = 0 AND v_share.units = 0;
+      -- A share worth cents on no returnable quantity refuses, so every billed quantity can be returned
+      -- (Mason, 2026-11-06, option B); the office adjusts the shares.
+      IF v_share.units = 0 THEN
+        RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: on delivery % a payer''s share of % is under 0.01 of a unit; change the shares so each payer gets at least 0.01',
+          v_delivery.delivery_number, COALESCE(v_item.oi_product_name, v_item.p_name)
+          USING ERRCODE = 'check_violation';
+      END IF;
       v_invoice_id := (v_map ->> v_share.customer_id::text)::uuid;
       IF v_invoice_id IS NULL THEN
         INSERT INTO invoices (invoice_number, invoice_type, order_id, customer_id, delivery_id, status, invoice_date,
@@ -517,10 +571,6 @@ BEGIN
         ROUND(COALESCE(v_item.cost_per_unit, 0) * 100)::bigint, COALESCE(v_item.oi_unit_size, 'ea'), v_item.tote_number);
     END LOOP;
   END LOOP;
-  IF cardinality(v_ids) = 0 AND v_too_small THEN
-    RAISE EXCEPTION 'BILL_SPLIT_QUANTITY_TOO_SMALL: delivery % delivered too little to bill', v_delivery.delivery_number
-      USING ERRCODE = 'check_violation';
-  END IF;
   IF cardinality(v_ids) = 0 THEN
     DELETE FROM split_invoice_creation_claims WHERE transaction_id = pg_current_xact_id();
     RETURN v_ids;
@@ -640,6 +690,23 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'INVOICE_SOURCE_LINEAGE_IMMUTABLE: order_id and delivery_id cannot change after invoice creation';
   END IF;
+  -- An invoice keeps the type it was created with (Mason, 2026-11-06), except that a draft may switch
+  -- between chemical sale and misc charge, as the invoice editor offers. Otherwise a credit memo
+  -- retyped as a sale would bill one customer past the Bill Split checks, which run on insert.
+  IF TG_OP = 'UPDATE' AND NEW.invoice_type IS DISTINCT FROM OLD.invoice_type
+     AND NOT (OLD.status = 'draft' AND OLD.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')) THEN
+    RAISE EXCEPTION 'INVOICE_TYPE_IMMUTABLE: an invoice keeps its type; void it and create the right one'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  -- Bill Split: a sale invoice joins a group only inside the split writer's claim, or a one-customer
+  -- draft given a made-up group id would pass the Bill Split checks. Leaving a group stays open.
+  IF TG_OP = 'UPDATE' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')
+     AND NEW.invoice_group_id IS NOT NULL AND NEW.invoice_group_id IS DISTINCT FROM OLD.invoice_group_id
+     AND NOT EXISTS (SELECT 1 FROM public.split_invoice_creation_claims claim
+                      WHERE claim.transaction_id = pg_current_xact_id() AND claim.order_id = NEW.order_id) THEN
+    RAISE EXCEPTION 'INVOICE_GROUP_ASSIGN_REQUIRES_SPLIT: a sale invoice joins a group only when the split drafts it'
+      USING ERRCODE = 'check_violation';
+  END IF;
 
   IF NEW.order_id IS NULL THEN
     IF NEW.delivery_id IS NOT NULL THEN
@@ -664,8 +731,12 @@ BEGIN
     RAISE EXCEPTION 'ORDER_INVOICE_TERMINAL: cannot attach an invoice to missing order %', NEW.order_id;
   END IF;
   -- Bill Split (billing plan M2): a sale with payers other than its customer bills through
-  -- one draft per payer, never as one invoice to the customer.
-  IF TG_OP = 'INSERT' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge') AND NEW.invoice_group_id IS NULL
+  -- one draft per payer, never as one invoice to the customer. A grouped invoice is created only
+  -- inside the split writer's claim for this transaction and order: a made-up group id isn't a split.
+  IF TG_OP = 'INSERT' AND NEW.invoice_type IN ('chemical_sale', 'misc_charge')
+     AND (NEW.invoice_group_id IS NULL OR NOT EXISTS (
+       SELECT 1 FROM public.split_invoice_creation_claims claim
+        WHERE claim.transaction_id = pg_current_xact_id() AND claim.order_id = NEW.order_id))
      AND public._order_has_bill_split(NEW.order_id) THEN
     RAISE EXCEPTION 'ORDER_HAS_BILL_SPLIT: this sale has a bill split, so it cannot be billed as one invoice';
   END IF;
@@ -1266,6 +1337,17 @@ BEGIN
         -- is told; Create Invoice on the delivery runs the same split again.
         BEGIN
           v_bill_split_ids := public._create_bill_split_delivery_invoices(p_delivery_id, v_effective_completion_date, v_actor);
+          -- As Create Invoice does: the flag stays while another completed delivery is still unbilled.
+          UPDATE orders SET needs_split_billing = false, updated_at = now()
+           WHERE id = v_delivery.order_id AND needs_split_billing
+             AND NOT EXISTS (
+               SELECT 1 FROM deliveries d
+                WHERE d.order_id = v_delivery.order_id AND d.id <> p_delivery_id
+                  AND d.status = 'completed' AND d.deleted_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM invoices i
+                     WHERE i.delivery_id = d.id AND i.status NOT IN ('voided', 'cancelled')
+                       AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL));
         EXCEPTION WHEN OTHERS THEN
           v_bill_split_failed := true;
           INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
@@ -1479,16 +1561,29 @@ BEGIN
   -- Billing plan M2: a Bill Split sale is drafted per payer, as completing the delivery does.
   IF public._order_has_bill_split(v_delivery.order_id) THEN
     v_invoice_ids := public._create_bill_split_delivery_invoices(
-      p_delivery_id, (now() AT TIME ZONE 'America/Chicago')::date, v_actor);
+      p_delivery_id,
+      -- Dated by the delivery, as completing it would have been, not by the day Create Invoice runs.
+      COALESCE((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, (now() AT TIME ZONE 'America/Chicago')::date),
+      v_actor);
     IF cardinality(v_invoice_ids) = 0 THEN
       RAISE EXCEPTION 'BILL_SPLIT_NOTHING_TO_BILL: delivery % delivered no quantity, so there is nothing to bill', v_delivery.delivery_number
         USING ERRCODE = 'check_violation';
     END IF;
+    -- The flag stays while another completed delivery on the order is still unbilled.
     UPDATE orders SET needs_split_billing = false, updated_at = now()
-     WHERE id = v_delivery.order_id AND needs_split_billing;
+     WHERE id = v_delivery.order_id AND needs_split_billing
+       AND NOT EXISTS (
+         SELECT 1 FROM deliveries d
+          WHERE d.order_id = v_delivery.order_id AND d.id <> p_delivery_id
+            AND d.status = 'completed' AND d.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM invoices i
+               WHERE i.delivery_id = d.id AND i.status NOT IN ('voided', 'cancelled')
+                 AND i.invoice_type <> 'credit_memo' AND i.deleted_at IS NULL));
     SELECT id, invoice_number INTO v_invoice_id, v_invoice_number FROM invoices WHERE id = v_invoice_ids[1];
     v_result := jsonb_build_object('success', true, 'delivery_id', p_delivery_id,
       'invoice_id', v_invoice_id, 'invoice_number', v_invoice_number, 'invoice_ids', to_jsonb(v_invoice_ids),
+      'invoice_numbers', (SELECT jsonb_agg(invoice_number ORDER BY invoice_number) FROM invoices WHERE id = ANY (v_invoice_ids)),
       'total_cents', (SELECT sum(total_amount_cents) FROM invoices WHERE id = ANY (v_invoice_ids)));
     IF p_idempotency_key IS NOT NULL THEN
       PERFORM save_idempotency(p_idempotency_key, 'create_invoice_for_unbilled_delivery', v_result);
@@ -1551,19 +1646,32 @@ DECLARE
   v_lines_before jsonb;
   v_saved_id uuid;
 BEGIN
+  -- A retry replays its saved answer before the draft checks below, so a save whose response was lost still
+  -- answers after the group posts (Sol, 6 Nov). save_invoice has already matched the key's actor and request.
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT NULLIF(k.result->>'invoice_id', '')::uuid
+      INTO v_saved_id
+      FROM public.idempotency_keys k
+     WHERE k.idempotency_key = p_idempotency_key
+       AND k.operation = 'save_invoice'
+       AND k.request_fingerprint IS NOT NULL;
+    IF v_saved_id IS NOT NULL THEN
+      RETURN v_saved_id;
+    END IF;
+  END IF;
   IF v_invoice_id IS NOT NULL THEN
     PERFORM 1
       FROM public.invoices i
      WHERE i.id = v_invoice_id
      FOR UPDATE;
 
-    -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts. The layer below
-    -- already refreshes its provenance under a mutation claim.
+    -- Billing plan M2: a Bill Split draft takes charges and header edits until it posts, and again once the
+    -- group is unposted. The layer below already refreshes its provenance under a mutation claim.
     SELECT public._bill_split_product_lines(i.id)
       INTO v_lines_before
       FROM public.invoices i
      WHERE i.id = v_invoice_id
-       AND i.status = 'draft'
+       AND i.status IN ('draft', 'unposted')
        AND i.delivery_id IS NOT NULL
        AND i.invoice_group_id IS NOT NULL
        AND public._order_has_bill_split(i.order_id);
@@ -1755,14 +1863,15 @@ BEGIN
   IF p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match the authenticated user';
   END IF;
-  IF EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id AND invoice_group_id IS NOT NULL) THEN
-    RAISE EXCEPTION 'GROUP_UNPOST_REQUIRED';
-  END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'invoice_id', p_invoice_id));
   v_replay := public.check_idempotency_intent(p_idempotency_key, 'unpost_invoice', v_actor, v_fingerprint);
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  END IF;
+  -- A retry of an unpost saved before this migration replays; only a new request is refused.
+  IF v_replay IS NULL AND EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id AND invoice_group_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'GROUP_UNPOST_REQUIRED';
   END IF;
   v_result := public._unpost_invoice_replay_impl_20261015(p_invoice_id, p_performed_by, p_idempotency_key);
   IF v_replay IS NULL THEN

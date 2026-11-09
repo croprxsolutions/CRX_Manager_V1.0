@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { extractQueries, packetFrom } from './run-live.mjs';
+import { extractQueries, failingSummary, packetFrom } from './run-live.mjs';
 
 const runner = fileURLToPath(new URL('./run-sweeps.mjs', import.meta.url));
 const printed = spawnSync(process.execPath, [runner], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SUPABASE_DB_URL: '' } });
@@ -37,5 +37,14 @@ assert.throws(() => packetFrom(first.name, 200, 'not json'), /not JSON/);
 assert.throws(() => packetFrom(first.name, 200, '[]'), /exactly one sweep_result/);
 assert.throws(() => packetFrom(first.name, 200, JSON.stringify([{ sweep_result: packet }, { sweep_result: packet }])), /exactly one/);
 assert.throws(() => packetFrom('other', 200, JSON.stringify([{ sweep_result: packet }])), /for this predicate/);
+
+// Closing list: only non-PASS predicates, with their unallowlisted counts.
+const verdict = JSON.stringify({ ok: false, summary: [
+  { predicate: 'a', status: 'PASS', violations: [] },
+  { predicate: 'b', status: 'FAIL', violations: [{}, {}] },
+] });
+assert.equal(failingSummary(verdict), '1 of 2 predicates did not pass:\n  FAIL  b  2 unallowlisted');
+assert.equal(failingSummary(JSON.stringify({ ok: true, summary: [{ predicate: 'a', status: 'PASS' }] })), 'All 1 predicates passed.');
+assert.match(failingSummary('garbage'), /Could not read/);
 
 console.log(`run-live.test.mjs: ok (${queries.length} queries)`);

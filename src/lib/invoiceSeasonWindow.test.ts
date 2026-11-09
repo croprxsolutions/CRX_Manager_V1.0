@@ -7,7 +7,7 @@ describe('openOrInSeasonFilter', () => {
       'status.in.(draft,unposted,posted,overdue),and(invoice_date.gte.2026-10-01,invoice_date.lt.2027-10-01)',
     );
     expect(openOrInSeasonFilter('created_at', 2026)).toBe(
-      'status.in.(draft,unposted,posted,overdue),and(created_at.gte.2025-10-01,created_at.lt.2026-10-01)',
+      'status.in.(draft,unposted,posted,overdue),and(created_at.gte.2025-10-01T05:00:00.000Z,created_at.lt.2026-10-01T05:00:00.000Z)',
     );
   });
 });

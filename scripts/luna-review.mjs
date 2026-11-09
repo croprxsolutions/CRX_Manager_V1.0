@@ -9,6 +9,9 @@
 //
 // Exit codes: 0 clean, 1 findings, 2 DID NOT RUN (never a verdict).
 //
+// A diff that touches src/ first runs the code-health ratchet that pre-push runs. A failure stops
+// with exit 2 and calls no model: its fix changes the code and voids the round (Mason, 2026-11-06).
+//
 // ADVISORY ONLY: this writes no proof and touches no proof file, so it can neither satisfy nor
 // corrupt a gate. Never route a Luna round through write-codex-push-proof.mjs: that wrapper
 // unlinks the proof for the current HEAD when it starts.
@@ -40,7 +43,7 @@ import {
   runCodexWithSandboxFallback,
 } from "./write-codex-push-proof.mjs";
 
-// The newest Luna this account can use (`gpt-6.1-luna` is refused as of 2026-11-01). A new Luna is
+// The newest Luna this account can use (`gpt-6.1-luna` is refused as of 2026-11-06). A new Luna is
 // a one-line change here; see docs/reference/codex-model-tuning.md for how to probe a name.
 export const LUNA_MODEL = "gpt-6-luna";
 export const LUNA_EFFORT = "xhigh";
@@ -115,7 +118,13 @@ Hunt these failure classes first, then anything else:
    another operation's cached row); RPCs that declare p_idempotency_key but ignore it.
 4. Migration drift — CHECK-constraint regressions (a new list must be a SUPERSET of the old),
    function-overload collisions, missing SET search_path = public, pg_temp, missing updated_at.
+   Valid, never a finding: has_function_privilege('public', <function>, 'EXECUTE') — PUBLIC is
+   an accepted role name there (also in has_table_privilege / has_schema_privilege).
 5. Lifecycle violations in the quote / order / delivery / invoice / return state machines.
+6. Screens that save, upload or import — for each request, say which request owns the screen
+   now: a stale or late reply overwriting newer state, a control still usable while a request
+   is in flight, a retry that drops its idempotency key before the save is confirmed, close or
+   reopen not resetting, legacy input formats silently dropped, a row error skipping later checks.
 
 For each finding give: severity (BLOCKER/HIGH/MED/LOW), file:line, what breaks, and a concrete
 failure scenario (inputs -> wrong result).
@@ -280,10 +289,12 @@ function freezeDiff(git, opts) {
   }
   const base = opts.base ?? GUARDED_BASE;
   const baseSha = resolveCommit(git, base);
+  // Freeze the head too, so the printed result names exactly what was read.
+  const headSha = resolveCommit(git, "HEAD");
   return {
-    label: `branch against ${base} (${baseSha.slice(0, 9)})`,
+    label: `branch against ${base} (${baseSha.slice(0, 9)}) at head ${headSha}`,
     baseSha,
-    diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...HEAD`]),
+    diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...${headSha}`]),
   };
 }
 
@@ -322,6 +333,25 @@ function guardRounds(git, root) {
   };
 }
 
+// ── code-health ratchet ──────────────────────────────────────────────────────
+const SRC_DIFF_RE = /^diff --git (?:"?a\/src\/|.* "?b\/src\/)/m;
+const CODE_HEALTH_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Only the check's own "FAIL - " verdict blocks. A check that could not run (no node_modules or
+// knip in this worktree, no origin/main) is no verdict: Luna goes ahead and the result says so;
+// pre-push and CI still run the real check.
+export function codeHealthGate(diff, root, spawn = spawnSync) {
+  if (!SRC_DIFF_RE.test(diff)) return { state: "skipped" };
+  const result = spawn(process.execPath, ["scripts/check-code-health.mjs"], {
+    cwd: root, encoding: "utf8", timeout: CODE_HEALTH_TIMEOUT_MS, maxBuffer: MAX_CAPTURE_BYTES, windowsHide: true, shell: false,
+  });
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  if (!result.error && result.status === 0) return { state: "passed" };
+  if (!result.error && /^FAIL - /m.test(output)) return { state: "failed", output };
+  const firstError = output.split(/\r?\n/).find((line) => /error/i.test(line));
+  return { state: "unavailable", reason: (result.error?.message ?? firstError ?? `exit ${result.status}`).trim() };
+}
+
 // ── reporting ────────────────────────────────────────────────────────────────
 function oversizedAdvice(git, frozen) {
   const commits = frozen.baseSha
@@ -340,8 +370,21 @@ function oversizedAdvice(git, frozen) {
 // Any mention of BLOCKER or HIGH withholds the hint, so a missed severity errs toward another round.
 export function nextStepHint(text) {
   if (/\b(?:BLOCKER|HIGH)\b/i.test(text)) return null;
-  return "Next: no BLOCKER or HIGH. Fix the cheap MED/LOW items (or refute them) in one commit, then go "
-    + "straight to Sol if the change is on the Sol list. Do not run Luna again just for these.";
+  return "Next: no BLOCKER or HIGH. Fix the cheap MED/LOW items (or refute them) in one commit. If that commit "
+    + "only fixes or refutes those findings and touches no rule file, it needs no whole-branch rerun; otherwise "
+    + "run the whole-branch round again (codex-review Step 3A). Report each fix and refutation with its reason, "
+    + "and name both heads. Then Sol if the change is on the Sol list.";
+}
+
+// A round on one commit or on uncommitted work never clears the change (Mason, 2026-11-06).
+export function scopeHint(label, dirty = false) {
+  if (String(label).startsWith("branch against origin/main ")) {
+    if (!dirty) return null;
+    return "Scope: the checkout has edits that are not committed, and this round did not read them. Commit "
+      + "them and run the whole-branch round again before you push (codex-review Step 3A).";
+  }
+  return `Scope: this round read only ${label}. The round that clears the change must be the default `
+    + "whole-branch round on the committed head you will push (codex-review Step 3A).";
 }
 
 function reportDidNotRun(reason, advice) {
@@ -351,11 +394,13 @@ function reportDidNotRun(reason, advice) {
   return EXIT_DID_NOT_RUN;
 }
 
-function report(run, { label, diffLines, files, model, effort }) {
+function report(run, { label, diffLines, files, model, effort, dirty, healthNote }) {
   const exitCode = exitCodeFor(run);
   if (run.outcome === "void") {
     console.error(run.stderr.split(/\r?\n/).slice(-20).join("\n"));
-    return reportDidNotRun(run.reason, run.advice);
+    reportDidNotRun(run.reason, run.advice);
+    if (healthNote) console.log(healthNote);
+    return exitCode;
   }
   console.log(run.text.trimEnd());
   console.log();
@@ -364,10 +409,13 @@ function report(run, { label, diffLines, files, model, effort }) {
   console.log("Advisory only: this is not a Sol proof and satisfies no gate.");
   const hint = run.outcome === "clean" ? null : nextStepHint(run.text);
   if (hint) console.log(hint);
+  const scope = scopeHint(label, dirty);
+  if (scope) console.log(scope);
+  if (healthNote) console.log(healthNote);
   return exitCode;
 }
 
-export function main(argv = process.argv.slice(2), codexDeps = {}) {
+export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth = codeHealthGate } = {}) {
   try {
     const opts = parseArgs(argv);
     const model = opts.sol ? CODEX_REVIEW_MODEL : LUNA_MODEL;
@@ -407,6 +455,18 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
       return EXIT_FINDINGS;
     }
 
+    const health = codeHealth(frozen.diff, rootDir);
+    if (health.state === "failed") {
+      return reportDidNotRun(
+        `src/ fails the code-health check that pre-push runs, so no model was called:\n${health.output}`,
+        "Next: fix it (node scripts/check-code-health.mjs), commit, then run Luna again.",
+      );
+    }
+    const healthNote = health.state === "unavailable"
+      ? `Code health: NOT CHECKED, the check could not run (${health.reason}). Luna ran anyway; pre-push and CI still run it.`
+      : null;
+    if (healthNote) console.error(`[luna-review] ${healthNote}`);
+
     const diffLines = frozen.diff.split("\n").length;
     const files = frozen.diff.match(/^diff --git /gm)?.length ?? 0;
     console.error(`[luna-review] ${model} at ${effort} reviewing ${frozen.label}: ${files} file(s), ${diffLines} diff lines.`);
@@ -414,7 +474,8 @@ export function main(argv = process.argv.slice(2), codexDeps = {}) {
     // Only a round that reached a verdict counts; a broken run is retried for free.
     if (rounds && run.outcome !== "void") rounds.record();
     if (run.kind === "output-limit") run.advice = oversizedAdvice(git, frozen);
-    return report(run, { label: frozen.label, diffLines, files, model, effort });
+    const dirty = gitOutput(git, ["status", "--porcelain"]).trim() !== "";
+    return report(run, { label: frozen.label, diffLines, files, model, effort, dirty, healthNote });
   } catch (error) {
     return reportDidNotRun(error.message);
   }

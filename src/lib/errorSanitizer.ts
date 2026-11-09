@@ -131,7 +131,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
   [/^BILL_SPLIT_FROZEN\b/,
-   "Nothing was changed. A delivery on this sale is complete, so its bill split is locked. Void the delivery to change the split"],
+   "Nothing was changed. A delivery on this sale is complete and invoiced, so its bill split is locked. Void that delivery's invoices to change the split. Unpost a posted group first, so the sale keeps its commission"],
   [/^BILL_SPLIT_HAS_DRAFT\b/,
    "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"],
   [/^BILL_SPLIT_LINES_LOCKED\b/,
@@ -149,7 +149,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^GROUP_UNPOST_REQUIRED\b/,
    "Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again"],
   [/^BILL_SPLIT_QUANTITY_TOO_SMALL\b/,
-   "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"],
+   "Nothing was billed. A payer's share of a product is under 0.01 of a unit. Change the bill split so each payer gets at least 0.01"],
+  [/^BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS\b/,
+   "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"],
   [/^PRICING_INCOMPLETE: price the order before its Bill Split\b/,
    "Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery"],
   [/^SPLIT_INVOICE_PROVENANCE_IMMUTABLE\b/,
@@ -158,6 +160,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. The bill split can't total more than 100%"],
   [/^ORDER_SHARES_ORDER_IMMUTABLE\b/,
    "Nothing was changed. A bill split row can't move to another order"],
+  [/^ORDER_ITEM_SHARES_BUSY\b/,
+   "Nothing was changed. A delivery on this sale is being completed. Try again in a moment"],
+  [/^ORDER_ITEM_SHARES_LINE_MOVED\b/,
+   "Nothing was changed. This line moved to another order. Refresh the page and try again"],
   [/^ORDER_ITEM_SHARES_LINE_MOVE\b/,
    "Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order"],
   [/^ORDER_ITEM_SHARES_LINE_IMMUTABLE\b/,
@@ -320,8 +326,8 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
   }
-  // Rate lock (20261107060000): the server text after the token is the operator's answer.
-  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG):\s*(.+)$/s)?.[1];
+  // Rate lock (20261107060000), product parents (20261108120000) and tote fill (20261117130000): the server text after the token is the operator's answer.
+  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|TOTE_FILL_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }

@@ -14,7 +14,7 @@ import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
 import { useAuth } from '../contexts/AuthContext';
 import { sanitizeError, supabase, checkMutationResult, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
 import { Sentry } from '../lib/sentry';
-import { parseLocalDate } from '../lib/dateUtils';
+import { addDaysToDate, businessDayStartIso, localToday } from '../lib/dateUtils';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRealtimeNotes } from '../hooks/useRealtimeSubscription';
@@ -217,11 +217,16 @@ export default function TeamBoard() {
       .order('created_at', { ascending: false })
       .limit(100);
 
-    if (activityDateFrom) {
-      query = query.gte('created_at', `${activityDateFrom}T00:00:00Z`);
+    // Whole Chicago business days, not UTC days (KI-18). A typed year past 9999 is no
+    // business day, and 9999-12-31 has no next day: such a bound means "no limit".
+    const isPlainDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    // Before 1883 Chicago had no standard offset, so the exact start throws; 06:00Z is close enough for a filter.
+    const dayStart = (d: string) => { try { return businessDayStartIso(d); } catch { return `${d}T06:00:00Z`; } };
+    if (activityDateFrom && isPlainDay(activityDateFrom)) {
+      query = query.gte('created_at', dayStart(activityDateFrom));
     }
-    if (activityDateTo) {
-      query = query.lte('created_at', `${activityDateTo}T23:59:59Z`);
+    if (activityDateTo && isPlainDay(activityDateTo) && activityDateTo < '9999-12-31') {
+      query = query.lt('created_at', dayStart(addDaysToDate(activityDateTo, 1)));
     }
     if (activityUser) {
       query = query.eq('user_id', activityUser);
@@ -598,7 +603,9 @@ export default function TeamBoard() {
     const open = notes.filter(n => !n.is_completed);
     const completed = notes.filter(n => n.is_completed);
     const now = new Date();
-    const overdue = open.filter(n => n.due_date && parseLocalDate(n.due_date) < now);
+    const today = localToday();
+    // Overdue only after the due day has passed (by the Chicago date), not from its first minute.
+    const overdue = open.filter(n => n.due_date && n.due_date.slice(0, 10) < today);
     const myTasks = open.filter(n => n.assigned_to === profile?.id);
 
     // Completed this week
@@ -619,7 +626,7 @@ export default function TeamBoard() {
 
   // ── Helpers ──
   const isOverdue = (note: TeamNote) =>
-    !note.is_completed && note.due_date && parseLocalDate(note.due_date) < new Date();
+    !note.is_completed && note.due_date && note.due_date.slice(0, 10) < localToday();
 
   const getTimeToComplete = (created: string, completed: string) => {
     const diffMs = new Date(completed).getTime() - new Date(created).getTime();

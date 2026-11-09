@@ -1,4 +1,4 @@
--- Smoke chain: product parent proposals and parent brands (REQUIRES 20261123120000, PAR-2).
+-- Smoke chain: product parent proposals and parent brands (REQUIRES 20261203110000, PAR-2).
 -- One DO block; always ends in SMOKE_PASS_ROLLBACK, so the proposal, groups, parents, brands, events and
 -- receipts it writes are rolled back. Proves, as a real signed-in browser session (role authenticated with
 -- each live profile's claims) and as a signed-out visitor (role anon), on three invented two-size products:
@@ -45,7 +45,7 @@ BEGIN
     'public.approve_product_parent_groups(uuid,bigint,jsonb,text)',
     'public.hold_product_parent_group(uuid,bigint,text,text,text)',
     'public.reject_product_parent_group(uuid,bigint,text,text,text)',
-    'public.upsert_parent_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)',
+    'public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)',
     'public.get_product_brands(uuid)'] LOOP
     IF has_function_privilege('anon', v_sig, 'EXECUTE') THEN
       RAISE EXCEPTION 'SMOKE_FAIL: anon can execute %', v_sig;
@@ -60,11 +60,12 @@ BEGIN
 
   -- Three invented products, two sizes each, one EPA number each; no price, rate or brand.
   FOR v_i IN 1..3 LOOP
-    INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active)
+    INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active,
+                                 container_size, container_unit)
     VALUES (v_ids[2 * v_i - 1], '[SMOKE] Partwo ' || v_word[v_i] || ' ' || v_tag || ' 2.5 gal', 'SMOKE-P2-' || v_i || 'a-' || v_tag,
-            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true),
+            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true, 2.5, 'Gal'),
            (v_ids[2 * v_i], '[SMOKE] Partwo ' || v_word[v_i] || ' ' || v_tag || ' 1 gal', 'SMOKE-P2-' || v_i || 'b-' || v_tag,
-            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true);
+            v_cat, '9999' || v_i || '-7', 'liquid', 'Gal', true, 1, 'Gal');
   END LOOP;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -87,7 +88,7 @@ BEGIN
     END;
     IF NOT v_refused THEN RAISE EXCEPTION 'SMOKE_FAIL: an approval ran while grouping is closed'; END IF;
     BEGIN
-      PERFORM public.upsert_parent_brand(gen_random_uuid(), 'Smoke Closed ' || v_tag, NULL, NULL, true, false, NULL,
+      PERFORM public.upsert_parent_brand(gen_random_uuid(), gen_random_uuid(), 'Smoke Closed ' || v_tag, NULL, NULL, true, false, NULL,
         NULL, NULL, false, NULL, 'smoke:par2:closed-b:' || v_tag);
       v_refused := false;
     EXCEPTION WHEN OTHERS THEN
@@ -160,14 +161,14 @@ BEGIN
   END IF;
 
   -- Parent brand: add, read through a size, retire with a reason.
-  v_brand := public.upsert_parent_brand(v_parent, 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
+  v_brand := public.upsert_parent_brand(v_parent, v_ids[2], 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
     NULL, NULL, false, NULL, 'smoke-pp2-brand-' || v_tag);
   v_read := public.get_product_brands(v_ids[2]);
   IF v_read->>'source' <> 'parent' OR (v_read->>'parent_id')::uuid IS DISTINCT FROM v_parent
      OR jsonb_array_length(v_read->'brands') <> 1 OR v_read->'brands'->0->>'id' <> v_brand->>'id' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the size did not read its parent''s brand: %', v_read;
   END IF;
-  PERFORM public.upsert_parent_brand(v_parent, 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
+  PERFORM public.upsert_parent_brand(v_parent, v_ids[2], 'Smoke Brand ' || v_tag, '99991-7', 'Smoke Co', true, false, NULL,
     (v_brand->>'id')::uuid, (v_brand->>'row_version')::integer, true, 'smoke no longer carried', 'smoke-pp2-retire-' || v_tag);
   v_read := public.get_product_brands(v_ids[2]);
   EXECUTE 'RESET ROLE';

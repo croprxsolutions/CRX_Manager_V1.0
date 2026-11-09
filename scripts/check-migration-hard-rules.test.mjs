@@ -527,6 +527,28 @@ scenarios.push(['unknown head is a hard error', (dir) => {
   eq(result.status, 2, 'exit 2: the check could not run');
 }]);
 
+// 2026-11-07: `--head HEAD` was refused, and any --base that was not a raw
+// SHA (origin/main, a branch, a typo) printed "nothing to compare" and exited
+// 0 having checked nothing. Ref names now resolve; anything else is exit 2.
+scenarios.push(['ref names resolve like SHAs', (dir) => {
+  seedBase(dir);
+  sh(dir, ['checkout', '-q', '-b', 'feature']);
+  write(dir, APPLIED, `${GOOD}\n-- tweak\n`);
+  commitAll(dir, 'tweak applied');
+  const result = runCli(dir, 'main', 'HEAD');
+  eq(result.status, 1, 'exit 1: the edited applied migration is caught via ref names');
+  ok(result.stdout.includes('MODIFIES an applied migration'), 'the real check ran');
+}]);
+
+scenarios.push(['unresolvable base is a hard error, not a skip', (dir) => {
+  const head = seedBase(dir);
+  for (const base of ['no-such-branch', 'e'.repeat(40)]) {
+    const result = runCli(dir, base, head);
+    eq(result.status, 2, `exit 2 for base ${base}`);
+    ok(!result.stdout.includes('nothing to compare'), `no silent skip for base ${base}`);
+  }
+}]);
+
 scenarios.push(['runDiffCheck is callable in-process', (dir) => {
   const base = seedBase(dir);
   write(dir, APPLIED, `${GOOD}\n-- tweak\n`);

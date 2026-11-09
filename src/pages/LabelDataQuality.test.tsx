@@ -27,6 +27,7 @@ const H = vi.hoisted(() => ({
   logActivity: vi.fn(),
   toast: vi.fn(),
   captureException: vi.fn(),
+  getProductParents: vi.fn(),
 }));
 
 const coverage: LabelCoverageReport = {
@@ -133,6 +134,10 @@ vi.mock('../lib/activityLogger', () => ({
   logActivity: H.logActivity,
 }));
 
+vi.mock('../lib/productParents', () => ({
+  getProductParents: H.getProductParents,
+}));
+
 vi.mock('../lib/sentry', () => ({
   Sentry: { captureException: H.captureException },
 }));
@@ -152,6 +157,7 @@ describe('LabelDataQuality', () => {
     H.missingProducts = [];
     H.mutationResults = [];
     H.rpc.mockResolvedValue({ data: coverage, error: null });
+    H.getProductParents.mockResolvedValue([]);
     H.invoke.mockResolvedValue({ data: verifiedLookup(), error: null });
     sessionStorage.clear();
     sessionStorage.setItem(CACHE_KEY, JSON.stringify({
@@ -512,6 +518,42 @@ describe('LabelDataQuality', () => {
 
     expect(await screen.findByText('No EPA check results yet')).toBeInTheDocument();
     expect(screen.queryByText('Inconsistent Product')).not.toBeInTheDocument();
+  });
+
+  it('replaces the EPA correction with a parent note for a grouped size', async () => {
+    H.getProductParents.mockResolvedValue([{ id: 'parent-1', name: 'Callisto 4L', sizes: [{ product_id: 'product-1' }] }]);
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Set on parent Callisto 4L. Correcting a grouped product's EPA number isn't available yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Correct identity/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Corrected EPA registration for Callisto Herbicide')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(H.getProductParents).toHaveBeenCalledWith(null);
+  });
+
+  it('keeps the editor when parents fail to load, reports it, and shows the database refusal in plain words', async () => {
+    H.getProductParents.mockRejectedValue(new Error('parents offline'));
+    H.mutationResults = [{ data: null, error: { message: 'PRODUCT_PARENT_VALUE: epa_registration belongs to parent "Callisto 4L"; edit it on the parent' } }];
+    H.checkMutationResult.mockImplementation((result: { error: unknown }) => { if (result.error) throw result.error; });
+    render(
+      <MemoryRouter initialEntries={['/label-data-quality']}>
+        <LabelDataQuality />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(H.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'parents offline' }),
+      expect.objectContaining({ tags: expect.objectContaining({ action: 'load_product_parents' }) }),
+    ));
+    const input = await screen.findByLabelText('Corrected EPA registration for Callisto Herbicide');
+    fireEvent.change(input, { target: { value: '264-849' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Save failed: Nothing was saved\. Epa_registration belongs to parent "Callisto 4L"/)).toBeInTheDocument();
   });
 });
 

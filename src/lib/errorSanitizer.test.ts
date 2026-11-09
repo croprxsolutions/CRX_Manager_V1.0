@@ -24,6 +24,23 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'insert or update violates foreign key constraint "product_setup_category_fk"' }))
       .toBe('Choose a category from the product category list');
   });
+  // RAISE texts of 20261108120000_product_parents.sql (PAR-1).
+  it.each([
+    ['PRODUCT_PARENT_VALUE: category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)',
+      'Nothing was saved. Category belongs to parent "Atrazine 4L"; edit it on the parent (reload the app if you do not see a Parent panel)'],
+    ['PRODUCT_PARENT_STALE: parent "Atrazine 4L" changed since you opened it; reload and try again',
+      'Nothing was saved. Parent "Atrazine 4L" changed since you opened it; reload and try again'],
+    ['PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until registrations (REG-1) are built',
+      'Nothing was saved. EPA number correction is switched off until registrations (REG-1) are built'],
+    ['EVIDENCE_REQUIRED: say what shows it', 'Nothing was saved. Say what shows it'],
+    // RAISE texts of 20261117130000_tote_fill_from_bulk.sql (BLK-1a).
+    ['TOTE_FILL_STOCK_MOVED: stock of the tote or its bulk has moved since this fill; adjust stock instead',
+      'Nothing was saved. Stock of the tote or its bulk has moved since this fill; adjust stock instead'],
+    ['TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)',
+      'Nothing was saved. "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)'],
+  ])('explains the parent refusal %s by name', (raw, expected) => {
+    expect(sanitizeError({ code: 'P0001', message: raw })).toBe(expected);
+  });
   it('explains an UNKNOWN_STORAGE_LOCATION refusal without the raw token (KI-85)', () => {
     const message = sanitizeError({ message: 'UNKNOWN_STORAGE_LOCATION: stock can be received only into Main Warehouse until stock transfers between warehouses exist' });
     expect(message).toContain('only into Main Warehouse');
@@ -255,6 +272,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError('BILL_SPLIT_HAS_DRAFT: draft invoice CS-1 bills this sale to one customer.')).toBe(
       "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"
     );
+    expect(sanitizeError('ORDER_ITEM_SHARES_BUSY: a delivery on this sale is being completed; try again')).toBe(
+      'Nothing was changed. A delivery on this sale is being completed. Try again in a moment',
+    );
+    expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVED: the line moved to another order; try again')).toBe(
+      'Nothing was changed. This line moved to another order. Refresh the page and try again',
+    );
     expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
       'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
     );
@@ -274,7 +297,10 @@ describe('sanitizeError', () => {
       "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"
     );
     expect(sanitizeError('BILL_SPLIT_QUANTITY_TOO_SMALL: delivery D-1')).toBe(
-      "Nothing was billed. This delivery's quantity is too small to put on an invoice. Check the delivered quantity"
+      "Nothing was billed. A payer's share of a product is under 0.01 of a unit. Change the bill split so each payer gets at least 0.01"
+    );
+    expect(sanitizeError('BILL_SPLIT_QUANTITY_NOT_HUNDREDTHS: delivery D-1 delivered 1.2345')).toBe(
+      "Nothing was billed. A Bill Split sale bills delivered amounts in whole hundredths (like 1.23). Correct the delivered amount with Fix Delivery, then choose Create Invoice"
     );
     expect(sanitizeError('PRICING_INCOMPLETE: price the order before its Bill Split invoices are drafted')).toBe(
       'Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery'

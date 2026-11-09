@@ -44,6 +44,12 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
   '20261105170000_data11_preferred_vendor_links.sql',
+  // KI-01 part C (#1650) changes job and storage access only; its preflight needs live's storage.objects policies,
+  // which this database does not have (the staff photo storage files are parked above). Its own proof is
+  // prove-job-access-ends-with-the-job-real-schema.mjs; same approach as prove-close-delivery-receipt-real-schema.mjs.
+  '20261217100000_job_access_ends_with_the_job.sql',
+  // Its KI-73 follow-up (applicator spray-record fields) needs part C applied; same reason.
+  '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(guard_customer_document_update|_guard_delivery_photo_uploader|delivery_photos_uploader_guard)/i;

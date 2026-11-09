@@ -1,6 +1,7 @@
 import {
   buildStoragePath,
   canAccessCustomerDocuments,
+  canDownloadDocument,
   isServerIssuedPath,
   MAX_FILE_SIZE_BYTES,
   parseDocumentFileRequest,
@@ -89,4 +90,12 @@ Deno.test("unknown actions and non-object bodies are refused", () => {
   assertEquals(parseDocumentFileRequest({ action: "discard_upload", customer_id: CUSTOMER }).ok, false);
   assertEquals(parseDocumentFileRequest(null).ok, false);
   assertEquals(parseDocumentFileRequest([]).ok, false);
+});
+
+Deno.test("a removed document downloads for admins only (KI-07)", () => {
+  const removed = "2026-11-08T12:00:00Z";
+  assertEquals(canDownloadDocument("admin", removed), true);
+  assertEquals(canDownloadDocument("sales_rep", removed), false);
+  assertEquals(canDownloadDocument("admin", null), true);
+  assertEquals(canDownloadDocument("sales_rep", null), true);
 });

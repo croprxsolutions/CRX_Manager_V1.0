@@ -214,8 +214,11 @@ interface ActivePlannedHold {
 
 // The line table's "no unit" choice (the old select's "--" option).
 const NO_UNIT = '__none__';
-// Number boxes in the line table and cards: 44 px below 768 px, 36 px above.
-const LINE_INPUT = 'w-full min-w-0 h-11 md:h-9 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+// Text-link buttons in the Products tab: 44 px tall below 768 px; from 768 px a 40 px hit area
+// (an invisible ::after) so the link does not stretch its row.
+const LINK_HIT = "relative min-h-11 md:min-h-0 after:absolute after:inset-x-0 after:top-1/2 after:h-10 after:-translate-y-1/2 after:content-['']";
+// Number boxes in the line table and cards: 44 px below 768 px, 40 px above.
+const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
 function quoteTotals(sections: LocalSection[]) {
@@ -4804,7 +4807,7 @@ export default function QuoteBuilder() {
                 <button
                   type="button"
                   onClick={openPicker}
-                  className="text-left font-medium text-nav-dark break-words hover:text-crx-green"
+                  className={`${LINK_HIT} text-left font-medium text-nav-dark break-words hover:text-crx-green`}
                 >
                   {prod.product_name}
                 </button>
@@ -4812,7 +4815,7 @@ export default function QuoteBuilder() {
                 <button
                   type="button"
                   onClick={openPicker}
-                  className="inline-flex min-h-11 md:min-h-0 items-center gap-1 font-medium text-crx-green hover:underline"
+                  className={`${LINK_HIT} inline-flex items-center gap-1 font-medium text-crx-green hover:underline`}
                 >
                   <Search className="w-3.5 h-3.5" />
                   Select Product
@@ -4835,7 +4838,7 @@ export default function QuoteBuilder() {
                   <button
                     type="button"
                     onClick={() => setEditingLineNote(null)}
-                    className="min-h-11 md:min-h-0 text-xs font-medium text-crx-green hover:underline"
+                    className={`${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
                   >
                     Done
                   </button>
@@ -4848,7 +4851,7 @@ export default function QuoteBuilder() {
                   type="button"
                   onClick={() => updateItem(sec._key, item._key, { notes: defaultNote })}
                   title="Reset to default"
-                  className="min-h-11 md:min-h-0 text-xs font-medium text-crx-green hover:underline"
+                  className={`${LINK_HIT} text-xs font-medium text-crx-green hover:underline`}
                 >
                   Reset note
                 </button>
@@ -4877,7 +4880,6 @@ export default function QuoteBuilder() {
               <div className="mt-1">
                 <Dropdown
                   aria-label="Rate unit"
-                  size="sm"
                   noHelperRow
                   value={item.rate_unit || (allowNoUnit ? NO_UNIT : null)}
                   onChange={(v) =>
@@ -4979,7 +4981,6 @@ export default function QuoteBuilder() {
               <div className="mt-1">
                 <Dropdown
                   aria-label="Price unit"
-                  size="sm"
                   noHelperRow
                   value={item.price_unit || (allowNoUnit ? NO_UNIT : null)}
                   onChange={(v) =>
@@ -5006,7 +5007,7 @@ export default function QuoteBuilder() {
                       ? 'Reset to the price saved on this line'
                       : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
                     aria-label="Reset the manual price"
-                    className="min-h-11 md:min-h-0 font-semibold text-crx-green hover:underline"
+                    className={`${LINK_HIT} font-semibold text-crx-green hover:underline`}
                   >
                     Reset
                   </button>
@@ -5059,7 +5060,7 @@ export default function QuoteBuilder() {
                           });
                         }}
                         disabled={formLocked}
-                        className="min-h-11 md:min-h-0 font-semibold text-crx-green hover:underline disabled:opacity-50"
+                        className={`${LINK_HIT} font-semibold text-crx-green hover:underline disabled:opacity-50`}
                       >
                         Use today {fmt(todayPriceOffer)}
                       </button>
@@ -5115,7 +5116,7 @@ export default function QuoteBuilder() {
               <button
                 type="button"
                 onClick={() => toggleSectionCollapse(sec._key)}
-                className="h-11 w-11 md:h-8 md:w-8 shrink-0 inline-flex items-center justify-center rounded-md text-secondary hover:bg-gray-100"
+                className="h-11 w-11 md:h-10 md:w-10 shrink-0 inline-flex items-center justify-center rounded-md text-secondary hover:bg-gray-100"
                 aria-label={isCollapsed ? 'Expand section' : 'Collapse section'}
                 aria-expanded={!isCollapsed}
               >
@@ -5129,7 +5130,7 @@ export default function QuoteBuilder() {
                 value={sec.section_name}
                 onChange={(e) => updateSectionName(sec._key, e.target.value)}
                 aria-label="Section name"
-                className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-9 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+                className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-10 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
                 placeholder="Section name"
               />
               <div className="order-last md:order-none w-full md:w-auto flex flex-wrap items-center gap-2">
@@ -5154,7 +5155,7 @@ export default function QuoteBuilder() {
                   <button
                     type="button"
                     onClick={() => navigate(`/jobs/${sectionJobs[sec.id as string].id}`)}
-                    className="shrink-0 min-h-11 md:min-h-0"
+                    className="shrink-0 min-h-11 md:min-h-10"
                     title="Open the job scheduled from this section"
                   >
                     <Badge variant={statusToBadgeVariant[sectionJobs[sec.id as string].status] || 'info'}>
@@ -5163,7 +5164,7 @@ export default function QuoteBuilder() {
                   </button>
                 )}
                 {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
-                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-9">
+                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
                     Schedule job
                   </Button>
                 )}
@@ -5239,9 +5240,8 @@ export default function QuoteBuilder() {
                     <textarea
                       value={sec.section_header_notes || ''}
                       onChange={(e) => updateSectionField(sec._key, 'section_header_notes', e.target.value || null)}
+                      id={`section-note-input-${sec._key}`}
                       onFocus={openSectionNote}
-                      // eslint-disable-next-line jsx-a11y/no-autofocus -- only an empty note just opened by its link; the user means to type
-                      autoFocus={!sec.section_header_notes}
                       aria-labelledby={`section-note-${sec._key}`}
                       rows={2}
                       placeholder="Section notes for grower (shown above products on PDF)..."
@@ -5251,8 +5251,12 @@ export default function QuoteBuilder() {
                 ) : (
                   <button
                     type="button"
-                    onClick={openSectionNote}
-                    className="-ml-2 inline-flex min-h-11 md:min-h-8 items-center gap-1.5 px-2 text-left text-sm font-medium text-crx-green hover:underline"
+                    onClick={() => {
+                      openSectionNote();
+                      // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
+                      requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
+                    }}
+                    className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 px-2 text-left text-sm font-medium text-crx-green hover:underline"
                   >
                     <Plus className="w-3.5 h-3.5 shrink-0" />
                     Add a note for this section (prints above its products)
@@ -5265,7 +5269,7 @@ export default function QuoteBuilder() {
                   <button
                     type="button"
                     onClick={() => addItem(sec._key)}
-                    className="min-h-11 md:min-h-0 text-crx-green hover:underline font-medium"
+                    className={`${LINK_HIT} text-crx-green hover:underline font-medium`}
                   >
                     Add one
                   </button>
@@ -5303,20 +5307,21 @@ export default function QuoteBuilder() {
                 </div>
               ) : (
                 // 768 px and up: all columns; the table scrolls inside its card with Product pinned when it doesn't fit.
-                <div className="mt-2 overflow-x-auto">
-                  <table className={`w-full text-sm ${hideCost ? 'min-w-[53rem]' : 'min-w-[61rem]'}`}>
+                // relative: the sr-only header is absolutely positioned and must stay inside this scroller.
+                <div className="relative mt-2 overflow-x-auto">
+                  <table className={`w-full text-sm ${hideCost ? 'min-w-[48.5rem]' : 'min-w-[56.5rem]'}`}>
                     <thead>
                       <tr className="border-t border-cream-dark text-left text-xs text-secondary">
                         <th scope="col" className="py-2.5 pl-4 pr-2 w-8 font-medium">#</th>
-                        <th scope="col" className="sticky left-0 z-[1] bg-white py-2.5 px-2 min-w-[12rem] font-medium">Product</th>
+                        <th scope="col" className="sticky left-0 z-[1] bg-white py-2.5 px-2 min-w-[10rem] font-medium">Product</th>
                         <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Rate</th>
                         <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium">Acres</th>
                         <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Quantity</th>
-                        <th scope="col" className="py-2.5 px-2 w-[7.5rem] font-medium">Price</th>
+                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Price</th>
                         <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium text-right">$/acre</th>
-                        <th scope="col" className="py-2.5 px-2 w-24 font-medium text-right">Total</th>
+                        <th scope="col" className="py-2.5 px-2 w-20 font-medium text-right">Total</th>
                         {!hideCost && <th scope="col" className="py-2.5 px-2 w-32 font-medium text-right">Cost · margin</th>}
-                        <th scope="col" className="py-2.5 pl-2 pr-4 w-14"><span className="sr-only">Line actions</span></th>
+                        <th scope="col" className="py-2.5 px-1 w-12"><span className="sr-only">Line actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5337,7 +5342,7 @@ export default function QuoteBuilder() {
                               {fmt(item.total_price)}
                             </td>
                             {!hideCost && <td className="py-3 px-2 pt-5 text-right text-xs">{line.cost}</td>}
-                            <td className="py-2 pl-2 pr-4 text-right">{line.menu}</td>
+                            <td className="py-2 px-1 text-right">{line.menu}</td>
                           </tr>
                         );
                       })}

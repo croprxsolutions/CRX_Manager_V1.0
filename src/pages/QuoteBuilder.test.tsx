@@ -5565,6 +5565,38 @@ describe('QuoteBuilder', () => {
       }
     });
 
+    it('Edit note opens the line note, Done shows it, and Save draft sends it', async () => {
+      serveLines();
+      await loaded();
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for line 1' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /note$/ }));
+      const note = await screen.findByRole('textbox', { name: 'Line note' });
+      fireEvent.change(note, { target: { value: 'Apply before rain' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(screen.queryByRole('textbox', { name: 'Line note' })).not.toBeInTheDocument();
+      expect(screen.getByText('Note: Apply before rain')).toBeInTheDocument();
+
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { quote_id: 'quote-draft-7', row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+      fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      const saveArgs = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
+        p_sections: Array<{ items: Array<{ id: string | null; notes: string | null }> }>;
+      };
+      expect(saveArgs.p_sections[0].items[0]).toMatchObject({ id: 'item-1', notes: 'Apply before rain' });
+    });
+
+    // Found at 768 px: the sr-only "Line actions" header is absolutely positioned; without a positioned
+    // scroller it escapes the table's overflow and widens the page.
+    it('the line table scrolls inside a positioned wrapper', async () => {
+      serveLines();
+      await loaded();
+      const wrapper = screen.getByRole('columnheader', { name: 'Total' }).closest('table')?.parentElement;
+      expect(wrapper).toHaveClass('relative', 'overflow-x-auto');
+      expect(within(wrapper as HTMLElement).getByText('Line actions')).toHaveClass('sr-only');
+    });
+
     // Review Focus 1: a long name wraps on the 360 px card instead of being cut off behind a tooltip.
     it('a line card at 360 px keeps a 60-character product name readable', async () => {
       const longName = 'Synthetic pre-emerge herbicide concentrate, long label names';

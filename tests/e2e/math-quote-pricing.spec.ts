@@ -53,13 +53,13 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
     }
 
     // Find column indices by header keywords
-    // Quote columns: #, Product, Price/Unit, Cost, Sug.Rate, ActualRate, Unit, Acres, Oz/Acre, $/Acre, UnitsNeeded, Total, Profit, Margin, (delete)
+    // Quote columns: #, Product, Rate, Acres, Quantity, Price, $/acre, Total, Cost · margin (admin), (actions)
     const colProduct = headerTexts.findIndex((h) => h.includes('product'));
-    const colPriceUnit = headerTexts.findIndex((h) => h.includes('price') && h.includes('unit'));
-    const colUnitsNeeded = headerTexts.findIndex((h) => h.includes('units') && h.includes('need'));
-    const colTotal = headerTexts.findIndex((h) => h === 'total' || h.includes('total') && !h.includes('units'));
-    const colProfit = headerTexts.findIndex((h) => h.includes('profit'));
-    const colMargin = headerTexts.findIndex((h) => h.includes('margin'));
+    const colPriceUnit = headerTexts.findIndex((h) => h === 'price');
+    const colUnitsNeeded = headerTexts.findIndex((h) => h === 'quantity');
+    const colTotal = headerTexts.findIndex((h) => h === 'total');
+    // One admin cell: "$6.00 / today $8.00 · up" then "$8.00 · 40.0%" (profit · margin).
+    const colCostMargin = headerTexts.findIndex((h) => h.includes('margin'));
 
     const bodyRows = table.locator('tbody tr');
     const rowCount = await bodyRows.count();
@@ -73,13 +73,15 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
         ? ((await cells.nth(colProduct).textContent()) ?? '').trim()
         : '';
 
-      const pricePerUnit = colPriceUnit >= 0
-        ? parseDollars((await cells.nth(colPriceUnit).textContent()) ?? '') / 100
-        : 0;
+      // Price and Quantity are <input type="number"> boxes: read their values, not the cell text
+      // (which holds hints such as "Sent at $X").
+      const pricePerUnit = await (async (): Promise<number> => {
+        if (colPriceUnit < 0) return 0;
+        const inputEl = cells.nth(colPriceUnit).locator('input[aria-label="Price per unit"]');
+        if ((await inputEl.count()) === 0) return 0;
+        return parseFloat(await inputEl.inputValue()) || 0;
+      })();
 
-      // "Units Needed" column renders an <input type="number"> element, not plain text.
-      // textContent() on the td returns '' because the value lives in the input DOM attribute.
-      // We must call inputValue() on the input element to get the displayed number.
       const totalUnitsNeeded = await (async (): Promise<number> => {
         if (colUnitsNeeded < 0) return 0;
         const inputEl = cells.nth(colUnitsNeeded).locator('input');
@@ -93,14 +95,15 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
         ? parseDollars((await cells.nth(colTotal).textContent()) ?? '') / 100
         : 0;
 
-      const profit = colProfit >= 0
-        ? parseDollars((await cells.nth(colProfit).textContent()) ?? '') / 100
-        : 0;
-
+      let profit = 0;
       let margin = 0;
-      if (colMargin >= 0) {
-        const marginText = ((await cells.nth(colMargin).textContent()) ?? '').trim();
-        margin = parseFloat(marginText.replace(/[^0-9.-]/g, '')) || 0;
+      if (colCostMargin >= 0) {
+        const costText = ((await cells.nth(colCostMargin).textContent()) ?? '').trim();
+        const profitMargin = costText.match(/(-?\$[\d,]+\.\d{2}) · (-?[\d.]+)%$/);
+        if (profitMargin) {
+          profit = parseDollars(profitMargin[1]) / 100;
+          margin = parseFloat(profitMargin[2]) || 0;
+        }
       }
 
       if (pricePerUnit > 0 || totalPrice > 0) {

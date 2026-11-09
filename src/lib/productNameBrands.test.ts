@@ -62,6 +62,12 @@ describe('parseNameBrands', () => {
     expect(parseNameBrands('Gen L: (2,4-D Amine; Brand B)').brands).toEqual(['2,4-D Amine', 'Brand B']);
   });
 
+  it('never reads a bracket before the colon as a brand', () => {
+    expect(parseNameBrands('Gen Alpha (Crop Mix): (Brand A)').brands).toEqual(['Brand A']);
+    expect(parseNameBrands('Alpha (Brand A) - 1 Gal').brands).toEqual(['Brand A']);
+    expect(parseNameBrands('Alpha (Brand: A)').brands).toEqual(['Brand: A']);
+  });
+
   it('does not split on a slash', () => {
     expect(parseNameBrands('Gen M: (Brand A/B)').brands).toEqual(['Brand A/B']);
   });

@@ -30,10 +30,23 @@ function isNote(normal: string): boolean {
   return !/[a-z]/.test(normal) || SIZE_ITEM.test(normal) || NOTE_WORDS.has(normal);
 }
 
+// Where the brands start: after the first colon outside brackets ("Gen (Crop Oil): (Brand A)"), else 0.
+function brandsStart(productName: string): number {
+  let depth = 0;
+  for (let i = 0; i < productName.length; i += 1) {
+    const char = productName[i];
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    else if (char === ':' && depth === 0) return i + 1;
+  }
+  return 0;
+}
+
 export function parseNameBrands(productName: string): NameBrands {
   const result: NameBrands = { brands: [], notes: [], unclosed: false, maybeCutOff: null };
   const seen = new Set<string>();
-  for (const match of productName.matchAll(/\(([^)]*)(\)|$)/g)) {
+  // The text before the colon names the product being matched, so its brackets are never brands.
+  for (const match of productName.slice(brandsStart(productName)).matchAll(/\(([^)]*)(\)|$)/g)) {
     const unclosed = match[2] === '';
     const text = unclosed ? match[1].replace(SIZE_TAIL, '') : match[1];
     let lastBrand: string | null = null;

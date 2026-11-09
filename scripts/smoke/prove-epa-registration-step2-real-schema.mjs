@@ -560,6 +560,13 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   assert.equal(capture(L1), `${N1}|no|Caution|registration:${N1}@4|true`);
   ownerOk(`UPDATE public.invoice_items SET quantity = 2, extended_cents = 3000 WHERE id = '${L2}';`);
   assert.equal(capture(L2), `no|product:${P2}|true`);
+  // A quantity change on a Yes line takes today's facts but never lowers the Yes.
+  raw(`UPDATE public.epa_registrations SET signal_word = 'Warning', rup_status = 'no' WHERE epa_registration = '${N2}';`);
+  ownerOk(`UPDATE public.invoice_items SET quantity = 4, extended_cents = 6000 WHERE id = '${L5}';`);
+  assert.equal(capture(L5), `${N2}|yes|Warning|registration:${N2}@1|true`);
+  raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
+  ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
+  assert.equal(capture(L5), `${N2}|yes|Danger|registration:${N2}@1|true`);
   console.log('[prover] case 11: a new line captures its number\'s registration; a sent capture or an unregistered number is refused; a price edit keeps the capture and a quantity edit re-captures');
 
   // 12. Posting writes the restricted-use record once.

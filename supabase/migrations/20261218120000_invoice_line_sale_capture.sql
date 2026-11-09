@@ -109,6 +109,7 @@ DECLARE
   v_p record;
   v_reg public.epa_registrations;
   v_n text;
+  v_keep_yes boolean := false;
 BEGIN
   PERFORM public._epa_registration_lock(false);
   IF TG_OP = 'INSERT' THEN
@@ -126,10 +127,11 @@ BEGIN
 
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
      AND public._normalize_epa_registration(NEW.epa_registration) IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration) THEN
-    IF NEW.quantity IS NOT DISTINCT FROM OLD.quantity OR OLD.sale_rup_status = 'yes' THEN
-      RETURN NEW;  -- price, notes and similar edits keep the capture; a Yes is never lowered
+    IF NEW.quantity IS NOT DISTINCT FROM OLD.quantity THEN
+      RETURN NEW;  -- price, notes and similar edits keep the capture
     END IF;
     NEW.epa_registration := NULL;  -- a quantity change re-captures from the product's current label
+    v_keep_yes := OLD.sale_rup_status = 'yes';  -- with today's facts, but a Yes is never lowered
   END IF;
 
   IF NEW.product_id IS NULL THEN
@@ -154,6 +156,7 @@ BEGIN
     NEW.sale_signal_word := v_p.signal_word;
     NEW.sale_facts_source := 'product:' || v_p.id::text;
   END IF;
+  IF v_keep_yes THEN NEW.sale_rup_status := 'yes'; END IF;
   NEW.sale_facts_captured_at := now();
   RETURN NEW;
 END;

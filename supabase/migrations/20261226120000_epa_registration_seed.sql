@@ -3,7 +3,7 @@
 --  _product_parent_replay(key, scope, fingerprint), which refuses a key reused for another request or
 --  another actor, then saves its receipt with save_idempotency. The hook only recognises check_idempotency.)
 -- Written 2026-11-08, cut down 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261218130000_epa_registration_seed.md (REG-1 Step 2, file 3 of 3).
+-- docs/reference/migrations.d/20261226120000_epa_registration_seed.md (REG-1 Step 2, file 3 of 3).
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2, the one-time seed (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 5). Mason,
@@ -23,7 +23,7 @@
 -- ROLLBACK (its own reviewed migration): drop the seed functions and _epa_registration_seed_plan; before the
 --   seed nothing else to undo; after it, a reviewed migration removes the seed's registrations, events and run row.
 --
--- ORDERING: after 20261218120000_rup_records_by_sold_number.
+-- ORDERING: after 20261226110000_rup_records_by_sold_number.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -39,7 +39,7 @@ BEGIN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
   IF to_regprocedure('public.get_epa_sales_to_check()') IS NULL THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: apply 20261218120000_rup_records_by_sold_number first';
+    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: apply 20261226110000_rup_records_by_sold_number first';
   END IF;
   IF to_regprocedure('public.seed_epa_registrations(jsonb,text,text,text)') IS NOT NULL THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: this file was already applied';

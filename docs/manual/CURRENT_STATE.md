@@ -284,6 +284,8 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-09 (PR #1663):** `customer-document-files` Edge Function deployed to v6 (admins can download removed
+  documents to check before restoring); verified ACTIVE, byte-identical to the PR, caller path exercised by Mason.
 - **2026-11-08 evening Central (KI-25, PR #1647):** the new `send-delivery-receipts` Edge Function was deployed live as
   v1 with `verify_jwt` off on Mason's in-chat approval ("ok deploy it"), through the Supabase connector with main's
   `index.ts`, `logic.ts` and `_shared/` `sentry.ts`, `deliveryReceiptHtml.ts`. The downloaded live copy matches main

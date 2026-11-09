@@ -18,6 +18,7 @@ export interface BadgeProps {
   children: ReactNode;
   size?: 'sm' | 'md';
   className?: string;
+  normalCase?: boolean;
 }
 
 const variantClasses: Record<BadgeVariant, string> = {
@@ -70,11 +71,12 @@ export const statusToBadgeVariant: Record<string, BadgeVariant> = {
   partially_paid: 'info',
 };
 
-export default function Badge({ variant = 'default', children, size = 'sm', className = '' }: BadgeProps) {
+export default function Badge({ variant = 'default', children, size = 'sm', className = '', normalCase = false }: BadgeProps) {
   return (
     <span
       className={`
-        inline-flex items-center font-medium rounded-full capitalize
+        inline-flex items-center font-medium rounded-full
+        ${normalCase ? '' : 'capitalize'}
         ${variantClasses[variant]}
         ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm'}
         ${className}

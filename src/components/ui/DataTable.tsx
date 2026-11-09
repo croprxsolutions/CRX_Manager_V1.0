@@ -6,6 +6,8 @@ import { applyTableSearchSort, type SortDir } from '../../lib/tableSearchSort';
 export interface Column<T> {
   key: string;
   header: ReactNode;
+  /** Rendered beside the header (outside the sort button), e.g. a HelpTip. */
+  headerExtra?: ReactNode;
   render?: (row: T) => ReactNode;
   sortable?: boolean;
   className?: string;
@@ -209,6 +211,7 @@ export default function DataTable<T extends Record<string, any>>({
                     key={col.key}
                     className={`px-4 py-3 text-left font-medium text-secondary ${col.className || ''}`}
                   >
+                    <span className={col.headerExtra ? 'inline-flex items-center gap-2.5' : undefined}>
                     {col.sortable ? (
                       <button
                         onClick={() => toggleSort(col.key)}
@@ -229,6 +232,8 @@ export default function DataTable<T extends Record<string, any>>({
                     ) : (
                       col.header
                     )}
+                    {col.headerExtra}
+                    </span>
                   </th>
                 ))}
               </tr>

@@ -1554,7 +1554,8 @@ export default function Deliveries() {
     },
     {
       key: 'delivery_number',
-      header: (<span className="flex items-center">Delivery #<HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" /></span>),
+      header: 'Delivery #',
+      headerExtra: <HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" />,
       sortable: true,
       render: (row) => (
         <div className="flex items-center gap-2">

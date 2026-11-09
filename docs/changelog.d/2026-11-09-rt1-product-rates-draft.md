@@ -2,7 +2,7 @@
 
 Local candidate migration `20261223100000_product_rates_draft.sql` (not applied). It adds draft rates per product
 parent: a fixed unit list (`product_rate_units`), the rates themselves (`product_rates`, exact to 6 decimals, one row
-per parent, source and basis) and an append-only history (`product_rate_draft_events`). Four admin calls save, delete,
+for each parent, source and basis pair, so a parent can have several) and an append-only history (`product_rate_draft_events`). Four admin calls save, delete,
 read and derive draft rows; derive copies today's per-size `products.rate` fields into draft rows and records a note
 for everything it cannot read. A house rate above a linked EPA label maximum needs a written reason. Nothing in the app
 reads these tables yet (RT-4), and no existing table, row or function changes. Types in `src/types/index.ts`; calls in

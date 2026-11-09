@@ -285,6 +285,8 @@ try {
     psql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
       VALUES ('20261217100000', '20261217100000_job_access_ends_with_the_job', ARRAY[]::text[]) ON CONFLICT DO NOTHING;`);
   }
+  // 20261222100000's preflight needs storage.objects.created_at timestamptz, as live has it (the container's stub lacks it).
+  psql('ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();', { user: 'supabase_admin' });
   replay({ stopBefore: CANDIDATE });
   if (reuse) {
     // Reuse only: drop the candidate's objects so it can be applied again (fixtures are kept).

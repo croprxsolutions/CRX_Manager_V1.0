@@ -752,6 +752,8 @@ export default function QuoteBuilder() {
   const [threadOrders, setThreadOrders] = useState<{ id: string; order_number: string; deliveries: { id: string; delivery_number: string }[]; invoices: { id: string; invoice_number: string }[] }[]>([]);
   const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
   const [markingPresented, setMarkingPresented] = useState(false);
+  // The columns the shown preview was drawn with; the effect below redraws when the chips change.
+  const previewColumnsKeyRef = useRef<string | null>(null);
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
@@ -2867,52 +2869,55 @@ export default function QuoteBuilder() {
     navigate(`/quotes/${result.quote_id}`);
   };
 
+  // Download and the preview print the same data (the email builds its own, with the stored expiry).
+  const buildQuotePdfData = () => ({
+    quote_number: quoteNumber,
+    customer_name: selectedCustomer?.farm_name || 'Customer',
+    customer_email: selectedCustomer?.email || undefined,
+    customer_phone: selectedCustomer?.phone || undefined,
+    customer_address: selectedCustomer?.billing_address || undefined,
+    sales_rep_name: profile?.full_name || 'Sales Rep',
+    created_at: new Date().toISOString(),
+    expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
+    tier,
+    header_notes: headerNotes || undefined,
+    footer_notes: footerNotes || undefined,
+    sections: sections.map((sec) => ({
+      section_name: sec.section_name,
+      section_notes: sec.section_notes || undefined,
+      section_header_notes: sec.section_header_notes || undefined,
+      items: sec.items
+        .filter((i) => i.product_id)
+        .map((i) => ({
+          product_name: i.product?.product_name || '',
+          category: i.product?.category || '',
+          notes: i.notes || undefined,
+          suggested_rate: i.product?.suggested_rate || undefined,
+          actual_rate: i.actual_rate || 0,
+          rate_unit: i.rate_unit || '',
+          acres: i.acres || 0,
+          total_units_needed: i.total_units_needed || 0,
+          inventory_unit: i.product?.inventory_unit || undefined,
+          unit_size: i.product?.unit_size || undefined,
+          price_per_unit: i.price_per_unit,
+          price_unit: i.price_unit || undefined,
+          price_per_acre: i.price_per_acre || undefined,
+          total_price: i.total_price,
+        })),
+    })),
+    totals: {
+      totalPrice: totals.totalPrice,
+      totalCost: totals.totalCost,
+      totalProfit: totals.totalProfit,
+      avgMargin: totals.totalMarginPct,
+    },
+  });
+
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
     await runCriticalAction({
       action: async () => {
-        await downloadQuotePdf({
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            section_header_notes: sec.section_header_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                category: i.product?.category || '',
-                notes: i.notes || undefined,
-                suggested_rate: i.product?.suggested_rate || undefined,
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                inventory_unit: i.product?.inventory_unit || undefined,
-                unit_size: i.product?.unit_size || undefined,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                price_per_acre: i.price_per_acre || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        }, customColumns || getTemplateColumns(selectedTemplateId));
+        await downloadQuotePdf(buildQuotePdfData(), customColumns || getTemplateColumns(selectedTemplateId));
       },
       toast,
       successMessage: 'PDF downloaded',
@@ -3158,42 +3163,9 @@ export default function QuoteBuilder() {
   const handlePreviewQuote = async () => {
     await runCriticalAction({
       action: async () => {
-        const pdfData = {
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        };
-        const doc = await generateQuotePdf(pdfData);
+        const columns = customColumns || getTemplateColumns(selectedTemplateId);
+        const doc = await generateQuotePdf(buildQuotePdfData(), columns);
+        previewColumnsKeyRef.current = columns.join(',');
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
@@ -3457,6 +3429,27 @@ export default function QuoteBuilder() {
     const t = pdfTemplates.find((p) => p.id === templateId);
     return t ? (t.columns as string[]) : ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
   };
+
+  // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
+  const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
+  const activePdfColumnsKey = activePdfColumns.join(',');
+  const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
+  useEffect(() => {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) return;
+    let stale = false;
+    const timer = setTimeout(async () => {
+      try {
+        const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
+        if (stale) return;
+        previewColumnsKeyRef.current = activePdfColumnsKey;
+        setPreviewPdfBlob(doc.output('blob'));
+      } catch (err) {
+        // Keep the last good preview; Download and Email build their own PDF.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'read', action: 'preview_quote_pdf' } });
+      }
+    }, 200);
+    return () => { stale = true; clearTimeout(timer); };
+  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;
@@ -5856,15 +5849,14 @@ export default function QuoteBuilder() {
                 <legend className="mb-2.5 text-sm font-medium text-secondary">Columns on the PDF</legend>
                 <div className="flex flex-wrap gap-2">
                   {AVAILABLE_PDF_COLUMNS.map((col) => {
-                    const activeColumns = customColumns || getTemplateColumns(selectedTemplateId);
-                    const isActive = activeColumns.includes(col.key);
+                    const isActive = activePdfColumns.includes(col.key);
                     return (
                       <button
                         key={col.key}
                         type="button"
                         aria-pressed={isActive}
                         onClick={() => {
-                          const cols = [...activeColumns];
+                          const cols = [...activePdfColumns];
                           if (isActive) cols.splice(cols.indexOf(col.key), 1);
                           else cols.push(col.key);
                           setCustomColumns(cols);
@@ -5876,7 +5868,7 @@ export default function QuoteBuilder() {
                     );
                   })}
                 </div>
-                <p className="text-sm text-secondary">Applies to the emailed and downloaded PDF.</p>
+                <p className="text-sm text-secondary">The preview updates as you pick.</p>
               </fieldset>
               <div className="flex flex-col gap-1.5 rounded-lg border border-cream-dark bg-cream p-3.5 text-sm">
                 <span className="font-medium text-nav-dark">Sending to</span>

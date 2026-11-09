@@ -11,6 +11,11 @@ async function loadPdfjs() {
   return pdfjs;
 }
 
+// Zeroing the backing store frees canvas memory at once (iOS Safari holds it otherwise).
+function releaseCanvases(canvases: HTMLCanvasElement[]) {
+  for (const c of canvases) { c.width = 0; c.height = 0; }
+}
+
 /** Shows each page of a PDF as a canvas sized to the pane (crisp on high-DPI screens). */
 export default function PdfPagePreview({ blob, title }: { blob: Blob; title: string }) {
   const pagesRef = useRef<HTMLDivElement>(null);
@@ -22,7 +27,9 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
     let cancelled = false;
     let loadingTask: { destroy: () => Promise<void> } | null = null;
     const renderTasks: { cancel: () => void }[] = [];
-    setStatus('loading');
+    const drawn: HTMLCanvasElement[] = [];
+    // The skeleton shows on first load only; a new blob keeps the old pages until its own are drawn.
+    if (!host.hasChildNodes()) setStatus('loading');
     (async () => {
       try {
         const pdfjs = await loadPdfjs();
@@ -39,6 +46,7 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
           if (cancelled) return;
           const viewport = page.getViewport({ scale: (cssWidth / page.getViewport({ scale: 1 }).width) * dpr });
           const canvas = document.createElement('canvas');
+          drawn.push(canvas);
           canvas.width = Math.floor(viewport.width);
           canvas.height = Math.floor(viewport.height);
           canvas.setAttribute('role', 'img');
@@ -48,20 +56,37 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
           renderTasks.push(renderTask);
           await renderTask.promise;
           if (cancelled) return;
-          host.append(canvas);
         }
+        const old = [...host.children] as HTMLCanvasElement[];
+        host.replaceChildren(...drawn);
+        releaseCanvases(old);
         setStatus('ready');
       } catch {
-        if (!cancelled) setStatus('error');
+        if (cancelled) return;
+        releaseCanvases([...host.children] as HTMLCanvasElement[]);
+        host.replaceChildren();
+        releaseCanvases(drawn);
+        setStatus('error');
       }
     })();
     return () => {
       cancelled = true;
       renderTasks.forEach((t) => t.cancel());
       void loadingTask?.destroy();
-      host.replaceChildren();
+      // Pages not yet shown are dropped; shown pages stay until the next blob's pages replace them.
+      releaseCanvases(drawn.filter((c) => c.parentNode !== host));
     };
   }, [blob, title]);
+
+  // Unmount: free the shown pages too.
+  useEffect(() => {
+    const host = pagesRef.current;
+    return () => {
+      if (!host) return;
+      releaseCanvases([...host.children] as HTMLCanvasElement[]);
+      host.replaceChildren();
+    };
+  }, []);
 
   return (
     <div className="mx-auto flex w-full max-w-[816px] flex-col gap-6">

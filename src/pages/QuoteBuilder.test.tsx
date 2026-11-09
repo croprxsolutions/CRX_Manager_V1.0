@@ -5693,6 +5693,58 @@ describe('QuoteBuilder', () => {
       ));
     });
 
+    it('toggling a chip redraws the preview with the new columns; the emailed PDF is built as before', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      const quote = { ...fixture.quote, status: 'sent' };
+      let quoteReads = 0;
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes'
+          ? (++quoteReads <= 2 ? quote : { ...quote, row_version: 8 })
+          : table === 'quote_sections'
+            ? [fixture.section]
+            : table === 'quote_items'
+              ? [fixture.item]
+              : table === 'customers'
+                ? [QUOTE_FIXTURE_CUSTOMER]
+                : table === 'products'
+                  ? [fixture.product]
+                  : [],
+        error: null,
+      }));
+      mockRpc.mockImplementation((name: string) => Promise.resolve(
+        name === 'create_quote_version'
+          ? { data: { version_number: 2, status: 'created', row_version: 8 }, error: null }
+          : { data: null, error: null },
+      ));
+      renderQuoteBuilder(quote.id);
+      const defaults = ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
+      const dialog = await openPreview();
+
+      // The preview prints the same rich line data as Download, with the active columns.
+      expect(mockGenerateQuotePdf).toHaveBeenCalledTimes(1);
+      expect(mockGenerateQuotePdf).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sections: [expect.objectContaining({
+            items: [expect.objectContaining({ category: '', inventory_unit: 'gal', unit_size: 'gal' })],
+          })],
+        }),
+        defaults,
+      );
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Category' }));
+      await waitFor(() => expect(mockGenerateQuotePdf).toHaveBeenCalledTimes(2));
+      expect(mockGenerateQuotePdf).toHaveBeenLastCalledWith(expect.anything(), [...defaults, 'category']);
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Email to grower' }));
+      await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+      expect(mockGenerateQuotePdf).toHaveBeenCalledTimes(3);
+      // The email still builds its own PDF: the quote's saved issue date and the expiry its send stored.
+      expect(mockGenerateQuotePdf).toHaveBeenLastCalledWith(
+        expect.objectContaining({ created_at: RECENT_QUOTE_CREATED_AT, expires_at: new Date(2026, 10, 25).toISOString() }),
+        [...defaults, 'category'],
+      );
+    });
+
     it("Email to grower is refused with today's messages when unsaved, unsaved changes, or no email", async () => {
       renderQuoteBuilder();
       let dialog = await openPreview();

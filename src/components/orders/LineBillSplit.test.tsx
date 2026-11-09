@@ -136,6 +136,20 @@ describe('LineBillSplit', () => {
     expect(screen.getByLabelText('Line split percent')).toBeDisabled();
   });
 
+  it("can't switch lines while a share is saving, so the reply can't clear the other line's entry", async () => {
+    let finish: (v: { data: unknown[]; error: null }) => void = () => {};
+    mocks.from.mockReturnValue({ insert: vi.fn(() => ({ select: vi.fn(() => new Promise((resolve) => { finish = resolve; })) })) });
+    render(<LineBillSplit {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Split by line' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Line split customer' }));
+    fireEvent.change(screen.getByLabelText('Line split percent'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change split for Adjuvant' })).toBeDisabled());
+    finish({ data: [{}], error: null });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change split for Adjuvant' })).not.toBeDisabled());
+  });
+
   it('refuses a line total over 100% before saving', () => {
     render(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 60, customer: { farm_name: 'Farmer' } }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Change split for Glyphosate' }));

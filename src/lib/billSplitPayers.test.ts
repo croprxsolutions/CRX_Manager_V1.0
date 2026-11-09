@@ -21,6 +21,12 @@ describe('billSplitPayerShares', () => {
     expect(payers.reduce((s, p) => s + p.amount_cents, 0)).toBe(10000);
   });
 
+  it('gives the extra hundredths to the first payers when remainders tie exactly (whole-number maths)', () => {
+    // 1c, 1c, 4c of 6c: each remainder is exactly 4/6 of a hundredth; float maths gave the third payer one.
+    const payers = billSplitPayerShares([row('1', 'A', 1), row('2', 'B', 1), row('3', 'C', 4)]);
+    expect(payers.map((p) => p.split_percentage)).toEqual([16.67, 16.67, 66.66]);
+  });
+
   it('equal payers print to two places and still add up to 100%', () => {
     // 100 / 300 each is 33.3333...; printed at two places that was 99.99%.
     const payers = billSplitPayerShares([row('1', 'A', 100), row('2', 'B', 100), row('3', 'C', 100)]);

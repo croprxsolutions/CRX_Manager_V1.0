@@ -2929,7 +2929,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Print Dialog */}
       <InvoicePrintDialog
-        key={`${invoice.id}:${billSplitPayers.length > 1 ? 'bill-split' : 'plain'}`}
+        // Remounted on every open, so its defaults (payer shares ticked) come back after an untick and close.
+        key={`${invoice.id}:${billSplitPayers.length > 1 ? 'bill-split' : 'plain'}:${showPrintDialog ? 'open' : 'closed'}`}
         sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}

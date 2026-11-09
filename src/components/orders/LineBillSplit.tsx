@@ -105,7 +105,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
                 )}
               </div>
               {canEdit && !locked && (
-                <Button variant="ghost" size="sm" showChevron={false} aria-label={`Change split for ${name}`}
+                <Button variant="ghost" size="sm" showChevron={false} aria-label={`Change split for ${name}`} disabled={saving}
                   onClick={() => { setOpenItemId(isOpen ? null : item.id); setCustomer(null); setPct(''); }}>
                   {isOpen ? 'Done' : 'Change'}
                 </Button>

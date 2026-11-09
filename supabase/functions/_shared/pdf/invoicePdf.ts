@@ -221,10 +221,12 @@ export function billSplitPayerShares(rows: Array<{
   // Numeric, so -10 follows -2. The database sorts the suffix as text.
   const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
   // Hundredths of a percent, largest remainder first, so the printed column adds up to exactly 100%.
-  const raw = ordered.map((r) => (total > 0 ? ((r.total_amount_cents ?? 0) * 10000) / total : 0));
-  const bp = raw.map(Math.floor);
+  // Whole numbers throughout (cents x 10000 stays exact), so equal remainders tie exactly and go in order.
+  const parts = ordered.map((r) => (total > 0 ? (r.total_amount_cents ?? 0) * 10000 : 0));
+  const bp = parts.map((p) => (total > 0 ? Math.floor(p / total) : 0));
   const short = total > 0 ? 10000 - bp.reduce((s, v) => s + v, 0) : 0;
-  raw.map((v, i) => [v - bp[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).slice(0, short).forEach(([, i]) => { bp[i] += 1; });
+  parts.map((p, i) => [total > 0 ? p - bp[i] * total : 0, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
+    .slice(0, short).forEach(([, i]) => { bp[i] += 1; });
   return ordered.map((r, i) => ({
     invoice_id: r.id,
     invoice_number: r.invoice_number,

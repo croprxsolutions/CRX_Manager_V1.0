@@ -10,6 +10,8 @@
 --   F  An invoice with no split group: no rows
 --   G  A payer invoice with no sales rep (an office sale): a driver and another rep are still refused, and a
 --      call with no signed-in claims at all is refused (a NULL in the check must never let a caller through)
+--   H  Rep 2 deactivated: refused on their own invoice, though their token still names them
+--   I  A plain (not Bill Split) invoice in the caller's reach: no rows, never another group's payers
 --
 -- HOW TO RUN: execute this whole file as ONE statement (Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture,
@@ -182,6 +184,34 @@ BEGIN
     IF SQLERRM NOT LIKE 'INVOICE_NOT_VISIBLE:%' THEN v_fails := v_fails || ' (G) wrong refusal with no claims: ' || SQLERRM || ';'; END IF;
   END;
   RESET ROLE;
+
+  -- H: rep 2 deactivated (as owner; rolled back with everything else).
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  UPDATE profiles SET is_active = false WHERE id = v_rep2;
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep2, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep2::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM count(*) FROM get_bill_split_payers(v_inv2);
+    v_fails := v_fails || ' (H) a deactivated rep read the payers;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVOICE_NOT_VISIBLE:%' THEN v_fails := v_fails || ' (H) wrong refusal for a deactivated rep: ' || SQLERRM || ';'; END IF;
+  END;
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  UPDATE profiles SET is_active = true WHERE id = v_rep2;
+
+  -- I: the admin on a non-Bill-Split invoice that has a group (a field split's, if this database has one).
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  SELECT id INTO v_plain FROM invoices
+   WHERE invoice_group_id IS NOT NULL AND delivery_id IS NULL AND deleted_at IS NULL AND status NOT IN ('voided', 'cancelled')
+   ORDER BY created_at DESC LIMIT 1;
+  IF v_plain IS NOT NULL AND (SELECT count(*) FROM get_bill_split_payers(v_plain)) <> 0 THEN
+    v_fails := v_fails || ' (I) a grouped invoice that is not a Bill Split returned payers;';
+  END IF;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL bill split payers read:%', v_fails;

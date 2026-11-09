@@ -468,8 +468,19 @@ try {
   // Every fluid-ounce spelling normalize_rate_unit folds into 'oz' keeps its volume kind; only a bare ounce takes the row's kind.
   for (const [spelling, kind, want] of [['fluid ounce/acre', 'weight', '-'], ['Fluid Ounces/acre', 'weight', '-'], ['floz/acre', 'weight', '-'],
     ['fluid ounce/acre', 'volume', 'fl_oz'], ['floz', 'volume', 'fl_oz'], ['ounce/acre', 'weight', 'dry_oz'], ['ounces', 'volume', 'fl_oz'],
-    ['dry ounces/acre', 'weight', 'dry_oz'], ['oz', 'weight', 'dry_oz']]) {
+    ['dry ounces/acre', 'weight', 'dry_oz'], ['oz', 'weight', 'dry_oz'],
+    ['each/acre', 'each', 'each'], ['Ea', 'each', 'each'], ['unit/acre', 'each', 'each'], ['each/acre', 'weight', '-']]) {
     assert.equal(scalar(`SELECT COALESCE(public._product_rate_max_unit(${sq(spelling)}, ${sq(kind)})->>'unit', '-');`), want, `${spelling} on ${kind}`);
+  }
+  // A count maximum compares with a count rate (Sol round 5): 2 each/acre over 1 each/acre needs a reason.
+  const eachMax = `UPDATE public.epa_registrations SET max_label_rate = 1, max_label_rate_unit = 'each/acre' WHERE epa_registration = '100-7';
+    UPDATE public.product_parents SET generic_epa_registration = '100-7' WHERE id = '${P['Each A']}';`;
+  const eaHouse = pick(rates(P['Each A']), 'house_standard', 'per_acre');
+  const eaSave = (rec) => save(P['Each A'], { rate: eaHouse.id, ver: eaHouse.row_version, basis: 'per_acre', source: 'house_standard', rec, unit: 'each', def: eaHouse.is_quoting_default });
+  expectCode(refused(eaSave(2), { before: eachMax }), 'PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED');
+  assert.equal(call(eaSave(1), { before: eachMax }).label_check.status, 'within');
+  for (const [text, want] of [['2 each/acre', 'each|2'], ['1-2 ea/acre', 'each|'], ['3 Unit per acre', 'each|3']]) {
+    assert.equal(scalar(`SELECT (r->>'unit') || '|' || COALESCE(r->>'recommended', '') FROM (SELECT public._product_rate_parse_text(${sq(text)}, 'each') AS r) s;`), want, text);
   }
   assert.equal(scalar(`SELECT (0.25 * 128 = 32 AND 18 * 1000 = 18000 AND 6 * 1 = 6 AND 2 * 32 = 64
     AND 17 * 453592.37 = 7711070.29 AND 17 * 453592.37 / 28349.523125 = 272

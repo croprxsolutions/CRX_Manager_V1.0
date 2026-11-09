@@ -314,7 +314,7 @@ LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path = public, pg_temp AS $fu
     WHEN p_word IN ('lb', 'lbs', 'pound', 'pounds') THEN 'lb'
     WHEN p_word IN ('g', 'gram', 'grams') THEN 'g'
     WHEN p_word = 'mg' THEN 'mg'
-    WHEN p_word IN ('ea', 'unit') THEN 'each'
+    WHEN p_word IN ('each', 'ea', 'unit') THEN 'each'
   END;
 $function$;
 
@@ -324,7 +324,7 @@ CREATE FUNCTION public._product_rate_parse_text(p_text text, p_form text) RETURN
 LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   c_num constant text := '([0-9]+(?:\.[0-9]*)?|\.[0-9]+)';
-  c_unit constant text := '(fl oz|dry oz|oz|pints|pint|pt|quarts|quart|qt|gallons|gallon|gal|pounds|pound|lbs|lb|grams|gram|mg|g|ea|unit)';
+  c_unit constant text := '(fl oz|dry oz|oz|pints|pint|pt|quarts|quart|qt|gallons|gallon|gal|pounds|pound|lbs|lb|grams|gram|mg|g|each|ea|unit)';
   v text := lower(regexp_replace(btrim(COALESCE(p_text, '')), '\s+', ' ', 'g'));
   v_left text;
   v_basis text;
@@ -396,6 +396,7 @@ BEGIN
     WHEN v_code IS NOT NULL THEN v_code
     WHEN v_base = 'oz' THEN NULL
     WHEN v_base IN ('pt', 'qt', 'gal', 'lb', 'g', 'mg') THEN v_base
+    WHEN v_base IN ('each', 'ea', 'unit') THEN 'each'
   END;
   IF v_code IS NOT NULL AND (SELECT u.kind FROM public.product_rate_units u WHERE u.code = v_code) IS DISTINCT FROM p_kind THEN
     v_code := NULL;

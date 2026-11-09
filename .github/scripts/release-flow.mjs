@@ -72,7 +72,7 @@ export function labelProblem({ label, merged, baseRef, headRef, texts }) {
 }
 
 // Minimal GitHub REST helper (GITHUB_TOKEN, GITHUB_REPOSITORY from the Actions environment).
-async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE' } = {}) {
+async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE', allow422 = false } = {}) {
   const res = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${path}`, {
     method,
     headers: {
@@ -83,7 +83,7 @@ async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE' }
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 404 && allow404) return null;
+  if ((res.status === 404 && allow404) || (res.status === 422 && allow422)) return null;
   if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
   return res.status === 204 || method === 'DELETE' ? null : res.json();
 }
@@ -91,7 +91,8 @@ async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE' }
 async function ensureLabels() {
   for (const [name, spec] of Object.entries(LABELS)) {
     if (!(await gh(`/labels/${encodeURIComponent(name)}`, { allow404: true }))) {
-      await gh('/labels', { method: 'POST', body: { name, ...spec } });
+      // 422 = another run created it a moment ago, which is fine.
+      await gh('/labels', { method: 'POST', body: { name, ...spec }, allow422: true });
     }
   }
 }

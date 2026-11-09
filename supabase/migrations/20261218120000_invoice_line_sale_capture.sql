@@ -143,7 +143,11 @@ BEGIN
     FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
   -- Decision (a): a line sells under its size's number, whichever writer inserted it; a numberless size's line has none.
   -- A different number sent by a screen is replaced, never refused: a missing or wrong number never blocks a sale (Mason, 2026-11-09).
-  v_n := public._normalize_epa_registration(v_p.epa_registration);
+  -- Only save_invoice (holding the invoice's pass) sends a number: a kept line's stored (sold) number, which it keeps.
+  v_n := CASE WHEN public._epa_registration_has_pass('invoices', NEW.invoice_id)
+                   AND public._normalize_epa_registration(NEW.epa_registration) IS NOT NULL
+              THEN public._normalize_epa_registration(NEW.epa_registration)
+              ELSE public._normalize_epa_registration(v_p.epa_registration) END;
   NEW.epa_registration := v_n;
   IF v_n IS NOT NULL THEN
     SELECT * INTO v_reg FROM public.epa_registrations WHERE epa_registration = v_n FOR SHARE;
@@ -233,7 +237,6 @@ DECLARE
   v_seeded boolean;
   v_old jsonb := '{}'::jsonb;
   v_old_line jsonb;
-  v_pay text;
   v_line_epa text;
   v_cap jsonb;
   v_keep_yes boolean;
@@ -492,7 +495,6 @@ BEGIN
     v_cap := NULL;
     v_keep_yes := false;
     IF v_seeded AND NULLIF(btrim(v_item->>'product_id'), '') IS NOT NULL THEN
-      v_pay := public._normalize_epa_registration(v_item->>'epa_registration');
       v_old_line := v_old -> lower(NULLIF(v_item->>'id', ''));
       IF v_old_line IS NOT NULL THEN
         v_old := v_old - lower(v_item->>'id');  -- each saved line is carried once
@@ -507,8 +509,8 @@ BEGIN
           v_cap := v_old_line;
         END IF;
       ELSE
-        -- New or product-changed line: the capture trigger gives it the product's number, whatever was sent.
-        v_line_epa := v_pay;
+        -- New or product-changed line: the payload's number is ignored; the capture trigger gives it the product's.
+        v_line_epa := NULL;
       END IF;
     END IF;
     INSERT INTO invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents,

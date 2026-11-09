@@ -653,6 +653,13 @@ ${r.stderr}`, /invoice_items_sale_capture_whole/);
   ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
     ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}';`), product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500, epa_registration: N3 }])}, 'k-save14b');`);
   assert.equal(scalar(`SELECT epa_registration || '|' || sale_rup_status FROM public.invoice_items WHERE invoice_id = '${INV4}';`), `${N2}|yes`);
+  // A legacy (uncaptured) kept line keeps the number it was stored under, not its product's current one.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
+    VALUES ('${L6}', '${INV4}', '${P4}', '[PROVER] legacy', 1, 'Gal', 1500, 1500, '${N1}');`);
+  ok(ADMIN, `SELECT public.save_invoice(${J({ id: INV4, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') })},
+    ${J([{ id: scalar(`SELECT id FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] line';`), product_id: P4, description: '[PROVER] line', quantity: 5, unit_size: 'Gal', unit_price_cents: 1500 },
+         { id: L6, product_id: P4, description: '[PROVER] legacy', quantity: 1, unit_size: 'Gal', unit_price_cents: 1500, epa_registration: N1 }])}, 'k-save14c');`);
+  assert.equal(scalar(`SELECT epa_registration FROM public.invoice_items WHERE invoice_id = '${INV4}' AND description = '[PROVER] legacy';`), N1);
   raw(`UPDATE public.epa_registrations SET signal_word = 'Danger', rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   console.log('[prover] case 14: save_invoice re-captures a kept Yes line on a quantity change with the current facts and keeps the Yes');
   console.log('[prover] case 13: Sales to check lists a restricted-use sale posted before the seed, a numberless sale and a seed-assumed one, and not a recorded one');

@@ -1261,7 +1261,8 @@ export default function Invoices() {
       </Modal>
 
       {/* Batch Print Dialog */}
-      <InvoicePrintDialog
+      {/* Mounted when opened, so its defaults (payer shares ticked for a Bill Split) follow this selection. */}
+      {showBatchPrintDialog && <InvoicePrintDialog
         open={showBatchPrintDialog}
         onClose={() => setShowBatchPrintDialog(false)}
         invoiceType={anySelectedIsFieldApp ? 'field_application' : 'chemical_sale'}
@@ -1270,7 +1271,7 @@ export default function Invoices() {
         sharesOnByDefault={anySelectedIsBillSplit}
         onPrint={handleBatchPrint}
         loading={printing}
-      />
+      />}
 
       {/* Batch Delete Modal */}
       <BulkDeleteConfirmModal

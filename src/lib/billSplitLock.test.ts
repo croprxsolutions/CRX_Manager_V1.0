@@ -81,6 +81,7 @@ describe('canEditBillSplit (the lock decides, not the delivery status)', () => {
   });
   it('is closed on a cancelled sale and for other roles', () => {
     expect(canEditBillSplit('admin', 'cancelled')).toBe(false);
+    expect(canEditBillSplit('admin', 'voided')).toBe(false);
     expect(canEditBillSplit('driver', 'pending')).toBe(false);
     expect(canEditBillSplit(undefined, undefined)).toBe(false);
   });

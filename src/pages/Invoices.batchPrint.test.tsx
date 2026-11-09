@@ -16,6 +16,7 @@ const H = vi.hoisted(() => ({
   toast: vi.fn(),
   printed: vi.fn(),
   dialogProps: {} as Record<string, unknown>,
+  closedRenders: 0,
 }));
 
 function replyFor(table: string): { data: unknown; error: unknown; count: number | null } {
@@ -61,7 +62,7 @@ vi.mock('../lib/invoicePdf', async (importOriginal) => ({
 }));
 vi.mock('../components/invoices/InvoicePrintDialog', () => ({
   default: (props: { open: boolean; onPrint: (options: Record<string, never>) => void }) => {
-    if (props.open) H.dialogProps = props;
+    if (props.open) H.dialogProps = props; else H.closedRenders += 1;
     return props.open ? <button type="button" onClick={() => props.onPrint({})}>Print with defaults</button> : null;
   },
 }));
@@ -89,6 +90,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-09T12:00:00'));
   H.failing = new Map();
+  H.closedRenders = 0;
   H.tables = {
     invoices: [posted],
     invoice_items: [line],
@@ -122,6 +124,8 @@ describe('Invoices — Print Selected', () => {
     await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
     // Mason, 9 Nov (A): every payer's invoice shows every payer, so batch print ticks the table by default.
     expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
+    // Mounted only when opened, so its ticked-by-default state is set from this selection, not the empty first load.
+    expect(H.closedRenders).toBe(0);
     expect(H.printed.mock.calls[0][0][0].shares).toMatchObject([
       { invoice_number: 'CS-1001-1', customer_name: 'Farmer', split_percentage: 60, amount_cents: 6000 },
       { invoice_number: 'CS-1001-2', customer_name: 'Landlord', split_percentage: 40, amount_cents: 4000 },

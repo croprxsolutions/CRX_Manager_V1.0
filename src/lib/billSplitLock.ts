@@ -40,9 +40,10 @@ export function billSplitLock(allInvoices: LockInvoice[], deliveries: LockDelive
 /**
  * Who may open the split editors. The delivery status doesn't close them: completing a delivery marks the sale
  * fulfilled or part-delivered, and a split the database refused to bill must stay fixable. billSplitLock decides.
+ * A cancelled or voided sale is archived, so its split stays as it was.
  */
 export function canEditBillSplit(role: string | null | undefined, orderStatus: string | null | undefined): boolean {
-  return (role === 'admin' || role === 'sales_rep') && !!orderStatus && orderStatus !== 'cancelled';
+  return (role === 'admin' || role === 'sales_rep') && !!orderStatus && !['cancelled', 'voided'].includes(orderStatus);
 }
 
 /** True when shares total over 100%, added exactly (millionths, as numeric(9,6)) so 0.2 + 83.9 + 15.9 is 100. */

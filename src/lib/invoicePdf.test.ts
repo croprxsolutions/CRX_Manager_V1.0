@@ -257,6 +257,18 @@ describe('generateInvoicePdf', () => {
     expect(heads.some((h) => h.includes('"Payer"'))).toBe(false);
   });
 
+  it("a Bill Split payer's misc charge invoice prints the payer table too (Mason, 9 Nov: every payer's invoice shows every payer)", async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'misc_charge',
+      options: { show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Farmer', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && h.includes('"Shares"'))).toBe(true);
+  });
+
   it('handles field_application with finance charges', async () => {
     const doc = await generateInvoicePdf(makeInvoiceData({
       finance_charge_cents: 1500,

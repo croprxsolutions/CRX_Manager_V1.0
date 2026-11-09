@@ -54,12 +54,12 @@ describe('InvoicePrintDialog', () => {
     expect(screen.queryByText('Show grower shares')).not.toBeInTheDocument();
   });
 
-  it("offers no payer table on a payer's misc charge invoice, whose layout has none", () => {
+  it("a payer's misc charge invoice offers the payer table and prints it by default, like the chemical sale", () => {
     const onPrint = vi.fn();
     render(<InvoicePrintDialog {...defaultProps} invoiceType="misc_charge" hasShares sharesOnByDefault onPrint={onPrint} />);
-    expect(screen.queryByText('Show payer shares')).not.toBeInTheDocument();
+    expect(screen.getByText('Show payer shares')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
-    expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: false }));
+    expect(onPrint).toHaveBeenCalledWith(expect.objectContaining({ show_shares: true }));
   });
 
   it('hides grower shares checkbox when hasShares=false', () => {

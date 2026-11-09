@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { billSplitCompletion } from './billSplitCompletion';
-import { billSplitPayerShares, buildInvoicePdfDataFromRow, isBillSplitInvoice } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { billSplitPayerShares, buildInvoicePdfDataFromRow, isBillSplitInvoice, loadBillSplitPayers } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 const row = (id: string, name: string | null, cents: number) => ({
   id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, customer: name ? { farm_name: name } : null,
@@ -70,7 +70,7 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
     const client = {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
-        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null });
+        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null, count: 2 });
         q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: null }, error: null });
         return q;
       },
@@ -97,7 +97,7 @@ describe('buildInvoicePdfDataFromRow on a Bill Split invoice', () => {
     const client = {
       from: (t: string) => {
         if (t !== 'invoices') return read({ data: t === 'customers' ? {} : [], error: null });
-        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null });
+        const q = read({ data: [row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], error: null, count: 2 });
         q.maybeSingle = () => Promise.resolve({ data: { invoice_group_id: 'g1', delivery_id: 'd1' }, error: null });
         return q;
       },
@@ -129,5 +129,22 @@ describe('billSplitCompletion', () => {
     expect(billSplitCompletion({ bill_split_failed: false, bill_split_invoices: [{ invoice_id: 'a', invoice_number: 'CS-1-1' }, { invoice_id: 'b', invoice_number: 'CS-1-2' }] }))
       .toEqual({ failed: false, numbers: ['CS-1-1', 'CS-1-2'] });
     expect(billSplitCompletion(null)).toEqual({ failed: false, numbers: [] });
+  });
+});
+
+describe('loadBillSplitPayers', () => {
+  // A chain that answers like PostgREST: rows plus the exact count asked for.
+  const db = (data: unknown[], count: number | null) => {
+    const q: Record<string, unknown> = {};
+    for (const m of ['select', 'eq', 'is', 'not', 'order']) q[m] = () => q;
+    q.then = (resolve: (v: unknown) => unknown) => resolve({ data, error: null, count });
+    return { from: () => q } as never;
+  };
+  it('reads every payer', async () => {
+    const payers = await loadBillSplitPayers(db([row('1', 'Farmer', 6000), row('2', 'Landlord', 4000)], 2), 'g1');
+    expect(payers).toHaveLength(2);
+  });
+  it('refuses a read that came back short of the count, rather than print a partial payer table', async () => {
+    await expect(loadBillSplitPayers(db([row('1', 'Farmer', 6000)], 2), 'g1')).rejects.toThrow();
   });
 });

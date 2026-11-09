@@ -19,15 +19,12 @@ export default function InvoicePrintDialog({
   open,
   onClose,
   invoiceType,
-  hasShares: hasShareRows,
-  sharesOnByDefault: sharesOnRequested = false,
+  hasShares,
+  sharesOnByDefault = false,
   onPrint,
   loading = false,
 }: InvoicePrintDialogProps) {
   const isFieldApp = invoiceType === 'field_application';
-  // The misc charge layout prints no share table, so a payer's misc charge invoice offers none.
-  const hasShares = hasShareRows && invoiceType !== 'misc_charge';
-  const sharesOnByDefault = sharesOnRequested && hasShares;
 
   const [showShares, setShowShares] = useState(sharesOnByDefault || (isFieldApp && hasShares));
   const [showPricePerAcre, setShowPricePerAcre] = useState(isFieldApp);

@@ -237,14 +237,15 @@ export function billSplitPayerShares(rows: Array<{
 
 /** Read from each group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it. */
 export async function loadBillSplitPayers(db: SupabaseClient, invoiceGroupId: string): Promise<BillSplitPayer[]> {
-  const { data, error } = await db
+  // Counted, so a read cut short by the row cap is refused rather than printed as a partial payer table.
+  const { data, error, count } = await db
     .from('invoices')
-    .select('id, invoice_number, total_amount_cents, customer:customers!invoices_customer_id_fkey(farm_name)')
+    .select('id, invoice_number, total_amount_cents, customer:customers!invoices_customer_id_fkey(farm_name)', { count: 'exact' })
     .eq('invoice_group_id', invoiceGroupId)
     .is('deleted_at', null)
     .not('status', 'in', '("voided","cancelled")')
     .order('invoice_number');
-  if (error || !Array.isArray(data)) throw new InvoiceDetailsUnavailableError();
+  if (error || !Array.isArray(data) || count !== data.length) throw new InvoiceDetailsUnavailableError();
   return billSplitPayerShares(data as unknown as Parameters<typeof billSplitPayerShares>[0]);
 }
 
@@ -872,7 +873,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   } else if (data.invoice_type === 'chemical_sale') {
     y = drawChemicalSaleLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   } else {
-    y = drawMiscChargeLayout(doc, data, y, margin, pageW, autoTable, drawPageFooter);
+    y = drawMiscChargeLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   }
 
   // ── Totals Section ─────────────────────────────────────────────────
@@ -1289,6 +1290,38 @@ function drawChemicalSaleLayout(
   y += 18;
 
   // Shares table (chemical sales can also have splits)
+  y = drawSharesTable(doc, data, y, margin, opts, autoTable, drawPageFooter);
+
+  // Finance charges
+  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
+    y += 4;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(margin, y, pageW - margin, y);
+    y += 12;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...CHARCOAL);
+    doc.text('FIN', margin, y);
+    doc.text('Finance Charges', margin + 60, y);
+    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
+    y += 16;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
+    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
+    y += 16;
+  }
+
+  return y + 10;
+}
+
+// ── Layout 3: Misc Charge ────────────────────────────────────────────────
+
+/** The customer share table under a chemical sale's or misc charge's lines (a Bill Split payer's draft can be either). */
+function drawSharesTable(
+  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
+): number {
+  let y = startY;
   if (opts.show_shares && data.shares && data.shares.length > 1) {
     y += 4;
     const hasPerAcrePricing = data.shares.some(s => s.price_per_acre_cents != null);
@@ -1334,34 +1367,12 @@ function drawChemicalSaleLayout(
     });
     y = doc.lastAutoTable.finalY + 6;
   }
-
-  // Finance charges
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    y += 4;
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 12;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text('FIN', margin, y);
-    doc.text('Finance Charges', margin + 60, y);
-    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
-    y += 16;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
-    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
-    y += 16;
-  }
-
-  return y + 10;
+  return y;
 }
-
-// ── Layout 3: Misc Charge ────────────────────────────────────────────────
 
 function drawMiscChargeLayout(
   doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  autoTable: AutoTable, drawPageFooter: () => void,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
 ): number {
   let y = startY;
 
@@ -1395,7 +1406,8 @@ function drawMiscChargeLayout(
     didDrawPage: drawPageFooter,
   });
 
-  return doc.lastAutoTable.finalY + 20;
+  // Every Bill Split payer's invoice shows every payer (Mason, 9 Nov), a payer's misc charge draft too.
+  return drawSharesTable(doc, data, doc.lastAutoTable.finalY + 20, margin, opts, autoTable, drawPageFooter);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

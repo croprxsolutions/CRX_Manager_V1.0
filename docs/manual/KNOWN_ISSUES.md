@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109052957`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -42,8 +42,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | WP-PM-3 checks still owed (KI-92) | 1 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
-Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
-2026-10-27 UTC, part C, access ending with the job, 2026-11-09 UTC), KI-02 (cost and
+Highest-priority open items, in order: KI-01 (an applicator keeps field access after the assignment ends,
+part C; the functions and tables were fixed live 2026-10-26 and 2026-10-27 UTC, parts A and B), KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone).
@@ -53,13 +53,13 @@ key alone).
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · parts A, B and C applied live; the related lows below stay open**
+**HIGH · PARTIAL · security · Mason approval needed to narrow permissions; parts A and B applied live, part C written and not applied**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
-C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
+C (the job route); A and B are applied live and merged; part C is written and not applied (`20261217100000`, see KI-73). Related lows: dispatched
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
@@ -960,7 +960,10 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
   `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
   the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
-  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`).
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
+  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
+  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
+  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
   `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
@@ -977,7 +980,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   whose role is driver keeps the crew job and its map but not the field tables (by design).
 - Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
   details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
-  ticket) means these should be widened to the dispatch route too. Part C (live 2026-11-09 UTC, PR #1650)
+  ticket) means these should be widened to the dispatch route too. Part C (written 2026-11-08, NOT APPLIED)
   gives them read-only access to those rows of the job they are dispatched to.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)

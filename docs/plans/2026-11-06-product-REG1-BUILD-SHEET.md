@@ -406,7 +406,9 @@ Migration stamps in this project run ahead of the calendar; the stamps above are
 | 2026-11-06 | gpt-6-sol high (advisory), final check | cfc6ea4d5 | 5 HIGH-or-lower open, 2 fixed | Fixed: a quantity change never lowers a Yes capture; the draft snapshot includes the max-rate unit. **Left open for the REG-DB build (Mason, 2026-11-06: land with problems written down), each needing a decision there:** (a) HIGH: new invoice lines compare only with the size's number, so a brand carrying its own number cannot be sold under it; (b) HIGH: an `accepted` draft call that sends no values would be refused after the seed until the screens PR ships; (c) MED: the seed preview takes no Q1 answer, so it cannot show the RUP results Mason approves; (d) MED: draft recovery needs `p_label_draft_id` on `set_epa_registration` and `assign_epa_registration`, missing from their signatures; (e) LOW: `label_draft_targets` has no `updated_at`. The REG-DB build's own required Sol review must clear these |
 
 
-## 13. Step 2 as built (2026-11-08)
+## 13. Step 2 as built (2026-11-08) — superseded 2026-11-09
+
+**Superseded (Mason, 2026-11-09: "Yes, simplify", then "Drop them").** Everything below describes the four-file build with sale capture, guards, passes, product-setup registration and the products grant change; none of it shipped. Step 2 is the three files in the "Guards dropped 2026-11-09" note at the top of this sheet, and the seed does not wait for the screens PR. Kept for history only.
 
 Step 1 (`20261210100000`, live) shipped part A's storage. Step 2 is four files, `20261218100000` (tools) to `20261218130000` (guards and seed); proof `scripts/smoke/prove-epa-registration-step2-real-schema.mjs`. Where it differs from sections 4 and 5:
 

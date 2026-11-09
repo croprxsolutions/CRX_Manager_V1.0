@@ -50,8 +50,8 @@
 //   <name> ... ENABLE ROW LEVEL SECURITY` and in at least one `CREATE POLICY ...
 //   ON <name>` in the SAME file. Names are compared lowercase, unquoted,
 //   schema-qualified (unqualified names mean `public`). The one documented
-//   exemption is the same marker the local .claude/hooks/rls-on-new-tables.mjs
-//   hook honors: a `-- rls-check: exempt` comment in the file (used once in 900
+//   exemption is the marker the retired local rls-on-new-tables hook
+//   honored: a `-- rls-check: exempt` comment in the file (used once in 900
 //   migrations, for a SECURITY DEFINER only counter table). An exempt file is
 //   reported loudly, never silently.
 //

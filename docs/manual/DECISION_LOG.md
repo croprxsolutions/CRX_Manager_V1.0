@@ -10,6 +10,18 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
+
+**Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.
+**Why.** The only gap is a race: an invoice whose season changes between the screen's check and the posting step. It needs two people editing the same invoice at the same moment and had not happened.
+**What this implies:** the gap stays recorded in `docs/changelog.d/2026-10-12-invoice-lists-season.md`. A later small change may add the check. This entry was only on the unmerged `pra-work` branch until the [2026-11-08 branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md).
+
+## 2026-11-08 — A re-activated applicator's open jobs go straight onto the Dispatch Board (KI-28)
+
+**Decision (Mason, in session, 2026-11-08: "A: show them right away" / "Yes do the recomended option"):** when a person is re-activated or made an applicator, their already-assigned open jobs go straight onto the Dispatch Board even if their license has expired, the same as adding a location to their job today. The license is checked when a job is assigned, and the Expiring Licenses card warns.
+**Why:** holding such jobs back until a license was renewed needed license triggers and locks that Sol found a new same-instant race in three rounds running (PR for KI-28). Dropping the hold-back removes that whole mechanism.
+**What this forbids/implies:** don't re-add a license check to `_sync_job_location_dispatch_on_applicator_qualify` (`20261215100000`) without re-deciding this; a license rule for dispatch belongs at assignment or on the board.
+
 ## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
 
 **Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.

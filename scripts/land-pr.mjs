@@ -20,12 +20,14 @@
 //   node scripts/land-pr.mjs <pr-number> [--timeout-mins N] [--once]
 //
 // Intended flow:
-//   non-risky diff:  gh pr merge N --squash --auto --delete-branch   (gated)
-//                    node scripts/land-pr.mjs N        → exits 0 when MERGED
-//   risky diff:      node scripts/land-pr.mjs N        → updates branch, waits
-//                    for CLEAN+green, then prints the proof-and-merge steps
-//                    (mint proof with write-codex-push-proof.mjs, merge with
-//                    NO --auto, immediately — proof is head+base bound).
+//   non-risky diff:  node scripts/land-pr.mjs N        → updates branch, waits
+//                    for CLEAN+green, then prints the immediate merge command
+//                    pinned to the checked head (pr-merge-guard refuses `--auto`
+//                    and any merge without `--match-head-commit`).
+//   risky diff:      same, but prints the proof-and-merge steps first
+//                    (mint proof with write-codex-push-proof.mjs, then the same
+//                    pinned merge, immediately — proof is head+base bound).
+//   Auto-merge armed outside this script (GitHub UI): it keeps polling until MERGED.
 //   --once:          single pass — report state, run update-branch if BEHIND,
 //                    exit without polling.
 
@@ -95,6 +97,11 @@ function classifyRisky() {
   return { risky: false, why: "" };
 }
 
+// The only merge form pr-merge-guard accepts: immediate (no --auto) and pinned to the head it checked.
+function mergeCommand(headSha) {
+  return `gh pr merge ${prNumber} --repo ${REPO} --squash --delete-branch --match-head-commit ${headSha}`;
+}
+
 function updateBranch() {
   try {
     gh(["pr", "update-branch", prNumber, "--repo", REPO]);
@@ -155,16 +162,16 @@ for (;;) {
         `This script will not merge it (by design). Land it now, immediately, with a fresh proof:\n` +
         `  1. gh pr checkout ${prNumber} && git fetch origin\n` +
         `  2. node scripts/write-codex-push-proof.mjs\n` +
-        `  3. gh pr merge ${prNumber} --squash --delete-branch   (NO --auto — proof is bound to this exact head+base)\n` +
+        `  3. ${mergeCommand(pr.headRefOid)}   (proof is bound to this exact head+base)\n` +
         `If main moves before you merge, re-run this script first.`
       );
       process.exit(2);
     }
     if (!armed) {
       console.log(
-        `[land-pr] PR #${prNumber} is green, up to date, and non-risky, but auto-merge is NOT armed.\n` +
-        `Arm it (goes through the normal merge gate), then re-run me to watch it land:\n` +
-        `  gh pr merge ${prNumber} --squash --auto --delete-branch`
+        `[land-pr] PR #${prNumber} is green, up to date, and non-risky. Merge it now (the merge gate checks it):\n` +
+        `  ${mergeCommand(pr.headRefOid)}\n` +
+        `If main moves before you merge, re-run this script first.`
       );
       process.exit(2);
     }

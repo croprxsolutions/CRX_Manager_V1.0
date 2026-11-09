@@ -1,0 +1,68 @@
+-- Written 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- docs/reference/migrations.d/20261229100000_product_grouping_switch_on.md. Re-read the live ledger before applying.
+--
+-- WHY (Mason, 2026-11-09: "Yes, switch it on"): PAR-2's data step (DATA-9) groups the existing product sizes under
+--   parent products, Mason approving each batch on the Group Products screen. The screen and every grouping writer
+--   are live, but approval and parent-brand edits are refused (PRODUCT_PARENT_GROUPING_NOT_OPEN) while the switch
+--   _product_parent_grouping_open() returns false. 20261123120000 shipped it off until the screens that read
+--   get_product_brands were deployed; they were (PR #1602, merged 2026-11-07), and Taha's four "before the switch
+--   is turned on" items from PR #1555 were settled by 20261201110000 (applied live).
+--
+-- WHAT: replaces the switch body "SELECT false" with "SELECT true". Nothing else: same signature, language,
+--   volatility, search_path, owner and grants (owner-only EXECUTE).
+--
+-- EFFECT once applied: approve_product_parent_groups and upsert_parent_brand stop refusing with
+--   PRODUCT_PARENT_GROUPING_NOT_OPEN, and get_product_grouping_open() reads true, so the screen shows Approve. No row
+--   changes here: a product is grouped only when an admin approves a group on the screen. Approval never changes a
+--   product ID, unit, price, cost, stock or any old record, and refuses a live rate change while the rate lock is on.
+--
+-- NOT CHANGED: every table, row, grant and other function.
+--
+-- ROLLBACK (its own reviewed migration): the same CREATE OR REPLACE with "SELECT false". Groups approved while open
+--   stay grouped (closing the switch only stops new approvals and parent-brand edits).
+--
+-- ORDERING: apply after every older pending migration.
+
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  IF to_regprocedure('public._product_parent_grouping_open()') IS NULL
+     OR to_regprocedure('public.get_product_grouping_open()') IS NULL
+     OR to_regprocedure('public.approve_product_parent_groups(uuid,bigint,jsonb,text)') IS NULL
+     -- 20261201110000 (Taha's pre-switch items) and 20261203110000 (brand save names its size) are live.
+     OR to_regprocedure('public._product_name_strength_tokens(text,numeric,text)') IS NULL
+     OR to_regprocedure('public._product_parent_identity_name(text)') IS NULL
+     OR to_regprocedure('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)') IS NULL THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping function this depends on is missing';
+  END IF;
+  IF public._product_parent_grouping_open() THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: grouping is already switched on';
+  END IF;
+  -- The rule 20261123120000 set for this step: a size grouped while the switch was off must not keep its own
+  -- legacy brand rows, because once open its brands are read from the parent's list.
+  IF EXISTS (SELECT 1 FROM public.product_brands b JOIN public.product_parent_members m ON m.product_id = b.product_id) THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouped size has its own brand rows; settle them first';
+  END IF;
+END
+$preflight$;
+
+CREATE OR REPLACE FUNCTION public._product_parent_grouping_open() RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$
+  SELECT true;
+$function$;
+ALTER FUNCTION public._product_parent_grouping_open() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._product_parent_grouping_open() FROM PUBLIC, anon, authenticated, service_role;
+
+DO $postflight$
+BEGIN
+  IF NOT public._product_parent_grouping_open() THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_POSTFLIGHT: the switch did not turn on';
+  END IF;
+  IF has_function_privilege('authenticated', 'public._product_parent_grouping_open()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._product_parent_grouping_open()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._product_parent_grouping_open()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_POSTFLIGHT: the switch is callable by an API role';
+  END IF;
+END
+$postflight$;

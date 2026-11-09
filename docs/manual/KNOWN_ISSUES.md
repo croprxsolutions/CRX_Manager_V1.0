@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-08 for the live ledger only (latest live row `20261108192049`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -53,13 +53,13 @@ key alone).
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · Mason approval needed to narrow permissions; parts A and B applied live, part C not started**
+**HIGH · PARTIAL · security · Mason approval needed to narrow permissions; parts A and B applied live, part C written and not applied**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
-C (the job route); A and B are applied live and merged; part C has no PR. Related lows: dispatched
+C (the job route); A and B are applied live and merged; part C is written and not applied (`20261217100000`, see KI-73). Related lows: dispatched
 applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
@@ -541,6 +541,8 @@ any already waiting (board splits and undispatched locations left alone; a job a
 same instant waits for the activation instead of being missed; proof
 `scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
 `scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
+Taha's review: a job reassigned to an inactive applicator keeps the old applicator's dispatch row after re-activation.
+Kept as designed (Mason, DECISION_LOG 2026-11-08): both sprayers can see and start it, proved in the same script.
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · PARTLY RE-MEASURED 2026-11-08 · inventory/process · Mason**
@@ -938,14 +940,25 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
   to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
   Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
-- Every active account reads every `customer_addresses` row (To-Do row 11.7; HIGH).
+- Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
+  keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
+  part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
+- DEFERRED (LOW, Sol 2026-11-08, part C): `start_job` and `complete_job` return a matching idempotency result before
+  the job-access check, so a former applicator replaying their own key gets back the earlier result (ids they already
+  had). Nothing new is written. Fix: check access before the replay lookup.
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
   billing splits and spray-record field/acres data through `field_billing_defaults` and
   `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
 - Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
-  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH; part C, not
-  started). Part A's `_can_see_field` already ends whole-job access when `jobs.deleted_at` is set, for the
-  field-map lookups only.
+  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). FIXED LIVE 2026-11-09
+  05:29 UTC (11:29 PM Central, 2026-11-08) by part C (PR #1650, ledger `20261109052957`, `20261217100000`), which ends the whole-job applicator's access when
+  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
+  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
+  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
+  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
+  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
 - FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
   `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
   `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
@@ -962,7 +975,8 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   whose role is driver keeps the crew job and its map but not the field tables (by design).
 - Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
   details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
-  ticket) means these should be widened to the dispatch route too; not built.
+  ticket) means these should be widened to the dispatch route too. Part C (written 2026-11-08, NOT APPLIED)
+  gives them read-only access to those rows of the job they are dispatched to.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
 **MED · PARTIAL · security/money · Mason**
@@ -1036,12 +1050,17 @@ service-role tools (LOW).
   stale after same-head invalidation; privileged workflow actions use mutable tags; merge guards do not bind
   approval to the recorded request marker or reviewer identity (MED; relevance lowered since CodeRabbit became
   advisory).
-- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables`, `generated-column-check` and
-  `env-guard` still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
-  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching (LOW).
-  Still open, not covered by that acceptance: a separate gap in `env-guard`'s frontend secret-key checks (LOW;
-  confirmed on `main` 2026-11-08; details withheld until the fix ships). PR #605's branch
-  (`claude/loosen-claude-permissions-20260905`, tip `d5cc21353e`) has the fix.
+- PR #605 hook gaps, ACCEPTED 2026-11-02: `money-safety`, `rls-on-new-tables` and `generated-column-check`
+  still read only `content || new_string`, so a MultiEdit payload would go unchecked, but the current
+  Claude Code has no MultiEdit tool; non-canonical path spellings can bypass path-rule matching, `.env` aliases in
+  `env-guard` included (LOW). Revisit trigger: if Claude Code regains a MultiEdit tool, reopen the 2026-11-02
+  acceptance for these three content guards.
+- `env-guard` service-role scan: FIXED 2026-11-08 (branch `claude/guard-port-envguard-ki107-7aecfa`). An Edit is
+  judged as the whole file after the edit, comments are scanned like code, and a repo-relative or upper-case `src/`
+  path counts. `*.test.ts(x)` files may quote `'service_role'` (several assert database grants) but still may not
+  name the key or hold a JWT-shaped literal. Still not caught (LOW): frontend files with other extensions (`.mjs`,
+  `.vue`, `.html`), a key name or role built at run time from pieces, keys not shaped like a JWT, and the `.env`
+  path aliases accepted above.
 - Review-proof guard: besides the 8.3 short name, an interpreter can build the path, a hard link can expose the file
   outside the state directory, and an alias/junction can be swapped after the check (MED). A separate
   `export GIT_PAGER=...` can evade it, like `GIT_EXTERNAL_DIFF` (LOW).

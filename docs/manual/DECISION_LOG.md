@@ -16,6 +16,17 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
 **What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
 
+## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
+
+**Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
+**Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
+**What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
+## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
+
+**Decision (Mason, in session, 2026-11-08: "sometimes the same field is sprayed by both sprayers"; "any sprayer should be able to just pick up field and start spraying, not wait on someone from office"):** when a job already on sprayer A's board is reassigned to B while B is inactive, re-activating B does not move the field off A's board. B, as the job's applicator, already sees the job in the field app and can start and complete it; A keeps the field and can start it.
+**Why:** Taha's review of PR #1652 suggested re-pointing such rows to B. Two sprayers sometimes work the same field, and the board holds one sprayer per field, so moving it would take work away from A. The real-schema proof shows B already gets the job without an office step.
+**What this forbids/implies:** don't make `_sync_job_location_dispatch_on_applicator_qualify` overwrite or replace a dispatch row held by someone else without re-deciding this. A dispatch row whose sprayer differs from `jobs.applicator_id` is allowed, not a defect.
 ## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
 
 **Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.

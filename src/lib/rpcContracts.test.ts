@@ -3054,6 +3054,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // required-key public wrapper. Prune once the registry high-water passes 20261102200000.
   '_manual_inventory_add_replay_impl_20261015',
   '_complete_job_replay_impl_20261015',
+  // 20261217100000 (KI-73 part C) re-emits the start body only to end the whole-job applicator's access with
+  // the job; it keeps p_idempotency_key behind its required-key public wrapper. Prune once the registry
+  // high-water passes 20261217100000.
+  '_start_job_replay_impl_20261015',
   // 20261120100000 (KI-14) re-creates this renamed body with a trailing p_terms_by_invoice; it keeps
   // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes 20261120100000.
   '_update_field_app_invoice_billing_replay_impl_20261015',

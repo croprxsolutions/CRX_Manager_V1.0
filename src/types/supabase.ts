@@ -2172,6 +2172,44 @@ export type Database = {
           },
         ]
       }
+      customer_document_restores: {
+        Row: {
+          customer_id: string
+          document_id: string
+          id: string
+          removed_at: string
+          removed_by: string | null
+          restored_at: string
+          restored_by: string
+        }
+        Insert: {
+          customer_id: string
+          document_id: string
+          id?: string
+          removed_at: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by: string
+        }
+        Update: {
+          customer_id?: string
+          document_id?: string
+          id?: string
+          removed_at?: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_document_restores_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "customer_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_facts: {
         Row: {
           category: string

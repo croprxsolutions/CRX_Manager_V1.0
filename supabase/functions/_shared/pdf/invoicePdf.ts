@@ -245,9 +245,18 @@ export function billSplitPayerShares(rows: Array<{
  */
 export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string): Promise<BillSplitPayer[]> {
   const { data, error, count } = await db.rpc('get_bill_split_payers', { p_invoice_id: invoiceId }, { count: 'exact' });
-  if (error || !Array.isArray(data) || count !== data.length) throw new InvoiceDetailsUnavailableError();
-  return billSplitPayerShares((data as Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>)
+  if (error) throw new InvoiceDetailsUnavailableError();
+  const rows = assertRpcResult<Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>>(data, 'get_bill_split_payers');
+  if (!Array.isArray(rows) || count !== rows.length) throw new InvoiceDetailsUnavailableError();
+  return billSplitPayerShares(rows
     .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })));
+}
+
+// Supabase returns null data, not an error, when a call is denied; this shared file runs in Deno too,
+// so it keeps its own copy (as create-user and send-delivery-receipts do).
+function assertRpcResult<T>(data: unknown, _rpcName: string): T {
+  if (data === null || data === undefined) throw new InvoiceDetailsUnavailableError();
+  return data as T;
 }
 
 export interface InvoicePdfData {

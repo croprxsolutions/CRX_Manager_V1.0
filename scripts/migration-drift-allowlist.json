@@ -1,0 +1,735 @@
+{
+  "_about": "KI-35 drift check (scripts/check-migration-drift.mjs). acceptedLedgerRows (share this one reason): live rows with no file on main, accepted as pre-existing drift (KI-62); all were applied before the 2026-07-27 schema baseline (supabase/baselines/manifest.json). parkedFiles: {file, reason} for a migration on main that is deliberately not applied. acceptedMismatches: {version, file, liveSha, fileSha, reason} for a live row whose SQL differs from its file on purpose; it stays accepted only while both hashes are unchanged. A deliberate name difference uses {version, liveName, file, reason} instead and is still SQL-compared.",
+  "acceptedLedgerRows": [
+    {
+      "version": "20260212035255",
+      "name": "inventory_unique_product_location"
+    },
+    {
+      "version": "20260212035336",
+      "name": "save_quote_rpc"
+    },
+    {
+      "version": "20260212035400",
+      "name": "save_delete_purchase_order_rpcs"
+    },
+    {
+      "version": "20260212035455",
+      "name": "save_customer_blend_duplicate_rpcs"
+    },
+    {
+      "version": "20260212035513",
+      "name": "sprint1_security_fixes"
+    },
+    {
+      "version": "20260212035532",
+      "name": "driver_update_policy_restriction"
+    },
+    {
+      "version": "20260212035552",
+      "name": "delivery_po_number_sequences"
+    },
+    {
+      "version": "20260212035638",
+      "name": "sprint5_commission_fk_and_partial_delivery"
+    },
+    {
+      "version": "20260212035737",
+      "name": "sprint5_updated_rpcs"
+    },
+    {
+      "version": "20260213052947",
+      "name": "phase2_billing_rpcs"
+    },
+    {
+      "version": "20260213054014",
+      "name": "phase3_blend_ticket_order_linkage_schema"
+    },
+    {
+      "version": "20260213054054",
+      "name": "phase3_blend_ticket_order_linkage_rpcs"
+    },
+    {
+      "version": "20260213054813",
+      "name": "phase4a_blend_recipes_schema"
+    },
+    {
+      "version": "20260214131234",
+      "name": "job_scheduling_rpcs"
+    },
+    {
+      "version": "20260214131309",
+      "name": "reporting_rpcs_logbooks"
+    },
+    {
+      "version": "20260214131619",
+      "name": "reporting_rpcs_financial_v3"
+    },
+    {
+      "version": "20260214145832",
+      "name": "fix_search_path_all_functions"
+    },
+    {
+      "version": "20260214151430",
+      "name": "fix_transfer_job_to_invoice_columns"
+    },
+    {
+      "version": "20260214152638",
+      "name": "fix_transfer_job_cost_cents_per_unit"
+    },
+    {
+      "version": "20260214153054",
+      "name": "fix_get_monthly_summary_columns"
+    },
+    {
+      "version": "20260214153125",
+      "name": "fix_get_monthly_summary_payments_col"
+    },
+    {
+      "version": "20260214153355",
+      "name": "add_prepay_balance_cents_to_customers"
+    },
+    {
+      "version": "20260214155011",
+      "name": "fix_security_definer_search_path_batch"
+    },
+    {
+      "version": "20260215064120",
+      "name": "sprint16_payment_allocation"
+    },
+    {
+      "version": "20260219010436",
+      "name": "audit_drop_void_invoice"
+    },
+    {
+      "version": "20260219010508",
+      "name": "audit_drop_void_invoice_v2"
+    },
+    {
+      "version": "20260219010527",
+      "name": "audit_void_invoice_v3"
+    },
+    {
+      "version": "20260219010546",
+      "name": "audit_apply_write_off"
+    },
+    {
+      "version": "20260219010620",
+      "name": "audit_cancel_order"
+    },
+    {
+      "version": "20260219010635",
+      "name": "audit_drop_overloads"
+    },
+    {
+      "version": "20260219010706",
+      "name": "audit_generate_finance_charges"
+    },
+    {
+      "version": "20260219010728",
+      "name": "audit_reconcile_and_receive_return"
+    },
+    {
+      "version": "20260219010804",
+      "name": "audit_complete_delivery"
+    },
+    {
+      "version": "20260219010818",
+      "name": "audit_manual_inventory_add"
+    },
+    {
+      "version": "20260219010853",
+      "name": "audit_blend_ticket_prebooking"
+    },
+    {
+      "version": "20260219010952",
+      "name": "audit_transfer_job_to_invoice"
+    },
+    {
+      "version": "20260219123440",
+      "name": "drop_old_rpc_overloads"
+    },
+    {
+      "version": "20260222171402",
+      "name": "add_test_inventory_for_audit"
+    },
+    {
+      "version": "20260222174823",
+      "name": "fix_invoice_number_prefix_bug"
+    },
+    {
+      "version": "20260222175057",
+      "name": "fix_allocate_payment_schema_mismatch"
+    },
+    {
+      "version": "20260222175156",
+      "name": "fix_invoice_status_check_add_paid"
+    },
+    {
+      "version": "20260222175220",
+      "name": "fix_financial_audit_log_entity_type_constraint"
+    },
+    {
+      "version": "20260222175249",
+      "name": "fix_financial_audit_log_constraints_comprehensive"
+    },
+    {
+      "version": "20260222175908",
+      "name": "phase2_partial_delivery_test_order"
+    },
+    {
+      "version": "20260222175959",
+      "name": "phase2_create_delivery_partial_test"
+    },
+    {
+      "version": "20260222180132",
+      "name": "fix_trg_delivery_status_change_zero_uuid"
+    },
+    {
+      "version": "20260222180216",
+      "name": "fix_all_zero_uuid_triggers"
+    },
+    {
+      "version": "20260222180232",
+      "name": "phase2_reset_delivery_after_trigger_fix"
+    },
+    {
+      "version": "20260222180324",
+      "name": "phase2_followup_delivery_from_remainders"
+    },
+    {
+      "version": "20260222181012",
+      "name": "fix_create_quick_delivery_commission_split_column"
+    },
+    {
+      "version": "20260222181120",
+      "name": "fix_create_quick_delivery_missing_created_by"
+    },
+    {
+      "version": "20260222184709",
+      "name": "fix_save_purchase_order_product_name_column"
+    },
+    {
+      "version": "20260222185005",
+      "name": "fix_apply_write_off_search_path"
+    },
+    {
+      "version": "20260222185046",
+      "name": "fix_13_rpcs_empty_search_path"
+    },
+    {
+      "version": "20260222185227",
+      "name": "fix_void_invoice_allocation_schema"
+    },
+    {
+      "version": "20260222185342",
+      "name": "fix_void_invoice_prepay_column_name"
+    },
+    {
+      "version": "20260222185525",
+      "name": "fix_apply_prepay_to_invoice_customer_balance"
+    },
+    {
+      "version": "20260222185820",
+      "name": "fix_generate_finance_charges_draft_status"
+    },
+    {
+      "version": "20260222190307",
+      "name": "fix_batch_void_audit_log_entity_id"
+    },
+    {
+      "version": "20260222190535",
+      "name": "fix_allocate_payment_v2_prepay_columns"
+    },
+    {
+      "version": "20260222190620",
+      "name": "fix_payments_order_id_nullable"
+    },
+    {
+      "version": "20260222191027",
+      "name": "fix_cancel_delivery_in_progress_prebook_release"
+    },
+    {
+      "version": "20260222191145",
+      "name": "fix_inventory_transactions_add_prebook_released_type"
+    },
+    {
+      "version": "20260222191459",
+      "name": "fix_financial_audit_log_add_return_credit_issued"
+    },
+    {
+      "version": "20260222192514",
+      "name": "fix_remaining_6_rpcs_role_guards"
+    },
+    {
+      "version": "20260222192628",
+      "name": "create_role_guard_helpers"
+    },
+    {
+      "version": "20260222192724",
+      "name": "add_role_guards_to_remaining_5_rpcs"
+    },
+    {
+      "version": "20260222193240",
+      "name": "add_role_guards_transfer_job_batch_prepay"
+    },
+    {
+      "version": "20260222193534",
+      "name": "fix_more_unguarded_rpcs"
+    },
+    {
+      "version": "20260222193754",
+      "name": "fix_final_unguarded_rpcs"
+    },
+    {
+      "version": "20260222224313",
+      "name": "fix_quick_delivery_commission_split_format"
+    },
+    {
+      "version": "20260223014245",
+      "name": "add_rate_limiting_infrastructure"
+    },
+    {
+      "version": "20260223014457",
+      "name": "upgrade_rate_limit_to_upsert_and_consolidate"
+    },
+    {
+      "version": "20260223014847",
+      "name": "update_rate_limits_allocate_payment"
+    },
+    {
+      "version": "20260223014954",
+      "name": "update_rate_limits_quick_delivery_and_batch_ops"
+    },
+    {
+      "version": "20260223015106",
+      "name": "update_rate_limits_finance_charges_and_add_new_rpcs"
+    },
+    {
+      "version": "20260223015205",
+      "name": "add_rate_limits_save_quote_and_save_customer"
+    },
+    {
+      "version": "20260223015311",
+      "name": "add_rate_limit_to_record_payment_7arg"
+    },
+    {
+      "version": "20260223015420",
+      "name": "fix_receive_return_search_path"
+    },
+    {
+      "version": "20260223021043",
+      "name": "fix_public_role_rls_policies"
+    },
+    {
+      "version": "20260223021127",
+      "name": "fix_security_advisor_findings"
+    },
+    {
+      "version": "20260223021149",
+      "name": "fix_rate_limit_log_rls"
+    },
+    {
+      "version": "20260223021302",
+      "name": "drop_duplicate_payments_index"
+    },
+    {
+      "version": "20260223021341",
+      "name": "tighten_remaining_public_select_policies"
+    },
+    {
+      "version": "20260223023755",
+      "name": "fix_allocate_payment_double_count_overload1"
+    },
+    {
+      "version": "20260223023824",
+      "name": "fix_allocate_payment_double_count_overload2"
+    },
+    {
+      "version": "20260223023835",
+      "name": "repair_order_balances_from_double_count"
+    },
+    {
+      "version": "20260223121947",
+      "name": "fix_batch_void_invoices_call_void_invoice"
+    },
+    {
+      "version": "20260223122020",
+      "name": "add_next_cycle_count_number_rpc"
+    },
+    {
+      "version": "20260223122139",
+      "name": "fix_receive_return_create_missing_inventory"
+    },
+    {
+      "version": "20260226203318",
+      "name": "invoice_ar_single_source_1a_drop_trigger"
+    },
+    {
+      "version": "20260226203530",
+      "name": "invoice_ar_1b_trg_recalc_order_totals"
+    },
+    {
+      "version": "20260226203608",
+      "name": "invoice_ar_1c_dashboard_summary"
+    },
+    {
+      "version": "20260226203629",
+      "name": "invoice_ar_1d_get_ar_aging"
+    },
+    {
+      "version": "20260226203707",
+      "name": "invoice_ar_1e_void_invoice"
+    },
+    {
+      "version": "20260226203730",
+      "name": "invoice_ar_1f_record_invoice_payment"
+    },
+    {
+      "version": "20260226203811",
+      "name": "invoice_ar_1h_convert_quote_to_order"
+    },
+    {
+      "version": "20260226203846",
+      "name": "invoice_ar_1i_create_order_from_blend_ticket"
+    },
+    {
+      "version": "20260226203916",
+      "name": "invoice_ar_1j_update_order_items"
+    },
+    {
+      "version": "20260226203932",
+      "name": "invoice_ar_1k_deprecate_record_payment"
+    },
+    {
+      "version": "20260226203948",
+      "name": "invoice_ar_1l_column_deprecation_comments"
+    },
+    {
+      "version": "20260228215551",
+      "name": "audit_phase0_fix4a_generate_finance_charges"
+    },
+    {
+      "version": "20260228215610",
+      "name": "audit_phase0_fix4b_preview_finance_charges"
+    },
+    {
+      "version": "20260228215700",
+      "name": "audit_phase0_fix5_transfer_job_billing_lock"
+    },
+    {
+      "version": "20260228220356",
+      "name": "complete_delivery_tote_copy_part1"
+    },
+    {
+      "version": "20260228220439",
+      "name": "create_quick_delivery_tote_thread"
+    },
+    {
+      "version": "20260302040409",
+      "name": "fix_allocate_payment_version_conflict"
+    },
+    {
+      "version": "20260307190336",
+      "name": "create_vendors_table"
+    },
+    {
+      "version": "20260307190352",
+      "name": "create_vendor_bills_table"
+    },
+    {
+      "version": "20260307190401",
+      "name": "create_vendor_payments_table"
+    },
+    {
+      "version": "20260307190415",
+      "name": "create_vendor_bill_rpc"
+    },
+    {
+      "version": "20260307190428",
+      "name": "record_vendor_payment_rpc"
+    },
+    {
+      "version": "20260307190437",
+      "name": "void_vendor_bill_rpc"
+    },
+    {
+      "version": "20260307190458",
+      "name": "ap_aging_and_dashboard_rpcs"
+    },
+    {
+      "version": "20260307190515",
+      "name": "create_rup_sales_records_table"
+    },
+    {
+      "version": "20260307190538",
+      "name": "rup_sales_rpcs"
+    },
+    {
+      "version": "20260307190646",
+      "name": "fix_ap_aging_bigint_cast"
+    },
+    {
+      "version": "20260308163305",
+      "name": "fix_dashboard_margin_column_name"
+    },
+    {
+      "version": "20260310023021",
+      "name": "order_po_number_and_shares_v2"
+    },
+    {
+      "version": "20260313122749",
+      "name": "prelaunch_state_machine_and_security_part1_v2"
+    },
+    {
+      "version": "20260313122837",
+      "name": "prelaunch_state_machine_and_security_part2"
+    },
+    {
+      "version": "20260313122858",
+      "name": "prelaunch_state_machine_and_security_part3"
+    },
+    {
+      "version": "20260313143137",
+      "name": "fix_create_direct_order_wrong_function_name"
+    },
+    {
+      "version": "20260313144151",
+      "name": "fix_create_direct_order_commission_split_column"
+    },
+    {
+      "version": "20260313191446",
+      "name": "fix_order_edit_product_swap_inventory_v2"
+    },
+    {
+      "version": "20260313222232",
+      "name": "fix_save_quote_inventory_unit_fallback"
+    },
+    {
+      "version": "20260315025034",
+      "name": "fix_all_idempotency_column_refs_v2"
+    },
+    {
+      "version": "20260316121822",
+      "name": "enable_pg_cron_and_schedule_overdue_check"
+    },
+    {
+      "version": "20260316121923",
+      "name": "drop_stale_confirm_delivery_overload"
+    },
+    {
+      "version": "20260316221514",
+      "name": "drop_overloads_from_state_machine_v2"
+    },
+    {
+      "version": "20260317003710",
+      "name": "team_board_phase2_and_delivery_rpc_fixes"
+    },
+    {
+      "version": "20260317003834",
+      "name": "fix_yesterday_recap_issue_description_column"
+    },
+    {
+      "version": "20260317170956",
+      "name": "cleanup_fake_cycle_counts_and_rebates_v2"
+    },
+    {
+      "version": "20260317171013",
+      "name": "fix_reverse_cycle_count_rpc_no_updated_at"
+    },
+    {
+      "version": "20260318014622",
+      "name": "fix_save_quote_server_totals_aliases"
+    },
+    {
+      "version": "20260331133327",
+      "name": "field_grouping_multi_polygon_complete"
+    },
+    {
+      "version": "20260406031332",
+      "name": "fix_transfer_job_vehicle_name"
+    },
+    {
+      "version": "20260406031436",
+      "name": "smart_pricing_schema"
+    },
+    {
+      "version": "20260406031543",
+      "name": "smart_pricing_rpc"
+    },
+    {
+      "version": "20260406033725",
+      "name": "fix_idempotency_and_bugs"
+    },
+    {
+      "version": "20260406033817",
+      "name": "fix_blend_ticket_invoice_idempotency"
+    },
+    {
+      "version": "20260406034815",
+      "name": "fix_car_select_policy"
+    },
+    {
+      "version": "20260406035834",
+      "name": "fix_app_services_index"
+    },
+    {
+      "version": "20260407120109",
+      "name": "field_app_rpcs"
+    },
+    {
+      "version": "20260407120203",
+      "name": "save_field_app_invoice_rpc"
+    },
+    {
+      "version": "20260510152727",
+      "name": "tighten_customer_profile_rls_part1"
+    },
+    {
+      "version": "20260512033010",
+      "name": "canonical_commission_math_helpers"
+    },
+    {
+      "version": "20260512033118",
+      "name": "canonical_commission_math_callers"
+    },
+    {
+      "version": "20260512033222",
+      "name": "canonical_commission_math_create_quick_delivery"
+    },
+    {
+      "version": "20260512034058",
+      "name": "safe_cents_qty_helper"
+    },
+    {
+      "version": "20260512034202",
+      "name": "create_quick_delivery_safe_cents"
+    },
+    {
+      "version": "20260512034527",
+      "name": "invoices_balance_non_negative_check"
+    },
+    {
+      "version": "20260513022441",
+      "name": "prepay_edit_delete_trigger_aware_correct_signatures"
+    },
+    {
+      "version": "20260513023324",
+      "name": "rebate_claim_counters_explicit_deny_all_policy"
+    },
+    {
+      "version": "20260630152521",
+      "name": "parked_001_unapply_credit_memo_period_gate"
+    },
+    {
+      "version": "20260630161342",
+      "name": "parked_003_void_commission_payment_period_gate"
+    },
+    {
+      "version": "20260630162158",
+      "name": "parked_004_save_job_applied_record_bind_actor"
+    },
+    {
+      "version": "20260630162406",
+      "name": "parked_007_preview_field_app_split_role_gate"
+    },
+    {
+      "version": "20260630162511",
+      "name": "parked_009_blend_ticket_fields_billed_lock"
+    }
+  ],
+  "parkedFiles": [],
+  "acceptedMismatches": [
+    {
+      "version": "20260729015706",
+      "file": "20260729015706_application_service_cost_admin_only.sql",
+      "liveSha": "6d53eb771ff221f2e30f9396d0589d5e18a58a1409788cd86a0d23cfffb6a1bd",
+      "fileSha": "003591982f3bbdc967a24ede72e6bde8ffeed70f0fd58b76de0d875515d52159",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260729213733",
+      "file": "20260729213733_supplier_pricing_phase3c_return_policy_classification.sql",
+      "liveSha": "7e5f5d1286859a75de58c68eeba80bed71a59e2839abf09240b40b85f5125e3e",
+      "fileSha": "fae503029bc8084761e5a1901d2a81bc431f02747f9c7a45e76397de544b6ec4",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730114102",
+      "file": "20260730114102_vendor_bill_period_close_lock.sql",
+      "liveSha": "0dad8f71675abefbfc5e5afe326c77127a83464df4393c6c4480a1f2df123d72",
+      "fileSha": "fc89ea883741ea9aa200939e286707f443b33ff55cb1a6a1933c5b9608b45ba0",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730124308",
+      "file": "20260730124308_close_accounting_period_idempotency_recheck.sql",
+      "liveSha": "e3de3c5d94e7aca6297885d1da8069cb24c4464c47834dd2b61b871c9c048503",
+      "fileSha": "693ac20aab115b46ab74ac1e01e3fa4acd2fb84e8437b175074841d2c3f8a6a2",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260730140808",
+      "file": "20260730140808_accounting_period_immutable_date_math.sql",
+      "liveSha": "1936d4a5a8fe3fe9798f1fbaac69098eb831d95df11b4cd3a767797c6a380d6c",
+      "fileSha": "7f36873c24197e639e84138258f19244326a3216f5228187114d50f200ea6b06",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260807215532",
+      "file": "20260807215532_profile_role_lock_covers_insert.sql",
+      "liveSha": "fc2fcfa92760a6e1bc0e29382a1c917311633ce9a085bd5281d57af4cc90a9c0",
+      "fileSha": "e61b98948c8de82993f5841b230115c42d9f8266122ad2fcfffe755886c69699",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260807220323",
+      "file": "20260807220323_log_customer_fact_rpc.sql",
+      "liveSha": "509976763363d07ca4f89f24be4c45ab56b706e03fec5bf2da21354a36365717",
+      "fileSha": "312d70006c0c6e162a5fb1782e6bc1f8cf294c40d93b7379a99c920667a49720",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903023935",
+      "file": "20260831160000_harden_receiving_reversal_and_ap_reporting.sql",
+      "liveSha": "feffa79f5309e5b5e9ed58e786da77ae855b5a99403aa46b9551a1fa22186f66",
+      "fileSha": "8be80541a80ae3e2143a844a40bb47e1623a9b2d0e7391249b68df46029a08e1",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903024550",
+      "file": "20260831161000_require_cumulative_po_bill_confirmation.sql",
+      "liveSha": "30a748012462966cc55109a67013e01c863bda2d232846cca30c809c0cd6f155",
+      "fileSha": "51e284156e9d14a0f37597298846bebfc9ac1b7a1dfbd4333e779b526a2bf7aa",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903025249",
+      "file": "20260831162000_fail_closed_historical_commission_balance.sql",
+      "liveSha": "2c8e92abefa119d933f9de613a9a80d7a2c6c58e725eef78531852c908672dea",
+      "fileSha": "b2ff899c539c47d9a9b0a0f63f8c1c43d34b414e03be422106a63ac3bcf1515c",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903025854",
+      "file": "20260831212415_guard_cycle_count_completion_revision.sql",
+      "liveSha": "eed4c2414501fdaaf4eb6d77df74ec0a5255db68654479c26ade10186da6a706",
+      "fileSha": "74b19d1b0cebc1f0d3d6f04a571ccd2c64c4c3eb491e29fdb6980a8e293586c1",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903124710",
+      "file": "20260831233000_bind_section9_replays_to_intent.sql",
+      "liveSha": "4f014c700f738e199b07ef7d9d4420ec8324dade38fae91bb65accf6609e690b",
+      "fileSha": "c3b17f869970c3669c73be921ca23f39bc7c9d9158727b27d6a5a7d41635cf4c",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    },
+    {
+      "version": "20260903124741",
+      "file": "20260831235900_serialize_gauntlet_write_boundaries.sql",
+      "liveSha": "948e59776a2a48ba8ce7a72d61b27210c2467aebf0bfaceeb1cda3314d814fae",
+      "fileSha": "fcfdd459c526cf5ad73a9ee8214bc24992f8c6b92987b4ec9e302ba668523aff",
+      "reason": "Only comment lines differ (a header note such as PARKED changed to APPLIED LIVE, a reworded comment, or a trailing newline); diffed by hand 2026-11-08 (KI-35)."
+    }
+  ]
+}

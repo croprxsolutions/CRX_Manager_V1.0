@@ -480,10 +480,16 @@ this number is fixed and live (archive, 2026-11-05).
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (deliberately deferred) · UI/database · unassigned (next Goal 5/6 change)**
-After completion the phone sends the receipt email. If signal drops between, the delivery is complete with no
-receipt; the driver is warned and the office can resend by hand. A queue table plus scheduled sender was designed
-and not built (needs a new Edge Function deploy). No `delivery_receipt_queue` exists in `supabase/`.
+**MED · OPEN (built, waiting on deploy) · UI/database/Edge Function · Claude**
+The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
+save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`) and the office "Customer receipts to
+check" card on Deliveries are in the sender PR; the app switch that asks for the server receipt is a separate PR
+that waits on Mason's approval to
+deploy the function (with `verify_jwt` off, or the timer's wake is refused) and store its secrets; the app switch must not land before the sender is on. Not built:
+provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
+Email Confirmation does not pause a worker retry (Sol MED, PR #1647). The close action needs its own migration PR
+and should land before the app switch.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**
@@ -496,10 +502,14 @@ The four older signature policies (fixed path `signatures/<id>.png`) are narrowe
 and reading needs the file to be the delivery's recorded signature.
 
 ### KI-28 — Jobs assigned to a non-applicator never reach the dispatch board
-**MED · OPEN · database · unassigned**
-The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later does not
-add the job back. A detection sweep exists (`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`);
-the write-path fix is not built. Older record counted 0 missing rows live.
+**MED · FIXED 2026-11-08 5:58 PM Central (PR #1652, migration `20261215100000`, ledger `20261108235833`) · database · Claude**
+The sync triggers (`20260707020000:231,296`) require an active applicator; re-activating the person later did not
+add the job back. Fix: a `profiles` trigger dispatches the open jobs' undispatched locations to a person the moment
+they become an active applicator, whatever their license (Mason, 2026-11-08, DECISION_LOG), and the apply backfills
+any already waiting (board splits and undispatched locations left alone; a job assignment or location add at the
+same instant waits for the activation instead of being missed; proof
+`scripts/smoke/prove-dispatch-sync-on-applicator-qualify-real-schema.mjs`). Detection sweep:
+`scripts/db-invariant-sweeps/predicates/dispatch-sync-nonqualifying-profile.sql`; 0 rows live 2026-11-08 (preventive).
 
 ### KI-29 — Field-mode and inventory data decisions waiting on Mason
 **LOW-MED · UNVERIFIED · inventory/process · Mason**
@@ -640,9 +650,16 @@ quote changes the tier label without repricing its locked lines.
 ## Database and release process
 
 ### KI-35 — Live ledger vs files on `main` is checked only by noticing
-**MED · UNVERIFIED · process/database · unassigned**
-Nothing automatically compares migrations applied live with migration files on `main` (four past mismatches). The
-live ledger also has older entries with no file (ACCEPTED, pre-existing drift; see KI-62).
+**MED · FIXED (tool), run by hand · process/database · unassigned**
+Nothing compared migrations applied live with migration files on `main` (four past mismatches). Now
+`npm run db-drift:live` (`scripts/check-migration-drift.mjs`, read-only) lists live rows with no file on `main`, files
+on `main` never applied (parked drafts named in `scripts/migration-drift-allowlist.json` are shown apart), and live
+rows whose name or SQL differs from the file, or whose SQL cannot be compared. It reuses the pending-set guard's row
+matching. The 159 old rows with no file (all before the 2026-07-27 baseline; KI-62) are allowlisted by version, and 13
+rows whose files had only a header comment edited after the apply are allowlisted pinned to both hashes.
+First live run, 2026-11-08 about 20:40 UTC: 1174 rows vs 1087 files, 259 SQL bodies compared; one row with no
+file, `20261214100000_ki30_epa_registration_corrections`, applied before its PR #1653 merged (clean against that
+branch). Not yet scheduled: it needs Mason's PC token, so run it after each live apply or merge.
 
 ### KI-36 — A table lock does not serialize the OLD body of a replaced function
 **MED (rule) · ACCEPTED as guidance (same as KI-61) · database · Mason (2026-09-03)**
@@ -809,6 +826,11 @@ times, money formatting in a dozen files (two print "$-5.00"), customer-notifica
 invoice pages. `src/pages/QuoteBuilder.tsx` (~6,000 lines) and the job page (~5,400) mix loading, pricing, saving,
 status actions and PDF/email; moving status actions and PDF/email into their own files changes nothing for users.
 Delete with a grep of every reference first; keep one copy of each helper.
+**Part 1 done 2026-11-08** (`docs/changelog.d/2026-11-08-ki96-delete-unreferenced-tooling.md`): the seven
+never-queued offline handlers, 8 old unreferenced proof files and the 12 `tmpclaude-*` files are gone. Still open:
+the two unwired hooks (`active-area-guard.mjs`, `rls-on-new-tables.mjs`; the review-proof guard refuses shell
+deletes under `.claude/hooks`), the October/November proofs nothing references, the two Edge Functions (removing
+them from live is Mason's deploy action), and the helper and page-split work. All six Playwright configs are in use.
 
 ---
 
@@ -986,7 +1008,7 @@ service-role tools (LOW).
 
 KI-07 (customer-document post-apply check), KI-16 (split-acre
 rounding), KI-20 (per-delivery split, commission design choices), KI-29/KI-30
-(live-data counts), KI-35 (ledger reconciliation), KI-41 (offline recovery), KI-52 (prover, live-testdata false
+(live-data counts), KI-41 (offline recovery), KI-52 (prover, live-testdata false
 positives). Live-database facts need a read-only query by someone with access.
 
 ---

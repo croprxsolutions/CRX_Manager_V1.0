@@ -415,38 +415,10 @@ describe('syncPendingActions', () => {
     expect(result).toEqual({ ...EMPTY_RESULT, synced: 1 });
   });
 
-  it('parks a cancel refused for a completed delivery without retrying or voiding it', async () => {
-    mockGetPendingActions.mockResolvedValue([
-      makeAction({
-        operation: 'cancel_delivery',
-        params: { p_delivery_id: 'd-1', p_cancel_reason: 'Stale', p_performed_by: 'user-1', p_idempotency_key: 'cancel_delivery:user-1:test-key' },
-        idempotencyKey: 'cancel_delivery:user-1:test-key',
-      }),
-    ]);
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { updated_at: '2026-07-13T12:00:00.000Z' }, error: null });
-    mockFrom.mockReturnValue({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) });
-    mockRpc.mockResolvedValue({
-      data: null,
-      error: { message: 'DELIVERY_COMPLETED_USE_VOID: a completed delivery cannot be cancelled; an admin must void it instead' },
-    });
-
-    await syncPendingActions('user-1');
-
-    expect(mockRpc).toHaveBeenCalledTimes(1);
-    expect(mockRpc).toHaveBeenCalledWith('cancel_delivery', expect.anything());
-    expect(mockRpc).not.toHaveBeenCalledWith('void_delivery', expect.anything());
-    expect(mockRemoveAction).not.toHaveBeenCalled();
-    expect(mockUpdateAction).toHaveBeenCalledWith(expect.objectContaining({
-      retryCount: 1,
-      status: 'needs_attention',
-      lastError: expect.stringContaining('DELIVERY_COMPLETED_USE_VOID'),
-    }));
-  });
-
   it('retains a conflict as needs attention without calling the business RPC', async () => {
     mockGetPendingActions.mockResolvedValue([
       makeAction({
-        operation: 'cancel_delivery',
+        operation: 'legacy_op',
         entityTable: 'deliveries',
         entityId: 'd-1',
         snapshotAt: '2026-07-13T12:00:00.000Z',
@@ -663,7 +635,7 @@ describe('syncPendingActions', () => {
       makeAction({ id: 20 }),
       makeAction({
         id: 21,
-        operation: 'allocate_payment',
+        operation: 'complete_job',
         params: { p_performed_by: 'user-1' },
         entityTable: undefined,
         snapshotAt: undefined,

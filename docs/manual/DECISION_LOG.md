@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — Taha's merge hold covers a fixed list, not every PR
+
+**Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.
+**Why:** Mason's EPA, docs and field work was waiting 4 hours with nothing of Taha's at stake. Taha asked to keep the database, orders, deliveries, customers, products and shared plumbing on the list, because billing reads them or depends on them.
+**What this forbids/implies:** when unsure whether a PR is on the list, hold it. Rule: `.claude/commands/ship.md` Step 8 item 4a. The merge hold is still a written rule only; the apply hold is enforced by `tahaHoldProblem` in `.claude/hooks/migration-landing-gate-lib.mjs`.
+
 ## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
 
 **Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.

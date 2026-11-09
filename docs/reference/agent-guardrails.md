@@ -127,7 +127,7 @@
 > **Sol round hard stop (Mason, 2026-11-09).** Every full run prints "Sol round N" (ledger `sol-rounds.jsonl`, counted
 > per branch commit); rounds 3–4 add the AGENTS.md stop-rule reminder. From round 5 the run refuses with no Codex call
 > and nothing recorded (`solRoundGate()`), unless `docs/manual/DECISION_LOG.md` at the reviewed head has an entry whose
-> heading carries a date of today (Central) or later and that names the PR as `#<n>`. So: ask Mason the business
+> heading carries a real date of today (Central) or later, with a `**Decision` line, that names the PR as `#<n>`. So: ask Mason the business
 > trade-off, record his answer naming the PR, commit, re-run. `--dry-run` prints the would-be refusal and exits 0;
 > the carries never count rounds. Why: PR #1653 reached round 8 past a warning-only line before Mason was asked.
 >

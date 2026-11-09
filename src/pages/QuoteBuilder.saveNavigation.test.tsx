@@ -147,7 +147,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     const router = renderNewQuote();
     await fillInNewQuote();
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
@@ -167,7 +167,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     const router = renderNewQuote();
     await fillInNewQuote();
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     // The page leaves for the saved quote once the save lands, so an edit made now would
     // be lost: every field, including Planned Program, is locked until then.
@@ -193,7 +193,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     await fillInNewQuote();
     fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     // Staying on /quotes/new with a locked form would strand the rep beside an already-saved quote.
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();

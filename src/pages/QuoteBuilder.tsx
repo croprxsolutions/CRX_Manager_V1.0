@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
   Send,
@@ -23,7 +23,8 @@ import {
   XCircle,
   Ban,
   Undo2,
-  MoreHorizontal,
+  ArrowLeft,
+  Clock,
 } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import LastChargedPrices from '../components/quotes/LastChargedPrices';
@@ -93,6 +94,10 @@ import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuo
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
 import TransactionThread from '../components/ui/TransactionThread';
+import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
+import { useIsPhone } from '../hooks/useIsPhone';
+import { primaryAction } from '../lib/quoteBuilderView';
+import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
@@ -717,10 +722,7 @@ export default function QuoteBuilder() {
   const [templateDescription, setTemplateDescription] = useState('');
   const [showRolloverModal, setShowRolloverModal] = useState(false);
   const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
-  const [createOrderMenuOpen, setCreateOrderMenuOpen] = useState(false);
-  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
-  const createOrderMenuRef = useRef<HTMLDivElement>(null);
-  const moreActionsRef = useRef<HTMLDivElement>(null);
+  const isPhone = useIsPhone();
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -859,33 +861,6 @@ export default function QuoteBuilder() {
   const scheduleBlockedAccepted = isPlanned && currentStatus === 'accepted';
   const canRevert = isEditing && isAdmin && ['accepted', 'declined', 'expired', 'cancelled'].includes(currentStatus);
   const revertLabel = currentStatus === 'accepted' ? 'Un-accept' : 'Reopen';
-
-  useEffect(() => {
-    if (!createOrderMenuOpen && !moreActionsOpen) return;
-
-    const closeMenusOnOutsideClick = (event: MouseEvent) => {
-      if (
-        !createOrderMenuRef.current?.contains(event.target as Node)
-        && !moreActionsRef.current?.contains(event.target as Node)
-      ) {
-        setCreateOrderMenuOpen(false);
-        setMoreActionsOpen(false);
-      }
-    };
-    const closeMenusOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCreateOrderMenuOpen(false);
-        setMoreActionsOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', closeMenusOnOutsideClick);
-    document.addEventListener('keydown', closeMenusOnEscape);
-    return () => {
-      document.removeEventListener('mousedown', closeMenusOnOutsideClick);
-      document.removeEventListener('keydown', closeMenusOnEscape);
-    };
-  }, [createOrderMenuOpen, moreActionsOpen]);
 
   // Mark dirty whenever user changes form data (after initial load)
   useEffect(() => {
@@ -4225,310 +4200,217 @@ export default function QuoteBuilder() {
   // would not be in what was written, and the page usually moves on afterwards.
   const formLocked = saving || converting || drawing;
 
+  // Header actions (spec "Actions by state"). Each action keeps today's show and enable
+  // conditions and handler; only where it sits changes.
+  const primary = primaryAction({ isNew: !isEditing, status: currentStatus, unsentChange, canConvert, canDraw });
+  const showSaveDraft = !isEditing || canEdit; // elsewhere Save draft was always disabled
+  const showCreateOrder = isEditing && (canConvert || canDraw);
+  const showRevise = isEditing && currentStatus === 'sent';
+  const pdfVisible = primary === null && !isPhone; // closed quotes: Download PDF is the visible action
+  const createOrderItems: ActionMenuItem[] = [
+    {
+      id: 'convert', label: 'Convert whole booking', icon: <ShoppingCart className="w-4 h-4" />,
+      onAction: () => setConfirmConvertOpen(true),
+      disabled: !canConvert || converting,
+      disabledReason: canConvert ? undefined : 'Whole-booking conversion is available after the quote is sent or revised.',
+    },
+    {
+      id: 'draw', label: 'Draw part of booking…', icon: <PackageOpen className="w-4 h-4" />,
+      onAction: () => { openDrawDownModal(); },
+      disabled: !canDraw || drawLoading,
+      disabledReason: canDraw ? undefined : 'Partial draw-down is available after the quote is sent or revised.',
+    },
+  ];
+  const moreItems: ActionMenuItem[] = [
+    ...(!pdfVisible ? [{ id: 'pdf', label: 'Download PDF', icon: <Download className="w-4 h-4" />, onAction: handleDownloadPdf }] : []),
+    {
+      id: 'customer-view', label: customerView ? 'Leave customer view' : 'Customer view (hide costs)',
+      icon: customerView ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />,
+      onAction: () => setCustomerView(!customerView),
+    },
+    ...(quoteId ? [{ id: 'template', label: 'Save as template', icon: <Copy className="w-4 h-4" />, onAction: () => setShowSaveTemplateModal(true) }] : []),
+    ...(quoteId ? [{ id: 'rollover', label: 'Roll over to next season', icon: <RotateCcw className="w-4 h-4" />, onAction: () => setShowRolloverModal(true) }] : []),
+    ...(isEditing && !!quoteId && currentStatus === 'draft' && !isDirty ? [{
+      id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
+      onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
+    }] : []),
+    // Task 12 replaces this with the History tab.
+    ...(isEditing && savedVersionCount > 0 ? [{
+      id: 'versions', label: `Version history (${savedVersionCount})`, icon: <History className="w-4 h-4" />,
+      onAction: () => setShowVersionHistory(!showVersionHistory),
+    }] : []),
+    ...(canRevert ? [{
+      id: 'revert', label: revertLabel, icon: <Undo2 className="w-4 h-4" />,
+      onAction: () => { setRevertReason(''); setShowRevertModal(true); }, disabled: reverting,
+    }] : []),
+    // The phone top bar has no room for secondaries, so they join the menu there.
+    ...(isPhone && showRevise ? [{ id: 'revise', label: 'Revise quote', icon: <Pencil className="w-4 h-4" />, onAction: handleReviseQuote, disabled: revising }] : []),
+    ...(isPhone && showCreateOrder && primary !== 'createOrder' ? createOrderItems.map((item) => ({ ...item, group: 'Create order' })) : []),
+    ...(canCloseApplied ? [{
+      id: 'close-applied', label: 'Close as applied (we applied it)', icon: <CheckCircle className="w-4 h-4" />, group: 'Close this booking',
+      onAction: () => setConfirmCloseAppliedOpen(true), disabled: closingApplied,
+    }] : []),
+    ...(canCloseShort ? [{
+      id: 'close-short', label: "Close short (grower won't take the rest)", icon: <PackageOpen className="w-4 h-4" />, group: 'Close this booking',
+      onAction: () => setConfirmCloseShortOpen(true), disabled: closingShort,
+    }] : []),
+    ...(canDecline ? [{
+      id: 'decline', label: 'Decline quote', icon: <XCircle className="w-4 h-4" />, danger: true,
+      onAction: () => setConfirmDeclineOpen(true), disabled: statusActionLoading,
+    }] : []),
+    ...(canCancel ? [{
+      id: 'cancel', label: 'Cancel quote', icon: <Ban className="w-4 h-4" />, danger: true,
+      onAction: () => setConfirmCancelOpen(true), disabled: statusActionLoading,
+    }] : []),
+  ];
+  const moreMenu = <ActionMenu label="More actions" items={moreItems} />;
+  const createOrderMenu = (variant: 'primary' | 'secondary') => (
+    <ActionMenu label="Create order" items={createOrderItems} trigger={{ text: 'Create order', variant, icon: <ShoppingCart className="w-4 h-4" /> }} />
+  );
+  const tall = 'h-11 md:h-10';
+  const saveDraftButton = (className = '') => (
+    <Button
+      variant="secondary"
+      icon={<Save className="w-4 h-4" />}
+      onClick={handleSaveDraft}
+      loading={saving}
+      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
+      className={`${tall} ${className}`}
+    >
+      Save draft
+    </Button>
+  );
+  const previewButton = (variant: 'primary' | 'secondary') => (
+    <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
+      Preview &amp; send
+    </Button>
+  );
+  const greenAction = primary === 'preview' && canSend
+    ? previewButton('primary')
+    : primary === 'createOrder' && showCreateOrder
+      ? createOrderMenu('primary')
+      : null;
+  const statusBadge = isEditing && (
+    <Badge normalCase dot variant={quoteBadgeVariant(currentStatus)}>{quoteStatusLabel(currentStatus)}</Badge>
+  );
+  const plannedChip = isPlanned && <Badge normalCase variant="warning">Planned</Badge>;
+  const unsavedNote = isDirty && (
+    <span className="inline-flex items-center gap-1.5 text-sm text-amber-800">
+      <Clock className="w-4 h-4" aria-hidden="true" />
+      Unsaved changes
+    </span>
+  );
+  // Task 11 moves this into the Details card as a Switch.
+  const plannedToggle = (
+    <label className="inline-flex min-h-11 md:min-h-0 items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={isPlanned}
+        onChange={(e) => setIsPlanned(e.target.checked)}
+        className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
+        disabled={formLocked || (!canEdit && isEditing)}
+      />
+      <span className="font-medium">Planned Program</span>
+      <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="ml-1" />
+    </label>
+  );
+  // A new quote's number, held until its first save.
+  const pendingNumber = !isEditing && quoteNumber && <span className="text-secondary tabular-nums">{quoteNumber}</span>;
+  const retryNumber = !isEditing && !quoteNumber && !quoteNumberLoading && (
+    <Button variant="secondary" size="sm" icon={<RotateCcw className="w-4 h-4" />} onClick={generateQuoteNumber} className={tall}>
+      Retry quote number
+    </Button>
+  );
+  const subline = [
+    selectedCustomer?.farm_name,
+    `Tier ${tier}`,
+    `Expires ${parseLocalDate(chosenExpiryDate ?? seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+  ].filter(Boolean).join(' · ');
+  const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
+  const hasBottomBar = isPhone && (showSaveDraft || !!greenAction);
+
   return (
     <div className="space-y-4">
-      <Breadcrumbs items={[
-        { label: 'Quotes', href: '/quotes' },
-        { label: isEditing ? (quoteNumber || 'Quote') : 'New Quote' },
-      ]} />
-      {isEditing && threadOrders.length > 0 && (
-        <TransactionThread
-          quoteId={quoteId || undefined}
-          quoteNumber={quoteNumber || undefined}
-          orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
-          deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
-          invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
-          currentEntity="quote"
-          currentEntityId={quoteId || undefined}
-        />
-      )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold font-heading text-nav-dark">
-            Quote <span className="split-heading-accent">Builder</span>
-          </h1>
-          {quoteNumber && (
-            <span className="text-sm text-secondary font-mono">{quoteNumber}</span>
-          )}
-          {isEditing && (
-            <Badge variant={statusToBadgeVariant[status] || 'default'}>
-              {status === 'closed_by_application' ? 'Fulfilled (Applied)' : status === 'closed_short' ? 'Closed — Short' : status}
-            </Badge>
-          )}
-          <label className="flex items-center gap-2 text-sm ml-4">
-            <input
-              type="checkbox"
-              checked={isPlanned}
-              onChange={(e) => setIsPlanned(e.target.checked)}
-              className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
-              disabled={formLocked || (!canEdit && isEditing)}
-            />
-            <span className="font-medium">Planned Program</span>
-            <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="ml-1" />
-          </label>
-          {isPlanned && (
-            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">
-              Planned
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {!isEditing && !quoteNumber && !quoteNumberLoading && (
-            <Button
-              variant="secondary"
-              icon={<RotateCcw className="w-4 h-4" />}
-              showChevron={false}
-              onClick={generateQuoteNumber}
-            >
-              Retry quote number
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            icon={<Save className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleSaveDraft}
-            loading={saving}
-            disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
-          >
-            Save Draft
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<Download className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleDownloadPdf}
-          >
-            Download PDF
-          </Button>
-          <div
-            className="relative"
-            ref={moreActionsRef}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setMoreActionsOpen(false);
-              }
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setMoreActionsOpen((open) => !open)}
-              aria-label="More actions"
-              aria-haspopup="menu"
-              aria-expanded={moreActionsOpen}
-              className="inline-flex items-center justify-center rounded-lg border border-gray-200 p-2 text-secondary transition-colors hover:border-crx-green hover:text-crx-green"
-            >
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-            {moreActionsOpen && (
-              <div role="menu" className="absolute right-0 z-30 mt-2 w-60 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setCustomerView(!customerView);
-                    setMoreActionsOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                >
-                  {customerView ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  Customer View
-                </button>
-                {quoteId && (
-                  <>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowSaveTemplateModal(true);
-                        setMoreActionsOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                    >
-                      <Copy className="w-4 h-4" />
-                      Save as Template
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowRolloverModal(true);
-                        setMoreActionsOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      Roll Over to New Season
-                    </button>
-                  </>
-                )}
-              </div>
+      {isPhone ? (
+        <>
+          <div data-testid="quote-header" className="sticky top-14 z-20 -mx-4 -mt-4 flex h-14 items-center gap-1 border-b border-gray-200 bg-white px-1">
+            <Link to="/quotes" aria-label="Back to quotes" className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-nav-dark">
+              <ArrowLeft className="w-5 h-5" aria-hidden="true" />
+            </Link>
+            <h1 className="min-w-0 flex-1 truncate font-heading text-[22px] font-semibold text-nav-dark">{title}</h1>
+            {canSend && (
+              <button type="button" aria-label="Preview and send" onClick={handlePreviewQuote} className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-nav-dark">
+                <Eye className="w-5 h-5" aria-hidden="true" />
+              </button>
+            )}
+            {moreMenu}
+          </div>
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {pendingNumber}
+              {statusBadge}
+              {plannedChip}
+              {unsavedNote}
+              {retryNumber}
+            </div>
+            {selectedCustomer?.farm_name && <span className="text-base font-semibold text-nav-dark break-words">{selectedCustomer.farm_name}</span>}
+            {plannedToggle}
+          </div>
+        </>
+      ) : (
+        <div data-testid="quote-header" className="sticky top-16 z-20 -mx-4 -mt-4 lg:-mx-6 lg:-mt-6 flex flex-col gap-2.5 border-b border-gray-200 bg-cream/95 px-4 py-3.5 backdrop-blur lg:px-6">
+          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
+            <Breadcrumbs items={[
+              { label: 'Quotes', href: '/quotes' },
+              { label: isEditing ? (quoteNumber || 'Quote') : 'New quote' },
+            ]} />
+            {isEditing && threadOrders.length > 0 && (
+              <TransactionThread
+                quoteId={quoteId || undefined}
+                quoteNumber={quoteNumber || undefined}
+                orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
+                deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
+                invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
+                currentEntity="quote"
+                currentEntityId={quoteId || undefined}
+              />
             )}
           </div>
-          {canSend && (
-            <Button
-              variant="primary"
-              icon={<Eye className="w-4 h-4" />}
-              onClick={handlePreviewQuote}
-            >
-              Preview Quote
-            </Button>
-          )}
-          {isEditing && quoteId && currentStatus === 'draft' && !isDirty && (
-            <Button
-              variant="secondary"
-              icon={<ShoppingCart className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmBookAsOrderOpen(true)}
-              loading={bookingAsOrder}
-            >
-              Book as Order
-            </Button>
-          )}
-          {isEditing && (canConvert || canDraw) && (
-            <div
-              className="relative"
-              ref={createOrderMenuRef}
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                  setCreateOrderMenuOpen(false);
-                }
-              }}
-            >
-              <Button
-                variant="primary"
-                icon={<ShoppingCart className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setCreateOrderMenuOpen((open) => !open)}
-                aria-haspopup="menu"
-                aria-expanded={createOrderMenuOpen}
-              >
-                Create Order ▾
-              </Button>
-              {createOrderMenuOpen && (
-                <div role="menu" className="absolute right-0 z-30 mt-2 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canConvert || converting}
-                    title={canConvert ? undefined : 'Whole-booking conversion is available after the quote is sent or revised.'}
-                    onClick={() => {
-                      setConfirmConvertOpen(true);
-                      setCreateOrderMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    Convert whole booking
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canDraw || drawLoading}
-                    title={canDraw ? undefined : 'Partial draw-down is available after the quote is sent or revised.'}
-                    onClick={() => {
-                      openDrawDownModal();
-                      setCreateOrderMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <PackageOpen className="w-4 h-4" />
-                    Draw part of booking…
-                  </button>
-                </div>
-              )}
+          <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="font-heading text-3xl font-semibold leading-tight text-nav-dark">{title}</h1>
+                {pendingNumber}
+                {retryNumber}
+                {statusBadge}
+                {plannedChip}
+                {unsavedNote}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <p className="text-secondary">{subline}</p>
+                {plannedToggle}
+              </div>
             </div>
-          )}
-          {isEditing && currentStatus === 'sent' && (
-            <Button
-              variant="secondary"
-              icon={<Pencil className="w-4 h-4" />}
-              showChevron={false}
-              onClick={handleReviseQuote}
-              loading={revising}
-            >
-              Revise Quote
-            </Button>
-          )}
-          {canCloseApplied && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<CheckCircle className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setConfirmCloseAppliedOpen(true)}
-                loading={closingApplied}
-              >
-                Close — Applied
-              </Button>
-              <HelpTip text="Use this when WE applied this booking's product for the customer (job applications), instead of delivering it. It closes the booking as fulfilled by application and releases any un-applied product back to free inventory. The customer was already billed through each job's application invoice — this never bills again." className="ml-1" />
-            </>
-          )}
-          {canCloseShort && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<PackageOpen className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setConfirmCloseShortOpen(true)}
-                loading={closingShort}
-              >
-                Close — Short
-              </Button>
-              <HelpTip text="Use this when the customer walked away from this booking (or took only part of it) and won't take the rest. It closes the booking and releases the un-fulfilled remainder back to free inventory. Any product already drawn was billed on its order — this never bills again. This is the way to close a booking that Decline/Cancel refuse because it was partially drawn." className="ml-1" />
-            </>
-          )}
-          {canDecline && (
-            <Button
-              variant="secondary"
-              icon={<XCircle className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmDeclineOpen(true)}
-              loading={statusActionLoading}
-            >
-              Decline
-            </Button>
-          )}
-          {canCancel && (
-            <Button
-              variant="ghost"
-              icon={<Ban className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmCancelOpen(true)}
-              loading={statusActionLoading}
-            >
-              Cancel Quote
-            </Button>
-          )}
-          {canRevert && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<Undo2 className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => { setRevertReason(''); setShowRevertModal(true); }}
-                loading={reverting}
-              >
-                {revertLabel}
-              </Button>
-              <HelpTip text="Reopens this quote to “sent” so it can be edited, re-sent, or converted again. Admin only. Blocked if an order was already created from an accepted quote." className="ml-1" />
-            </>
-          )}
-          {isEditing && savedVersionCount > 0 && (
-            <>
-              <Button
-                variant="ghost"
-                icon={<History className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setShowVersionHistory(!showVersionHistory)}
-              >
-                Versions ({savedVersionCount})
-              </Button>
-              <HelpTip text="Every time you send or revise, a snapshot is saved. You can compare versions side-by-side or restore an older version if needed." className="ml-1" />
-            </>
-          )}
+            <div className="flex flex-wrap items-center gap-2">
+              {showRevise && (
+                <Button variant="secondary" icon={<Pencil className="w-4 h-4" />} onClick={handleReviseQuote} loading={revising} className={tall}>
+                  Revise quote
+                </Button>
+              )}
+              {canSend && primary !== 'preview' && previewButton('secondary')}
+              {showSaveDraft && saveDraftButton()}
+              {showCreateOrder && primary !== 'createOrder' && createOrderMenu('secondary')}
+              {pdfVisible && (
+                <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={handleDownloadPdf} className={tall}>
+                  Download PDF
+                </Button>
+              )}
+              {greenAction}
+              {moreMenu}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Covers a stale warning left active when the convert-confirm modal closes; draw-down no longer raises it. */}
       {!confirmConvertOpen && (
@@ -6256,6 +6138,14 @@ export default function QuoteBuilder() {
         confirmLabel="Convert Anyway"
         variant="warning"
       />
+
+      {/* Phone: sticky above the app's bottom nav. It sits in the page flow, so it never covers the last content. */}
+      {hasBottomBar && (
+        <div data-testid="quote-bottom-bar" className="sticky bottom-[calc(2.75rem+1px+env(safe-area-inset-bottom))] z-20 -mx-4 flex gap-2 border-t border-gray-200 bg-white px-4 pb-3.5 pt-2.5 shadow-[0_-1px_4px_rgba(0,0,0,0.08)]">
+          {showSaveDraft && saveDraftButton('flex-1')}
+          {greenAction && <div className="flex flex-[1.4] [&>*]:w-full">{greenAction}</div>}
+        </div>
+      )}
     </div>
   );
 }

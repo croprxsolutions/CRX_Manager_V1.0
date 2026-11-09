@@ -1,7 +1,8 @@
-import { useState, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
 import { Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import { applyTableSearchSort, type SortDir } from '../../lib/tableSearchSort';
+import { useIsPhone } from '../../hooks/useIsPhone';
 
 export interface Column<T> {
   key: string;
@@ -50,24 +51,10 @@ interface DataTableProps<T> {
   serverSide?: boolean;
 }
 
-const PHONE_QUERY = '(max-width: 767px)';
-const subscribePhone = (onChange: () => void) => {
-  if (typeof window.matchMedia !== 'function') return () => {};
-  const query = window.matchMedia(PHONE_QUERY);
-  // Safari before 14 has only the older addListener/removeListener.
-  if (typeof query.addEventListener !== 'function') {
-    query.addListener(onChange);
-    return () => query.removeListener(onChange);
-  }
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-};
-// One layout at a time, so a long list is never rendered twice. No matchMedia (tests) = desktop.
-const isPhoneNow = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
-
+// One layout at a time, so a long list is never rendered twice.
 /** The phone row renderer while the screen is phone-width, and the columns its sort select offers. */
 function usePhoneLayout<T>(mobileRow: ((row: T) => ReactNode) | undefined, columns: Column<T>[]) {
-  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
+  const isPhone = useIsPhone();
   const phoneRow = isPhone ? mobileRow : undefined;
   return { phoneRow, sortableColumns: phoneRow ? columns.filter((col) => col.sortable) : [] };
 }

@@ -458,7 +458,7 @@ function configureDrawDownFixture(
 
 async function submitOneUnitDraw(quoteId: string) {
   renderQuoteBuilder(quoteId);
-  const createOrderButton = await screen.findByRole('button', { name: /Create Order/ });
+  const createOrderButton = await screen.findByRole('button', { name: 'Create order' });
   await new Promise((resolve) => setTimeout(resolve, 0));
   await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
   fireEvent.click(createOrderButton);
@@ -536,7 +536,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder();
     expect(await screen.findByTestId('last-charged-card')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Customer View/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
     expect(screen.queryByTestId('last-charged-card')).not.toBeInTheDocument();
     cleanup();
 
@@ -1057,7 +1057,7 @@ describe('QuoteBuilder', () => {
 
     // Saving is refused too, before any save reaches the server.
     mockToast.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Products are still loading. Try again in a moment.'));
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
 
@@ -1149,7 +1149,7 @@ describe('QuoteBuilder', () => {
   it('renders the Quote Builder heading for a new quote', async () => {
     renderQuoteBuilder();
     await waitFor(() => {
-      expect(screen.getByText('Builder')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'New quote' })).toBeInTheDocument();
     });
   });
 
@@ -1168,7 +1168,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
       ? number : Promise.resolve({ data: null, error: null }));
     renderQuoteBuilder();
-    const save = await screen.findByRole('button', { name: 'Save Draft' });
+    const save = await screen.findByRole('button', { name: 'Save draft' });
     expect(save).toBeDisabled();
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('quote number'));
     await act(async () => resolveNumber({ data: 'Q-2026-9876', error: null }));
@@ -1191,8 +1191,8 @@ describe('QuoteBuilder', () => {
     const customer = await screen.findByRole('combobox', { name: 'Customer' });
     fireEvent.change(customer, { target: { value: 'Far' } });
     fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'A quote number could not be confirmed. Use Retry quote number to try again.'));
     expect(mockFrom).not.toHaveBeenCalledWith('quotes');
     expect(screen.queryByText(/^Q-\d{4}-\d+$/)).not.toBeInTheDocument();
@@ -1309,7 +1309,7 @@ describe('QuoteBuilder', () => {
       // A reload loses the hook's memory: a fresh key would be minted for this booking.
       quoteIdempotencyState.bump(quoteId);
       renderQuoteBuilder(quoteId);
-      const createOrderButton = await screen.findByRole('button', { name: /Create Order/ });
+      const createOrderButton = await screen.findByRole('button', { name: 'Create order' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
       fireEvent.click(createOrderButton);
@@ -1505,7 +1505,7 @@ describe('QuoteBuilder', () => {
             extra_order_id: 'order-2', extra_order_number: 'ORD-2' }, error: null }
         : { data: null, error: null }));
       renderQuoteBuilder(fixture.quote.id);
-      const createOrderButton = await screen.findByRole('button', { name: /Create Order/ });
+      const createOrderButton = await screen.findByRole('button', { name: 'Create order' });
       await new Promise((resolve) => setTimeout(resolve, 0));
       await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
       fireEvent.click(createOrderButton);
@@ -1588,7 +1588,7 @@ describe('QuoteBuilder', () => {
   it('shows Save Draft button', async () => {
     renderQuoteBuilder();
     await waitFor(() => {
-      expect(screen.getByText('Save Draft')).toBeInTheDocument();
+      expect(screen.getByText('Save draft')).toBeInTheDocument();
     });
   });
 
@@ -1596,7 +1596,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder();
     await waitFor(() => {
       expect(screen.getByText('Quotes')).toBeInTheDocument();
-      expect(screen.getByText('New Quote')).toBeInTheDocument();
+      expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('New quote')).toBeInTheDocument();
     });
   });
 
@@ -1652,7 +1652,8 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Versions \(2\)/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(2\)/ }));
 
     // Both rows are listed, and neither claims an item count or a total — those could only
     // come from a snapshot this build has already refused to read.
@@ -1755,7 +1756,8 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Versions \(3\)/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(3\)/ }));
 
     // Guard the fixture: if all three landed in one bucket the ordering claim would be vacuous.
     expect(await screen.findByText(/Saved in an older format/)).toBeInTheDocument();
@@ -1801,7 +1803,8 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Versions \(1\)/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Version history \(1\)/ }));
 
     expect(await screen.findByText('Details unavailable')).toBeInTheDocument();
     // Calling it an older format would be a guess: the server says this row is current.
@@ -1929,7 +1932,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue('Original header');
     fireEvent.change(header, { target: { value: 'Unsaved header edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
     expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 7, header_notes: 'Unsaved header edit' }),
@@ -1940,13 +1943,13 @@ describe('QuoteBuilder', () => {
     expect((screen.getByDisplayValue('Unsaved header edit') as HTMLTextAreaElement).value).toBe('Unsaved header edit');
     expect(quoteReads).toBe(readsBeforeKeepEditing);
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await screen.findByText('Reload Quote');
     fireEvent.click(screen.getByText('Reload Quote'));
     await waitFor(() => expect((screen.getByDisplayValue('Newer header') as HTMLTextAreaElement).value).toBe('Newer header'));
     expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument();
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 8, header_notes: 'Newer header' }),
     })));
@@ -1974,7 +1977,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue('Version test header');
     fireEvent.change(header, { target: { value: 'First edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(saves).toBe(1));
     const first = sentLines(0);
     expect(first.map((line) => line.id)).toEqual(['item-1', 'item-2']);
@@ -1982,7 +1985,7 @@ describe('QuoteBuilder', () => {
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
 
     fireEvent.change(screen.getByDisplayValue('First edit'), { target: { value: 'Second edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(saves).toBe(2));
     expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
   });
@@ -2008,7 +2011,7 @@ describe('QuoteBuilder', () => {
     };
     await pick(0, 'Beta Chem');
     await pick(0, 'Alpha Chem');
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     const lines = (mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1] as {
       p_sections: Array<{ items: Array<{ id: string | null; product_id: string }> }>;
@@ -2045,7 +2048,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue(quote.header_notes);
     fireEvent.change(header, { target: { value: 'Keep stale draft edit for review' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Keep stale draft edit for review')).toBeInTheDocument();
@@ -2096,7 +2099,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quote.id}-0`,
@@ -2106,7 +2109,7 @@ describe('QuoteBuilder', () => {
       'an empty save_quote reply is ambiguous — the key must survive it so a retry can replay',
     ).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
       expect(saves.length).toBeGreaterThan(1);
@@ -2153,7 +2156,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: {}, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quote.id}-0`,
@@ -2164,7 +2167,7 @@ describe('QuoteBuilder', () => {
     ).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('came back without an ID'));
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
       expect(saves.length).toBeGreaterThan(1);
@@ -2218,7 +2221,7 @@ describe('QuoteBuilder', () => {
       }));
 
     renderQuoteBuilder(quote.id);
-    await screen.findByText('Save Draft');
+    await screen.findByText('Save draft');
 
     let clock = 1_800_000_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
@@ -2227,13 +2230,13 @@ describe('QuoteBuilder', () => {
     });
 
     try {
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(1);
       });
       expect(mockResetIdempotencyKey).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(2);
       });
@@ -2281,7 +2284,7 @@ describe('QuoteBuilder', () => {
       return served;
     }
     async function saveDraftPayload() {
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(1);
       });
@@ -2292,7 +2295,7 @@ describe('QuoteBuilder', () => {
     it('keeps a picked date and sends it as the expiry', async () => {
       const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
       renderQuoteBuilder(quote.id);
-      await screen.findByText('Save Draft');
+      await screen.findByText('Save draft');
 
       expect(screen.getByLabelText('Expires')).toHaveValue('date');
       expect(screen.getByLabelText('Expiry date')).toHaveValue('2026-12-15');
@@ -2304,7 +2307,7 @@ describe('QuoteBuilder', () => {
     it('switching to season end clears the pick and shows Sept 30', async () => {
       const quote = serveDraft({ chosen_expiry_date: '2026-12-15' });
       renderQuoteBuilder(quote.id);
-      await screen.findByText('Save Draft');
+      await screen.findByText('Save draft');
 
       fireEvent.change(screen.getByLabelText('Expires'), { target: { value: 'season' } });
       expect(screen.queryByLabelText('Expiry date')).not.toBeInTheDocument();
@@ -2319,7 +2322,7 @@ describe('QuoteBuilder', () => {
     it('a quote with no pick opens on season end', async () => {
       const quote = serveDraft({ chosen_expiry_date: null });
       renderQuoteBuilder(quote.id);
-      await screen.findByText('Save Draft');
+      await screen.findByText('Save draft');
 
       expect(screen.getByLabelText('Expires')).toHaveValue('season');
       expect((await saveDraftPayload()).chosen_expiry_date).toBeNull();
@@ -2352,7 +2355,8 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     await screen.findByDisplayValue('Local note');
-    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Decline quote' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Decline Quote' }));
 
     fireEvent.click(await screen.findByText('Reload Quote'));
@@ -2402,7 +2406,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
 
     renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quoteA.id}-0`,
     })));
@@ -2411,7 +2415,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Jump to quote B' }));
     await screen.findByDisplayValue('Quote B header');
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
       expect(saves.length).toBeGreaterThan(1);
@@ -2464,7 +2468,7 @@ describe('QuoteBuilder', () => {
     ));
 
     renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
     // A's save is rejected, so A's recovery dialog opens.
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
 
@@ -2521,7 +2525,7 @@ describe('QuoteBuilder', () => {
     });
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
 
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
     expect(mockRpc).toHaveBeenLastCalledWith('save_quote', expect.objectContaining({
@@ -2531,7 +2535,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByText('Reload Quote'));
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     // The fresh key's save; a cost refresh may follow it.
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quote.id}-1`,
@@ -2559,7 +2563,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: null }),
@@ -2597,7 +2601,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue(quote.header_notes);
     fireEvent.change(header, { target: { value: 'Unsaved local edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     fireEvent.click(await screen.findByRole('button', { name: 'Reload Quote' }));
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Quote' })).not.toBeInTheDocument());
@@ -2627,13 +2631,13 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 7 }),
     })));
-    await waitFor(() => expect(screen.getByText('Save Draft')).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByText('Save draft')).not.toBeDisabled());
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const quoteSaves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
       expect(quoteSaves).toHaveLength(2);
@@ -2666,7 +2670,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByText('Save Draft'));
+    fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
       'warning',
@@ -2700,15 +2704,16 @@ describe('QuoteBuilder', () => {
         : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Un-accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Un-accept' }));
     fireEvent.change(screen.getByPlaceholderText('Why is this quote being reopened?'), {
       target: { value: 'Corrected customer request' },
     });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Un-accept' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Un-accept' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Quote reopened to sent.'));
     expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringContaining('save-protection version'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Revise Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise quote' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: null }),
     })));
@@ -2734,11 +2739,12 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     fireEvent.change(await screen.findByDisplayValue('Keep this local note'), { target: { value: 'Keep this local edit' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Decline quote' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Decline Quote' }));
 
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
-    expect(screen.getAllByText('declined')).not.toHaveLength(0);
+    expect(screen.getAllByText('Declined')).not.toHaveLength(0);
     expect(screen.getByDisplayValue('Keep this local edit')).toBeInTheDocument();
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('another edit may have completed'));
   });
@@ -2758,7 +2764,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue('Original header');
     fireEvent.change(header, { target: { value: 'Keep this quote edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await screen.findByText('Reload Quote');
     fireEvent.click(screen.getByText('Reload Quote'));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('current edits were kept')));
@@ -2783,7 +2789,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     const header = await screen.findByDisplayValue('Original header');
     fireEvent.change(header, { target: { value: 'Keep this quote edit' } });
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await screen.findByText('Reload Quote');
     fireEvent.click(screen.getByText('Reload Quote'));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('stable saved quote')));
@@ -2802,10 +2808,11 @@ describe('QuoteBuilder', () => {
       ? { data: { success: true, old_status: 'accepted', new_status: 'sent' }, error: null }
       : { data: { quote_id: quote.id, row_version: 9 }, error: null }));
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Un-accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Un-accept' }));
     fireEvent.change(screen.getByPlaceholderText('Why is this quote being reopened?'), { target: { value: 'Corrected customer request' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Un-accept' })[1]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Revise Quote' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Un-accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise quote' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 8 }),
     })));
@@ -2823,12 +2830,13 @@ describe('QuoteBuilder', () => {
       ? { data: { success: true, old_status: 'accepted', new_status: 'sent' }, error: null }
       : { data: { quote_id: quote.id, row_version: 10 }, error: null }));
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Un-accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Un-accept' }));
     fireEvent.change(screen.getByPlaceholderText('Why is this quote being reopened?'), { target: { value: 'Corrected customer request' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Un-accept' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Un-accept' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('save-protection version could not be confirmed')));
     expect(mockToast).not.toHaveBeenCalledWith('success', 'Quote reopened to sent.');
-    fireEvent.click(await screen.findByRole('button', { name: 'Revise Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise quote' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: null }),
     })));
@@ -2848,10 +2856,11 @@ describe('QuoteBuilder', () => {
       ? { data: { success: true, old_status: 'accepted', new_status: 'sent' }, error: null }
       : { data: null, error: null }));
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Un-accept' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Un-accept' }));
     fireEvent.change(screen.getByPlaceholderText('Why is this quote being reopened?'), { target: { value: 'Corrected customer request' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Un-accept' })[1]);
-    await waitFor(() => expect(screen.getByText('sent')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Un-accept' }));
+    await waitFor(() => expect(screen.getByText('Sent')).toBeInTheDocument());
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('was reopened'));
     expect(mockToast).not.toHaveBeenCalledWith('success', 'Quote reopened to sent.');
   });
@@ -2869,13 +2878,13 @@ describe('QuoteBuilder', () => {
       : { data: { version_number: 1, row_version: 9 }, error: null }));
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:quote'), revokeObjectURL: vi.fn() });
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.objectContaining({
       p_expected_row_version: 8,
     })));
-    await waitFor(() => expect(screen.getByText('sent')).toBeInTheDocument());
-    fireEvent.click(await screen.findByRole('button', { name: 'Revise Quote' }));
+    await waitFor(() => expect(screen.getByText('Sent')).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('button', { name: 'Revise quote' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 9 }),
     })));
@@ -2914,7 +2923,7 @@ describe('QuoteBuilder', () => {
     }));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
@@ -2978,7 +2987,7 @@ describe('QuoteBuilder', () => {
     ));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
 
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
@@ -3021,7 +3030,7 @@ describe('QuoteBuilder', () => {
     ));
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('expiry date could not be read')));
@@ -3065,7 +3074,7 @@ describe('QuoteBuilder', () => {
       .mockResolvedValueOnce({ deduplicated: false });
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'email transport failed'));
 
@@ -3120,7 +3129,7 @@ describe('QuoteBuilder', () => {
     });
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
     // ASSERTION DELIBERATELY CHANGED (H5 follow-up). This waited on the canned
     // literal 'Failed to email the quote', which only appeared because the
@@ -3178,7 +3187,7 @@ describe('QuoteBuilder', () => {
     });
 
     renderQuoteBuilder(quote.id);
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Email to Grower' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Quote' })).toBeInTheDocument());
     expect(mockSendEmail).not.toHaveBeenCalled();
@@ -3221,7 +3230,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    const opener = await screen.findByRole('button', { name: 'Create order' });
     await waitFor(() => expect(opener).toBeEnabled());
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
@@ -3266,7 +3275,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    const opener = await screen.findByRole('button', { name: 'Create order' });
     await waitFor(() => expect(opener).toBeEnabled());
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
@@ -3363,7 +3372,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     await screen.findByText('$6.00');
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     expect(await screen.findByText('$7.00')).toBeInTheDocument();
     // Today's cost is re-read too, so the line never shows a stale "today" beside the recorded cost.
@@ -3597,7 +3606,7 @@ describe('QuoteBuilder', () => {
       const picker = await screen.findByRole('dialog');
       fireEvent.click(await within(picker).findByRole('button', { name: /T1 price/ }));
       fireEvent.change(await screen.findByRole('spinbutton', { name: 'Units needed' }), { target: { value: '2' } });
-      fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
 
       await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/quotes/quote-new', { replace: true }));
       expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Check the saved prices before sending it'));
@@ -3619,7 +3628,7 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Use today $12.00' }));
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' }));
-      fireEvent.click(await screen.findByRole('button', { name: 'Preview Quote' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Mark as Presented' }));
 
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the quote to see the saved prices')));
@@ -3802,19 +3811,19 @@ describe('QuoteBuilder', () => {
     it('a higher price needs the "grower agreed" tick before it saves', async () => {
       await openRevisedAndSetPrice('12');
       const tick = await screen.findByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' });
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Grower agreed')));
       expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(0);
 
       fireEvent.click(tick);
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 12, grower_confirmed: true }));
     });
 
     it('a lower price saves with no tick', async () => {
       await openRevisedAndSetPrice('9');
       expect(screen.queryByRole('checkbox', { name: /Grower agreed/ })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByText('Save Draft'));
+      fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 9 }));
       expect(savedLine()).not.toHaveProperty('grower_confirmed');
     });
@@ -3842,7 +3851,7 @@ describe('QuoteBuilder', () => {
     const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
-    const opener = screen.getByRole('button', { name: 'Create Order ▾' });
+    const opener = screen.getByRole('button', { name: 'Create order' });
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
     const dialog = await screen.findByRole('dialog', { name: /Convert to.*Order/ });
@@ -3877,7 +3886,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    const opener = await screen.findByRole('button', { name: 'Create order' });
     await waitFor(() => expect(opener).toBeEnabled());
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
@@ -3918,8 +3927,9 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     await waitFor(() => {
-      const bookAsOrderOpener = screen.getByRole('button', { name: 'Book as Order' });
-      expect(bookAsOrderOpener).toBeEnabled();
+      if (!screen.queryByRole('menu')) fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      const bookAsOrderOpener = screen.getByRole('menuitem', { name: 'Book as order' });
+      expect(bookAsOrderOpener).not.toHaveAttribute('aria-disabled', 'true');
       fireEvent.click(bookAsOrderOpener);
       expect(screen.getByRole('dialog', { name: 'Book as Order' })).toBeInTheDocument();
     });
@@ -3959,7 +3969,7 @@ describe('QuoteBuilder', () => {
     const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     const saveArgs = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as {
@@ -4002,12 +4012,12 @@ describe('QuoteBuilder', () => {
     const units = await screen.findByRole('spinbutton', { name: 'Units needed' });
     await waitFor(() => expect(units).toBeEnabled());
     fireEvent.change(units, { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save draft/ })).toBeEnabled());
 
     fireEvent.change(units, { target: { value: '4' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls()).toHaveLength(2));
     expect(saveCalls()[1]).toMatchObject({ id: 'item-9', current_cost: 8 });
   });
@@ -4032,7 +4042,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
-    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    const opener = await screen.findByRole('button', { name: 'Create order' });
     await waitFor(() => expect(opener).toBeEnabled());
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
@@ -4073,7 +4083,7 @@ describe('QuoteBuilder', () => {
     });
 
     renderQuoteBuilder(quote.id);
-    const opener = await screen.findByRole('button', { name: 'Create Order ▾' });
+    const opener = await screen.findByRole('button', { name: 'Create order' });
     await waitFor(() => expect(opener).toBeEnabled());
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Convert whole booking' }));
@@ -4118,8 +4128,9 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     await waitFor(() => {
-      const bookAsOrderOpener = screen.getByRole('button', { name: 'Book as Order' });
-      expect(bookAsOrderOpener).toBeEnabled();
+      if (!screen.queryByRole('menu')) fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      const bookAsOrderOpener = screen.getByRole('menuitem', { name: 'Book as order' });
+      expect(bookAsOrderOpener).not.toHaveAttribute('aria-disabled', 'true');
       fireEvent.click(bookAsOrderOpener);
       expect(screen.getByRole('dialog', { name: 'Book as Order' })).toBeInTheDocument();
     });
@@ -4348,7 +4359,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], { 'quote-b': gateB.opened });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    await screen.findByRole('button', { name: /Save Draft/ });
+    await screen.findByRole('button', { name: /Save draft/ });
 
     await goToQuote(router, 'quote-b');
 
@@ -4357,7 +4368,7 @@ describe('QuoteBuilder', () => {
     // target is quoteId, which is still A until B installs.
     await waitFor(() => expect(screen.queryAllByText('Q-AAA-1')).toHaveLength(0));
     expect(screen.queryAllByText('Q-BBB-2')).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: /Save Draft/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save draft/ })).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
 
     gateB.open();
@@ -4442,7 +4453,7 @@ describe('QuoteBuilder', () => {
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
 
     // Save quote A and lose the version race, which opens the reload dialog.
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await screen.findByRole('button', { name: /Reload Quote/i });
 
     // Move to quote B; its load fails. Quote A's form - and this still-open dialog -
@@ -4481,7 +4492,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await screen.findByRole('button', { name: /Reload Quote/i });
 
     // Move to quote B. The reload dialog's closure still names quote A, so firing
@@ -4523,7 +4534,7 @@ describe('QuoteBuilder', () => {
 
     expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
     expect(screen.queryAllByText('Q-AAA-1')).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: /Save Draft/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save draft/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Close|Revert/ })).not.toBeInTheDocument();
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
     expect(mockRpc).not.toHaveBeenCalledWith('revert_quote_status', expect.anything());
@@ -4569,7 +4580,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
     await goToQuote(router, 'quote-b');
@@ -4605,7 +4616,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
     // Leave for quote B while quote A's save is still in flight.
@@ -4620,7 +4631,7 @@ describe('QuoteBuilder', () => {
 
     // The decisive check. Quote B's own token must still be the one it saves
     // against — proving quote A's reply neither replaced it nor cleared it.
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-b',
       p_quote_payload: expect.objectContaining({ row_version_expected: 11 }),
@@ -4647,7 +4658,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
     await goToQuote(router, 'quote-b');
@@ -4701,7 +4712,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
     // Leave quote A with its save still in flight, then come straight back to it.
@@ -4721,7 +4732,7 @@ describe('QuoteBuilder', () => {
     // The decisive check. The reopened session loaded at version 3, so version 3
     // is what it must still save against — proving the abandoned save's token
     // was neither installed over it nor cleared.
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
       p_quote_payload: expect.objectContaining({ row_version_expected: 3 }),
@@ -4747,7 +4758,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {}, { suspendOn: 'quote-b' });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
     // Begin a navigation to quote B whose render never completes. Quote A is
@@ -4764,7 +4775,7 @@ describe('QuoteBuilder', () => {
     // reply must be installed and confirmed, not discarded.
     expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
     // ...and the authoritative token it carried must be what the next save uses.
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
       p_quote_payload: expect.objectContaining({ row_version_expected: 4 }),
@@ -4794,7 +4805,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
     // Leave quote A, then let its conflict reply land.
@@ -4826,7 +4837,7 @@ describe('QuoteBuilder', () => {
 
     // The decisive check: the next save carries a FRESH key, so it is no longer
     // rejected by a key the server bound to an earlier payload.
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
       // Generation 1 within quote A's OWN scope: the reopen retired A's key, and
@@ -4879,7 +4890,7 @@ describe('QuoteBuilder', () => {
     renderQuoteSwitch([quoteA, quoteB], {}, { belowCostApproval: true });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
 
     await approveBelowCost();
 
@@ -4902,7 +4913,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {}, { belowCostApproval: true });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
-    fireEvent.click(await screen.findByRole('button', { name: /Save Draft/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     // Quote A's save is now parked on the dialog rather than on the network.
     await screen.findByLabelText(/Approval reason/i);
 
@@ -4929,6 +4940,162 @@ describe('QuoteBuilder', () => {
       (call) => call[0] === 'error' && String(call[1]).includes('Q-AAA-1'),
     )!;
     expect(refusalMessage).toMatch(/was not saved/i);
+  });
+  describe('header and actions (Quotes UI redesign)', () => {
+    function renderAtStatus(status: string, isPlanned = true) {
+      const quote = { id: `quote-${status}`, quote_number: 'Q-HDR-1', customer_id: 'customer-1', customer: QUOTE_FIXTURE_CUSTOMER, tier: 1, valid_days: 30, header_notes: '', footer_notes: '', status, is_planned: isPlanned, commission_split: { splits: [] }, row_version: 1, created_at: RECENT_QUOTE_CREATED_AT };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? quote : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER] : [],
+        error: null,
+      }));
+      renderQuoteBuilder(quote.id);
+    }
+
+    async function loaded() {
+      await screen.findByRole('heading', { level: 1, name: 'Q-HDR-1' });
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    }
+
+    const header = () => screen.getByTestId('quote-header');
+    const menuItemNames = () => screen.queryAllByRole('menuitem')
+      .filter((el) => el.getAttribute('aria-disabled') !== 'true')
+      .map((el) => el.querySelector('[slot="label"]')?.textContent ?? el.textContent ?? '');
+
+    /** Every action a user can run from the header: enabled buttons plus enabled items of both menus. */
+    function availableActions(): string[] {
+      const names: string[] = [];
+      for (const button of within(header()).getAllByRole('button')) {
+        // Skips the menu triggers (their items are read below), help tips and the Quotes breadcrumb.
+        const name = button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '';
+        if ((button as HTMLButtonElement).disabled || ['More actions', 'Create order', 'More info', 'Quotes'].includes(name)) continue;
+        names.push(name);
+      }
+      fireEvent.click(within(header()).getByRole('button', { name: 'More actions' }));
+      names.push(...menuItemNames());
+      fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      const createOrder = within(header()).queryByRole('button', { name: 'Create order' });
+      if (createOrder) {
+        fireEvent.click(createOrder);
+        names.push(...menuItemNames());
+        fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      }
+      return names.sort();
+    }
+
+    /** Today's show and enable conditions (QuoteBuilder before the redesign), one action name each. */
+    function todaysActions(status: string, role: string, planned: boolean): string[] {
+      const open = status === 'sent' || status === 'revised';
+      const names = ['Download PDF', 'Customer view (hide costs)', 'Save as template', 'Roll over to next season'];
+      if (status === 'draft' || status === 'revised') names.push('Save draft');
+      if (status === 'draft' || open) names.push('Preview & send');
+      if (status === 'draft') names.push('Book as order');
+      if (open || status === 'accepted') names.push('Convert whole booking');
+      if (open) names.push('Draw part of booking…', "Close short (grower won't take the rest)", 'Decline quote');
+      if (open && planned) names.push('Close as applied (we applied it)');
+      if (status === 'sent') names.push('Revise quote');
+      if (status === 'draft' || open) names.push('Cancel quote');
+      if (role === 'admin' && ['accepted', 'declined', 'expired', 'cancelled'].includes(status)) {
+        names.push(status === 'accepted' ? 'Un-accept' : 'Reopen');
+      }
+      return names.sort();
+    }
+
+    it('draft: Preview & send is the green button', async () => {
+      renderAtStatus('draft');
+      await loaded();
+      const preview = within(header()).getByRole('button', { name: 'Preview & send' });
+      expect(preview.className).toContain('bg-crx-green');
+      expect(within(header()).getByRole('button', { name: 'Save draft' }).className).not.toContain('bg-crx-green');
+      expect(within(header()).queryByRole('button', { name: 'Create order' })).not.toBeInTheDocument();
+    });
+
+    it('sent: Create order is green, Revise quote is visible, Decline and Cancel are in More', async () => {
+      renderAtStatus('sent');
+      await loaded();
+      expect(within(header()).getByRole('button', { name: 'Create order' }).className).toContain('bg-crx-green');
+      expect(within(header()).getByRole('button', { name: 'Revise quote' })).toBeInTheDocument();
+      expect(within(header()).getByRole('button', { name: 'Preview & send' }).className).not.toContain('bg-crx-green');
+      expect(within(header()).queryByRole('button', { name: /Decline|Cancel quote/ })).not.toBeInTheDocument();
+      fireEvent.click(within(header()).getByRole('button', { name: 'More actions' }));
+      const items = within(screen.getByRole('menu')).getAllByRole('menuitem').map((el) => el.textContent);
+      expect(items.slice(-2)).toEqual(['Decline quote', 'Cancel quote']);
+      expect(screen.getByRole('menuitem', { name: 'Cancel quote' }).className).toContain('text-red-700');
+    });
+
+    it('admin sees Reopen in More on a declined quote; a sales rep does not', async () => {
+      renderAtStatus('declined');
+      await loaded();
+      fireEvent.click(within(header()).getByRole('button', { name: 'More actions' }));
+      expect(screen.getByRole('menuitem', { name: 'Reopen' })).toBeInTheDocument();
+      cleanup();
+
+      authState.role = 'sales_rep';
+      renderAtStatus('declined');
+      await loaded();
+      fireEvent.click(within(header()).getByRole('button', { name: 'More actions' }));
+      expect(screen.queryByRole('menuitem', { name: 'Reopen' })).not.toBeInTheDocument();
+    });
+
+    it('shows the plain status label and Unsaved changes from the dirty flag', async () => {
+      renderAtStatus('closed_short');
+      await loaded();
+      expect(within(header()).getByText('Closed short')).toBeInTheDocument();
+      expect(within(header()).queryByText('Unsaved changes')).not.toBeInTheDocument();
+      cleanup();
+
+      renderAtStatus('draft');
+      await loaded();
+      fireEvent.change(screen.getByPlaceholderText(/top of the quote|header notes/i), { target: { value: 'Changed' } });
+      expect(await within(header()).findByText('Unsaved changes')).toBeInTheDocument();
+    });
+
+    it('phone: top bar with back, number, preview and More; Save draft and the green action stay at the bottom', async () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+      }));
+      try {
+        renderAtStatus('sent');
+        await loaded();
+        const top = header();
+        expect(within(top).getByRole('link', { name: 'Back to quotes' })).toHaveAttribute('href', '/quotes');
+        expect(within(top).getByRole('button', { name: 'Preview and send' })).toBeInTheDocument();
+        const bar = screen.getByTestId('quote-bottom-bar');
+        expect(within(bar).getByRole('button', { name: 'Create order' }).className).toContain('bg-crx-green');
+        // Sent quotes cannot be saved as a draft (the button was always disabled), so the bar holds only the green action.
+        expect(within(bar).queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
+        // The visible secondaries join the menu on a phone.
+        fireEvent.click(within(top).getByRole('button', { name: 'More actions' }));
+        expect(screen.getByRole('menuitem', { name: 'Revise quote' })).toBeInTheDocument();
+        expect(screen.getByRole('menuitem', { name: 'Download PDF' })).toBeInTheDocument();
+        cleanup();
+
+        renderAtStatus('draft');
+        await loaded();
+        const draftBar = screen.getByTestId('quote-bottom-bar');
+        expect(within(draftBar).getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
+        expect(within(draftBar).getByRole('button', { name: 'Preview & send' }).className).toContain('bg-crx-green');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    // Review Focus 3: no status gains an action it does not have today, and none loses one.
+    it.each(['draft', 'sent', 'revised', 'accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short'])(
+      '%s: the header offers exactly today’s actions to an admin and a sales rep',
+      async (status) => {
+        for (const role of ['admin', 'sales_rep']) {
+          for (const planned of [true, false]) {
+            authState.role = role;
+            dirtyStates.length = 0;
+            renderAtStatus(status, planned);
+            await loaded();
+            expect(availableActions(), `${status} / ${role} / planned=${planned}`).toEqual(todaysActions(status, role, planned));
+            cleanup();
+          }
+        }
+      },
+    );
   });
 });
 
@@ -4981,11 +5148,11 @@ describe('QuoteBuilder load failures', () => {
     renderQuoteBuilder(fixture.quote.id);
 
     expect(await screen.findByText('This quote could not be loaded')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Save Draft/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save draft/ })).not.toBeInTheDocument();
 
     serveQuote(fixture);
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
-    expect(await screen.findByRole('button', { name: /Save Draft/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Save draft/ })).toBeInTheDocument();
     expect(screen.queryByText('This quote could not be loaded')).not.toBeInTheDocument();
     expect(screen.getAllByText('Q-version-test').length).toBeGreaterThan(0);
   });
@@ -4995,7 +5162,7 @@ describe('QuoteBuilder load failures', () => {
     serveQuote(fixture, { table: 'unit_conversions', mode: 'nodata' });
     renderQuoteBuilder(fixture.quote.id);
 
-    await screen.findByRole('button', { name: /Save Draft/ });
+    await screen.findByRole('button', { name: /Save draft/ });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load unit conversions.'));
   });
 

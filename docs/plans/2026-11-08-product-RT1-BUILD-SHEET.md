@@ -330,12 +330,21 @@ No other `src/` file changes. The PR description lists its file list against thi
 
 ## 5. Deriving drafts from today's values
 
-**Input:** the parent's own `rate_per_acre`, `rate_unit` and `suggested_rate` (PAR-1 copies them to every size). **Safety check first:** every member size must carry the same three values as the parent (trimmed text compare, numeric equality). If not, the parent is `skipped_sizes_disagree` with no rows: the PAR-1 guard should make this impossible, so it is a bug signal, not a normal path.
+**Input:** the parent's own `rate_per_acre`, `rate_unit` and `suggested_rate` (PAR-1 copies them to every size). **Safety check first (form-aware):**
+- Every member size must carry the parent's `rate_per_acre` (numeric equality) and `suggested_rate` (trimmed text).
+- `rate_unit` depends on the form:
+  - **liquid and dry parents:** each size's `rate_unit` must equal the parent's (trimmed).
+  - **each and seed parents:** PAR-2 stores the parent's `rate_unit` as null (`20261123120000_product_parent_proposals.sql:851`), and `_copy_parent_to_size` gives each size its own `inventory_unit` as its rate unit (`20261108120000_product_parents.sql:653-656`). So each size's `rate_unit` must equal its own `inventory_unit` (trimmed), and the parent's null is expected, not a disagreement.
+- A failure is `skipped_sizes_disagree` with no rows. The PAR-1 guard should make this impossible, so it is a bug signal, not a normal path.
+
+**The house row's unit** (`house_unit`):
+- **liquid and dry:** the parent's `rate_unit`.
+- **each and seed:** the members' common stock unit. When every member's trimmed `inventory_unit` is the same spelling, that spelling is `house_unit`. When members stock in different units (for example `Ea` and `Unit`, or a seed sold in both bags and units), there is no house row. The note is `stock_units_differ`, listing each size and its unit, and the text row (Row 2) is still derived. Different spellings are never merged, even ones that map to the same code, because RT-3 should see the difference.
 
 **Row 1 · the house row** (from `rate_per_acre` and `rate_unit`):
-- Only when `rate_per_acre` is not null.
-- `source = 'house_standard'`, `basis = 'per_acre'`, `recommended = rate_per_acre`, low and high null, `origin = 'derived_house'`, `source_text = rate_per_acre || ' ' || rate_unit`.
-- Unit: the `product_rate_units` row whose `legacy_spellings` contains the exact `rate_unit` (case-sensitive; trimmed). None: no row, note `unit_unknown`. Wrong kind for the form: no row, note `unit_not_for_form` (today: the two dry `oz` products).
+- Only when `rate_per_acre` is not null and `house_unit` was found.
+- `source = 'house_standard'`, `basis = 'per_acre'`, `recommended = rate_per_acre`, low and high null, `origin = 'derived_house'`, `source_text = rate_per_acre || ' ' || house_unit`.
+- Unit: the `product_rate_units` row whose `legacy_spellings` contains the exact `house_unit` (case-sensitive; trimmed). None: no row, note `unit_unknown`. Wrong kind for the form: no row, note `unit_not_for_form` (today: the two dry `oz` products).
 - `is_quoting_default = true` **unless** a basis doubt exists, in which case false with note `basis_suspect`. A doubt exists when the parent's `suggested_rate` text is present and does **not** parse (Row 2) to `per_acre` or `per_100_gal`. That covers the seed treatments (`/unit`), the per-ton and per-gallon products, and any unreadable text. (MSO XL's text parses to `per_100_gal`, so its house row is proposed as the default.)
 
 **Row 2 · the text row** (from `suggested_rate`):
@@ -349,7 +358,7 @@ No other `src/` file changes. The PR description lists its file list against thi
 - Anything else (`1.5 qt/ton`, `1-3lb`, `Beans 5 oz/acre -- Corn 14oz/acre`, `Spray on`, `2 products`): no row, note `text_unparsed` with the text. A unit that fails 3.3 for the parent's form (the each-form seed treatments' `oz/unit`): no row, note `unit_not_for_form`.
 - Never a quoting default.
 
-**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`, `above_label`, `value_invalid`.
+**Notes** are written as `derive_note` events (`note_code`, the text, and what was skipped), so RT-3 has the full list per parent. Note codes: `no_rate`, `unit_unknown`, `unit_not_for_form`, `basis_suspect`, `basis_from_text`, `text_unparsed`, `sizes_disagree`, `stock_units_differ`, `above_label`, `value_invalid`.
 
 **What derivation never does:** change any `products` or `product_parents` value; overwrite or merge into an existing row; set a default other than the house per-acre row; convert between bases; touch the rate lock.
 
@@ -386,7 +395,7 @@ The harness is `scripts/smoke/prove-product-rates-draft-real-schema.mjs`, run ag
 | R11 | Two sessions: a draft save and a REG-1 registration write (or `set_parent_rates`) on the same parent | One waits; no deadlock |
 | R12 | **No reader changed:** before migration and derivation, snapshot every fixture product's and parent's rate columns, `product_price_per_acre` for every fixture product and tier, a fixture quote's saved lines, and the md5 of the five function bodies in 4.G | All identical after the migration, after derivation, and after every R-case |
 | R13 | Rate lock on | Drafts save, edit, delete and derive normally; a live-rate write on the same parent is still refused `PRODUCT_RATES_LOCKED` |
-| R14 | Seed treatment, each-form seed treatment, dry `oz` product, `1.5 qt/ton`, free text, sizes that disagree (forced past the guard in the fixture) | Rows and notes exactly as section 5 says, including no default, `basis_suspect`, `basis_confirmed = false` and a `not_checked`/`basis_unconfirmed` label check against a per-acre max; a 4.A save of that row sets `basis_confirmed = true` |
+| R14 | Seed treatment, each-form seed treatment, dry `oz` product, `1.5 qt/ton`, free text, sizes that disagree (forced past the guard in the fixture), a PAR-2-grouped each parent (parent `rate_unit` null, both sizes `Ea`), and an each parent whose sizes stock in `Ea` and `Unit` | Rows and notes exactly as section 5 says, including no default, `basis_suspect`, `basis_confirmed = false` and a `not_checked`/`basis_unconfirmed` label check against a per-acre max; a 4.A save of that row sets `basis_confirmed = true`; the grouped each parent derives a house row in `each` (not `skipped_sizes_disagree` or `unit_unknown`); the mixed-stock parent gets no house row, note `stock_units_differ`, and its text row still derives |
 | R15 | Re-run derive on a derived parent | `skipped_has_rows`; no row or version changes |
 | R16 | Grants and replay | Non-admin refused on all four RPCs; anon has no execute; a non-admin reads 0 rows from `product_rates` and the events table; the same key replays the same result; the same key with other arguments refuses `IDEMPOTENCY_PAYLOAD_MISMATCH` |
 | R17 | Stale and approved | Wrong `p_expected_row_version` refused `PRODUCT_RATE_STALE`; a fixture row set to `approved` (as `postgres`) cannot be edited or deleted (`PRODUCT_RATE_APPROVED`) |
@@ -486,3 +495,7 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 **Luna round 3** (head `9b08ad381`): no BLOCKER or HIGH; 2 findings, both fixed.
 - MED a parsed value with more than 6 decimals would fail the CHECK mid-batch: fixed, derivation checks every value first and notes `value_invalid` (section 5, R6).
 - LOW the save RPC's value check missed the `< 1e12` limit: fixed, it tests the CHECK's exact rule first (4.A step 2, R6).
+
+**Codex GitHub App, PR #1679:** 2 P2 findings, both fixed.
+- The idempotency receipt must use the `{actor_id, request_fingerprint, response}` envelope that `_product_parent_replay` reads (3.7).
+- Grouped each and seed parents carry a null `rate_unit`, and their sizes use their stock unit. The safety check and house row are now form-aware, with the new note `stock_units_differ` (section 5, R14).

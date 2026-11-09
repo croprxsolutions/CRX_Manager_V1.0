@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Tabs from '../components/ui/Tabs';
-import LastChargedPrices from '../components/quotes/LastChargedPrices';
+import { LastChargedPricesCard } from '../components/quotes/LastChargedPrices';
+import { useLastChargedPrices } from '../hooks/useLastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
 import { QuoteCreditStatus, TierMismatchNote } from '../components/quotes/QuoteCustomerChecks';
@@ -839,6 +840,13 @@ export default function QuoteBuilder() {
   // trigger allows: draft/sent/revised → cancelled; sent/revised → declined;
   // accepted/declined/expired/cancelled → sent (admin revert RPC only).
   const isAdmin = profile?.role === 'admin';
+  const staffSeesLastCharged = !customerView && (isAdmin || profile?.role === 'sales_rep');
+  const lastChargedLines = sections.flatMap((section) => section.items.map((item) => ({
+    productId: item.product_id,
+    productName: item.product?.product_name ?? 'Product',
+  })));
+  // Loads on page load and when the customer or product set changes, whichever tab shows.
+  const lastCharged = useLastChargedPrices(customerId, lastChargedLines, staffSeesLastCharged);
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); Customer View hides them for an admin too.
   const hideCost = customerView || !isAdmin;
   const canCancel = isEditing && ['draft', 'sent', 'revised'].includes(currentStatus);
@@ -4313,11 +4321,6 @@ export default function QuoteBuilder() {
   const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
   // Summary strip: the totals memo and the booking settlement, as the Totals and Settlement cards show them.
   const settlement = isEditing && canDraw && bookingSettlement?.found ? bookingSettlement : null;
-  const staffSeesLastCharged = !customerView && (isAdmin || profile?.role === 'sales_rep');
-  const lastChargedLines = sections.flatMap((section) => section.items.map((item) => ({
-    productId: item.product_id,
-    productName: item.product?.product_name ?? 'Product',
-  })));
   // Each tab shows exactly when its old card did.
   const tabAvailable: Record<string, boolean> = {
     products: true,
@@ -4325,7 +4328,11 @@ export default function QuoteBuilder() {
     last: staffSeesLastCharged && !!customerId && lastChargedLines.some((line) => !!line.productId),
     history: isEditing && savedVersionCount > 0,
   };
+  // A tab that goes away while selected sends the page back to Products for good (not just for now).
+  if (!tabAvailable[activeTab]) setActiveTab('products');
   const shownTab = tabAvailable[activeTab] ? activeTab : 'products';
+  const settlementHasPrepay = (settlement?.prepay_remaining_cents ?? 0) > 0 || (settlement?.prepay_earmarked_cents ?? 0) > 0;
+  const settlementEmpty = !settlementHasPrepay && (settlement?.lines?.length ?? 0) === 0;
   const productCount = sections.reduce((sum, sec) => sum + sec.items.length, 0);
   const bookedCents = settlement?.booked_cents ?? 0;
   const drawnPct = bookedCents > 0 ? Math.min(100, Math.max(0, Math.round(((settlement?.drawn_cents ?? 0) / bookedCents) * 100))) : 0;
@@ -5240,9 +5247,10 @@ export default function QuoteBuilder() {
           },
           ...(settlement ? [{
             key: 'balance',
-            label: 'Booking balance',
+            label: isPhone ? 'Booking' : 'Booking balance',
             content: <div className="pt-4"><Card>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm empty:hidden">
+          {settlementEmpty && <p className="text-sm text-secondary">Nothing booked on this quote yet.</p>}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
             {/* Prepaid cell hidden while there is no earmarked prepay — the booking-prepay
                 earmark engine is shelved (docs/roadmap/shelved-earmark-engine/), so this
                 reads 0 for now and lights up automatically when the engine returns. */}
@@ -5293,12 +5301,7 @@ export default function QuoteBuilder() {
           ...(tabAvailable.last ? [{
             key: 'last',
             label: 'Last charged',
-            content: <div className="pt-4"><LastChargedPrices
-              // A new customer starts a new card, so the last customer's prices never show for a moment.
-              key={customerId}
-              customerId={customerId}
-              lines={lastChargedLines}
-            /></div>,
+            content: <div className="pt-4"><LastChargedPricesCard products={lastCharged.products} state={lastCharged.state} onRetry={lastCharged.retry} /></div>,
           }] : []),
           ...(tabAvailable.history ? [{
             key: 'history',

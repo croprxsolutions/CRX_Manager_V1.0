@@ -24,18 +24,20 @@ export default function Tabs({
 }: TabsProps) {
   const id = useId().replace(/:/g, '');
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabListRef = useRef<HTMLDivElement | null>(null);
 
+  // Keeps the active tab inside the tab bar. It moves only the bar sideways: never the page, and
+  // not on a re-render that leaves the active tab alone (callers often pass a fresh `tabs` array).
   useEffect(() => {
-    const activeIndex = tabs.findIndex((tab) => tab.key === activeKey);
-    const activeTab = activeIndex >= 0 ? tabRefs.current[activeIndex] : null;
-    if (typeof activeTab?.scrollIntoView === 'function') {
-      activeTab.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
-        inline: 'nearest',
-      });
-    }
-  }, [activeKey, tabs]);
+    const list = tabListRef.current;
+    const tab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !tab || typeof list.scrollTo !== 'function') return;
+    const pad = 16;
+    const left = tab.offsetLeft;
+    const right = left + tab.offsetWidth;
+    if (left < list.scrollLeft) list.scrollTo({ left: Math.max(0, left - pad), behavior: 'smooth' });
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollTo({ left: right - list.clientWidth + pad, behavior: 'smooth' });
+  }, [activeKey]);
 
   const selectTab = (index: number) => {
     const tab = tabs[index];
@@ -73,6 +75,7 @@ export default function Tabs({
     <div className={`font-sub ${className}`}>
       <div className="relative">
         <div
+          ref={tabListRef}
           role="tablist"
           aria-label={ariaLabel}
           className="flex flex-nowrap gap-1 overflow-x-auto border-b border-gray-200 [-webkit-overflow-scrolling:touch]"
@@ -95,7 +98,7 @@ export default function Tabs({
                 onClick={() => onChange(tab.key)}
                 onKeyDown={(event) => handleKeyDown(event, index)}
                 className={`
-                  -mb-px inline-flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-4 py-2 md:min-h-10
+                  -mb-px inline-flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 py-2 md:min-h-10 md:px-4
                   text-sm font-medium whitespace-nowrap transition-colors
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green
                   focus-visible:ring-offset-2

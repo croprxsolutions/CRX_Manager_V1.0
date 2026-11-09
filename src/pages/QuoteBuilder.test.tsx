@@ -308,7 +308,14 @@ vi.mock('../components/ui/CommissionSplitEditor', () => ({
 vi.mock('../components/ui/UnsavedChangesModal', () => ({ default: () => null }));
 // Has its own tests (LastChargedPrices.test.tsx); here a marker stands in, so its load and Retry stay
 // out of these tests while who sees it is still checked.
-vi.mock('../components/quotes/LastChargedPrices', () => ({ default: () => <div data-testid="last-charged-card" /> }));
+const mockUseLastCharged = vi.hoisted(() => vi.fn());
+vi.mock('../components/quotes/LastChargedPrices', () => ({ LastChargedPricesCard: () => <div data-testid="last-charged-card" /> }));
+vi.mock('../hooks/useLastChargedPrices', () => ({
+  useLastChargedPrices: (...args: unknown[]) => {
+    mockUseLastCharged(...args);
+    return { products: [], state: { status: 'loading' }, retry: () => {} };
+  },
+}));
 
 import { preferredQuoteNotes } from '../lib/quoteNotes';
 import QuoteBuilder from './QuoteBuilder';
@@ -5297,13 +5304,24 @@ describe('QuoteBuilder', () => {
       serveTabs('draft');
       expect(await screen.findByRole('tab', { name: 'Last charged' })).toBeInTheDocument();
       expect(screen.queryByTestId('last-charged-card')).not.toBeInTheDocument();
+      // The data loads with the page (Products showing), not when the tab opens.
+      await waitFor(() => expect(mockUseLastCharged).toHaveBeenCalledWith(
+        'customer-1',
+        [expect.objectContaining({ productId: expect.any(String) })],
+        true,
+      ));
       fireEvent.click(screen.getByRole('tab', { name: 'Last charged' }));
       expect(screen.getByTestId('last-charged-card')).toBeInTheDocument();
 
-      // Customer View hides it, and the selected tab falls back to Products.
+      // Customer View hides it, and the selected tab falls back to Products for good.
       fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
       fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
       expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /^Products/ })).toHaveAttribute('aria-selected', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Leave customer view/ }));
+      // Leaving Customer View brings the tab back, but the page stays on Products.
+      expect(await screen.findByRole('tab', { name: 'Last charged' })).toHaveAttribute('aria-selected', 'false');
       expect(screen.getByRole('tab', { name: /^Products/ })).toHaveAttribute('aria-selected', 'true');
       cleanup();
 
@@ -5314,9 +5332,11 @@ describe('QuoteBuilder', () => {
       cleanup();
 
       authState.role = 'driver';
+      mockUseLastCharged.mockClear();
       serveTabs('draft');
       await screen.findByRole('tab', { name: /^Products/ });
       expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+      expect(mockUseLastCharged).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), true);
       cleanup();
 
       // No customer, no tab.
@@ -5324,6 +5344,43 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder();
       await screen.findByRole('tab', { name: /^Products/ });
       expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+    });
+
+    it('a customer with no product lines has no Last charged tab', async () => {
+      const fixture = makeQuoteFixture('draft', 7);
+      const emptySection = { ...fixture.section };
+      mockFrom.mockImplementation((table: string) => buildChain({
+        data: table === 'quotes' ? fixture.quote
+          : table === 'quote_sections' ? [emptySection]
+            : table === 'customers' ? [QUOTE_FIXTURE_CUSTOMER]
+              : table === 'products' ? [fixture.product]
+                : [],
+        error: null,
+      }));
+      renderQuoteBuilder(fixture.quote.id);
+      await screen.findByRole('tab', { name: /^Products/ });
+      await screen.findByDisplayValue('Version test header');
+      expect(screen.queryByRole('tab', { name: 'Last charged' })).not.toBeInTheDocument();
+    });
+
+    it('an empty Booking balance tab says nothing is booked', async () => {
+      serveTabs('sent', { settlement: SETTLEMENT });
+      fireEvent.click(await screen.findByRole('tab', { name: 'Booking balance' }));
+      expect(screen.getByText('Nothing booked on this quote yet.')).toBeInTheDocument();
+    });
+
+    it('the Booking balance tab is called Booking on a phone', async () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+      }));
+      try {
+        serveTabs('sent', { settlement: SETTLEMENT });
+        expect(await screen.findByRole('tab', { name: 'Booking' })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: 'Booking balance' })).not.toBeInTheDocument();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('History shows with the version count, keeps compare and restore, and the menu item is gone', async () => {

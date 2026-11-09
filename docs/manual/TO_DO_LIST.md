@@ -349,6 +349,19 @@ Removed for good. Don't re-add without asking Mason: bank reconciliation, 1099s,
 
 **Also settled earlier** (carried over from the old `TODO.md` "Not building" list; don't re-add without new evidence): native apps; multi-tenancy for now; machine-learning forecasting; AI acting on its own on financial records; QuickBooks two-way sync (the planned sync is one-way, section 14); grain, energy and feed modules; a big-bang screen redesign; reorganizing screens by role before there's portal and phone usage data; re-enabling prepay bulk-apply; applying the shelved earmark migrations as they are; and offline money changes in general.
 
+## 18. Foundations to finish (road map)
+
+Mason, 2026-11-08: finish the base parts of the app fully and up to standard, the way Product Master did, so later work stands on them; save this ranking for the future road map. Detail, evidence and "Done when" for each row: [`docs/plans/2026-11-08-foundation-roadmap.md`](../plans/2026-11-08-foundation-roadmap.md). Each row gets its own backlog, build sheet and Sol review before it is built. Rank words here are order, not MUST/SHOULD.
+
+| # | Foundation | Today (evidence) | Next step | Order |
+|---|---|---|---|---|
+| 18.1 | **Fields and who pays:** one billing split group per field that every split path reads | About 8 places store who pays for a field and about 5 split mechanisms run side by side; `Fields.tsx:254` hard-deletes; `OrderDetail.tsx:960,985` writes `order_shares` directly | Backlog and build sheet; Mason answers KI-76 | 1st |
+| 18.2 | **Sales read model, per payer:** one server source of sales by payer, in cents | Sales reports credit `orders.customer_id` in dollars, so a split sale shows under the main customer | Build once PR #1524 is live | Alongside 18.1 |
+| 18.3 | **Customer master:** every write through an RPC, one home for addresses and contacts | Bulk import, deactivate, crops and contacts write the tables directly; duplicate check is screen-only (PR #1660) | Backlog | 3rd |
+| 18.4 | **Seasons and price rules:** server-set season; sent price billed (KI-81). The quote-tier check stays screen-only (KI-105, settled 2026-11-05) | The invoice save still accepts a season from the screen | Backlog; quote parts after 2026-12-15 | 4th |
+| 18.5 | **Permissions, one model** | Roles checked three ways; KI-03 enforced on screen only | After PR #1650 lands | 5th |
+| 18.6 | **Money units and retry keys:** all money in cents, retry keys required | Orders and commissions still in dollars; key optional on most money RPCs; six August drafts parked | After 2026-12-15 | 6th |
+
 ## What Mason needs to decide
 
 **Answered 2026-10-22:** item 1 (approved), item 7 (yes, the small part) and item 13 (SHOULD, for now). Their answers are preserved in the [completion record](../audits/2026-10-28-to-do-completed-items.md); unanswered questions keep their original numbers. Items 2, 5 and 6 are "not chosen yet". Items 3 and 4 wait for the 2026-12-15 checkpoint, after the contingencies are written and rehearsed.
@@ -366,6 +379,7 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 10. **How do quote discounts and fees work?** Sales tax is already settled: none. (old `TODO.md`, §5)
 11. **Finance charges and month-end:** automate finance charges, warn before reopening a closed period, and save the month-end checkboxes? Decide before January 31. (old `TODO.md`, §5)
 12. **True average purchase cost for inventory?** Recommend later. (old `TODO.md`, §3)
+14. **Which customers may a split bill?** (KI-76) Needed before foundation 18.1 is designed.
 
 **Actions already decided, still waiting on Mason** (not new decisions):
 - **Live Create User check on the new `create-user` function** (version 25, deployed 2026-10-23, see 11.9). Mason deferred it on 2026-10-23.

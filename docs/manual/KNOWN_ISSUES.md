@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110061547`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110164910`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -372,7 +372,7 @@ can make old splits refuse to save (LOW-MED).
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
-- FIX PENDING LIVE APPLY (`20261231100000`, contract `docs/plans/2026-11-10-ki16-rate-unit-denominator-and-invisible-chars-CONTRACT.md`):
+- APPLIED LIVE 2026-11-10 10:49 AM Central (`20261231100000`, ledger `20261110164910`, PR #1733; contract `docs/plans/2026-11-10-ki16-rate-unit-denominator-and-invisible-chars-CONTRACT.md`):
   a rate unit measured per something other than acres ("oz/cwt", "oz per cwt") is refused when any job line or blend
   ticket line is written (scheduling from a booking, the recipe RPC, blend ticket create/save), with save_job's rule
   and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its

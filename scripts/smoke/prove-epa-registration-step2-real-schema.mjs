@@ -460,6 +460,15 @@ async function main() {
   ownerOk(`UPDATE public.products SET phi_days = 3 WHERE id = '${P5}';`);
   refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's-x7'), /EPA_REGISTRATION_SEED_STALE/);
   ownerOk(`UPDATE public.products SET phi_days = NULL WHERE id = '${P5}';`);
+  // Sol r11 (Mason "Yes, fix both"): an active restricted-use record made before the seed refuses the preview and the seed;
+  // a voided one does not.
+  raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name)
+    VALUES ('${INV2}', '${ORD}', '${CUST}', '${P4}', current_date, '[PROVER] pre-seed', '${N2}', 1, 'Gal', 1500, 1500, 2027, 'x');`);
+  refused(ADMIN, PREVIEW_SEED('no'), /EPA_REGISTRATION_SEED_RECORDS_EXIST/);
+  refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's-x8'), /EPA_REGISTRATION_SEED_RECORDS_EXIST/);
+  raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE product_name = '[PROVER] pre-seed';`);
+  assert.equal(okJ(ADMIN, PREVIEW_SEED('no')).fingerprint, pv.fingerprint);
+  raw(`DELETE FROM public.rup_sales_records WHERE product_name = '[PROVER] pre-seed';`);
   assert.equal(regCount(), '0');
   const seeded = okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1'));
   const productLines = Number(scalar('SELECT count(*) FROM public.invoice_items WHERE product_id IS NOT NULL;'));
@@ -642,6 +651,10 @@ async function main() {
   assert.equal(scalar(`SELECT public._rup_record_for_line_key(ii)::text FROM public.invoice_items ii WHERE id = '${id('2a')}';`), 'false');
   raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV3}' AND product_name <> '[PROVER] sw';`);
   assert.equal(scalar(`SELECT public._rup_record_for_line_key(ii)::text FROM public.invoice_items ii WHERE id = '${id('2a')}';`), 'true');
+  // Sol r11 MED: that record totals the Yes line L6 with its Not reviewed sibling, so it does not cover L6, and a
+  // registration turning restricted use still lists L6.
+  assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'false');
+  assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N1}') @> '[{"invoice_item_id": "${L6}"}]')::text;`), 'true');
   raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word)
     SELECT invoice_id, order_id, customer_id, product_id, sale_date, '[PROVER] sw2', epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word
       FROM public.rup_sales_records WHERE product_name = '[PROVER] sw';`);

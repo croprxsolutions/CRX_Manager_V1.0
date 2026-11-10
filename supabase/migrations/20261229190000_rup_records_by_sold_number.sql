@@ -233,7 +233,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
     LEFT JOIN public.invoice_line_rup_captures c ON c.invoice_item_id = ii.id
    WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL AND ii.product_id IS NOT NULL
      AND (c.epa_registration = p_number OR public._normalize_epa_registration(ii.epa_registration) = p_number)
-     AND NOT public._rup_record_covers_line(ii) AND NOT public._rup_record_for_line_key(ii);
+     AND NOT public._rup_record_covers_line(ii);  -- a record that does not cover the line hides nothing (Sol r11)
 $function$;
 
 DO $owners$

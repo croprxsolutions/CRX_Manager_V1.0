@@ -16,7 +16,7 @@
 --     p_expected_fingerprint, p_idempotency_key), admin only. The seed creates one registration per EPA number
 --     found on sizes, brands, parents, invoice lines and job lines, with the facts every carrier agrees on and
 --     Mason's pick where they disagree, and records the seed run last. It refuses a stale preview, a missing
---     or unknown pick, an invalid number and a second run. Then it captures every invoice line that exists (sheet
+--     or unknown pick, an invalid number, a second run and any active restricted-use record made before it. Then it captures every invoice line that exists (sheet
 --     4.C, Mason 2026-11-10 "Capture it at save"). It changes no size, brand or invoice line.
 --
 -- NOT CHANGED: products, brands, parents, PAR-1 functions, invoice and job lines, and every grant.
@@ -141,6 +141,11 @@ BEGIN
   IF public._epa_registrations_seeded() OR EXISTS (SELECT 1 FROM public.epa_registrations) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_DONE: EPA registrations are already set up';
   END IF;
+  -- Sol r11 (Mason 2026-11-10 "Yes, fix both"): no restricted-use record may predate the seed (live had 0),
+  -- so posting after the seed never has to match a record made under the old rules.
+  IF EXISTS (SELECT 1 FROM public.rup_sales_records WHERE voided_at IS NULL) THEN
+    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_RECORDS_EXIST: restricted-use records exist from before the setup; void them first';
+  END IF;
   v_plan := public._epa_registration_seed_plan(p_rup_default);
   RETURN v_plan || jsonb_build_object(
     'fingerprint', md5(v_plan::text),
@@ -195,6 +200,11 @@ BEGIN
     IN SHARE ROW EXCLUSIVE MODE;
   IF public._epa_registrations_seeded() OR EXISTS (SELECT 1 FROM public.epa_registrations) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_DONE: EPA registrations are already set up';
+  END IF;
+  -- Sol r11 (Mason 2026-11-10 "Yes, fix both"): no restricted-use record may predate the seed (live had 0),
+  -- so posting after the seed never has to match a record made under the old rules.
+  IF EXISTS (SELECT 1 FROM public.rup_sales_records WHERE voided_at IS NULL) THEN
+    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_RECORDS_EXIST: restricted-use records exist from before the setup; void them first';
   END IF;
 
   v_plan := public._epa_registration_seed_plan(p_rup_default);

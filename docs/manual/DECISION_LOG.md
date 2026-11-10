@@ -17,6 +17,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 ## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
+## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
+
+**Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.
+**Why:** Sol's third round on #1710 found the same "save races a turn-off" gap again, plus grouping sizes that hold a turned-off option failing. Mason chose the business trade-off that removes the mechanism: a rare product may keep a just-turned-off timing; it stays visible and an admin can remove it.
+**What this forbids/implies:** do not re-add a database lock or refusal for turned-off timings without a new decision; the screens (USE-1 screens PR) must not offer a turned-off option. One pair twice on one row is still refused.
 
 ## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
 

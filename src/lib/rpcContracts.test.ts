@@ -2863,6 +2863,10 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261209100000',
   '20261210100000',
   '20261211100000',
+  '20261215100000',
+  '20261215110000',
+  '20261222100000',
+  '20261229110000',
 ]);
 
 /**
@@ -3114,6 +3118,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
+  // 20261229120000 (USE-1, local candidate): admin-only use-timing option writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'add_use_timing_option',
+  'set_use_timing_option_active',
   // 20261229110000 (RT-1, local candidate): admin-only draft rate writers; each replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
   'delete_draft_product_rate',

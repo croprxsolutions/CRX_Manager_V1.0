@@ -34,8 +34,9 @@ const FOLLOW_UPS = ['20261226110000_rup_records_by_sold_number.sql', '2026122612
 // Later files that only READ what this proof covers and redefine none of it.
 // Later migrations checked by hand: they name a covered function but change nothing this proof covers.
 // 20261229100000 only turns the product-grouping switch on (one function body); the brand functions appear in
-// its comments and checks, and no product here is grouped.
-const LATER_READ_ONLY = new Set(['20261229100000_product_grouping_switch_on.sql']);
+// its comments and checks, and no product here is grouped. 20261229110000 (RT-1 rates) adds its own tables and
+// functions and only reads registrations and product numbers.
+const LATER_READ_ONLY = new Set(['20261229100000_product_grouping_switch_on.sql', '20261229110000_product_rates_draft.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

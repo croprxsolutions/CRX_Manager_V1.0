@@ -203,7 +203,7 @@ Start Right 2.0 (2 rows), BoostMax-D (2), BoostMax-M (2), Residue RX (2), Bio-Re
 | Order with PAR-2 grouping | batch 1 APPROVED ~9:57 PM 2026-11-09 (36 parents, 72 sizes; ids in the shared notes file PAR2-batch1-approved-product-ids-2026-11-09.md): its brands go on the parent via `upsert_parent_brand`. Agreed: brand rows go on every size of a product IDENTICALLY (grouping then merges them to the parent with no picks); nothing written to a batch 1 size until PAR-2 says batch 1 is approved; batch 1 sizes then get brands on the parent |
 | BroadAxe XC wrong number | **fixed 2026-11-09** (Mason `approve 784327`): Mason said BroadAxe XC and Authority Elite are different products. Both BroadAxe XC sizes (Syngenta) had FMC's 279-3442; EPA lists BroadAxe XC as distributor number 279-3442-100. Changed on the product page; verified live, history shows only that change by Mason Wells. Authority Elite - Bulk (FMC) stays 279-3442. |
 | Brand writes | on hold until PAR-2 batch 2 is approved (so most brands go once on a parent) |
-| Order with REG-1 seed | asked REG-1 session; no brand write until it answers |
+| Order with REG-1 seed | answered 2026-11-09: write brands BEFORE the seed (it reads brand numbers). #1688 does not change `upsert_product_brand`. Only rule: no brand write between Mason's seed preview and seed run (it refuses EPA_REGISTRATION_SEED_STALE and he re-previews). |
 | Approved brand rows written to live | not started |
 | Read-only verification of brand rows | not started |
 | C items answered by Mason | not started |

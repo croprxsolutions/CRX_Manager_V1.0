@@ -16,13 +16,21 @@ describe('toSentryError', () => {
     expect(result.stack).toContain('sentryError.test');
   });
 
-  it('keeps figures out of the stack even when the message holds a $& sequence, and keeps the cause', () => {
-    const cause = new TypeError('network timeout');
-    const err = Object.assign(new Error('Charge $& 125.75 failed'), { cause });
+  it('keeps figures out of the stack even when the message holds a $& sequence, and drops the unscrubbed cause', () => {
+    const err = Object.assign(new Error('Charge $& 125.75 failed'), { cause: new Error('refresh_token=secret123') });
     const result = toSentryError(err);
     expect(result.message).toBe('Charge $& # failed');
     expect(result.stack).not.toContain('125.75');
-    expect((result as { cause?: unknown }).cause).toBe(cause);
+    expect((result as { cause?: unknown }).cause).toBeUndefined();
+  });
+
+  it('changes only the first stack line, so frame line numbers survive a short message', () => {
+    const err = new Error('1');
+    err.stack = 'Error: 1\n    at pay (src/foo.ts:101:10)';
+    expect(toSentryError(err).stack).toBe('Error: #\n    at pay (src/foo.ts:101:10)');
+    const firefox = new Error('Invoice 42 failed');
+    firefox.stack = 'pay@src/foo.ts:7:3';
+    expect(toSentryError(firefox).stack).toBe('pay@src/foo.ts:7:3');
   });
 
   it('titles a Supabase error object with its own message, not [object Object]', () => {
@@ -38,7 +46,8 @@ describe('toSentryError', () => {
   it.each([
     ['a whole JWT', 'expired eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2ln42 at 10', 'expired [REDACTED] at #'],
     ['a Bearer header', 'sent Bearer abc123def456 twice', 'sent [REDACTED] twice'],
-    ['link tokens', '/reset#access_token=ab12&refresh_token=r3fr35h&type=recovery ?token_hash=pk9&code=x1', '/reset#[REDACTED]&[REDACTED]&type=recovery ?[REDACTED]&[REDACTED]'],
+    ['link tokens', '/reset#access_token=ab12&refresh_token=r3fr35h&type=recovery ?token_hash=pk9&code=x1', '/reset#[REDACTED]&[REDACTED]&[REDACTED] ?[REDACTED]&[REDACTED]'],
+    ['a PKCE verifier', 'callback code_verifier=pkceSecret42 failed', 'callback [REDACTED] failed'],
     ['fullwidth digits', 'Invoice ２０２６-００４２', 'Invoice #-#'],
   ])('removes %s before blanking figures, leaving no piece of it', (_label, message, expected) => {
     expect(toSentryError({ message }).message).toBe(expected);

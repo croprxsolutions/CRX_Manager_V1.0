@@ -4,7 +4,7 @@
 const TOKENS = [
   /eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*/g, // a whole JWT: header, payload and signature
   /\bBearer\s+[^\s"',;]+/gi,
-  /\b\w*(?:token|code)(?:_hash)?=[^&#\s"',;]+/gi, // access_token=, refresh_token=, token_hash=, code=
+  /\b\w+=[^&#\s"',;]+/g, // any name=value (access_token, code_verifier, ...): no guessing which names are secret
 ];
 // Amounts and invoice numbers: Sentry needs the reason, not the figures.
 const FIGURES = /\p{Nd}+(?:[.,]\p{Nd}+)*/gu;
@@ -19,10 +19,12 @@ export function toSentryError(err: unknown): Error {
     if (message === err.message) return err;
     const blanked = new Error(message);
     blanked.name = err.name;
-    // Keep where it was thrown; the stack's first line repeats the message (split/join: no `$&` patterns).
-    if (err.stack) blanked.stack = err.stack.split(err.message).join(message);
-    // Sentry reports the underlying cause as a linked error.
-    if ('cause' in err) Object.assign(blanked, { cause: (err as { cause?: unknown }).cause });
+    // Keep where it was thrown. Only the first line repeats the message; the frames stay as they are.
+    // The cause is not copied: its text would reach Sentry unscrubbed.
+    const head = `${err.name}: ${err.message}`;
+    if (err.stack?.startsWith(head)) blanked.stack = `${err.name}: ${message}${err.stack.slice(head.length)}`;
+    // Firefox and Safari stacks hold frames only.
+    else if (err.stack && !err.stack.includes(err.message)) blanked.stack = err.stack;
     return blanked;
   }
   const message = typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err);

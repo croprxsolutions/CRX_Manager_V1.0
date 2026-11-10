@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
+
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.

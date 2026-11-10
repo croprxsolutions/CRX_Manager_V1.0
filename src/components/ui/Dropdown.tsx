@@ -36,6 +36,10 @@ interface DropdownProps {
   active?: boolean;
   /** Dense table cells: no reserved helper line under the trigger. */
   noHelperRow?: boolean;
+  /** Shown before the value inside the trigger. */
+  icon?: ReactNode;
+  /** Shown in the trigger instead of the selected option's label (e.g. "Sort" while the default is picked). */
+  valueLabel?: ReactNode;
 }
 
 export default function Dropdown({
@@ -53,6 +57,8 @@ export default function Dropdown({
   inline = false,
   active = false,
   noHelperRow = false,
+  icon,
+  valueLabel,
 }: DropdownProps) {
   // RAC's Button drops aria-invalid (it only sets data-invalid on the Select root), so set it directly.
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -91,8 +97,9 @@ export default function Dropdown({
               : 'bg-white text-nav-dark border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green data-[pressed]:border-crx-green'}
         `}
       >
+        {icon}
         {inline && label && <span className={active ? 'font-normal' : 'text-secondary'} aria-hidden="true">{label}</span>}
-        <SelectValue className="truncate data-[placeholder]:text-gray-500" />
+        <SelectValue className="truncate data-[placeholder]:text-gray-500">{valueLabel === undefined ? undefined : () => valueLabel}</SelectValue>
         <ChevronDown className={`h-4 w-4 shrink-0 ${active ? '' : 'text-gray-500'}`} aria-hidden="true" />
       </Button>
       {!inline && !noHelperRow && (

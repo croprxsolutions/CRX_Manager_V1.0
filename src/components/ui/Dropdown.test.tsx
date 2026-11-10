@@ -64,6 +64,18 @@ describe('Dropdown', () => {
     expect(trigger).not.toHaveClass('bg-white');
   });
 
+  it('icon and valueLabel change only what the trigger shows', () => {
+    const onChange = vi.fn();
+    render(<Dropdown inline aria-label="Sort things" icon={<span data-testid="lead-icon" />} valueLabel="Sort" value="draft" onChange={onChange} options={options} />);
+    const trigger = screen.getByRole('button', { name: /Sort/ });
+    expect(trigger).toHaveTextContent(/^Sort$/);
+    expect(screen.getByTestId('lead-icon')).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('option', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    expect(onChange).toHaveBeenCalledWith('sent');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

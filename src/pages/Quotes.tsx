@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { parseLocalDate, localDatePlusDays, localToday } from '../lib/dateUtils';
-import { Plus, Upload, Copy, Download, FileText, Trash2, ChevronDown, ChevronUp, PackageCheck, AlertTriangle, Check } from 'lucide-react';
+import { Plus, Upload, Copy, Download, FileText, Trash2, ChevronDown, ChevronUp, PackageCheck, AlertTriangle, Check, Search, ArrowUpDown } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Dropdown from '../components/ui/Dropdown';
@@ -22,7 +22,8 @@ import { resendRequiredMessage } from '../lib/quotePriceLock';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { QUOTE_COLUMNS } from '../lib/costFields';
 import { quoteStatusLabel, quoteBadgeVariant } from '../lib/quoteStatusLabel';
-import { applyTableSearchSort } from '../lib/tableSearchSort';
+import { applyTableSearchSort, type SortDir } from '../lib/tableSearchSort';
+import { useIsPhone } from '../hooks/useIsPhone';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
@@ -44,6 +45,25 @@ const STATUSES = ['draft', 'sent', 'revised', 'accepted', 'declined', 'expired',
 const ALL = 'all';
 const STATUS_OPTIONS = [{ value: ALL, label: 'All' }, ...STATUSES.map((s) => ({ value: s, label: quoteStatusLabel(s) }))];
 const SEARCH_KEYS = ['quote_number', 'customer_name', 'product_names'];
+const SEARCH_LABEL = 'Search by quote number, customer or product';
+// Phone sort chip: every sortable column both ways, in words; the value is the same key:dir the table headers set.
+const AS_LISTED = 'as_listed';
+const SORT_OPTIONS = [
+  { value: AS_LISTED, label: 'As listed' },
+  { value: 'quote_number:asc', label: 'Quote number, A to Z' },
+  { value: 'quote_number:desc', label: 'Quote number, Z to A' },
+  { value: 'status:asc', label: 'Status, A to Z' },
+  { value: 'status:desc', label: 'Status, Z to A' },
+  { value: 'tier:asc', label: 'Tier, 1 to 3' },
+  { value: 'tier:desc', label: 'Tier, 3 to 1' },
+  { value: 'total_price:asc', label: 'Total, low to high' },
+  { value: 'total_price:desc', label: 'Total, high to low' },
+  { value: 'created_at:asc', label: 'Created, oldest first' },
+  { value: 'created_at:desc', label: 'Created, newest first' },
+  { value: 'expires_at:asc', label: 'Expires, soonest first' },
+  { value: 'expires_at:desc', label: 'Expires, latest first' },
+];
+const quotesWord = (n: number) => (n === 1 ? 'quote' : 'quotes');
 
 const shortDate = (d: Date, withYear = true) =>
   d.toLocaleDateString('en-US', withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
@@ -82,6 +102,9 @@ export default function Quotes() {
   const [plannedFilter, setPlannedFilter] = useState(false);
   // Held here (not inside the table) so the result count matches the rows shown.
   const [search, setSearch] = useState('');
+  // Held here too, so the phone Sort chip and the table headers share one sort.
+  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
+  const isPhone = useIsPhone();
   const [importModalOpen, setImportModalOpen] = useState(false);
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -414,7 +437,8 @@ export default function Quotes() {
       isSelectable: (q) => DELETABLE.includes(q.status),
     });
 
-  const hasSelectable = filtered.some((q) => DELETABLE.includes(q.status));
+  const selectableCount = filtered.filter((q) => DELETABLE.includes(q.status)).length;
+  const hasSelectable = selectableCount > 0;
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
   const checkboxCol: Column<QuoteRow> = {
@@ -535,9 +559,9 @@ export default function Quotes() {
   };
 
   const bulkActions = [
-    { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
-    { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
-    { key: 'delete', label: 'Delete quotes', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    { key: 'csv', label: 'Export CSV', shortLabel: 'CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
+    { key: 'pdf', label: 'Download PDF', shortLabel: 'PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
+    { key: 'delete', label: 'Delete quotes', shortLabel: 'Delete', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
   ];
 
   const customerName = (row: QuoteRow) => (row.customer as unknown as { farm_name: string })?.farm_name || '-';
@@ -661,6 +685,60 @@ export default function Quotes() {
     );
   };
 
+  const selecting = canBulkAction && selectedCount > 0;
+  // A failed read shows no count: "0 quotes" would read as an empty list.
+  const countText = loadFailed ? null : filtersActive || search ? (
+    <><strong className="font-semibold text-nav-dark">{shownCount}</strong> of {quotes.length} {quotesWord(quotes.length)}</>
+  ) : (
+    <><strong className="font-semibold text-nav-dark">{shownCount}</strong> {quotesWord(shownCount)}</>
+  );
+  // Always in the layout; hidden (space kept) while no filter is on. Clears status and Planned, as before.
+  const clearButton = (
+    <button
+      type="button"
+      onClick={clearFilters}
+      style={filtersActive ? undefined : { visibility: 'hidden' }}
+      className="ml-auto h-11 md:h-10 shrink-0 rounded-lg px-1 text-sm font-medium text-crx-green hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
+    >
+      Clear filters
+    </button>
+  );
+  const resultsLine = isPhone ? (
+    <div data-testid="quote-results" className="mt-2.5 flex h-11 items-center gap-2.5 border-b border-gray-200 text-sm text-secondary">
+      {canBulkAction ? (
+        // Phones have no table header, so the select-all box sits here; it selects what the header box does.
+        <label className="inline-flex h-11 min-w-0 items-center gap-2.5">
+          <input
+            type="checkbox"
+            aria-label="Select all quotes"
+            checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = someSelected; }}
+            onChange={toggleAll}
+            disabled={!hasSelectable}
+            className="h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green focus:ring-crx-green disabled:opacity-50"
+          />
+          <span className="truncate tabular-nums">
+            {selecting ? <><strong className="font-semibold text-nav-dark">{selectedCount}</strong> of {selectableCount} selected</> : countText}
+          </span>
+        </label>
+      ) : (
+        <span className="truncate tabular-nums">{countText}</span>
+      )}
+      {clearButton}
+    </div>
+  ) : (
+    <div data-testid="quote-results" className="h-12 border-t border-gray-200">
+      {selecting ? (
+        <BulkActionBar bar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
+      ) : (
+        <div className="flex h-full items-center gap-3 bg-cream px-4 text-sm text-secondary">
+          <span className="tabular-nums">{countText}</span>
+          {clearButton}
+        </div>
+      )}
+    </div>
+  );
+
   const showPrepaid = rolloverRows.some((b) => (b.prepay_remaining_cents ?? 0) > 0 || (b.prepay_earmarked_cents ?? 0) > 0);
 
   if (loading) {
@@ -672,7 +750,7 @@ export default function Quotes() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className={`space-y-5 ${selecting && isPhone ? 'pb-28' : ''}`}>
       {/* PageHeader's markup, laid out like the boards: on phones the title and New quote share a row,
           the description and accent word hide, and Import quotes moves into a ⋯ menu. */}
       <header className="flex min-w-0 items-center justify-between gap-3 md:items-end">
@@ -799,22 +877,74 @@ export default function Quotes() {
         </Card>
       )}
 
-      <Card padding={false} className="max-md:border-0 max-md:bg-transparent max-md:shadow-none">
-        <section aria-label="All quotes" className="md:p-5">
-          {canBulkAction && selectedCount > 0 && (
-            <div className="mb-3">
-              <BulkActionBar bar selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
+      <Card padding={false} className="max-md:border-0 max-md:bg-transparent max-md:shadow-none md:overflow-hidden">
+        <section aria-label="All quotes">
+          {/* Same rows in every state (only colours and text change), so nothing jumps while filtering or selecting. */}
+          <div className="flex flex-col gap-2.5 md:h-16 md:flex-row md:items-center md:px-4">
+            <div className="relative min-w-0 md:w-105 md:shrink">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={isPhone ? 'Quote, customer or product' : SEARCH_LABEL}
+                aria-label={SEARCH_LABEL}
+                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-base md:h-10 md:text-sm focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors"
+              />
             </div>
-          )}
+            {/* One row of chips; on a narrow phone it scrolls inside itself instead of widening the page. */}
+            <div className="-my-1 flex min-w-0 items-center gap-1.5 overflow-x-auto py-1 [scrollbar-width:none] md:shrink-0 md:gap-2 md:overflow-visible">
+              <Dropdown
+                inline
+                label="Status"
+                value={statusFilter || ALL}
+                active={!!statusFilter}
+                onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
+                options={STATUS_OPTIONS}
+                className="shrink-0"
+              />
+              <button
+                type="button"
+                aria-label="Planned programs"
+                aria-pressed={plannedFilter}
+                onClick={() => setPlannedFilter(!plannedFilter)}
+                className={`inline-flex h-11 md:h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 md:gap-2 md:px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
+              >
+                {plannedFilter ? <Check className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
+                <span className="md:hidden">Planned</span>
+                <span className="hidden md:inline">Planned programs</span>
+              </button>
+              {/* Phones have no column headers, so the sort lives here (the same key and direction a header click sets). */}
+              {isPhone && (
+                <Dropdown
+                  inline
+                  aria-label="Sort quotes"
+                  icon={<ArrowUpDown className={`h-4 w-4 shrink-0 ${sort.key ? '' : 'text-gray-500'}`} aria-hidden="true" />}
+                  value={sort.key ? `${sort.key}:${sort.dir}` : AS_LISTED}
+                  valueLabel={sort.key ? undefined : 'Sort'}
+                  active={!!sort.key}
+                  onChange={(v) => {
+                    const [key, dir] = v.split(':');
+                    setSort(v === AS_LISTED ? { key: null, dir: 'asc' } : { key, dir: dir as SortDir });
+                  }}
+                  options={SORT_OPTIONS}
+                  className="shrink-0"
+                />
+              )}
+              <HelpTip className="shrink-0" text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />
+            </div>
+          </div>
+          {resultsLine}
+          <div className="max-md:mt-3">
           <DataTable<QuoteRow>
             data={filtered}
             columns={columns}
-            searchable
-            searchPlaceholder="Search by quote number, customer or product"
-            phoneSearchPlaceholder="Quote, customer or product"
             searchKeys={SEARCH_KEYS}
             searchValue={search}
             onSearchChange={setSearch}
+            sortState={sort}
+            onSortChange={setSort}
+            phoneSort={false}
             onRowClick={(row) => navigate(`/quotes/${row.id}`)}
             mobileRow={mobileRow}
             emptyTitle={filtersActive || search ? 'No matching quotes' : 'No quotes yet'}
@@ -831,60 +961,15 @@ export default function Quotes() {
             loading={loading}
             loadError={loadFailed}
             onRetry={() => { setLoading(true); fetchQuotes(); }}
-            filters={
-              <div className="flex flex-wrap items-center gap-2">
-                <Dropdown
-                  inline
-                  label="Status"
-                  value={statusFilter || ALL}
-                  active={!!statusFilter}
-                  onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
-                  options={STATUS_OPTIONS}
-                />
-                <button
-                  type="button"
-                  aria-label="Planned programs"
-                  aria-pressed={plannedFilter}
-                  onClick={() => setPlannedFilter(!plannedFilter)}
-                  className={`inline-flex h-11 md:h-10 items-center gap-2 rounded-full px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border border-crx-green bg-crx-green-light text-crx-green' : 'border border-dashed border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
-                >
-                  {plannedFilter ? <Check className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
-                  <span className="md:hidden">Planned</span>
-                  <span className="hidden md:inline">Planned programs</span>
-                </button>
-                <HelpTip text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />
-                {filtersActive && (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="h-11 md:h-10 rounded-lg px-2 text-sm font-medium text-crx-green hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
-                  >
-                    Clear
-                  </button>
-                )}
-                {/* A failed read shows no count: "0 quotes" would read as an empty list. */}
-                {!loadFailed && (
-                  <span className="whitespace-nowrap text-sm text-secondary">
-                    {shownCount} {shownCount === 1 ? 'quote' : 'quotes'}
-                  </span>
-                )}
-                {canBulkAction && hasSelectable && (
-                  // Phones have no table header, so the select-all box sits here (md+ uses the header one).
-                  <label className="inline-flex h-11 items-center gap-2 px-1 text-sm text-secondary md:hidden">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                    />
-                    Select all
-                  </label>
-                )}
-              </div>
-            }
           />
+          </div>
         </section>
       </Card>
+
+      {/* Phone: docked at the bottom (the root's padding keeps it off the last card). Desktop: the results strip above. */}
+      {canBulkAction && isPhone && (
+        <BulkActionBar dock selectedCount={selectedCount} actions={bulkActions} onDeselectAll={clearSelection} />
+      )}
 
       <BulkDeleteConfirmModal
         open={deleteModalOpen}

@@ -49,6 +49,8 @@ interface DataTableProps<T> {
   mobileRow?: (row: T) => ReactNode;
   /** The rows arrive already searched and sorted (a database page): show them as given. */
   serverSide?: boolean;
+  /** false: the page renders its own phone sort control (with controlled sortState), so the table shows no sort select. */
+  phoneSort?: boolean;
 }
 
 // One layout at a time, so a long list is never rendered twice.
@@ -115,8 +117,10 @@ export default function DataTable<T extends Record<string, any>>({
   onSortChange,
   mobileRow,
   serverSide,
+  phoneSort = true,
 }: DataTableProps<T>) {
-  const { phoneRow, sortableColumns } = usePhoneLayout(mobileRow, columns);
+  const { phoneRow, sortableColumns: phoneSortColumns } = usePhoneLayout(mobileRow, columns);
+  const sortableColumns = phoneSort ? phoneSortColumns : [];
   // Internal fallback state — used only when the caller doesn't control it.
   const [searchInner, setSearchInner] = useState('');
   const [sortKeyInner, setSortKeyInner] = useState<string | null>(null);

@@ -3,7 +3,7 @@
 --  _product_parent_replay(key, scope, fingerprint), which refuses a key reused for another request or
 --  another actor, then saves its receipt with save_idempotency. The hook only recognises check_idempotency.)
 -- Written 2026-11-08, cut down 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261226120000_epa_registration_seed.md (REG-1 Step 2, file 3 of 3).
+-- docs/reference/migrations.d/20261229200000_epa_registration_seed.md (REG-1 Step 2, file 3 of 3).
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2, the one-time seed (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 5). Mason,
@@ -16,14 +16,16 @@
 --     p_expected_fingerprint, p_idempotency_key), admin only. The seed creates one registration per EPA number
 --     found on sizes, brands, parents, invoice lines and job lines, with the facts every carrier agrees on and
 --     Mason's pick where they disagree, and records the seed run last. It refuses a stale preview, a missing
---     or unknown pick, an invalid number and a second run. It changes no size, brand or invoice line.
+--     or unknown pick, an invalid number, a second run, and an active restricted-use record that does not hold
+--     all the lines sharing its product, unit and price (today's posting records only the first; Sol r7).
+--     It changes no size, brand or invoice line.
 --
 -- NOT CHANGED: products, brands, parents, PAR-1 functions, invoice and job lines, and every grant.
 --
 -- ROLLBACK (its own reviewed migration): drop the seed functions and _epa_registration_seed_plan; before the
 --   seed nothing else to undo; after it, a reviewed migration removes the seed's registrations, events and run row.
 --
--- ORDERING: after 20261226110000_rup_records_by_sold_number.
+-- ORDERING: after 20261229190000_rup_records_by_sold_number.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -39,7 +41,7 @@ BEGIN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
   IF to_regprocedure('public.get_epa_sales_to_check()') IS NULL THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: apply 20261226110000_rup_records_by_sold_number first';
+    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: apply 20261229190000_rup_records_by_sold_number first';
   END IF;
   IF to_regprocedure('public.seed_epa_registrations(jsonb,text,text,text)') IS NOT NULL THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_FILE_PREFLIGHT: this file was already applied';
@@ -201,6 +203,21 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'registrations') r WHERE NOT (r->>'number_valid')::boolean) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_INVALID_NUMBER: fix the EPA numbers the preview lists as invalid first';
+  END IF;
+  -- Today's posting writes one record per product from its first line; after the seed a record must hold every line
+  -- sharing its product, unit and price, so a short one would refuse later postings (Sol r7 HIGH). Live had none
+  -- at review; refuse until each is fixed (void it and re-post) rather than switch on with one.
+  SELECT i.invoice_number INTO v_n FROM public.rup_sales_records s JOIN public.invoices i ON i.id = s.invoice_id,
+         LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
+                    FROM public.invoice_items o
+                   WHERE o.invoice_id = s.invoice_id AND o.product_id = s.product_id
+                     AND COALESCE(o.unit_size, 'Unit not set') = s.unit
+                     AND o.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents) l
+   WHERE s.voided_at IS NULL
+     AND (s.quantity IS DISTINCT FROM l.quantity OR s.total_cents IS DISTINCT FROM l.total_cents)
+   ORDER BY i.invoice_number LIMIT 1;
+  IF v_n IS NOT NULL THEN
+    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_SHORT_RECORD: invoice % has a restricted-use record that does not hold all its matching lines; void it and post again first', v_n;
   END IF;
   -- Every pick must answer a listed disagreement with one of its candidates, and every disagreement needs one.
   SELECT k INTO v_n FROM jsonb_object_keys(p_picks) k

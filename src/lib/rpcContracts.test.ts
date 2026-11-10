@@ -3111,7 +3111,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'save_active_ingredient',
   'set_parent_chemistry',
   'set_parent_cost_reference',
-  // 20261226100000 (REG-1 step 2, local candidate): admin-only registration writers; each replays through
+  // 20261229180000 (REG-1 step 2, local candidate): admin-only registration writers; each replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
   'seed_epa_registrations',
   'set_epa_registration',
@@ -3214,11 +3214,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
-  // 20261226100000 (REG-1 step 2, local candidate): private helpers.
+  // 20261229180000 (REG-1 step 2, local candidate): private helpers.
   // Prune once applied and the registry high-water moves past it.
-  _epa_registration_event: 'internal REG-1 helper (20261226100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_insert: 'internal REG-1 helper (20261226100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  _epa_registration_update: 'internal REG-1 helper (20261226100000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_event: 'internal REG-1 helper (20261229180000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_insert: 'internal REG-1 helper (20261229180000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_update: 'internal REG-1 helper (20261229180000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

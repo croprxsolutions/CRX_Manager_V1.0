@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for REG-1 Step 2 (20261226100000, 20261226110000, 20261226120000), cut down 2026-11-09
+ * Real-schema proof for REG-1 Step 2 (20261229180000, 20261229190000, 20261229200000), cut down 2026-11-09
  * (Mason: "Yes, simplify", then "Drop them"): the registration edit tool, restricted-use posting by the number each
  * line was sold under (either the registration or the product's tick says Yes), Sales to check, the seed preview
  * and the one-time seed, and the invoice-line grant check. No guard: sizes and brands stay directly editable.
@@ -28,15 +28,11 @@ const KEEP = REUSE !== '' || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261226100000_epa_registration_tools.sql');
-const FOLLOW_UPS = ['20261226110000_rup_records_by_sold_number.sql', '20261226120000_epa_registration_seed.sql']
+const CANDIDATE = path.join(MIGRATIONS, '20261229180000_epa_registration_tools.sql');
+const FOLLOW_UPS = ['20261229190000_rup_records_by_sold_number.sql', '20261229200000_epa_registration_seed.sql']
   .map((f) => path.join(MIGRATIONS, f));
 // Later files that only READ what this proof covers and redefine none of it.
-// Later migrations checked by hand: they name a covered function but change nothing this proof covers.
-// 20261229100000 only turns the product-grouping switch on (one function body); the brand functions appear in
-// its comments and checks, and no product here is grouped. 20261229110000 (RT-1 rates) adds its own tables and
-// functions and only reads registrations and product numbers.
-const LATER_READ_ONLY = new Set(['20261229100000_product_grouping_switch_on.sql', '20261229110000_product_rates_draft.sql']);
+const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -321,8 +317,8 @@ function seed() {
 }
 
 const SIG = {
-  A: '20261226100000_epa_registration_tools.sql',
-  C: '20261226110000_rup_records_by_sold_number.sql', D: '20261226120000_epa_registration_seed.sql',
+  A: '20261229180000_epa_registration_tools.sql',
+  C: '20261229190000_rup_records_by_sold_number.sql', D: '20261229200000_epa_registration_seed.sql',
 };
 const PUBLIC_FNS = [
   'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)',
@@ -441,6 +437,14 @@ async function main() {
   ownerOk(`UPDATE public.products SET phi_days = 3 WHERE id = '${P5}';`);
   refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's-x7'), /EPA_REGISTRATION_SEED_STALE/);
   ownerOk(`UPDATE public.products SET phi_days = NULL WHERE id = '${P5}';`);
+  // An active record short of its matching lines (today's posting records only the first) refuses the seed (Sol r7 HIGH).
+  raw(`INSERT INTO public.rup_sales_records (id, invoice_id, order_id, customer_id, product_id, sale_date, product_name, quantity, unit,
+         unit_price_cents, total_cents, season, buyer_name)
+       SELECT 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', ii.invoice_id, i.order_id, i.customer_id, ii.product_id, i.invoice_date, 'x',
+              ii.quantity + 1, COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents, ii.extended_cents, 2027, 'x'
+         FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id ORDER BY ii.id LIMIT 1;`);
+  refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's-x8'), /EPA_REGISTRATION_SEED_SHORT_RECORD/);
+  raw(`DELETE FROM public.rup_sales_records WHERE id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';`);
   assert.equal(regCount(), '0');
   const seeded = okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1'));
   assert.deepEqual(seeded, { registrations: 4, rup_default: 'no', fingerprint: pv.fingerprint });
@@ -634,7 +638,11 @@ async function main() {
   // A Not reviewed number saved on the line keeps it listed though its product's number says No (Sol r6 MED).
   raw(`UPDATE public.epa_registrations SET rup_status = 'unknown' WHERE epa_registration = '${N2}';`);
   assert.equal(reasons()[L6], 'not_reviewed');
-  raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
+  // ...and when its product has no number at all (Sol r7 MED).
+  raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P3}';`);
+  assert.equal(reasons()[L6], 'no_epa_number');
+  raw(`UPDATE public.products SET epa_registration = '${N1}' WHERE id = '${P3}';
+    UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   // A number with no registration, or a Not reviewed one, is listed even when its product is not ticked (Luna r13 HIGH).
   raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${P1}';`);

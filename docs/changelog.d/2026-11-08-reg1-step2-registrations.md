@@ -1,6 +1,6 @@
 ## 2026-11-08 — REG-1 Step 2: EPA registrations become the one source of label facts (database, not applied)
 
-- Three migrations (`20261226100000`, `20261226110000`, `20261226120000`): the registration edit tool,
+- Three migrations (`20261229180000`, `20261229190000`, `20261229200000`): the registration edit tool,
   restricted-use posting under the product's own number at posting, as today (a record when any Yes says so: the product's
   tick, its number's registration, or the number saved on the line; a product with no number records with the number blank; Mason,
   "Yes, product's number"), Sales to check, and the one-time seed with its preview. Everything stays off

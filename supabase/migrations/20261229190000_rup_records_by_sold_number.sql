@@ -1,5 +1,5 @@
 -- Written 2026-11-08, cut down 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261226110000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
+-- docs/reference/migrations.d/20261229190000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 4.C): once the seed has run,
@@ -20,7 +20,7 @@
 --     An active record that disagrees with what posting would write is refused (RUP_RECORD_CONFLICT), never
 --     silently kept; one that agrees is kept even if the product's number changed since.
 --   - _rup_record_covers_line: the one rule for "this posted line has its record"; used by
---     _epa_registration_unrecorded_posted_lines (re-issued from 20261226100000, same grants) and the list below.
+--     _epa_registration_unrecorded_posted_lines (re-issued from 20261229180000, same grants) and the list below.
 --   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines with no
 --     record (restricted_use_to_record; the same any-Yes rule); posted lines whose product has no number and that are restricted-use or
 --     have a record (no_epa_number); unrecorded lines whose product's number has no registration
@@ -39,9 +39,9 @@
 --
 -- ROLLBACK (its own reviewed migration): drop get_epa_sales_to_check and _rup_record_covers_line, re-emit
 --   generate_rup_sales_records from its pinned body and _epa_registration_unrecorded_posted_lines from
---   20261226100000.
+--   20261229180000.
 --
--- ORDERING: after 20261226100000_epa_registration_tools; before 20261226120000.
+-- ORDERING: after 20261229180000_epa_registration_tools; before 20261229200000.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -55,7 +55,7 @@ BEGIN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
   IF to_regprocedure('public._epa_registration_unrecorded_posted_lines(text)') IS NULL THEN
-    RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: apply 20261226100000_epa_registration_tools first';
+    RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: apply 20261229180000_epa_registration_tools first';
   END IF;
   IF to_regprocedure('public.get_epa_sales_to_check()') IS NOT NULL THEN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: this file was already applied';
@@ -107,7 +107,7 @@ $function$;
 ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;
 
--- Re-issued from 20261226100000 (same signature and grants) to use the one coverage rule above.
+-- Re-issued from 20261229180000 (same signature and grants) to use the one coverage rule above.
 CREATE OR REPLACE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
@@ -371,7 +371,8 @@ BEGIN
    WHERE (epa_registration IS NOT NULL AND NOT has_record
           AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'
                OR line_registration_rup_status = 'unknown'))
-      OR (epa_registration IS NULL AND (restricted_use OR has_record));
+      OR (epa_registration IS NULL AND (restricted_use OR has_record
+                                         OR (line_registration_rup_status = 'unknown' AND NOT has_record)));
   RETURN v_out;
 END;
 $function$;

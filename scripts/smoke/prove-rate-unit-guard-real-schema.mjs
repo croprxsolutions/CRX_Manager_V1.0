@@ -32,6 +32,7 @@
  *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac') and a stock Unit 'Pt'+TAB; 'oz/'+ZWSP+'cwt' is still refused.
  *   F4  a soft-deleted ticket no longer blocks the product edit; a live unbilled ticket still does.
  *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
+ *   F6  a dry product refuses fluid ounces on a blend line in any spelling, through its default, and by turning dry (Sol round 1 HIGH).
  *
  * Run: node scripts/smoke/prove-rate-unit-guard-real-schema.mjs   (needs Docker)
  * Prints RATE_UNIT_GUARD_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -511,12 +512,18 @@ function followUps() {
   refusedWith('FB liquid fl. oz/ac invoice', invoice(T_FL), 'BLEND_TICKET_UNIT_UNCONVERTIBLE');
   const fbTab = refusedWith('FB oz<TAB> at save', ticket('a16a1600-0000-4000-8000-00000000f102', [`'oz' || ${TAB}`]), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
   refusedWith('FB save_job pt/a<ZWSP>c', saveJobLine(`'pt/a' || ${ZWSP} || 'c'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
+  // Sol round 1 HIGH: a dry product's undotted 'fl oz/ac' saves and bills 200 fl oz as 12.5 lb of weight.
+  const T_DRYB = 'a16a1600-0000-4000-8000-00000000f107';
+  clean('FB dry fl oz/ac saves', ticket(T_DRYB, [["'fl oz/ac'", DRY]]), { commit: true });
+  approve(T_DRYB);
+  clean('FB dry fl oz/ac invoice', invoice(T_DRYB), { commit: true });
+  assert.equal(billed(T_DRYB), '12.5000', 'FB: 200 fl oz on a dry product bills as 12.5 lb');
   const T_DEL = 'a16a1600-0000-4000-8000-00000000f103';
   clean('FB blank-unit line on product two', ticket(T_DEL, [['NULL', LIQ2]]), { commit: true });
   raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_DEL}';`);
   refusedWith('FB soft-deleted ticket blocks the product edit', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQ2}';`,
     'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
-  console.log(`[prover] FB: before the follow-up, fl. oz/ac is refused at billing, oz+TAB at save (${fbTab.replace(/^.*ERROR:\s*/, '').slice(0, 60)}), pt/a+ZWSP+c by save_job, and a deleted ticket blocks a product edit`);
+  console.log(`[prover] FB: before the follow-up, fl. oz/ac is refused at billing, oz+TAB at save (${fbTab.replace(/^.*ERROR:\s*/, '').slice(0, 60)}), pt/a+ZWSP+c by save_job, a deleted ticket blocks a product edit, and a dry product's fl oz/ac bills ${billed(T_DRYB)} lb`);
 
   // F0: a drifted save_job body refuses the whole follow-up.
   const followUp = lf(FOLLOW_UP);
@@ -539,11 +546,9 @@ function followUps() {
   clean('F1 liquid fl. oz/ac invoice', invoice(T_FL), { commit: true });
   assert.equal(billed(T_FL), '1.5625', 'F1: 200 fl oz bills as 1.5625 Gal');
   const T_DRY = 'a16a1600-0000-4000-8000-00000000f104';
-  clean('F1 dry fl. oz/ac saves', ticket(T_DRY, [["'fl. oz/ac'", DRY]]), { commit: true });
-  approve(T_DRY);
-  refusedWith('F1 dry fl. oz/ac invoice', invoice(T_DRY), 'BLEND_TICKET_UNIT_UNCONVERTIBLE');
+  refusedWith('F1 dry fl. oz/ac at save', ticket(T_DRY, [["'fl. oz/ac'", DRY]]), 'CHEM_UNIT_FORM_MISMATCH');
   assert.equal(billingUnitRefusal(T_OK), '0', "F1: P3's saved 'fl. oz/acre' line now passes the invoice unit check");
-  console.log(`[prover] F1: a liquid fl. oz/ac line now bills ${billed(T_FL)} Gal; a dry product's fl. oz/ac is still refused`);
+  console.log(`[prover] F1: a liquid fl. oz/ac line now bills ${billed(T_FL)} Gal; a dry product's fl. oz/ac is refused at save`);
 
   // F2
   const T_TAB = 'a16a1600-0000-4000-8000-00000000f105';
@@ -575,6 +580,21 @@ function followUps() {
   approve(T_DEL);
   refusedWith('F4 restored ticket on a per-cwt product', invoice(T_DEL), 'BLEND_TICKET_UNIT_UNCONVERTIBLE');
   console.log('[prover] F4: a soft-deleted ticket no longer blocks a product rate unit edit; a live unbilled ticket still does; a restored one is refused at billing');
+
+  // F6: a dry product cannot be measured in fluid ounces on a blend line, in any spelling or through its default.
+  for (const u of ["'fl oz/ac'", `'fl' || ${TAB} || 'oz/ac'`, "'FLUID OUNCES per acre'", `'fl' || ${ZWSP} || 'oz'`, "'floz'"]) {
+    refusedWith(`F6 dry ${u}`, ticket('a16a1600-0000-4000-8000-00000000f108', [[u, DRY]]), 'CHEM_UNIT_FORM_MISMATCH');
+  }
+  clean('F6 dry oz/ac saves', ticket('a16a1600-0000-4000-8000-00000000f108', [["'oz/ac'", DRY]]));
+  const T_DRYN = 'a16a1600-0000-4000-8000-00000000f109';
+  clean('F6 dry blank-unit line', ticket(T_DRYN, [['NULL', DRY]]), { commit: true });
+  refusedWith('F6 dry product default to fl oz/ac', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  const T_LF = 'a16a1600-0000-4000-8000-00000000f10a';
+  clean('F6 liquid fl oz/ac line', ticket(T_LF, ["'fl oz/ac'"]), { commit: true });
+  refusedWith('F6 liquid product turning dry', `UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
+    "can't change on a saved product", { asOwner: true }); // the existing unit lock refuses first; the guard's became-dry check is a backstop
+  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line; a saved product cannot turn dry (the existing unit lock refuses first)");
 
   // F5
   for (const [expr, want] of [[`'oz' || ${ZWSP}`, 'oz'], [`chr(65279) || 'Gal' || chr(160)`, 'gal'], [`'fl' || chr(160) || 'oz'`, 'oz'],

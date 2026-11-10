@@ -179,3 +179,16 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
   `CHEM_UNIT_UNSUPPORTED_CHARACTER` while the screen trims it): fixed.** The wrapper now folds the string `unit` the
   same way; prover F3 saves a priced line with stock Unit `Pt`+TAB. The impl still runs its own character rule on
   what reaches it, and the same idempotency note as `rate_unit` applies.
+
+## Sol round 1 (gpt-6-sol high, head d3ab706c6, BLOCKERS: 1 HIGH, 2 MED)
+
+- **HIGH (the tab fold newly lets `fl<TAB>oz/ac` save on a dry product, billing it as weight): fixed, Mason
+  2026-11-10 "Yes, fix here".** New `unit_names_fluid_ounce` (save_job's `CHEM_UNIT_FORM_MISMATCH` reduction after the
+  fold). The blend line guard refuses a dry product's line whose billed unit names fluid ounces; the product guard
+  refuses a dry product's unit becoming fluid ounces under a live unbilled blank-unit line, and a product turning dry
+  under a live fluid-ounce line (the existing unit lock already refuses a saved product's form change, prover F6).
+  Prover FB shows the bug before (200 fl oz on a dry product bills 12.5 lb), F1/F6 the refusals after. This also
+  closes Luna's undotted `fl oz` HIGH for blend lines; demand and deduction are unchanged.
+- **MED (restoring a soft-deleted ticket revives a line whose product unit changed meanwhile):** accepted as recorded
+  in item 4: billing refuses it (`BLEND_TICKET_UNIT_UNCONVERTIBLE`, prover F4) until the line gets its own unit.
+- **MED (a spent pre-deploy `save_job` key whose payload carried a foldable character):** accepted, as Luna round 1 #5.

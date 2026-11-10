@@ -386,11 +386,11 @@ can make old splits refuse to save (LOW-MED).
   Accepted (Mason, 2026-11-10, Sol round 5 HIGH): the product rate-unit guard skips billed tickets, so if a ticket
   with a blank line unit is billed, its product's unit then changes to a per-X unit, and the invoice is voided,
   re-billing is refused until someone types the line's unit (may need the order unlinked first).
-  Still open, HIGH but latent (Luna 2026-11-10): an undotted "fl oz" rate on a dry product reads as "oz" and bills as
-  weight ounces, so 16 fl oz/ac can bill as 1 lb/ac (pre-existing since `20260630170000`; live read-only 2026-11-10:
-  0 products, job lines or blend lines carry any "fl"/"fluid" spelling). Not fixed in `20261231110000`: mapping it to
-  `fl oz` makes the dry converter return nothing, and job demand and stock deduction then fall back to the raw
-  quantity (16 lb), so the fix needs its own plan across billing, demand and deduction. Mason 2026-11-10: fix it separately later, not in PR #1741. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  Dry fluid ounces (Luna 2026-11-10 HIGH, Sol round 1 HIGH; Mason 2026-11-10 "Yes, fix here", PR #1741): a blend
+  line on a dry product whose billed unit names fluid ounces in any spelling ("fl oz/ac", "fl<TAB>oz", "fluid ounces
+  per acre") is refused at save (`CHEM_UNIT_FORM_MISMATCH`), as job lines already were; before, 16 fl oz/ac billed
+  as 1 lb/ac. Live read-only 2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
+  to "oz", so a direct table write that skips the triggers would bill it as weight. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
   at billing).

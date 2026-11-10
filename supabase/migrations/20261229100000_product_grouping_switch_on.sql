@@ -45,33 +45,42 @@ BEGIN
      OR to_regprocedure('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)') IS NULL THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping function this depends on is missing';
   END IF;
-  -- Opening the switch changes how these six behave (and the seventh, the admin read the screen uses, reports it); refuse unless their installed bodies are the reviewed ones
-  -- (body, definer flag, search_path, grants and owner in one fingerprint each, read from live 2026-11-09).
+  -- Each function below is pinned by one fingerprint over everything Postgres keeps for it: body, definer flag,
+  -- settings, grants, owner, volatility, kind, parallel/strict/leakproof flags, return type, language and arguments
+  -- (read from live 2026-11-09). Opening the switch changes how the first six behave; the seventh is the admin read
+  -- the screen uses to show Approve.
   IF EXISTS (
     SELECT 1 FROM (VALUES
-      ('public.approve_product_parent_groups(uuid,bigint,jsonb,text)', '1f32c5b652fe0c48041317440c86015e'),
-      ('public._approve_product_parent_group(public.product_parent_proposals,jsonb,boolean)', '20482fbbf73a2e4ecc9bc258422bcf4f'),
-      ('public._move_group_brands(uuid,uuid[],jsonb,boolean,text)', '83d7b3aa16ac583645d7cbdda8a06ec1'),
-      ('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)', 'cd230ee46d84785dddd31159ec3d19aa'),
-      ('public.upsert_product_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,text)', '2b765237e5f73baaf50c7eff25efb320'),
-      ('public.get_product_brands(uuid)', '1c0b809f62076f0afe8727a5ef95be14'),
-      ('public.get_product_grouping_open()', '0b2d4786f92e1689c4fea788bd09fa4d')
+      ('public.approve_product_parent_groups(uuid,bigint,jsonb,text)', 'daaec83f30d36513458c68dbd878b698'),
+      ('public._approve_product_parent_group(public.product_parent_proposals,jsonb,boolean)', 'e04e50d6cc7fd49d23a8ed49ac239824'),
+      ('public._move_group_brands(uuid,uuid[],jsonb,boolean,text)', 'e1d262ff287ce94915c5c75c521b6b99'),
+      ('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)', 'd73d43d0c36502ac702ab22e000d64ab'),
+      ('public.upsert_product_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,text)', '19d1c4ecb68f7814d1a8c1bd37faf480'),
+      ('public.get_product_brands(uuid)', 'de0838a868f736ea3dc70f353d1a798b'),
+      ('public.get_product_grouping_open()', '54f36617de3868b333ab68462a8e2f37')
     ) AS pin(fn, h)
-    WHERE (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','), array_to_string(p.proacl, ','), p.proowner::regrole::text)) FROM pg_proc p WHERE p.oid = to_regprocedure(pin.fn)) IS DISTINCT FROM pin.h
+    WHERE (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','),
+               array_to_string(p.proacl, ','), p.proowner::regrole::text, p.provolatile, p.prokind, p.proparallel, p.proisstrict,
+               p.proleakproof, p.proretset, p.prorettype::regtype::text, l.lanname, pg_get_function_identity_arguments(p.oid)))
+             FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = to_regprocedure(pin.fn)) IS DISTINCT FROM pin.h
   ) THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a function this switch opens changed since review; re-review it first';
   END IF;
-  -- The helpers those six reach (every _product_parent_* and _product_name_* function except the switch): one
-  -- fingerprint over their 19 bodies (read from live 2026-11-09), so a changed, added or dropped helper refuses too.
-  IF (SELECT md5(string_agg(f, ',' ORDER BY f)) FROM (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','), array_to_string(p.proacl, ','), p.proowner::regrole::text)) AS f
-        FROM pg_proc p
-       WHERE p.pronamespace = 'public'::regnamespace AND p.proname ~ '^_product_(parent|name)_'
-         AND p.proname <> '_product_parent_grouping_open') fp) IS DISTINCT FROM 'd27ad1c82de1dfd25c688569b11fc3a0' THEN
-    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping helper changed since review; re-review it first';
+  -- Exactly one version of each of those seven, so a call cannot reach an unreviewed overload.
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('approve_product_parent_groups',
+        '_approve_product_parent_group', '_move_group_brands', 'upsert_parent_brand', 'upsert_product_brand', 'get_product_brands',
+        'get_product_grouping_open')) <> 7 THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: expected exactly one version of each function this switch opens';
   END IF;
-  IF (SELECT count(*) FROM pg_proc WHERE proname IN ('upsert_parent_brand', 'approve_product_parent_groups')
-        AND pronamespace = 'public'::regnamespace) <> 2 THEN
-    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: expected exactly one upsert_parent_brand and one approve_product_parent_groups';
+  -- The helpers they reach (every _product_parent_* and _product_name_* function except the switch), in one combined
+  -- fingerprint over the 19, so a changed, added or dropped helper refuses too.
+  IF (SELECT md5(string_agg(f, ',' ORDER BY f)) FROM (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','),
+               array_to_string(p.proacl, ','), p.proowner::regrole::text, p.provolatile, p.prokind, p.proparallel, p.proisstrict,
+               p.proleakproof, p.proretset, p.prorettype::regtype::text, l.lanname, pg_get_function_identity_arguments(p.oid))) AS f
+        FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+       WHERE p.pronamespace = 'public'::regnamespace AND p.proname ~ '^_product_(parent|name)_'
+         AND p.proname <> '_product_parent_grouping_open') fp) IS DISTINCT FROM '3319eacd47a9ce80f2bee09edba4389e' THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping helper changed since review; re-review it first';
   END IF;
   IF public._product_parent_grouping_open() THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: grouping is already switched on';
@@ -79,9 +88,10 @@ BEGIN
   -- The switch being replaced must be the reviewed one (20261123120000's plain SELECT false, owner-only), so no
   -- extra condition it might carry is dropped silently.
   IF (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','),
-             array_to_string(p.proacl, ','), p.proowner::regrole::text))
-        FROM pg_proc p WHERE p.oid = 'public._product_parent_grouping_open()'::regprocedure)
-       IS DISTINCT FROM 'ec714430fb2cfd99308b735532cfb4a9' THEN
+               array_to_string(p.proacl, ','), p.proowner::regrole::text, p.provolatile, p.prokind, p.proparallel, p.proisstrict,
+               p.proleakproof, p.proretset, p.prorettype::regtype::text, l.lanname, pg_get_function_identity_arguments(p.oid)))
+        FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang WHERE p.oid = 'public._product_parent_grouping_open()'::regprocedure)
+       IS DISTINCT FROM 'ed2b79633591824552c294e4944dd12a' THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: the switch changed since review; re-review it first';
   END IF;
   -- The rule 20261123120000 set for this step: a size grouped while the switch was off must not keep its own

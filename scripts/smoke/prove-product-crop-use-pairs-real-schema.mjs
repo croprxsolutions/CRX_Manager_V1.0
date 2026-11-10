@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261224100000 (Product Master USE-1, crop/use pairs). Builds the checked-in schema
+ * Real-schema proof for 20261229120000 (Product Master USE-1, crop/use pairs). Builds the checked-in schema
  * baseline in a network-disabled PostgreSQL container, replays migrations up to the candidate, seeds invented
  * products holding each live use-timing code, applies the candidate (a second apply refuses), then, as real
  * signed-in roles: every product keeps its codes and joined text; 10 options and 8 crops; only an admin adds or
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261224100000_product_crop_use_pairs.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261229120000_product_crop_use_pairs.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

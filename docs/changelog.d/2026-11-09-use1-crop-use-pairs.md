@@ -1,6 +1,6 @@
 ## 2026-11-09 — Use timings become crop + timing pairs; admins can add and retire them (USE-1, database half)
 
-- New migration `20261224100000_product_crop_use_pairs.sql`: a crop list (Corn, Soybeans, Wheat, Milo, Cotton,
+- New migration `20261229120000_product_crop_use_pairs.sql`: a crop list (Corn, Soybeans, Wheat, Milo, Cotton,
   Alfalfa, Pasture/Hay, Range/Pasture/Turf; blank means any crop), one active option per crop + timing, and a new
   "Burndown (preplant)" Herbicide option. Volunteer Corn moves to "any crop"; Range/Pasture/Turf gets its own crop.
   Every product keeps its codes and its saved timing text.

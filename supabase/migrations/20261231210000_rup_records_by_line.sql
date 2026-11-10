@@ -314,8 +314,14 @@ BEGIN
   END IF;
 
   -- REG-1 (Mason, 2026-11-10): a return credit never creates or needs a restricted-use record. After the key check,
-  -- so another invoice's key is refused here too (Luna 2026-11-10 r1).
-  IF v_invoice.invoice_type = 'credit_memo' THEN RETURN 0; END IF;
+  -- so another invoice's key is refused here too (Luna 2026-11-10 r1), and its own key is spent (r2).
+  IF v_invoice.invoice_type = 'credit_memo' THEN
+    IF p_idempotency_key IS NOT NULL THEN
+      PERFORM save_idempotency(p_idempotency_key, 'generate_rup_sales_records',
+        jsonb_build_object('count', 0, 'invoice_id', p_invoice_id));
+    END IF;
+    RETURN 0;
+  END IF;
 
   v_season := CASE
     WHEN EXTRACT(MONTH FROM LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) >= 10

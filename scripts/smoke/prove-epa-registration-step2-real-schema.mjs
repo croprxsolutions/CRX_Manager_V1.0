@@ -671,6 +671,9 @@ async function main() {
   assert.equal(ok(ADMIN, GEN(INVC, 'g-cm')), '0');
   // A return credit does not skip the key check: another invoice's key is refused (Luna 2026-11-10 r1).
   refused(ADMIN, GEN(INVC, 'g0'), /IDEMPOTENCY_KEY_REUSED/);
+  // ...and the credit's own key is spent: a sale cannot reuse it (Luna 2026-11-10 r2).
+  assert.equal(ok(ADMIN, GEN(INVC, 'g-cm')), '0');
+  refused(ADMIN, GEN(INV1, 'g-cm'), /IDEMPOTENCY_KEY_REUSED/);
   assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_id = '${INVC}';`), '0');
   ownerRefused(`INSERT INTO public.rup_sales_records (${REC_COLS})
     SELECT '${INVC}', '${id('2e')}', order_id, customer_id, product_id, sale_date, product_name, epa_registration, 1, unit, unit_price_cents, total_cents, season, buyer_name

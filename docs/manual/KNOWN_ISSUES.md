@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-117 added 2026-11-10 (REG-1 step 2)) | 66 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2)) | 67 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 18 |
 | WP-PM-3 checks still owed (KI-92) | 1 |
@@ -552,6 +552,18 @@ RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; n
 invoice is un-posted, edited and re-posted after its size's number changed, the restricted-use record uses the new
 number, not the one it was sold under. Live behavior today; REG-1 step 2 does not change it. The fix is to
 send each kept line's stored number in that function (a large money function re-issue), so it waits for Mason's call.
+
+### KI-118 — REG-1 step 2 deferrals: late restricted-use lines and small record gaps
+**LOW · OPEN, named deferrals · restricted-use records · found 2026-11-10 (REG-1 step 2 contract and reviews)**
+- A posted line that turns restricted use later (its registration or tick changes to Yes after posting) is listed
+  in Sales to check (`now_restricted_use`) but cannot be recorded from there yet. Recording it from the list is a
+  later step (contract: docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md).
+- A record voided by the invoice void trigger is attributed on the record (who, when, new status) but writes no
+  separate `rup_sales_voided` audit row, unlike `unpost_invoice`.
+- The void trigger watches status and deletion, not an `invoice_type` change (no screen changes the type of a
+  posted invoice).
+- The seed has no lock timeout of its own and its preview does not run the facts check; run the seed in a quiet
+  window. `label_url` accepts any text. The Step 1 assign/preview stubs keep their "not set up" message.
 
 ## Inventory and deliveries
 

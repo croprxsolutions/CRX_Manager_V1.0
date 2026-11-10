@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildSetupPreview,
   rebaseRateRowsAfterSetup,
@@ -15,6 +15,9 @@ import {
 import { loadExcelJs } from './productPricingWorkbook';
 import type { ProductParent } from './productParents';
 import type { UseTimingOption } from '../types';
+
+// Each test builds and re-reads real ExcelJS workbooks: ~0.5-2.5s locally under coverage, past 5s on loaded CI shards.
+vi.setConfig({ testTimeout: 30_000 });
 
 const NONE = new Map<string, string>();
 

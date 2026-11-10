@@ -24,6 +24,15 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in session, 2026-11-09: "Yes" to "any Yes records it", after Sol round 5 on PR #1688):** Sol would not pass the accepted gap above (a product moved from a restricted-use number to a non-restricted one before posting got no record and left the list), and Sol has no owner override, so the gap is closed instead. A sale needs a restricted-use record when ANY Yes says so: the product's tick, its number's registration, or the registration of the number saved on the line. The record still goes under the product's number at posting. **Why:** a wrong number saved on a line can only add a record, never lose one, and re-posting clears anything Sales to check lists, because posting and the list use the same rule. This replaces the round 4 trade-off above.
 
 **Follow-on (Sol round 6 on PR #1688, implementing the decision above):** a record counts only the lines that are restricted-use under that rule (a same-price line saved under a No number is not added in), and a sale saved under a Not reviewed number stays on Sales to check even when its product's number now says No.
+## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-09: "yes do it").** Sol round 5 on PR #1705 found that a label maximum written in a counted unit (`each`, `ea`, `unit`, for example "1 each/acre") was reported "not comparable", so a house rate above it needed no reason. The build sheet (section 3.5 step 4) had listed only ounce, pint, quart, gallon, pound, gram and milligram as comparable. Counted units now compare too, with an each-kind row only, and the suggested-rate reader also reads `each`. Sol round 6 may run on the fixed head.
+**What this implies:** this widens the build sheet's comparable-unit list. Mason's rule for this PR: a round-6 finding goes to him before any further fix. (Round 6 was clean at `a3b9b5a8d`.)
+
+## 2026-11-09 — #1705 (RT-1 draft rates) gets one more Sol round (round 5) after the fluid-ounce fix
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1705 may run Sol round 5. Sol round 4 was clean at `6687055b5`; the Codex GitHub App then found that a label maximum written as "fluid ounce" lost its volume kind, fixed at `163e7e33e`. A label maximum whose unit spelling is not one the database recognizes is reported as "not comparable" rather than guessed. No finding keeps returning: each Sol round found a different issue, all fixed.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
 
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 

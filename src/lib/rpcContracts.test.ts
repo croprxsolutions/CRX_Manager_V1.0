@@ -3118,6 +3118,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
+  // 20261229110000 (RT-1, local candidate): admin-only draft rate writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'delete_draft_product_rate',
+  'derive_draft_product_rates',
+  'save_draft_product_rate',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3246,6 +3251,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'admin read-only preview (DM-1, 20261209100000): runs the real edit inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   preview_parent_chemistry_correction:
     'admin read-only preview (DM-1, 20261209100000): runs the real correction inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20261229110000 (RT-1, local candidate): private helpers behind derive_draft_product_rates. Prune once applied
+  // and the registry high-water moves past it.
+  _product_rate_derive_parent: 'internal RT-1 helper (20261229110000): derives one parent, called only by derive_draft_product_rates after its replay check; every API-role EXECUTE is revoked',
+  _product_rate_insert_derived: 'internal RT-1 helper (20261229110000): inserts one derived draft row inside the calling keyed writer; every API-role EXECUTE is revoked',
+  _product_rate_note: 'internal RT-1 helper (20261229110000): appends one derive note event inside the calling keyed writer; every API-role EXECUTE is revoked',
   return_net_weight_to_draft:
     'AFTER UPDATE row trigger on products pack columns (DM-2): fires only when a watched value really changes, so a replayed edit with the same values does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   return_density_to_draft:

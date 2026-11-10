@@ -1,10 +1,11 @@
 -- RT-2 step 1 RECOVERY (not a migration): put the 20 products moved by
--- supabase/migrations/20261229170000_unit_spellings_remap.sql back to their old spellings, with the stock
--- products' inventory snapshots.
+-- supabase/migrations/20261229210000_unit_spellings_remap.sql back to their old spellings, with the stock
+-- products' inventory snapshots and the Imazuron Herbicide family's rate unit.
 -- Proven by scripts/smoke/prove-unit-spellings-real-schema.mjs. To use it live, copy it into a new
 -- migration and take it through the normal gates. Refuses (and changes nothing) unless every listed product
--- still holds its new spelling, the rate lock is off, no step-2 change has removed the old spellings, and no
--- listed product is in a family or has a net weight.
+-- still holds its new spelling, the rate lock is off, no step-2 change has removed the old spellings, no listed
+-- product has a net weight, and Imazuron is still the only size of its family, which still holds "Lb".
+-- A family stores no stock unit, so the stock products' families are not touched.
 DO $rt2a_reverse$
 DECLARE
   v_bad text;
@@ -38,6 +39,10 @@ BEGIN
     ('e453fc17-c8b9-4e6c-89c1-7468b7875184'::uuid, 'Prevent Foam - 1  Qt', 'stock', 'Qt', 'qt'),
     ('28087f6b-e3f4-4caa-8d0f-3c25ea2cf8e5'::uuid, 'Tordon RTU - 1 Qt', 'stock', 'Qt', 'qt'),
     ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'Imazuron Herbicide', 'rate', 'LB', 'Lb');
+  -- The Imazuron Herbicide family (the forward step's pinned id).
+  CREATE TEMP TABLE rt2a_rev_family (product_id uuid PRIMARY KEY, parent_id uuid NOT NULL) ON COMMIT DROP;
+  INSERT INTO rt2a_rev_family VALUES
+    ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, '6981391c-72a1-4107-9a2e-3def38dbf821'::uuid);
   IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'RT2A_REVERSE_RATE_LOCK_ON: unlock product rates first. Nothing was changed.';
   END IF;
@@ -52,10 +57,12 @@ BEGIN
     RAISE EXCEPTION 'RT2A_REVERSE_UNITS_DRIFT: Oz, Qt or LB no longer matches oz, qt or Lb. Nothing was changed.';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')
+              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock',
+                             'trigger_zz_guard_product_parent_values')
               AND tgenabled <> 'O')
      OR (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')) <> 2 THEN
+              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock',
+                             'trigger_zz_guard_product_parent_values')) <> 3 THEN
     RAISE EXCEPTION 'RT2A_REVERSE_GUARD_STATE: a product guard is missing or not in its normal on state. Nothing was changed.';
   END IF;
   SELECT string_agg(r.product_name, ', ' ORDER BY r.product_name) INTO v_bad
@@ -63,8 +70,15 @@ BEGIN
    WHERE p.id IS NULL
       OR (r.kind = 'stock' AND (p.inventory_unit IS DISTINCT FROM r.new_unit OR p.unit_size IS DISTINCT FROM r.new_unit))
       OR (r.kind = 'rate' AND p.rate_unit IS DISTINCT FROM r.new_unit)
-      OR EXISTS (SELECT 1 FROM public.product_parent_members pm WHERE pm.product_id = r.id OR pm.fill_source_product_id = r.id)
-      OR EXISTS (SELECT 1 FROM public.product_size_net_weight_values w WHERE w.product_id = r.id);
+      OR EXISTS (SELECT 1 FROM public.product_size_net_weight_values w WHERE w.product_id = r.id)
+      -- The rate product is still the only size of its pinned family, which still holds the new spelling.
+      OR (r.kind = 'rate' AND (
+            (SELECT pm.parent_id FROM public.product_parent_members pm WHERE pm.product_id = r.id)
+              IS DISTINCT FROM (SELECT f.parent_id FROM rt2a_rev_family f WHERE f.product_id = r.id)
+         OR (SELECT count(*) FROM public.product_parent_members pm
+              WHERE pm.parent_id = (SELECT f.parent_id FROM rt2a_rev_family f WHERE f.product_id = r.id)) <> 1
+         OR (SELECT pp.rate_unit FROM public.product_parents pp
+              WHERE pp.id = (SELECT f.parent_id FROM rt2a_rev_family f WHERE f.product_id = r.id)) IS DISTINCT FROM r.new_unit));
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RT2A_REVERSE_ROW_MOVED: nothing was changed: %', v_bad;
   END IF;
@@ -80,23 +94,46 @@ BEGIN
            tier1_price_per_acre, tier2_price_per_acre, tier3_price_per_acre, current_cost,
            inventory_unit, unit_size, rate_unit, container_unit, max_label_rate_unit
       FROM public.products;
+  CREATE TEMP TABLE rt2a_rev_parents_before ON COMMIT DROP AS SELECT * FROM public.product_parents;
   ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
   UPDATE public.products p SET inventory_unit = r.old_unit, unit_size = r.old_unit, updated_at = now()
     FROM rt2a_rev r WHERE r.kind = 'stock' AND p.id = r.id;
   GET DIAGNOSTICS v_done = ROW_COUNT;
   IF v_done <> 19 THEN RAISE EXCEPTION 'RT2A_REVERSE_COUNT: % of 19 stock units', v_done; END IF;
+  ALTER TABLE public.products ENABLE TRIGGER trg_validate_product_setup_fields;
+  UPDATE public.product_parents pp SET rate_unit = r.old_unit, parent_version = pp.parent_version + 1, updated_at = now()
+    FROM rt2a_rev r JOIN rt2a_rev_family f ON f.product_id = r.id
+   WHERE r.kind = 'rate' AND pp.id = f.parent_id;
+  GET DIAGNOSTICS v_done = ROW_COUNT;
+  IF v_done <> 1 THEN RAISE EXCEPTION 'RT2A_REVERSE_COUNT: % of 1 family rate unit', v_done; END IF;
+  ALTER TABLE public.products DISABLE TRIGGER trigger_zz_guard_product_parent_values;
   UPDATE public.products p SET rate_unit = r.old_unit, updated_at = now()
     FROM rt2a_rev r WHERE r.kind = 'rate' AND p.id = r.id;
   GET DIAGNOSTICS v_done = ROW_COUNT;
   IF v_done <> 1 THEN RAISE EXCEPTION 'RT2A_REVERSE_COUNT: % of 1 rate unit', v_done; END IF;
-  ALTER TABLE public.products ENABLE TRIGGER trg_validate_product_setup_fields;
+  ALTER TABLE public.products ENABLE TRIGGER trigger_zz_guard_product_parent_values;
   -- Every inventory snapshot of a stock product follows it back (rows added since step 1 included).
   UPDATE public.inventory i SET unit_size = r.old_unit
     FROM rt2a_rev r WHERE r.kind = 'stock' AND i.product_id = r.id AND i.unit_size = r.new_unit;
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
-              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock')
+              AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock',
+                             'trigger_zz_guard_product_parent_values')
               AND tgenabled <> 'O') THEN
     RAISE EXCEPTION 'RT2A_REVERSE_POSTFLIGHT: a product guard was left off';
+  END IF;
+  -- Families: only the Imazuron family changed, and only its rate unit (back to LB), version and time.
+  SELECT string_agg(COALESCE(a.name, b.name), ', ') INTO v_bad
+    FROM rt2a_rev_parents_before b
+    FULL JOIN public.product_parents a ON a.id = b.id
+    LEFT JOIN rt2a_rev_family f ON f.parent_id = b.id
+   WHERE a.id IS NULL OR b.id IS NULL
+      OR (f.parent_id IS NULL AND to_jsonb(a) IS DISTINCT FROM to_jsonb(b))
+      OR (f.parent_id IS NOT NULL AND (
+            to_jsonb(a) - ARRAY['rate_unit', 'parent_version', 'updated_at']
+              IS DISTINCT FROM to_jsonb(b) - ARRAY['rate_unit', 'parent_version', 'updated_at']
+         OR a.rate_unit IS DISTINCT FROM 'LB' OR a.parent_version IS DISTINCT FROM b.parent_version + 1));
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_POSTFLIGHT: an unexpected family change: %', v_bad;
   END IF;
   -- No money field moved, and only the listed unit columns changed, exactly back to the old spelling.
   SELECT string_agg(b.id::text, ', ') INTO v_bad

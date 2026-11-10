@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261229170000_unit_spellings_remap (RT-2 step 1, data only).
+ * Real-schema proof for 20261229210000_unit_spellings_remap (RT-2 step 1, data only).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's 14 unit_conversions rows, the 20
  * listed products (live ids, names, forms and units; made-up prices) and five control products (two of them the
- * dry oz-rate products that wait for step 2), then proves
+ * dry oz-rate products that wait for step 2), puts 18 of the 20 into one-size product families as live has them
+ * (family ids, names and rate units read back from the candidate's pinned family list), then proves
  * (build sheet docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md section 6, step-1 cases):
  *   U7  rate lock on: refused, nothing changed.        U8  an unlisted LB product: refused.
- *   U9  a listed product in a family, or a family on Qt: refused.   Drift: a moved row or unit row: refused.
+ *   U9  a listed product moved to another family, a second size in a pinned family, a fill-source link, a family
+ *       on Qt, or Imazuron no longer matching its family: refused.   Drift: a moved row or unit row: refused.
  *   U10b a product save holding an Oz insert open: the migration waits for it, then refuses.
  *   Apply: exactly the 20 rows move, history records each, pricing_version +1 on the one rate row only,
- *          every price column of every product unchanged, the setup guard is enabled again (U13).
+ *          every price column of every product unchanged, the setup guard is enabled again (U13); the Imazuron
+ *          family moves LB -> Lb (version +1), every other family is unchanged, the family-values guard is on
+ *          again and still refuses a size-only rate unit change.
  *   Inventory: old-spelling snapshots of the stock products move with them (pinned count; any other count
  *          refuses) and recovery moves them back.
  *   U1  three quotes (tier 1-3) saved through save_quote with every fixture product: identical lines
@@ -19,7 +23,7 @@
  *   U2  an ordinary edit of every fixture product saves; new products in oz, qt and Lb save.
  *   U5/U6 per-acre prices and the bodies of the functions that read unit_conversions unchanged.
  *   U15 the recovery script restores every unit column exactly; re-apply works; a second run is refused.
- * Not covered here: the net-weight refusal (same query shape as the family refusal) and the lock-timeout
+ * Not covered here: the net-weight refusal (same query as the family refusal) and the lock-timeout
  * path; step 2's cases (U4, U10-U12, U12b, U14) belong to step 2's PR.
  *
  * Run: node scripts/smoke/prove-unit-spellings-real-schema.mjs   (needs Docker)
@@ -38,7 +42,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261229170000_unit_spellings_remap.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261229210000_unit_spellings_remap.sql');
 const FOLLOW_UPS = []; // the check-only follow-up was dropped (Mason, 2026-11-09)
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -265,6 +269,14 @@ function unitRows() {
   assert.equal(rows.length, 14, 'the candidate must pin 14 unit rows');
   return rows.map(([, id, unit, f, t, n]) => `('${id}'::uuid, ${q(unit)}, ${f}, '${t}', ${q(n)})`);
 }
+// The pinned family of each listed product (Milestone and Prevent Foam have none).
+function families() {
+  const rows = [...lf(CANDIDATE).matchAll(/\('([0-9a-f-]{36})'::uuid, '([0-9a-f-]{36})'::uuid, '([^']*)', '([^']*)'\)/g)]
+    .map(([, product, parent, name, unit]) => ({ product, parent, name, unit }));
+  assert.equal(rows.length, 18, 'the candidate must pin 18 families');
+  return rows;
+}
+const parents = () => scalar(`SELECT md5(string_agg(to_jsonb(pp)::text, ',' ORDER BY pp.id)) FROM public.product_parents pp;`);
 const CONTROLS = [
   { id: '7a7e5000-0000-4000-8000-0000000000c1', name: '[PROVER] Gal per qt', form: 'liquid', inv: 'Gal', rate: 'qt', per: 2 },
   { id: '7a7e5000-0000-4000-8000-0000000000c2', name: '[PROVER] Lb per Lb', form: 'dry', inv: 'Lb', rate: 'Lb', per: 1.5 },
@@ -307,6 +319,19 @@ function seed(rows) {
       ('${ADMIN}', 'rt2a-admin@example.invalid', '{"full_name":"[PROVER] RT2A Admin","role":"admin"}'::jsonb);
     INSERT INTO public.customers (farm_name, is_active) VALUES ('[PROVER] RT2A Farm', true);`);
   assert.equal(scalar(`SELECT role || ',' || is_active FROM public.profiles WHERE id = '${ADMIN}';`), 'admin,true');
+  // One-size families as live has them: the family copies its size's values, so each matches its size.
+  const fams = families();
+  raw(`INSERT INTO public.product_parents (id, name, product_form, rate_unit, rate_per_acre, suggested_rate, category, use_timings,
+        created_by, updated_by)
+      SELECT f.parent, f.name, p.product_form, f.unit, p.rate_per_acre, p.suggested_rate, p.category, p.use_timings, '${ADMIN}', '${ADMIN}'
+        FROM (VALUES ${fams.map((x) => `('${x.product}'::uuid, '${x.parent}'::uuid, ${q(x.name)}, ${q(x.unit)})`).join(', ')}) f(product, parent, name, unit)
+        JOIN public.products p ON p.id = f.product;
+    INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by)
+      SELECT f.product, f.parent, 'package', '${ADMIN}'
+        FROM (VALUES ${fams.map((x) => `('${x.product}'::uuid, '${x.parent}'::uuid)`).join(', ')}) f(product, parent);`);
+  assert.equal(scalar('SELECT count(*) FROM public.product_parent_members;'), '18');
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parents pp JOIN public.product_parent_members m ON m.parent_id = pp.id
+      JOIN public.products p ON p.id = m.product_id WHERE pp.rate_unit IS NOT DISTINCT FROM p.rate_unit;`), '18', 'each family matches its size');
   console.log(`[prover] seeded live's 14 unit rows, the ${rows.length} listed products and ${CONTROLS.length} controls`);
 }
 
@@ -382,6 +407,10 @@ async function main() {
   const q0 = quotes(rows);
   const armezon = rows.find((r) => r.old === 'Oz');
   const imazuron = rows.find((r) => r.old === 'LB');
+  const imazFam = families().find((x) => x.product === imazuron.id).parent;
+  const p0 = parents();
+  const othersNow = (id) => scalar(`SELECT md5(string_agg(to_jsonb(pp)::text, ',' ORDER BY pp.id)) FROM public.product_parents pp WHERE pp.id <> '${id}';`);
+  const others0 = othersNow(imazFam);
 
   // U7. The rate lock on refuses.
   raw('UPDATE public.product_rate_lock SET is_locked = true;');
@@ -422,14 +451,29 @@ async function main() {
   raw(`DELETE FROM public.inventory WHERE product_id = '${armezon.id}';`);
   console.log('[prover] inventory: an unexpected old-spelling inventory snapshot refuses');
 
-  // U9. A listed product used in a family refuses; so does a family rate unit on a losing spelling.
+  // U9. Families: a listed product moved to another family, a second size in a pinned family, a fill-source link,
+  // an unlisted family on a losing spelling, and Imazuron differing from its family each refuse.
+  const armFam = families().find((x) => x.product === armezon.id).parent;
   raw(`INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${FAM}', 'RT2A family', 'liquid', '${ADMIN}', '${ADMIN}');
-    INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role, fill_source_product_id) VALUES ('${CONTROLS[0].id}', '${FAM}', '${ADMIN}', 'fixed_tote', '${armezon.id}');`);
+    UPDATE public.product_parent_members SET parent_id = '${FAM}' WHERE product_id = '${armezon.id}';`);
+  refused('cand.sql', new RegExp(`RT2A_FAMILY_OR_WEIGHT[^\\n]*${esc(armezon.name)}`));
+  raw(`UPDATE public.product_parent_members SET parent_id = '${armFam}' WHERE product_id = '${armezon.id}';`);
+  raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role) VALUES ('${CONTROLS[1].id}', '${imazFam}', '${ADMIN}', 'package');`);
+  refused('cand.sql', /RT2A_FAMILY_OR_WEIGHT[^\n]*Imazuron/);
+  raw(`DELETE FROM public.product_parent_members WHERE product_id = '${CONTROLS[1].id}';`);
+  raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role, fill_source_product_id) VALUES ('${CONTROLS[0].id}', '${FAM}', '${ADMIN}', 'fixed_tote', '${armezon.id}');`);
   refused('cand.sql', new RegExp(`RT2A_FAMILY_OR_WEIGHT[^\\n]*${esc(armezon.name)}`));
   raw(`DELETE FROM public.product_parent_members WHERE parent_id = '${FAM}'; UPDATE public.product_parents SET rate_unit = 'Qt' WHERE id = '${FAM}';`);
   refused('cand.sql', /RT2A_UNLISTED_SPELLING[^\n]*RT2A family/);
   raw(`DELETE FROM public.product_parents WHERE id = '${FAM}';`);
-  console.log('[prover] U9: a listed product in a family, or a family on Qt, refuses');
+  raw(`UPDATE public.product_parents SET rate_per_acre = rate_per_acre + 1 WHERE id = '${imazFam}';`);
+  refused('cand.sql', /RT2A_FAMILY_VALUES[^\n]*Imazuron/);
+  raw(`UPDATE public.product_parents SET rate_per_acre = rate_per_acre - 1 WHERE id = '${imazFam}';`);
+  raw(`UPDATE public.product_parents SET rate_unit = 'Lb' WHERE id = '${imazFam}';`);
+  refused('cand.sql', /RT2A_FAMILY_OR_WEIGHT[^\n]*Imazuron/);
+  raw(`UPDATE public.product_parents SET rate_unit = 'LB' WHERE id = '${imazFam}';`);
+  assert.equal(parents(), p0, 'the family checks left the families as seeded');
+  console.log('[prover] U9: a moved family, a second size, a fill source, a family on Qt, or Imazuron off its family refuses');
 
   // U10b. A product save adding an Oz product, held open, makes the migration wait; once it commits, the
   // migration sees it and refuses.
@@ -476,7 +520,13 @@ async function main() {
     assert.equal(scalar(`SELECT concat_ws('/', rate_unit, pricing_version, updated_at::date) FROM public.products WHERE id = '${c.id}';`), `${c.rate}/1/2026-01-01`, c.name);
   }
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_validate_product_setup_fields';"), 'O', 'U13: setup guard enabled');
+  assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trigger_zz_guard_product_parent_values';"), 'O', 'family guard enabled');
   assert.equal(scalar('SELECT count(*) FROM public.unit_conversions;'), '14', 'unit rows untouched');
+  // Families: Imazuron's moved with its size (version +1); every other family is exactly as before.
+  assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'Lb/2');
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parents WHERE rate_unit IN ('Oz', 'Qt', 'LB');`), '0');
+  assert.equal(othersNow(imazFam), others0, 'every other family is unchanged');
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parent_events;`), '0', 'no family event without a person');
   console.log(`[prover] apply: ${rows.length} products moved, ${historyRows} history rows, pricing version +1 on the rate row only, every price and per-acre value unchanged, the two dry oz-rate products untouched, setup guard on`);
 
   // U13. The setup guard still refuses an ordinary stock-unit change.
@@ -491,7 +541,10 @@ async function main() {
   // Sol round 2 LOW: the saved figure trims the unit, as the screen preview does.
   assert.equal(scalar("SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.convert_to_gl_lb(16, ' Dry oz ', 'dry') c;"), '1.00000000000000000000 LB');
   console.log('[prover] gl/lb: 16 Dry oz on a dry product is 1 LB; the two dry oz-rate products keep 1 LB per 16 oz');
-  console.log('[prover] U13: after the apply a stock-unit change is still refused');
+  // The family guard still refuses a size-only rate unit change (a family copy is the only way in).
+  const fg = psql(`UPDATE public.products SET rate_unit = 'Dry oz' WHERE id = '${imazuron.id}';`, { allowFailure: true });
+  assert.notEqual(fg.status, 0, 'the family guard let a size-only rate unit change through');
+  console.log('[prover] U13: after the apply a stock-unit change is still refused, and so is a size-only rate unit change');
 
   // U1 at S1: the same quotes price to the cent.
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after the apply');
@@ -517,6 +570,13 @@ async function main() {
   raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Lb' WHERE id = '${imazuron.id}';`);
   refused('reverse.sql', /RT2A_REVERSE_LABEL_RATE[^\n]*Imazuron/);
   raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${imazuron.id}';`);
+  // Recovery refuses while Imazuron's family has another size.
+  raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role) VALUES ('${CONTROLS[1].id}', '${imazFam}', '${ADMIN}', 'package');`);
+  refused('reverse.sql', /RT2A_REVERSE_ROW_MOVED[^\n]*Imazuron/);
+  raw(`DELETE FROM public.product_parent_members WHERE product_id = '${CONTROLS[1].id}';`);
+  raw('ALTER TABLE public.products DISABLE TRIGGER trigger_zz_guard_product_parent_values;');
+  refused('reverse.sql', /RT2A_REVERSE_GUARD_STATE/);
+  raw('ALTER TABLE public.products ENABLE TRIGGER trigger_zz_guard_product_parent_values;');
   const rv = apply('reverse.sql');
   assert.equal(rv.status, 0, rv.output);
   assert.equal(units(), s0.units, 'U15: recovery restored every unit column');
@@ -524,9 +584,12 @@ async function main() {
   assert.equal(perAcre(), s0.perAcre);
   assert.equal(fnBodies(), s0.fns);
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_validate_product_setup_fields';"), 'O');
+  assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trigger_zz_guard_product_parent_values';"), 'O');
+  assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'LB/3', 'recovery moved the family back');
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after recovery');
   const again = apply('cand.sql');
   assert.equal(again.status, 0, again.output);
+  assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'Lb/4');
   assert.equal(money(), s0.money);
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after re-apply');
   console.log('[prover] U15: a second run refuses; recovery restores every unit column exactly; re-apply works; quotes equal throughout');

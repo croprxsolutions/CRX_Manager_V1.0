@@ -209,6 +209,12 @@ function buildContainer() {
     if (base === '20261117130000_tote_fill_from_bulk.sql') {
       psql("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;");
     }
+    // RT-1's preflight pins live's unit_conversions (read-only, 2026-11-09); the baseline carries only Ea and Unit.
+    if (base === '20261229110000_product_rates_draft.sql') {
+      psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('fl oz', 1, 'liquid'), ('oz', 1, 'liquid'),
+        ('Oz', 1, 'liquid'), ('Pt', 16, 'liquid'), ('qt', 32, 'liquid'), ('Qt', 32, 'liquid'), ('Gal', 128, 'liquid'), ('Dry oz', 1, 'dry'),
+        ('Lb', 16, 'dry'), ('LB', 16, 'dry'), ('g', 0.03527396, 'dry'), ('MG', 0.00003527396, 'dry') ON CONFLICT DO NOTHING;`);
+    }
     const name = `m-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.output}`);
     ledger(path.basename(file, '.sql'));

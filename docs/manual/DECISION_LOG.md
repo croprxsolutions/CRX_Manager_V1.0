@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — EPA registrations: restricted-use answer captured when a sale is saved (REG-1 Step 2, PR #1688)
+
+**Decision (Mason, in session, 2026-11-10: "Capture it at save", after Sol round 8 on PR #1688 parked it):** once registrations are switched on, the database stores each invoice line's restricted-use answer (any Yes, as decided 2026-11-09), its product's EPA number and signal word when the line is saved, in a private table only the database writes; the seed stores them for every line that exists; posting records exactly what was stored. This replaces the "facts at posting" rule below.
+**Why:** Sol rounds 1 to 8 all traced to one cause: posting judged a sale by facts that could change after it was saved (a label corrected, a number moved). Storing the answer at save removes that cause instead of patching each case. Astra challenged the design first (25 findings, folded in).
+**What this forbids/implies:** later label changes never change what a saved or posted sale records; Sales to check lists a sale captured No or Not reviewed whose number is later reviewed Yes, for a person. **Accepted:** a save that rebuilds an invoice's lines (the invoice editor, field-application saves) captures them again as of that save.
+
 ## 2026-11-09 — EPA registrations: no sale capture and no product-master guards (REG-1 Step 2, PR #1688)
 
 **Decision (Mason, in session, 2026-11-09: "epa numbers are not a big deal and do not wan tover complicated system to manage", then "Yes, simplify", then "Drop them"):** REG-1 Step 2 keeps only the registration list, its plain edit tool, the one-time seed, and restricted-use posting by the number each line was sold under. No per-line capture of label facts, no guards on sizes or brands, no copying of facts from a registration to sizes or brands, no registration-driven assign, label drafts or product setup. Posting records a sale when the sold number's registration or the product's own restricted-use tick says Yes.

@@ -1,45 +1,39 @@
--- Written 2026-11-08, cut down 2026-11-09. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- Written 2026-11-08, rebuilt 2026-11-10. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migrations.d/20261229190000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
 -- Re-read the live ledger before applying.
 --
--- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 4.C): once the seed has run,
---   posting takes the restricted-use answer and signal word from the registration of the product's own EPA
---   number, as well as the product's tick. Records go under the product's own number at posting, as live does
---   today (Mason, 2026-11-09, "Yes, product's number", after Sol round 3: a number stored on the invoice line
---   can come back from the screen, so it is never trusted for the record). The file name is kept from the earlier
---   sold-number design. A missing or unregistered number never blocks a sale (Mason, 2026-11-09). Every
---   restricted-use sale gets its record (Mason, 2026-11-09, "Yes, always record"): a product with no number
---   records with the number blank (as live does today) and stays on Sales to check.
+-- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 4.C). Mason, 2026-11-10, "Capture
+--   it at save": once the seed has run, the database stores each invoice line's restricted-use answer, EPA number
+--   and signal word when the line is saved, and posting records exactly that, so a label change between saving and
+--   posting never changes what a sale records. Kept rules (Mason, 2026-11-09): the number is the product's own
+--   ("Yes, product's number"), any Yes makes it restricted use ("Yes, any Yes"), a missing or unregistered number
+--   never blocks a sale, and every restricted-use sale gets its record ("Yes, always record").
 --
 -- WHAT:
---   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After the seed a
---     line needs a record when ANY Yes says so: its product's tick, its product's number's registration, or the
---     registration of the number saved on the line (Mason, 2026-11-09, "Yes, any Yes", after Sol round 5; a
---     wrong saved number can only add a record, never lose one). One record per product, unit and unit price
---     (lines sold at different prices or units never merge), always under the product's number.
---     An active record that disagrees with what posting would write is refused (RUP_RECORD_CONFLICT), never
---     silently kept; one that agrees is kept even if the product's number changed since.
---   - _rup_record_covers_line: the one rule for "this posted line has its record"; used by
---     _epa_registration_unrecorded_posted_lines (re-issued from 20261229180000, same grants) and the list below.
---   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines with no
---     record (restricted_use_to_record; the same any-Yes rule); posted lines whose product has no number and that are restricted-use or
---     have a record (no_epa_number); unrecorded lines whose product's number has no registration
---     (no_registration) or a Not reviewed one (not_reviewed).
---   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today);
---     the postflight proves it.
+--   - invoice_line_rup_captures (private, RLS on, no grants): one row per invoice line, removed with its line.
+--   - _invoice_line_rup_facts(product, saved number): the capture rule, read in one statement.
+--   - trg_zz_capture_invoice_line_rup (AFTER INSERT OR UPDATE OF product_id, epa_registration on invoice_items),
+--     after the seed only: captures every new product line, and re-captures when the product changes or the saved
+--     number changes to a different one. A blank number being filled, or a price, quantity or unit edit, keeps it.
+--   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After it, posting first
+--     captures any line without a capture (source 'posting'), then writes one record per product, captured number,
+--     captured signal word, unit and unit price for the 'yes' lines. An active record matching all of those with a
+--     different quantity or amount is refused (RUP_RECORD_CONFLICT).
+--   - _rup_record_covers_line: only a 'yes' line can be covered (or, for a line posted before the seed, today's rule).
+--   - _epa_registration_unrecorded_posted_lines re-issued (same signature and grants) and get_epa_sales_to_check()
+--     (admin, read-only), each line judged on its own capture.
+--   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today).
 --
--- ACCEPTED (Mason, 2026-11-09): a re-post after un-posting uses the product and registration as they are then;
---   a product whose number changes between a sale and its posting records under the new number (the any-Yes
---   rule still records it when the number saved on the line says Yes). The list is unpaged (admin-only,
---   read-only, small history).
+-- ACCEPTED (Mason, 2026-11-10): a save that deletes and re-inserts lines captures them again (the capture is as of
+--   the latest save). The list is unpaged (admin-only, read-only, small history).
 --
--- NOT CHANGED: invoice saving (save_invoice, the field-application saves), _fill_invoice_line_epa, the
---   posting wrappers. Posting takes the REG-1 lock in shared mode; one colliding with a registration change
---   can end in a deadlock error, which rolls back and is retried (rare, admin-only, all-or-nothing).
+-- NOT CHANGED: invoice saving (save_invoice, the field-application saves), _fill_invoice_line_epa, the posting
+--   wrappers (post_invoice calls the generator in its own transaction and does not catch its errors), and the
+--   applicator-licence pick inside the generator. Saves and posting take the REG-1 lock in shared mode; one
+--   colliding with a registration edit can end in a deadlock error, which rolls back with nothing written.
 --
--- ROLLBACK (its own reviewed migration): drop get_epa_sales_to_check and _rup_record_covers_line, re-emit
---   generate_rup_sales_records from its pinned body and _epa_registration_unrecorded_posted_lines from
---   20261229180000.
+-- ROLLBACK (its own reviewed migration, forward repair): keep the captures; a generator that ignores them would
+--   lose a sale captured Yes. Drop the trigger only with a generator that still reads the captures.
 --
 -- ORDERING: after 20261229180000_epa_registration_tools; before 20261229200000.
 
@@ -57,7 +51,8 @@ BEGIN
   IF to_regprocedure('public._epa_registration_unrecorded_posted_lines(text)') IS NULL THEN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: apply 20261229180000_epa_registration_tools first';
   END IF;
-  IF to_regprocedure('public.get_epa_sales_to_check()') IS NOT NULL THEN
+  IF to_regprocedure('public.get_epa_sales_to_check()') IS NOT NULL
+     OR to_regclass('public.invoice_line_rup_captures') IS NOT NULL THEN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: this file was already applied';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -66,63 +61,185 @@ BEGIN
                     AND p.proowner = 'postgres'::regrole AND p.prosecdef) THEN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: generate_rup_sales_records drifted from the body this file was written from';
   END IF;
+  -- The capture reads the line's number after this trigger has filled a blank one (it must stay BEFORE).
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.invoice_items'::regclass
+                    AND t.tgname = 'trg_fill_invoice_line_epa' AND NOT t.tgisinternal AND (t.tgtype & 2) = 2) THEN
+    RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: trg_fill_invoice_line_epa is missing or no longer BEFORE';
+  END IF;
 END
 $preflight$;
 
 -- ---------------------------------------------------------------------------------------------
--- 1. The one coverage rule
+-- 1. The capture (sheet 4.C)
 -- ---------------------------------------------------------------------------------------------
 
--- A posted line has its restricted-use record when an active record has its invoice, product, unit and unit
--- price (posting writes one per each, under the product's number) and that record's quantity and amount are the sum of
--- the restricted-use lines on the invoice sharing them, as posting counts them (any Yes: the product's tick, its
--- number's registration, or the line's saved number's registration). When none of them is restricted-use now, the
--- sum of all of them, so a record kept from before still covers its sale. An older record written for only some of
--- those lines does not count.
+CREATE TABLE public.invoice_line_rup_captures (
+  invoice_item_id uuid PRIMARY KEY REFERENCES public.invoice_items(id) ON DELETE CASCADE,
+  epa_registration text,  -- the product's own number, normalized; NULL when the product has none
+  rup_status text NOT NULL CHECK (rup_status IN ('yes', 'no', 'unknown')),
+  signal_word text,
+  source text NOT NULL CHECK (source IN ('save', 'seed', 'posting')),
+  captured_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.invoice_line_rup_captures OWNER TO postgres;
+ALTER TABLE public.invoice_line_rup_captures ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.invoice_line_rup_captures FROM PUBLIC, anon, authenticated, service_role;
+-- Private: written and read only by SECURITY DEFINER functions owned by postgres. No app role holds a grant, so
+-- this policy only states that intent (an admin read, should a grant ever be added).
+CREATE POLICY invoice_line_rup_captures_admin_read ON public.invoice_line_rup_captures FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = auth.uid() AND pr.role = 'admin' AND pr.is_active));
+
+-- The capture rule, in one statement: 'yes' when the product's tick, its number's registration or the registration
+-- of the number saved on the line says Yes; else 'unknown' when either number, where present, has no registration or
+-- a Not reviewed one; else 'no'. The number is the product's own; the signal word its registration's, else the product's.
+CREATE FUNCTION public._invoice_line_rup_facts(p_product_id uuid, p_line_number text,
+  OUT epa_registration text, OUT rup_status text, OUT signal_word text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT n.pn,
+         CASE WHEN COALESCE(p.is_rup, false) OR r.rup_status = 'yes' OR lr.rup_status = 'yes' THEN 'yes'
+              WHEN (n.pn IS NOT NULL AND COALESCE(r.rup_status, 'unknown') = 'unknown')
+                OR (n.ln IS NOT NULL AND COALESCE(lr.rup_status, 'unknown') = 'unknown') THEN 'unknown'
+              ELSE 'no' END,
+         COALESCE(r.signal_word, p.signal_word)
+    FROM public.products p
+   CROSS JOIN LATERAL (SELECT public._normalize_epa_registration(p.epa_registration) AS pn,
+                              public._normalize_epa_registration(p_line_number) AS ln) n
+    LEFT JOIN public.epa_registrations r ON r.epa_registration = n.pn
+    LEFT JOIN public.epa_registrations lr ON lr.epa_registration = n.ln
+   WHERE p.id = p_product_id;
+$function$;
+
+CREATE FUNCTION public._capture_invoice_line_rup() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+BEGIN
+  IF NOT public._epa_registrations_seeded() THEN
+    RETURN NULL;  -- before the seed nothing is captured; the seed captures every line that exists
+  END IF;
+  IF NEW.product_id IS NULL THEN
+    DELETE FROM public.invoice_line_rup_captures WHERE invoice_item_id = NEW.id;
+    RETURN NULL;
+  END IF;
+  -- Kept unless the product changed or the saved number changed to a different number. A blank number being filled
+  -- in (by the writer or by _fill_invoice_line_epa) is not a new sale fact; the trigger fires only on these columns,
+  -- so a price, quantity or unit edit never reaches here.
+  IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
+     AND (public._normalize_epa_registration(OLD.epa_registration) IS NULL
+          OR public._normalize_epa_registration(NEW.epa_registration)
+             IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration))
+     AND EXISTS (SELECT 1 FROM public.invoice_line_rup_captures c WHERE c.invoice_item_id = NEW.id) THEN
+    RETURN NULL;
+  END IF;
+  PERFORM public._epa_registration_lock(false);
+  INSERT INTO public.invoice_line_rup_captures (invoice_item_id, epa_registration, rup_status, signal_word, source)
+  SELECT NEW.id, f.epa_registration, f.rup_status, f.signal_word, 'save'
+    FROM public._invoice_line_rup_facts(NEW.product_id, NEW.epa_registration) f
+  ON CONFLICT (invoice_item_id) DO UPDATE
+    SET epa_registration = EXCLUDED.epa_registration, rup_status = EXCLUDED.rup_status,
+        signal_word = EXCLUDED.signal_word, source = EXCLUDED.source, captured_at = now();
+  RETURN NULL;
+END;
+$function$;
+
+-- AFTER, so it reads the row as saved (after trg_fill_invoice_line_epa filled a blank number).
+CREATE TRIGGER trg_zz_capture_invoice_line_rup AFTER INSERT OR UPDATE OF product_id, epa_registration
+  ON public.invoice_items FOR EACH ROW EXECUTE FUNCTION public._capture_invoice_line_rup();
+
+-- ---------------------------------------------------------------------------------------------
+-- 2. The one coverage rule
+-- ---------------------------------------------------------------------------------------------
+
+-- A posted line has its restricted-use record when it was captured 'yes' and an active record carries its invoice,
+-- product, captured number, captured signal word, unit and unit price, with the quantity and amount of the 'yes'
+-- lines sharing all of those (posting writes one per each). A line captured by the seed on an invoice posted before
+-- it is also covered by today's rule: an active record for its invoice and product written before the seed.
 CREATE FUNCTION public._rup_record_covers_line(p_line public.invoice_items) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
-  SELECT EXISTS (SELECT 1
-                   FROM public.rup_sales_records s,
-                        LATERAL (SELECT COALESCE(sum(o.quantity) FILTER (WHERE o_rup), sum(o.quantity)) AS quantity,
-                                        COALESCE(sum(o.extended_cents) FILTER (WHERE o_rup), sum(o.extended_cents))::bigint
-                                          AS total_cents
-                                   FROM public.invoice_items o
-                                   JOIN public.products op ON op.id = o.product_id
-                                   LEFT JOIN public.epa_registrations opr
-                                     ON opr.epa_registration = public._normalize_epa_registration(op.epa_registration)
-                                   LEFT JOIN public.epa_registrations olr
-                                     ON olr.epa_registration = public._normalize_epa_registration(o.epa_registration),
-                                   LATERAL (SELECT COALESCE(op.is_rup OR opr.rup_status = 'yes' OR olr.rup_status = 'yes',
-                                                            false) AS o_rup) q
-                                  WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
-                                    AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
-                                    AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
-                  WHERE s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
-                    -- a line with no unit records as 'Unit not set' (the record's unit is required)
-                    AND s.unit IS NOT DISTINCT FROM COALESCE(p_line.unit_size, 'Unit not set')
-                    AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents
-                    AND s.quantity IS NOT DISTINCT FROM l.quantity
-                    AND s.total_cents IS NOT DISTINCT FROM l.total_cents);
+  SELECT EXISTS (
+           SELECT 1
+             FROM public.invoice_line_rup_captures c
+             JOIN public.rup_sales_records s
+               ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+              AND s.epa_registration IS NOT DISTINCT FROM c.epa_registration
+              AND s.signal_word IS NOT DISTINCT FROM c.signal_word
+              -- a line with no unit records as 'Unit not set' (the record's unit is required)
+              AND s.unit = COALESCE(p_line.unit_size, 'Unit not set')
+              AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents,
+             LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
+                        FROM public.invoice_items o
+                        JOIN public.invoice_line_rup_captures oc ON oc.invoice_item_id = o.id
+                       WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
+                         AND oc.rup_status = 'yes'
+                         AND oc.epa_registration IS NOT DISTINCT FROM c.epa_registration
+                         AND oc.signal_word IS NOT DISTINCT FROM c.signal_word
+                         AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
+                         AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
+            WHERE c.invoice_item_id = p_line.id AND c.rup_status = 'yes'
+              AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents)
+      OR EXISTS (
+           SELECT 1
+             FROM public.invoice_line_rup_captures c
+             JOIN public.epa_registration_seed_run sr ON c.captured_at >= sr.seeded_at
+             JOIN public.invoices i ON i.id = p_line.invoice_id AND i.posted_at < sr.seeded_at
+             JOIN public.rup_sales_records s
+               ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+              AND s.created_at < sr.seeded_at
+            WHERE c.invoice_item_id = p_line.id AND c.source = 'seed');
 $function$;
 ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;
 
--- Re-issued from 20261229180000 (same signature and grants) to use the one coverage rule above.
+-- A line not captured 'yes' counts as recorded only when an active record carries its captured number, unit and
+-- price with the quantity and amount of EVERY captured line sharing them (a record added by hand that includes it).
+-- A record holding only a 'yes' sibling never hides it (Astra 2026-11-10).
+CREATE FUNCTION public._rup_record_for_line_key(p_line public.invoice_items) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT EXISTS (SELECT 1
+                   FROM public.invoice_line_rup_captures c
+                   JOIN public.rup_sales_records s
+                     ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+                    AND s.epa_registration IS NOT DISTINCT FROM c.epa_registration
+                    AND s.unit = COALESCE(p_line.unit_size, 'Unit not set')
+                    AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents,
+                  LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
+                             FROM public.invoice_items o
+                             JOIN public.invoice_line_rup_captures oc ON oc.invoice_item_id = o.id
+                            WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
+                              AND oc.epa_registration IS NOT DISTINCT FROM c.epa_registration
+                              AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
+                              AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
+                  WHERE c.invoice_item_id = p_line.id
+                    AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents);
+$function$;
+
+-- Re-issued from 20261229180000 (same signature and grants): posted lines whose captured number or saved number is
+-- p_number and that are not covered.
 CREATE OR REPLACE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
            'invoice_number', i.invoice_number, 'product_id', ii.product_id) ORDER BY ii.id), '[]'::jsonb)
     FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
-    JOIN public.products p ON p.id = ii.product_id
-   WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
-     -- posting's any-Yes rule reads the product's number and the number saved on the line (Mason, 2026-11-09)
-     AND (public._normalize_epa_registration(p.epa_registration) = p_number
-          OR public._normalize_epa_registration(ii.epa_registration) = p_number)
-     AND NOT public._rup_record_covers_line(ii);
+    LEFT JOIN public.invoice_line_rup_captures c ON c.invoice_item_id = ii.id
+   WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL AND ii.product_id IS NOT NULL
+     AND (c.epa_registration = p_number OR public._normalize_epa_registration(ii.epa_registration) = p_number)
+     AND NOT public._rup_record_covers_line(ii) AND NOT public._rup_record_for_line_key(ii);
 $function$;
 
+DO $owners$
+DECLARE
+  f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'public._invoice_line_rup_facts(uuid,text)', 'public._capture_invoice_line_rup()',
+    'public._rup_record_for_line_key(public.invoice_items)']
+  LOOP
+    EXECUTE format('ALTER FUNCTION %s OWNER TO postgres', f);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated, service_role', f);
+  END LOOP;
+END
+$owners$;
+
 -- ---------------------------------------------------------------------------------------------
--- 2. Posting: generate_rup_sales_records (live body, md5 0cb155a2..., plus the seeded branch)
+-- 3. Posting: generate_rup_sales_records (live body, md5 0cb155a2..., plus the seeded branch)
 -- ---------------------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.generate_rup_sales_records(p_invoice_id uuid, p_idempotency_key text DEFAULT NULL::text)
@@ -206,25 +323,27 @@ BEGIN
   END;
 
   IF v_seeded THEN
-    -- REG-1 (sheet 4.C): lines need a record when ANY Yes says so: the product's tick, its number's registration,
-    -- or the registration of the number saved on a line (Mason, 2026-11-09, "Yes, any Yes", after Sol round 5).
-    -- They record under the product's number (blank when it has none). One record per product, unit and unit
-    -- price, holding only the restricted-use lines sharing them (the coverage rule counts the same lines; Sol r6).
+    -- REG-1 (sheet 4.C, Mason 2026-11-10 "Capture it at save"): every line was captured when saved, or by the seed;
+    -- one still without a capture is captured now and keeps it.
+    INSERT INTO invoice_line_rup_captures (invoice_item_id, epa_registration, rup_status, signal_word, source)
+    SELECT ii.id, f.epa_registration, f.rup_status, f.signal_word, 'posting'
+      FROM invoice_items ii, LATERAL public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f
+     WHERE ii.invoice_id = p_invoice_id AND ii.product_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM invoice_line_rup_captures c WHERE c.invoice_item_id = ii.id);
+    -- One record per product, captured number, captured signal word, unit and unit price, holding the 'yes' lines
+    -- sharing them (the coverage rule counts the same lines), under the captured number.
     OPEN v_items FOR
       SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity,
              COALESCE(ii.unit_size, 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
              ii.unit_price_cents, sum(ii.extended_cents)::bigint AS extended_cents,
-             public._normalize_epa_registration(p.epa_registration) AS epa_registration,
-             COALESCE(r.signal_word, p.signal_word) AS signal_word
+             c.epa_registration, c.signal_word
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
-        LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(p.epa_registration)
-        LEFT JOIN epa_registrations lr ON lr.epa_registration = public._normalize_epa_registration(ii.epa_registration)
-       WHERE ii.invoice_id = p_invoice_id
-         AND (p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes')
-       GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(p.epa_registration),
-                COALESCE(r.signal_word, p.signal_word), COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents
-       ORDER BY ii.product_id, 4, 5;
+        JOIN invoice_line_rup_captures c ON c.invoice_item_id = ii.id
+       WHERE ii.invoice_id = p_invoice_id AND c.rup_status = 'yes'
+       GROUP BY ii.product_id, p.product_name, c.epa_registration, c.signal_word,
+                COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents
+       ORDER BY ii.product_id, 7, 8, 4, 5;
   ELSE
     OPEN v_items FOR
     SELECT ii.product_id, p.product_name, ii.quantity, ii.unit_size,
@@ -265,11 +384,13 @@ BEGIN
     END IF;
 
     IF v_seeded THEN
-      -- REG-1: one active record per invoice, product, unit and unit price (the coverage rule); one that
-      -- disagrees with what this posting would write is an error, never skipped.
+      -- REG-1: one active record per invoice, product, number, signal word, unit and unit price (the coverage rule);
+      -- one that disagrees with what this posting would write is an error, never skipped.
       SELECT r.quantity, r.total_cents INTO v_rec_qty, v_rec_total FROM rup_sales_records r
        WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id
-         AND r.unit IS NOT DISTINCT FROM v_item.unit_size
+         AND r.epa_registration IS NOT DISTINCT FROM v_item.epa_registration
+         AND r.signal_word IS NOT DISTINCT FROM v_item.signal_word
+         AND r.unit = v_item.unit_size
          AND r.unit_price_cents IS NOT DISTINCT FROM v_item.unit_price_cents
          AND r.voided_at IS NULL
        -- a disagreeing record sorts first, so any one of several active records that disagrees is refused
@@ -277,7 +398,7 @@ BEGIN
                 r.id LIMIT 1;
       IF FOUND THEN
         IF v_rec_qty IS DISTINCT FROM v_item.quantity OR v_rec_total IS DISTINCT FROM v_item.extended_cents THEN
-          RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % at this unit and price with a different quantity or amount',
+          RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % at this number, unit and price with a different quantity or amount',
             v_invoice.invoice_number, v_item.product_name;
         END IF;
         CONTINUE;
@@ -328,7 +449,7 @@ $function$;
 ALTER FUNCTION public.generate_rup_sales_records(uuid, text) OWNER TO postgres;
 
 -- ---------------------------------------------------------------------------------------------
--- 3. Posted sales a person should check (admin, read-only; sheet 4.C)
+-- 4. Posted sales a person should check (admin, read-only; sheet 4.C)
 -- ---------------------------------------------------------------------------------------------
 
 CREATE FUNCTION public.get_epa_sales_to_check() RETURNS jsonb
@@ -342,37 +463,42 @@ BEGIN
   END IF;
   WITH lines AS (
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
-           public._normalize_epa_registration(p.epa_registration) AS epa_registration, ii.quantity,
-           r.rup_status AS registration_rup_status, p.is_rup AS product_is_rup,
-           lr.rup_status AS line_registration_rup_status,
-           COALESCE(p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes', false) AS restricted_use,
-           public._rup_record_covers_line(ii) AS has_record
+           c.epa_registration, public._normalize_epa_registration(ii.epa_registration) AS saved_number,
+           ii.quantity, c.rup_status, c.source AS capture_source,
+           r.rup_status AS registration_rup_status_now, lr.rup_status AS saved_registration_rup_status_now,
+           public._rup_record_covers_line(ii) AS covered, public._rup_record_for_line_key(ii) AS has_record
       FROM invoice_items ii
       JOIN invoices i ON i.id = ii.invoice_id
       JOIN products p ON p.id = ii.product_id
-      LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(p.epa_registration)
+      LEFT JOIN invoice_line_rup_captures c ON c.invoice_item_id = ii.id
+      LEFT JOIN epa_registrations r ON r.epa_registration = c.epa_registration
       LEFT JOIN epa_registrations lr ON lr.epa_registration = public._normalize_epa_registration(ii.epa_registration)
      WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
+  ), judged AS (
+    SELECT l.*,
+           CASE WHEN rup_status IS NULL THEN 'not_captured'
+                WHEN epa_registration IS NULL AND (rup_status = 'yes' OR has_record) THEN 'no_epa_number'
+                WHEN rup_status = 'yes' AND NOT covered THEN 'restricted_use_to_record'
+                WHEN rup_status = 'yes' THEN NULL
+                WHEN has_record THEN NULL
+                WHEN registration_rup_status_now = 'yes' OR saved_registration_rup_status_now = 'yes' THEN 'now_restricted_use'
+                WHEN rup_status = 'unknown'
+                 AND ((epa_registration IS NOT NULL AND COALESCE(registration_rup_status_now, 'unknown') = 'unknown')
+                      OR (saved_number IS NOT NULL AND COALESCE(saved_registration_rup_status_now, 'unknown') = 'unknown'))
+                  THEN 'not_reviewed'
+                ELSE NULL END AS reason
+      FROM lines l
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'line_id', line_id, 'invoice_id', invoice_id, 'invoice_number', invoice_number, 'invoice_date', invoice_date,
            'product_id', product_id, 'product_name', product_name, 'epa_registration', epa_registration,
-           'quantity', quantity, 'registration_rup_status', registration_rup_status,
-           'product_is_rup', product_is_rup, 'has_record', has_record,
-           'reason', CASE WHEN epa_registration IS NULL THEN 'no_epa_number'
-                          WHEN restricted_use THEN 'restricted_use_to_record'
-                          WHEN registration_rup_status IS NULL THEN 'no_registration'
-                          ELSE 'not_reviewed' END)  -- includes a Not reviewed number saved on the line
+           'saved_number', saved_number, 'quantity', quantity, 'captured_rup_status', rup_status,
+           'capture_source', capture_source, 'registration_rup_status', registration_rup_status_now,
+           'has_record', covered OR has_record, 'reason', reason)
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
-    FROM lines
-   -- a number whose registration is missing or Not reviewed is listed too (sheet 4.C: unknown lines are findable)
-   -- and so is a line whose saved number's registration is Not reviewed (Sol r6 MED)
-   WHERE (epa_registration IS NOT NULL AND NOT has_record
-          AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'
-               OR line_registration_rup_status = 'unknown'))
-      OR (epa_registration IS NULL AND (restricted_use OR has_record
-                                         OR (line_registration_rup_status = 'unknown' AND NOT has_record)));
+    FROM judged
+   WHERE reason IS NOT NULL;
   RETURN v_out;
 END;
 $function$;
@@ -381,7 +507,7 @@ REVOKE ALL ON FUNCTION public.get_epa_sales_to_check() FROM PUBLIC, anon, authen
 GRANT EXECUTE ON FUNCTION public.get_epa_sales_to_check() TO authenticated;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Q7 (invoice_items half): no direct line writes from the app roles
+-- 5. Q7 (invoice_items half): no direct line writes from the app roles
 -- ---------------------------------------------------------------------------------------------
 
 REVOKE INSERT, UPDATE ON TABLE public.invoice_items FROM anon, authenticated;
@@ -394,14 +520,21 @@ BEGIN
     IF has_table_privilege(v_role, 'public.invoice_items', 'INSERT')
        OR has_table_privilege(v_role, 'public.invoice_items', 'UPDATE')
        OR has_any_column_privilege(v_role, 'public.invoice_items', 'INSERT')
-       OR has_any_column_privilege(v_role, 'public.invoice_items', 'UPDATE') THEN
-      RAISE EXCEPTION 'POSTFLIGHT_RUP_RECORDS_BY_SOLD_NUMBER: % can write invoice_items', v_role;
+       OR has_any_column_privilege(v_role, 'public.invoice_items', 'UPDATE')
+       OR has_any_column_privilege(v_role, 'public.invoice_line_rup_captures', 'SELECT,INSERT,UPDATE,REFERENCES') THEN
+      RAISE EXCEPTION 'POSTFLIGHT_RUP_RECORDS_BY_SOLD_NUMBER: % can write invoice_items or read captures', v_role;
     END IF;
   END LOOP;
-  IF has_function_privilege('authenticated', 'public._rup_record_covers_line(public.invoice_items)', 'EXECUTE')
+  IF has_table_privilege('service_role', 'public.invoice_line_rup_captures', 'SELECT,INSERT,UPDATE,DELETE')
+     OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoice_line_rup_captures'::regclass)
+     OR has_function_privilege('authenticated', 'public._rup_record_covers_line(public.invoice_items)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._rup_record_for_line_key(public.invoice_items)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._invoice_line_rup_facts(uuid,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._capture_invoice_line_rup()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._epa_registration_unrecorded_posted_lines(text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.get_epa_sales_to_check()', 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', 'public.get_epa_sales_to_check()', 'EXECUTE') THEN
+     OR NOT has_function_privilege('authenticated', 'public.get_epa_sales_to_check()', 'EXECUTE')
+     OR EXISTS (SELECT 1 FROM public.invoice_line_rup_captures) THEN
     RAISE EXCEPTION 'POSTFLIGHT_RUP_RECORDS_BY_SOLD_NUMBER_WRONG';
   END IF;
 END;

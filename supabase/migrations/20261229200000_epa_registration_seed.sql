@@ -16,9 +16,8 @@
 --     p_expected_fingerprint, p_idempotency_key), admin only. The seed creates one registration per EPA number
 --     found on sizes, brands, parents, invoice lines and job lines, with the facts every carrier agrees on and
 --     Mason's pick where they disagree, and records the seed run last. It refuses a stale preview, a missing
---     or unknown pick, an invalid number, a second run, and an active restricted-use record that does not hold
---     all the lines sharing its product, unit and price (today's posting records only the first; Sol r7).
---     It changes no size, brand or invoice line.
+--     or unknown pick, an invalid number and a second run. Then it captures every invoice line that exists (sheet
+--     4.C, Mason 2026-11-10 "Capture it at save"). It changes no size, brand or invoice line.
 --
 -- NOT CHANGED: products, brands, parents, PAR-1 functions, invoice and job lines, and every grant.
 --
@@ -175,6 +174,7 @@ DECLARE
   v_pick jsonb;
   v_reg public.epa_registrations;
   v_reg_count integer := 0;
+  v_line_count bigint := 0;
   v_result jsonb;
 BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED'; END IF;
@@ -203,21 +203,6 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'registrations') r WHERE NOT (r->>'number_valid')::boolean) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_INVALID_NUMBER: fix the EPA numbers the preview lists as invalid first';
-  END IF;
-  -- Today's posting writes one record per product from its first line; after the seed a record must hold every line
-  -- sharing its product, unit and price, so a short one would refuse later postings (Sol r7 HIGH). Live had none
-  -- at review; refuse until each is fixed (void it and re-post) rather than switch on with one.
-  SELECT i.invoice_number INTO v_n FROM public.rup_sales_records s JOIN public.invoices i ON i.id = s.invoice_id,
-         LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
-                    FROM public.invoice_items o
-                   WHERE o.invoice_id = s.invoice_id AND o.product_id = s.product_id
-                     AND COALESCE(o.unit_size, 'Unit not set') = s.unit
-                     AND o.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents) l
-   WHERE s.voided_at IS NULL
-     AND (s.quantity IS DISTINCT FROM l.quantity OR s.total_cents IS DISTINCT FROM l.total_cents)
-   ORDER BY i.invoice_number LIMIT 1;
-  IF v_n IS NOT NULL THEN
-    RAISE EXCEPTION 'EPA_REGISTRATION_SEED_SHORT_RECORD: invoice % has a restricted-use record that does not hold all its matching lines; void it and post again first', v_n;
   END IF;
   -- Every pick must answer a listed disagreement with one of its candidates, and every disagreement needs one.
   SELECT k INTO v_n FROM jsonb_object_keys(p_picks) k
@@ -248,11 +233,19 @@ BEGIN
     v_reg_count := v_reg_count + 1;
   END LOOP;
 
+  -- Capture every invoice line that exists, posted or not, from the facts now (Mason, 2026-11-10, "Capture it at
+  -- save"; sheet 4.C). The table lock above holds every line writer off, so none is left uncaptured.
+  INSERT INTO public.invoice_line_rup_captures (invoice_item_id, epa_registration, rup_status, signal_word, source)
+  SELECT ii.id, f.epa_registration, f.rup_status, f.signal_word, 'seed'
+    FROM public.invoice_items ii, LATERAL public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f
+   WHERE ii.product_id IS NOT NULL;
+  GET DIAGNOSTICS v_line_count = ROW_COUNT;
+
   -- Last: from here on the registration tools and posting by registration are live.
   INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint)
   VALUES (v_actor, p_rup_default, p_expected_fingerprint);
 
-  v_result := jsonb_build_object('registrations', v_reg_count,
+  v_result := jsonb_build_object('registrations', v_reg_count, 'lines_captured', v_line_count,
     'rup_default', p_rup_default, 'fingerprint', p_expected_fingerprint);
   PERFORM public.save_idempotency(p_idempotency_key, 'seed_epa_registrations',
     jsonb_build_object('actor_id', v_actor, 'request_fingerprint', v_fp, 'response', v_result));

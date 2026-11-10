@@ -590,11 +590,15 @@ function followUps() {
   clean('F6 dry blank-unit line', ticket(T_DRYN, [['NULL', DRY]]), { commit: true });
   refusedWith('F6 dry product default to fl oz/ac', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
     'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // Sol round 2 HIGH: a soft-deleted ticket still holds it, since a restore would bill the line.
+  raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_DRYN}';`);
+  refusedWith('F6 dry default to fl oz/ac under a deleted ticket', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   const T_LF = 'a16a1600-0000-4000-8000-00000000f10a';
   clean('F6 liquid fl oz/ac line', ticket(T_LF, ["'fl oz/ac'"]), { commit: true });
   refusedWith('F6 liquid product turning dry', `UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
     "can't change on a saved product", { asOwner: true }); // the existing unit lock refuses first; the guard's became-dry check is a backstop
-  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line; a saved product cannot turn dry (the existing unit lock refuses first)");
+  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line, deleted ticket or not; a saved product cannot turn dry (the existing unit lock refuses first)");
 
   // F5
   for (const [expr, want] of [[`'oz' || ${ZWSP}`, 'oz'], [`chr(65279) || 'Gal' || chr(160)`, 'gal'], [`'fl' || chr(160) || 'oz'`, 'oz'],

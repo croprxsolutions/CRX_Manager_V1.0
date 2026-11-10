@@ -192,3 +192,11 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
 - **MED (restoring a soft-deleted ticket revives a line whose product unit changed meanwhile):** accepted as recorded
   in item 4: billing refuses it (`BLEND_TICKET_UNIT_UNCONVERTIBLE`, prover F4) until the line gets its own unit.
 - **MED (a spent pre-deploy `save_job` key whose payload carried a foldable character):** accepted, as Luna round 1 #5.
+
+## Sol round 2 (head 8569e8106, 1 HIGH, 1 MED)
+
+- **HIGH (soft-delete a ticket, change its dry product's default to `fl oz/ac`, restore, invoice: bills as weight):
+  fixed.** The product guard's fluid-ounce checks count soft-deleted unbilled tickets (a restore would bill them);
+  only the per-X refusal still skips them, because billing refuses a restored per-X line. Prover F6 deletes a dry
+  ticket and the edit is still refused. The postflight's dry check covers deleted unbilled tickets too.
+- **MED (spent pre-deploy idempotency key):** accepted, as Luna round 1 #5 and Sol round 1.

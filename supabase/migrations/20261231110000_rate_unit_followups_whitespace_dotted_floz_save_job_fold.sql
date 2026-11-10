@@ -250,19 +250,19 @@ BEGIN
                                 JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
                                WHERE b.product_id = NEW.id
                                  AND public.unit_names_fluid_ounce(NULLIF(btrim(b.rate_per_acre_unit), ''))
-                                 AND t.deleted_at IS NULL
                                  AND t.payment_status NOT IN ('billed', 'no_charge')) THEN
     RAISE EXCEPTION
       'CHEM_UNIT_FORM_MISMATCH: % has blend ticket lines not yet billed measured in fluid ounces, so it cannot become a dry product. Give those lines a weight rate unit first.',
       COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product');
   END IF;
   IF v_refusal IS NULL THEN RETURN NEW; END IF;
-  -- A soft-deleted ticket is never billed (no path restores one), so it does not hold the product's unit (KI-16).
+  -- A soft-deleted ticket does not hold a per-X unit: if restored, billing refuses that line (KI-16). It does hold a
+  -- dry product's unit against fluid ounces, which billing would size as weight after a restore (Sol round 2 HIGH).
   IF EXISTS (SELECT 1 FROM public.blend_ticket_products b
                JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
               WHERE b.product_id = NEW.id
                 AND NULLIF(btrim(b.rate_per_acre_unit), '') IS NULL
-                AND t.deleted_at IS NULL
+                AND (t.deleted_at IS NULL OR v_refusal = 'CHEM_UNIT_FORM_MISMATCH')
                 AND t.payment_status NOT IN ('billed', 'no_charge')) THEN
     RAISE EXCEPTION
       '%: % has blend ticket lines not yet billed that use its rate unit, so it cannot become "%". Give those lines their own per-acre rate unit first.',
@@ -425,10 +425,10 @@ BEGIN
                    AND public.rate_unit_line_refusal(
                          COALESCE(NULLIF(btrim(public.unit_fold_invisible(b.rate_per_acre_unit)), ''), p.rate_unit),
                          b.product_id IS NOT NULL) IS NOT NULL)
-     -- No live unbilled line on a dry product bills in fluid ounces (the new refusal, PR #1741).
+     -- No unbilled line on a dry product, deleted ticket or not, bills in fluid ounces (the new refusal, PR #1741).
      OR EXISTS (SELECT 1 FROM public.blend_ticket_products b JOIN public.products p ON p.id = b.product_id
                   JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
-                 WHERE t.deleted_at IS NULL AND t.payment_status NOT IN ('billed', 'no_charge')
+                 WHERE t.payment_status NOT IN ('billed', 'no_charge')
                    AND p.product_form = 'dry'
                    AND public.unit_names_fluid_ounce(COALESCE(NULLIF(btrim(b.rate_per_acre_unit), ''), p.rate_unit)))
      -- Invisible-only line units stay refused on every ticket, deleted or not, as the line trigger does.

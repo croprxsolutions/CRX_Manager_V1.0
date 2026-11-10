@@ -15,6 +15,7 @@ import Card from '../components/ui/Card';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import Input from '../components/ui/Input';
+import NameBrandCheckSection from '../components/products/NameBrandCheckSection';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageMeta } from '../hooks/usePageMeta';
@@ -1101,6 +1102,8 @@ export default function LabelDataQuality() {
           <p className="text-sm text-secondary">Coverage is unavailable right now.</p>
         )}
       </Card>
+
+      <NameBrandCheckSection />
 
       {running && (
         <Card>

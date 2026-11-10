@@ -27,6 +27,8 @@ import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '..
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
+import VendorSelect from '../components/orders/VendorSelect';
+import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
@@ -71,6 +73,7 @@ interface LineItem {
   sort_order: number;
   notes: string | null;
   tote_number: string | null;
+  vendor?: string | null;
   price_source: 'quoted' | 'tier' | 'manual' | null;
   quoted_price_cents: number | null;
   /** Per-line split billing: set when this line was produced by a split billing line.
@@ -193,6 +196,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
+  const vendorNames = useVendorNames(routeArea !== 'field');
   // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
   // (freight, service...) beside its products (migration 20261108160000).
   const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
@@ -789,6 +793,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         sort_order: it.sort_order,
         notes: it.notes as string | null,
         tote_number: (it.tote_number as string) ?? null,
+        vendor: (it.vendor as string) ?? null,
         price_source: (it.price_source as LineItem['price_source']) ?? null,
         quoted_price_cents: it.quoted_price_cents != null ? Number(it.quoted_price_cents) : null,
         return_credit_cogs_cents: it.return_credit_cogs_cents != null ? Number(it.return_credit_cogs_cents) : null,
@@ -1188,6 +1193,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           id: it.id,
           order_item_id: it.order_item_id,
           product_id: it.product_id,
+          vendor: it.vendor ?? null,
           description: it.description || it.product_name,
           quantity: it.quantity,
           unit_price_cents: it.unit_price_cents,
@@ -1974,6 +1980,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // shares (Codex P1 #6). Paired with the hard guard in handleSave.
   const isSplitInvoice = !!(invoice as { field_app_billing_set_id?: string | null }).field_app_billing_set_id;
   const canEdit = isAdminOrRep;
+  const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
@@ -2521,6 +2528,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               <thead>
                 <tr className="text-left text-secondary border-b border-gray-100">
                   <th className="pb-2 pr-4">{isFromScratch ? 'Charge' : 'Product'}</th>
+                  {showVendors && <th className="pb-2 pr-4">Vendor</th>}
                   <th className="pb-2 pr-4 w-24">Qty</th>
                   <th className="pb-2 pr-4 w-28">{isFromScratch ? 'Amount' : 'Unit Price'}</th>
                   <th className="pb-2 pr-4 w-28">Extended</th>
@@ -2570,6 +2578,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         </>
                       )}
                     </td>
+                    {showVendors && (
+                      <td className="py-2 pr-4 text-secondary">
+                        {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
+                        {editable && item.order_item_id && item.quantity > 0 ? (
+                          <VendorSelect
+                            label={`Vendor for ${item.product_name || item.description || 'line'}`}
+                            value={item.vendor}
+                            vendors={vendorNames}
+                            disabled={saving}
+                            onChange={(vendor) => updateItem(idx, 'vendor', vendor)}
+                          />
+                        ) : (item.vendor || '-')}
+                      </td>
+                    )}
                     <td className="py-2 pr-4">
                       {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
@@ -2631,7 +2653,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200 font-semibold">
-                  <td className="pt-3" colSpan={displayItems.some((i) => i.tote_number) ? 4 : 3}>
+                  <td className="pt-3" colSpan={(displayItems.some((i) => i.tote_number) ? 4 : 3) + (showVendors ? 1 : 0)}>
                     Total
                   </td>
                   <td className="pt-3">{fmt(totalCents)}</td>

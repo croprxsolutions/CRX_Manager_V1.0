@@ -20,6 +20,111 @@ export function flowEnabled(env) {
   return env.RELEASE_FLOW === 'on';
 }
 
+// The first line "Staging proof: https://…" in the PR body or any comment (key case-insensitive).
+// The link must be on the same line and be a real https URL with a host.
+export function proofLink(texts) {
+  for (const t of texts) {
+    for (const m of (t ?? '').matchAll(/^[ \t]*staging proof:[ \t]*(\S+)/gim)) {
+      try {
+        const url = new URL(m[1]);
+        if (url.protocol === 'https:' && url.hostname.includes('.')) return m[1];
+      } catch {
+        // not a URL; keep looking
+      }
+    }
+  }
+  return null;
+}
+
+// "Held off: <revert PR or flag name>": why a PR on staging isn't shipping this week. It must name
+// how: a PR or commit (#123 or a GitHub link) or a flag ("flag <name>").
+export function heldOffNote(texts) {
+  for (const t of texts) {
+    for (const m of (t ?? '').matchAll(/^[ \t]*held off:[ \t]*(\S.*?)[ \t]*$/gim)) {
+      if (/#\d+\b|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/(pull|commit)\/\w+|\bflag\s+\S+/i.test(m[1])) return m[1];
+    }
+  }
+  return null;
+}
+
+// The back-merge PR (main -> staging) is plumbing, not work: no labels, not in release lists.
+export function isBackMerge(headRef) {
+  return headRef === 'main';
+}
+
+export const LABELS = {
+  'on-staging': { color: '0ea5a4', description: 'Merged into staging (added by the release flow)' },
+  'verified-on-staging': { color: '16a34a', description: 'Tried on staging; needs a "Staging proof: <link>" line' },
+  'held-off': { color: 'f59e0b', description: 'On staging but not shipping: "Held off: <revert PR or flag>"' },
+};
+
+// Why a label can't stay, or null when it can. on-staging is the bot's; added by hand to an
+// unmerged PR or a back-merge, it goes.
+export function labelProblem({ label, merged, baseRef, headRef, texts }) {
+  if (!(label in LABELS)) return null;
+  if (isBackMerge(headRef)) return `The back-merge PR (main into staging) isn't release work, so I removed \`${label}\`.`;
+  if (!merged || baseRef !== 'staging') {
+    return `\`${label}\` goes on after the PR is merged into staging and tried there, so I removed it.`;
+  }
+  if (label === 'verified-on-staging' && !proofLink(texts)) {
+    return 'I removed `verified-on-staging`: add a line `Staging proof: <link>` (an https link to a screenshot, recording or comment showing it working on staging) to the PR description or a comment, then add the label again.';
+  }
+  if (label === 'held-off' && !heldOffNote(texts)) {
+    return 'I removed `held-off`: add a line `Held off: <revert PR or flag name>` saying how it is kept out of this release, then add the label again.';
+  }
+  return null;
+}
+
+// Minimal GitHub REST helper (GITHUB_TOKEN, GITHUB_REPOSITORY from the Actions environment).
+async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE', allow422 = false } = {}) {
+  const res = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if ((res.status === 404 && allow404) || (res.status === 422 && allow422)) return null;
+  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
+  return res.status === 204 || method === 'DELETE' ? null : res.json();
+}
+
+async function ensureLabels() {
+  for (const [name, spec] of Object.entries(LABELS)) {
+    if (!(await gh(`/labels/${encodeURIComponent(name)}`, { allow404: true }))) {
+      // 422 = another run created it a moment ago, which is fine.
+      await gh('/labels', { method: 'POST', body: { name, ...spec }, allow422: true });
+    }
+  }
+}
+
+async function allPages(path) {
+  const out = [];
+  for (let page = 1; ; page++) {
+    const batch = await gh(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    out.push(...batch);
+    if (batch.length < 100) return out;
+  }
+}
+
+// Conversation comments, review summaries and inline review comments written by people.
+async function humanComments(number) {
+  const all = [
+    ...(await allPages(`/issues/${number}/comments`)),
+    ...(await allPages(`/pulls/${number}/reviews`)),
+    ...(await allPages(`/pulls/${number}/comments`)),
+  ];
+  return all.filter((c) => c.user?.type !== 'Bot' && c.body).map((c) => c.body);
+}
+
+async function readEvent() {
+  const { readFile } = await import('node:fs/promises');
+  return JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'));
+}
+
 const commands = {
   // usage (stdin = changed file names): release-flow.mjs check-release-files
   async 'check-release-files'() {
@@ -27,6 +132,29 @@ const commands = {
     if (!extra.length) return 0;
     console.log(`::error::release/next differs from staging + main outside the bot's files (${extra.slice(0, 20).join(', ')}). If staging just moved, the bot refreshes release/next on that push.`);
     return 1;
+  },
+  // pull_request closed into staging: label the merged work on-staging (not the back-merge PR).
+  async 'mark-on-staging'() {
+    const { pull_request: pr } = await readEvent();
+    if (!pr.merged || pr.base.ref !== 'staging' || isBackMerge(pr.head.ref)) return 0;
+    await ensureLabels();
+    await gh(`/issues/${pr.number}/labels`, { method: 'POST', body: { labels: ['on-staging'] } });
+    console.log(`#${pr.number} labelled on-staging`);
+    return 0;
+  },
+  // pull_request labeled: verified-on-staging needs a proof link, held-off needs a reason.
+  // Reads the PR fresh, so an edit made while this queued is seen; removes only a label still there.
+  async 'check-label'() {
+    const { pull_request: event, label } = await readEvent();
+    const pr = await gh(`/pulls/${event.number}`);
+    if (!pr.labels.some((l) => l.name === label?.name)) return 0;
+    const texts = [pr.body, ...(await humanComments(pr.number))];
+    const problem = labelProblem({ label: label?.name, merged: pr.merged, baseRef: pr.base.ref, headRef: pr.head.ref, texts });
+    if (!problem) return 0;
+    await gh(`/issues/${pr.number}/labels/${encodeURIComponent(label.name)}`, { method: 'DELETE' });
+    await gh(`/issues/${pr.number}/comments`, { method: 'POST', body: { body: problem } });
+    console.log(`#${pr.number}: removed ${label.name}`);
+    return 0;
   },
   // usage: release-flow.mjs check-head <head ref>
   'check-head'([ref]) {

@@ -1,6 +1,6 @@
 # PAR-2 grouping batches (DATA-9 / DATA-12): tracking
 
-**Status, 2026-11-09 (Central): batch 1 DRAFTED, waiting on Mason. Nothing is grouped on live.**
+**Status, 2026-11-09 (Central): grouping switch ON (PR #1712, ledger `20261110023059`); batch 1 APPROVED live by Mason (36 parents, 72 sizes). Batch 2 waits for DATA-2 brand writes.**
 
 What this is: CRX Manager keeps each container size of a chemical as its own product row (a 2.5 gal jug and a Bulk row of the same chemical are two rows). PAR-2 puts those rows under one **parent** per chemical, so shared values (rate, Use Timing, later weight and ingredients) are typed once. Grouping never changes a product ID, price, cost, stock, unit or any old order or invoice. Plan: `docs/plans/2026-10-29-product-GRAND-PLAN.md` overlaps 13 and 14, PAR-2, DATA-9 and DATA-12; build sheet `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` section 5.
 
@@ -103,3 +103,8 @@ An agent then checks read-only that each approved group has a parent, every memb
 | Date | Batch | State |
 |---|---|---|
 | 2026-11-09 | 1 | Drafted (36 groups). Waiting on Mason: turn on grouping, then approve. |
+| 2026-11-09 | 1 | **Approved** about 9:57 PM Central, proposal 88c57e35 (built 9:38 PM): 36 parents, 72 sizes (29 Bulk, 43 Package). Read-only check: for all 72 sizes the approval record has identical before/after rate, per-acre tier prices, EPA and category; 0 stock movements; no brand rows. |
+
+**Size roles (Mason, 2026-11-09):** only fertilizer is kept in real bulk storage. For chemicals and adjuvants, a "- Bulk" row is a tote filled to the customer's amount (usually by the vendor, sometimes by the shop from spare totes) and sold by the gallon, so it keeps the **Bulk** role. A set-size vendor container (110/120/125/250 gal) with no Bulk size in its group is a **Package**, not a Tote. Tracking shop-filled chemical totes as a stock movement is not built (shop fill is fertilizer only, DECISION_LOG 2026-11-04).
+
+**Order with DATA-2 (EPA brand numbers, PR #1709):** DATA-2 writes identical brand lists on every size of the ungrouped products, and writes on the parent (`upsert_parent_brand`) for batch 1. Batch 2 and later proposals are built only after DATA-2's writes land.

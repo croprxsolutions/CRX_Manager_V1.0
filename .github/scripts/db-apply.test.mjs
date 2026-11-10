@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -92,4 +92,32 @@ test('refuseTarget: exactly the expected project read from the URL, never live o
   assert.match(refuseTarget(pooler('fsnjredpmakbmhwowjjt'), ''), /TARGET_REF is not set/);
   assert.match(refuseTarget('', 'fsnjredpmakbmhwowjjt'), /not set/);
   assert.equal(urlRef('postgresql://postgres:postgres@127.0.0.1:56322/x'), 'local');
+});
+
+test('sqlSkeleton keeps only top-level SQL; transaction control is caught in any form', () => {
+  const body = "create procedure p() language plpgsql as $$\nbegin\n  commit;\nend;\n$$;\n-- commit;\n/* commit; /* nested */ */\nselect 'commit;';\n";
+  assert.deepEqual(fileProblems('20261110120000_p', Buffer.from(body)), []);
+  for (const bad of ['create table t(x int); COMMIT WORK;', 'create table t(x int); COMMIT /* note */;', 'select 1;\n  end;', 'savepoint a;', 'Begin Transaction;']) {
+    assert.match(fileProblems('x', Buffer.from(bad))[0] ?? '', /own transaction control/, bad);
+  }
+  assert.equal(sqlSkeleton("select E'it\\'s ; commit' ;").includes('commit'), false);
+});
+
+test('planMigrations: allowOutOfOrder applies older files (and still reports them)', () => {
+  const p = planMigrations({
+    files: f(['20261101000000_late', '20261105000000_new']),
+    highWater: '20260727174805',
+    ledgerNames: new Set(['20261103000000_applied']),
+    oneShots: new Set(),
+    allowOutOfOrder: true,
+  });
+  assert.deepEqual(p.outOfOrder, ['20261101000000_late']);
+  assert.deepEqual(p.steps.map((s) => s.stem), ['20261101000000_late', '20261105000000_new']);
+});
+
+test('urlRef: a pooler user only counts on a Supabase pooler host, the direct host only with user postgres', () => {
+  assert.equal(urlRef('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:6543/postgres'), 'fsnjredpmakbmhwowjjt');
+  assert.equal(urlRef('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@attacker.example:5432/postgres'), null);
+  assert.equal(urlRef('postgresql://postgres.fsnjredpmakbmhwowjjt@localhost:5432/postgres'), null);
+  assert.equal(urlRef('postgresql://other:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres'), null);
 });

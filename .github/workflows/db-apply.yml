@@ -13,7 +13,7 @@ on:
     paths: ['supabase/migrations/**', '.github/scripts/db-apply*.mjs', '.github/workflows/db-apply.yml']
   push:
     branches: [staging]
-    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**']
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', '.github/scripts/db-apply.mjs', '.github/workflows/db-apply.yml']
   workflow_dispatch:
 
 permissions: {}
@@ -56,6 +56,9 @@ jobs:
       DB_URL: ${{ secrets.STAGING_DB_URL }}
       TARGET_REF: fsnjredpmakbmhwowjjt
       BACKFILL: '1'
+      # Staging can hold staging-only migrations (e.g. a change waiting for its live partner) that sit
+      # ahead of main's stamps; older files then apply after them with a warning. Live never does this.
+      ALLOW_OUT_OF_ORDER: '1'
     steps:
       - id: on
         run: |

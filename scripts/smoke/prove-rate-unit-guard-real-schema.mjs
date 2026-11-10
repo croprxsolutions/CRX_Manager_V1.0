@@ -396,6 +396,11 @@ async function main() {
     'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
   refusedWith('P3 blank line moved to a per-cwt product', `UPDATE public.blend_ticket_products SET product_id = '${CWT}' WHERE blend_ticket_id = '${T_OK}' AND rate_per_acre_unit IS NULL;`,
     'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
+  // Sol round 1 HIGH: billing reads NULLIF(btrim(unit), ''), so '' and spaces fall back to the product's unit too.
+  for (const blank of ["''", "'   '"]) {
+    refusedWith(`P3 line unit ${blank} on a per-cwt product`, `UPDATE public.blend_ticket_products SET product_id = '${CWT}', rate_per_acre_unit = ${blank} WHERE blend_ticket_id = '${T_OK}' AND rate_per_acre_unit = 'oz';`,
+      'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
+  }
   clean('P3 unrelated edit', `UPDATE public.blend_ticket_products SET quantity = quantity + 1 WHERE blend_ticket_id = '${T_OK}';`, { asOwner: true });
   console.log('[prover] P3: blend lines oz/cwt/ac, oz/cwt, a lookalike slash, and a blank unit on a per-cwt product are refused at save; per-acre spellings (one with a pasted zero-width space) save and pass the invoice check; edits to a per-cwt unit are refused');
 

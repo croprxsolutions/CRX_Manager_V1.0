@@ -206,8 +206,9 @@ BEGIN
      AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
     RETURN NEW;
   END IF;
-  -- The unit billing will use (create_invoice_from_blend_ticket): the line's, else the product's.
-  v_unit := NEW.rate_per_acre_unit;
+  -- The unit billing will use (create_invoice_from_blend_ticket): NULLIF(btrim(line), ''), else the product's,
+  -- so a line unit of '' or spaces is checked through the product's unit exactly as billing reads it.
+  v_unit := NULLIF(btrim(NEW.rate_per_acre_unit), '');
   IF v_unit IS NULL AND NEW.product_id IS NOT NULL THEN
     SELECT p.rate_unit INTO v_unit FROM public.products p WHERE p.id = NEW.product_id;
   END IF;
@@ -217,7 +218,7 @@ BEGIN
     RAISE EXCEPTION
       'CHEM_RATE_DENOMINATOR_NOT_ACRES: % has a rate unit of "%", which is measured per something other than acres, so a per-acre quantity cannot be derived from it.%',
       COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product'), btrim(v_unit),
-      CASE WHEN NEW.rate_per_acre_unit IS NULL
+      CASE WHEN NULLIF(btrim(NEW.rate_per_acre_unit), '') IS NULL
            THEN ' This line has no rate unit, so the product''s default was used: enter a per-acre rate unit on the line.'
            ELSE ' Enter the rate per acre.' END;
   END IF;

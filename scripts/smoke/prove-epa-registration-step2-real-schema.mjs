@@ -42,7 +42,13 @@ const PARKED = new Set([
   '20261217100000_job_access_ends_with_the_job.sql',
   // Its KI-73 follow-up (applicator spray-record fields) needs part C applied; same reason.
   '20261220100000_applicator_keeps_own_record_fields.sql',
+  // RT-1 rates (#1700) refuses unless unit_conversions holds live's rows, which this database lacks; it creates only
+  // its own rate tables and functions and reads registrations and product numbers (asserted below).
+  '20261229110000_product_rates_draft.sql',
 ]);
+// Parked files that read what this proof covers but create, alter or drop none of it.
+const PARKED_DEFINES_NONE = new Set(['20261229110000_product_rates_draft.sql']);
+const DEFINES_TOUCHED = /\b(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+(FUNCTION|TABLE|TRIGGER|VIEW|POLICY)\s+(IF\s+(NOT\s+)?EXISTS\s+)?(public\.)?(label_draft|epa_registration|_product_label_fingerprint|invoice_items|save_invoice|generate_rup_sales_records|add_product_size|move_product_size|create_product_with_parent|apply_product_setup|upsert_product_brand|upsert_parent_brand)/i;
 // Parked files whose only match is a read of products.epa_registration (complete_job copies it onto the
 // applied record); they redefine nothing this proof covers.
 const PARKED_READS_ONLY = new Set(['20261217100000_job_access_ends_with_the_job.sql']);
@@ -175,6 +181,10 @@ function plan() {
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
+    if (PARKED_DEFINES_NONE.has(name)) {
+      assert.ok(!DEFINES_TOUCHED.test(lf(file)), `${name} now defines what this proof covers; replay it or re-think the skip`);
+      continue;
+    }
     const text = PARKED_READS_ONLY.has(name) ? lf(file).replace(/'epa_registration', p\.epa_registration/g, '') : lf(file);
     assert.ok(!TOUCHED.test(text), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }

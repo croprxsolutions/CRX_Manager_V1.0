@@ -220,8 +220,10 @@ BEGIN
   v_unit := NULLIF(btrim(NEW.rate_per_acre_unit), '');
   IF v_unit IS NULL AND NEW.product_id IS NOT NULL THEN
     -- Takes turns with guard_product_rate_unit_for_blend_lines, so a product edit committing at the same
-    -- moment cannot pass unseen (Luna round 3); the read below then sees the committed unit.
-    PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.product_id::text));
+    -- moment cannot pass unseen (Luna round 3); the read below then sees the committed unit. Shared, so
+    -- two ticket saves touching the same products in any order never wait on (or deadlock) each other;
+    -- only the product edit takes this key exclusively.
+    PERFORM pg_advisory_xact_lock_shared(160016, hashtext(NEW.product_id::text));
     SELECT p.rate_unit INTO v_unit FROM public.products p WHERE p.id = NEW.product_id;
   END IF;
   v_refusal := public.rate_unit_line_refusal(v_unit, NEW.product_id IS NOT NULL);

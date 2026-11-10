@@ -139,6 +139,38 @@ describe('EPA data-quality finding classification', () => {
       .toEqual(['NOT_FOUND']);
   });
 
+  it('reports a moved registration as an action and never trusts its signal word', () => {
+    const findings = buildFindingsForRegistration(
+      '524-475',
+      classifyRegistrationNumber('524-475'),
+      [product({ epa_registration: '524-475', product_name: 'Roundup Ultra' })],
+      epa({ found: false, eparegno: '105211-77', transferredTo: '105211-77', productname: 'ROUNDUP ULTRA HERBICIDE' }),
+    );
+
+    expect(findings[0]).toMatchObject({
+      type: 'TRANSFERRED',
+      level: 'action',
+      registrationNumber: '524-475',
+      ourValue: '524-475',
+      epaValue: '105211-77',
+      message: 'EPA moved this registration to 105211-77. Update the saved number.',
+    });
+    expect(findings.map((finding) => finding.type)).toEqual(['TRANSFERRED']);
+    expect(trustedAvailableSignalWord(findings)).toBeNull();
+  });
+
+  it('treats a distributor found through its base record like any distributor', () => {
+    const findingTypes = types(
+      '62719-671-55467',
+      [product({ epa_registration: '62719-671-55467', product_name: 'Volley' })],
+      epa({ regType: 'distributor', eparegno: '62719-671-55467', productname: 'KEYSTONE NXT', transferredTo: null }),
+    );
+
+    expect(findingTypes).toContain('DISTRIBUTOR_NAME_DIFF');
+    expect(findingTypes).not.toContain('NOT_FOUND');
+    expect(findingTypes).not.toContain('TRANSFERRED');
+  });
+
   it('fans one registration out to every pack-size product deterministically', () => {
     const groups = groupProductsByRegistration([
       product({ id: 'product-b', product_name: 'Example - Bulk' }),

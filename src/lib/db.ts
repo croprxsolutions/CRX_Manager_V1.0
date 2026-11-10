@@ -144,6 +144,22 @@ export const RpcErrorCodes = {
   PRODUCT_RATES_STALE: 'PRODUCT_RATES_STALE',
   PRODUCT_RATES_NOT_LOCKED: 'PRODUCT_RATES_NOT_LOCKED',
   PRODUCT_RATE_PREVIEW_CHANGED: 'PRODUCT_RATE_PREVIEW_CHANGED',
+  // Tote fill (migration 20261117130000): stock, units, source or catalog cost changed since the preview.
+  TOTE_FILL_PREVIEW_CHANGED: 'TOTE_FILL_PREVIEW_CHANGED',
+  // Product parents (migration 20261108120000): the parent, a size or the sizes changed since loaded or previewed.
+  PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
+  PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',
+  PRODUCT_PARENT_RATES_STALE: 'PRODUCT_PARENT_RATES_STALE',
+  // Product weights (migration 20261207100000): a weight screen older than the subject, a lower-trust value
+  // that needs Correct weight, and a draft entered for a pack or formulation that has since changed.
+  PRODUCT_WEIGHT_STALE: 'PRODUCT_WEIGHT_STALE',
+  PRODUCT_WEIGHT_LOWER_TRUST: 'PRODUCT_WEIGHT_LOWER_TRUST',
+  PRODUCT_WEIGHT_BASIS_CHANGED: 'PRODUCT_WEIGHT_BASIS_CHANGED',
+  // Parent brands (migration 20261123120000): grouping still off, and a grouped size's brands kept on its parent.
+  PRODUCT_PARENT_GROUPING_NOT_OPEN: 'PRODUCT_PARENT_GROUPING_NOT_OPEN',
+  PRODUCT_BRANDS_BELONG_TO_PARENT: 'PRODUCT_BRANDS_BELONG_TO_PARENT',
+  // Raised by the screen, not SQL: the size joined, left or moved parents since its brand list loaded.
+  PRODUCT_BRANDS_PARENT_CHANGED: 'PRODUCT_BRANDS_PARENT_CHANGED',
   COST_BASIS_REQUIRED: 'COST_BASIS_REQUIRED',
   COST_BASIS_CENTS_REQUIRED: 'COST_BASIS_CENTS_REQUIRED',
   DRAW_ALLOCATION_MISMATCH: 'DRAW_ALLOCATION_MISMATCH',

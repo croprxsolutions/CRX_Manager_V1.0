@@ -62,6 +62,16 @@ export function packetFrom(name, status, bodyText) {
   return packet;
 }
 
+/** A short closing list of the predicates that did not pass, so the long JSON never needs a re-run to read (2026-11-07 retro). */
+export function failingSummary(adjudicated) {
+  let verdict;
+  try { verdict = JSON.parse(adjudicated); } catch { return 'Could not read the adjudicator output; see above.'; }
+  const failing = (verdict.summary ?? []).filter((item) => item.status !== 'PASS');
+  if (failing.length === 0) return `All ${verdict.summary?.length ?? 0} predicates passed.`;
+  return [`${failing.length} of ${verdict.summary.length} predicates did not pass:`,
+    ...failing.map((item) => `  ${item.status}  ${item.predicate}  ${item.violations?.length ?? item.error ?? '?'} unallowlisted`)].join('\n');
+}
+
 async function main() {
   const out = join(ROOT, '.claude', 'session-state', 'db-sweeps-live-capture.json');
   // This script is the live execution, so the helpers run in print/adjudicate mode: an empty
@@ -86,7 +96,10 @@ async function main() {
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(capture, null, 2)}\n`);
   console.log(`\nSaved ${capture.length} packets to ${out} (private: may hold business data).\n`);
-  const verdict = spawnSync(process.execPath, [RUNNER, '--adjudicate', out], { stdio: 'inherit', env });
+  const verdict = spawnSync(process.execPath, [RUNNER, '--adjudicate', out],
+    { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+  process.stdout.write(verdict.stdout ?? '');
+  console.log(`\n${failingSummary(verdict.stdout ?? '')}`);
   process.exitCode = verdict.status ?? 2;
 }
 

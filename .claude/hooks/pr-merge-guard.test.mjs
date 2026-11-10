@@ -625,6 +625,13 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(gateRequestSource.indexOf("stagingMigrationOnGitHub(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
     "the staging migration refusal runs before any allow point");
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
+  // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
+  // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
+  ok(/"baseRefName,baseRefOid,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
+  ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
+    "a PR without a usable Follow-ups section is denied");
+  ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),
+    "the Follow-ups refusal runs before any allow point");
 }
 
 // headContainsBaseOnGitHub / ghApiRepoPath — driven in-process with an injected gh.

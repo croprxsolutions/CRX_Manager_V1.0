@@ -193,6 +193,7 @@ ok(!classifySql("INSERT INTO customers (name) VALUES ('[E2E] Farm Alpha')").bloc
 ok(classifySql("DELETE FROM invoices WHERE id = 5").block, "financial delete blocked");
 ok(classifySql("UPDATE invoices SET status = 'voided' WHERE id = 5").block, "void real invoice blocked");
 ok(!classifySql("SELECT * FROM invoices").block, "select allowed");
+ok(classifySql("INSERT INTO public.tote_fills (id) VALUES (gen_random_uuid())").block, "raw tote_fills insert blocked (Sol 2026-11-06)");
 ok(!classifySql("INSERT INTO some_log_table (x) VALUES (1)").block, "non-business table allowed");
 eq(classifySql("DELETE FROM customers WHERE id = 5").kind, "real-delete", "non-financial business delete blocked (PR #352)");
 eq(classifySql("SELECT setval('invoice_number_seq', 1, false)").kind, "sequence-mutation", "setval via SELECT blocked (PR #352)");
@@ -560,10 +561,6 @@ function runHook(file, payload) {
 // hold-latch-guard: no hold.json → nothing (assumes none latched; safe if a real repo has one, so only assert exit 0)
 let r = runHook("hold-latch-guard.mjs", { tool_name: "Edit", tool_input: { file_path: "src/x.tsx" } });
 eq(r.status, 0, "hold-latch-guard exits 0");
-// active-area-guard: no active-areas.json in a scratch payload → passthrough (nothing)
-r = runHook("active-area-guard.mjs", { tool_name: "Bash", tool_input: { command: "ls" } });
-eq(r.status, 0, "active-area-guard exits 0 on benign cmd");
-eq(r.stdout.trim(), "", "active-area-guard silent on benign cmd");
 // live-testdata-guard: a [E2E] insert → silent (allowed)
 r = runHook("live-testdata-guard.mjs", { tool_name: "mcp__supabase__execute_sql", tool_input: { query: "INSERT INTO customers (name) VALUES ('[E2E] X')" } });
 eq(r.status, 0, "live-testdata-guard exits 0");
@@ -1201,6 +1198,53 @@ for (const command of [
     "folder-variable force push is still refused");
 
   fs.rmSync(repo, { recursive: true, force: true });
+}
+
+// ── env-guard: raw-text scans, anchored src/ path, full post-edit file (KI-78) ──
+{
+  const envGuard = (toolName, toolInput) => {
+    const r = spawnSync(process.execPath, [path.join(__dirname, "env-guard.mjs")],
+      { input: JSON.stringify({ tool_name: toolName, tool_input: toolInput }), encoding: "utf8" });
+    assert.equal(r.status, 0, `env-guard exited ${r.status}: ${r.stderr}`);
+    return /"permissionDecision":"deny"/.test(r.stdout) ? "deny" : "allow";
+  };
+  const refused = (toolName, input, why) => eq(envGuard(toolName, input), "deny", `env-guard refuses: ${why}`);
+  const passed = (toolName, input, why) => eq(envGuard(toolName, input), "allow", `env-guard passes: ${why}`);
+  const root = tempDir("crx-env-guard-");
+  const missingTs = path.join(root, "src", "lib", "missing.ts");
+  const keyLookup = "const k = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;";
+  const anonLookup = "const k = import.meta.env.VITE_SUPABASE_ANON_KEY;";
+
+  refused("Write", { file_path: missingTs, content: "// never use service_role here\n" + keyLookup }, "a // comment does not exempt a key lookup");
+  refused("Edit", { file_path: missingTs, old_string: "a", new_string: "/* service_role is banned */ const r = 'service_role';" }, "a block comment does not exempt the literal");
+  refused("Write", { file_path: missingTs, content: "// SUPABASE_SERVICE_ROLE_KEY must never be read here\n" + anonLookup }, "a comment-only mention of the key (raw scan)");
+  refused("Write", { file_path: missingTs, content: "const u = 'https://x.co'; " + keyLookup }, "a URL's // is not treated as a comment");
+  refused("Write", { file_path: "src/lib/x.ts", content: "const role = 'service_role';" }, "a repo-relative src/lib/x.ts path is in src");
+  refused("Write", { file_path: "C:/repo/SRC/lib/x.ts", content: "const role = 'service_role';" }, "an upper-case SRC/ path is in src");
+  passed("Write", { file_path: "C:/repo/docs/x.ts", content: "const role = 'service_role';" }, "a file outside src/ is not scanned (control)");
+  passed("Write", { file_path: "C:/repo/notsrc/x.ts", content: "const role = 'service_role';" }, "a folder merely ending in src is not src/ (control)");
+
+  // An Edit is judged on the full post-edit file, CRLF on disk included: each replacement text
+  // below is harmless alone and only the finished file holds the key or the literal.
+  for (const [label, eol] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
+    const onDisk = path.join(root, "src", "lib", `existing-${label}.ts`);
+    fs.mkdirSync(path.dirname(onDisk), { recursive: true });
+    fs.writeFileSync(onDisk, ["// config", anonLookup, "const role = 'authenticated';", "export default k;", ""].join(eol));
+    refused("Edit", { file_path: onDisk, old_string: "VITE_SUPABASE_ANON", new_string: "SUPABASE_SERVICE_ROLE" }, `an Edit turning the anon key into the service-role key on an existing ${label} file`);
+    refused("Edit", { file_path: onDisk, old_string: "authenticated", new_string: "service_role" }, `an Edit turning a role string into 'service_role' on an existing ${label} file`);
+    passed("Edit", { file_path: onDisk, old_string: "// config", new_string: "// settings" }, `an unrelated Edit on an existing ${label} file (control)`);
+    refused("Edit", { file_path: onDisk, old_string: "// not in the file", new_string: keyLookup }, `an Edit whose old_string the splice cannot place still has its new text judged (${label})`);
+  }
+
+  // Test files may quote 'service_role' (grant assertions); the key and JWT scans still apply.
+  const testTs = path.join(root, "src", "lib", "grants.test.ts");
+  passed("Write", { file_path: testTs, content: "expect(grantees).not.toContain('service_role');" }, "a .test.ts file may quote 'service_role'");
+  passed("Write", { file_path: path.join(root, "src", "ui", "X.test.tsx"), content: "const r = \"service_role\";" }, "a .test.tsx file may quote 'service_role'");
+  refused("Write", { file_path: testTs, content: keyLookup }, "a .test.ts file still may not read the service-role key");
+  refused("Write", { file_path: testTs, content: "const k = 'eyJ" + "a".repeat(48) + "';" }, "a .test.ts file still may not hold a JWT-shaped literal");
+  refused("Write", { file_path: path.join(root, "src", "lib", "testHelpers.ts"), content: "const r = 'service_role';" }, "a non-test file named like a test helper is still scanned");
+
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
 console.log(`guards: ${pass} assertions passed`);

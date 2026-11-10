@@ -22,6 +22,7 @@
  */
 import type { InvoiceStatus } from '../types';
 import { computeSeason, seasonStartDate } from '../utils/season';
+import { businessDayStartIso } from './dateUtils';
 
 /** Statuses that still need someone to post or collect the invoice. */
 export const OPEN_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = ['draft', 'unposted', 'posted', 'overdue'];
@@ -35,9 +36,11 @@ export function openOrInSeasonFilter(
   column: 'created_at' | 'invoice_date',
   season: number = computeSeason(),
 ): string {
-  const start = seasonStartDate(season);
+  // A timestamp column is cut at Chicago midnight, not UTC midnight (KI-18); a date column as written.
+  const bound = (date: string) => (column === 'created_at' ? businessDayStartIso(date) : date);
+  const start = bound(seasonStartDate(season));
   // Half-open [Oct 1, next Oct 1): covers the whole of Sep 30 for a timestamp column too.
-  const nextStart = seasonStartDate(season + 1);
+  const nextStart = bound(seasonStartDate(season + 1));
   return `status.in.(${OPEN_INVOICE_STATUSES.join(',')}),and(${column}.gte.${start},${column}.lt.${nextStart})`;
 }
 

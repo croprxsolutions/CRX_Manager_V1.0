@@ -8,7 +8,9 @@
  * receipt with the right content; NULL, FALSE and no_proof record none (no email: office list); a replay records
  * none; and the worker calls claim, confirm right before the send (waiting for an in-flight edit), lease, back
  * off, cap, stop at 23 hours, cancel or flag deliveries no longer completed, refuse stale claims, and stay
- * service_role only; email_log is untouched. No email is sent.
+ * service_role only; email_log is untouched. Then the sender's own code (send-delivery-receipts/logic.ts) runs
+ * against this schema with a stand-in provider that keeps Resend's duplicate guard: a failed first send, then a
+ * lost finish, ends with exactly one receipt emailed. No real email is sent.
  *
  * Run: node scripts/smoke/prove-delivery-receipt-queue-real-schema.mjs   (needs local Docker image)
  * Prints DELIVERY_RECEIPT_QUEUE_PROOF_PASS on success.
@@ -18,7 +20,8 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { bundleNodeEsm } from './bundle-node-esm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-ki25-receipt-queue-${process.pid}-${Date.now().toString(36)}`;
@@ -150,7 +153,8 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  // 20261221100000 only adds the office's close call (its own proof); it changes nothing this proof covers.
+  for (const file of all.slice(at + 1).filter((f) => path.basename(f) !== '20261221100000_close_delivery_receipt.sql')) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -297,7 +301,81 @@ const fresh = (i) => { reset(i, 'attempts = 0, send_authorized_at = NULL'); due(
 const confirm = (c, key) =>
   worker(`SELECT public.confirm_delivery_receipt_send('${c.id}', '${c.claim_token}'${key ? `, '${key}'` : ''})`, { allowFailure: true });
 
-function main() {
+// The sender (supabase/functions/send-delivery-receipts/logic.ts, the exact code the Edge Function runs) against
+// this schema, with a stand-in for Resend that keeps Resend's documented duplicate guard: a repeat of a key it
+// already sent returns the first answer and sends nothing; the same key with a different body is a 409.
+function sqlLiteral(v) {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'number') return String(v);
+  return `'${String(v).replaceAll("'", "''")}'`;
+}
+async function proveSender() {
+  const bundle = path.join(tmpdir(), `ki25-sender-${process.pid}.mjs`);
+  await bundleNodeEsm(path.join(ROOT, 'supabase', 'functions', 'send-delivery-receipts', 'logic.ts'), bundle);
+  const { runReceiptBatch, sendViaResend } = await import(pathToFileURL(bundle).href);
+  unlinkSync(bundle);
+
+  const provider = { sentByKey: new Map(), delivered: [], failNext: 0 };
+  const fakeFetch = async (_url, init) => {
+    const key = init.headers['Idempotency-Key'];
+    if (provider.failNext > 0) {
+      provider.failNext -= 1;
+      return new Response(JSON.stringify({ name: 'application_error', message: '[PROVER] outage' }), { status: 503 });
+    }
+    const seen = provider.sentByKey.get(key);
+    if (seen) {
+      if (seen.body !== init.body) return new Response(JSON.stringify({ name: 'invalid_idempotent_request' }), { status: 409 });
+      return new Response(JSON.stringify({ id: seen.id }), { status: 200 });
+    }
+    const id = `prover-msg-${provider.delivered.length + 1}`;
+    provider.sentByKey.set(key, { body: init.body, id });
+    provider.delivered.push({ key, to: JSON.parse(init.body).to[0] });
+    return new Response(JSON.stringify({ id }), { status: 200 });
+  };
+  let failFinish = false;
+  const rpc = async (fn, args) => {
+    if (failFinish && fn === 'finish_delivery_receipt') throw new Error('[PROVER] connection lost before finish');
+    const named = Object.entries(args).map(([k, v]) => `${k} => ${sqlLiteral(v)}`).join(', ');
+    const r = worker(`SELECT public.${fn}(${named})::text`, { allowFailure: true });
+    if (r.status !== 0) throw new Error(`${fn}: ${r.err}`);
+    return fn === 'claim_delivery_receipts' ? JSON.parse(r.out) : r.out;
+  };
+  let n = 0;
+  const run = () => runReceiptBatch({ rpc, send: (req) => sendViaResend(req, '[PROVER] key', fakeFetch), from: 'noreply@example.invalid', newKey: () => `prover-${++n}` });
+
+  // Only this proof's receipt is due.
+  psql("UPDATE public.delivery_receipt_queue SET next_attempt_at = now() + interval '1 day' WHERE status = 'pending';");
+  seedDelivery(40); assert.equal(complete(40, { emailReceipt: 'true' }).status, 0);
+  assert.equal(row(40, 'status'), 'pending');
+
+  // 1. The first send fails (provider outage): nothing delivered, the receipt waits to retry.
+  provider.failNext = 1;
+  assert.deepEqual(await run(), { claimed: 1, sent: 0, retry: 1, check: 0, skipped: 0, lost: 0 });
+  assert.equal(row(40, "status || ' ' || attempts || ' ' || (next_attempt_at > now())"), 'pending 1 true');
+  assert.equal(provider.delivered.length, 0);
+  assert.equal((await run()).claimed, 0, 'backing off: not claimed again at once');
+
+  // 2. Due again: the email goes out, but the answer is lost before finish (twice, so the one retry fails too).
+  due(40);
+  failFinish = true;
+  assert.deepEqual(await run(), { claimed: 1, sent: 0, retry: 0, check: 0, skipped: 0, lost: 1 });
+  failFinish = false;
+  assert.equal(provider.delivered.length, 1);
+  assert.equal(row(40, 'status'), 'sending');
+  assert.equal((await run()).claimed, 0, 'the lease holds it while the first worker may still finish');
+
+  // 3. The lease runs out; the next run resends the identical request, the provider answers from its guard.
+  psql(`UPDATE public.delivery_receipt_queue SET claimed_at = now() - interval '11 minutes' WHERE delivery_id = '${D(40)}';`);
+  assert.deepEqual(await run(), { claimed: 1, sent: 1, retry: 0, check: 0, skipped: 0, lost: 0 });
+  assert.equal(row(40, "status || ' ' || resend_message_id || ' ' || sent_to"), 'sent prover-msg-1 ki25-farm@example.invalid');
+  assert.equal((await run()).claimed, 0);
+
+  // Exactly one email reached the customer for this delivery.
+  assert.deepEqual(provider.delivered, [{ key: `delivery-receipt/${row(40, 'id')}`, to: 'ki25-farm@example.invalid' }]);
+  console.log('[prover] sender: a failed first send, then a lost finish, ends with exactly one receipt emailed and the row sent');
+}
+
+async function main() {
   if (!REUSE) buildContainer();
   else {
     // A reused container must be one this prover built: its label, no network.
@@ -690,11 +768,13 @@ function main() {
   assert.equal(row(2, 'status'), 'pending');
   console.log('[prover] the timer posts only when a receipt is due and both secrets exist, and changes no row');
 
+  await proveSender();
+
   // Grants on the replaced complete_delivery are unchanged.
   const sig = 'public.complete_delivery(uuid,text,uuid,jsonb,text,text,text,timestamptz,text,text,boolean)';
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', '${sig}', 'EXECUTE')::text || has_function_privilege('service_role', '${sig}', 'EXECUTE')::text || has_function_privilege('anon', '${sig}', 'EXECUTE')::text;`), 'truetruefalse');
   console.log('DELIVERY_RECEIPT_QUEUE_PROOF_PASS');
 }
 
-try { main(); }
+try { await main(); }
 finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }

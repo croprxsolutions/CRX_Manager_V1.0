@@ -17,6 +17,7 @@ import { readOrderEditSnapshot } from '../lib/orderEditSnapshot';
 import Input from '../components/ui/Input';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
+import LineBillSplit, { type LineShare } from '../components/orders/LineBillSplit';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
@@ -47,6 +48,7 @@ import type { PickListData } from '../lib/orderPickListPdf';
 import { validateInventoryPositionShape } from '../lib/inventoryPositionValidator';
 import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { activeInvoiceCoversOrder } from '../lib/deliveryInvoiceCoverage';
+import { billSplitLock, canEditBillSplit, cardLiveCents, sharesLeft, sharesOverHundred, sharesTotal } from '../lib/billSplitLock';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { INVOICE_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Order, OrderItem, OrderShare, OrderItemFieldAllocation, Customer, Invoice, Delivery, Product, LinkedEntityType, InventoryPositionRow } from '../types';
@@ -121,6 +123,7 @@ export default function OrderDetail() {
 
   // Field/acre split state (multi-field split invoicing — entered on the order, billed by acres).
   type AllocField = { id: string; field_name: string; total_acres: number | null; customer_id: string; owners: { customer_id: string; split_pct: number }[] };
+  const [lineShares, setLineShares] = useState<LineShare[]>([]);
   const [allocations, setAllocations] = useState<OrderItemFieldAllocation[]>([]);
   const [allocFields, setAllocFields] = useState<AllocField[]>([]);
   const [custNames, setCustNames] = useState<Record<string, string>>({});
@@ -307,6 +310,19 @@ export default function OrderDetail() {
         if (readFailed(shareRes, 'shares')) return false;
         if (isStale()) return false;
         setShares(shareRes.data as OrderShare[]);
+
+        // A line's own payers, overriding the card for that line (billing plan M2).
+        // Paged and counted, so a capped read can't leave lines looking like they follow the card.
+        const lineShareRes = await fetchAllRows((from, to) => pageWithList(supabase
+          .from('order_item_shares')
+          .select('id, order_item_id, customer_id, split_percentage, customer:customers(farm_name), order_items!inner(order_id)', { count: 'exact' })
+          .eq('order_items.order_id', id!)
+          .order('created_at')
+          .order('id')
+          .range(from, to)));
+        if (readFailed(lineShareRes, 'line shares')) return false;
+        if (isStale()) return false;
+        setLineShares((lineShareRes.data || []) as unknown as LineShare[]);
 
         // Field/acre split: existing per-line allocations for this order, the active fields to pick
         // from (with their owner splits), and a customer-id → name map for the live preview.
@@ -934,7 +950,9 @@ export default function OrderDetail() {
   const openShareEditor = () => {
     setNewShareCustomerId('');
     setNewShareCustomerName('');
-    setNewSharePct('');
+    // The card should reach 100%, so the next share starts at exactly what's left (rounding it could push it over).
+    const left = sharesLeft(shares.map((sh) => sh.split_percentage));
+    setNewSharePct(shares.length > 0 && left > 0 ? String(left) : '');
     setShowShareEditor(true);
   };
 
@@ -945,9 +963,9 @@ export default function OrderDetail() {
       toast('error', 'Percentage must be between 0 and 100');
       return;
     }
-    const totalExisting = shares.reduce((s, sh) => s + sh.split_percentage, 0);
-    if (totalExisting + pct > 100) {
-      toast('error', `Total split would exceed 100% (currently ${totalExisting}%)`);
+    // Added exactly, as the database does: a float sum refuses a card that is exactly 100%.
+    if (sharesOverHundred([...shares.map((sh) => sh.split_percentage), pct])) {
+      toast('error', `Total split would exceed 100% (currently ${Math.round((100 - sharesLeft(shares.map((sh) => sh.split_percentage))) * 100) / 100}%)`);
       return;
     }
     // The picked customer's name, kept from the search picker.
@@ -1330,12 +1348,16 @@ export default function OrderDetail() {
   // editing the order_shares row would drift from the invoice's historical
   // invoice_shares snapshot. Enforced at DB level by the
   // prevent_order_shares_edit_after_post() trigger; this is just the UI half.
-  const sharesLocked = invoices.some((inv) =>
-    ['posted', 'paid', 'overdue'].includes(inv.status)
-  );
-  const lockingInvoice = sharesLocked
-    ? invoices.find((inv) => ['posted', 'paid', 'overdue'].includes(inv.status))
-    : null;
+  // Also frozen once a completed delivery is billed (BILL_SPLIT_FROZEN) or a draft bills the sale to one
+  // customer (BILL_SPLIT_HAS_DRAFT), in the database's order.
+  const splitLock = billSplitLock(invoices, deliveries);
+  const sharesLocked = !!splitLock;
+  const linesWithOwnSplit = new Set(lineShares.map((ls) => ls.order_item_id));
+  // Each card payer's live amount, the main customer with whatever is left, as the split writer bills it.
+  const cardLive = cardLiveCents(items, linesWithOwnSplit,
+    shares.map((sh) => ({ customer_id: sh.customer_id, pct: sh.split_percentage })), order?.customer_id ?? '');
+  // The split editors follow the lock, not the delivery status: a split the database refused to bill stays open.
+  const canEditSplit = canEditBillSplit(role, order?.status);
 
   return (
     <div className="space-y-4">
@@ -1835,6 +1857,7 @@ export default function OrderDetail() {
                 <thead>
                   <tr className="border-b border-gray-100">
                     <th className="px-4 py-3 text-left font-medium text-secondary">Product</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Vendor</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Price/Unit</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Units Needed</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Delivered</th>
@@ -1857,6 +1880,9 @@ export default function OrderDetail() {
                         <tr key={item.id} className="border-b border-gray-50">
                           <td className="px-4 py-3 font-medium text-nav-dark">
                             {item.product_name}
+                          </td>
+                          <td className="px-4 py-3 text-secondary">
+                            {item.vendor || '-'}
                           </td>
                           <td className="px-4 py-3 font-mono">
                             {editing ? (
@@ -1925,6 +1951,7 @@ export default function OrderDetail() {
                             <span className="text-xs text-crx-green font-normal">(new)</span>
                           </div>
                         </td>
+                        <td className="px-4 py-3 text-secondary">-</td>
                         <td className="px-4 py-3 font-mono">
                           <input
                             type="number"
@@ -1963,7 +1990,7 @@ export default function OrderDetail() {
                     ))}
                     {/* Add Product button */}
                     <tr className="border-t border-dashed border-gray-300">
-                      <td colSpan={7} className="px-4 py-2">
+                      <td colSpan={8} className="px-4 py-2">
                         <button
                           type="button"
                           onClick={() => { setShowProductModal(true); setProductSearch(''); }}
@@ -1980,7 +2007,7 @@ export default function OrderDetail() {
                       <td colSpan={2} className="px-4 py-3 font-medium text-nav-dark">
                         New Total:
                       </td>
-                      <td colSpan={5} className="px-4 py-3 font-semibold text-nav-dark">
+                      <td colSpan={6} className="px-4 py-3 font-semibold text-nav-dark">
                         {/* Each line as the order functions store it, exact to the cent (To-Do 1.7). */}
                         {fmt(
                           [...editItems, ...newItems].reduce((cents, i) => cents + Math.round(exactRound2([i.price_per_unit, i.total_units_needed]) * 100), 0) / 100
@@ -1996,7 +2023,7 @@ export default function OrderDetail() {
       ))}
 
       {/* Order Shares (Bill Splitting) */}
-      {(shares.length > 0 || canEdit) && (
+      {(shares.length > 0 || lineShares.length > 0 || canEditSplit) && (
         <Card>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -2006,7 +2033,7 @@ export default function OrderDetail() {
                 <span className="text-xs text-secondary">({shares.length} customer{shares.length !== 1 ? 's' : ''})</span>
               )}
             </div>
-            {canEdit && !showShareEditor && !sharesLocked && (
+            {canEditSplit && !showShareEditor && !sharesLocked && (
               <Button variant="secondary" size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={openShareEditor}>
                 Add Split
               </Button>
@@ -2016,14 +2043,36 @@ export default function OrderDetail() {
           {sharesLocked && (
             <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>
-                Bill split is locked because invoice <strong>{lockingInvoice?.invoice_number}</strong> is already posted.
-                Void the invoice first to change the split.
-              </span>
+              {splitLock?.kind === 'posted' && (
+                <span>
+                  Bill split is locked because invoice <strong>{splitLock.number}</strong> is already posted.
+                  Void the invoice first to change the split.
+                </span>
+              )}
+              {splitLock?.kind === 'delivery' && (
+                <span>
+                  Bill split is locked because delivery <strong>{splitLock.number}</strong> is complete and billed.
+                  Void its invoices or the delivery to change the split.
+                </span>
+              )}
+              {splitLock?.kind === 'draft' && (
+                <span>
+                  Bill split is locked because draft invoice <strong>{splitLock.number}</strong> bills this sale to one customer.
+                  Remove that draft to change the split.
+                </span>
+              )}
             </div>
           )}
 
-          {shares.length === 0 && !showShareEditor && (
+          {hasAllocations && (
+            <p className="mb-3 text-xs text-amber-700">This order is split by field below, so the field split bills it, not this card.</p>
+          )}
+
+          {shares.length === 0 && lineShares.length > 0 && !showShareEditor && (
+            <p className="text-sm text-secondary text-center py-4">No split on the whole sale. Some lines have their own below.</p>
+          )}
+
+          {shares.length === 0 && lineShares.length === 0 && !showShareEditor && (
             <p className="text-sm text-secondary text-center py-4">No bill splits — 100% billed to primary customer</p>
           )}
 
@@ -2037,12 +2086,19 @@ export default function OrderDetail() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-nav-dark">{share.customer_name}</p>
-                      <p className="text-xs text-secondary">{fmt(share.amount_cents / 100)}</p>
+                      {/* Live, not the amount saved when the share was added: it follows price edits and line splits.
+                          Not shown while a field split bills the order instead of this card. */}
+                      {!hasAllocations && (
+                        <p className="text-xs text-secondary">
+                          about {fmt((cardLive.get(share.customer_id) ?? 0) / 100)} of the products
+                          {linesWithOwnSplit.size > 0 && ' on lines that follow this card'}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-blue-600">{share.split_percentage}%</span>
-                    {canEdit && !sharesLocked && (
+                    {canEditSplit && !sharesLocked && (
                       <button onClick={() => handleRemoveShare(share.id)} className="text-red-400 hover:text-red-600 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -2053,10 +2109,10 @@ export default function OrderDetail() {
               <div className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg">
                 <span className="text-xs font-medium text-blue-700">Total Allocated</span>
                 <span className="text-xs font-semibold text-blue-700">
-                  {shares.reduce((s, sh) => s + sh.split_percentage, 0)}%
-                  {shares.reduce((s, sh) => s + sh.split_percentage, 0) < 100 && (
+                  {sharesTotal(shares.map((sh) => sh.split_percentage))}%
+                  {sharesLeft(shares.map((sh) => sh.split_percentage)) > 0 && (
                     <span className="text-amber-600 ml-2">
-                      ({100 - shares.reduce((s, sh) => s + sh.split_percentage, 0)}% unallocated)
+                      (the other {Math.round(sharesLeft(shares.map((sh) => sh.split_percentage)) * 100) / 100}% stays with {customer?.farm_name || 'the main customer'})
                     </span>
                   )}
                 </span>
@@ -2102,6 +2158,19 @@ export default function OrderDetail() {
                 </Button>
               </div>
             </div>
+          )}
+
+          {/* Not when the field split failed to load: its lines would show an editor whose shares don't bill. */}
+          {!hasAllocations && !allocLoadFailed && items.length > 0 && (
+            <LineBillSplit
+              items={items}
+              lineShares={lineShares}
+              hasCard={shares.length > 0}
+              mainCustomerName={customer?.farm_name || 'the main customer'}
+              canEdit={canEditSplit}
+              locked={sharesLocked}
+              onChanged={() => fetchOrder()}
+            />
           )}
         </Card>
       )}

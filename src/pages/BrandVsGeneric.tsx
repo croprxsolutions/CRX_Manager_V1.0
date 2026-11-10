@@ -1,18 +1,13 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { FlaskConical, Plus, Pencil, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { FlaskConical, Info } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
-import Button from '../components/ui/Button';
-import Modal from '../components/ui/Modal';
-import ConfirmModal from '../components/ui/ConfirmModal';
-import Combobox from '../components/ui/Combobox';
-import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import EmptyState from '../components/ui/EmptyState';
 import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, checkMutationResult, sanitizeError } from '../lib/db';
+import { supabase } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import { PRODUCT_COLUMNS, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { fetchAllRows } from '../lib/pagedRead';
@@ -30,21 +25,6 @@ export default function BrandVsGeneric() {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-
-  // Add / edit form state
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<MappingRow | null>(null);
-  const [brandedName, setBrandedName] = useState('');
-  const [activeIngredient, setActiveIngredient] = useState('');
-  const [genericLabel, setGenericLabel] = useState('');
-  const [hasBulk, setHasBulk] = useState(false);
-  const [notes, setNotes] = useState('');
-  const [formError, setFormError] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  // Delete state
-  const [deleteTarget, setDeleteTarget] = useState<MappingRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // Only the newest load may install rows: a role change re-runs the loader while an older
   // (possibly cost-less) load is still in flight (Luna round 2).
@@ -110,45 +90,6 @@ export default function BrandVsGeneric() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  // product_name is NOT unique in the catalog (verified live: e.g. two "Vixen D - 12#"),
-  // so a name-keyed lookup would collapse duplicates and could persist the wrong
-  // generic_product_id. The BRANDED value is stored as a plain product_name
-  // (fallback_branded_product is name-keyed by design), but the GENERIC picker must
-  // resolve to a SPECIFIC product — key it on a unique per-product label (name + SKU
-  // when the name is duplicated), not the name.
-  const nameCounts = useMemo(() => {
-    const c = new Map<string, number>();
-    products.forEach((p) => c.set(p.product_name, (c.get(p.product_name) || 0) + 1));
-    return c;
-  }, [products]);
-
-  const labelFor = useCallback(
-    (p: Product) =>
-      (nameCounts.get(p.product_name) || 0) > 1
-        ? `${p.product_name} — SKU ${p.sku || p.id.slice(0, 8)}`
-        : p.product_name,
-    [nameCounts]
-  );
-
-  // Branded picker: unique product names (duplicates collapse to the same stored string).
-  const brandedOptions = useMemo(
-    () => [...new Set(products.map((p) => p.product_name))].sort((a, b) => a.localeCompare(b)),
-    [products]
-  );
-  const productNameSet = useMemo(() => new Set(products.map((p) => p.product_name)), [products]);
-
-  // Generic picker: one disambiguated label per product, mapped back to the exact row.
-  const genericOptions = useMemo(
-    () => products.map(labelFor).sort((a, b) => a.localeCompare(b)),
-    [products, labelFor]
-  );
-  const productByLabel = useMemo(() => {
-    const m = new Map<string, Product>();
-    products.forEach((p) => m.set(labelFor(p), p));
-    return m;
-  }, [products, labelFor]);
-
   // Comparison viewer — derived from the loaded mappings (single source of truth).
   const selectedProduct = products.find((p) => p.id === selectedProductId) || null;
   const viewerMapping = selectedProduct
@@ -160,111 +101,6 @@ export default function BrandVsGeneric() {
     n != null
       ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
       : '-';
-
-  const openAdd = () => {
-    setEditing(null);
-    setBrandedName('');
-    setActiveIngredient('');
-    setGenericLabel('');
-    setHasBulk(false);
-    setNotes('');
-    setFormError('');
-    setFormOpen(true);
-  };
-
-  const openEdit = (row: MappingRow) => {
-    setEditing(row);
-    setBrandedName(row.fallback_branded_product || '');
-    setActiveIngredient(row.branded_ingredient || '');
-    setGenericLabel(row.generic_product ? labelFor(row.generic_product) : '');
-    setHasBulk(row.generic_has_bulk);
-    setNotes(row.notes || '');
-    setFormError('');
-    setFormOpen(true);
-  };
-
-  const handleSave = async () => {
-    setFormError('');
-    // The duplicate and product checks below need the complete lists.
-    if (loadFailed) {
-      setFormError('Products and mappings could not be loaded. Reload the page to try again.');
-      return;
-    }
-    // A refresh in flight may not include a mapping just saved (Luna, #1017).
-    if (loading) {
-      setFormError('Products and mappings are still loading. Try again in a moment.');
-      return;
-    }
-    const branded = brandedName.trim();
-    if (!branded) {
-      setFormError('Choose a branded product.');
-      return;
-    }
-    if (!productNameSet.has(branded)) {
-      setFormError('The branded product must match an existing product.');
-      return;
-    }
-    // One mapping per branded product — the comparison viewer resolves a product
-    // with mappings.find(...) and would otherwise pick an arbitrary duplicate row.
-    // On edit, allow the row itself but block colliding with a different one.
-    const duplicate = mappings.find(
-      (m) =>
-        m.id !== editing?.id &&
-        (m.fallback_branded_product || '').trim().toLowerCase() === branded.toLowerCase()
-    );
-    if (duplicate) {
-      setFormError('A mapping for this branded product already exists — edit that one instead.');
-      return;
-    }
-    const generic = genericLabel.trim();
-    let genericId: string | null = null;
-    if (generic) {
-      const genericProd = productByLabel.get(generic);
-      if (!genericProd) {
-        setFormError('The generic alternative must match an existing product (or leave it blank).');
-        return;
-      }
-      genericId = genericProd.id;
-    }
-
-    const payload = {
-      fallback_branded_product: branded,
-      // branded_ingredient is NOT NULL; default it to the branded product name when left blank.
-      branded_ingredient: activeIngredient.trim() || branded,
-      generic_product_id: genericId,
-      generic_has_bulk: hasBulk,
-      notes: notes.trim() || null,
-    };
-
-    setSaving(true);
-    try {
-      const result = editing
-        ? await supabase.from('ingredient_map').update(payload).eq('id', editing.id).select()
-        : await supabase.from('ingredient_map').insert(payload).select();
-      checkMutationResult(result, editing ? 'Update ingredient mapping' : 'Create ingredient mapping');
-      toast('success', editing ? 'Mapping updated' : 'Mapping added');
-      setFormOpen(false);
-      await fetchData();
-    } catch (err: unknown) {
-      setFormError(sanitizeError(err));
-    }
-    setSaving(false);
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      const result = await supabase.from('ingredient_map').delete().eq('id', deleteTarget.id).select();
-      checkMutationResult(result, 'Delete ingredient mapping');
-      toast('success', 'Mapping deleted');
-      setDeleteTarget(null);
-      await fetchData();
-    } catch (err: unknown) {
-      toast('error', sanitizeError(err));
-    }
-    setDeleting(false);
-  };
 
   const dataColumns: Column<MappingRow>[] = [
     {
@@ -302,30 +138,6 @@ export default function BrandVsGeneric() {
     },
   ];
 
-  const actionColumn: Column<MappingRow> = {
-    key: 'actions',
-    header: '',
-    render: (r) => (
-      <div className="flex items-center justify-end gap-1">
-        <button
-          onClick={() => openEdit(r)}
-          aria-label={`Edit mapping for ${r.fallback_branded_product || 'product'}`}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-crx-green hover:bg-gray-100 transition-colors"
-        >
-          <Pencil className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setDeleteTarget(r)}
-          aria-label={`Delete mapping for ${r.fallback_branded_product || 'product'}`}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-gray-100 transition-colors"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-    ),
-  };
-
-  const columns = isAdmin ? [...dataColumns, actionColumn] : dataColumns;
 
   return (
     <div className="space-y-6">
@@ -356,9 +168,7 @@ export default function BrandVsGeneric() {
             icon={<FlaskConical className="w-6 h-6 text-gray-400" />}
             title="No generic alternative found"
             description={
-              isAdmin
-                ? `No mapping links ${selectedProduct.product_name} to a generic. Use "Add Mapping" below to create one.`
-                : `No generic alternative has been mapped for ${selectedProduct.product_name}.`
+              `No generic alternative has been mapped for ${selectedProduct.product_name}.`
             }
           />
         </Card>
@@ -500,25 +310,23 @@ export default function BrandVsGeneric() {
       <Card padding={false}>
         <div className="p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardHeader title="Manage" accent="Mappings" />
-            {isAdmin && (
-              <Button icon={<Plus className="w-4 h-4" />} onClick={openAdd} disabled={loadFailed || loading}>
-                Add Mapping
-              </Button>
-            )}
+            <CardHeader title="Brand" accent="Mappings" />
+          </div>
+          {/* Read-only since DM-1: ingredients move to each product's Chemistry section. */}
+          <div role="note" className="flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-secondary">
+            <Info className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              This list is read-only. Active ingredients are recorded in the Chemistry section of each product.
+            </span>
           </div>
           <DataTable<MappingRow>
             data={mappings}
-            columns={columns}
+            columns={dataColumns}
             searchable
             searchPlaceholder="Search mappings..."
             searchKeys={['fallback_branded_product', 'branded_ingredient', 'notes']}
             emptyTitle="No mappings yet"
-            emptyDescription={
-              isAdmin
-                ? 'Add your first brand-to-generic mapping to power the comparison above.'
-                : 'No brand-to-generic mappings have been set up yet.'
-            }
+            emptyDescription="No brand-to-generic mappings have been set up."
             loading={loading}
             loadError={loadFailed}
             onRetry={() => void fetchData()}
@@ -526,101 +334,6 @@ export default function BrandVsGeneric() {
         </div>
       </Card>
 
-      {/* Add / edit modal (admin only) */}
-      {isAdmin && (
-        <Modal
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          title={editing ? 'Edit' : 'Add'}
-          accent="Mapping"
-        >
-          <div className="space-y-4">
-            <div>
-              <Combobox
-                label="Branded Product *"
-                value={brandedName}
-                onChange={setBrandedName}
-                options={brandedOptions}
-                placeholder="Search products..."
-              />
-              <p className="mt-1 text-xs text-secondary">
-                The branded product customers ask for. Must match a product in your catalog.
-              </p>
-            </div>
-
-            <div>
-              <Input
-                label="Active Ingredient"
-                value={activeIngredient}
-                onChange={(e) => setActiveIngredient(e.target.value)}
-                placeholder="e.g. Glyphosate"
-              />
-              <p className="mt-1 text-xs text-secondary">
-                Optional. Defaults to the branded product name if left blank.
-              </p>
-            </div>
-
-            <div>
-              <Combobox
-                label="Generic Alternative"
-                value={genericLabel}
-                onChange={setGenericLabel}
-                options={genericOptions}
-                placeholder="Search products (optional)..."
-              />
-              <p className="mt-1 text-xs text-secondary">
-                The lower-cost generic to suggest. Leave blank if there isn&apos;t one yet.
-              </p>
-            </div>
-
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hasBulk}
-                onChange={(e) => setHasBulk(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green/20"
-              />
-              <span className="text-sm text-nav-dark">Generic available in bulk</span>
-            </label>
-
-            <div>
-              <label className="block text-sm font-medium text-secondary mb-1">Notes</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                placeholder="Optional notes for the sales team..."
-                className="w-full px-3 py-2.5 text-sm text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
-              />
-            </div>
-
-            {formError && <p className="text-sm text-red-500">{formError}</p>}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="ghost" onClick={() => setFormOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave} loading={saving}>
-                {editing ? 'Save Changes' : 'Add Mapping'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Delete confirm (admin only) */}
-      {isAdmin && (
-        <ConfirmModal
-          open={deleteTarget !== null}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={handleDelete}
-          title="Delete Mapping"
-          message={`Delete the brand-to-generic mapping for "${deleteTarget?.fallback_branded_product || 'this product'}"? This cannot be undone.`}
-          confirmLabel="Delete"
-          variant="danger"
-          loading={deleting}
-        />
-      )}
     </div>
   );
 }

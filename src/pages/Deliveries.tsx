@@ -31,13 +31,15 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import ReceiptsToCheck from '../components/deliveries/ReceiptsToCheck';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import DataTable, { type Column } from '../components/ui/DataTable';
-import { applyTableSearchSort } from '../lib/tableSearchSort';
+import type { SortDir } from '../lib/tableSearchSort';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase, sanitizeError, assertRpcResult } from '../lib/db';
+import type { Database, Json } from '../types/supabase';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { CriticalActionHandledError, runCriticalAction } from '../lib/criticalAction';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
@@ -67,6 +69,8 @@ interface DeliveryRow extends Delivery {
   customer_name: string;
   driver_name: string;
   item_count: number;
+  // Its place in the chosen order (get_deliveries_page), used to re-sort a read made by id.
+  sort_position?: number;
   farm_group_name: string | null;
 }
 
@@ -99,8 +103,6 @@ const dayLabel = (d: string) => {
   return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 };
 
-const DELIVERY_SEARCH_KEYS = ['delivery_number', 'customer_name', 'driver_name', 'farm_group_name'];
-
 // Style D driver list: one white list per group, gray-100 dividers.
 const DRIVER_SECTION_TITLE = 'mb-2 font-heading text-xl font-bold text-nav-dark';
 const DRIVER_LIST = 'overflow-hidden rounded-xl border border-gray-200 bg-white divide-y divide-gray-100';
@@ -116,24 +118,107 @@ const priorityBadge = (p: string) => {
   return <Badge variant={s.variant}>{s.label}</Badge>;
 };
 
-// Default list order keeps today's work first, followed by upcoming then recent past deliveries.
-const compareDefaultDeliveryOrder = (a: DeliveryRow, b: DeliveryRow, todayDate: string) => {
-  const bucketFor = (scheduledDate: string) => (
-    scheduledDate === todayDate ? 1 : scheduledDate > todayDate ? 2 : 3
-  );
-  const aBucket = bucketFor(a.scheduled_date);
-  const bBucket = bucketFor(b.scheduled_date);
-  if (aBucket !== bBucket) return aBucket - bBucket;
-
-  if (a.scheduled_date !== b.scheduled_date) {
-    return aBucket === 3
-      ? b.scheduled_date.localeCompare(a.scheduled_date)
-      : a.scheduled_date.localeCompare(b.scheduled_date);
+/* ─── Server-side list (Goal 4) ─── */
+// get_deliveries_keyset_page searches, filters, sorts and counts in the database and returns one page
+// plus the true totals. Its default order keeps today's work first, then upcoming, then past.
+const LIST_PAGE_SIZE = 50;
+/** Page one has no bookmark: it reads from the top of the list. */
+const FIRST_PAGE: (Json | null)[] = [null];
+type NextBookmark = { key: string; page: number; cursor: Json | null };
+/** The bookmark after the page on screen, only when it came from that same query and page. */
+function nextBookmarkFor(next: NextBookmark | null, key: string, page: number): Json | null {
+  return next && next.key === key && next.page === page ? next.cursor : null;
+}
+/** The bookmark no longer fits the list (the sort or the day changed) or is malformed: read again from page one. */
+function isBookmarkRefused(error: unknown): boolean {
+  return /DELIVERIES_PAGE_(STALE|BAD)_CURSOR/.test((error as { message?: string } | null)?.message ?? '');
+}
+const SEARCH_MAX_CHARS = 200;
+interface DeliveriesSummary {
+  visible_count: number;
+  open_count: number;
+  scheduled_today: number;
+  in_progress: number;
+  completed_this_week: number;
+  strip: { date: string; count: number; unassigned: number }[];
+}
+interface DeliveriesPage {
+  total_count: number;
+  rows: DeliveryRow[];
+  summary: DeliveriesSummary;
+  /** The bookmark after this page's last row, to read the next page from; null on the last page. */
+  next_cursor: Json | null;
+}
+interface DeliveriesQuery {
+  p_today: string;
+  p_week_start: string;
+  p_search?: string | null;
+  p_statuses?: string[] | null;
+  p_driver_id?: string | null;
+  p_priority?: string | null;
+  p_customer_id?: string | null;
+  p_date_from?: string | null;
+  p_date_to?: string | null;
+  p_sort_key?: string | null;
+  p_sort_desc?: boolean;
+}
+// The database returns at most this many rows per call.
+const FULL_READ_PAGE_SIZE = 500;
+// limit null reads every matching row (exports, the load sheet, the calendar, the driver view), in pages of 500.
+// With `after` (the previous page's next_cursor) a page starts right after that row, so deliveries that left
+// the list in between never push one past the screen.
+async function readDeliveriesPage(query: DeliveriesQuery, limit: number | null, after: Json | null = null): Promise<DeliveriesPage> {
+  if (limit !== null) return readOnePage(query, limit, { after });
+  // Pages are separate reads, so the list can change between them. A read whose total moved, or whose
+  // rows do not add up to it, is read again. A count can stay equal through a change (one delivery
+  // cancelled, another created), so a read that needed more than one page is returned only once a second
+  // whole read matches it row for row, as fetchAllRows does. After three tries it is reported as failed.
+  let unconfirmed: string | null = null;
+  for (let attempt = 0; attempt < FULL_READ_ATTEMPTS; attempt++) {
+    const result = await readAllPagesOnce(query);
+    if (!result) { unconfirmed = null; continue; }
+    if (result.pages === 1) return result.page;
+    const key = JSON.stringify(result.page.rows);
+    if (key === unconfirmed) return result.page;
+    unconfirmed = key;
   }
-
-  const numberComparison = String(a.delivery_number ?? a.id).localeCompare(String(b.delivery_number ?? b.id));
-  return numberComparison || a.id.localeCompare(b.id);
-};
+  throw new Error('Deliveries kept changing while they were read. Please try again.');
+}
+const FULL_READ_ATTEMPTS = 3;
+// Walk the list by delivery id, which never changes, so a delivery edited between pages is never skipped
+// or repeated; then put the rows back in the chosen order. Null when the list changed mid-read.
+async function readAllPagesOnce(query: DeliveriesQuery): Promise<{ page: DeliveriesPage; pages: number } | null> {
+  const first = await readOnePage(query, FULL_READ_PAGE_SIZE, { afterId: FIRST_ID });
+  const rows = [...first.rows];
+  let pages = 1;
+  for (let page = first; page.rows.length === FULL_READ_PAGE_SIZE; pages++) {
+    page = await readOnePage(query, FULL_READ_PAGE_SIZE, { afterId: page.rows[page.rows.length - 1].id });
+    if (page.total_count !== first.total_count) return null;
+    rows.push(...page.rows);
+  }
+  if (rows.length !== first.total_count) return null;
+  rows.sort((a, b) => (a.sort_position ?? 0) - (b.sort_position ?? 0));
+  return { page: { ...first, rows }, pages };
+}
+// Below every delivery id: the first page of a read by id.
+const FIRST_ID = '00000000-0000-0000-0000-000000000000';
+// One page: from the top, after a delivery id (a read by id), or after a bookmark.
+async function readOnePage(query: DeliveriesQuery, limit: number, from: { afterId?: string; after?: Json | null }): Promise<DeliveriesPage> {
+  // Generated Args cannot say null; the function reads a null filter as "no filter".
+  const args = {
+    ...query, p_limit: limit, p_offset: 0,
+    ...(from.afterId ? { p_after_id: from.afterId } : {}),
+    ...(from.after ? { p_after: from.after } : {}),
+  } as unknown as Database['public']['Functions']['get_deliveries_keyset_page']['Args'];
+  const { data, error } = await supabase.rpc('get_deliveries_keyset_page', args);
+  if (error) throw error;
+  const page = assertRpcResult<DeliveriesPage>(data, 'get_deliveries_keyset_page');
+  if (!Array.isArray(page.rows) || typeof page.total_count !== 'number' || !page.summary || !Array.isArray(page.summary.strip)
+    || (page.next_cursor != null && (typeof page.next_cursor !== 'object' || Array.isArray(page.next_cursor)))) {
+    throw new Error('get_deliveries_keyset_page returned an unexpected result');
+  }
+  return page;
+}
 
 const SELECTABLE_STATUSES = ['scheduled', 'in_progress'];
 const DATE_PRESETS = [
@@ -235,8 +320,14 @@ export default function Deliveries() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
+  // The list view holds one page; the calendar and the driver view hold every matching row.
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
+  // Every row matching the list's search and filters, and the cards and strip, from the same read.
+  const [totalCount, setTotalCount] = useState(0);
+  const [summary, setSummary] = useState<DeliveriesSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  // A page, sort, search or filter change is loading (the first load shows the skeleton instead).
+  const [pageLoading, setPageLoading] = useState(false);
   // The last load failed: the page shows an error instead of an empty or partial list.
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -275,6 +366,8 @@ export default function Deliveries() {
 
   const [rescheduling, setRescheduling] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportingCsvRef = useRef(false);
 
   /* Quick Delivery modal */
   const [quickDeliveryOpen, setQuickDeliveryOpen] = useState(false);
@@ -290,10 +383,19 @@ export default function Deliveries() {
   const [shortageDeliveryIds, setShortageDeliveryIds] = useState<Set<string>>(new Set());
   // The last stock check failed: no badges then means "not checked", not "enough stock".
   const [shortageCheckFailed, setShortageCheckFailed] = useState(false);
+  // True until a stock check finishes: until then, no badge does not yet mean enough stock.
+  const [shortageChecking, setShortageChecking] = useState(true);
 
   /* Driver-specific: unassigned deliveries they can claim */
   const [unassigned, setUnassigned] = useState<DeliveryRow[]>([]);
   const [listSearch, setListSearch] = useState('');
+  // The search the database runs: settles 300 ms after the last keystroke, so typing sends one read.
+  const [searchTerm, setSearchTerm] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(listSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [listSearch]);
+  const [sortState, setSortState] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
 
   const canCreate = role === 'admin' || role === 'sales_rep';
   const canQuickDeliver = role === 'admin' || role === 'sales_rep';
@@ -370,193 +472,176 @@ export default function Deliveries() {
     setRemainderCount(count || 0);
   }, []);
 
-  // A multi-page read can finish after a newer one started (a refresh after completing or
-  // cancelling); only the latest load may set the list, its badges or the loading state.
+  /* ─── What the database is asked for ─── */
+  const todayStr = today();
+  const weekStartStr = weekStart();
+  // The list's filters (also what the calendar's export and load sheet read).
+  const filterQuery = useMemo<DeliveriesQuery>(() => {
+    let dateFrom: string | null = null;
+    let dateTo: string | null = null;
+    if (scheduleDate) {
+      dateFrom = scheduleDate;
+      dateTo = scheduleDate;
+    } else if (datePreset === 'today') {
+      dateFrom = todayStr;
+      dateTo = todayStr;
+    } else if (datePreset === 'week') {
+      dateFrom = weekStartStr;
+      dateTo = addDays(weekStartStr, 6);
+    } else if (datePreset === 'future') {
+      dateFrom = todayStr;
+    }
+    return {
+      p_today: todayStr,
+      p_week_start: weekStartStr,
+      p_statuses: statusFilter ? [statusFilter] : null,
+      p_driver_id: driverFilter || null,
+      p_priority: priorityFilter || null,
+      p_customer_id: customerFilter || null,
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    };
+  }, [todayStr, weekStartStr, statusFilter, driverFilter, priorityFilter, customerFilter, scheduleDate, datePreset]);
+  // The list adds its search and column sort. The calendar hides the search box, so there it does not apply.
+  const listQuery = useMemo<DeliveriesQuery>(() => ({
+    ...filterQuery,
+    p_search: searchTerm || null,
+    p_sort_key: sortState.key,
+    p_sort_desc: sortState.dir === 'desc',
+  }), [filterQuery, searchTerm, sortState]);
+  // Drivers see every delivery of theirs (row level security limits them to those); the calendar
+  // shows every delivery of the chosen status; the list reads one page at a time.
+  const paged = !isDriver && viewMode === 'list';
+  const loadQuery = useMemo<DeliveriesQuery>(() => {
+    // Row level security already limits a driver to their deliveries; the filter keeps that if it ever widens.
+    if (isDriver) return { p_today: todayStr, p_week_start: weekStartStr, p_driver_id: profile?.id ?? null };
+    // As before, the calendar shows every delivery except cancelled and voided, unless one of those is chosen.
+    if (viewMode === 'calendar') {
+      return { p_today: todayStr, p_week_start: weekStartStr, p_statuses: statusFilter === 'cancelled' || statusFilter === 'voided' ? [statusFilter] : null };
+    }
+    return listQuery;
+  }, [isDriver, profile?.id, viewMode, todayStr, weekStartStr, statusFilter, listQuery]);
+  // Each list page is read from the bookmark (the last row) of the page before it, so deliveries removed in
+  // between never push one past the screen. afters[i] is page i's bookmark; the last one is on screen.
+  // The pages belong to one query: a new search, filter or sort starts again at page one.
+  const loadQueryKey = JSON.stringify(loadQuery);
+  const [pageState, setPageState] = useState({ key: '', afters: FIRST_PAGE });
+  const afters = paged && pageState.key === loadQueryKey ? pageState.afters : FIRST_PAGE;
+  const listPage = afters.length - 1;
+  // The bookmark after the page on screen, from its own read; null on the last page.
+  const [nextState, setNextState] = useState<NextBookmark | null>(null);
+  const nextCursor = nextBookmarkFor(nextState, loadQueryKey, listPage);
+  const goNext = () => {
+    if (nextCursor !== null) setPageState({ key: loadQueryKey, afters: [...afters, nextCursor] });
+  };
+  const goPrevious = () => {
+    if (listPage > 0) setPageState({ key: loadQueryKey, afters: afters.slice(0, -1) });
+  };
+  useEffect(() => {
+    setPageState((prev) => (prev.key === loadQueryKey ? prev : { key: loadQueryKey, afters: FIRST_PAGE }));
+  }, [loadQueryKey]);
+  // The page of the rows on screen, so the pager never pairs a new page number with old rows.
+  const [loadedPage, setLoadedPage] = useState(0);
+
+  // A read can finish after a newer one started (a page flip, or a refresh after completing or
+  // cancelling); only the latest read may set the list, its counts or the loading state.
   const fetchSeq = useRef(0);
-  const fetchDeliveries = useCallback(async () => {
+  const loadDeliveries = useCallback(async () => {
     const seq = ++fetchSeq.current;
-    // A failed read shows an error, never a short list with complete-looking counts.
-    const failLoad = (error: unknown) => {
+    setPageLoading(true);
+    try {
+      const result = await readDeliveriesPage(loadQuery, paged ? LIST_PAGE_SIZE : null, afters[listPage]);
+      if (seq !== fetchSeq.current) return;
+      // Every delivery after the bookmark was removed (e.g. cancelled): step back to the page before.
+      if (listPage > 0 && result.rows.length === 0) {
+        setPageState({ key: loadQueryKey, afters: afters.slice(0, -1) });
+        return;
+      }
+      setDeliveries(result.rows);
+      setLoadedPage(listPage);
+      setNextState({ key: loadQueryKey, page: listPage, cursor: result.next_cursor ?? null });
+      setTotalCount(result.total_count);
+      setSummary(result.summary);
+      setLoadFailed(false);
+    } catch (error) {
+      if (seq !== fetchSeq.current) return;
+      // The bookmark no longer fits this list (e.g. the day changed): start again at page one, with no error.
+      if (listPage > 0 && isBookmarkRefused(error)) {
+        setPageState({ key: loadQueryKey, afters: FIRST_PAGE });
+        return;
+      }
+      // A failed read shows an error, never an empty or partial list with complete-looking counts.
       Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries' } });
       toast('error', 'Failed to load deliveries. Please try again.');
       setDeliveries([]);
-      setShortageDeliveryIds(new Set());
+      setTotalCount(0);
+      setSummary(null);
       setLoadFailed(true);
-      setLoading(false);
-    };
-
-    // Read every page: a single request is silently cut off at the server's row cap.
-    // PR-07 follow-up: dropped `driver:profiles!fk(full_name)` embed; driver
-    // names resolved via profile_public_view post-fetch (see below).
-    const { data: delPages, error: delError } = await fetchAllRows((from, to) => {
-      let query = supabase
-        .from('deliveries')
-        .select('*, customer:customers(farm_name, parent_customer_id)', { count: 'exact' });
-
-      if (statusFilter === 'cancelled' || statusFilter === 'voided') {
-        query = query.eq('status', statusFilter);
-      } else {
-        query = query.not('status', 'in', '("cancelled","voided")');
+    } finally {
+      if (seq === fetchSeq.current) {
+        setLoading(false);
+        setPageLoading(false);
       }
-
-      // Driver sees only their deliveries
-      if (isDriver && profile?.id) {
-        query = query.eq('assigned_driver', profile.id);
-      }
-
-      return pageWithList(query
-        .order('scheduled_date', { ascending: false })
-        .order('id')
-        .range(from, to));
-    });
-    if (seq !== fetchSeq.current) return;
-
-    if (delError || !delPages) {
-      failLoad(delError ?? new Error('deliveries read returned no list'));
-      return;
     }
-    const delData = (delPages || []) as unknown as Array<Delivery & {
-      customer: { farm_name: string; parent_customer_id: string | null } | null;
-    }>;
+  }, [loadQuery, loadQueryKey, paged, afters, listPage, toast]);
 
-    const deliveryIds = (delData || []).map((d) => d.id);
-
-    // Fetch parent customer names for farm group labels
-    const parentIds = [...new Set(
-      (delData || [])
-        .map((d) => d.customer?.parent_customer_id)
-        .filter(Boolean) as string[]
-    )];
-
-    // PR-07 follow-up: resolve driver names via profile_public_view (safe
-    // columns only) so non-admin users still see driver names after
-    // profiles_select tightens to admin-or-self.
-    const driverIds = [...new Set(
-      (delData || [])
-        .map((d) => d.assigned_driver)
-        .filter(Boolean) as string[]
-    )];
-
-    // Run all post-fetch queries in parallel — they depend on delData but not each other.
-    // Each id list is sent in chunks and every chunk is paged, so a long delivery list
-    // neither overflows the request URL nor loses rows past the server's row cap.
-    const [itemCountsResult, parentsResult, driversResult] = await Promise.all([
-      fetchAllRowsForIds(deliveryIds, (idChunk, from, to) => pageWithList(supabase
+  // Inventory shortage check over every scheduled or in-progress delivery the user can see, not
+  // only the shown page: products are summed across all of them before comparing to stock.
+  const shortageSeq = useRef(0);
+  const loadShortages = useCallback(async () => {
+    const seq = ++shortageSeq.current;
+    setShortageChecking(true);
+    try {
+      const { data: diData, error: diError } = await fetchAllRows((from, to) => pageWithList(supabase
         .from('delivery_items')
-        // `id` lets the pager drop a line repeated across a page seam.
-        .select('id, delivery_id', { count: 'exact' })
-        .in('delivery_id', idChunk)
+        .select('id, delivery_id, product_id, quantity, delivery:deliveries!inner(status)', { count: 'exact' })
+        .in('delivery.status', ['scheduled', 'in_progress'])
         .order('id')
-        .range(from, to))),
-      fetchAllRowsForIds(parentIds, (idChunk, from, to) => pageWithList(supabase
-        .from('customers')
-        .select('id, farm_name', { count: 'exact' })
-        .in('id', idChunk)
-        .order('id')
-        .range(from, to))),
-      fetchAllRowsForIds(driverIds, (idChunk, from, to) => pageWithList(supabase
-        .from('profile_public_view')
-        .select('id, full_name', { count: 'exact' })
-        .in('id', idChunk)
-        .order('id')
-        .range(from, to))),
-    ]);
-    if (seq !== fetchSeq.current) return;
+        .range(from, to)));
+      if (seq !== shortageSeq.current) return;
+      if (diError || !diData) throw diError ?? new Error('delivery items read returned no list');
 
-    // A missing lookup would show wrong item counts or "Unknown" names as if they were right.
-    const lookupError = itemCountsResult.error || parentsResult.error || driversResult.error;
-    if (lookupError) {
-      failLoad(lookupError);
-      return;
-    }
-
-    const countMap: Record<string, number> = {};
-    ((itemCountsResult.data || []) as Array<{ delivery_id: string }>).forEach((item) => {
-      countMap[item.delivery_id] = (countMap[item.delivery_id] || 0) + 1;
-    });
-
-    const parentNameMap: Record<string, string> = {};
-    ((parentsResult.data || []) as Array<{ id: string; farm_name: string }>).forEach((p) => { parentNameMap[p.id] = p.farm_name; });
-
-    const driverNameMap: Record<string, string> = {};
-    ((driversResult.data || []) as Array<{ id: string; full_name: string }>).forEach((d) => { driverNameMap[d.id] = d.full_name; });
-
-    const rows = (delData || []).map((d) => ({
-      ...d,
-      customer_name: d.customer?.farm_name || 'Unknown',
-      driver_name: d.assigned_driver ? (driverNameMap[d.assigned_driver] || 'Unknown driver') : 'Unassigned',
-      item_count: countMap[d.id] || 0,
-      farm_group_name: d.customer?.parent_customer_id ? parentNameMap[d.customer.parent_customer_id] || null : null,
-    }));
-
-    const todayForSort = today();
-    setDeliveries(rows.sort((a, b) => compareDefaultDeliveryOrder(a, b, todayForSort)));
-    setLoadFailed(false);
-
-    // Inventory shortage check for active (non-completed) deliveries
-    const activeIds = rows
-      .filter((d) => d.status === 'scheduled' || d.status === 'in_progress')
-      .map((d) => d.id);
-
-    // A failed check is said out loud: no badge must never be mistaken for "enough stock".
-    const markShortageCheckFailed = (error: unknown) => {
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'deliveries', action: 'shortage_check' } });
+      const productIds = [...new Set((diData as Array<{ product_id: string }>).map((i) => i.product_id).filter(Boolean))];
+      let invMap: Record<string, number> = {};
+      if (productIds.length > 0) {
+        const { data: invData, error: invError } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => pageWithList(supabase
+          .from('inventory')
+          .select('id, product_id, quantity_available', { count: 'exact' })
+          .in('product_id', idChunk)
+          .eq('location', 'Main Warehouse')
+          .order('id')
+          .range(from, to)));
+        if (seq !== shortageSeq.current) return;
+        if (invError) throw invError;
+        invMap = {};
+        for (const row of (invData || []) as Array<{ product_id: string; quantity_available: number }>) {
+          invMap[row.product_id] = (invMap[row.product_id] || 0) + Number(row.quantity_available);
+        }
+      }
+      // Sum each product across ALL active deliveries before comparing to stock, so tier-split
+      // lines and deliveries competing for the same product are flagged together.
+      // See src/lib/inventoryShortage.ts.
+      const lines = (diData as Array<{ delivery_id: string; product_id: string; quantity: number }>)
+        .map((item) => ({ deliveryId: item.delivery_id, productId: item.product_id, quantity: Number(item.quantity) }));
+      setShortageDeliveryIds(findShortDeliveries(lines, invMap));
+      setShortageCheckFailed(false);
+    } catch (err) {
+      if (seq !== shortageSeq.current) return;
+      // A failed check is said out loud: no badge must never be mistaken for "enough stock".
+      Sentry.captureException(err, { tags: { source: 'fetch', page: 'deliveries', action: 'shortage_check' } });
       toast('error', 'Stock shortage warnings could not be checked. Reload to try again.');
       setShortageDeliveryIds(new Set());
       setShortageCheckFailed(true);
-    };
-
-    if (activeIds.length > 0) {
-      try {
-        const { data: diData, error: diError } = await fetchAllRowsForIds(activeIds, (idChunk, from, to) => pageWithList(supabase
-          .from('delivery_items')
-          .select('id, delivery_id, product_id, quantity', { count: 'exact' })
-          .in('delivery_id', idChunk)
-          .order('id')
-          .range(from, to)));
-        if (seq !== fetchSeq.current) return;
-        if (diError) throw diError;
-
-        const productIds = [...new Set((diData || []).map((i: { product_id: string }) => i.product_id).filter(Boolean))];
-
-        if (productIds.length > 0) {
-          const { data: invData, error: invError } = await fetchAllRowsForIds(productIds, (idChunk, from, to) => pageWithList(supabase
-            .from('inventory')
-            .select('id, product_id, quantity_available', { count: 'exact' })
-            .in('product_id', idChunk)
-            .eq('location', 'Main Warehouse')
-            .order('id')
-            .range(from, to)));
-          if (seq !== fetchSeq.current) return;
-          if (invError) throw invError;
-
-          const invMap: Record<string, number> = {};
-          for (const row of (invData || []) as Array<{ product_id: string; quantity_available: number }>) {
-            invMap[row.product_id] = (invMap[row.product_id] || 0) + Number(row.quantity_available);
-          }
-
-          // Sum each product across ALL active deliveries before comparing to
-          // stock, so tier-split lines and deliveries competing for the same
-          // product are flagged together. See src/lib/inventoryShortage.ts.
-          const lines = ((diData || []) as Array<{ delivery_id: string; product_id: string; quantity: number }>)
-            .map((item) => ({ deliveryId: item.delivery_id, productId: item.product_id, quantity: Number(item.quantity) }));
-          setShortageDeliveryIds(findShortDeliveries(lines, invMap));
-          setShortageCheckFailed(false);
-        } else {
-          setShortageDeliveryIds(new Set());
-          setShortageCheckFailed(false);
-        }
-      } catch (err) {
-        if (seq !== fetchSeq.current) return;
-        markShortageCheckFailed(err);
-      }
-    } else {
-      setShortageDeliveryIds(new Set());
-      setShortageCheckFailed(false);
+    } finally {
+      if (seq === shortageSeq.current) setShortageChecking(false);
     }
+  }, [toast]);
 
-    setLoading(false);
-  }, [isDriver, profile, statusFilter, toast]);
+  // After a change (complete, cancel, reschedule): re-read the shown page and the shortage check.
+  const fetchDeliveries = useCallback(async () => {
+    void loadShortages();
+    await loadDeliveries();
+  }, [loadDeliveries, loadShortages]);
 
   // F3 act-from-list: complete a delivery in full, in place. p_quantities omitted = deliver
   // in full. Partial deliveries, issue flags and the customer receipt email stay on the detail page.
@@ -787,12 +872,15 @@ export default function Deliveries() {
     });
   };
 
+  useEffect(() => { void loadDeliveries(); }, [loadDeliveries]);
+  // The stock check covers every open delivery, not the shown page, so it runs on opening and after each
+  // change made here, not on every page flip (that would reread every open delivery's items each time).
   useEffect(() => {
-    fetchDeliveries();
+    void loadShortages();
     fetchDrivers();
     fetchCustomers();
     fetchRemainderCount();
-  }, [fetchDeliveries, fetchDrivers, fetchCustomers, fetchRemainderCount]);
+  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount]);
 
   // Fetch unassigned deliveries for driver dashboard
   useEffect(() => {
@@ -832,61 +920,17 @@ export default function Deliveries() {
     })();
   }, [isDriver]);
 
-  /* ─── Summary stats ─── */
-  const todayStr = today();
-  const weekStartStr = weekStart();
+  /* ─── Summary stats and 7-day strip: every visible delivery that is not cancelled or voided,
+     whatever the list's search and filters, counted by the database ─── */
+  const scheduledToday = summary?.scheduled_today ?? 0;
+  const inProgress = summary?.in_progress ?? 0;
+  const completedThisWeek = summary?.completed_this_week ?? 0;
+  const scheduleStrip = summary?.strip ?? [];
+  // Whether any delivery exists at all, for the empty-list message.
+  const anyDeliveries = (summary?.visible_count ?? 0) > 0 || totalCount > 0;
 
-  const scheduledToday = deliveries.filter(
-    (d) => d.scheduled_date === todayStr && (d.status === 'scheduled' || d.status === 'in_progress')
-  ).length;
-  const inProgress = deliveries.filter((d) => d.status === 'in_progress').length;
-  const completedThisWeek = deliveries.filter(
-    (d) => d.status === 'completed' && d.completed_at && d.completed_at.slice(0, 10) >= weekStartStr
-  ).length;
-
-  /* ─── 7-Day Schedule Strip ─── */
-  const scheduleStrip = useMemo(() => {
-    const strip = [];
-    const t = today();
-    for (let i = 0; i < 7; i++) {
-      const d = addDays(t, i);
-      const dayDeliveries = deliveries.filter(
-        (del) => del.scheduled_date === d && del.status !== 'cancelled'
-      );
-      const unassigned = dayDeliveries.filter((del) => !del.assigned_driver).length;
-      strip.push({ date: d, count: dayDeliveries.length, unassigned });
-    }
-    return strip;
-  }, [deliveries]);
-
-  /* ─── Filtering ─── */
-  const filtered = useMemo(() => {
-    return deliveries.filter((d) => {
-      if (statusFilter && d.status !== statusFilter) return false;
-      if (driverFilter && d.assigned_driver !== driverFilter) return false;
-      if (priorityFilter && d.priority !== priorityFilter) return false;
-      if (customerFilter && d.customer_id !== customerFilter) return false;
-
-      // Date filtering
-      if (scheduleDate) {
-        if (d.scheduled_date !== scheduleDate) return false;
-      } else if (datePreset === 'today') {
-        if (d.scheduled_date !== todayStr) return false;
-      } else if (datePreset === 'week') {
-        if (d.scheduled_date < weekStartStr || d.scheduled_date > addDays(weekStartStr, 6)) return false;
-      } else if (datePreset === 'future') {
-        if (d.scheduled_date < todayStr) return false;
-      }
-
-      return true;
-    });
-  }, [deliveries, statusFilter, driverFilter, datePreset, priorityFilter, customerFilter, scheduleDate, todayStr, weekStartStr]);
-  // The in-list search; the desktop table still sorts these rows itself. The calendar hides the
-  // search box, so there the search does not apply.
-  const searched = useMemo(
-    () => (viewMode === 'list' ? applyTableSearchSort(filtered, DELIVERY_SEARCH_KEYS, listSearch, null, 'asc') : filtered),
-    [filtered, listSearch, viewMode]
-  );
+  // The database already searched, filtered and sorted: the list shows its rows as they come.
+  const searched = deliveries;
   // A row the search or filters hide stops being selected, so no batch action reaches it and the
   // reschedule retry key (keyed on the selection) starts fresh.
   useEffect(() => {
@@ -898,7 +942,10 @@ export default function Deliveries() {
   }, [searched]);
 
   /* ─── Batch actions ─── */
-  const selectedDeliveries = searched.filter((d) => selected.has(d.id));
+  // While a new page, search or filter loads (or a search is still being typed), the rows on screen belong
+  // to the old query: nothing acts on them, and exports wait for the query on screen.
+  const listSettling = pageLoading || listSearch.trim() !== searchTerm;
+  const selectedDeliveries = listSettling ? [] : searched.filter((d) => selected.has(d.id));
   const selectableShown = searched.filter((d) => SELECTABLE_STATUSES.includes(d.status));
   const allShownSelected = selectableShown.length > 0 && selectableShown.every((d) => selected.has(d.id));
   const activeFilterCount = [statusFilter, driverFilter, priorityFilter, customerFilter, scheduleDate || datePreset].filter(Boolean).length;
@@ -973,15 +1020,27 @@ export default function Deliveries() {
     setShowCancelModal(false);
   };
 
+  // What the screen shows: the calendar hides the filters and search, so there its own query applies.
+  const shownQuery = viewMode === 'calendar' ? loadQuery : listQuery;
+  // The selected rows, or every row matching the search and filters on every page, in the shown order.
+  const readExportRows = async (): Promise<DeliveryRow[]> => (selectedDeliveries.length > 0
+    ? selectedDeliveries
+    : (await readDeliveriesPage(shownQuery, null)).rows);
+  // The load sheet only prints open deliveries, so with no status chosen it reads only those.
+  const readLoadSheetRows = async (): Promise<DeliveryRow[]> => {
+    const query = shownQuery;
+    return (await readDeliveriesPage({ ...query, p_statuses: query.p_statuses ?? ['scheduled', 'in_progress'] }, null)).rows;
+  };
+
   const handlePrintLoadSheet = async () => {
     await runCriticalAction({
       action: async () => {
         const { generateBatchDeliveryPdf } = await import('../lib/deliveryPdf');
 
-        // Use selected deliveries, or every shown scheduled/in_progress one
+        // Use selected deliveries, or every scheduled/in_progress one matching the search and filters (all pages)
         const rows = selectedDeliveries.length > 0
           ? selectedDeliveries
-          : searched.filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
+          : (await readLoadSheetRows()).filter((d) => d.status === 'scheduled' || d.status === 'in_progress');
 
         if (rows.length === 0) {
           throw new Error('No deliveries to include in load sheet');
@@ -1142,8 +1201,22 @@ export default function Deliveries() {
     });
   };
 
-  const handleExportCSV = () => {
-    const rows = selectedDeliveries.length > 0 ? selectedDeliveries : searched;
+  const handleExportCSV = async () => {
+    // Claimed synchronously, so a double click cannot start two reads and download two files.
+    if (exportingCsvRef.current) return;
+    exportingCsvRef.current = true;
+    setExportingCsv(true);
+    let rows: DeliveryRow[];
+    try {
+      rows = await readExportRows();
+    } catch (err: unknown) {
+      Sentry.captureException(err, { tags: { source: 'export', page: 'deliveries' } });
+      toast('error', 'The deliveries could not be read for the export. Nothing was exported; try again.');
+      return;
+    } finally {
+      exportingCsvRef.current = false;
+      setExportingCsv(false);
+    }
     exportToCSV(rows as unknown as Record<string, unknown>[], [
       { key: 'delivery_number', header: 'Delivery #' },
       { key: 'customer_name', header: 'Customer' },
@@ -1160,7 +1233,7 @@ export default function Deliveries() {
   const handleExportPDF = async () => {
     setExportingPdf(true);
     try {
-      const rows = selectedDeliveries.length > 0 ? selectedDeliveries : searched;
+      const rows = await readExportRows();
       await downloadReportPdf({
         title: 'Deliveries',
         subtitle: `${rows.length} delivery(ies)`,
@@ -1326,8 +1399,11 @@ export default function Deliveries() {
           {driverHeader}
           <div className="p-4 sm:p-6">
             <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700">
-              Your deliveries could not be loaded. Reload to try again.
+              Your deliveries could not be loaded.
             </p>
+            <div className="mt-3 flex justify-center">
+              <Button variant="secondary" size="sm" onClick={() => void fetchDeliveries()} loading={pageLoading}>Try again</Button>
+            </div>
           </div>
         </div>
       );
@@ -1347,6 +1423,9 @@ export default function Deliveries() {
         <div className="space-y-4 p-4 sm:p-6">
           {jumpSections.length > 1 && <SectionJumpBar sections={jumpSections} ariaLabel="Jump to deliveries" />}
 
+          {shortageChecking && !shortageCheckFailed && (
+            <p role="status" className="rounded-xl border border-gray-200 bg-cream px-4 py-3 text-sm text-secondary">Checking stock for shortages. Until this finishes, a missing warning does not mean there is enough stock.</p>
+          )}
           {shortageCheckFailed && (
             <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
@@ -1475,7 +1554,8 @@ export default function Deliveries() {
     },
     {
       key: 'delivery_number',
-      header: (<span className="flex items-center">Delivery #<HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" /></span>),
+      header: 'Delivery #',
+      headerExtra: <HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" />,
       sortable: true,
       render: (row) => (
         <div className="flex items-center gap-2">
@@ -1593,7 +1673,10 @@ export default function Deliveries() {
       <div className="space-y-4">
         <PageHeader title="Deliveries" />
         <Card>
-          <p role="alert" className="text-center text-red-600 py-8 text-sm">Deliveries could not be loaded. Reload to try again.</p>
+          <p role="alert" className="text-center text-red-600 pt-8 pb-3 text-sm">Deliveries could not be loaded.</p>
+          <div className="flex justify-center pb-6">
+            <Button variant="secondary" size="sm" onClick={() => void fetchDeliveries()} loading={pageLoading}>Try again</Button>
+          </div>
         </Card>
       </div>
     );
@@ -1637,6 +1720,8 @@ export default function Deliveries() {
             size="sm"
             icon={<Download className="w-4 h-4" />}
             onClick={handleExportCSV}
+            loading={exportingCsv}
+            disabled={listSettling}
           >
             Export CSV
           </Button>
@@ -1646,6 +1731,7 @@ export default function Deliveries() {
             icon={<FileText className="w-4 h-4" />}
             onClick={handleExportPDF}
             loading={exportingPdf}
+            disabled={listSettling}
           >
             Download PDF
           </Button>
@@ -1655,6 +1741,7 @@ export default function Deliveries() {
             icon={<FileText className="w-4 h-4" />}
             onClick={handlePrintLoadSheet}
             loading={printingLoadSheet}
+            disabled={listSettling}
           >
             {selectedDeliveries.length > 0 ? `Load Sheet (${selectedDeliveries.length})` : 'Load Sheet'}
           </Button>
@@ -1701,6 +1788,8 @@ export default function Deliveries() {
           </>
         )}
       />
+
+      {canCreate && <ReceiptsToCheck />}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -1750,11 +1839,11 @@ export default function Deliveries() {
       {/* Calendar View */}
       {viewMode === 'calendar' && (
         <Card>
-          <DeliveryCalendar
+          {pageLoading ? <SkeletonCard /> : <DeliveryCalendar
             deliveries={deliveries}
             onDeliveryClick={(deliveryId) => navigate(`/deliveries/${deliveryId}`)}
             onDateClick={(date) => navigate(`/deliveries/new?date=${date}`)}
-          />
+          />}
         </Card>
       )}
 
@@ -1796,6 +1885,9 @@ export default function Deliveries() {
         })}
       </div>
 
+      {shortageChecking && !shortageCheckFailed && (
+        <div role="status" className="rounded-lg border border-gray-200 bg-cream px-4 py-3 text-sm text-secondary">Checking stock for shortages. Until this finishes, a missing warning does not mean there is enough stock.</div>
+      )}
       {shortageCheckFailed && (
         <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Stock shortage warnings could not be checked, so a missing warning does not mean there is enough stock. Reload to try again.
@@ -1812,6 +1904,7 @@ export default function Deliveries() {
                 type="text"
                 value={listSearch}
                 onChange={(e) => setListSearch(e.target.value)}
+                maxLength={SEARCH_MAX_CHARS}
                 placeholder="Search deliveries..."
                 aria-label="Search deliveries"
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors"
@@ -1902,7 +1995,7 @@ export default function Deliveries() {
                   onClick={toggleAll}
                   className="text-xs text-crx-green hover:underline ml-2"
                 >
-                  {allShownSelected ? 'Deselect All' : 'Select All'}
+                  {allShownSelected ? 'Deselect All' : totalCount > deliveries.length ? 'Select All on This Page' : 'Select All'}
                 </button>
               )}
             </div>
@@ -1912,19 +2005,23 @@ export default function Deliveries() {
               data={searched}
               columns={columns}
               onRowClick={(row) => navigate(`/deliveries/${row.id}`)}
-              emptyTitle={deliveries.length > 0 ? 'No deliveries match your search or filters' : 'No deliveries scheduled'}
-              emptyDescription={deliveries.length > 0 ? undefined : "Deliveries are created from orders. Open an order and click 'Schedule Delivery' to get started."}
-              emptyAction={deliveries.length > 0 ? undefined : (
+              emptyTitle={anyDeliveries ? 'No deliveries match your search or filters' : 'No deliveries scheduled'}
+              emptyDescription={anyDeliveries ? undefined : "Deliveries are created from orders. Open an order and click 'Schedule Delivery' to get started."}
+              emptyAction={anyDeliveries ? undefined : (
                 <Button icon={<Truck className="w-4 h-4" />} showChevron onClick={() => navigate('/orders')}>
                   View Orders
                 </Button>
               )}
-              loading={loading}
+              sortState={sortState}
+              onSortChange={setSortState}
+              serverSide
+              loading={loading || pageLoading}
             />
           </div>
           <div className="md:hidden">
-            {searched.length === 0 ? (
-              deliveries.length > 0 ? (
+            {/* While a page loads, the old rows and their actions are hidden, as the table above hides them. */}
+            {pageLoading ? <SkeletonCard /> : searched.length === 0 ? (
+              anyDeliveries ? (
                 <p className="py-8 text-center font-semibold text-nav-dark">No deliveries match your search or filters</p>
               ) : (
                 <div className="py-8 text-center">
@@ -1982,6 +2079,8 @@ export default function Deliveries() {
               </ul>
             )}
           </div>
+          <DeliveriesPager totalCount={totalCount} page={loadedPage} rowsShown={deliveries.length} busy={pageLoading}
+            hasPrevious={listPage > 0} hasNext={nextCursor !== null} onPrevious={goPrevious} onNext={goNext} />
         </div>
       </SectionCard>
       </>}
@@ -2219,5 +2318,38 @@ export default function Deliveries() {
         loading={completing}
       />
     </div>
+  );
+}
+
+/** "Showing 1–B of N" (later pages: "Page P · B shown of N") with Previous/Next; N covers every matching delivery. */
+function DeliveriesPager({ totalCount, page, rowsShown, busy, hasPrevious, hasNext, onPrevious, onNext }: {
+  totalCount: number;
+  page: number;
+  rowsShown: number;
+  busy: boolean;
+  /** From the page being read, not the one on screen: a new search returns to page one before its rows land. */
+  hasPrevious: boolean;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (totalCount === 0) return null;
+  return (
+    <nav aria-label="Delivery list pages" className="flex flex-wrap items-center justify-between gap-3">
+      <span className="text-sm text-secondary" aria-live="polite">
+        {/* Past page one the exact row numbers are unknown: a page starts after the last row seen, and deliveries removed before it change the numbering. */}
+        {page === 0 ? `Showing 1–${rowsShown}` : `Page ${page + 1} · ${rowsShown} shown`} of {totalCount}
+      </span>
+      {(totalCount > LIST_PAGE_SIZE || page > 0) && (
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onPrevious} disabled={!hasPrevious || busy}>
+            Previous
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onNext} disabled={!hasNext || busy}>
+            Next
+          </Button>
+        </div>
+      )}
+    </nav>
   );
 }

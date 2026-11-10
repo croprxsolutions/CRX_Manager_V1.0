@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261116120000_orders_list_page.sql (Goal 4). Builds the checked-in baseline plus
+ * Real-schema proof for 20261116120000_orders_list_page.sql (Goal 4) and its keyset follow-up
+ * 20261125100000_orders_list_keyset_page.sql (get_orders_keyset_page; get_orders_page now wraps it). Builds the checked-in baseline plus
  * every post-baseline migration on this checkout (the candidate included) in a network-disabled PostgreSQL
  * container (scripts/smoke/undo-paths/harness.mjs), seeds 5,250 orders (5,200 in the season, some deleted,
  * 50 before it) with lines, invoices (active, voided, credit memo, over-billed) and deliveries, then checks
@@ -13,7 +14,13 @@
  *     return the reference's rows in the reference's order (ties broken by id);
  *   - a sales rep's invoiced % counts only the invoices that rep can see (as the screen does today);
  *   - a driver sees no order; anon cannot call it; bad sort, range and dates are refused;
- *   - the live smoke chain passes; applying the candidate a second time is refused.
+ *   - keyset paging (get_orders_keyset_page, p_after = the previous next_cursor) lists exactly the same rows
+ *     for every sort key both ways, with nulls in the sort column, for a rep, and in pages of 37;
+ *   - an order deleted (or edited out of the filter) between two pages, including the bookmark row itself,
+ *     makes offset paging skip a row and keyset paging skip none; stale and malformed bookmarks are refused;
+ *   - the live smoke chains pass; applying the candidate a second time is refused;
+ *   - with 60,000 more orders (rolled back) a rep's first page, a deep page, an export page, a sort, a search, bookmark pages
+ *     and an admin's first page each stay under 8 s and under 3x a rep's plain read of the same rows.
  *
  * Run: node scripts/smoke/prove-orders-list-page-real-schema.mjs   (needs Docker; never touches live)
  * Reuse a built database: UNDO_PATHS_CONTAINER=<name> ORDERS_PAGE_PROOF_REUSE=1 (left running).
@@ -87,23 +94,33 @@ if (process.argv[2] === '--print-seed') {
   process.exit(0);
 }
 
-const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT, NAME, docker } = await import('./undo-paths/harness.mjs');
+const { buildContainer, removeContainer, seedUsers, psql, scalar, attempt, asUser, signIn, USERS, ROOT, NAME, docker } = await import('./undo-paths/harness.mjs');
 const { applyTableSearchSort } = await import(pathToFileURL(path.join(ROOT, 'src', 'lib', 'tableSearchSort.ts')).href);
 
-const CANDIDATE = '20261116120000_orders_list_page.sql';
+const FIRST = '20261116120000_orders_list_page.sql';
+const CANDIDATE = '20261125100000_orders_list_keyset_page.sql';
 const FROM = '2026-10-01';
 const TO = '2027-09-30';
 const reuse = process.env.ORDERS_PAGE_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const q = (v) => (v === null || v === undefined ? 'NULL' : typeof v === 'string' ? `'${v.replaceAll("'", "''")}'` : String(v));
 
-/** Calls get_orders_page as `uid` (null = anon) and returns the payload, or { error }. */
-function page(uid, { search = null, status = null, planned = null, pricing = null, split = null, key = null, dir = 'asc', limit = 1000, offset = 0, from = FROM, to = TO } = {}) {
+/**
+ * Calls get_orders_page (or, with `after` set, get_orders_keyset_page) as `uid` (null = anon) and returns the
+ * payload, or { error }. `pre` runs first as the superuser inside the same rolled-back transaction (e.g. a
+ * delete "between pages"). `after: 'none'` calls the keyset function with no bookmark.
+ */
+function page(uid, { search = null, status = null, planned = null, pricing = null, split = null, key = null, dir = 'asc', limit = 1000, offset = 0, from = FROM, to = TO, after, pre = '' } = {}) {
   const who = uid
     ? `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`
     : 'SET LOCAL ROLE anon;';
-  const sql = `BEGIN; ${who}
-SELECT public.get_orders_page(${q(from)}::date, ${q(to)}::date, ${q(search)}, ${q(status)}, ${q(planned)}, ${q(pricing)}, ${q(split)}, ${q(key)}, ${q(dir)}, ${limit}, ${offset})::text;
+  const args = `${q(from)}::date, ${q(to)}::date, ${q(search)}, ${q(status)}, ${q(planned)}, ${q(pricing)}, ${q(split)}, ${q(key)}, ${q(dir)}, ${limit}, ${offset}`;
+  const call = after === undefined
+    ? `public.get_orders_page(${args})`
+    : `public.get_orders_keyset_page(${args}, ${after === 'none' ? 'NULL' : q(typeof after === 'string' ? after : JSON.stringify(after))}::jsonb)`;
+  const sql = `BEGIN; ${pre}
+${who}
+SELECT ${call}::text;
 ROLLBACK;`;
   const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { input: sql, allowFailure: true });
   if (r.status !== 0) return { error: r.stderr };
@@ -122,6 +139,25 @@ function allPages(uid, opts, size) {
     if (p.rows.length < size) break;
   }
   assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, 'a row appeared twice across pages');
+  return { rows, total: first.total_count, cents: first.total_price_cents };
+}
+
+/** Every row by bookmark: each call passes the previous page's next_cursor (as text, like the browser). */
+function keysetAll(uid, opts, size, pre = '') {
+  const rows = [];
+  let first;
+  for (let after = 'none'; ;) {
+    const p = page(uid, { ...opts, limit: size, after, pre });
+    assert.ok(!p.error, `keyset page failed: ${p.error}`);
+    first ??= p;
+    assert.equal(p.total_count, first.total_count, 'keyset: total_count moved between pages');
+    assert.ok(p.rows.length <= size, 'keyset: page too long');
+    rows.push(...p.rows);
+    if (!p.next_cursor) break;
+    assert.equal(p.rows.length, size, 'keyset: a short page must not carry a next_cursor');
+    after = p.next_cursor;
+  }
+  assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, 'keyset: a row appeared twice across pages');
   return { rows, total: first.total_count, cents: first.total_price_cents };
 }
 
@@ -207,8 +243,10 @@ const cents = (rows) => rows.reduce((s, o) => s + Math.round((o.total_price || 0
 
 try {
   if (!reuse) { buildContainer(); seedUsers(); }
-  assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${path.basename(CANDIDATE, '.sql')}';`), '1',
-    'the candidate must have replayed');
+  for (const m of [FIRST, CANDIDATE]) {
+    assert.equal(scalar(`SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${path.basename(m, '.sql')}';`), '1',
+      `${m} must have replayed`);
+  }
   if (scalar("SELECT count(*) FROM orders WHERE order_number LIKE 'G4O-%';") === '0') {
     const r = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'],
       { input: seedSql(FROM, USERS.admin, USERS.rep), allowFailure: true });
@@ -274,20 +312,163 @@ try {
   assert.match(page(USERS.admin, { from: null }).error ?? '', /ORDERS_PAGE_DATES_REQUIRED/);
   console.log('[orders-page] driver sees 0; anon refused; bad sort, direction, range and dates refused');
 
-  // 6. The live smoke chain passes here first.
-  const chain = readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-goal4-orders-page.sql'), 'utf8');
-  const smoked = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1'], { input: chain, allowFailure: true });
-  assert.match(smoked.stderr, /SMOKE_PASS_ROLLBACK/, `smoke-goal4-orders-page.sql did not pass:\n${smoked.stderr}`);
-  console.log('[orders-page] smoke-goal4-orders-page.sql: PASS (rolled back)');
+  // 6. Keyset paging lists exactly what the reference lists: default order (pages of 1000 and 37), every
+  //    sort key both ways, filters with search, and a rep.
+  for (const size of [1000, 37]) {
+    const all = keysetAll(USERS.admin, {}, size);
+    sameRows(`keyset default, pages of ${size}`, all.rows, ref);
+    assert.equal(all.total, ref.length, 'keyset total_count');
+    assert.equal(all.cents, cents(ref), 'keyset total_price_cents');
+  }
+  for (const key of ['order_number', 'status', 'total_price', 'order_date', 'fulfillment_pct', 'invoiced_pct']) {
+    for (const dir of ['asc', 'desc']) {
+      // Pages of 400 put page breaks inside runs of equal values (status, dates, percentages).
+      sameRows(`keyset sort ${key} ${dir}`, keysetAll(USERS.admin, { key, dir }, 400).rows, expected(ref, { key, dir }));
+    }
+  }
+  for (const c of [{ search: 'product 3', split: true }, { status: 'confirmed', planned: false, pricing: 'priced', key: 'total_price', dir: 'desc' }]) {
+    sameRows(`keyset ${JSON.stringify(c)}`, keysetAll(USERS.admin, c, 50).rows, expected(ref, c));
+  }
+  sameRows('keyset sales rep', keysetAll(USERS.rep, {}, 1000).rows, refRep);
+  console.log('[orders-page] keyset: default (1000 and 37), six sort keys both ways (pages of 400), filters, rep: same rows as the screen');
 
-  // 7. A second apply is refused.
+  // 7. Nulls in the sort column sort last both ways, and keyset paging walks across them with no skip.
+  //    Every sort column is NOT NULL today; the constraint is lifted inside the rolled-back call to test the branch.
+  const nulls = "ALTER TABLE public.orders ALTER COLUMN total_price DROP NOT NULL; UPDATE public.orders SET total_price = NULL WHERE order_number < 'G4O-00300';";
+  for (const dir of ['asc', 'desc']) {
+    const byOffset = allPages(USERS.admin, { key: 'total_price', dir, pre: nulls }, 1000).rows;
+    assert.ok(byOffset.at(-1).total_price === null && byOffset[0].total_price !== null, 'nulls must sort last');
+    sameRows(`keyset with null totals ${dir}`, keysetAll(USERS.admin, { key: 'total_price', dir }, 113, nulls).rows, byOffset);
+  }
+  console.log('[orders-page] keyset with null totals: nulls last both ways, same rows as one long read');
+
+  // 8. The skip itself: page 1 (50 rows) is read, then an order on page 1 leaves the list before page 2.
+  for (const [label, filt, key, dir, removeAt, how] of [
+    ['deleted (default order)', {}, null, 'asc', 10, 'UPDATE public.orders SET deleted_at = now() WHERE id = $1;'],
+    ['the bookmark row itself deleted', {}, null, 'asc', 49, 'UPDATE public.orders SET deleted_at = now() WHERE id = $1;'],
+    ['edited out of the status filter', { status: 'fulfilled' }, 'order_number', 'desc', 0, "SET LOCAL session_replication_role = replica; UPDATE public.orders SET status = 'cancelled' WHERE id = $1;"],
+    ['deleted (status sort, inside a run of equal values)', {}, 'status', 'asc', 25, 'UPDATE public.orders SET deleted_at = now() WHERE id = $1;'],
+  ]) {
+    const want = expected(ref, { ...filt, key, dir });
+    const p1 = page(USERS.admin, { ...filt, key, dir, limit: 50, after: 'none' });
+    sameRows(`${label}: page 1`, p1.rows, want.slice(0, 50));
+    const pre = how.replace('$1', q(p1.rows[removeAt].id));
+    const offset2 = page(USERS.admin, { ...filt, key, dir, limit: 50, offset: 50, pre });
+    const keyset2 = page(USERS.admin, { ...filt, key, dir, limit: 50, after: p1.next_cursor, pre });
+    assert.ok(!offset2.error && !keyset2.error, offset2.error || keyset2.error);
+    // The old offset paging skips the first row of page 2 (the bug being fixed) ...
+    assert.equal(offset2.rows[0].id, want[51].id, `${label}: expected the offset page to start one row late`);
+    // ... and the bookmark page starts exactly where page 1 ended.
+    sameRows(`${label}: keyset page 2`, keyset2.rows, want.slice(50, 100));
+    assert.equal(keyset2.total_count, want.length - 1, `${label}: total_count counts the change`);
+    console.log(`[orders-page] ${label} between pages: offset paging skipped ${want[50].order_number}; keyset page 2 starts with it`);
+  }
+
+  // 9. Bookmarks: a stale one (other sort) and malformed ones are refused; anon refused; driver sees 0.
+  const firstCursor = page(USERS.admin, { limit: 5, after: 'none' }).next_cursor;
+  assert.ok(firstCursor?.id, 'page 1 must carry a next_cursor');
+  assert.match(page(USERS.admin, { key: 'status', limit: 5, after: firstCursor }).error ?? '', /ORDERS_PAGE_STALE_CURSOR/);
+  assert.match(page(USERS.admin, { dir: 'desc', limit: 5, after: firstCursor }).error ?? '', /ORDERS_PAGE_STALE_CURSOR/);
+  assert.match(page(USERS.admin, { limit: 5, offset: 5, after: firstCursor }).error ?? '', /ORDERS_PAGE_BAD_RANGE/, 'a bookmark with an offset must be refused');
+  for (const bad of ['[]', '"x"', '{"k":null,"dir":"asc"}', '{"k":null,"dir":"asc","d":"2026-10-05"}',
+    '{"k":null,"dir":"asc","d":"2026-10-05","id":"x"}', '{"k":null,"dir":"asc","d":"not a date","id":"00000000-0000-0000-0000-000000000000"}',
+    '{"k":null,"dir":"asc","n":"abc","d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"}',
+    '{"k":null,"dir":"asc","t":"G4O","d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"}',
+    '{"k":null,"dir":"asc","n":"5","d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"}']) {
+    assert.match(page(USERS.admin, { limit: 5, after: bad }).error ?? '', /ORDERS_PAGE_BAD_CURSOR/, `bookmark ${bad} must be refused`);
+  }
+  // A bookmark missing its own sort value (or carrying it as a non-text JSON value) is refused, not read as "nothing after".
+  const ID0 = '"d":"2026-10-05","id":"00000000-0000-0000-0000-000000000000"';
+  for (const [key, bad] of [['order_number', `{"k":"order_number","dir":"asc",${ID0}}`],
+    ['status', `{"k":"status","dir":"asc","t":5,${ID0}}`],
+    ['total_price', `{"k":"total_price","dir":"asc",${ID0}}`],
+    ['order_date', `{"k":"order_date","dir":"asc","n":9000,${ID0}}`]]) {
+    assert.match(page(USERS.admin, { key, limit: 5, after: bad }).error ?? '', /ORDERS_PAGE_BAD_CURSOR/, `bookmark ${bad} must be refused`);
+  }
+  // A real bookmark whose sort value is null (nulls sort last) is still accepted.
+  assert.ok(!page(USERS.admin, { key: 'total_price', limit: 5, after: `{"k":"total_price","dir":"asc","n":null,${ID0}}` }).error, 'a null sort value is a valid bookmark');
+  assert.match(page(null, { after: 'none' }).error ?? '', /permission denied for function get_orders_keyset_page/);
+  assert.equal(page(USERS.driver, { after: 'none' }).total_count, 0, 'a driver must see no order (keyset)');
+  const lastPage = page(USERS.admin, { limit: 1000, offset: ref.length - 3, after: 'none' });
+  assert.equal(lastPage.rows.length, 3);
+  assert.equal(lastPage.next_cursor, null, 'the last page must carry no next_cursor');
+  console.log('[orders-page] stale and malformed bookmarks refused; anon refused; driver sees 0; last page has no next_cursor');
+
+  // 10. The live smoke chains pass here first.
+  for (const file of ['smoke-goal4-orders-page.sql', 'smoke-goal4-orders-keyset-page.sql']) {
+    const chain = readFileSync(path.join(ROOT, 'scripts', 'smoke', file), 'utf8');
+    const smoked = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-1'], { input: chain, allowFailure: true });
+    assert.match(smoked.stderr, /SMOKE_PASS_ROLLBACK/, `${file} did not pass:\n${smoked.stderr}`);
+    console.log(`[orders-page] ${file}: PASS (rolled back)`);
+  }
+
+  // 11. A second apply is refused.
   const again = psql(candidate, { allowFailure: true });
   assert.notEqual(again.status, 0, 'a second apply must be refused');
   assert.match(again.stderr, /already exists/);
 
-  // 8. Cost-exposure sweep keys for the new function (SECURITY INVOKER: expected none).
+  // 12. Cost-exposure sweep keys for both functions (SECURITY INVOKER: expected none).
   const costSql = readFileSync(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'cost-exposure-review.sql'), 'utf8').replace(/;\s*$/, '');
-  console.log('[orders-page] cost-exposure keys:', scalar(`SELECT string_agg(violation_key, ' ; ') FROM (${costSql}) s WHERE violation_key LIKE 'get_orders_page(%';`) || '<none>');
+  console.log('[orders-page] cost-exposure keys:', scalar(`SELECT string_agg(violation_key, ' ; ') FROM (${costSql}) s WHERE violation_key LIKE 'get_orders_page(%' OR violation_key LIKE 'get_orders_keyset_page(%';`) || '<none>');
+
+  // 13. Speed at 60,000 more orders (the Deliveries lesson, 2026-11-06: a rep's first page took ~9 s at 60,000 rows,
+  // over the 8 s statement timeout for `authenticated`, and nobody had timed it before review). Seeded in one
+  // rolled-back transaction. Each read is also held under 3x a rep's plain read of the same orders, lines, invoices
+  // and deliveries (the same row level security cost), so the check means the same on a slow or a fast PC.
+  const ms = (label, stmt) => `f0 := clock_timestamp(); ${asUser(stmt)} t := concat_ws(',', t, '${label}=' || round(extract(epoch FROM clock_timestamp() - f0::timestamptz) * 1000));`;
+  const rpc = (o = {}) => `r := public.get_orders_page(p_from => '${FROM}', p_to => '${TO}'${Object.entries(o).map(([k, v]) => `, p_${k} => ${q(v)}`).join('')});`;
+  const keyset = (o, after) => `r := public.get_orders_keyset_page(p_from => '${FROM}', p_to => '${TO}'${Object.entries(o).map(([k, v]) => `, p_${k} => ${q(v)}`).join('')}, p_after => ${after});`;
+  const plain = 'n := (SELECT count(*) FROM public.orders) + (SELECT count(*) FROM public.order_items) + (SELECT count(*) FROM public.invoices) + (SELECT count(*) FROM public.deliveries);';
+  const timed = attempt(USERS.rep, `
+    SET LOCAL session_replication_role = replica;
+    INSERT INTO public.orders (id, order_number, customer_id, status, total_price, order_date, is_planned, pricing_status, needs_split_billing)
+    SELECT md5('g4v-order-' || g)::uuid, 'G4V-' || lpad(g::text, 6, '0'), md5('g4o-cust-' || (1 + g % 60))::uuid,
+           (ARRAY['confirmed','partially_fulfilled','fulfilled','cancelled','voided'])[1 + g % 5],
+           round(((g * 7919) % 250000) / 100.0 + 0.01, 2), date '${FROM}' + (g % 365), g % 7 = 0,
+           CASE WHEN g % 6 = 0 THEN 'needs_pricing' ELSE 'priced' END, g % 11 = 0
+      FROM generate_series(1, 60000) g;
+    INSERT INTO public.order_items (order_id, product_id, product_name, price_per_unit, total_units_needed, quantity_delivered, total_price, sort_order)
+    SELECT md5('g4v-order-' || g)::uuid, md5('g4o-prod-' || (1 + (g + k) % 40))::uuid, '[G4O] Product ' || (1 + (g + k) % 40),
+           round(((g * k * 31) % 5000) / 100.0 + 1, 2), (g % 50) + k, (g % 3) * k, 0, k
+      FROM generate_series(1, 60000) g CROSS JOIN generate_series(1, 4) k WHERE k <= 1 + g % 4;
+    INSERT INTO public.invoices (invoice_number, order_id, customer_id, invoice_type, status, total_amount_cents, salesman_id, created_by)
+    SELECT 'G4V-INV-' || g, md5('g4v-order-' || g)::uuid, md5('g4o-cust-' || (1 + g % 60))::uuid, 'chemical_sale', 'unposted',
+           ((g * 7919) % 250000) / 2, CASE WHEN g % 4 = 0 THEN '${USERS.rep}'::uuid END, '${USERS.admin}'::uuid
+      FROM generate_series(1, 60000) g WHERE g % 2 = 0;
+    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status, scheduled_date)
+    SELECT 'G4V-D-' || g, md5('g4v-order-' || g)::uuid, md5('g4o-cust-' || (1 + g % 60))::uuid, '${USERS.admin}'::uuid,
+           (ARRAY['scheduled','in_progress','completed'])[1 + g % 3], date '${FROM}' + (g % 365)
+      FROM generate_series(1, 60000) g WHERE g % 3 = 0;
+    SET LOCAL session_replication_role = origin;
+    ANALYZE public.orders; ANALYZE public.order_items; ANALYZE public.invoices; ANALYZE public.deliveries; ANALYZE public.customers;
+    ${ms('warm', plain)}
+    ${ms('base', plain)}
+    ${ms('rep_first', rpc({ limit: 50 }))} t := t || ',rep_first_seen=' || (r->>'total_count') || ',rep_first_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_deep_page', rpc({ limit: 50, offset: 30000 }))} t := t || ',rep_deep_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_export', rpc({ limit: 1000, offset: 30000 }))} t := t || ',rep_export_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_sort', rpc({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }))} t := t || ',rep_sort_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_search', rpc({ limit: 50, search: 'product 3' }))} t := t || ',rep_search_seen=' || (r->>'total_count') || ',rep_search_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_first', keyset({ limit: 50 }, 'NULL'))} t := t || ',rep_bookmark_first_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_next', keyset({ limit: 50 }, "r->'next_cursor'"))} t := t || ',rep_bookmark_next_rows=' || jsonb_array_length(r->'rows');
+    ${ms('rep_bookmark_sort_first', keyset({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }, 'NULL'))}
+    ${ms('rep_bookmark_sort_next', keyset({ limit: 50, sort_key: 'invoiced_pct', sort_dir: 'desc' }, "r->'next_cursor'"))} t := t || ',rep_bookmark_sort_rows=' || jsonb_array_length(r->'rows');
+    ${signIn(USERS.admin)}
+    ${ms('admin_first', rpc({ limit: 50 }))}
+    v := t || ',admin_seen=' || (r->>'total_count');`);
+  assert.ok(timed.startsWith('ok|'), `speed probe failed: ${timed}`);
+  const times = Object.fromEntries(timed.slice(3).split(',').map((kv) => kv.split('=')).map(([k, n]) => [k, Number(n)]));
+  console.log(`[orders-page] 60,000 more orders, ms: ${JSON.stringify(times)}`);
+  // The rep's timed reads must have done the full work, not returned an empty list fast.
+  assert.ok(times.admin_seen > 60000 && times.rep_first_seen > 60000, `the timed reads saw too few orders: ${timed}`);
+  assert.ok(times.rep_first_rows === 50 && times.rep_deep_rows === 50 && times.rep_export_rows === 1000 && times.rep_sort_rows === 50 && times.rep_search_seen > 1000 && times.rep_search_rows === 50
+    && times.rep_bookmark_first_rows === 50 && times.rep_bookmark_next_rows === 50 && times.rep_bookmark_sort_rows === 50,
+    `a rep's timed read returned a short page: ${timed}`);
+  for (const k of ['base', 'rep_first', 'rep_deep_page', 'rep_export', 'rep_sort', 'rep_search', 'rep_bookmark_first', 'rep_bookmark_next', 'rep_bookmark_sort_first', 'rep_bookmark_sort_next', 'admin_first']) {
+    assert.ok(Number.isFinite(times[k]), `no timing for ${k}: ${timed}`);
+    assert.ok(times[k] < 8000, `${k} took ${times[k]} ms at 60,000 orders (authenticated statement_timeout is 8 s)`);
+    // Floor of 1 s: on a fast PC a tiny baseline must not fail a healthy page.
+    if (k !== 'base') assert.ok(times[k] < 3 * Math.max(times.base, 1000), `${k} took ${times[k]} ms, over 3x a rep's plain read (${times.base} ms): the per-page cost regressed`);
+  }
   console.log('\nORDERS_LIST_PAGE_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

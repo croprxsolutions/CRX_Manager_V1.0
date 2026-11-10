@@ -95,8 +95,9 @@ BEGIN
   VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
 
   v_lic_num := 'SMK-LIC-' || v_suffix;
-  INSERT INTO applicator_licenses (customer_id, license_number, license_type, holder_name, expiry_date, is_active)
-  VALUES (v_customer, v_lic_num, 'private', '[SMOKE] Holder ' || v_suffix, CURRENT_DATE + 365, true);
+  -- issued_date is required for 'compliant': a license with no issue date on file is a warning (KI-18 batch 1).
+  INSERT INTO applicator_licenses (customer_id, license_number, license_type, holder_name, issued_date, expiry_date, is_active)
+  VALUES (v_customer, v_lic_num, 'private', '[SMOKE] Holder ' || v_suffix, CURRENT_DATE - 30, CURRENT_DATE + 365, true);
 
   INSERT INTO orders (order_number, customer_id, status, booking_draw, salesman_id)
   VALUES ('[SMOKE] RUPP-' || v_suffix, v_customer, 'confirmed', false, v_admin)

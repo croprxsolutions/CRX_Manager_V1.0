@@ -16,7 +16,7 @@ These are the detailed engineering rules behind the concise contract in `AGENTS.
 ### 2. Research before coding
 - Search for the closest existing pattern before writing new code.
 - Check whether the capability or helper already exists; use `docs/reference/pages-routes.md` when adding or changing a page.
-- For architecture or multi-file tracing, use Graphify to narrow the source surface, then verify the relevant edges in current source.
+- For architecture or multi-file tracing, use the `graphify` skill (its search recipe, or the optional graph) to narrow the source surface, then verify the relevant edges in current source.
 
 ### 3. Plan before building
 - For substantial work, state the goal, observable completion conditions, files or systems likely to change, and one current step.

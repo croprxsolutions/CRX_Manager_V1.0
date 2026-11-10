@@ -795,4 +795,77 @@ try {
   rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── Pattern 3: check_idempotency_intent() + direct receipt INSERT (2026-11-08) ──
+// The house shape since 20260811130000 (47 migrations); 28 of them carried the
+// file-level exempt marker only because this guard did not recognize it.
+const intentBody = (check, insert) => fn(`
+  DECLARE v_replay jsonb;
+  BEGIN
+  ${check}
+  UPDATE public.customer_documents SET deleted_at = now() WHERE id = 1;
+  ${insert}
+  END;
+`);
+const INTENT_CHECK = "v_replay := public.check_idempotency_intent(\n    p_idempotency_key, 'test_fn', v_actor, v_fingerprint\n  );";
+const RECEIPT = "INSERT INTO public.idempotency_keys (\n    idempotency_key, operation, result, request_actor_id, request_fingerprint\n  ) VALUES (p_idempotency_key, 'test_fn', v_result, v_actor, v_fingerprint);";
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT));
+ok(!isDeny(r), "check_idempotency_intent + INSERT INTO public.idempotency_keys is allowed with no exempt marker");
+
+r = runHook(intentBody(INTENT_CHECK, ""));
+ok(isDeny(r), "check_idempotency_intent with no receipt INSERT is still blocked (half-wired)");
+
+r = runHook(intentBody("", RECEIPT));
+ok(isDeny(r), "receipt INSERT into public.idempotency_keys with no check is still blocked");
+
+r = runHook(intentBody("v_replay := public.check_idempotency_intent(p_idempotency_key);", RECEIPT));
+ok(isDeny(r), "check_idempotency_intent with no operation argument is blocked (FIX 6)");
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace("'test_fn'", "'other_fn'")));
+ok(isDeny(r), "intent check and receipt under different operation literals are blocked");
+
+const SAVE = "PERFORM public.save_idempotency(p_idempotency_key, 'test_fn', v_result);";
+const BIND = "PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'test_fn', v_fingerprint);";
+r = runHook(intentBody(INTENT_CHECK, SAVE + "\n" + BIND));
+ok(!isDeny(r), "check_idempotency_intent + save_idempotency + replay-receipt binding is allowed");
+
+// Codex P2 (PR #1666): save_idempotency() writes no actor/fingerprint, and
+// check_idempotency_intent() rejects such a receipt — every retry would fail.
+r = runHook(intentBody(INTENT_CHECK, SAVE));
+ok(isDeny(r), "check_idempotency_intent + save_idempotency with no binding is blocked");
+ok(r.stdout.includes("not bound"), "unbound-receipt block explains the binding");
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace(", request_actor_id, request_fingerprint", "").replace(", v_actor, v_fingerprint)", ")")));
+ok(isDeny(r), "receipt INSERT without request_actor_id/request_fingerprint is blocked");
+
+// The save_job shape: plain INSERT, then an UPDATE that binds actor + fingerprint.
+r = runHook(intentBody(INTENT_CHECK,
+  "INSERT INTO idempotency_keys (idempotency_key, operation, result) VALUES (p_idempotency_key, 'test_fn', v_result);\n" +
+  "UPDATE idempotency_keys SET request_fingerprint = v_fingerprint, request_actor_id = v_actor WHERE idempotency_key = p_idempotency_key AND operation = 'test_fn';"));
+ok(!isDeny(r), "INSERT followed by a binding UPDATE under the same operation is allowed");
+
+r = runHook(intentBody(INTENT_CHECK, SAVE.replace("'test_fn'", "'other_fn'") + "\n" + BIND.replace("'test_fn'", "'other_fn'")));
+ok(isDeny(r), "check_idempotency_intent + save_idempotency under a different operation is blocked");
+
+// Codex P2 (PR #1666): the checked operation appearing only in the result
+// payload must not count as a matching receipt.
+r = runHook(intentBody(INTENT_CHECK,
+  "PERFORM public.save_idempotency(p_idempotency_key, 'other_fn', jsonb_build_object('test_fn', v_result));\n" +
+  BIND.replace("'test_fn'", "'other_fn'")));
+ok(isDeny(r), "save under another operation is blocked even when the payload mentions the checked one");
+
+r = runHook(intentBody(INTENT_CHECK, RECEIPT.replace("v_result,", "jsonb_build_object('test_fn', 1),").replace("(p_idempotency_key, 'test_fn',", "(p_idempotency_key, 'other_fn',")));
+ok(isDeny(r), "INSERT under another operation is blocked even when its result mentions the checked one");
+
+// Schema-qualified direct pattern counts the same as the bare one.
+r = runHook(fn(`
+  DECLARE v_existing text;
+  BEGIN
+  SELECT result INTO v_existing FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND operation = 'test_fn';
+  INSERT INTO customers (name) VALUES ('x');
+  INSERT INTO public.idempotency_keys (idempotency_key, operation, result) VALUES (p_idempotency_key, 'test_fn', '{}');
+  END;
+`));
+ok(!isDeny(r), "schema-qualified direct lookup + record (public.idempotency_keys) is allowed");
+
 console.log(`idempotency-body-check: ${pass} assertions passed`);

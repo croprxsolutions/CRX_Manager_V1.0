@@ -132,13 +132,14 @@ describe('Accounts Receivable in the evening, Central time', () => {
     // The customer's name opens their statement; its end date is the box on that tab.
     fireEvent.click((await screen.findAllByRole('button', { name: 'Big Farm' }))[0]);
     const printButton = await screen.findByRole('button', { name: /Print Statement/ });
-    // Start and end boxes; the end date still follows the computer's clock (UTC here), so it
-    // differs from the table's Chicago date and a pop-up on the wrong date would show.
+    // Start and end boxes. Both default to the Chicago date now (KI-18), so the end date is
+    // moved to a different day: a pop-up on the table's date instead would show.
     const dateBoxes = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/) as HTMLInputElement[];
     expect(dateBoxes).toHaveLength(2);
-    expect(dateBoxes[1].value).toBe('2026-10-21');
+    expect(dateBoxes[1].value).toBe('2026-10-20');
+    fireEvent.change(dateBoxes[1], { target: { value: '2026-10-15' } });
     fireEvent.click(printButton);
-    expect(await printDialogDate()).toBe('2026-10-21');
+    expect(await printDialogDate()).toBe('2026-10-15');
   });
 
   it('after the As of Date is changed, Batch Print starts on the new date', async () => {

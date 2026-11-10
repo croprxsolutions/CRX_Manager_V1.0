@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Save, Send, Ban, Plus, Trash2, Search, DollarSign, FileText, Printer, Truck, Mail, RotateCcw, AlertTriangle,
 } from 'lucide-react';
@@ -27,9 +27,11 @@ import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '..
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
+import VendorSelect from '../components/orders/VendorSelect';
+import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -43,7 +45,8 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
-import { todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
+import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
@@ -70,6 +73,7 @@ interface LineItem {
   sort_order: number;
   notes: string | null;
   tote_number: string | null;
+  vendor?: string | null;
   price_source: 'quoted' | 'tier' | 'manual' | null;
   quoted_price_cents: number | null;
   /** Per-line split billing: set when this line was produced by a split billing line.
@@ -170,7 +174,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     invoice_type: isMiscChargeLocked ? 'misc_charge' : 'chemical_sale',
     status: 'draft',
     // An invoice date is a company-wide accounting fact, so it follows Crop RX's business
-    // timezone, not the browser's. localToday() would let a user outside Chicago open a new
+    // timezone, not the browser's. The browser's own date would let a user outside Chicago open a new
     // invoice dated 2026-09-30 while Chicago is already on 2026-10-01, filing it in season 2026
     // when the business day says 2027 (the server derives season from invoice_date since
     // migration 20260904180000).
@@ -192,6 +196,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
+  const vendorNames = useVendorNames(routeArea !== 'field');
   // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
   // (freight, service...) beside its products (migration 20261108160000).
   const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
@@ -253,6 +258,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Print dialog
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [shares, setShares] = useState<InvoiceShare[]>([]);
+  const [billSplitPayers, setBillSplitPayers] = useState<BillSplitPayer[]>([]);
 
   // Void modal
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -644,20 +650,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     const normalizedTerms = effectivePaymentTerms.toLowerCase();
     const isReceiptAlias = ['due on receipt', 'due upon receipt', 'receipt', 'immediately'].includes(normalizedTerms);
     const isPreset = ['Net 30', 'Net 15', 'Net 60', 'Due on receipt'].includes(effectivePaymentTerms);
-    const termDays = isReceiptAlias
-      ? 0
-      : (() => {
-          const match = /(\d+)/.exec(effectivePaymentTerms);
-          const parsed = match ? Number(match[1]) : NaN;
-          return Number.isFinite(parsed) && parsed >= 1 && parsed <= 365 ? parsed : 30;
-        })();
-    let stampedDate = '';
-    if (loadedInvoice.invoice_date) {
-      const stamped = new Date(`${loadedInvoice.invoice_date}T00:00:00Z`);
-      stamped.setUTCDate(stamped.getUTCDate() + termDays);
-      stampedDate = stamped.toISOString().slice(0, 10);
-    }
-    const isPostingStamp = loadedDueDate !== '' && loadedDueDate === stampedDate;
+    // KI-14: a field-application invoice records whether its date was typed (due_date_is_custom);
+    // other invoice types still compare the date with the stamp their terms give.
+    const stampedDate = loadedInvoice.invoice_date ? dueDateFromTerms(loadedInvoice.invoice_date, effectivePaymentTerms) : '';
+    const isPostingStamp = loadedDueDate !== '' && (
+      loadedInvoice.invoice_type === 'field_application'
+        ? !loadedInvoice.due_date_is_custom
+        : loadedDueDate === stampedDate);
     const isEditableStatus = ['draft', 'unposted'].includes(loadedInvoice.status || '');
     if (loadedDueDate && !isPostingStamp && isEditableStatus) {
       setPaymentTerms('Custom date…');
@@ -794,6 +793,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         sort_order: it.sort_order,
         notes: it.notes as string | null,
         tote_number: (it.tote_number as string) ?? null,
+        vendor: (it.vendor as string) ?? null,
         price_source: (it.price_source as LineItem['price_source']) ?? null,
         quoted_price_cents: it.quoted_price_cents != null ? Number(it.quoted_price_cents) : null,
         return_credit_cogs_cents: it.return_credit_cogs_cents != null ? Number(it.return_credit_cogs_cents) : null,
@@ -821,6 +821,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     if (shareError) throw shareError;
     if (!Array.isArray(shareData)) throw new Error('The invoice share read returned no list');
     setShares(shareData as InvoiceShare[]);
+
+    // A chemical sale split across payers: each payer's invoice shows that delivery's payers.
+    const payers = readsBillSplitPayers(data) && data.invoice_group_id && shareData.length === 0
+      ? await loadBillSplitPayers(supabase, invoiceId)
+      : [];
+    if (isStale()) return;
+    setBillSplitPayers(payers);
 
     // Fetch write-offs
     const { data: woData, error: woError } = await supabase
@@ -1121,6 +1128,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('error', 'Choose a custom due date before saving.');
       return;
     }
+    // KI-14: the database marks a field invoice's date as typed only when the date changes, so a "custom" date equal
+    // to the date its terms already gave would be recalculated from the new terms on save (Sol, PR #1556).
+    if (paymentTerms === 'Custom date…' && invoice.invoice_type === 'field_application'
+      && !invoice.due_date_is_custom && customDueDate === (invoice.due_date || '')) {
+      toast('error', "That is already this invoice's due date from its terms. Keep the terms, or choose a different custom date.");
+      return;
+    }
     // Per-line split billing (Codex P1 #6, 2026-07-18): a split child's line detail lives in
     // invoice_line_shares, keyed to invoice_items by billing_line_id. The generic save_invoice
     // deletes + recreates invoice_items, which would CASCADE those shares away and silently
@@ -1132,6 +1146,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     if (!invoice.customer_id) {
       toast('error', 'Please select a customer');
+      return;
+    }
+    const dateProblem = invoiceDateTooFarProblem(invoice.invoice_date);
+    if (dateProblem) {
+      toast('error', dateProblem);
       return;
     }
     if (takesCharges) {
@@ -1174,6 +1193,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           id: it.id,
           order_item_id: it.order_item_id,
           product_id: it.product_id,
+          vendor: it.vendor ?? null,
           description: it.description || it.product_name,
           quantity: it.quantity,
           unit_price_cents: it.unit_price_cents,
@@ -1730,6 +1750,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Build PDF data object (shared by print + email)
   // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
   const buildInvoicePdfData = async (options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
+    // Re-read the payers: another payer's invoice may have gained a charge since this page loaded
+    // (the email path reads them fresh too).
+    const printPayers = billSplitPayers.length > 0 && invoice?.invoice_group_id
+      ? await loadBillSplitPayers(supabase, id!)
+      : billSplitPayers;
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')
       .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
@@ -1805,7 +1830,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         split_percentage: s.split_percentage,
         acres: s.acres,
         amount_cents: s.amount_cents,
-      })) : undefined,
+      })) : printPayers.length > 0 ? printPayers : undefined,
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
       total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
@@ -1955,6 +1980,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // shares (Codex P1 #6). Paired with the hard guard in handleSave.
   const isSplitInvoice = !!(invoice as { field_app_billing_set_id?: string | null }).field_app_billing_set_id;
   const canEdit = isAdminOrRep;
+  const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
@@ -2287,6 +2313,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   type="date"
                   value={invoice.invoice_date?.split('T')[0] || ''}
                   onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_date: e.target.value }))}
+                  max={latestInvoiceDate()}
                   className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 />
               ) : (
@@ -2440,6 +2467,31 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         </Card>
       </div>
 
+      {billSplitPayers.length > 1 && (
+        <Card>
+          <h2 className="text-sm font-semibold text-nav-dark mb-1">Bill Split</h2>
+          <p className="text-xs text-secondary mb-3">The payers on this delivery</p>
+          <div className="space-y-2">
+            {billSplitPayers.map((payer) => (
+              <div key={payer.invoice_id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-nav-dark">{payer.customer_name}</span>
+                  {payer.invoice_id === id ? (
+                    <span className="ml-2 text-xs text-secondary">{payer.invoice_number} (this invoice)</span>
+                  ) : (
+                    <Link to={`/invoices/${payer.invoice_id}`} className="ml-2 text-xs text-crx-green hover:underline">{payer.invoice_number}</Link>
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  <span className="text-secondary mr-3">{payer.split_percentage}%</span>
+                  <span className="font-semibold">{fmt(payer.amount_cents)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Line Items */}
       <Card>
         <div className="flex items-center justify-between mb-4">
@@ -2476,6 +2528,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               <thead>
                 <tr className="text-left text-secondary border-b border-gray-100">
                   <th className="pb-2 pr-4">{isFromScratch ? 'Charge' : 'Product'}</th>
+                  {showVendors && <th className="pb-2 pr-4">Vendor</th>}
                   <th className="pb-2 pr-4 w-24">Qty</th>
                   <th className="pb-2 pr-4 w-28">{isFromScratch ? 'Amount' : 'Unit Price'}</th>
                   <th className="pb-2 pr-4 w-28">Extended</th>
@@ -2525,6 +2578,20 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         </>
                       )}
                     </td>
+                    {showVendors && (
+                      <td className="py-2 pr-4 text-secondary">
+                        {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
+                        {editable && item.order_item_id && item.quantity > 0 ? (
+                          <VendorSelect
+                            label={`Vendor for ${item.product_name || item.description || 'line'}`}
+                            value={item.vendor}
+                            vendors={vendorNames}
+                            disabled={saving}
+                            onChange={(vendor) => updateItem(idx, 'vendor', vendor)}
+                          />
+                        ) : (item.vendor || '-')}
+                      </td>
+                    )}
                     <td className="py-2 pr-4">
                       {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
@@ -2586,7 +2653,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200 font-semibold">
-                  <td className="pt-3" colSpan={displayItems.some((i) => i.tote_number) ? 4 : 3}>
+                  <td className="pt-3" colSpan={(displayItems.some((i) => i.tote_number) ? 4 : 3) + (showVendors ? 1 : 0)}>
                     Total
                   </td>
                   <td className="pt-3">{fmt(totalCents)}</td>
@@ -2884,10 +2951,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Print Dialog */}
       <InvoicePrintDialog
+        // Remounted on every open, so its defaults (payer shares ticked) come back after an untick and close.
+        key={`${invoice.id}:${billSplitPayers.length > 1 ? 'bill-split' : 'plain'}:${showPrintDialog ? 'open' : 'closed'}`}
+        sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}
         invoiceType={invoice.invoice_type || 'chemical_sale'}
-        hasShares={shares.length > 1}
+        hasShares={shares.length > 1 || billSplitPayers.length > 1}
         onPrint={handlePrint}
         loading={printing}
       />

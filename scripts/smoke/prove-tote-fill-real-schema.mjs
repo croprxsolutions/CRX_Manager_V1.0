@@ -42,6 +42,10 @@ const LEDGER_ONLY = new Set([
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(tote_fill|inventory_transactions_transaction_type_check|product_parent_members|_product_parent_replay|_product_parent_require_admin|_product_parent_reason|FUNCTION\s+(public\.)?"?(is_admin|is_active_profile|check_idempotency|save_idempotency)\b)/i;
+// A later file that rewrites, rather than only calls, what the candidate relies on. Later PAR-2 files
+// call the _product_parent_* helpers and insert members; only a redefinition or a table change (alter, drop, create) can
+// change what this proof proved.
+const REDEFINED = /(tote_fill|inventory_transactions_transaction_type_check|(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+FUNCTION\s+(IF\s+EXISTS\s+)?(public\.)?"?(_product_parent_replay|_product_parent_require_admin|_product_parent_reason|is_admin|is_active_profile|check_idempotency|save_idempotency)\b|(ALTER|DROP|CREATE)\s+TABLE\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?(product_parent_members|product_parents|inventory|inventory_transactions)\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -155,7 +159,7 @@ function plan() {
     last = i;
   }
   for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+    assert.ok(!REDEFINED.test(lf(file)), `${path.basename(file)} sorts after the candidate and rewrites what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {

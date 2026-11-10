@@ -52,6 +52,14 @@ const LIVE_BODY_MD5 = {
   'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
 };
 const TOUCHED = /transfer_job_to_invoice|job_chemicals|convert_to_gl_lb/i;
+// Later files that match TOUCHED and were checked against this proof. This proof replays only up to
+// its candidate, so a later file never runs here; each entry says why it leaves what it relies on intact.
+const REVIEWED_LATER = new Set([
+  // Revokes direct app writes on job_chemicals and adds an AFTER trigger that records a sprayed job's
+  // product EPA numbers in a separate table; transfer_job_to_invoice, the line units and convert_to_gl_lb
+  // are unchanged.
+  '20261204120000_job_lines_keep_epa_number.sql',
+]);
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -116,6 +124,7 @@ function plan() {
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
   for (const file of all.slice(at + 1)) {
+    if (REVIEWED_LATER.has(path.basename(file))) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

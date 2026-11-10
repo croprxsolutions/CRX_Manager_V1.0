@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { todayInBusinessTz } from './dateUtils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { addDaysToDate, businessDayStartIso, invoiceDateTooFarProblem, todayInBusinessTz } from './dateUtils';
 
 describe('todayInBusinessTz', () => {
   it('keeps the late Central evening on the prior business date', () => {
@@ -96,5 +96,48 @@ describe('daysSinceBusinessDate', () => {
     // Fall-back night: 11:30pm Central on Nov 1 is still day 0.
     expect(daysSinceBusinessDate('2026-11-01', new Date('2026-11-02T05:30:00Z'))).toBe(0);
     expect(daysSinceBusinessDate('', evening)).toBe(0);
+  });
+});
+
+describe('businessDayStartIso (KI-18)', () => {
+  it('starts a daylight-time day at 05:00 UTC', () => {
+    expect(businessDayStartIso('2026-10-01')).toBe('2026-10-01T05:00:00.000Z');
+  });
+
+  it('starts a standard-time day at 06:00 UTC', () => {
+    expect(businessDayStartIso('2026-12-15')).toBe('2026-12-15T06:00:00.000Z');
+  });
+
+  it('handles both daylight-saving change days', () => {
+    expect(businessDayStartIso('2026-11-01')).toBe('2026-11-01T05:00:00.000Z');
+    expect(businessDayStartIso('2026-03-08')).toBe('2026-03-08T06:00:00.000Z');
+  });
+
+  it('refuses a value that is not a date', () => {
+    expect(() => businessDayStartIso('not-a-date')).toThrow();
+  });
+});
+
+describe('addDaysToDate', () => {
+  it('crosses month, year and daylight-saving boundaries by calendar day', () => {
+    expect(addDaysToDate('2026-09-30', 1)).toBe('2026-10-01');
+    expect(addDaysToDate('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDaysToDate('2026-11-01', -1)).toBe('2026-10-31');
+  });
+});
+
+describe('invoiceDateTooFarProblem (KI-18)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('allows up to 365 days after the Chicago date and refuses the day after, even in the evening', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T02:00:00Z')); // Sep 30, 9 PM CDT
+    expect(invoiceDateTooFarProblem('2027-09-30')).toBeNull();
+    expect(invoiceDateTooFarProblem('2027-10-01')).toMatch(/2027-10-01 is more than 365 days/);
+    expect(invoiceDateTooFarProblem('2206-09-30T00:00:00')).toMatch(/Check the year/);
+    expect(invoiceDateTooFarProblem('2026-09-30')).toBeNull();
+    expect(invoiceDateTooFarProblem('')).toBeNull();
+    expect(invoiceDateTooFarProblem(null)).toBeNull();
+    expect(invoiceDateTooFarProblem('10000-01-01')).toMatch(/Check the year/);
   });
 });

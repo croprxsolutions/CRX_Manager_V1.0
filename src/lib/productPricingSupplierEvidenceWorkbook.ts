@@ -8,6 +8,7 @@ import {
   PRICING_WORKBOOK_SHEET,
   PricingWorkbookFormatError,
   type ParsedPricingWorkbook,
+  type PricingWorkbookOptions,
 } from './productPricingWorkbook';
 import { formatSupplierCents, type SupplierMarketEvidence } from './supplierPricing';
 
@@ -130,8 +131,9 @@ function styleEvidenceSheet(worksheet: Worksheet, rowCount: number): void {
 export async function generateProductPricingWorkbookWithSupplierEvidence(
   pricingExport: PricingWorkbookExport,
   evidence: SupplierMarketEvidence[],
+  options: PricingWorkbookOptions = {},
 ): Promise<Blob> {
-  const baseWorkbook = await generateProductPricingWorkbook(pricingExport);
+  const baseWorkbook = await generateProductPricingWorkbook(pricingExport, options);
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await baseWorkbook.arrayBuffer());

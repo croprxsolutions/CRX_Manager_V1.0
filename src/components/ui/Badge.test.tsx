@@ -70,3 +70,12 @@ describe('statusToBadgeVariant', () => {
     expect(statusToBadgeVariant['nonexistent']).toBeUndefined();
   });
 });
+
+describe('Badge normalCase', () => {
+  it('normalCase keeps the label as given', () => {
+    const { rerender } = render(<Badge normalCase>PO-12</Badge>);
+    expect(screen.getByText('PO-12').className).not.toContain('capitalize');
+    rerender(<Badge>PO-12</Badge>);
+    expect(screen.getByText('PO-12').className).toContain('capitalize');
+  });
+});

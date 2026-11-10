@@ -305,6 +305,12 @@ export default function BulkProductImport({ open, onClose, onSuccess }: BulkProd
     try {
       const [header, ...data] = parseCsvRecords(await file.text());
       const headers = header?.cells ?? [];
+      // A broken header would map a column the file did not cleanly name, so every row under it is suspect.
+      if (header?.malformed) {
+        if (gen !== generation.current) return;
+        toast('error', 'The header row has text after a closing quote. Put each column name fully inside its quotes and try again.');
+        return;
+      }
       const pricingHeaders = headers.filter(isRetiredPricingColumn);
       if (pricingHeaders.length > 0) {
         toast('error', `Pricing columns are not allowed in Bulk Product Import: ${pricingHeaders.join(', ')}. Use the governed pricing worksheet or Product page instead.`);

@@ -17,6 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
+import { dueDateFromTerms } from "../paymentTerms.ts";
 import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
@@ -193,6 +194,80 @@ export interface InvoicePdfShare {
   amount_cents: number;
   price_per_acre_cents?: number | null;
   pricing_note?: string | null;
+  /** A Bill Split payer's own invoice, printed as its reference on Old Print. */
+  invoice_number?: string | null;
+}
+
+/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the whole sale. */
+export interface BillSplitPayer extends InvoicePdfShare {
+  invoice_id: string;
+}
+
+/**
+ * A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery.
+ * A payer's draft may be switched to misc charge (guard_invoice_terminal_order) and stays in the group.
+ */
+export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null }): boolean {
+  return (row.invoice_type === 'chemical_sale' || row.invoice_type === 'misc_charge') && !!row.invoice_group_id && !!row.delivery_id;
+}
+
+/**
+ * Whether this invoice shows the sale's payer table: a live Bill Split payer invoice. get_bill_split_payers refuses a
+ * voided, cancelled or deleted invoice as its key, so those show no table rather than failing to open.
+ */
+export function readsBillSplitPayers(row: {
+  invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null;
+  status?: string | null; deleted_at?: string | null;
+}): boolean {
+  return isBillSplitInvoice(row) && !['voided', 'cancelled'].includes(row.status ?? '') && !row.deleted_at;
+}
+
+export function billSplitPayerShares(rows: Array<{
+  id: string;
+  invoice_number: string | null;
+  total_amount_cents: number | null;
+  customer?: { farm_name?: string | null } | null;
+}>): BillSplitPayer[] {
+  const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
+  // Numeric, so -10 follows -2. The database sorts the suffix as text.
+  const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
+  // Hundredths of a percent, largest remainder first, so the printed column adds up to exactly 100%.
+  // Whole numbers throughout (cents x 10000 stays exact), so equal remainders tie exactly and go in order.
+  const parts = ordered.map((r) => (total > 0 ? (r.total_amount_cents ?? 0) * 10000 : 0));
+  const bp = parts.map((p) => (total > 0 ? Math.floor(p / total) : 0));
+  const short = total > 0 ? 10000 - bp.reduce((s, v) => s + v, 0) : 0;
+  parts.map((p, i) => [total > 0 ? p - bp[i] * total : 0, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
+    .slice(0, short).forEach(([, i]) => { bp[i] += 1; });
+  return ordered.map((r, i) => ({
+    invoice_id: r.id,
+    invoice_number: r.invoice_number,
+    customer_name: r.customer?.farm_name || 'Unknown',
+    split_percentage: bp[i] / 100,
+    acres: null,
+    amount_cents: r.total_amount_cents ?? 0,
+  }));
+}
+
+/**
+ * Every payer of the Bill Split sale this invoice belongs to, read through get_bill_split_payers (anyone who may
+ * read the invoice gets the whole group, so a rep who can't see another payer's invoice still gets the full table).
+ * Read from the group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it.
+ * Counted, so a read cut short by the row cap is refused rather than printed as a partial payer table.
+ */
+export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string): Promise<BillSplitPayer[]> {
+  const { data, error, count } = await db.rpc('get_bill_split_payers', { p_invoice_id: invoiceId }, { count: 'exact' });
+  if (error) throw new InvoiceDetailsUnavailableError();
+  const rows = assertRpcResult<Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>>(data, 'get_bill_split_payers');
+  if (!Array.isArray(rows) || count !== rows.length) throw new InvoiceDetailsUnavailableError();
+  return billSplitPayerShares(rows
+    .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })));
+}
+
+// Supabase returns null data, not an error, when a call is denied; this shared file runs in Deno too,
+// so it keeps its own copy (as create-user and send-delivery-receipts do).
+function assertRpcResult<T>(data: unknown, _rpcName: string): T {
+  if (data === null || data === undefined) throw new InvoiceDetailsUnavailableError();
+  return data as T;
 }
 
 export interface InvoicePdfData {
@@ -404,7 +479,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -429,8 +504,12 @@ export async function buildInvoicePdfDataFromRow(
     discount_earned_cents?: number | null; discount_date?: string | null;
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
-    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null;
+    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
   } | null;
+  const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
+      && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
+    ? await loadBillSplitPayers(db, inv.id)
+    : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;
   const pickTerms = inv.payment_terms !== undefined ? inv.payment_terms : billingRow?.payment_terms;
   const pickDue = inv.due_date !== undefined ? inv.due_date : billingRow?.due_date;
@@ -461,10 +540,17 @@ export async function buildInvoicePdfDataFromRow(
     (items || []).map(mapInvoicePdfItem),
   );
 
+  // KI-14: an editable field-application invoice with no stored due date prints the one its terms give (the
+  // database fills it on save); other types and closed invoices keep "On receipt" (CodeRabbit, PR #1556).
+  // Blank terms print as the 'Net 30' the database saves, so the date never shows without its terms (Sol).
+  const termsDue = !pickDue && inv.invoice_date && (inv.invoice_type || 'field_application') === 'field_application'
+    && ['draft', 'unposted'].includes(inv.status || 'draft');
+  const printTerms = pickTerms || custRow?.payment_terms || (termsDue ? 'Net 30' : undefined);
+
   return {
     invoice_number: inv.invoice_number,
     invoice_date: inv.invoice_date,
-    due_date: pickDue || undefined,
+    due_date: pickDue || (termsDue && inv.invoice_date ? dueDateFromTerms(inv.invoice_date, printTerms) : undefined),
     invoice_type: inv.invoice_type || 'field_application',
     status: inv.status || 'draft',
     customer_name: inv.customer_name,
@@ -474,7 +560,7 @@ export async function buildInvoicePdfDataFromRow(
     customer_zip: custRow?.zip || undefined,
     account_number: custRow?.account_number || undefined,
     // #33: invoice-level payment terms override the customer default when present.
-    payment_terms: pickTerms || custRow?.payment_terms || undefined,
+    payment_terms: printTerms || undefined,
     salesman_name: inv.salesman_name || undefined,
     purchase_order_ref: pickPo || undefined,
     header_notes: pickHeader || undefined,
@@ -496,7 +582,7 @@ export async function buildInvoicePdfDataFromRow(
           price_per_acre_cents: s.price_per_acre_cents ?? null,
           pricing_note: s.pricing_note ?? null,
         }))
-      : undefined,
+      : billSplitPayers.length > 0 ? billSplitPayers : undefined,
     items: pdfItems,
     total_amount_cents: inv.total_amount_cents || 0,
     total_cost_cents: inv.total_cost_cents || 0,
@@ -808,7 +894,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   } else if (data.invoice_type === 'chemical_sale') {
     y = drawChemicalSaleLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   } else {
-    y = drawMiscChargeLayout(doc, data, y, margin, pageW, autoTable, drawPageFooter);
+    y = drawMiscChargeLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   }
 
   // ── Totals Section ─────────────────────────────────────────────────
@@ -1225,6 +1311,38 @@ function drawChemicalSaleLayout(
   y += 18;
 
   // Shares table (chemical sales can also have splits)
+  y = drawSharesTable(doc, data, y, margin, opts, autoTable, drawPageFooter);
+
+  // Finance charges
+  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
+    y += 4;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(margin, y, pageW - margin, y);
+    y += 12;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...CHARCOAL);
+    doc.text('FIN', margin, y);
+    doc.text('Finance Charges', margin + 60, y);
+    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
+    y += 16;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
+    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
+    y += 16;
+  }
+
+  return y + 10;
+}
+
+// ── Layout 3: Misc Charge ────────────────────────────────────────────────
+
+/** The customer share table under a chemical sale's or misc charge's lines (a Bill Split payer's draft can be either). */
+function drawSharesTable(
+  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
+): number {
+  let y = startY;
   if (opts.show_shares && data.shares && data.shares.length > 1) {
     y += 4;
     const hasPerAcrePricing = data.shares.some(s => s.price_per_acre_cents != null);
@@ -1270,34 +1388,12 @@ function drawChemicalSaleLayout(
     });
     y = doc.lastAutoTable.finalY + 6;
   }
-
-  // Finance charges
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    y += 4;
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 12;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text('FIN', margin, y);
-    doc.text('Finance Charges', margin + 60, y);
-    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
-    y += 16;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
-    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
-    y += 16;
-  }
-
-  return y + 10;
+  return y;
 }
-
-// ── Layout 3: Misc Charge ────────────────────────────────────────────────
 
 function drawMiscChargeLayout(
   doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  autoTable: AutoTable, drawPageFooter: () => void,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
 ): number {
   let y = startY;
 
@@ -1331,7 +1427,8 @@ function drawMiscChargeLayout(
     didDrawPage: drawPageFooter,
   });
 
-  return doc.lastAutoTable.finalY + 20;
+  // Every Bill Split payer's invoice shows every payer (Mason, 9 Nov), a payer's misc charge draft too.
+  return drawSharesTable(doc, data, doc.lastAutoTable.finalY + 20, margin, opts, autoTable, drawPageFooter);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

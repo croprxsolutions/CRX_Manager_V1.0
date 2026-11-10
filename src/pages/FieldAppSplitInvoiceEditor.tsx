@@ -17,7 +17,7 @@ import { INVOICES_POSTABLE } from '../lib/costFields';
 import { formatCents } from '../lib/money';
 import { pctsToMicro } from '../lib/splitVectorMath';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
-import { todayInBusinessTz } from '../lib/dateUtils';
+import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz } from '../lib/dateUtils';
 import { SPLIT_BILLING_SETTING_KEY, parseSplitBillingEnabled } from '../lib/splitBillingSetting';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
@@ -209,7 +209,7 @@ export default function FieldAppSplitInvoiceEditor() {
   // Header + selection
   // Chicago BUSINESS date (2026-09-04). Two earlier revisions of this line were both wrong:
   // toISOString() rolled to tomorrow after ~7 pm Central (Codex r2 #J), and localToday() — the fix
-  // that replaced it — follows the BROWSER's clock, so a salesman west of Chicago crossing
+  // that replaced it — then followed the BROWSER's clock (it follows Chicago since KI-18), so a salesman west of Chicago crossing
   // October 1 still sends the wrong day. This date is not cosmetic here: it is always sent
   // (:712), and _save_field_app_split_invoice_impl derives v_season from it when there is no
   // source job, then uses that season for BOTH the customer_application_rates rate lookup and
@@ -468,6 +468,8 @@ export default function FieldAppSplitInvoiceEditor() {
   function validateForSave(): string | null {
     if (!profile?.id) return 'Your sign-in could not be verified. Refresh and try again.';
     if (!invoiceDate) return 'Choose an invoice date.';
+    const dateProblem = invoiceDateTooFarProblem(invoiceDate);
+    if (dateProblem) return dateProblem;
     if (fields.length === 0) return 'Add at least one field with applied acres greater than zero.';
     // Codex round-6 P1: every SELECTED field must carry positive acres. The save path bills only
     // fields with acres > 0, so a selected field left blank/zero would be silently dropped from
@@ -1002,6 +1004,7 @@ export default function FieldAppSplitInvoiceEditor() {
               type="date"
               value={invoiceDate}
               onChange={(e) => setInvoiceDate(e.target.value)}
+              max={latestInvoiceDate()}
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
           </label>

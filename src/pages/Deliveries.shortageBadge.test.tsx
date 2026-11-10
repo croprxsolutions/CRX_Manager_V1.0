@@ -143,6 +143,24 @@ async function renderDeliveries(): Promise<number> {
         : undefined
       : undefined,
   ));
+  // The list comes from get_deliveries_keyset_page; the shortage check still reads the tables above.
+  mockRpc.mockImplementation(((name: string) => {
+    if (name !== 'get_deliveries_keyset_page') return Promise.resolve({ data: null, error: null });
+    const rows = (tables.data.deliveries ?? []).map((d) => {
+      const row = d as Record<string, unknown> & { customer?: { farm_name?: string } };
+      return { ...row, customer_name: row.customer?.farm_name ?? 'Unknown', driver_name: 'Unassigned', item_count: 0, farm_group_name: null };
+    });
+    return Promise.resolve({
+      data: {
+        success: true,
+        total_count: rows.length,
+        rows,
+        next_cursor: null,
+        summary: { visible_count: rows.length, open_count: rows.length, scheduled_today: 0, in_progress: 0, completed_this_week: 0, strip: [] },
+      },
+      error: null,
+    });
+  }) as never);
 
   render(<MemoryRouter><Deliveries /></MemoryRouter>);
 

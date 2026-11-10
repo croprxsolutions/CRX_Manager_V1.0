@@ -10,6 +10,138 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
+## 2026-11-09 — Taha's merge hold covers a fixed list, not every PR
+
+**Decision (Mason and Taha, Slack #crx-work, 2026-11-09):** our PRs stay open 4 hours before the merge only when they change a file on the Sol list, `src/` code with `customer` or `product` in its path, shared plumbing (`.github/`, `src/lib/`, `src/types/`, `package.json`, `package-lock.json`), or a file in one of Taha's open PRs. Every other PR (docs, tooling, EPA, compliance or field-setup work that touches none of these) merges once checks pass and the review is clean. Every live migration apply, in any area, keeps the enforced hold (#1667) unchanged. Supersedes the 2026-11-08 "every PR waits 4 hours" rule and item (4) of the 2026-11-06 entry below.
+**Why:** Mason's EPA, docs and field work was waiting 4 hours with nothing of Taha's at stake. Taha asked to keep the database, orders, deliveries, customers, products and shared plumbing on the list, because billing reads them or depends on them.
+**What this forbids/implies:** when unsure whether a PR is on the list, hold it. Rule: `.claude/commands/ship.md` Step 8 item 4a. The merge hold is still a written rule only; the apply hold is enforced by `tahaHoldProblem` in `.claude/hooks/migration-landing-gate-lib.mjs`.
+## 2026-11-09 — Email Confirmation stays a hand send from the screen; two rare duplicates are accepted (KI-25 follow-up)
+
+**Decision (Mason, in session, 2026-11-09: "Yes, allow it"; widened the same morning: "Yes, accept it"):** Email Confirmation keeps sending from the office's screen after `close_delivery_receipt` pauses the server's queued receipt (PR #1678). Three rare cases are accepted: two office users pressing it for the same delivery within seconds can both email the customer; a void in the seconds between the go-ahead and the hand send does not stop that send; and a second office user may mark the paused receipt handled while a hand send is still going, so if that send then fails the receipt is off the list (the sender sees the failure and can press Email Confirmation again).
+**Why:** Sol (round 4) and Luna both asked for the go-ahead to be an exclusive permission that also holds the delivery until the email leaves. That needs a "sending now" lock plus rules for a failed send, or moving the hand send into the server sender: a redesign. The duplicate this work exists to stop, the server emailing a copy after the office sent one, is closed; a delivery that is already not completed is refused (`DELIVERY_NOT_COMPLETED`, checked before any replay).
+**What this forbids/implies:** don't add a sending-now lock or make `paused` an exclusive send permission in `close_delivery_receipt` (`20261221100000`) or make `handled` wait for an in-flight hand send, without re-deciding this; a matching retry of a used key re-checks the same receipt as it is now, never an earlier saved answer, and never acts on a receipt re-queued since (`DELIVERY_RECEIPT_CHANGED`). Closing these fully means sending Email Confirmation through the server sender.
+## 2026-11-09 — KI-30 EPA corrections: the restore check reads history, not today's number; no follow-up check
+
+**Decision (Mason, in chat, 2026-11-09: "drop the check").** The check-only follow-up migration `20261215120000_ki30_epa_followup_checks` (never applied) is dropped from PR #1653. The restore data proof in `supabase/baselines/README.md` keeps requiring a change-history row that set each of the 48 corrected numbers; it does not compare each product's current number.
+**Why.** Sol asked eight rounds running for a stricter check; the stricter one (current number must equal the 2026-11-08 list) would fail a restore whenever the office later edits a number for a real reason, such as a new EPA registration. The correction itself is live (`20261214100000`, ledger `20261108192049`).
+**What this implies:** don't add a current-number check for these 48 products without re-deciding this. If a restore brings back pre-correction numbers, the proof fails and the correction is re-run by hand.
+## 2026-11-09 — Sol round 5 is a hard stop until Mason's trade-off is recorded
+
+**Decision (Mason, 2026-11-09 overnight-run retro: "spin both up in fresh sessions"):** from Sol round 5, `scripts/write-codex-push-proof.mjs` refuses a full Sol run until this log has an entry dated that day or later naming the PR as `#<n>`. Rounds 3–4 keep the warning line.
+**Why:** PR 1653 reached Sol round 8 past the round-3 warning before Mason was asked; he then decided in one message.
+**What this forbids/implies:** at round 5, ask Mason the business trade-off (AGENTS.md Operating Contract), record his answer here naming the PR, commit, then re-run. `--dry-run` and the carries are unaffected. Supersedes the warning-only part of the 2026-11-06 round-count entry.
+
+## 2026-11-09 — Build the name-vs-brand report (CLN-3) before brand entry starts
+
+**Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
+**Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
+**What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
+## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
+
+**Decision (Mason, in session, 2026-11-08: "sometimes the same field is sprayed by both sprayers"; "any sprayer should be able to just pick up field and start spraying, not wait on someone from office"):** when a job already on sprayer A's board is reassigned to B while B is inactive, re-activating B does not move the field off A's board. B, as the job's applicator, already sees the job in the field app and can start and complete it; A keeps the field and can start it.
+**Why:** Taha's review of PR #1652 suggested re-pointing such rows to B. Two sprayers sometimes work the same field, and the board holds one sprayer per field, so moving it would take work away from A. The real-schema proof shows B already gets the job without an office step.
+**What this forbids/implies:** don't make `_sync_job_location_dispatch_on_applicator_qualify` overwrite or replace a dispatch row held by someone else without re-deciding this. A dispatch row whose sprayer differs from `jobs.applicator_id` is allowed, not a defect.
+## 2026-10-13 (recorded 2026-11-08) — no database season check on posting, for now
+
+**Decision (Mason, in chat, 2026-10-13: "skip it").** Posting does not get a database check that refuses an invoice from another season. The "this season only" rule for Post All and Select All stays in the screens (PR #895). Posting an older invoice on purpose from its own page stays allowed.
+**Why.** The only gap is a race: an invoice whose season changes between the screen's check and the posting step. It needs two people editing the same invoice at the same moment and had not happened.
+**What this implies:** the gap stays recorded in `docs/changelog.d/2026-10-12-invoice-lists-season.md`. A later small change may add the check. This entry was only on the unmerged `pra-work` branch until the [2026-11-08 branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md).
+
+## 2026-11-08 — A re-activated applicator's open jobs go straight onto the Dispatch Board (KI-28)
+
+**Decision (Mason, in session, 2026-11-08: "A: show them right away" / "Yes do the recomended option"):** when a person is re-activated or made an applicator, their already-assigned open jobs go straight onto the Dispatch Board even if their license has expired, the same as adding a location to their job today. The license is checked when a job is assigned, and the Expiring Licenses card warns.
+**Why:** holding such jobs back until a license was renewed needed license triggers and locks that Sol found a new same-instant race in three rounds running (PR for KI-28). Dropping the hold-back removes that whole mechanism.
+**What this forbids/implies:** don't re-add a license check to `_sync_job_location_dispatch_on_applicator_qualify` (`20261215100000`) without re-deciding this; a license rule for dispatch belongs at assignment or on the board.
+
+## 2026-11-07 — A product with no EPA number can be given one; old blank invoice lines may then show it
+
+**Decision (Mason, in session, 2026-11-07: "Yes, allow it"):** a parent EPA correction is not blocked by an old invoice line with no EPA copy when that line's size had no number either. Such a line showed none; after the correction, a reader that falls back to the size (the customer year-end summary) shows the added number. Printed invoices and statements print only the line's own copy, so they do not change. A blank line for a size that HAS a number still blocks, because it would show a different number.
+**Why:** Sol (round 3, PR #1611) found that a parent with no number could otherwise never be given one; Luna objected that the old line would change from blank to a number. Showing the product's real label beats a product that can never be fixed.
+**Enforcement:** `_product_parent_identity_after` in `supabase/migrations/20261207113000_parent_epa_correction.sql`, proven by `scripts/smoke/prove-parent-epa-correction-real-schema.mjs`.
+
+## 2026-11-07 — A reversal belongs to the Central day its row was made (KI-18)
+
+**Decision (Mason, in chat, 2026-11-07):** reversing a write-off or a credit application checks only the accounting month of the Chicago (Central) day the write-off or application was made, the day its apply already checked. A row made at 9 pm Central on Oct 31 is October's: a closed October refuses its reversal, a closed November does not.
+**Why:** KI-18 batch 1 checked both the UTC and the Chicago day, so a row made 6/7-11:59 pm Central on a month's last day could not be reversed once either month closed. Live had 0 write-offs and 0 credit applications when this was decided, so no existing row changes month.
+**What this forbids/implies:** don't re-add the UTC-day check to `reverse_credit_memo_application`, `_unapply_return_credit_guard_impl_20260826`, `_void_invoice_split_provenance_impl_20260719` or `_reverse_write_off_replay_impl_20261015` (`20261206110000`).
+
+## 2026-11-07 — Weight per gallon is capped at 20 lb/gal (DM-2 and DM-1 match)
+
+**Decision (Mason, in session, 2026-11-07):** "there is no liquid that heavy, most is 8lb-12lb is normal range of product weights, set them both to 20lbs". DM-2's density limit drops from 25 to 20 lb/gal, matching DM-1's 20 lb/gal strength limit.
+**Why:** the cap is a typo guard; real products run about 8 to 12 lb/gal, and the two sheets disagreed (flagged on PR #1617).
+**Enforcement:** `supabase/migrations/20261207100000_product_weights.sql` (table CHECK and `set_parent_density` range check, changed before its live apply), proven by `scripts/smoke/prove-product-weights-real-schema.mjs`.
+
+## 2026-11-07 — Sol: a test file is not money code by its name alone
+
+**Decision (Mason, in session, 2026-11-07):** a changed test or spec (`__tests__/`, `*.test.*`, `*.spec.*`) no longer needs Sol just because its name carries a money word (`MONEY_PATH_WORDS`). Money code, migrations, Edge Functions and every listed path in `docs/reference/sol-required-paths.md` (tests under those paths included) still need Sol.
+**Why:** on PR #1579 a one-line fix to `src/__tests__/return-credit-remediation-guards.test.ts` (matched by "credit") forced a full Sol of the whole PR after the live apply; that run reopened an unrelated, already-accepted area and cost two more rounds. A test cannot change what ships; the code it tests already needs Sol.
+**Enforcement:** `.claude/hooks/sol-risk-lib.mjs` (`solRiskPathProblem`), proven by `.claude/hooks/sol-risk-lib.test.mjs` (fails before the change, passes after).
+
+## 2026-11-05 — Anyone may quote at a tier other than the customer's; the check stays on the screen (KI-105, To-Do 1.6)
+
+**Decision:** anyone, reps included, may override a customer's assigned price tier on a quote. Quote Builder warns and needs "Use Tier N" or the "Quote at Tier M anyway" tick before Save, for every role; the database never refuses a different tier (Mason, 2026-11-05). Supersedes the 2026-11-05 entry that parked the screen check until a rep-only database rule existed.
+**Why:** the tier is a pricing judgment the person quoting may need to make; the screen check makes it deliberate.
+**What this forbids/implies:** don't build a database refusal of a different tier for reps, and don't describe the screen check as a money invariant.
+## 2026-11-07 — Statements use the AR Aging day ranges; aging takes "today" from the Chicago date
+
+**Decision (Mason, 2026-11-07: "AR Aging ranges"; KI-18 batch 3):** customer statements bucket overdue amounts with the AR Aging page's ranges, 0-29 / 30-59 / 60-89 / 90-119 / 120+ days past due, replacing <=30 / 31-60 / 61-90 / 91-120 / >120. Every statement and aging path counts days from the Chicago date: screens pass `todayInBusinessTz()` (or `localToday()`, the same date), and `get_ar_aging`'s fallback date, the last one on the UTC `CURRENT_DATE`, moves to the Chicago date (`20261208100000`).
+**Why:** a customer's statement and the AR Aging page disagreed about the same invoice at each range edge (30 days past due was "Current" on one and "30-59" on the other). The live database clock is UTC, so from 6 pm CST / 7 pm CDT `CURRENT_DATE` is tomorrow and an invoice moves into the next bucket a day early.
+**What this forbids/implies:** every aging view (AR Aging page, customer page, Financial Dashboard strip, statements) uses one set of ranges; a new one uses them too. A new aging, statement or report function takes its "as of" date from the caller with no default, or defaults to `(now() AT TIME ZONE 'America/Chicago')::date`, never `CURRENT_DATE`.
+
+## 2026-11-06 — Hands off Taha's PRs; he lands his own; we hold ours 4 hours
+
+**Decision (Mason, Slack #crx-work, evening of 2026-11-06 Central, confirming a 2026-11-03 agreement):** (1) Mason's agents never push to a branch or PR Taha owns; they comment findings and Taha fixes them the same day, and an urgent fix is agreed with him first. Billing-rule changes go to Mason and Taha as a decision before any code. (2) Taha's six items, the billing plan included, are his through 2026-12-15 (exact list pending from Taha). (3) From billing-plan M4 on, Taha merges his own PRs; his clean Sol run on the final commit counts for the Sol rule, and he must use at least one non-Anthropic adversarial reviewer. Mason does not review his work or run agents monitoring his PRs. Billing-rule decisions stay with Mason. (4) Mason's agents hold their own Sol-list PRs, before any migration apply and the merge, until Taha submits a review or 4 hours pass after opening.
+**Why:** on 2026-11-06 more than half of PR 1524's commits came from Mason's agents, including a billing-math change later reverted, so Taha's test results no longer matched what would ship and the same agents were writing and reviewing.
+**What this forbids/implies:** narrows the autonomous-landing rule (2026-09-26) for Sol-list PRs. Rules live in `AGENTS.md` and `.claude/commands/ship.md` › Taha's PRs. No guard enforces the push ban or the hold yet: these are prose rules until a guard is built. Mason added the same day that Claude warns him, without blocking, when his own money or billing work may overlap Taha's items; his field application invoice work is his own (`CLAUDE.md`).
+
+## 2026-11-06 — Sol skips the wait for an idle Codex App, and counts its rounds
+
+**Decision (Mason, PR 1524 retro: "do item 1 and 2"):** the Sol pre-flight no longer waits up to 15 minutes for the Codex GitHub App when the App reviewed none of the PR's last 3 pushes, and every full Sol run prints "Sol round N on PR #n".
+**Why:** on PR 1524 the App had stopped reviewing after `c5d7113e8`, yet each Sol round still waited 15 minutes for it; and about 6 rounds went into one rounding mechanism before Mason was asked the trade-off, because no one could see the count.
+**What this forbids/implies:** the wait stays when the App reviewed any of the last 3 pushes or the PR has fewer than 3. From round 3 the wrapper points at the AGENTS.md stop rule (same mechanism a 3rd time: stop and ask Mason the trade-off). A pre-commit control-character check was proposed in the same retro and NOT approved.
+
+## 2026-11-06 — Sprayed jobs lock each product's EPA number (lock per product)
+
+**Decision (Mason, 2026-11-06: "Yes, lock per product"):** once a job is sprayed (spray record saved) or finished, every product already on that job keeps the EPA number the job recorded for it, however its line is edited, deleted or re-added; only a product never on the job takes the product's current number (and then keeps it). On a conflict the older number wins. The lock survives a spray record being deleted and re-entered. Migration 20261204120000, PR #1584.
+**Why:** keeping numbers by job-line identity failed three Sol rounds on the same mechanism (save_job deletes and re-writes every line, so a line's identity does not survive a save). Locking by job and product has no such gap.
+**What this forbids/implies:** kept numbers live in `job_product_epa` (insert-only); a job's unlocked products read `products.epa_registration`. Printouts move to the kept numbers in a follow-up PR. A correction made between the physical spray and its record being entered reaches the job.
+
+## 2026-11-06 — A moved spray record makes its new job "Not recorded"
+
+**Decision (Mason, 2026-11-06: "Mark Not recorded"):** when a spray record is moved to a job that was not yet sprayed or finished, that job's products are kept as "Not recorded", never at the product's current number. A job already sprayed keeps its own numbers. Migration 20261204120000, PR #1584.
+**Why:** Sol found a new HIGH in three rounds in a row, each about a lock filled in when the true history is unknown; a moved record proves nothing about which numbers its new job used. The choice was block (refuse the move) vs loss (allow it, record no number); Mason chose loss, so nothing ever prints an invented number.
+**What this forbids/implies:** a job or product ID that has kept numbers can never be reused (both refused with `JOB_EPA_HISTORY_ID` / `PRODUCT_EPA_HISTORY_ID`).
+
+## 2026-11-06 — Signed-in users cannot write job chemical lines directly
+
+**Decision:** Mason approved removing `authenticated` and `anon` INSERT, UPDATE, DELETE and TRUNCATE on `job_chemicals` (Mason, 2026-11-06: "Yes, remove it"; migration 20261204120000, PR #1584). Reads are unchanged.
+**Why:** job lines are the input to a sprayed job's kept EPA numbers; the app never wrote the table directly (every write goes through save_job and the other definer-rights job functions), so direct writes were only a way around the server's checks.
+**What this forbids/implies:** job lines are written only by server functions; a screen or script that needs a new kind of line write gets an RPC, not a direct grant. Re-granting direct writes is a permission change that needs Mason.
+## 2026-11-06 — Duplicate ingredients are replaced, never linked (DM-1)
+
+**Decision (Mason, 2026-11-06: "Yes, use replace"):** when two active-ingredient entries turn out to be the same chemical, an admin swaps the duplicate out on each product through the normal reviewed chemistry correction, then retires the unused entry. No merge, alias or "merged into" link exists.
+**Why:** in the DM-1 plan, Sol found new HIGHs from the merge alias three rounds running (a decision race, an undo that broke its own rule, a CAS moved by the merge). Duplicates will be rare: a typed CAS number already reuses the existing entry (D-AA-1). Removing the link deletes the whole class of bugs, at the cost of a few more clicks per duplicate.
+**What this forbids/implies:** this refines D-AA (2026-08-27). D-AA-1 now means "a CAS match reuses the entry", and a CAS that already belongs to another entry is refused rather than joined. D-AA-2's side-by-side approval is the possible-duplicates list, which Mason resolves by correction. Plan: `docs/plans/2026-11-06-product-DM1-BUILD-SHEET.md`.
+
+## 2026-11-06 — A Deliveries export may miss a delivery cancelled or reactivated while it runs
+
+**Decision:** Mason accepted that a multi-page Deliveries read (export, load sheet, calendar, driver view) includes every delivery that matches for the whole read exactly once, but a delivery cancelled, reactivated or moved in or out of the filters while it runs may or may not appear, and rows near an edit can sit a place out of order (Mason, 2026-11-06: "A: accept it").
+**Why:** each page of 500 is its own database call, so no snapshot spans the read; three review rounds in a row found a new HIGH in the same multi-page mechanism (PR #1549). The alternatives were a re-check that asks the user to export again, or lifting the 500-row cap Sol required.
+**What this forbids/implies:** `get_deliveries_page` with `p_after_id` and the screen's whole-list reads keep this behaviour; changing it (one snapshot across pages, a lock, or a re-check that refuses or retries the export) needs a new decision from Mason.
+## 2026-11-06 — Cross-checking: whole-branch final Luna round, tests for screen bugs, no Terra; gate-file protection parked
+
+**Decision (Mason, 2026-11-06: "i agree with the plan build it", then "Ship rules, park guards"):** (1) the Luna round that clears a change reads the whole branch at the head to be pushed, not just the newest fix commit; (2) a confirmed BLOCKER/HIGH in a screen that saves, uploads or imports is fixed only with a failing-then-passing test or observed behavior, and disputes are settled by a test or Sol, not Mason; (3) Terra is not added as a second reviewer; (4) Sol stays as it is; (5) putting the gate files themselves back under Sol is parked.
+**Why:** on PR #1494 Luna came back clean on five fix commits while Sol found new HIGH/MED bugs each round (stale replies, in-flight clicks, a lost idempotency key), because Luna read only each fix. Mason first proposed Terra as a second reviewer for off-list changes; web research, a Sol plan review (27 findings) and an independent Opus review agreed that a mid-tier model from the same vendor adds little, and that scope and tests address the miss. The gate-file list was built, but four review rounds in a row (Luna twice, Sol twice) each found a new way around a file-by-file list; Mason first accepted it as best effort, then Sol refused to certify those accepted holes, so he parked it.
+**What this forbids/implies:** never count a `--commit` round as the clearing round. `gpt-6.1-luna` does not exist for this account (re-probed 2026-11-06 beside a bogus control), so Luna stays `gpt-6-luna`; moving Sol to `gpt-6.1-sol` waits for a side-by-side on a known #1494 commit at a time when no Sol proof or parked migration is in flight. If the whole-branch round still misses what Sol finds, try Grok (`cursor` skill) on past cases before adding any reviewer. Open gap, unchanged since 2026-11-01: an edit weakening a gate, or the Sol list itself, lands on green checks. The parked fix is to make the merge gates judge a pull request with `main`'s copy of the Sol list, never the pull request's own, instead of growing a file list.
+
+**Narrowed the same day:** MED/LOW-only fix commits skip the whole-branch rerun (Mason, 2026-11-06, retro: one 5-line hint took four extra Luna rounds on #1572). A commit fixing a BLOCKER/HIGH, adding anything beyond the findings, or touching a rule file (`AGENTS.md`, `CLAUDE.md`, `.claude/`, `.agents/`, `docs/reference/`, `docs/workflows/`) still reruns: those files are the gates and Luna is their only model review (Mason chose this after Luna raised it three rounds running and Sol advised it).
+
 ## 2026-11-06 — A paged list clears its selection on every refresh and page turn
 
 **Decision:** on the paged Orders list, any list read (a page turn, a new search, filter or sort, a refresh after an import or bulk action, a failed read) clears both the ticked rows and "Select All" (Mason, 2026-11-06: "Yes, clear it").

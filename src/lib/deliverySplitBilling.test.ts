@@ -33,6 +33,15 @@ describe('orderRequiresSplitBilling — mirrors ORDER_NEEDS_SPLIT_BILLING', () =
     expect(orderRequiresSplitBilling({ needs_split_billing: undefined })).toBe(false);
   });
 
+  it('allows a flagged Bill Split sale with no field allocations (the backfill drafts per payer)', () => {
+    expect(orderRequiresSplitBilling({ needs_split_billing: true, has_bill_split: true })).toBe(false);
+    expect(orderRequiresSplitBilling({ needs_split_billing: true, has_bill_split: false })).toBe(true);
+  });
+
+  it('still refuses a Bill Split sale that has field allocations', () => {
+    expect(orderRequiresSplitBilling({ needs_split_billing: true, has_bill_split: true, has_field_allocations: true })).toBe(true);
+  });
+
   it('fails open on a missing signal rather than hiding a legitimate button', () => {
     expect(orderRequiresSplitBilling(null)).toBe(false);
     expect(orderRequiresSplitBilling(undefined)).toBe(false);
@@ -151,6 +160,7 @@ describe('the client predicate still matches the shipped server guard', () => {
       expect(guardBlock, where).toMatch(/COALESCE\(needs_split_billing,\s*false\)/);
       expect(guardBlock, where).toMatch(/OR EXISTS/);
       expect(guardBlock, where).toMatch(/FROM order_item_field_allocations/);
+      expect(guardBlock, where).toMatch(/AND NOT public\._order_has_bill_split\(/);
     }
   });
 
@@ -215,5 +225,12 @@ describe('the integrity panel no longer discards server error text', () => {
   it('routes every catch toast through sanitizeError', () => {
     const catchToasts = panel.match(/toast\('error', sanitizeError\(err\)\)/g) || [];
     expect(catchToasts.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('a failed Bill Split is shown at completion', () => {
+  it.each(['src/pages/DeliveryDetail.tsx', 'src/pages/FieldStop.tsx'])('%s warns when the split failed', (file) => {
+    const src = readFileSync(join(process.cwd(), file), 'utf8');
+    expect(src).toMatch(/if \(billSplit\.failed\) \{\s*toast\('warning', (forThisStop\()?billSplitFailedMessage\(/);
   });
 });

@@ -145,6 +145,8 @@ vi.mock('../lib/dateUtils', () => ({
   // and the suite would still have been green. The two dates must differ for that test to
   // discriminate at all.
   todayInBusinessTz: vi.fn(() => '2026-09-30'),
+  latestInvoiceDate: vi.fn(() => '2027-09-30'),
+  invoiceDateTooFarProblem: vi.fn(() => null),
   parseLocalDate: vi.fn((d: string) => new Date(d)),
 }));
 // parseCents is deliberately NOT mocked: the real parser refuses more than two
@@ -906,7 +908,7 @@ describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => 
 });
 
 describe('InvoiceDetail — chemical-sale payment terms', () => {
-  const setupInvoice = (status: string, payment_terms: string | null = null, due_date: string | null = null, customerPaymentTerms: string | null = null) => {
+  const setupInvoice = (status: string, payment_terms: string | null = null, due_date: string | null = null, customerPaymentTerms: string | null = null, extra: Record<string, unknown> = {}) => {
     let invoiceCalls = 0;
     const invoice = {
       id: 'inv-terms',
@@ -926,6 +928,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
       footer_notes: '',
       purchase_order_ref: '',
       created_at: '2026-03-15T00:00:00Z',
+      ...extra,
     };
     mockFrom.mockImplementation((table: string) => {
       if (table === 'invoices') {
@@ -977,6 +980,18 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
       expect(saveCall?.[1].p_invoice).toHaveProperty('due_date', null);
     });
+  });
+
+  it('KI-14: refuses a field invoice custom date equal to the date its terms gave (the database would recalculate it)', async () => {
+    setupInvoice('draft', 'Net 15', '2026-03-30', null, { invoice_type: 'field_application', due_date_is_custom: false });
+    mockIntentAwareRpc({ data: null, error: null });
+    renderInvoiceDetail('inv-terms');
+    await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payment Terms' }), { target: { value: 'Custom date…' } });
+    fireEvent.change(document.querySelector('#custom-due-date') as HTMLInputElement, { target: { value: '2026-03-30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('already this invoice')));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
 
   it('round-trips custom due date with the original custom terms text', async () => {

@@ -130,6 +130,48 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'Return credits are briefly paused while an accounting update finishes. Retry in a moment'],
   [/^ORDER_INVOICE_TERMINAL\b/i,
    'This order invoice is already final and cannot be changed'],
+  [/^BILL_SPLIT_FROZEN\b/,
+   "Nothing was changed. A delivery on this sale is complete and invoiced, so its bill split is locked. Void that delivery's invoices to change the split. Unpost a posted group first, so the sale keeps its commission"],
+  [/^BILL_SPLIT_HAS_DRAFT\b/,
+   "Nothing was changed. A draft invoice bills this sale to one customer. Remove that draft to change the bill split"],
+  [/^BILL_SPLIT_LINES_LOCKED\b/,
+   "Nothing was saved. A Bill Split invoice's product lines follow the split. Void the group to change them; charges can still be added"],
+  [/^ORDER_HAS_BILL_SPLIT\b/,
+   "Nothing was billed. This sale has a bill split, so it is billed per payer. Refresh the page, then choose Create Invoice on the delivery"],
+  [/^ORDER_ITEM_SHARES_OVER_100\b/,
+   "Nothing was changed. A line's shares can't total more than 100%"],
+  [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
+   "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^BILL_SPLIT_SLIVER_LOCKED\b/,
+   "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group"],
+  [/^BILL_SPLIT_CUSTOMER_INACTIVE\b/,
+   "Nothing was changed. This customer is inactive, so they can't be added to a bill split. Reactivate them first"],
+  [/^GROUP_UNPOST_REQUIRED\b/,
+   "Nothing was unposted. This invoice is part of a split group, so the whole group unposts together. Refresh the page and try again"],
+  [/^BILL_SPLIT_QUANTITY_TOO_SMALL\b/,
+   "Nothing was billed. A payer's share of a product is under 0.0001 of a unit. Change the bill split so each payer gets at least 0.0001"],
+  [/^BILL_SPLIT_QUANTITY_TOO_FINE\b/,
+   "Nothing was billed. A delivered amount has more than 4 decimal places, which an invoice line can't hold. Correct it with Fix Delivery, then choose Create Invoice"],
+  [/^RETURN_QUANTITY_TOO_FINE\b/,
+   "Nothing was returned. A return holds 2 decimal places. Enter a quantity like 0.70"],
+  [/^PRICING_INCOMPLETE: price the order before its Bill Split\b/,
+   "Nothing was billed. This sale still needs prices. Price it, then choose Create Invoice on the delivery"],
+  [/^SPLIT_INVOICE_PROVENANCE_IMMUTABLE\b/,
+   "Nothing was changed. This split invoice is locked to its group. Void the group and create a replacement"],
+  [/^ORDER_SHARES_OVER_100\b/,
+   "Nothing was changed. The bill split can't total more than 100%"],
+  [/^ORDER_SHARES_ORDER_IMMUTABLE\b/,
+   "Nothing was changed. A bill split row can't move to another order"],
+  [/^ORDER_ITEM_SHARES_BUSY\b/,
+   "Nothing was changed. A delivery on this sale is being completed. Try again in a moment"],
+  [/^ORDER_ITEM_SHARES_LINE_MOVED\b/,
+   "Nothing was changed. This line moved to another order. Refresh the page and try again"],
+  [/^ORDER_ITEM_SHARES_LINE_MOVE\b/,
+   "Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order"],
+  [/^ORDER_ITEM_SHARES_LINE_IMMUTABLE\b/,
+   "Nothing was changed. A line share can't move to another line"],
+  [/^BILL_SPLIT_NOTHING_TO_BILL\b/,
+   "Nothing was billed. This delivery has no delivered quantity"],
   // create_invoice_from_order refuses an order split across fields (20261022021000): it is billed
   // per field owner. The page offers that path once it sees the order's field allocations.
   [/^ORDER_HAS_FIELD_SPLIT\b/,
@@ -286,8 +328,8 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
   }
-  // Rate lock (20261107060000): the server text after the token is the operator's answer.
-  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG):\s*(.+)$/s)?.[1];
+  // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000): the server text after the token is the operator's answer.
+  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }

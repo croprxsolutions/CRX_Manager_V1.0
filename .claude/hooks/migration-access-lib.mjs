@@ -242,18 +242,23 @@ const MODELLED_ROLES = ["public", "anon", "authenticated", "service_role", "post
 // adds to it, it does not replace it). "table" covers views too. `metabase_ro`'s
 // default read was set outside the migrations at an unknown date, so an object
 // older than it is modelled as having that read — the one known way this model
-// can overstate earlier access.
+// can overstate earlier access. Since 20261123130000 the browser roles get no
+// TRUNCATE, TRIGGER or MAINTAIN on new tables (that file also revoked them from
+// every existing table, so older objects converge on these defaults too).
 const DEFAULT_GRANTS = {
   function: { public: ["execute"], anon: ["execute"], authenticated: ["execute"], service_role: ["execute"], postgres: ["execute"] },
-  table: { postgres: TABLE_PRIVILEGES, authenticated: TABLE_PRIVILEGES, service_role: TABLE_PRIVILEGES, anon: ["select", "maintain"], metabase_ro: ["select"] },
+  table: { postgres: TABLE_PRIVILEGES, authenticated: ["select", "insert", "update", "delete", "references"], service_role: TABLE_PRIVILEGES, anon: ["select"], metabase_ro: ["select"] },
   sequence: { postgres: SEQUENCE_PRIVILEGES, anon: SEQUENCE_PRIVILEGES, authenticated: SEQUENCE_PRIVILEGES, service_role: SEQUENCE_PRIVILEGES },
 };
-// The one ALTER DEFAULT PRIVILEGES in the history that the defaults above already
-// absorb: it removed anon's table writes, and the same file revoked them from
-// every existing table, so objects older than it converge on today's defaults.
-// Any OTHER one means objects created before it started from defaults this
-// model does not know.
-const ABSORBED_DEFAULT_PRIVILEGES_FILE = "20260526151856_execute_full_codebase_ultra_review.sql";
+// The ALTER DEFAULT PRIVILEGES files in the history that the defaults above
+// already absorb: each removed browser-role table privileges from the defaults
+// and, in the same file, from every existing table, so objects older than it
+// converge on today's defaults. Any OTHER one means objects created before it
+// started from defaults this model does not know.
+const ABSORBED_DEFAULT_PRIVILEGES_FILES = new Set([
+  "20260526151856_execute_full_codebase_ultra_review.sql",
+  "20261123130000_revoke_truncate_trigger_maintain.sql",
+]);
 const DYNAMIC_SQL_RE = /\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i;
 // Cheap raw-text test for history files that must be read even when they never
 // name the object: schema-wide grants, grants in dynamic SQL, default privileges.
@@ -594,7 +599,7 @@ function priorFromHistory(objects, history) {
     files.push({ index, name: file.name, named, ...parseHistoryFile(String(file.text || "")) });
   });
   const lastDefaultChange = Math.max(-1, ...files
-    .filter((file) => file.defaultPrivileges && path.basename(String(file.name)) !== ABSORBED_DEFAULT_PRIVILEGES_FILE)
+    .filter((file) => file.defaultPrivileges && !ABSORBED_DEFAULT_PRIVILEGES_FILES.has(path.basename(String(file.name))))
     .map((file) => file.index));
   for (const file of files) {
     if (file.error) {

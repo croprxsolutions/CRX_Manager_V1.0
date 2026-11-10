@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,6 +33,35 @@ try {
   { env: { ...process.env, TMP: crashTmp, TEMP: crashTmp, TMPDIR: crashTmp }, encoding: "utf8" });
   assert.notEqual(crash.status, 0, "the child really crashed");
   assert.deepEqual(readdirSync(crashTmp), [], "a crashed test's temp folder is still removed");
+
+  // Windows briefly locks a folder (antivirus, indexer): removal retries that, and only that.
+  const realRmdir = fs.rmdirSync;
+  const failRmdirWith = (code, times) => {
+    let left = times;
+    fs.rmdirSync = (...args) => {
+      if (left-- > 0) throw Object.assign(new Error(`${code}: stubbed`), { code });
+      return realRmdir(...args);
+    };
+    syncBuiltinESMExports();
+  };
+  try {
+    const busy = tempDir("crx-tempdir-busy-");
+    failRmdirWith("EBUSY", 2);
+    removeTree(busy);
+    assert.equal(existsSync(busy), false, "a briefly busy folder is removed after a retry");
+
+    const denied = tempDir("crx-tempdir-denied-");
+    failRmdirWith("EACCES", 1);
+    assert.throws(() => removeTree(denied), { code: "EACCES" }, "a non-transient error throws at once");
+    assert.equal(existsSync(denied), true, "no retry happened after the non-transient error");
+
+    const stuck = tempDir("crx-tempdir-stuck-");
+    failRmdirWith("EBUSY", 1000);
+    assert.throws(() => removeTree(stuck), { code: "EBUSY" }, "a lock that never clears still fails, boundedly");
+  } finally {
+    fs.rmdirSync = realRmdir;
+    syncBuiltinESMExports();
+  }
   console.log("test-temp-dir: all assertions passed");
 } finally {
   rmSync(outside, { recursive: true, force: true });

@@ -35,6 +35,10 @@ export interface LoaderProductInput {
   total_quantity: number | null;
   /** The quantity's unit label (e.g. "gal", "oz", "lb"). Display only. */
   unit: string | null;
+  /** DM-2: the product, its form and its source job line, so each load's amount is weighed line by line. */
+  product_id?: string | null;
+  product_form?: string | null;
+  source_line_id?: string;
 }
 
 /** How the worksheet assigns acres/product quantities across the computed loads. */
@@ -61,6 +65,9 @@ export interface LoaderLoadProduct {
   /** The amount of this product to put in THIS load (already rounded to 4 dp). */
   amount: number;
   unit: string | null;
+  product_id?: string | null;
+  product_form?: string | null;
+  source_line_id?: string;
 }
 
 /** One tank load: its 1-based number, its spray volume, and the per-product amounts. */
@@ -294,7 +301,8 @@ export function computeLoaderWorksheet(input: LoaderWorksheetInput): LoaderWorks
         amount = Math.max(0, remaining);
       }
       allocated = round4(allocated + amount);
-      loads[i].products.push({ product_name: p.product_name, amount, unit: p.unit });
+      loads[i].products.push({ product_name: p.product_name, amount, unit: p.unit,
+        product_id: p.product_id, product_form: p.product_form, source_line_id: p.source_line_id });
     }
   }
 

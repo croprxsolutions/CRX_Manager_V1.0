@@ -98,6 +98,8 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 | `tote_fill_out` | A fertilizer tote is filled from its Bulk (`fill_tote_from_bulk`, `20261117130000`); its undo writes the opposite sign | Signed: - on the Bulk in its own unit (may go below zero; a shortfall is flagged `requires_review`), + on undo |
 | `tote_fill_in` | The same fill, on the tote | Signed: + whole totes, - on undo |
 
+Admins fill totes from the tote's product page (Tote Fill card, with history and Undo of the newest fill) or the Fill button on the Inventory page. The screen previews first and sends that preview back; the database refuses the fill if anything changed since (`TOTE_FILL_PREVIEW_CHANGED`), and the screen shows the fresh preview to confirm again.
+
 ### Caveats for anyone recomputing stock from the ledger
 
 - **Historical `adjusted` rows are not always available-affecting.** Before

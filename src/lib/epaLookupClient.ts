@@ -2,7 +2,13 @@ import { supabase } from './db';
 import { waitForEpaRequestSlot } from './epaRequestThrottle';
 import type { EpaLookupResult } from '../types';
 
-function isEpaLookupResult(value: unknown): value is EpaLookupResult {
+// A moved registration is always found:false, so a reply that claims both is refused.
+function movedResultValid(result: Partial<EpaLookupResult>): boolean {
+  return result.transferredTo === undefined || result.transferredTo === null
+    || (typeof result.transferredTo === 'string' && result.found === false);
+}
+
+export function isEpaLookupResult(value: unknown): value is EpaLookupResult {
   if (!value || typeof value !== 'object') return false;
   const result = value as Partial<EpaLookupResult>;
   const nullableString = (field: unknown) => field === null || typeof field === 'string';
@@ -39,6 +45,7 @@ function isEpaLookupResult(value: unknown): value is EpaLookupResult {
     && nullableString(result.productStatus)
     && typeof result.isCancelled === 'boolean'
     && nullableString(result.latestLabelPdfUrl)
+    && movedResultValid(result)
     && activeIngredientsValid
     && labelPdfsValid;
 }

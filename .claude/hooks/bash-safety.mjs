@@ -19,6 +19,7 @@
 import { readFileSync } from "node:fs";
 import { checkCommandDeep, checkMigrationModify, checkAskDeep } from "./bash-safety-lib.mjs";
 import { literalReadOnlySearch } from "./read-only-search-lib.mjs";
+import { commandWithoutTextHeredocs } from "./codex-push-lib.mjs";
 
 function out(decision, reason) {
   const payload = decision === "block"
@@ -39,8 +40,11 @@ try {
   out("allow");
 }
 
-const cmd = payload?.tool_input?.command || "";
-if (!cmd) out("allow");
+const rawCmd = payload?.tool_input?.command || "";
+if (!rawCmd) out("allow");
+// Here-document text that only `cat`/`tee` write is not a command
+// (2026-11-07). Bash only: PowerShell has no here-documents.
+const cmd = payload?.tool_name === "Bash" ? commandWithoutTextHeredocs(rawCmd) : rawCmd;
 // A plain search runs nothing, so a quoted pattern such as 'rm -rf' or
 // 'git reset --hard' is text, not the command it names (2026-10-27).
 if (literalReadOnlySearch(cmd)) out("allow");

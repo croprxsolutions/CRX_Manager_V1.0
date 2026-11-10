@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-06 (America/Chicago), for the live ledger only (permission tightening applied, ledger `20261106062807`); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
+**Last verified:** 2026-11-09 (America/Chicago), for the live ledger only (latest live row `20261109123130`); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
@@ -284,6 +284,40 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **2026-11-09 (PR #1663):** `customer-document-files` Edge Function deployed to v6 (admins can download removed
+  documents to check before restoring); verified ACTIVE, byte-identical to the PR, caller path exercised by Mason.
+- **2026-11-08 evening Central (KI-25, PR #1647):** the new `send-delivery-receipts` Edge Function was deployed live as
+  v1 with `verify_jwt` off on Mason's in-chat approval ("ok deploy it"), through the Supabase connector with main's
+  `index.ts`, `logic.ts` and `_shared/` `sentry.ts`, `deliveryReceiptHtml.ts`. The downloaded live copy matches main
+  file for file. It has nothing to send until the app switch (PR #1649) lands; Mason stores its secrets in the dashboard.
+- **2026-11-08 4:02 PM Central (KI-30, PR #1648):** the `epa-lookup` Edge Function was deployed live as v7 (was v6)
+  on Mason's in-chat approval ("Yes, deploy it"), through the Supabase connector with main `700677517`'s
+  `index.ts`, `logic.ts` and `_shared/` `cors.ts`, `auth.ts`, `sentry.ts`.
+  - What changed: a number EPA moved now reports the new number (`transferredTo`, with `found: false` so older screens
+    never apply the new record to the old number), and an unlisted C-P-D distributor number is confirmed through EPA's
+    registration search and then takes its base C-P record's label facts.
+  - ACTIVE, with JWT checking on. Smoke from Mason's live admin session: 524-475 returned "moved to 105211-77" and
+    62719-671-55467 returned VOLLEY ATZ NXT, both HTTP 200; the function booted with no `SENTRY_MISCONFIG` line.
+- **2026-11-06 10:22 AM Central (KI-14, PR #1556):** the `send-email` Edge Function was deployed live as v28 (was
+  v27) on Mason's in-chat approval ("Yes, deploy it"), with `supabase functions deploy send-email --use-api --yes`
+  from main `d5e7884d2`'s `supabase/functions`; all 14 downloaded files matched main byte for byte.
+  - What changed: an emailed field-application invoice PDF with no stored due date prints the date its owner's terms
+    give (blank terms print as Net 30, the database default); other invoice types and closed invoices keep
+    "On receipt". The only other difference from v27 is the new `_shared/paymentTerms.ts` helper.
+  - ACTIVE, with JWT checking on. Smoke: a signed-out POST got 401 and the OPTIONS preflight 200.
+  - Caller path NOT exercised yet: no email had gone through v28 when this was written. The rollback is redeploying
+    v27 (main before `d5e7884d2`).
+- **2026-11-06, 06:03–14:29 UTC (12:03 AM–8:29 AM Central; KI-38 Sentry startup check, PR #1545):** all eight
+  Edge Functions were redeployed through the Supabase connector, each on Mason's own in-chat approval:
+  `epa-lookup` v6, `setup-blend-tickets-storage` v20, `customer-document-files` v3, `process-document` v22,
+  `process-blend-ticket` v27, `reset-user-password` v17, `create-user` v26, `send-email` v27.
+  - What changed: each function logs an ERROR-level `[SENTRY_MISCONFIG]` line at every cold start if `SENTRY_DSN`
+    is missing or malformed, and never stops serving. Nothing else changed.
+  - Checks for each: the live files matched main `f885e5d7a` byte for byte, the startup check appears once, a
+    signed-out POST got 401, the OPTIONS preflight got 200, and the new version booted with no `[SENTRY_MISCONFIG]`
+    line (so the live key is present and well-formed). JWT checking stays on.
+  - Not exercised: no signed-in call went through any function after its redeploy. The only change is a startup
+    log line, and every function booted cleanly.
 - **2026-11-06 ~01:00 UTC (about 7 PM Central, 2026-11-05; #1302 send-email follow-ups, PR #1515):**
   the `send-email` Edge Function was deployed live as v26 (was v25) on Mason's in-chat approval ("Yes, deploy"),
   with `supabase functions deploy send-email --use-api`; the function files matched main `0e41b3f` byte for byte.
@@ -539,7 +573,8 @@ Grouped, one-liner summary of what is LIVE in production today (see
 - **Field Mode:** `/my-route` driver workspace for applicators/drivers.
 - **EPA label lookup + data quality:** Wave 1 per-product "Look up EPA"
   lookup, admin `/label-data-quality` bulk EPA registration-number
-  check-and-fix tool.
+  check-and-fix tool, and its read-only "Brands in product names" check
+  (CLN-3, 2026-11-09): bracketed brands in a name versus the brand list.
 - **Lot capture/trace:** lot numbers captured and traceable through the
   chemical supply chain.
 - **PDF outputs:** invoices, statements, quotes, and delivery slips.

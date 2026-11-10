@@ -136,6 +136,17 @@ SELECT '_assert_quote_prices_as_sent:caller-lost:' || gate.sig AS violation_key,
     WHERE p.oid = to_regprocedure(gate.sig)
       AND regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g') ~ 'PERFORM\s+public\._assert_quote_prices_as_sent\s*\('
  )
+ -- KI-10 batch 4e (20261123110000) renames the reviewed create_job_from_quote_section body
+ -- unchanged to _create_job_from_quote_section_replay_impl_20261015 behind a receipt wrapper.
+ -- That shape is accepted only with the exact reviewed wrapper and the renamed body still calling
+ -- the check; any other shape is still reported.
+   AND NOT (gate.sig = 'public.create_job_from_quote_section(uuid,uuid,uuid,text)'
+     AND EXISTS (SELECT 1 FROM pg_proc w
+                  WHERE w.oid = to_regprocedure(gate.sig)
+                    AND encode(sha256(convert_to(w.prosrc, 'UTF8')), 'hex') = 'b5386d018fc4f514433d1ed92a80e0ec59b55ab3acea8ba5522b1fdf0655f71d')
+     AND EXISTS (SELECT 1 FROM pg_proc i
+                  WHERE i.oid = to_regprocedure('public._create_job_from_quote_section_replay_impl_20261015(uuid,uuid,uuid,text)')
+                    AND regexp_replace(regexp_replace(i.prosrc, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g') ~ 'PERFORM\s+public\._assert_quote_prices_as_sent\s*\('))
 
 UNION ALL
 

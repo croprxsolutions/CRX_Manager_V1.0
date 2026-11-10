@@ -49,6 +49,33 @@ describe('LoginPage', () => {
     expect(screen.getByText('Back')).toBeInTheDocument();
   });
 
+  it('shows and hides the password without submitting', () => {
+    renderLogin();
+    const password = screen.getByLabelText('Password');
+    expect(password).toHaveAttribute('type', 'password');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(password).toHaveAttribute('type', 'text');
+    expect(mockSignIn).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(password).toHaveAttribute('type', 'password');
+  });
+
+  it('hides a shown password again on submit', async () => {
+    mockSignIn.mockResolvedValue({ error: 'Invalid login' });
+    renderLogin();
+    const password = screen.getByLabelText('Password');
+    fireEvent.change(screen.getByLabelText('Email Address'), { target: { value: 'test@test.com' } });
+    fireEvent.change(password, { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+
+    fireEvent.click(screen.getByText('Sign In'));
+
+    await waitFor(() => expect(mockSignIn).toHaveBeenCalled());
+    expect(password).toHaveAttribute('type', 'password');
+  });
+
   it('submits form and navigates on successful login', async () => {
     mockSignIn.mockResolvedValue({ error: null });
     renderLogin();

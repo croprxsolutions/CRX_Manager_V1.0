@@ -30,12 +30,35 @@ import { supabase } from './db';
 import { fetchChemicalApplicationReportData } from './chemicalApplicationReportFetch';
 import { isGallonCapacityUnit } from './loaderWorksheet';
 import { sanitizeError } from './errorSanitizer';
-import type { MasterMixJobInput, MasterMixExcludedJob } from './masterMixSummaryData';
+import { fetchProductWeights } from './productWeights';
+import { Sentry } from './sentry';
+import type { MasterMixJobInput, MasterMixExcludedJob, MasterMixWeights } from './masterMixSummaryData';
 
 /** The fetch result: the jobs to combine + the jobs that must be shown as excluded. */
 export interface MasterMixFetchResult {
   jobs: MasterMixJobInput[];
   excluded: MasterMixExcludedJob[];
+  /** Current approved weights for every product in the batch (DM-2), or why they could not be read. */
+  weights: MasterMixWeights;
+}
+
+/**
+ * Current weights for every product in the batch, from one `get_product_weights` read. A failed read never
+ * stops the summary: the amounts still print, with the reason in place of the weights (DM-2 sheet 4.2, 7).
+ */
+export async function fetchMasterMixWeights(jobs: readonly MasterMixJobInput[]): Promise<MasterMixWeights> {
+  const ids = [...new Set(jobs.flatMap((j) => j.data.products.map((p) => p.product_id)).filter((id): id is string => !!id))];
+  try {
+    const read = await fetchProductWeights(ids);
+    const byProductId = Object.fromEntries(Object.entries(read.products ?? {}).map(([id, entry]) => [id, entry.found ? entry.weight : undefined]));
+    return { byProductId, units: read.units };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Too many products to weigh at once') {
+      return { unavailable: 'Too many products to weigh at once: select fewer jobs' };
+    }
+    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { level: 'warning', extra: { context: 'master_mix_weights' } });
+    return { unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' };
+  }
 }
 
 /** The loads-input columns we read per job (capacity/rate + vehicle gallon capacity). */
@@ -70,7 +93,7 @@ interface LoadsInputs {
  */
 export async function fetchMasterMixSummaryData(jobIds: string[]): Promise<MasterMixFetchResult> {
   const uniqueIds = [...new Set(jobIds)];
-  if (uniqueIds.length === 0) return { jobs: [], excluded: [] };
+  if (uniqueIds.length === 0) return { jobs: [], excluded: [], weights: { byProductId: {}, units: { factors: {}, ambiguous: [] } } };
 
   // One batched read of the loads inputs (capacity/rate + vehicle gallon capacity) for the
   // whole selection — derive the EFFECTIVE gallon capacity per job exactly as #10 does. A
@@ -139,7 +162,7 @@ export async function fetchMasterMixSummaryData(jobIds: string[]): Promise<Maste
     }
   }
 
-  return { jobs, excluded };
+  return { jobs, excluded, weights: await fetchMasterMixWeights(jobs) };
 }
 
 /**

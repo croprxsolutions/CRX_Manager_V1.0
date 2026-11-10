@@ -1634,6 +1634,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
     state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
+    // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
+    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
@@ -1652,7 +1654,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
-    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined } = {}) => evaluateLandingGate({
+    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1675,6 +1677,15 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         if (crError) throw crError;
         assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
         return requirementAnswer(crStatuses, crHead);
+      }
+      // The teammate-comment read (teammate-comments-lib.mjs): \`mates\` are plain PR comments.
+      if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /reviews\(last:100\)/.test(String(a)))) {
+        if (matesError) throw matesError;
+        assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
+        const page = (nodes) => ({ pageInfo: { hasPreviousPage: false }, nodes });
+        return JSON.stringify({ data: { repository: { pullRequest: { author: { login: "masonwells1" },
+          comments: { pageInfo: { hasPreviousPage: matesMore }, nodes: mates },
+          reviews: page([]), reviewThreads: page([]) } } } });
       }
       if (args[0] === "api" && args[1] === "graphql") {
         if (threadsError) throw threadsError;
@@ -1734,6 +1745,27 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "uncommitted changes", "an edited-after-commit migration is refused");
   refused(gate({ prError: new Error("no pull requests found") }), "could not find or read the open pull request", "no PR is refused");
   refused(gate({ pr: { state: "MERGED" } }), "is not open", "a closed or merged PR is refused");
+  // TAHA'S 4-HOUR HOLD (Mason, 2026-11-06; enforced 2026-11-08). Every migration
+  // PR is on the Sol list (supabase/), so a young PR waits for Taha or 4 hours.
+  {
+    const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const otherReview = readyPr.reviews;
+    refused(gate({ pr: { createdAt: young } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
+    refused(gate({ pr: { createdAt: young, comments: [{ author: { login: "someoneelse" }, body: "lgtm" }] } }),
+      "4-hour review hold", "another person's comment does not lift the hold");
+    refused(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
+      "4-hour review hold", "Taha's unposted (PENDING) review does not lift the hold");
+    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }] } }).ok === true,
+      "a Taha comment lifts the hold on a young PR");
+    ok(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "COMMENTED" }] } }).ok === true,
+      "a posted Taha review lifts the hold on a young PR");
+    ok(gate({ pr: { createdAt: young, author: { login: "TahaKhanAbdalli" } } }).ok === true,
+      "Taha's own PR is not held for Taha");
+    ok(gate({ pr: { createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000 - 1000).toISOString() } }).ok === true,
+      "a PR just over 4 hours old passes with no Taha comment");
+    refused(gate({ pr: { createdAt: undefined } }), "cannot be checked", "an unreadable open time fails closed");
+    refused(gate({ pr: { createdAt: young, comments: undefined } }), "cannot be checked", "an unreadable comment list fails closed");
+  }
   // Sol HIGH, round 7: the PR's head must already contain its base.
   refused(gate({ behindBy: "2\n" }), "does not contain its base", "a PR head behind main is refused");
   refused(gate({ behindBy: new Error("HTTP 502") }), "does not contain its base", "an unanswerable compare fails closed");
@@ -1818,6 +1850,15 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "could not be read completely", "a thread whose author cannot be read refuses the apply");
   refused(gate({ threadsHead: "d".repeat(40) }), "head moved while it was being checked",
     "a thread answer for a different head refuses the apply");
+  // Mason, 2026-11-08: Taha's plain PR comment blocks the live apply until answered, as it blocks the merge.
+  const TAHA_URL = "https://github.com/x/y/pull/900#issuecomment-5";
+  const tahaSays = { author: { __typename: "User", login: "TahaKhanAbdalli" }, url: TAHA_URL, body: "this breaks rush pricing" };
+  refused(gate({ mates: [tahaSays] }), TAHA_URL, "an unanswered Taha comment refuses the apply");
+  ok(gate({ mates: [tahaSays, { author: { __typename: "User", login: "masonwells1" }, url: "u2", body: `${TAHA_URL} fixed in abc` }] }).ok === true,
+    "a Taha comment answered with its link does not block");
+  ok(gate({ mates: [{ author: { __typename: "Bot", login: "vercel" }, url: "u3", body: "deployed" }] }).ok === true, "a bot comment does not block");
+  refused(gate({ matesError: new Error("HTTP 502") }), "cannot be ruled out", "an unreadable comment list refuses the apply");
+  refused(gate({ matesMore: true }), "more comments than the gate reads", "a partly read comment list refuses the apply");
   refused(gate({ pr: { mergeStateStatus: "BLOCKED" } }), "not merge-ready", "a PR that is not CLEAN is refused");
   refused(gate({ pr: { statusCheckRollup: [{ ...readyPr.statusCheckRollup[0], conclusion: "FAILURE" }] } }), "not merge-ready",
     "a failed check is refused");

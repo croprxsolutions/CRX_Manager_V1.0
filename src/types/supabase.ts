@@ -2172,6 +2172,44 @@ export type Database = {
           },
         ]
       }
+      customer_document_restores: {
+        Row: {
+          customer_id: string
+          document_id: string
+          id: string
+          removed_at: string
+          removed_by: string | null
+          restored_at: string
+          restored_by: string
+        }
+        Insert: {
+          customer_id: string
+          document_id: string
+          id?: string
+          removed_at: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by: string
+        }
+        Update: {
+          customer_id?: string
+          document_id?: string
+          id?: string
+          removed_at?: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_document_restores_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "customer_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_facts: {
         Row: {
           category: string
@@ -4984,6 +5022,7 @@ export type Database = {
           discount_date: string | null
           discount_earned_cents: number
           due_date: string | null
+          due_date_is_custom: boolean
           end_humidity_pct: number | null
           end_temp_f: number | null
           end_weather_source: string | null
@@ -5051,6 +5090,7 @@ export type Database = {
           discount_date?: string | null
           discount_earned_cents?: number
           due_date?: string | null
+          due_date_is_custom?: boolean
           end_humidity_pct?: number | null
           end_temp_f?: number | null
           end_weather_source?: string | null
@@ -5118,6 +5158,7 @@ export type Database = {
           discount_date?: string | null
           discount_earned_cents?: number
           due_date?: string | null
+          due_date_is_custom?: boolean
           end_humidity_pct?: number | null
           end_temp_f?: number | null
           end_weather_source?: string | null
@@ -6758,6 +6799,48 @@ export type Database = {
           },
           {
             foreignKeyName: "order_item_field_allocations_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_item_shares: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          order_item_id: string
+          split_percentage: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          order_item_id: string
+          split_percentage: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          order_item_id?: string
+          split_percentage?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_shares_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_shares_order_item_id_fkey"
             columns: ["order_item_id"]
             isOneToOne: false
             referencedRelation: "order_items"
@@ -11570,6 +11653,7 @@ export type Database = {
           discount_date: string | null
           discount_earned_cents: number | null
           due_date: string | null
+          due_date_is_custom: boolean | null
           end_humidity_pct: number | null
           end_temp_f: number | null
           end_weather_source: string | null
@@ -13911,6 +13995,17 @@ export type Database = {
         Returns: Json
       }
       get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
+      get_bill_split_payers: {
+        Args: {
+          p_invoice_id: string
+        }
+        Returns: {
+          farm_name: string | null
+          id: string
+          invoice_number: string | null
+          total_amount_cents: number | null
+        }[]
+      }
       get_bottom_line_pnl: {
         Args: { p_end_date: string; p_start_date: string }
         Returns: {
@@ -14058,6 +14153,45 @@ export type Database = {
         Returns: Json
       }
       get_dashboard_action_items: { Args: { p_limit?: number }; Returns: Json }
+      get_deliveries_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_after_id?: string
+          p_customer_id?: string
+          p_date_from?: string
+          p_date_to?: string
+          p_driver_id?: string
+          p_limit?: number
+          p_offset?: number
+          p_priority?: string
+          p_search?: string
+          p_sort_desc?: boolean
+          p_sort_key?: string
+          p_statuses?: string[]
+          p_today: string
+          p_week_start: string
+        }
+        Returns: Json
+      }
+      get_deliveries_page: {
+        Args: {
+          p_after_id?: string
+          p_customer_id?: string
+          p_date_from?: string
+          p_date_to?: string
+          p_driver_id?: string
+          p_limit?: number
+          p_offset?: number
+          p_priority?: string
+          p_search?: string
+          p_sort_desc?: boolean
+          p_sort_key?: string
+          p_statuses?: string[]
+          p_today: string
+          p_week_start: string
+        }
+        Returns: Json
+      }
       get_delivery_receipt_recipient: {
         Args: { p_delivery_id: string }
         Returns: Json
@@ -14444,6 +14578,23 @@ export type Database = {
       }
       get_open_booking_rollover: {
         Args: { p_customer_id?: string; p_season?: number }
+        Returns: Json
+      }
+      get_orders_keyset_page: {
+        Args: {
+          p_after?: Json
+          p_from: string
+          p_limit?: number
+          p_needs_split_billing?: boolean
+          p_offset?: number
+          p_planned?: boolean
+          p_pricing_status?: string
+          p_search?: string
+          p_sort_dir?: string
+          p_sort_key?: string
+          p_status?: string
+          p_to: string
+        }
         Returns: Json
       }
       get_orders_page: {
@@ -16083,6 +16234,7 @@ export type Database = {
           p_payment_terms?: string
           p_performed_by?: string
           p_purchase_order_ref?: string
+          p_terms_by_invoice?: Json
         }
         Returns: Json
       }

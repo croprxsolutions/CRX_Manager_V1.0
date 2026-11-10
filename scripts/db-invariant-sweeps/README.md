@@ -53,6 +53,7 @@ This runner makes those queries **standing executable gates** that run **before*
 | `office-only-pricing-secdef-gates.sql` | `compute_application_service_fee` and `get_program_completion` keep their in-body office-role gate, SECURITY DEFINER, and pinned `search_path` | **zero** |
 | `profile-role-lock-insert-arm.sql` | the profile role-lock trigger covers INSERT as well as UPDATE (closes the delete-and-reinsert-as-admin path) | **zero** |
 | `quote-price-lock-boundary.sql` | `_assert_quote_prices_as_sent` keeps its shape, reviewed body and four callers; `quote_price_changes` is browser read-only with RLS on and `save_quote` as its only writer; the browser cannot write `quotes.expires_at` | **zero** |
+| `browser-table-maintenance.sql` | `anon` or `authenticated` can TRUNCATE, TRIGGER or MAINTAIN a public table or view by any route, or belongs to another role | **zero** once `20261123130000` is applied (before it, the 462 grants it removes all show) |
 | `quote-versions-rpc-owned.sql` | `quote_versions` has no browser write path; only the owner-side RPC writes version snapshots | **zero** |
 | `return-credit-intent-binding.sql` | the six return RPC entry points and the shared credit-reversal helper are the exact reviewed actor/intent wrappers | **zero** |
 | `section9-po-ap-controls.sql` | PO on-order cache equals the open PO remainder; browsers cannot mutate vendors or vendor bills; active bills do not reference deleted vendors or draft/cancelled POs; the remediated AP RPCs keep their fail-closed controls | **zero** |

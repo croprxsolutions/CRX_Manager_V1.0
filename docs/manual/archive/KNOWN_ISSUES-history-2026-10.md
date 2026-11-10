@@ -7160,6 +7160,21 @@ Inventory pages through all products on mount to label inactive rows; product st
 
 ---
 
+## KI-18 (part) — Screens took "today" from the browser clock or cut the day at UTC midnight: FIXED 2026-11-06
+
+Branch `claude/ki18-remaining-dates`. The shared helpers `localToday()` and `localDatePlusDays()` in
+`src/lib/dateUtils.ts` now return the America/Chicago date, so every screen that defaults a date or a "last N days"
+window from them (about 35, including the CustomerDetail 90-day window) follows Chicago on any device clock. The
+reports' Last 30d / Last 90d buttons use them too. Two filters that cut the day at UTC midnight now cut at Chicago
+midnight (`businessDayStartIso()`): the closed-invoice season window on the Invoices and Field Invoices lists, and the
+TeamBoard activity date filter. A TeamBoard task is overdue only after its due day, by the Chicago date. Rebate
+program and quote-rollover year defaults use the Chicago year. The invoice date boxes stop 365 days ahead
+(`latestInvoiceDate()`). The original May 2026 review's three filters are covered: the Invoices season filter and the
+TeamBoard date filter as above, and the CustomerDetail 90-day window through the shared helper.
+Proof: `src/lib/tests/dateUtils.test.ts` (Chicago evening on Sept 30 and Dec 31) fails on the old helpers;
+`src/lib/dateUtils.test.ts` covers the day-start helper across both daylight-saving changes; `ReportShell.test.tsx`
+covers the 30/90-day buttons at 9 PM Central on Sept 30.
+
 ## KI-18 (part) — Client season read the browser clock: FIXED 2026-11-05
 
 Branch `claude/ki18-season-central-1f821d`. `computeSeason()` and `getSeasonDates()` in `src/utils/season.ts` now
@@ -7179,3 +7194,21 @@ Original text:
 - Client season reads use the browser clock (`src/utils/season.ts:14`). The important one is the pre-harvest-
   interval warning in `src/pages/JobDetail.tsx:1449`: a wrong season at the 1 October boundary can silently
   suppress the warning. MED (safety).
+
+### Closed 2026-11-08 — KI-89, KI-90, KI-91
+
+KI-89 was already fixed live by `20261204100000_ki18_batch1_chicago_today` (applied 2026-11-06), which re-emitted the position body after WP-PM-3 with Chicago dates; confirmed by a read-only live query on 2026-11-08. KI-90 and KI-91 are now covered by `scripts/smoke/prove-product-retire-race-and-negative-stock-real-schema.mjs`, which replays every migration on `main`.
+
+Original text:
+
+### KI-89 — Inventory position uses UTC dates
+**LOW · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+The re-emitted position body still uses `CURRENT_DATE` for season start and hold expiry, unchanged from its prior body.
+
+### KI-90 — Reopen race needs proof
+**MED · UNVERIFIED · product database · LOCAL CANDIDATE — NOT APPLIED**
+The reopen race through `set_product_active` has no automated real-schema proof.
+
+### KI-91 — Retired negative stock needs proof
+**MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
+A retired product with a negative balance in the position report was checked by hand only.

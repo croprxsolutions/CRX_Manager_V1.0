@@ -265,8 +265,9 @@ export default function FinancialDashboard() {
   // AR Aging bar calculations
   const agingBuckets = [
     { label: 'Current', value: data.arAgingBuckets.current, color: 'bg-emerald-500' },
-    { label: '31-60', value: data.arAgingBuckets.days_31_60, color: 'bg-amber-500' },
-    { label: '61-90', value: data.arAgingBuckets.days_61_90, color: 'bg-orange-500' },
+    // Days past due, the same ranges as the AR Aging page (KI-18); the keys keep their old names.
+    { label: '30-59', value: data.arAgingBuckets.days_31_60, color: 'bg-amber-500' },
+    { label: '60-89', value: data.arAgingBuckets.days_61_90, color: 'bg-orange-500' },
     { label: '90+', value: data.arAgingBuckets.days_90_plus, color: 'bg-red-500' },
   ];
   const maxAgingBucket = Math.max(...agingBuckets.map((b) => b.value), 1);

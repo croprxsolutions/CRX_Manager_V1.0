@@ -7,6 +7,36 @@
     "area_tags": "Every spec carries an \"area\" array (business-area tags: billing, inventory, lifecycle, pricing, security, idempotency, regression). run-smoke.mjs --area <area> selects by tag; scripts/run-area.mjs bundles these with the matching vitest slice and DB invariant sweeps."
   },
   "specs": {
+    "get_deliveries_page": {
+      "chain": "smoke-goal4-deliveries-page.sql",
+      "container_prover": "prove-deliveries-page-real-schema.mjs",
+      "area": ["regression"],
+      "description": "REQUIRES 20261130100000. Goal 4 Deliveries list, read only, as the authenticated role: as the oldest active admin, pages of 50 equal the full read (pages of 500 joined) for the default order, customer_name ascending and item_count descending, with no repeated id, and the read by id (pages of 500 after the last id) returns the same rows in id order; total_count and the summary's visible_count equal a direct count of deliveries not cancelled or voided, open_count equals the open rows; searching the last row's delivery number finds it; p_limit 501, p_limit NULL and an id cursor with an offset are refused; the active driver with the most deliveries sees exactly the deliveries assigned to them; the oldest active sales rep sees every delivery an admin sees; an active user of any other role with no delivery assigned to them sees none (row level security still shows anyone a delivery assigned to them).",
+      "covers": [
+        "get_deliveries_page"
+      ]
+    },
+    "get_deliveries_keyset_page": {
+      "chain": "smoke-goal4-deliveries-keyset-page.sql",
+      "container_prover": "prove-deliveries-page-real-schema.mjs",
+      "area": ["regression"],
+      "description": "REQUIRES 20261202100000. Goal 4 Deliveries list bookmark paging, read only: as the oldest active admin under the authenticated role, for the default order, customer_name ascending, priority descending and item_count descending, following next_cursor in pages of 7 lists exactly the offset read (pages of 500 joined) in the same order and the last page has no next_cursor; get_deliveries_page (now its wrapper) returns the same first page; a bookmark from another sort is refused; the busiest active driver's bookmark pages hold only deliveries assigned to them.",
+      "covers": ["get_deliveries_keyset_page", "get_deliveries_page"]
+    },
+    "get_orders_keyset_page": {
+      "chain": "smoke-goal4-orders-keyset-page.sql",
+      "area": ["regression"],
+      "description": "REQUIRES 20261125100000. Goal 4 Orders list bookmark paging, read only: as the oldest active admin under the authenticated role, following next_cursor in pages of 7 through the current season lists each order once in (order_date DESC, id) order with total_count and total_price_cents equal to the table, get_orders_page (now its wrapper) returns the same first page, a bookmark from another sort is refused; an active driver, when one exists, sees no order.",
+      "covers": ["get_orders_keyset_page", "get_orders_page"]
+    },
+    "ops_replay_binding_batch4e": {
+      "chain": "smoke-ops-replay-binding-batch4e.sql",
+      "container_only": true,
+      "container_prover": "prove-ops-replay-binding-batch4e-real-schema.mjs",
+      "description": "CONTAINER ONLY. After batch 4c and the app key PR, proves the 15 operations functions require a key (except the three PR #1518 began keying, whose keyless call runs the unchanged body with no receipt), preserve pre-replay checks, and bind any written receipt to its actor and full request. Uses invented records and rolls back.",
+      "covers": ["confirm_job_notification_sent", "record_job_pre_notifications", "record_job_post_notifications", "log_failed_notification", "apply_remaining_prepayments", "batch_apply_all_prepayments", "assign_job_applicator", "dispatch_job_locations", "undispatch_job_locations", "start_job", "create_job_from_quote_section", "update_field_app_applied_info", "create_quote_from_template", "rollover_quote_to_season", "save_quote_template"],
+      "area": ["idempotency", "security", "regression"]
+    },
     "get_orders_page": {
       "chain": "smoke-goal4-orders-page.sql",
       "area": ["regression"],
@@ -68,6 +98,46 @@
       ],
       "area": [
         "pricing",
+        "security"
+      ]
+    },
+    "build_product_parent_proposal": {
+      "chain": "smoke-product_parent_proposals.sql",
+      "container_prover": "prove-product-parent-review-fixes-real-schema.mjs",
+      "description": "REQUIRES 20261203110000. Product parent proposals (PAR-2): anon cannot execute the six public PAR-2 functions; on three invented two-size products an admin builds a proposal (a same-key retry answers the same) that proposes each as one EPA-number group, approves the first (a same-key retry answers the same) so both sizes join one new parent, refuses a hold without a reason, holds the second and rejects the third with reasons; the old per-size brand writer refuses a grouped size PRODUCT_BRANDS_BELONG_TO_PARENT; a parent brand is added, read through a size by get_product_brands, and retired with a reason (created and retired events logged); an active sales rep, driver, applicator and commission-recipient profile are refused ADMIN_REQUIRED.",
+      "covers": [
+        "build_product_parent_proposal",
+        "approve_product_parent_groups",
+        "hold_product_parent_group",
+        "reject_product_parent_group",
+        "upsert_parent_brand",
+        "get_product_brands",
+        "upsert_product_brand",
+        "product_parent_proposals",
+        "product_parent_proposal_groups",
+        "product_parent_brands",
+        "product_parent_brand_events",
+        "product_parent_brand_sources"
+      ],
+      "area": [
+        "pricing",
+        "security",
+        "idempotency"
+      ]
+    },
+    "set_parent_density": {
+      "chain": "smoke-product_weights.sql",
+      "container_prover": "prove-product-weights-real-schema.mjs",
+      "description": "REQUIRES 20261207100000. Product weights (DM-2): anon cannot execute the public weight functions and a signed-in user cannot call the private density draft helper; on invented liquid parents an admin sets a measured 9.5 lb/gal and the size reads it, a same-key retry replays, 20.00005 is refused PRODUCT_WEIGHT_OUT_OF_RANGE and exactly 20 saves, an older version is refused PRODUCT_WEIGHT_STALE, a label draft is unread until approve_weights approves it; an active sales rep is refused ADMIN_REQUIRED.",
+      "covers": [
+        "set_parent_density",
+        "approve_weights",
+        "get_product_weights",
+        "_save_parent_density_draft",
+        "_product_weight"
+      ],
+      "area": [
+        "inventory",
         "security"
       ]
     },
@@ -2000,11 +2070,29 @@
       "covers": ["retire_uncertain_request"],
       "area": ["idempotency", "regression"]
     },
+    "chem_sale_bill_split_invoices": {
+      "chain": "smoke-chem-sale-bill-split-invoices.sql",
+      "description": "Migration 20261215110000 (billing plan M2): a delivery on a Bill Split sale drafts one invoice per payer, CS-...-1 / -2 in one group, each other payer paying exactly their percentage rounded down to the cent on whole-hundredth quantities when the share allows (4 places only for a share under 0.01; a 2.125 delivery bills) and the main customer taking the rest; Create Invoice is dated the day it runs and refuses a closed month, a line past its planned quantity included; an unposted payer invoice takes header edits and charges with its product lines still locked; line shares override the card; the card and line shares refuse changes after the first delivery (BILL_SPLIT_FROZEN) and reopen when it is voided; a direct line write is refused, save_invoice can't bill past the delivery, re-saving a payer draft keeps its cents and takes a freight charge; a one-customer chemical-sale invoice is refused (ORDER_HAS_BILL_SPLIT); the group posts and the second payer can return; a card under 100% leaves the rest with the main customer; Create Invoice drafts per payer again after a group void; a sale with no card bills one plain invoice; a one-customer draft refuses a new payer (BILL_SPLIT_HAS_DRAFT); a payer draft's product lines can't change (BILL_SPLIT_LINES_LOCKED); each payer's invoice cost is its own lines' cost and survives a re-save; a change to a product line's cost or description can't land; a payer share under 0.01 of a unit bills (0.0099 of 0.01 at 99%), while one under 0.0001 that is worth cents refuses (BILL_SPLIT_QUANTITY_TOO_SMALL); backfilled payer invoices are dated the day Create Invoice runs; line shares and card rows record when they changed; one payer's draft can't be deleted or voided alone, the whole group can and Create Invoice redrafts; a three-decimal delivery (2.125) bills like a plain sale, while one finer than 4 places completes the delivery, leaves an activity record and bill_split_failed, and Create Invoice refuses it (BILL_SPLIT_QUANTITY_TOO_FINE); a field split can't take over a frozen Bill Split; Create Invoice with nothing to bill is refused; two deliveries under one card add up; replays draft nothing new; a rush sale waiting for prices drafts nothing, can be priced, then drafts; row security as rep and anon, soft-deleted orders hidden. Terminal rollback.",
+      "covers": ["_create_bill_split_delivery_invoices", "_bill_split_line_shares", "_order_has_bill_split", "_refuse_bill_split_change", "guard_invoice_terminal_order", "_complete_delivery_authorized_impl", "save_invoice", "create_invoice_for_unbilled_delivery", "post_invoice_group", "void_delivery", "delete_invoices", "unpost_invoice", "void_invoice_group", "unpost_invoice_group", "void_invoice", "complete_delivery", "price_order"],
+      "area": ["billing", "regression"]
+    },
     "sale_line_vendor": {
       "chain": "smoke-sale-line-vendor.sql",
       "description": "Migration 20261118110000 (billing plan M3): a new order line is filled from the product's preferred vendor; a line created with a vendor keeps it; a line's vendor changed on the sale reaches its invoice and doesn't touch the product; an older line with no vendor invoices with the preferred vendor; a re-save that sends no vendor keeps it and one that sends a vendor changes it; a product with no preferred vendor stays blank; only the vendor column is open to UPDATE; a product swap on a line takes the new product's preferred vendor unless the same write names one. Terminal rollback.",
       "covers": ["_fill_order_line_vendor", "_fill_invoice_line_vendor", "save_invoice", "complete_delivery"],
       "area": ["billing", "regression"]
+    },
+    "close_delivery_receipt": {
+      "chain": "smoke-close-delivery-receipt-chain.sql",
+      "description": "KI-25 follow-up (20261221100000): live-safe, plants no rows. No signed-in user, a missing key and a bad reason are refused; an admin on an unknown delivery gets outcome none and the same key replays it; manual_send on a delivery that is not completed is refused (DELIVERY_NOT_COMPLETED); an active driver is refused (office only); a real sent receipt of a completed delivery answers sent with sent_at and no address and is not changed, and its key with another reason is refused (IDEMPOTENCY_INTENT_MISMATCH); EXECUTE is authenticated-only. Pausing, closing, the in-flight refusal and the races with the worker need seeded deliveries and are proved in prove-close-delivery-receipt-real-schema.mjs. Terminal rollback.",
+      "covers": ["close_delivery_receipt"],
+      "area": ["security", "idempotency", "lifecycle"]
+    },
+    "bill_split_payers_read": {
+      "chain": "smoke-bill-split-payers-read.sql",
+      "description": "Migration 20261222110000 (#1534): rep 1 sells a Bill Split 50/50 and an admin moves payer 2's draft to rep 2 through save_invoice; rep 1's direct group read now sees one invoice (the gap); get_bill_split_payers on payer 1's invoice gives rep 1 both payers totalling the sale; rep 2 gets both on their own invoice and INVOICE_NOT_VISIBLE on payer 1's; a driver gets INVOICE_NOT_VISIBLE; anon has no EXECUTE; an invoice with no split group returns no rows; with payer 1's draft moved to no sales rep, a driver, another rep and a call with no claims are all refused (a NULL in the check never lets a caller through); a deactivated rep is refused on their own invoice; a grouped invoice that is not a Bill Split returns no rows. Terminal rollback.",
+      "covers": ["get_bill_split_payers", "save_invoice", "complete_delivery"],
+      "area": ["billing", "security", "regression"]
     }
   }
 }

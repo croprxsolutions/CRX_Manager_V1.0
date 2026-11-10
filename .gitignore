@@ -90,3 +90,6 @@ old_fn.sql
 
 # Impeccable design plugin: share .impeccable/config.json, keep per-developer overrides private (agreed with Taha 2026-10-29)
 .impeccable/config.local.json
+
+# Stray working-folder markers some tools leave at the repo root (KI-96)
+/tmpclaude-*

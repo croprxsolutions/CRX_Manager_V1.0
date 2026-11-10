@@ -22,6 +22,8 @@ const BUSINESS_TABLES = [
   "prepay_applications", "credit_memo_applications", "inventory_transactions",
   "inventory", "inventory_holds",
   "fields", "job_applied_records", "allocation_sets", "write_offs",
+  // Sol 2026-11-06: written only by the tote fill and reversal functions.
+  "tote_fills",
 ];
 const FINANCIAL_TABLES = [
   "invoices", "orders", "payments", "commissions", "commission_payments", "financial_audit_log",
@@ -949,6 +951,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["2e8bdab505e2e9b858462f0cdaae6c5a701c3c2ea362c1133a782a4234b30376", "anon-exec-secdef.sql"],
   ["3c1f93e2a1fe90b8e8aad9145f981904906116fae175696eecd9dce1b2061ed8", "audit-log-completeness.sql"],
   ["5c49a1f5d8afca87439cf87fc1a74ffebaa38de68cb5eb1790109fc0a8dce1e6", "auth-bound-role-ungated.sql"],
+  ["cf7d26579eb94ed66ede19cd97d6c7143676c16687cc69c1adb1615870f115ed", "browser-table-maintenance.sql"],
   ["c9a03c9a022912fdbf263251f3ec48155cf49259cf097f23a3daf28d445d4a54", "commission-admin-active.sql"],
   ["8a84f68c552dd6dfe98f2614febcfc0b34dfb3e581c97674229a9c5c4ae9b805", "cost-exposure-review.sql"],
   ["c769b15bf97485e4d8b1d7457a8ed9a726627a57ec1c16c06c198308d8984f0d", "dispatch-sync-nonqualifying-profile.sql"],
@@ -966,9 +969,9 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["1a9179b05963dc315c90e54b2fd18445e21d58cae9bdb743111607b9de7e8e86", "plpgsql-check.sql"],
   ["071d89aae1ef714720386c43c9ac6a4c11cc03edb0f00bdcd152ba52079db216", "product-name-vs-return-policy.sql"],
   ["5ea47dde9df5671b8b4acce4e274f242467e3eb71eeb0b3487c8940316a3019d", "profile-role-lock-insert-arm.sql"],
-  ["4d289dab209dcfc69bc14a9a7c1ab576458044e087489fdcec627fc41fba7a26", "quote-price-lock-boundary.sql"],
-  ["976e6060a4cb346c6b96f05f156b84da5db9df2e8e3f58ce24b98498ca0f1a29", "quote-versions-rpc-owned.sql"],
-  ["7c6edab973d810b5c6e7abc34b4121376609fd82cb82f3905075e01975e29e17", "return-credit-intent-binding.sql"],
+  ["201e22f0b21de39e663a7e732475a759b1e56a34316bed517dba68415ffc35cc", "quote-price-lock-boundary.sql"],
+  ["cab1d5703f569d05b0c88812028f4ff4c6267256f4cc0163289152458873088d", "quote-versions-rpc-owned.sql"],
+  ["4a12c1643b9f68d41a4b624706837f57b4a85ba3a97ff882e9d2986a029bdc32", "return-credit-intent-binding.sql"],
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],
   ["7dab8645f051bbcf2d619853b721b8beac3eef0f901c37538b9d9c1b579c0961", "save-field-actor-binding.sql"],
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],
@@ -1647,6 +1650,22 @@ const TRIGGER_HEADER_RE = new RegExp(String.raw`(\bcreate\s+(?:or\s+replace\s+)?
 function withoutTriggerEvents(t) {
   return t.replace(TRIGGER_HEADER_RE, (_, head, events, on) => head + events.replace(/"(?:[^"]|"")*"|\btruncate\b/gi, (w) => (w[0] === '"' ? w : "trigger_event")) + on);
 }
+// TRUNCATE as a privilege NAME is not a wipe (PR #1635's postflight tripped this):
+// a GRANT/REVOKE privilege list, or the privilege string that ends a
+// has_*_privilege(...) call. Only a list made purely of privilege words, commas
+// and WITH GRANT OPTION is blanked; none of those can hold a table name or ;,
+// so a real TRUNCATE (EXECUTE 'TRUNCATE t', or one between two strings) stays visible.
+const PRIV = String.raw`(?:select|insert|update|delete|truncate|references|trigger|maintain)(?:\s+with\s+grant\s+option)?`;
+const PRIV_LIST = String.raw`${PRIV}(?:\s*,\s*${PRIV})*`;
+const GRANT_LIST_RE = new RegExp(String.raw`(\b(?:grant|revoke)\s+(?:grant\s+option\s+for\s+)?)(${PRIV_LIST})(\s+on\b)`, "gi");
+// The privilege string may be single- or dollar-quoted ($$...$$ / $tag$...$tag$); the same quote must close it.
+const PRIV_CHECK_RE = new RegExp(String.raw`(\bhas_(?:table|any_column|column)_privilege\s*\([^;]*?,\s*('|\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$))(\s*${PRIV_LIST}\s*)(\2\s*\))`, "gi");
+function withoutPrivilegeNames(t) {
+  const blank = (list) => list.replace(/\btruncate\b/gi, "privilege_name");
+  return t
+    .replace(GRANT_LIST_RE, (_, head, list, tail) => head + blank(list) + tail)
+    .replace(PRIV_CHECK_RE, (_, head, _quote, list, tail) => head + blank(list) + tail);
+}
 
 export function destructiveMigrationCheck(sql) {
   // Strip ONLY clear function-definition bodies (AS $$...$$) — everything
@@ -1668,7 +1687,7 @@ export function destructiveMigrationCheck(sql) {
   if (/\balter\s+table\b[^;]*\bdrop\s+(?!constraint\b|not\s+null\b|default\b|identity\b|expression\b)/i.test(t)) {
     return { destructive: true, reason: "ALTER TABLE ... DROP [COLUMN]" };
   }
-  if (/\btruncate\b/i.test(withoutTriggerEvents(t))) return { destructive: true, reason: "TRUNCATE" };
+  if (/\btruncate\b/i.test(withoutPrivilegeNames(withoutTriggerEvents(t)))) return { destructive: true, reason: "TRUNCATE" };
   if (/\bdelete\s+from\b/i.test(t)) return { destructive: true, reason: "top-level DELETE FROM (any table)" };
   // MERGE can delete matched rows (WHEN MATCHED THEN DELETE) — and is rare
   // enough in a migration that ANY top-level MERGE deserves Mason's eyes

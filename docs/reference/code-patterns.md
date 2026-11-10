@@ -75,6 +75,7 @@ All numbers are generated server-side. The year-bearing `next_*_number` generato
 - `PendingAction` in `src/lib/offlineQueue.ts` has optional `snapshotAt`, `entityTable`, `entityId` fields
 - `syncPendingActions(currentUserId, options)` in `src/lib/offlineSync.ts` compares `snapshotAt` against the entity's `updated_at` before replaying, but only for operations that are NOT durable — returns `conflicts: string[]` for stale-data warnings
 - Durable operations (`complete_delivery`, `complete_job`; see `isDurableOfflineOperation` in `src/lib/offlineReceipts.ts`) skip that client check: the server decides conflicts when the action is staged (`stage_offline_action`), and conflicting work lands in the Offline Work Review queue instead of replaying
+- Those two are the only operations replayed (the only ones any screen has ever queued); any other saved operation is kept as "needs attention", never run or deleted (KI-96, 2026-11-08)
 
 ## Realtime Subscription Disabled Pattern
 - `useRealtimeSubscription({ table, disabled?: boolean })` — when `disabled` is true, hook skips channel creation entirely (no-op)

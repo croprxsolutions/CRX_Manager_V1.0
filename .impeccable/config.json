@@ -35,6 +35,15 @@
         ],
         "createdAt": "2026-11-05T04:35:50.951Z",
         "reason": "docs/workflows/UI_PATTERNS.md Style D Phone: a row that needs attention gets a 4px amber-500 left edge (Mason chose style D 2026-11-02)"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/components/inventory/ToteFillModal.tsx"
+        ],
+        "createdAt": "2026-11-07T06:28:37.230Z",
+        "reason": "Claude: amber left-border warning is the app's existing alert pattern (10 uses in Deliveries, DeliveryDetail, FieldApplicationInvoice, FieldStop); CLAUDE.md says no restyles"
       }
     ]
   }

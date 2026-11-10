@@ -58,6 +58,10 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({ getKey: () => 'idem', resetKey: vi.fn() }),
 }));
+vi.mock('../lib/productParents', () => {
+  const empty = { parents: [], byProduct: new Map(), index: new Map() };
+  return { useProductParents: () => empty, searchProductParents: async () => [] };
+});
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockSentryCaptureException } }));
 
 import FieldAppSplitInvoiceEditor from './FieldAppSplitInvoiceEditor';

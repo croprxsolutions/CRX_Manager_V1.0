@@ -229,6 +229,13 @@ describe('BulkProductImport screen', () => {
     expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { product_name: 'Other', sku: 'SKU-2', is_rup: false } }] });
   });
 
+  it('refuses a header row with text after a closing quote before anything is sent (Sol LOW)', async () => {
+    render(<BulkProductImport {...props} />);
+    await upload('"product_name"!,notes\nChemical,note\n');
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/header row has text after a closing quote/)));
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it('refuses two columns that mean the same thing', async () => {
     render(<BulkProductImport {...props} />);
     await upload('product_name,name\nA,B');

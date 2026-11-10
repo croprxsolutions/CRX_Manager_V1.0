@@ -52,6 +52,10 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
+vi.mock('../lib/productParents', () => {
+  const empty = { parents: [], byProduct: new Map(), index: new Map() };
+  return { useProductParents: () => empty, searchProductParents: async () => [] };
+});
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/csvExport', async (original) => ({
   ...(await original<typeof import('../lib/csvExport')>()), exportToCSV: vi.fn(),

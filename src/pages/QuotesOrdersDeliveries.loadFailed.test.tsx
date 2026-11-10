@@ -5,7 +5,7 @@
  * $0 return with live Approve / Receive / Credit buttons; Try again shows the rows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { getSeasonDates } from '../utils/season';
 
@@ -113,6 +113,13 @@ describe('Quotes list', () => {
     expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Product names could not be loaded'));
   });
 
+  it('the rollover help tip is not nested inside the toggle button', async () => {
+    at('/quotes', <Quotes />);
+    const toggle = await screen.findByRole('button', { name: /Open booking rollover/ });
+    const help = within(toggle.parentElement as HTMLElement).getByRole('button', { name: 'More info' });
+    expect(toggle.contains(help)).toBe(false);
+  });
+
   it('a failed booking rollover says so instead of "No open bookings."', async () => {
     H.failing.set('get_open_booking_rollover', 'error');
     at('/quotes', <Quotes />);
@@ -156,26 +163,26 @@ describe('Quotes list', () => {
 });
 
 describe('Orders list', () => {
-  // One page from get_orders_page: lines, invoices, deliveries and farm groups are read in that one
+  // One page from get_orders_keyset_page: lines, invoices, deliveries and farm groups are read in that one
   // statement, so any of them failing fails the whole reply (never a partial row or a 0%).
   const order = () => ({ id: 'o1', order_number: 'ORD-77', status: 'confirmed', customer_id: 'c1', order_date: getSeasonDates().start, deleted_at: null, total_price: 100, is_planned: false, pricing_status: 'priced', customer: { farm_name: 'Big Farm', parent_customer_id: null }, customer_name: 'Big Farm', farm_group_name: null, fulfillment_pct: 0, invoiced_pct: 0, active_delivery_count: 0, earliest_delivery_date: null, product_names: '' });
 
   it.each(['error', 'nodata'] as const)('a %s orders read says it could not be loaded, not "No orders yet"', async (mode) => {
-    H.failing.set('get_orders_page', mode);
+    H.failing.set('get_orders_keyset_page', mode);
     at('/orders', <Orders />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('No orders yet')).not.toBeInTheDocument();
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
 
-    H.failing.delete('get_orders_page');
-    H.functions.get_orders_page = { rows: [order()], total_count: 1, total_price_cents: 10000 };
+    H.failing.delete('get_orders_keyset_page');
+    H.functions.get_orders_keyset_page = { rows: [order()], total_count: 1, total_price_cents: 10000, next_cursor: null };
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     expect(await screen.findByText('ORD-77')).toBeInTheDocument();
     expect(screen.getByText('Showing 1–1 of 1 orders · $100.00 total')).toBeInTheDocument();
   });
 
   it('a reply without its totals fails the list instead of showing a $0 total', async () => {
-    H.functions.get_orders_page = { rows: [order()] };
+    H.functions.get_orders_keyset_page = { rows: [order()] };
     at('/orders', <Orders />);
     expect(await screen.findByText('This list could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('ORD-77')).not.toBeInTheDocument();
@@ -229,7 +236,7 @@ describe('Delivery Remainders', () => {
 
 describe('Deliveries list', () => {
   it('a read that answers with no list says it could not be loaded, not "No deliveries scheduled"', async () => {
-    H.failing.set('deliveries', 'nodata');
+    H.failing.set('get_deliveries_keyset_page', 'nodata');
     at('/deliveries', <Deliveries />);
     expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
     expect(screen.queryByText('No deliveries scheduled')).not.toBeInTheDocument();

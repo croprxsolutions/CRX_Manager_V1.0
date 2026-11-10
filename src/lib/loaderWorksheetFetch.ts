@@ -24,6 +24,7 @@ import { supabase, supabaseUntyped } from './db';
 import { resolveBilledCustomers } from './billedCustomersResolver';
 import { isGallonCapacityUnit } from './loaderWorksheet';
 import type { LoaderWorksheetPdfData } from './loaderWorksheetPdf';
+import { fetchLoaderJobWeights, loaderJobInputs, type LoaderGetterJob, type LoaderJobWeights } from './loaderWeightsFetch';
 import type { ApplicatorSheetCustomer } from './applicatorSheetData';
 import type { JobLoaderWorksheet } from '../types';
 
@@ -39,7 +40,7 @@ interface LoaderJobRow {
   loader_comment: string | null;
   vehicle: { vehicle_name: string | null; capacity_gallons: number | null; capacity_unit: string | null } | null;
   job_fields: Array<{ field_id: string | null; acres_to_treat: number | null }> | null;
-  job_chemicals: Array<{ quantity: number | null; unit: string | null; product: { product_name: string | null } | null }> | null;
+  job_chemicals: Array<{ id: string; product_id: string | null; quantity: number | null; unit: string | null; product: { product_name: string | null } | null }> | null;
 }
 
 interface WorksheetVehicleRow {
@@ -62,7 +63,7 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
       carrier_rate_gpa, loader_tank_capacity, loader_comment,
       vehicle:vehicles(vehicle_name, capacity_gallons, capacity_unit),
       job_fields(field_id, acres_to_treat),
-      job_chemicals(quantity, unit, product:products(product_name))
+      job_chemicals(id, product_id, quantity, unit, product:products(product_name))
     `)
     .in('id', jobIds);
   if (error) throw error;
@@ -95,19 +96,6 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     });
   }
 
-  // Resolve applicator names via the public profile view (never a profiles embed).
-  const applicatorIds = [...new Set(rows.map((r) => r.applicator_id).filter((x): x is string => !!x))];
-  const nameById = new Map<string, string>();
-  if (applicatorIds.length > 0) {
-    const { data: profs } = await supabase
-      .from('profile_public_view')
-      .select('id, full_name')
-      .in('id', applicatorIds);
-    ((profs || []) as Array<{ id: string; full_name: string | null }>).forEach((p) => {
-      if (p.full_name) nameById.set(p.id, p.full_name);
-    });
-  }
-
   // Billed customers per job via the SECURITY DEFINER RPC (saved job_field_shares →
   // field_billing_defaults → primary customer_id), which resolves the CO-billed
   // customers an applicator's customers_select RLS hides. Resolved per job (the RPC
@@ -123,18 +111,82 @@ export async function fetchLoaderWorksheetData(jobIds: string[]): Promise<Loader
     customersByJob.set(r.id, customers);
   }
 
+  // DM-2: the load plan, amounts and weights come from one getter read. If it fails, the reads above still print
+  // the sheet, with the weights withheld and the reason printed.
+  let weights: LoaderJobWeights | null = null;
+  try {
+    weights = await fetchLoaderJobWeights(rows.map((r) => r.id));
+  } catch (_error) {
+    weights = null;
+  }
+
+  // Resolve applicator names via the public profile view (never a profiles embed).
+  // After the getter: a page built from its read names that read's applicator, which may differ from the jobs read.
+  const applicatorIds = [...new Set([...rows.map((r) => r.applicator_id), ...[...(weights?.jobs.values() ?? [])].map((j) => j.job?.applicator_id)]
+    .filter((x): x is string => !!x))];
+  const nameById = new Map<string, string>();
+  if (applicatorIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profile_public_view')
+      .select('id, full_name')
+      .in('id', applicatorIds);
+    ((profs || []) as Array<{ id: string; full_name: string | null }>).forEach((p) => {
+      if (p.full_name) nameById.set(p.id, p.full_name);
+    });
+  }
+
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Preserve the caller's order; skip any id that didn't come back.
   return jobIds
     .map((jid) => byId.get(jid))
     .filter((r): r is LoaderJobRow => !!r)
-    .map((r) => mapRowToPdfData(
-      r,
-      nameById,
-      customersByJob.get(r.id) ?? [],
-      selectedWorksheetByJob.get(r.id),
-      worksheetVehicleNameById,
-    ));
+    .map((r) => {
+      const customers = customersByJob.get(r.id) ?? [];
+      const job = weights?.jobs.get(r.id);
+      if (weights && job?.found && job.job) return { ...mapGetterJobToPdfData(job, weights, nameById), customers };
+      const fallback = mapRowToPdfData(r, nameById, customers, selectedWorksheetByJob.get(r.id), worksheetVehicleNameById);
+      // The job's own lines go along, so a bad amount still prints its reason (never a negative or 0) without weights.
+      const sourceLines = (r.job_chemicals || []).map(({ id, product_id, quantity, unit }) => ({ id, product_id, quantity, unit }));
+      return { ...fallback, weights: { byProductId: {}, currentUnits: { factors: {}, ambiguous: [] }, sourceLines, saved: false,
+        unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' } };
+    });
+}
+
+/** One job's page built from the getter's one read: date, applicator, settings, vehicle, acres, lines and weights together. */
+function mapGetterJobToPdfData(entry: LoaderGetterJob, weights: LoaderJobWeights, nameById: Map<string, string>): LoaderWorksheetPdfData {
+  const job = entry.job!;
+  const selected = entry.worksheet?.worksheet;
+  const legacy = legacyCapacity(job.loader_tank_capacity, job.vehicle);
+  const inputs = loaderJobInputs(entry);
+  return {
+    job_number: job.job_number,
+    customers: [],
+    scheduled_date: job.job_date,
+    scheduled_time: job.scheduled_time,
+    applicator_name: job.applicator_id ? (nameById.get(job.applicator_id) ?? null) : null,
+    vehicle_name: entry.worksheet ? entry.worksheet.vehicle_name : job.vehicle?.vehicle_name ?? null,
+    total_acres: Number(entry.acres ?? 0),
+    carrier_rate_gpa: selected ? selected.carrier_rate_gpa : job.carrier_rate_gpa,
+    tank_capacity: selected ? selected.capacity_gal : legacy.capacity,
+    capacity_unit: selected ? 'gal' : legacy.unit,
+    products: inputs.products,
+    loader_comment: selected ? selected.comment : job.loader_comment,
+    load_balance_mode: selected?.load_balance_mode,
+    per_load_acres: selected?.per_load_acres,
+    loads_done: selected?.loads_done,
+    weights: { byProductId: inputs.weights, currentUnits: weights.unitsByJob.get(entry.job_id) ?? { factors: {}, ambiguous: [] }, sourceLines: inputs.sourceLines, saved: !!selected },
+  };
+}
+
+/**
+ * Effective capacity: the per-job override (in gallons) wins over the assigned vehicle's. The vehicle capacity is
+ * only usable as a GALLON tank size when its unit measures gallons: a dry spreader rated in lbs/tons can't seed
+ * gallon loads, so without a gallon override the worksheet shows its "enter capacity" guard (Codex).
+ */
+function legacyCapacity(override: number | null, vehicle: LoaderJobRow['vehicle']): { capacity: number | null; unit: string } {
+  const own = override != null && override > 0 ? override : null;
+  const vehicleCap = isGallonCapacityUnit(vehicle?.capacity_unit) ? (vehicle?.capacity_gallons ?? null) : null;
+  return { capacity: own ?? vehicleCap, unit: own != null ? 'gal' : (vehicle?.capacity_unit || 'gal') };
 }
 
 /** Map one fetched job row to the shared LoaderWorksheetPdfData. */
@@ -147,15 +199,7 @@ function mapRowToPdfData(
 ): LoaderWorksheetPdfData {
   const totalAcres = (r.job_fields || []).reduce((s, f) => s + (f.acres_to_treat || 0), 0);
 
-  // Effective capacity: the per-job override (in gallons) wins over the assigned
-  // vehicle's. The vehicle capacity is only usable as a GALLON tank size when its
-  // unit measures gallons — a dry spreader rated in lbs/tons can't seed gallon
-  // loads, so without a gallon override the worksheet shows its "enter capacity"
-  // guard rather than dividing gallons of spray by pounds (Codex).
-  const override = r.loader_tank_capacity != null && r.loader_tank_capacity > 0 ? r.loader_tank_capacity : null;
-  const vehicleCap = isGallonCapacityUnit(r.vehicle?.capacity_unit) ? (r.vehicle?.capacity_gallons ?? null) : null;
-  const effectiveCapacity = override ?? vehicleCap;
-  const capacityUnit = override != null ? 'gal' : (r.vehicle?.capacity_unit || 'gal');
+  const { capacity: effectiveCapacity, unit: capacityUnit } = legacyCapacity(r.loader_tank_capacity, r.vehicle);
 
   return {
     job_number: r.job_number,
@@ -176,6 +220,8 @@ function mapRowToPdfData(
         product_name: c.product?.product_name || 'Product',
         total_quantity: c.quantity,
         unit: c.unit,
+        product_id: c.product_id,
+        source_line_id: c.id,
       })),
     loader_comment: selectedWorksheet ? selectedWorksheet.comment : r.loader_comment,
     load_balance_mode: selectedWorksheet?.load_balance_mode,

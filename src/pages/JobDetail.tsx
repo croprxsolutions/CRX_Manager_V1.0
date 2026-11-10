@@ -34,6 +34,7 @@ import { generateChemicalApplicationReportPdf } from '../lib/chemicalApplication
 import { resolveBilledCustomers } from '../lib/billedCustomersResolver';
 import { generateLoaderWorksheetPdf } from '../lib/loaderWorksheetPdf';
 import { fetchLoaderWorksheetData } from '../lib/loaderWorksheetFetch';
+import { newJobLoaderPrint } from '../lib/newJobLoaderPrint';
 import { computeLoaderWorksheet, isGallonCapacityUnit } from '../lib/loaderWorksheet';
 import { stampJobPrinted } from '../lib/printStamp';
 import {
@@ -81,6 +82,7 @@ const JobFieldPickerModal = lazy(() => import('../components/jobs/JobFieldPicker
 import JobAttachments from '../components/jobs/JobAttachments';
 import { LegacyLoaderWorksheet } from '../components/jobs/LegacyLoaderWorksheet';
 import { LoaderWorksheetsPanel } from '../components/jobs/LoaderWorksheetsPanel';
+import { loaderPanelProducts } from '../components/jobs/loaderPanelWeights';
 import type { LoaderWorksheetDisplayMode } from '../lib/loaderWorksheets';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -1279,6 +1281,7 @@ export default function JobDetail() {
           custMap.set(`${name}|${c?.account_number ?? ''}`, { customer_name: name, account_number: c?.account_number ?? null });
         }
         loaderCustomers = [...custMap.values()];
+        const loaderPrint = await newJobLoaderPrint(chemRows);
         await generateLoaderWorksheetPdf({
           job_number: jobNumber || 'draft',
           customers: loaderCustomers,
@@ -1291,13 +1294,8 @@ export default function JobDetail() {
           carrier_rate_gpa: !Number.isNaN(parsedCarrierRate) && parsedCarrierRate > 0 ? parsedCarrierRate : null,
           tank_capacity: effectiveCapacity,
           capacity_unit: (tankCapacity.trim() !== '' && effectiveCapacity === overrideCapacity) ? 'gal' : (assignedVehicleCapacityUnit || 'gal'),
-          products: chemRows
-            .filter((c) => c.product_id)
-            .map((c) => ({
-              product_name: c.product_name || 'Product',
-              total_quantity: c.quantity.trim() === '' ? null : parseFloat(c.quantity),
-              unit: c.unit || null,
-            })),
+          products: loaderPrint.products,
+          weights: loaderPrint.weights,
           loader_comment: loaderComment || null,
         });
       }
@@ -4865,13 +4863,7 @@ export default function JobDetail() {
               vehicles={vehicles}
               jobVehicleId={vehicleId || null}
               totalAcres={totalAcres}
-              products={chemRows
-                .filter((chemical) => chemical.product_id)
-                .map((chemical) => ({
-                  product_name: chemical.product_name || 'Product',
-                  total_quantity: chemical.quantity.trim() === '' ? null : parseFloat(chemical.quantity),
-                  unit: chemical.unit || null,
-                }))}
+              products={loaderPanelProducts(chemRows)}
               defaultCarrierRateGpa={!Number.isNaN(parsedCarrierRate) ? parsedCarrierRate : null}
               legacyWorksheet={{
                 vehicleId: vehicleId || null,

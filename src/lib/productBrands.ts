@@ -1,9 +1,7 @@
-import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabase, supabaseUntyped } from './db';
+import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabaseUntyped } from './db';
 import { sanitizeError } from './errorSanitizer';
+import { normalizeBrand, parseNameBrands } from './productNameBrands';
 import type { BrandSignalWord, ProductBrand } from '../types';
-
-const PRODUCT_BRAND_COLUMNS =
-  'id, product_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version, created_by, updated_by, created_at, updated_at';
 
 /**
  * Same shapes the database and the EPA lookup accept: a Section 3 number (524-475) or a distributor
@@ -22,6 +20,8 @@ export function epaLabelSearchUrl(epaRegistration: string | null | undefined): s
 
 export interface ProductBrandInput {
   productId: string;
+  /** Set when the size is grouped: the brand is saved on the parent's list instead. */
+  parentId?: string | null;
   /** Omit to add a new brand. */
   brandId?: string;
   /** The row_version the editor read; required when brandId is set. */
@@ -34,20 +34,39 @@ export interface ProductBrandInput {
   signalWord: BrandSignalWord | null;
 }
 
-export async function listProductBrands(productId: string): Promise<ProductBrand[]> {
-  const { data, error } = await supabase
-    .from('product_brands')
-    .select(PRODUCT_BRAND_COLUMNS)
-    .eq('product_id', productId)
-    .order('brand_name');
+/** A product's brand list: its parent's list once the size is grouped (PAR-2), otherwise its own. */
+export interface ProductBrandList {
+  parentId: string | null;
+  parentName: string | null;
+  brands: ProductBrand[];
+}
+
+interface ProductBrandsReply {
+  source: 'product' | 'parent';
+  parent_id: string | null;
+  parent_name: string | null;
+  brands: (Omit<ProductBrand, 'product_id'> & { product_id?: string })[];
+}
+
+export async function getProductBrands(productId: string): Promise<ProductBrandList> {
+  // Untyped client: get_product_brands (20261123120000) is not in the generated types yet.
+  const { data, error } = await supabaseUntyped.rpc('get_product_brands', { p_product_id: productId });
   if (error) throw error;
-  return (data ?? []) as ProductBrand[];
+  const reply = assertRpcResult<ProductBrandsReply>(data, 'get_product_brands');
+  return {
+    parentId: reply.source === 'parent' ? reply.parent_id : null,
+    parentName: reply.source === 'parent' ? reply.parent_name : null,
+    // A parent's brand rows carry parent_id, not product_id; the screen shows them on this size.
+    brands: (reply.brands ?? []).map((brand) => ({ ...brand, product_id: productId })),
+  };
+}
+
+export async function listProductBrands(productId: string): Promise<ProductBrand[]> {
+  return (await getProductBrands(productId)).brands;
 }
 
 export async function saveProductBrand(input: ProductBrandInput, idempotencyKey: string): Promise<ProductBrand> {
-  // Untyped client: the generated Args type marks the nullable parameters non-null.
-  const { data, error } = await supabaseUntyped.rpc('upsert_product_brand', {
-    p_product_id: input.productId,
+  const fields = {
     p_brand_id: input.brandId ?? null,
     p_expected_row_version: input.expectedRowVersion ?? null,
     p_brand_name: input.brandName.trim(),
@@ -57,7 +76,25 @@ export async function saveProductBrand(input: ProductBrandInput, idempotencyKey:
     p_is_rup: input.isRup,
     p_signal_word: input.signalWord,
     p_idempotency_key: idempotencyKey,
-  });
+  };
+  // A size moved to another parent since the screen loaded must not edit its old parent's brands.
+  // upsert_parent_brand refuses that in SQL (p_product_id must still be a member); this early re-read
+  // also catches a size that left or joined a parent, which would otherwise hit the wrong RPC.
+  const current = await getProductBrands(input.productId);
+  if (current.parentId !== (input.parentId ?? null)) {
+    throw new Error(`${RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED}: this size's brand list moved since it loaded`);
+  }
+  if (input.parentId) {
+    const { data, error } = await supabaseUntyped.rpc('upsert_parent_brand', {
+      p_parent_id: input.parentId,
+      p_product_id: input.productId,
+      ...fields,
+    });
+    if (error) throw error;
+    return { ...assertRpcResult<ProductBrand>(data, 'upsert_parent_brand'), product_id: input.productId };
+  }
+  // Untyped client: the generated Args type marks the nullable parameters non-null.
+  const { data, error } = await supabaseUntyped.rpc('upsert_product_brand', { p_product_id: input.productId, ...fields });
   if (error) throw error;
   return assertRpcResult<ProductBrand>(data, 'upsert_product_brand');
 }
@@ -72,6 +109,12 @@ export function productBrandErrorMessage(error: unknown): string {
   if (hasRpcCode(error, RpcErrorCodes.BRAND_NOT_FOUND) || hasRpcCode(error, RpcErrorCodes.PRODUCT_NOT_FOUND)) {
     return 'This brand or product no longer exists. Reload the page.';
   }
+  if (hasRpcCode(error, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED) || hasRpcCode(error, RpcErrorCodes.PRODUCT_BRANDS_BELONG_TO_PARENT)) {
+    return 'This size joined or moved to a different parent since the page loaded, so nothing was saved. The list has been reloaded; open it again to edit.';
+  }
+  if (hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_GROUPING_NOT_OPEN)) {
+    return 'Shared parent brands can be changed once grouping is switched on. Nothing was saved.';
+  }
   if (hasRpcCode(error, RpcErrorCodes.NOT_AUTHORIZED)) return 'Only an admin can change a product’s brands.';
   if (hasRpcCode(error, RpcErrorCodes.IDEMPOTENCY_INTENT_MISMATCH)) {
     return 'This save conflicts with an earlier attempt. Close the form, reload the page and try again.';
@@ -81,21 +124,13 @@ export function productBrandErrorMessage(error: unknown): string {
 
 /**
  * Brand names written inside a product's name, e.g. "Roundup 5.4# Generic (Ag Saver 5.4, Slam 5.4) - 2.5 Gal"
- * → ["Ag Saver 5.4", "Slam 5.4"]. Only suggestions: some parentheses hold notes, not brands, so an admin
- * confirms each one (and types its EPA number) before it is saved. Names already listed are left out.
+ * → ["Ag Saver 5.4", "Slam 5.4"]. Only suggestions: some words in brackets are notes, not brands, so an admin
+ * confirms each one (and types its EPA number) before it is saved. Names already listed are left out. Uses the
+ * same bracket reader as the name-vs-brand check on Label Data Quality, so both agree. A brand the name may have
+ * cut off (e.g. "Bra" in "(Brand A, Bra") is never suggested: the name needs fixing, not a new brand.
  */
 export function suggestBrandNamesFromProductName(productName: string, existingNames: string[] = []): string[] {
-  const taken = new Set(existingNames.map((name) => name.trim().toLowerCase()));
-  const suggestions: string[] = [];
-  for (const match of productName.matchAll(/\(([^()]*)\)/g)) {
-    for (const part of match[1].split(/,|\//)) {
-      const name = part.trim();
-      const key = name.toLowerCase();
-      if (name && !taken.has(key)) {
-        taken.add(key);
-        suggestions.push(name);
-      }
-    }
-  }
-  return suggestions;
+  const taken = new Set(existingNames.map(normalizeBrand));
+  const { brands, maybeCutOff } = parseNameBrands(productName);
+  return brands.filter((name) => name !== maybeCutOff && !taken.has(normalizeBrand(name)));
 }

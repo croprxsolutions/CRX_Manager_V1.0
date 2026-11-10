@@ -8,6 +8,7 @@ proveReplayBinding({
   pass: 'RECORDS_REPLAY_BINDING_BATCH4D_PROOF_PASS',
   first: 'save_vendor',
   candidate: '20261114200000_bind_records_replay_receipts_batch4d.sql',
-  other: '20261111210000_bind_ops_replay_receipts_batch4e.sql',
+  // 4d is live; 4e (20261123110000) now requires 4d first, so no other-first order is left to prove.
+  other: null,
   chain: 'smoke-records-replay-binding-batch4d.sql',
 });

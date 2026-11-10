@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 
 // KI-27: the server check the clear makes before it removes anything.
 const { clearCheck } = vi.hoisted(() => ({
@@ -295,6 +295,190 @@ describe('useUncertainMutationIntent', () => {
       .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
     expect(result.current.isIntentLocked).toBe(false);
     setItem.mockRestore();
+  });
+
+  it.each([
+    ['mirror', (s: Storage, key: string) => s === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')],
+    ['acknowledgment', (s: Storage, key: string) => s === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')],
+  ])('a failed %s write leaves no hidden record to block the next, different request (Sol MED)', async (_label, fails) => {
+    const options = { operation: 'apply_product_setup', userId: `hidden-${_label}`, surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (fails(this, key)) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => first.result.current.beginIntent({ file: 'a.csv' })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+    }
+    first.unmount();
+    expect(window.localStorage.getItem(`crx:uncertain-mutation:v4:${JSON.stringify([options.operation, options.userId])}`)).toBeNull();
+
+    const next = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    expect(next.result.current.isIntentLocked).toBe(false);
+    await act(async () => {
+      expect(await next.result.current.beginIntent({ file: 'b.csv' })).toEqual({ file: 'b.csv' });
+    });
+  });
+
+  it('shows the record as a lock when it cannot be removed after a failed mirror write (Luna LOW)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'cleanup-fails', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const realDelete = IDBObjectStore.prototype.delete;
+    const deletes = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore) {
+      this.transaction.abort();
+      return realDelete.call(this, '__none__');
+    });
+    const { result } = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => result.current.beginIntent({ file: 'a.csv' })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+      deletes.mockRestore();
+    }
+    await act(async () => {});
+    expect(result.current.isIntentLocked).toBe(true);
+    expect(result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
+  });
+
+  it('keeps a record another tab joined, even after that tab closed, when this tab’s acknowledgment write fails (Sol HIGH)', async () => {
+    const options = { operation: 'record_vendor_payment', userId: 'joined-peer', surface: 'vendor-bill-detail', scope: 'bill-1' };
+    const originalSetItem = Storage.prototype.setItem;
+    let ackFailed = false;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')) {
+        ackFailed = true;
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    // Once the acknowledgment has failed, the cleanup reads a record that a peer tab joined and has since closed.
+    const realGet = IDBObjectStore.prototype.get;
+    const gets = vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (this: IDBObjectStore, key) {
+      const request = realGet.call(this, key);
+      if (ackFailed) {
+        request.addEventListener('success', () => {
+          const stored = request.result as { record?: { claimTabIds: string[] } } | undefined;
+          stored?.record?.claimTabIds.push('closed-peer-tab');
+        });
+      }
+      return request;
+    });
+    const tabA = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    try {
+      await expect(act(async () => tabA.result.current.beginIntent({ amount: 10000 })))
+        .rejects.toThrow('DURABLE_MUTATION_INTENT_STORAGE_UNAVAILABLE');
+    } finally {
+      writes.mockRestore();
+      gets.mockRestore();
+    }
+    await act(async () => {});
+    expect(tabA.result.current.isIntentLocked).toBe(true);
+    tabA.unmount();
+    // After a reload the request is still shown, and a different payment cannot start under a new key.
+    const reloaded = renderHook(() => useUncertainMutationIntent<{ amount: number }>(options));
+    expect(reloaded.result.current.isIntentLocked).toBe(true);
+    await expect(act(async () => reloaded.result.current.beginIntent({ amount: 5000 })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+  });
+
+  it('keeps the local copy when the cleanup itself fails, so a reload still shows the lock (Sol MED)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'cleanup-fails-reload', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const realDelete = IDBObjectStore.prototype.delete;
+    const deletes = vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (this: IDBObjectStore) {
+      this.transaction.abort();
+      return realDelete.call(this, '__none__');
+    });
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => first.result.current.beginIntent({ file: 'a.csv' }))).rejects.toThrow();
+    } finally {
+      writes.mockRestore();
+      deletes.mockRestore();
+    }
+    first.unmount();
+    const reloaded = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    expect(reloaded.result.current.isIntentLocked).toBe(true);
+    expect(reloaded.result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
+  });
+
+  it('a double click cannot let the first prepare’s cleanup delete the record the second one handed out (Sol HIGH r2)', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'double-click', surface: 'bulk-product-import' };
+    const originalSetItem = Storage.prototype.setItem;
+    let ackFailures = 1;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.sessionStorage && key.startsWith('crx:uncertain-mutation-ack:v1:') && ackFailures-- > 0) {
+        throw new DOMException('full', 'QuotaExceededError');
+      }
+      return originalSetItem.call(this, key, value);
+    });
+    const page = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    let outcomes: PromiseSettledResult<{ file: string }>[] = [];
+    try {
+      await act(async () => {
+        outcomes = await Promise.allSettled([
+          page.result.current.beginIntent({ file: 'a.csv' }),
+          page.result.current.beginIntent({ file: 'a.csv' }),
+        ]);
+      });
+    } finally {
+      writes.mockRestore();
+    }
+    expect(outcomes.map((o) => o.status)).toEqual(['rejected', 'fulfilled']);
+    const sentKey = page.result.current.getIdempotencyKey();
+    expect(sentKey).toBeTruthy();
+    page.unmount();
+    // A real second tab has none of this tab's session notes and no local copy to go by: only IndexedDB.
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    const otherTab = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await expect(act(async () => otherTab.result.current.beginIntent({ file: 'b.csv' })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    await act(async () => {
+      await otherTab.result.current.beginIntent({ file: 'a.csv' });
+    });
+    expect(otherTab.result.current.getIdempotencyKey()).toBe(sentKey);
+  });
+
+  it('a failed mirror write never removes an earlier request that may have committed', async () => {
+    const options = { operation: 'apply_product_setup', userId: 'kept-earlier', surface: 'bulk-product-import' };
+    const first = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await act(async () => first.result.current.beginIntent({ file: 'a.csv' }));
+    const earlierKey = first.result.current.getIdempotencyKey();
+    first.unmount();
+    const originalSetItem = Storage.prototype.setItem;
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this === window.localStorage && key.startsWith('crx:uncertain-mutation:v4:')) throw new DOMException('full', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    const retry = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    try {
+      await expect(act(async () => retry.result.current.beginIntent({ file: 'a.csv' }))).rejects.toThrow();
+    } finally {
+      writes.mockRestore();
+    }
+    retry.unmount();
+    const after = renderHook(() => useUncertainMutationIntent<{ file: string }>(options));
+    await expect(act(async () => after.result.current.beginIntent({ file: 'b.csv' })))
+      .rejects.toThrow('DURABLE_MUTATION_INTENT_CONFLICT');
+    expect(after.result.current.unresolvedIntent).toEqual({ file: 'a.csv' });
+    await act(async () => {
+      expect(await after.result.current.beginIntent({ file: 'a.csv' })).toEqual({ file: 'a.csv' });
+    });
+    expect(after.result.current.getIdempotencyKey()).toBe(earlierKey);
   });
 
   it('fails closed before mutation when transactional browser storage is unavailable', async () => {

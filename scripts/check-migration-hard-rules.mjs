@@ -50,18 +50,21 @@
 //   <name> ... ENABLE ROW LEVEL SECURITY` and in at least one `CREATE POLICY ...
 //   ON <name>` in the SAME file. Names are compared lowercase, unquoted,
 //   schema-qualified (unqualified names mean `public`). The one documented
-//   exemption is the same marker the local .claude/hooks/rls-on-new-tables.mjs
-//   hook honors: a `-- rls-check: exempt` comment in the file (used once in 900
+//   exemption is the marker the retired local rls-on-new-tables hook
+//   honored: a `-- rls-check: exempt` comment in the file (used once in 900
 //   migrations, for a SECURITY DEFINER only counter table). An exempt file is
 //   reported loudly, never silently.
 //
 // USAGE
-//   node scripts/check-migration-hard-rules.mjs --base <sha> --head <sha> [--repo-root <dir>]
+//   node scripts/check-migration-hard-rules.mjs --base <sha|ref> --head <sha|ref> [--repo-root <dir>]
+//       (ref names such as HEAD or origin/main are resolved with git rev-parse)
 //   node scripts/check-migration-hard-rules.mjs --audit-all [--repo-root <dir>]
 //       (scans every migration on disk for the RLS rule; informational)
 //
 // EXIT CODES
-//   0 = clean, 1 = violation, 2 = the check itself could not run
+//   0 = clean (or base is the all-zero SHA of a brand-new branch push),
+//   1 = violation, 2 = the check itself could not run (including any --base or
+//   --head that does not resolve to a commit; never a silent pass)
 
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -244,12 +247,13 @@ function git(repoRoot, args, options = {}) {
   });
 }
 
-function commitExists(repoRoot, sha) {
+// Accepts a SHA or any ref name (HEAD, origin/main, a branch); null if it is not a commit.
+function resolveCommit(repoRoot, ref) {
+  if (typeof ref !== 'string' || ref === '' || ref.startsWith('-')) return null;
   try {
-    git(repoRoot, ['cat-file', '-e', `${sha}^{commit}`]);
-    return true;
+    return git(repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim();
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -265,16 +269,19 @@ function showFile(repoRoot, sha, relPath) {
 // Runners
 // ---------------------------------------------------------------------------
 
-export function runDiffCheck({ repoRoot, base, head, log = console.log }) {
-  const isSha = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value);
-  if (!isSha(head) || !commitExists(repoRoot, head)) {
-    throw new Error(`head is not a reachable commit: ${head}`);
-  }
-  if (!isSha(base) || base.toLowerCase() === ZERO_SHA || !commitExists(repoRoot, base)) {
+export function runDiffCheck({ repoRoot, base, head: headRef, log = console.log }) {
+  const head = resolveCommit(repoRoot, headRef);
+  if (!head) throw new Error(`head is not a reachable commit: ${headRef}`);
+  // The all-zero SHA is GitHub's "no previous commit" on a brand-new branch push:
+  // the one deliberate skip. Any other base that does not resolve is an error.
+  if (typeof base === 'string' && base.toLowerCase() === ZERO_SHA) {
     log(`MIGRATION HARD RULES: no comparison base available (base=${base}); nothing to compare.`);
     log('  This happens on a brand-new branch push. The pull request run performs the real check.');
     return { ok: true, skipped: true };
   }
+  const baseRef = base;
+  base = resolveCommit(repoRoot, baseRef);
+  if (!base) throw new Error(`base is not a reachable commit: ${baseRef}`);
 
   const mergeBase = git(repoRoot, ['merge-base', base, head]).trim();
   const registryText = showFile(repoRoot, mergeBase, REGISTRY_PATH);
@@ -377,7 +384,7 @@ function main() {
     return;
   }
   if (!options.base || !options.head) {
-    throw new Error('usage: --base <sha> --head <sha> [--repo-root <dir>] | --audit-all');
+    throw new Error('usage: --base <sha|ref> --head <sha|ref> [--repo-root <dir>] | --audit-all');
   }
   const result = runDiffCheck({ repoRoot: options.repoRoot, base: options.base, head: options.head });
   process.exitCode = result.ok ? 0 : 1;

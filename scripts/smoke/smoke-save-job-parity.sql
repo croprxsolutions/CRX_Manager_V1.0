@@ -74,8 +74,9 @@ BEGIN
   -- a pricing-free shell. The chain never reads products.current_cost anyway;
   -- job cost/price come from the per-line cents in v_chems. (Verified live
   -- 2026-08-25 when the old fixture aborted on PRODUCT_PRICING_GOVERNED_PATH_REQUIRED.)
+  -- The rate-lock guard (20261107060000) needs units listed in unit_conversions: Pt and Gal, not pt/ac and GL.
   INSERT INTO products (product_name, unit_size, epa_registration, product_form, vendor, rei_hours, phi_days, rate_per_acre, rate_unit)
-  VALUES ('[SMOKE] Parity Chem A ' || v_sfx, 'GL', '999999-99999', 'liquid', 'Acme Chem', 24, 7, 1.5, 'pt/ac')
+  VALUES ('[SMOKE] Parity Chem A ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Acme Chem', 24, 7, 1.5, 'Pt')
   RETURNING id INTO v_prod_a;
   INSERT INTO products (product_name, unit_size, epa_registration, product_form, vendor, rei_hours, phi_days)
   VALUES ('[SMOKE] Parity Chem B ' || v_sfx, 'LB', '999999-99999', 'dry', 'Beta Supply', 12, 14)

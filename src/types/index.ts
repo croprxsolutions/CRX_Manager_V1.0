@@ -178,6 +178,8 @@ export interface EpaLookupResult {
   activeIngredients: EpaActiveIngredient[];
   latestLabelPdfUrl: string | null;
   labelPdfs: EpaLabelPdf[];
+  /** Set when EPA moved the requested number; the result is then found:false and describes the new registration. */
+  transferredTo?: string | null;
 }
 
 // ─── Label Drafts (§1 AI Label-Data Backfill) ───────────────────────────────
@@ -1841,6 +1843,409 @@ export interface UnitConversion {
   notes: string | null;
 }
 
+// DM-2 (20261207100000_product_weights): approved weight per gallon (liquid parent) and net weight per
+// pack (dry size stocked in Ea/Unit), read through get_product_weights and kept on saved tickets/worksheets.
+export type ProductWeightSource = 'measured' | 'sds' | 'label' | 'supplier';
+export type ProductWeightReviewState = 'draft' | 'approved' | 'superseded';
+export type ProductWeightKind = 'density' | 'net_weight' | 'unit_weight' | 'none';
+export type ProductWeightNoneReason = 'no_parent' | 'no_approved_weight' | 'seed_or_each' | 'unit_not_convertible' | 'unknown_form';
+export type ProductWeightEventType = 'draft_saved' | 'draft_replaced' | 'approved' | 'corrected' | 'returned_to_draft';
+
+/** lower(trim(unit)) -> pounds (weight), gallons (volume) or count per unit; names that collide are listed in `ambiguous`. */
+export interface WeightUnitFactors {
+  factors: Record<string, { kind: 'weight' | 'volume' | 'count'; factor: number }>;
+  ambiguous: string[];
+}
+
+/** One size's current weight (`_product_weight`): `products[id].weight` in get_product_weights. */
+export interface ProductWeight {
+  kind: ProductWeightKind;
+  /** Present (false) only when the product row does not exist. */
+  found?: false;
+  none_reason?: ProductWeightNoneReason;
+  product_form?: 'liquid' | 'dry' | 'seed' | 'each';
+  parent_id?: string;
+  lb_per_unit?: number;
+  per_unit?: string;
+  value_id?: string;
+  source?: ProductWeightSource | 'unit';
+  value_basis?: Record<string, unknown>;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  reviewed_by_name?: string | null;
+  pack_generation?: number;
+  member_generation?: number;
+  identity_generation?: number;
+}
+
+export interface ProductParentDensityValue {
+  id: string;
+  parent_id: string;
+  lb_per_gal: number;
+  entered_value: number;
+  entered_unit: 'lb_per_gal' | 'specific_gravity';
+  source: ProductWeightSource;
+  source_note: string | null;
+  basis: Record<string, unknown>;
+  review_state: ProductWeightReviewState;
+  reason: string | null;
+  evidence: string | null;
+  created_by: string | null;
+  created_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_at: string | null;
+}
+
+export interface ProductSizeNetWeightValue {
+  id: string;
+  product_id: string;
+  net_lb: number;
+  entered_value: number;
+  source: ProductWeightSource;
+  source_note: string | null;
+  basis: Record<string, unknown>;
+  review_state: ProductWeightReviewState;
+  reason: string | null;
+  evidence: string | null;
+  created_by: string | null;
+  created_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_at: string | null;
+}
+
+export interface ProductParentDensityState {
+  parent_id: string;
+  density_version: number;
+  identity_generation: number;
+}
+
+export interface ProductSizeNetWeightState {
+  product_id: string;
+  net_weight_version: number;
+  pack_generation: number;
+  member_generation: number;
+}
+
+export interface ProductWeightEvent {
+  id: number;
+  subject_kind: 'parent_density' | 'size_net_weight';
+  parent_id: string | null;
+  product_id: string | null;
+  event_type: ProductWeightEventType;
+  value_id: string | null;
+  before_value: unknown[] | null;
+  after_value: unknown[] | null;
+  reason: string | null;
+  evidence: string | null;
+  actor_kind: 'user' | 'system';
+  changed_by: string | null;
+  changed_by_name: string | null;
+  changed_at: string;
+}
+
+/** The weight a saved blend ticket first used for a product (never changed). */
+export interface BlendTicketProductWeight {
+  blend_ticket_id: string;
+  product_id: string;
+  product_name: string;
+  product_form: 'liquid' | 'dry' | 'seed' | 'each' | null;
+  weight_kind: ProductWeightKind;
+  value_id: string | null;
+  value_reviewed_at: string | null;
+  value_reviewed_by: string | null;
+  lb_per_unit: number | null;
+  per_unit: string | null;
+  unit_factors: WeightUnitFactors;
+  source: ProductWeightSource | 'unit' | null;
+  value_basis: Record<string, unknown> | null;
+  none_reason: ProductWeightNoneReason | null;
+  captured_how: 'at_save' | 'backfill_at_apply';
+  captured_at: string;
+}
+
+export interface BlendTicketWeightBasis {
+  blend_ticket_id: string;
+  unit_factors: WeightUnitFactors;
+  captured_at: string;
+}
+
+/** A saved loader worksheet's weight for one product; used only while worksheet_weight_is_valid. */
+export interface JobLoaderWorksheetWeight {
+  worksheet_id: string;
+  product_id: string;
+  job_id: string;
+  product_name: string;
+  product_form: 'liquid' | 'dry' | 'seed' | 'each' | null;
+  weight_kind: ProductWeightKind;
+  value_id: string | null;
+  value_reviewed_at: string | null;
+  value_reviewed_by: string | null;
+  lb_per_unit: number | null;
+  per_unit: string | null;
+  unit_factors: WeightUnitFactors;
+  source: ProductWeightSource | 'unit' | null;
+  value_basis: Record<string, unknown> | null;
+  none_reason: ProductWeightNoneReason | null;
+  pack_generation: number | null;
+  member_generation: number | null;
+  identity_generation: number | null;
+  captured_at: string;
+}
+
+/** get_blend_ticket_weights' per-line weight: the saved row with its name as `captured_name`, or a placeholder. */
+export type BlendTicketWeightSnapshot = Omit<BlendTicketProductWeight, 'product_name'> & { captured_name: string };
+export type BlendTicketLineWeight =
+  | BlendTicketWeightSnapshot
+  | { weight_kind: 'none'; none_reason: 'unlinked' | 'not_recorded' };
+
+// DM-1 (20261209100000_product_chemistry): active ingredients on a product parent (Product Stage 2),
+// read through get_parent_chemistry; cost per lb of active through get_parent_active_costs (admin).
+export type ChemistryRowStatus = 'active' | 'retired';
+export type ChemistryStrengthUnit = 'pct_ww' | 'lb_per_gal';
+export type ChemistryStrengthBasis = 'active_ingredient' | 'acid_equivalent';
+export type ChemistrySource = 'label' | 'sds' | 'supplier' | 'other' | 'epa_lookup';
+export type ModeOfActionScheme = 'HRAC' | 'FRAC' | 'IRAC';
+export type FertilizerNutrient = 'N' | 'P' | 'K' | 'S' | 'Ca' | 'Mg' | 'B' | 'Cl' | 'Co' | 'Cu' | 'Fe' | 'Mn' | 'Mo' | 'Ni' | 'Zn';
+export type FertilizerBasis = 'elemental' | 'oxide';
+export type ActiveIngredientEventType = 'created' | 'updated' | 'retired' | 'reactivated';
+export type ProductChemistryEventType = 'set' | 'corrected';
+
+export interface ActiveIngredient {
+  id: string;
+  name: string;
+  name_key: string; // generated
+  cas: string | null;
+  canonical_ingredient_id: string | null;
+  canonical_fraction: number | null;
+  fraction_basis: 'acid_equivalent' | null;
+  is_parent_form: boolean;
+  status: ChemistryRowStatus;
+  retire_reason: string | null;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentIngredient {
+  id: string;
+  parent_id: string;
+  ingredient_id: string;
+  strength_value: number | null;
+  strength_unknown: boolean;
+  strength_unit: ChemistryStrengthUnit;
+  strength_basis: ChemistryStrengthBasis;
+  source: ChemistrySource;
+  source_note: string | null;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentModeOfAction {
+  id: string;
+  parent_id: string;
+  ingredient_id: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  /** 'epa_lookup' once the EPA lookup has confirmed it (20261211100000); only the EPA writer removes those. */
+  source: 'typed' | 'epa_lookup';
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductParentFertilizerAnalysis {
+  id: string;
+  parent_id: string;
+  nutrient: FertilizerNutrient;
+  basis: FertilizerBasis;
+  percent: number | null;
+  percent_unknown: boolean;
+  source: ChemistrySource;
+  source_note: string | null;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One cost-per-lb figure: exact whole cents as a string, or a named refusal (never a number guessed). */
+// A figure carries exactly one of cents (exact whole cents as a string) or reason; the other key is absent.
+export type ActiveCostFigure =
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; cents: string }
+  | { basis: ChemistryStrengthBasis | FertilizerBasis; reason: string };
+
+// Payload shapes returned by the chemistry RPCs (not the table rows).
+export interface ActiveIngredientSummary {
+  id: string;
+  name: string;
+  cas: string | null;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  fraction_basis: 'acid_equivalent' | null;
+  is_parent_form: boolean;
+  provisional: boolean;
+  status: ChemistryRowStatus;
+  retire_reason: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryIngredientRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  cas: string | null;
+  provisional: boolean;
+  is_parent_form: boolean;
+  canonical_ingredient_id: string | null;
+  canonical_name: string | null;
+  canonical_fraction: number | null;
+  strength_value: number | null;
+  strength_unknown: boolean;
+  strength_unit: ChemistryStrengthUnit;
+  strength_basis: ChemistryStrengthBasis;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryModeRow {
+  row_id: string;
+  ingredient_id: string;
+  name: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  source: 'typed' | 'epa_lookup';
+  row_version: number;
+}
+
+export interface ParentChemistryFertilizerRow {
+  row_id: string;
+  nutrient: FertilizerNutrient;
+  basis: FertilizerBasis;
+  percent: number | null;
+  percent_unknown: boolean;
+  source: ChemistrySource;
+  source_note: string | null;
+  row_version: number;
+}
+
+export interface ParentChemistryValues {
+  ingredients: ParentChemistryIngredientRow[];
+  modes_of_action: ParentChemistryModeRow[];
+  fertilizer: ParentChemistryFertilizerRow[];
+}
+
+export interface ChemistryParentSize {
+  product_id: string;
+  product_name: string;
+  size_role: string;
+  is_active: boolean;
+}
+
+/** get_parent_chemistry (active users). `epa_refusal` is the D-Z gate's message, or null when typed chemistry is allowed. */
+export interface ParentChemistry {
+  parent_id: string;
+  parent_name: string;
+  product_form: string;
+  is_active: boolean;
+  chemistry_version: number;
+  chemistry: ParentChemistryValues;
+  epa_refusal: string | null;
+  sizes: ChemistryParentSize[];
+}
+
+/** preview_parent_chemistry_correction (admin). A refused preview has `refusal` and no fingerprint. */
+export interface ParentChemistryPreview {
+  parent_id: string;
+  parent_name: string;
+  is_active: boolean;
+  chemistry_version: number;
+  preview_fingerprint: string | null;
+  epa_refusal: string | null;
+  before: ParentChemistryValues;
+  after: ParentChemistryValues | null;
+  changed: boolean;
+  refusal: string | null;
+  sizes: ChemistryParentSize[];
+}
+
+export interface ActiveCostRow {
+  kind: 'ingredient' | 'fertilizer';
+  row_id: string;
+  ingredient_id: string | null;
+  name: string;
+  nutrient: FertilizerNutrient | null;
+  strength_value: number | null;
+  strength_unit: ChemistryStrengthUnit;
+  figure: ActiveCostFigure;
+  converted: ActiveCostFigure | null;
+  weight_row_id: string | null;
+  label: string;
+}
+
+export interface ActiveCostSize {
+  product_id: string;
+  product_name: string;
+  is_active: boolean;
+  size_role: string;
+  product_form: string;
+  priced_unit: string | null;
+  cost_per_base: { base: 'gal' | 'lb'; cents: string } | null;
+  cost_reason: string | null;
+  figures: ActiveCostRow[];
+}
+
+/** get_parent_active_costs (admin only). Cents are exact whole-number strings. */
+export interface ParentActiveCosts {
+  parent_id: string;
+  parent_name: string;
+  chemistry_version: number;
+  label: string;
+  density: { lb_per_gal: number; weight_row_id: string } | { reason: string };
+  reference: { product_id: string | null; source: 'bulk' | 'picked' | null; reason: string | null };
+  parent_figures: ActiveCostRow[] | null;
+  sizes: ActiveCostSize[];
+}
+
+export interface IngredientUsers {
+  parents: Array<{ parent_id: string; name: string; is_active: boolean }>;
+  forms: Array<{ ingredient_id: string; name: string }>;
+}
+export type ActiveIngredientWithUsers = ActiveIngredientSummary & IngredientUsers;
+
+/** get_active_ingredient_worklist (admin). */
+export interface IngredientWorklist {
+  needs_cas: ActiveIngredientWithUsers[];
+  possible_duplicates: Array<{ provisional: ActiveIngredientWithUsers; other: ActiveIngredientWithUsers }>;
+  retired: ActiveIngredientSummary[];
+}
+
+/** preview_active_ingredient_change (admin). */
+export interface IngredientChangePreview {
+  ingredient: ActiveIngredientSummary;
+  usage_fingerprint: string;
+  users: IngredientUsers;
+  affected_parents: Array<{ parent_id: string; name: string; is_active: boolean; epa_refusal: string | null; sizes: string[] }>;
+  after: ActiveIngredientSummary | null;
+  changed_fields: string[] | null;
+  needs_reason: boolean | null;
+  refusal: string | null;
+}
+
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';
 export type BlendTicketReviewStatus = 'unreviewed' | 'approved' | 'rejected';
 export type BlendTicketOrderLinkStatus = 'unlinked' | 'linked';
@@ -2061,6 +2466,8 @@ export interface Invoice {
   // Metadata
   invoice_date: string;
   due_date: string | null;
+  // KI-14: true when due_date was typed by hand; false when it follows payment_terms.
+  due_date_is_custom: boolean;
   purchase_order_ref: string | null;
   header_notes: string | null;
   footer_notes: string | null;
@@ -3166,6 +3573,8 @@ export interface Job {
   customer_id: string;
   status: JobStatus;
   job_date: string;
+  /** KI-73 part C: server-stamped when the job first reaches completed/invoiced; never written by the app. */
+  completed_at?: string | null;
   scheduled_time: string | null;
   applicator_id: string | null;
   vehicle_id: string | null;

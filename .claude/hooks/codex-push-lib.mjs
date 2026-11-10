@@ -3219,6 +3219,28 @@ export function commandFedToInterpreter(command) {
   });
 }
 
+// A note written in ONE strict shape loses its text, so the guards judge only
+// its first line (2026-11-07, Mason: notes that mentioned `git reset --hard` or
+// a worktree path were refused). The whole command must be
+//   cat >|>> FILE <<'WORD'   or   tee [-a] FILE <<'WORD'
+// then the note, then WORD as the last line, with no note line equal to WORD.
+// Bash then runs nothing but that cat/tee, and FILE stays visible to the
+// guards. Anything else returns unchanged. Mason chose this over a general
+// shell reader after the Codex App found three ways (substitutions, escaped
+// delimiters, a non-ASCII space after one) that the reader and Bash disagreed
+// on where a here-document ends (PR #1632). Language runtimes were dropped
+// earlier: no word list tells writing from launching (Luna rounds 1-2).
+const NOTE_HEAD = /^(?:cat >>? ?|tee (?:-a )?)[A-Za-z0-9_./~:@%+,=-]+ <<'([A-Za-z0-9_]+)'$/;
+export function commandWithoutTextHeredocs(command) {
+  const text = String(command ?? "");
+  if (/\r/.test(text)) return text;
+  const lines = text.replace(/\n$/, "").split("\n");
+  const word = lines.length >= 2 ? NOTE_HEAD.exec(lines[0])?.[1] : undefined;
+  if (!word || lines[lines.length - 1] !== word) return text;
+  if (lines.slice(1, -1).includes(word)) return text;
+  return lines[0];
+}
+
 // Words that run the program after them (possibly after their own options and
 // values). `timeout`, `nice`, `sudo -u root` and `env -u X` each hid an alias
 // from the check below when they were missing or their values were misread

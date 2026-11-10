@@ -2099,6 +2099,12 @@
       "description": "Migration 20261229150000: reads Sales Detail, every Sales Summary grouping and the dashboard as an admin; a rep sells a Bill Split 60/40, delivered and billed per payer; Sales Detail shows one row per payer (payer 2 exactly 40% rounded down, the main customer the rest), each with that payer's own invoice, and every other row unchanged; detail, every summary grouping and the dashboard headline grew by exactly the line; the customer filter and \"by customer\" credit payer 2; a rep gets the payer rows with cost, profit and margin empty; no API role may call _sales_line_payers. Terminal rollback.",
       "covers": ["get_sales_detail_report", "get_sales_summary_report", "financial_dashboard_summary", "_sales_line_payers"],
       "area": ["billing", "regression"]
+    },
+    "standing_grower_discount": {
+      "chain": "smoke-standing-grower-discount.sql",
+      "description": "Migration 20261231110000 (billing plan M4b): a 3% customer's delivery invoice drafts at products less 3% (half up, to the cent) with one 'Standing discount 3%' line; a $45.00 freight charge is not discounted; re-saving the draft as the screen sends it never discounts twice; a hand edit or delete of the line is put right at commit; a sales rep can't set a rate (STANDING_DISCOUNT_ADMIN_ONLY); a customer's new rate reaches their open draft and never a posted invoice; a Bill Split 50/50 bills each payer's own rate on their share, a payer re-save keeps it and the group posts; a customer with no rate gets one plain line; the office's rate on one sale (set_invoice_standing_discount) sets 1.5%, removes it with 0, returns to the customer's rate with NULL, is refused for a rep, a posted invoice and a direct write, and on a split payer's draft the group still posts. Deferred triggers fired with SET CONSTRAINTS at each commit point. Terminal rollback.",
+      "covers": ["_recompute_standing_discount", "_standing_discount_after_line_change", "_standing_discount_after_invoice_change", "_standing_discount_after_customer_change", "_standing_discount_before_fingerprint", "guard_customer_standing_discount", "set_invoice_standing_discount", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
     }
   }
 }

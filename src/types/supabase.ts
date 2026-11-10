@@ -2428,6 +2428,7 @@ export type Database = {
           row_version: number
           shipping_address: string | null
           soybean_acres: number | null
+          standing_discount_pct: number
           state: string | null
           total_acres: number | null
           updated_at: string
@@ -2462,6 +2463,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -2496,6 +2498,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -5003,6 +5006,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      invoice_standing_discount_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+          set_by: string
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+          set_by: string
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+          set_by?: string
+        }
+        Relationships: []
       }
       invoices: {
         Row: {
@@ -15929,6 +15953,14 @@ export type Database = {
           p_idempotency_key?: string
           p_override_acres: number
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      set_invoice_standing_discount: {
+        Args: {
+          p_idempotency_key: string
+          p_invoice_id: string
+          p_pct: number | null
         }
         Returns: Json
       }

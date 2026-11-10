@@ -780,6 +780,9 @@ async function dryFluidOunce() {
   const g4Stock = refusedWith('G4 dry stock unit to fl oz', `UPDATE public.products SET inventory_unit = 'fl oz' WHERE id = '${DRY}';`, 'ERROR', { asOwner: true });
   console.log(`[prover] G4: dry unit size fl oz refused (${g4Size.replace(/^.*ERROR:\s*/, '').slice(0, 50)}...); dry stock unit fl oz refused (${g4Stock.replace(/^.*ERROR:\s*/, '').slice(0, 50)}...)`);
 
+  // A package size that leads with a number (Luna round 1).
+  refusedWith('G4 new dry product sized 32 fl oz', `INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form)
+    VALUES ('a16a1600-0000-4000-8000-0000000000b8', '[PROVER] KI16 Dry Sized', '32 fl oz', 'Lb', 'lb', 'dry');`, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   // G4 race: a line save and a product turning dry, in two sessions, each order. Without the advisory lock both commit.
   const LIQ4 = 'a16a1600-0000-4000-8000-0000000000b6';
   const LIQ5 = 'a16a1600-0000-4000-8000-0000000000b7';

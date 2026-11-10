@@ -139,3 +139,10 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
 - For #1741 (not changed here): `authenticated` holds UPDATE on `blend_tickets.deleted_at` (live, read-only
   2026-11-10), so a soft-deleted ticket can be restored; `20261231110000`'s product rate-unit guard skips deleted
   tickets. Its prover (F4) shows a restored blank-rate line is refused at billing, so it fails closed.
+
+## Luna round 1 (gpt-6-luna xhigh, head 93ae69a06): 0 BLOCKER/HIGH, 3 MED
+
+- Fixed: a dry product's package size or stock unit that leads with a number (`32 fl oz`) is now refused too
+  (prover G4).
+- #1741's file (not changed here): a restored soft-deleted ticket can become unbillable, and a save_job retry with
+  foldable characters returns `IDEMPOTENCY_INTENT_MISMATCH`; both fail closed and are recorded in #1741's contract.

@@ -41,8 +41,9 @@ export function proofLink(texts) {
 // how: a PR or commit (#123 or a GitHub link) or a flag ("flag <name>").
 export function heldOffNote(texts) {
   for (const t of texts) {
-    const m = /^[ \t]*held off:[ \t]*(\S.*?)[ \t]*$/im.exec(t ?? '');
-    if (m && /#\d+\b|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/(pull|commit)\/\w+|\bflag\s+\S+/i.test(m[1])) return m[1];
+    for (const m of (t ?? '').matchAll(/^[ \t]*held off:[ \t]*(\S.*?)[ \t]*$/gim)) {
+      if (/#\d+\b|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/(pull|commit)\/\w+|\bflag\s+\S+/i.test(m[1])) return m[1];
+    }
   }
   return null;
 }

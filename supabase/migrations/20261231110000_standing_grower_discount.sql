@@ -125,6 +125,15 @@ CREATE POLICY invoice_standing_discount_rates_select ON public.invoice_standing_
   FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = invoice_standing_discount_rates.invoice_id));
 
+-- Every chemical-sale invoice already in the database keeps the rate it was billed at: today every customer's rate is
+-- the new column's 0, so this records 0% and moves no invoice. Without it, an older draft or an unposted invoice would
+-- take a customer's later rate the first time anything touched it.
+INSERT INTO public.invoice_standing_discount_rates (invoice_id, rate_pct, set_by)
+SELECT i.id, COALESCE(c.standing_discount_pct, 0), NULL
+  FROM public.invoices i LEFT JOIN public.customers c ON c.id = i.customer_id
+ WHERE i.invoice_type = 'chemical_sale'
+ON CONFLICT (invoice_id) DO NOTHING;
+
 -- 2. The computed line ---------------------------------------------------------------------------
 ALTER TABLE public.invoice_items DROP CONSTRAINT invoice_items_charge_type_check;
 ALTER TABLE public.invoice_items ADD CONSTRAINT invoice_items_charge_type_check
@@ -179,28 +188,59 @@ DECLARE
   v_pct numeric;
   v_same boolean;
   v_new_total bigint;
+  v_old_discount bigint;
 BEGIN
-  SELECT i.id, i.customer_id, i.invoice_type, i.total_amount_cents, i.created_by INTO v_inv
+  SELECT i.id, i.customer_id, i.invoice_type, i.status, i.deleted_at, i.total_amount_cents, i.created_by INTO v_inv
     FROM invoices i
-   WHERE i.id = p_invoice_id AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
+   WHERE i.id = p_invoice_id
    FOR UPDATE;
   IF NOT FOUND THEN
     RETURN;
   END IF;
 
-  IF v_inv.invoice_type = 'chemical_sale' THEN
-    -- The rate this invoice is drafted at, recorded once so a later customer change never moves it.
-    IF NOT EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id) THEN
-      INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by)
-      SELECT v_inv.id, COALESCE(c.standing_discount_pct, 0), NULL FROM customers c WHERE c.id = v_inv.customer_id
-      ON CONFLICT (invoice_id) DO NOTHING;
-    END IF;
-    SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(v_inv.id) e;
+  -- A chemical sale records the rate it is drafted at once, whatever its status (one drafted and posted in the
+  -- same transaction too), so a later customer change never moves it, not even on unposting.
+  IF v_inv.invoice_type = 'chemical_sale'
+     AND NOT EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id) THEN
+    INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by)
+    SELECT v_inv.id, COALESCE(c.standing_discount_pct, 0), NULL FROM customers c WHERE c.id = v_inv.customer_id
+    ON CONFLICT (invoice_id) DO NOTHING;
   END IF;
+
+  IF v_inv.status NOT IN ('draft', 'unposted') OR v_inv.deleted_at IS NOT NULL THEN
+    RETURN;
+  END IF;
+
+  IF v_inv.invoice_type <> 'chemical_sale' THEN
+    -- Any other draft is left exactly as its writer made it, unless it carries a stray discount line (switched away
+    -- from a chemical sale): then only that line's amount comes back out of its total, whatever the total means
+    -- for that type (a field application's is not the sum of its lines).
+    SELECT COALESCE(sum(extended_cents), 0) INTO v_old_discount
+      FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount';
+    IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount')
+       OR current_setting('app.crx_standing_discount_busy', true) = v_inv.id::text THEN
+      RETURN;
+    END IF;
+    PERFORM set_config('app.crx_standing_discount_busy', v_inv.id::text, true);
+    DELETE FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount';
+    v_new_total := v_inv.total_amount_cents - v_old_discount;
+    UPDATE invoices SET total_amount_cents = v_new_total WHERE id = v_inv.id;
+    INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
+                                     total_impact_cents, description)
+    VALUES ('invoice_updated', 'invoice', v_inv.id, COALESCE(auth.uid(), v_inv.created_by),
+            CASE WHEN auth.uid() IS NULL THEN 'system' ELSE (SELECT role FROM profiles WHERE id = auth.uid()) END,
+            jsonb_build_object('total_amount_cents', v_inv.total_amount_cents),
+            jsonb_build_object('total_amount_cents', v_new_total, 'standing_discount_cents', 0),
+            v_new_total - v_inv.total_amount_cents, 'Standing discount removed (not a chemical sale)');
+    PERFORM set_config('app.crx_standing_discount_busy', '', true);
+    RETURN;
+  END IF;
+
+  SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(v_inv.id) e;
 
   -- Nothing to change (cents, label and total): keep the existing line and its id, so a plain re-save is quiet.
   -- (Worked out first: plpgsql ends an IF condition at its first THEN, a CASE's included.)
-  v_same := (SELECT COALESCE(array_agg(-extended_cents || '|' || description), '{}'::text[]) FROM invoice_items
+  v_same := (SELECT COALESCE(array_agg((-(extended_cents::numeric))::text || '|' || description), '{}'::text[]) FROM invoice_items
               WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount')
             = (CASE WHEN v_cents > 0 THEN ARRAY[v_cents || '|' || v_label] ELSE '{}'::text[] END)
         AND (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id)
@@ -232,7 +272,9 @@ BEGIN
     INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
                                      total_impact_cents, description)
     VALUES ('invoice_updated', 'invoice', v_inv.id, COALESCE(auth.uid(), v_inv.created_by),
-            (SELECT role FROM profiles WHERE id = COALESCE(auth.uid(), v_inv.created_by)),
+            -- With no signed-in user (a background or service write) the entry says so; actor_user_id is required,
+            -- so it names the invoice's creator, and actor_role 'system' marks that they did not make this change.
+            CASE WHEN auth.uid() IS NULL THEN 'system' ELSE (SELECT role FROM profiles WHERE id = auth.uid()) END,
             jsonb_build_object('total_amount_cents', v_inv.total_amount_cents),
             jsonb_build_object('total_amount_cents', v_new_total, 'standing_discount_cents', v_cents, 'rate_pct', v_pct),
             v_new_total - v_inv.total_amount_cents,
@@ -335,7 +377,7 @@ DECLARE
   v_pct numeric;
 BEGIN
   SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(NEW.id) e;
-  IF (SELECT COALESCE(array_agg(-extended_cents || '|' || description), '{}'::text[]) FROM invoice_items
+  IF (SELECT COALESCE(array_agg((-(extended_cents::numeric))::text || '|' || description), '{}'::text[]) FROM invoice_items
        WHERE invoice_id = NEW.id AND charge_type = 'standing_discount')
      IS DISTINCT FROM (CASE WHEN v_cents > 0 THEN ARRAY[v_cents || '|' || v_label] ELSE '{}'::text[] END) THEN
     RAISE EXCEPTION 'STANDING_DISCOUNT_STALE: this draft''s standing discount is out of date; save it again, then post'

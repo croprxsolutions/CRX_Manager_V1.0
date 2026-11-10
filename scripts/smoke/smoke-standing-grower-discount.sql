@@ -20,6 +20,9 @@
 --   O  The discount's own audit entry: an 'invoice_updated' record with the change in total, so the trail adds up
 --   P  A rate change keeps every field of the draft's lines (rate per acre, acres, price source)
 --   Q  A new empty chemical-sale draft records its customer's rate at commit
+--   R  A field application draft whose total is not the sum of its lines: editing a line never changes its total
+--   S  A chemical sale drafted and posted in one transaction still records its rate (0%), so unposting after the
+--      customer moves to 5% keeps the posted amount
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -557,6 +560,56 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (Q) creating an empty chemical-sale draft failed: ' || SQLERRM || ';';
+  END;
+
+  -- R: a field application draft with a header total of 5000 cents and one 3000-cent line (as owner).
+  BEGIN
+    SET LOCAL session_replication_role = replica;   -- fixture only: a field app draft shaped as its writer leaves it
+    INSERT INTO invoices (customer_id, invoice_type, status, invoice_date, salesman_id, created_by, total_amount_cents)
+      VALUES (v_customer, 'field_application', 'draft', CURRENT_DATE, v_admin, v_admin, 5000) RETURNING id INTO v_invoice;
+    INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents, sort_order)
+      VALUES (v_invoice, '[SMOKE] application', 1, 3000, 3000, 0, 1);
+    SET LOCAL session_replication_role = origin;
+    UPDATE invoice_items SET notes = '[SMOKE] touched' WHERE invoice_id = v_invoice;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM 5000 THEN
+      v_fails := v_fails || format(' (R) a field application draft''s total moved to %s, want 5000;', (SELECT total_amount_cents FROM invoices WHERE id = v_invoice));
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (R) the field application check failed: ' || SQLERRM || ';';
+  END;
+
+  -- S: payer 2 at 0%: a delivery draft posted before any commit point, then 5%, then unposted.
+  BEGIN
+    UPDATE customers SET standing_discount_pct = 0 WHERE id = v_payer2;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+      VALUES ('SMK-DSS-' || v_suffix, v_payer2, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+    PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+    INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+      total_units_needed, total_price, quantity_delivered, quantity_remaining)
+      VALUES (v_order, v_product.id, '[SMOKE] Same-transaction post', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+        10, (v_product.current_cost + 1.37) * 10, 0, 10) RETURNING id INTO v_line;
+    PERFORM set_config('app.crx_below_cost_operation', '', true);
+    INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+      VALUES ('SMK-DSS-' || v_suffix, v_order, v_payer2, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+    INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+      VALUES (v_delivery, v_line, v_product.id, 10, 'gal');
+    PERFORM confirm_delivery(v_delivery, v_admin, 'smk-dss-confirm-' || v_suffix);
+    PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+      'smk-dss-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; same-transaction post');
+    SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND invoice_type <> 'credit_memo';
+    PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-dss-post-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    v_off := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    UPDATE customers SET standing_discount_pct = 5 WHERE id = v_payer2;
+    PERFORM unpost_invoice(v_invoice, v_admin, 'smk-dss-unpost-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_off THEN
+      v_fails := v_fails || format(' (S) unposting moved the total from %s to %s;', v_off, (SELECT total_amount_cents FROM invoices WHERE id = v_invoice));
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (S) the same-transaction post check failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

@@ -8,12 +8,12 @@
 // to keep them out of the main bundle (~500KB each)
 import { CRX_GREEN, GRAY, type JsPDFWithAutoTable } from './pdfTheme';
 import {
-  QUOTE_CONTENT_BOTTOM, QUOTE_CONTINUED_TOP, QUOTE_FOOTER_BASELINE, QUOTE_FOOTER_RULE, QUOTE_FOOTER_TEXT,
-  QUOTE_LOGO_RATIO, QUOTE_LOGO_SMALL_WIDTH, QUOTE_LOGO_WIDTH, QUOTE_MARGIN_TOP, QUOTE_MARGIN_X, QUOTE_MUTED,
-  QUOTE_NOTE_BG, QUOTE_NUMBER_COLUMNS, QUOTE_ROW_RULE, QUOTE_TABLE_HEAD_BG, QUOTE_TEXT, QUOTE_TOTALS_RULE,
-  QUOTE_TOTALS_WIDTH,
+  QUOTE_CONTENT_BOTTOM, QUOTE_CONTINUED_TOP, QUOTE_LOGO_RATIO, QUOTE_LOGO_WIDTH, QUOTE_MARGIN_TOP, QUOTE_MARGIN_X,
+  QUOTE_MUTED, QUOTE_NOTE_BG, QUOTE_NUMBER_COLUMNS, QUOTE_ROW_RULE, QUOTE_TABLE_HEAD_BG, QUOTE_TEXT,
+  QUOTE_TOTALS_RULE, QUOTE_TOTALS_WIDTH,
 } from './quotePdfLayout';
-import { COMPANY_WEBSITE, companyTaglineHeader, fitCompanyNameFont } from './companyInfo';
+import { COMPANY_WEBSITE } from './companyInfo';
+import { drawCompanyBlock, drawPageFooters, loadLogoDrawer } from './pdfBrand';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmt } from './money';
 
@@ -92,7 +92,6 @@ const DEFAULT_PDF_COLUMNS = ['product', 'actual_rate', 'acres', 'qty', 'price_un
 export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
-  const { default: logo } = await import('../assets/logo_quote_pdf.png?inline');
   const company = await loadCompanyInfoForPdf();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
@@ -107,32 +106,11 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
     doc.addPage();
     y = QUOTE_CONTINUED_TOP;
   };
-  // Best-effort: a logo that fails to embed must never stop the quote.
-  const drawLogo = (x: number, top: number, w: number) => {
-    try {
-      doc.addImage(logo, 'PNG', x, top, w, w * QUOTE_LOGO_RATIO, 'crx-quote-logo', 'FAST');
-    } catch { /* print without the logo */ }
-  };
+  const drawLogo = await loadLogoDrawer(doc);
 
   // ─── Header row: company block, logo + "Quote", details table ──
   const colW = (contentW - 32) / 3;
-  doc.setTextColor(...QUOTE_TEXT);
-  doc.setFont('helvetica', 'bold');
-  fitCompanyNameFont(doc, company.name, colW, 9);
-  // A long name wraps inside its column instead of running into the logo.
-  let companyY = y + 9;
-  (doc.splitTextToSize(company.name, colW) as string[]).forEach((line, i) => {
-    if (i) companyY += 11;
-    doc.text(line, margin, companyY);
-  });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.25);
-  // Today's letterhead tagline, address and phone, one per line; the address prints as saved in Settings.
-  const tagline = companyTaglineHeader(company).split('  •  ')[0];
-  for (const line of [tagline, ...(doc.splitTextToSize(company.address, colW) as string[]), company.phone]) {
-    companyY += 12;
-    doc.text(line, margin, companyY);
-  }
+  const companyY = drawCompanyBlock(doc, company, y, colW);
 
   drawLogo(pageW / 2 - QUOTE_LOGO_WIDTH / 2, y, QUOTE_LOGO_WIDTH);
   const quoteWordY = y + QUOTE_LOGO_WIDTH * QUOTE_LOGO_RATIO + 15;
@@ -339,28 +317,10 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   }
 
   // ─── Every page: small logo from page 2, footer with page number ──
-  const pageCount = doc.getNumberOfPages();
   const footerText = [company.name, COMPANY_WEBSITE, company.email, 'Prices valid for the period shown above. Subject to product availability.']
     .filter(Boolean)
     .join('  •  ');
-  for (let page = 1; page <= pageCount; page++) {
-    doc.setPage(page);
-    if (page > 1) drawLogo(pageW - margin - QUOTE_LOGO_SMALL_WIDTH, 24, QUOTE_LOGO_SMALL_WIDTH);
-    const footerY = pageH - QUOTE_FOOTER_BASELINE;
-    const pageLabel = `Page ${page} of ${pageCount}`;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...QUOTE_FOOTER_TEXT);
-    const footerLines = doc.splitTextToSize(footerText, contentW - doc.getTextWidth(pageLabel) - 18) as string[];
-    const footerTop = footerY - (footerLines.length - 1) * 9;
-    doc.setDrawColor(...QUOTE_FOOTER_RULE);
-    doc.setLineWidth(0.75);
-    doc.setLineDashPattern([2, 2], 0);
-    doc.line(margin, footerTop - 14, pageW - margin, footerTop - 14);
-    doc.setLineDashPattern([], 0);
-    doc.text(footerLines, margin, footerTop);
-    doc.text(pageLabel, pageW - margin, footerY, { align: 'right' });
-  }
+  drawPageFooters(doc, footerText, drawLogo);
 
   return doc;
 }

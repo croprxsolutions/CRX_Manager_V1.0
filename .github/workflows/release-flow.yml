@@ -34,6 +34,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
+      actions: write # hotfix PRs: ask the release bot for their release-gate
       contents: read
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
@@ -41,7 +42,9 @@ jobs:
       HEAD_REF: ${{ github.head_ref }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +67,15 @@ jobs:
             git log --no-merges --format='%an%x09%s' "origin/main..$HEAD_SHA" --not origin/staging \
               | node "$RUNNER_TEMP/release-flow.mjs" check-release-commits
           fi
+          if [ "${HEAD_REF#hotfix/}" != "$HEAD_REF" ]; then
+            # A hotfix may carry nothing from staging that main hasn't released.
+            if ! git merge-base --is-ancestor "$(git merge-base "$HEAD_SHA" origin/staging)" origin/main; then
+              echo "::error::This hotfix carries unreleased staging work. Cut hotfix/<name> from main."
+              exit 1
+            fi
+            # release-gate (required on main) comes from the release bot, never from this job.
+            gh workflow run release-pr.yml --repo "$REPO" --ref main -f create=false -f hotfix_pr="$PR_NUMBER"
+          fi
 
   main-inside-staging:
     # Never make this a required check: it is skipped on PRs, and a skipped required job counts as passed.
@@ -85,6 +97,22 @@ jobs:
             echo "::error::main has commits that staging lacks. Merge the open back-merge PR (main -> staging) with a merge commit, not squash."
             exit 1
           fi
+
+  refresh-release-pr:
+    # Holds no secrets: it only asks main's Release PR workflow to refresh an open release PR.
+    name: Refresh release PR
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet."; exit 0; fi
+          gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
 
   back-merge:
     name: Back-merge main into staging

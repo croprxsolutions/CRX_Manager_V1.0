@@ -6,9 +6,9 @@ name: Release labels
 on:
   pull_request:
     branches: [staging]
-    types: [closed, labeled]
-# Deleting a proof line later doesn't remove the label, but the weekly release gate re-reads the
-# proof itself, so the release can't merge without it.
+    types: [closed, labeled, unlabeled, edited]
+# unlabeled/edited only refresh the release gate, which re-reads labels and proof every time.
+# A deleted comment is picked up at the next refresh (push, label change or Thursday).
 
 permissions: {}
 
@@ -19,12 +19,14 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       ((github.event.action == 'closed' && github.event.pull_request.merged) ||
-       (github.event.action == 'labeled' &&
+       github.event.action == 'edited' ||
+       ((github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
         contains(fromJSON('["on-staging","verified-on-staging","held-off"]'), github.event.label.name)))
     runs-on: ubuntu-latest
     concurrency:
       group: release-labels-${{ github.event.pull_request.number }}
     permissions:
+      actions: write
       contents: read
       issues: write
       pull-requests: write
@@ -41,6 +43,14 @@ jobs:
         run: |
           if [ -f .github/scripts/release-flow.mjs ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
           else echo "::notice::No release flow script on staging before this PR yet."; fi
-      - run: |
+      - if: steps.script.outputs.ok && (github.event.action == 'closed' || github.event.action == 'labeled')
+        run: |
           if [ "$ACTION" = "closed" ]; then node .github/scripts/release-flow.mjs mark-on-staging
           else node .github/scripts/release-flow.mjs check-label; fi
+      # A label change can turn the release gate green or red: refresh an open release PR.
+      - name: Refresh the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Before the first release puts release-pr.yml on main there is nothing to refresh.
+        run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."

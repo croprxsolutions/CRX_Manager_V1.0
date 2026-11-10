@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, foreignReleaseCommits, proofLink, heldOffNote, isBackMerge, labelProblem,
+  pickPr, firstParagraph, releaseNotesModule, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -61,4 +62,98 @@ test('labelProblem explains what is missing, or returns null', () => {
   assert.match(labelProblem({ merged: false, baseRef: 'staging', label: 'on-staging', texts: [] }), /after the PR is merged into staging/);
   assert.match(labelProblem({ ...merged, headRef: 'main', label: 'verified-on-staging', texts: ['Staging proof: https://x.example'] }), /back-merge/);
   assert.equal(labelProblem({ ...merged, label: 'bug', texts: [] }), null);
+});
+
+test('pickPr trusts only a PR merged into staging as exactly this commit', () => {
+  const sha = 'a'.repeat(40);
+  const good = { number: 7, merge_commit_sha: sha, base: { ref: 'staging' }, merged_at: '2026-11-10T00:00:00Z' };
+  assert.equal(pickPr(sha, [good]), good);
+  assert.equal(pickPr(sha, [{ ...good, merge_commit_sha: 'b'.repeat(40) }]), null); // a commit that only mentions an old PR
+  assert.equal(pickPr(sha, [{ ...good, base: { ref: 'main' } }]), null);
+  assert.equal(pickPr(sha, [{ ...good, merged_at: null }]), null);
+  assert.equal(pickPr(sha, []), null);
+});
+
+test('nextVersion: release bumps minor, hotfix bumps patch, v0.1.0 first', () => {
+  assert.equal(nextVersion([], 'release'), 'v0.1.0');
+  assert.equal(nextVersion(['v0.1.0', 'v0.2.0', 'v0.1.3'], 'release'), 'v0.3.0');
+  assert.equal(nextVersion(['v0.2.0', 'v0.2.1'], 'hotfix'), 'v0.2.2');
+  assert.equal(nextVersion(['v1.0.0', 'nightly', 'v2', 'v0.9.9-rc1'], 'release'), 'v1.1.0');
+  assert.equal(nextVersion([], 'hotfix'), 'v0.0.1');
+});
+
+test('versionFromTitle keeps a version the releaser typed', () => {
+  assert.equal(versionFromTitle('release: v1.0.0'), 'v1.0.0');
+  assert.equal(versionFromTitle('Release: v0.4.0 '), 'v0.4.0');
+  assert.equal(versionFromTitle('release: soon'), null);
+  assert.equal(versionFromTitle(undefined), null);
+});
+
+test('groupChangelog sorts by conventional-commit type', () => {
+  const g = groupChangelog([
+    { number: 1, title: 'feat(billing): split bills' },
+    { number: 2, title: 'fix: one cent' },
+    { number: 3, title: 'docs(x): notes' },
+    { number: 4, title: 'refactor!: tidy' },
+    { number: 5, title: 'Revert "feat: x"' },
+    { number: 6, title: 'feat!: breaking thing' },
+  ]);
+  assert.deepEqual(g.features.map((p) => p.number), [1, 6]);
+  assert.deepEqual(g.fixes.map((p) => p.number), [2]);
+  assert.deepEqual(g.chores.map((p) => p.number), [3, 4]);
+  assert.deepEqual(g.other.map((p) => p.number), [5]);
+  assert.match(changelogMarkdown(g), /#### ✨ New Features\n\* split bills \(#1\)/);
+  assert.match(changelogMarkdown(g), /#### 🧩 Other\n\* Revert "feat: x" \(#5\)/);
+});
+
+test('usersSee reads the "What users see" line or section', () => {
+  assert.deepEqual(usersSee('Summary\nWhat users see: Quotes show the booked price.\n'), ['Quotes show the booked price.']);
+  assert.deepEqual(usersSee('## What users see\n- New Bill Split button\n- Payer table\n\n## Follow-ups\n- None'), ['New Bill Split button', 'Payer table']);
+  assert.deepEqual(usersSee('What users see: nothing'), []);
+  assert.deepEqual(usersSee('What users see: None.'), []);
+  assert.deepEqual(usersSee(null), []);
+});
+
+test('gateState blocks unverified PRs, labels whose evidence is gone, and commits without a PR', () => {
+  const ok = gateState([
+    { number: 1, labels: ['on-staging', 'verified-on-staging'], body: 'x', comments: ['Staging proof: https://x.example/1'] },
+    { number: 2, labels: ['held-off'], body: 'Held off: flag bill_split_v2 off' },
+  ], []);
+  assert.deepEqual(ok, { ok: true, blocking: [] });
+  const bad = gateState([
+    { number: 1, labels: ['on-staging'], body: '' },
+    { number: 2, labels: ['verified-on-staging'], body: 'proof was here once' },
+    { number: 3, labels: ['held-off'], body: '' },
+  ], ['hand-made commit']);
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.blocking, ['#1', '#2 (label without its proof or reason)', '#3 (label without its proof or reason)', 'commit without a PR: hand-made commit']);
+  assert.equal(gateState([], []).ok, false); // nothing to release is not a green release
+});
+
+test('renderReleaseBody fills bot blocks and keeps what people wrote', () => {
+  const template = 'v <!-- bot:version -->x<!-- /bot:version -->\n- [ ] Major\nNotes: [Yes/No]\n<!-- bot:changelog --><!-- /bot:changelog -->';
+  const first = renderReleaseBody(template, { version: 'v0.1.0', changelog: 'A' });
+  assert.equal(first, 'v <!-- bot:version -->v0.1.0<!-- /bot:version -->\n- [ ] Major\nNotes: [Yes/No]\n<!-- bot:changelog -->\nA\n<!-- /bot:changelog -->');
+  const edited = first.replace('- [ ] Major', '- [x] Major').replace('[Yes/No]', 'No');
+  const second = renderReleaseBody(template, { version: 'v0.1.0', changelog: 'B' }, edited);
+  assert.match(second, /- \[x\] Major/);
+  assert.match(second, /Notes: No/);
+  assert.match(second, /<!-- bot:changelog -->\nB\n<!-- \/bot:changelog -->/);
+  assert.equal(renderReleaseBody(template, { version: 'v1' }, null).includes('<!-- bot:changelog --><!-- /bot:changelog -->'), true);
+  const sneaky = renderReleaseBody(template, { version: 'v1', changelog: 'x <!-- /bot:changelog --> stuck' });
+  assert.match(sneaky, /<!-- bot:changelog -->\nx  \/bot:changelog  stuck\n<!-- \/bot:changelog -->/);
+});
+
+test('firstParagraph skips headings and comments and trims long text', () => {
+  assert.equal(firstParagraph('## What changes (plain English)\n\nThe wrapper now stops.\nOn round 3.'), 'The wrapper now stops. On round 3.');
+  assert.equal(firstParagraph('<!-- note -->\n## What\nFixes the red check.'), 'Fixes the red check.');
+  assert.equal(firstParagraph('x'.repeat(250)).length, 201);
+  assert.equal(firstParagraph(null), '');
+});
+
+test('releaseNotesModule writes a safe TypeScript literal', () => {
+  const src = releaseNotesModule({ version: '0.1.0', date: '2026-11-12', items: ['Quotes show "booked" prices`${x}`', 'Line\nbreak'] });
+  assert.match(src, /export const releaseNotes: ReleaseNotes = \{/);
+  const literal = src.slice(src.indexOf('= ') + 2, src.lastIndexOf(';'));
+  assert.deepEqual(JSON.parse(literal).items, ['Quotes show "booked" prices`${x}`', 'Line\nbreak']);
 });

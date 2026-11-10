@@ -8,6 +8,10 @@ function redactQuery(url: string): string {
 
 // Network errors that aren't bugs
 const NETWORK_ERRORS = ['Failed to fetch', 'NetworkError', 'Load failed'];
+// supabase-js wraps a browser fetch failure as "TypeError: <browser text> (host)".
+const NETWORK_BLIP = /^TypeError: (?:Failed to fetch|NetworkError|Load failed)/;
+// The whole token: header, payload and signature.
+const JWT = /eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*/g;
 
 // Supabase errors are plain objects: Sentry titles them "Object captured as exception"
 // and ignoreErrors never sees their message, so read it here.
@@ -53,13 +57,13 @@ export function initSentry() {
     beforeSend(event, hint) {
       const plain = plainErrorMessage(hint?.originalException);
       if (plain !== null) {
-        if (NETWORK_ERRORS.some((text) => plain.includes(text))) return null;
+        if (NETWORK_BLIP.test(plain)) return null;
         const first = event.exception?.values?.[0];
-        if (first) first.value = plain.replace(/eyJ[A-Za-z0-9_-]+/g, '[JWT_REDACTED]');
+        if (first) first.value = plain.replace(JWT, '[JWT_REDACTED]');
       }
       // Strip PII from error messages
       if (event.message) {
-        event.message = event.message.replace(/eyJ[A-Za-z0-9_-]+/g, '[JWT_REDACTED]');
+        event.message = event.message.replace(JWT, '[JWT_REDACTED]');
       }
       return event;
     },

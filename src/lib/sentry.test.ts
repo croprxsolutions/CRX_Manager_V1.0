@@ -76,6 +76,7 @@ describe('initSentry', () => {
     const result = config.beforeSend(event);
     expect(result.message).toContain('[JWT_REDACTED]');
     expect(result.message).not.toContain('eyJ');
+    expect(result.message).not.toContain('payload');
   });
 
   it('beforeSend passes through events without messages', async () => {
@@ -111,6 +112,19 @@ describe('initSentry', () => {
       const original = { code: '22P02', details: null, hint: null, message: 'invalid input syntax for type uuid: "group"' };
       expect(send(synthetic(), { originalException: original }).exception.values[0].value)
         .toBe('invalid input syntax for type uuid: "group"');
+    });
+
+    it('keeps a database error that only mentions fetching', async () => {
+      const send = await beforeSend();
+      const original = { code: 'P0001', details: null, hint: null, message: 'Failed to fetch the current inventory row' };
+      expect(send(synthetic(), { originalException: original }).exception.values[0].value)
+        .toBe('Failed to fetch the current inventory row');
+    });
+
+    it('redacts a whole JWT from the message', async () => {
+      const send = await beforeSend();
+      const original = { code: '', details: null, hint: null, message: 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln end' };
+      expect(send(synthetic(), { originalException: original }).exception.values[0].value).toBe('bad token [JWT_REDACTED] end');
     });
 
     it('leaves real Error objects alone', async () => {

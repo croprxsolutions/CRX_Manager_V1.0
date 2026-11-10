@@ -13,9 +13,10 @@ script `local-supabase/catchup-staging.sh`.
     stored text hashes to the file's bytes (sha256). Any failure rolls everything back.
   - One-shot data migrations (`supabase/baselines/one-shot-migrations.json`) are recorded, never run.
   - The run stops before writing anything if:
-    - a file isn't plain UTF-8, starts with a byte-order mark, or has a psql backslash command;
+    - a file isn't plain UTF-8, starts with a byte-order mark, or has a psql backslash command
+      anywhere outside quotes (`\!` would run a shell command on the runner);
     - a file has its own top-level transaction control (`COMMIT`, `COMMIT WORK`, `END`, `SAVEPOINT`
-      …; comments, strings and dollar-quoted bodies are ignored, so a procedure that commits is fine);
+      …; comments, strings, dollar-quoted bodies and `BEGIN ATOMIC … END` function bodies are ignored);
     - a post-baseline file is badly named;
     - an already-applied migration no longer matches its ledger row.
   - On staging, a missing file that is older than the newest applied one applies after it with a
@@ -44,10 +45,13 @@ script `local-supabase/catchup-staging.sh`.
 
   It never runs on live or MetaHive. The connection reaches psql through libpq environment variables,
   not the command line, and a failure never prints it.
-- **The PR check also refuses** a change to the baseline high-water, and turning an existing
-  migration into a one-shot (either would make the job skip a file).
-- **A file marked `-- crx: no-transaction`** is never retried. If it ran but its ledger row then
-  failed, the job says so and stops.
+- **The PR check also refuses** a missing or changed baseline high-water, and adding or removing
+  one-shot entries for existing migrations (either would make the job skip or run a file it
+  shouldn't). Migration stamps must be plausible dates.
+- **A file whose first line is `-- crx: no-transaction`** is never retried. If it fails part-way, or
+  if it ran but its ledger row then failed, the job says so and stops for a manual repair.
+- **One staging run at a time** (migrations, then functions), so an older run never deploys after
+  a newer one. To retry a failed run, re-run it or start the workflow by hand.
 
 Inert until the repository variable `STAGING_DB_JOB` is `on`. Before the secrets go in, the
 `staging-db` environment must be limited to the `staging` branch, and code-owner review on
@@ -58,7 +62,8 @@ Taken through these cases on a throwaway local database:
 - a failing migration (nothing kept, no ledger row);
 - a file with its own COMMIT (refused before anything ran);
 - an edited applied migration (stopped);
-- a procedure with COMMIT in its body (applied);
+- a procedure with COMMIT in its body, a `BEGIN ATOMIC` function, and files without a final
+  semicolon or ending in a comment (all applied);
 - an older file arriving later (applied with a warning on staging, stopped in strict mode);
 - out-of-order (stopped);
 - live or wrong-project URLs (refused);

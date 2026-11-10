@@ -43,7 +43,7 @@ test('wrapperSql: file, same-transaction check, ledger row with the exact text, 
   const lines = sql.split('\n');
   assert.equal(lines[0], 'BEGIN;');
   assert.match(lines[1], /set_config\('crx\.apply_tx', txid_current\(\)::text, true\)/);
-  assert.ok(sql.includes(`${lines[1]}\n${text}\nDO $crx_check$`));
+  assert.ok(sql.includes(`${lines[1]}\n${text}\n;\nDO $crx_check$`));
   assert.match(sql, /MIGRATION_LEFT_ITS_TRANSACTION: 20261110120000_add_t/);
   assert.ok(sql.includes("'20261110120000_add_t', ARRAY[$crx_0000000000000000$create table t(x int);\n-- it's fine\n$crx_0000000000000000$]);"));
   assert.ok(sql.includes(`IS DISTINCT FROM '${sha}' THEN RAISE EXCEPTION 'LEDGER_HASH_MISMATCH`));
@@ -64,9 +64,10 @@ test('fileProblems: UTF-8 only, no BOM, no own transaction control, no psql back
   assert.match(fileProblems('x', Buffer.from([0x73, 0xff, 0x0a]))[0], /not valid UTF-8/);
 });
 
-test('isNoTransaction reads a header marker in the first lines only', () => {
+test('isNoTransaction needs the marker alone on the first line', () => {
   assert.equal(isNoTransaction('-- crx: no-transaction\ncreate index concurrently i on t(x);'), true);
-  assert.equal(isNoTransaction('-- Written 2026-11-10\n--   crx:  no-transaction\nselect 1;'), true);
+  assert.equal(isNoTransaction('-- Written 2026-11-10\n-- crx: no-transaction\nselect 1;'), false);
+  assert.equal(isNoTransaction('-- crx: no-transaction please\nselect 1;'), false);
   assert.equal(isNoTransaction('select 1;\n'.repeat(10) + '-- crx: no-transaction'), false);
   assert.equal(isNoTransaction('create table t();'), false);
 });
@@ -120,4 +121,16 @@ test('urlRef: a pooler user only counts on a Supabase pooler host, the direct ho
   assert.equal(urlRef('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@attacker.example:5432/postgres'), null);
   assert.equal(urlRef('postgresql://postgres.fsnjredpmakbmhwowjjt@localhost:5432/postgres'), null);
   assert.equal(urlRef('postgresql://other:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres'), null);
+});
+
+test('fileProblems: a psql backslash command anywhere outside quotes; SQL-standard function bodies are fine', () => {
+  assert.match(fileProblems('x', Buffer.from('select 1; \\! cat /proc/self/environ'))[0] ?? '', /backslash/);
+  assert.deepEqual(fileProblems('x', Buffer.from("select '\\! not a command';")), []);
+  assert.deepEqual(fileProblems('x', Buffer.from('create function f() returns int language sql begin atomic select 1; select 2; end;\nselect 3;')), []);
+});
+
+test('migration names need a plausible date and time', () => {
+  const head = f(['99999999999999_x']);
+  assert.match(stampProblems({ added: head, base: [], head })[0], /name must be/);
+  assert.deepEqual(stampProblems({ added: f(['20261231235959_ok']), base: [], head: f(['20261231235959_ok']) }), []);
 });

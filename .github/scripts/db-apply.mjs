@@ -12,7 +12,8 @@ import { pathToFileURL } from 'node:url';
 
 const LIVE_REF = 'rhyzpcqhnizqbxphqdkr';
 const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
-const NAME = /^(\d{14})_[a-z0-9_]+$/;
+// <YYYYMMDDHHMMSS>_<lower_snake>, with a plausible date and time.
+const NAME = /^(20[2-9]\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d)_[a-z0-9_]+$/;
 
 // Same rule as scripts/list-post-baseline-migrations.mjs, against the target's own ledger: files after
 // the baseline high-water whose name the ledger lacks. One-shot data migrations are recorded, never
@@ -52,7 +53,8 @@ export function wrapperSql({ stem, text, run, sha, tag = dollarTag(text) }) {
   return [
     'BEGIN;',
     "SELECT set_config('crx.apply_tx', txid_current()::text, true);",
-    ...(run ? [text] : []),
+    // The file may end without a semicolon or inside a -- comment; close its last statement first.
+    ...(run ? [text, ';'] : []),
     `DO $crx_check$ BEGIN IF current_setting('crx.apply_tx', true) IS DISTINCT FROM txid_current()::text THEN RAISE EXCEPTION 'MIGRATION_LEFT_ITS_TRANSACTION: ${stem}'; END IF; END $crx_check$;`,
     `INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISS'), '${stem}', ARRAY[${tag}${text}${tag}]);`,
     `DO $crx_check$ BEGIN IF (SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex') FROM supabase_migrations.schema_migrations WHERE name = '${stem}') IS DISTINCT FROM '${sha}' THEN RAISE EXCEPTION 'LEDGER_HASH_MISMATCH: ${stem}'; END IF; END $crx_check$;`,
@@ -61,10 +63,12 @@ export function wrapperSql({ stem, text, run, sha, tag = dollarTag(text) }) {
   ].join('\n');
 }
 
-// Mason's point 6: a file that can't run inside a transaction (CREATE INDEX CONCURRENTLY) says so in
-// its header; it runs on its own, then its ledger row goes in, with the same hash check.
+// Mason's point 6: a file that can't run inside a transaction (CREATE INDEX CONCURRENTLY) says so on
+// its first line; it runs on its own, then its ledger row goes in, with the same hash check.
+// ponytail: if such a file fails part-way, what already ran stays; the job stops and says so, and the
+// repair is by hand. Keep these files to one statement.
 export function isNoTransaction(text) {
-  return text.split('\n').slice(0, 5).some((l) => /^--\s*crx:\s*no-transaction\b/i.test(l));
+  return /^--\s*crx:\s*no-transaction\s*$/i.test(text.split('\n')[0].trimEnd());
 }
 
 // What the job refuses to run: a file that isn't plain UTF-8 (the ledger stores text, so the hash
@@ -119,12 +123,15 @@ export function fileProblems(stem, buf) {
   if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) problems.push(`${stem}: starts with a byte-order mark`);
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return [...problems, `${stem}: is not valid UTF-8`]; }
-  for (const statement of sqlSkeleton(text).split(';')) {
-    if (TX_CONTROL.test(statement)) problems.push(`${stem}: has its own transaction control (${statement.trim().split(/\s+/).slice(0, 3).join(' ')}); the job wraps each file in one transaction`);
+  const skeleton = sqlSkeleton(text);
+  let atomic = 0; // SQL-standard function bodies: BEGIN ATOMIC ...; END
+  for (const statement of skeleton.split(';')) {
+    if (/\bBEGIN\s+ATOMIC\b/i.test(statement)) atomic++;
+    if (atomic > 0 && /^\s*END\b/i.test(statement)) { atomic--; continue; }
+    if (atomic === 0 && TX_CONTROL.test(statement)) problems.push(`${stem}: has its own transaction control (${statement.trim().split(/\s+/).slice(0, 3).join(' ')}); the job wraps each file in one transaction`);
   }
-  for (const [i, line] of text.split('\n').entries()) {
-    if (/^\s*\\/.test(line)) problems.push(`${stem}:${i + 1}: has a psql backslash command`);
-  }
+  // psql runs a backslash command anywhere outside quotes (\! runs a shell command), so none at all.
+  if (skeleton.includes('\\')) problems.push(`${stem}: has a psql backslash command outside quotes`);
   return problems;
 }
 
@@ -218,7 +225,10 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));
   const highWater = manifest.migrations_high_water;
-  const oneShots = new Set(Object.keys(JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8')).one_shot ?? {}));
+  if (!/^\d{14}$/.test(highWater ?? '')) throw new Error('STOPPED: supabase/baselines/manifest.json has no valid migrations_high_water');
+  const registry = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8')).one_shot;
+  if (!registry || typeof registry !== 'object') throw new Error('STOPPED: supabase/baselines/one-shot-migrations.json has no one_shot list');
+  const oneShots = new Set(Object.keys(registry));
   const allSql = readdirSync(migDir).filter((n) => n.endsWith('.sql'));
   const badNames = allSql.filter((n) => n > highWater && !NAME.test(n.slice(0, -4)));
   if (badNames.length) throw new Error(`STOPPED before applying anything: badly named migration file(s): ${badNames.join(', ')} (<14-digit stamp>_<lower_snake>.sql)`);
@@ -249,7 +259,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     const text = fileBytes(stem).toString('utf8');
     const tag = dollarTag(text);
     const f = path.join(work, `backfill-${stem}.sql`);
-    writeFileSync(f, `UPDATE supabase_migrations.schema_migrations SET statements = ARRAY[${tag}${text}${tag}] WHERE name = '${stem}' AND (statements IS NULL OR cardinality(statements) = 0);\n`);
+    writeFileSync(f, `UPDATE supabase_migrations.schema_migrations SET statements = ARRAY[${tag}${text}${tag}] WHERE name = '${stem}' AND statements[1] IS NULL;\n`);
     runFile(dbUrl, f);
   }
   if (bare.length) console.log(`backfilled statements on ${bare.length} older ledger rows`);
@@ -260,7 +270,11 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     const sha = sha256(buf);
     const wrapper = path.join(work, `${stem}.sql`);
     if (run && isNoTransaction(text)) {
-      runFile(dbUrl, path.join(migDir, `${stem}.sql`), { retry: false });
+      try {
+        runFile(dbUrl, path.join(migDir, `${stem}.sql`), { retry: false });
+      } catch (e) {
+        throw new Error(`${stem} ran outside a transaction and failed: whatever ran before the error stays; repair by hand before the next run. ${e.message}`);
+      }
       writeFileSync(wrapper, wrapperSql({ stem, text, run: false, sha }));
       try {
         runFile(dbUrl, wrapper);
@@ -303,8 +317,13 @@ const commands = {
     // The baseline high-water and the one-shot list decide what runs: they move only on purpose.
     const show = (ref, file) => { try { return JSON.parse(execFileSync('git', ['show', `${ref}:${file}`], { encoding: 'utf8' })); } catch { return null; } };
     const [mBase, mHead] = [show(baseRef, 'supabase/baselines/manifest.json'), show('HEAD', 'supabase/baselines/manifest.json')];
+    if (!/^\d{14}$/.test(mHead?.migrations_high_water ?? '')) problems.push('supabase/baselines/manifest.json: missing or invalid migrations_high_water');
     if (mBase && mHead && mBase.migrations_high_water !== mHead.migrations_high_water) problems.push(`supabase/baselines/manifest.json: migrations_high_water changed (${mBase.migrations_high_water} -> ${mHead.migrations_high_water}); that skips every file below it, so it needs a new baseline, not a PR`);
     const [oBase, oHead] = [show(baseRef, 'supabase/baselines/one-shot-migrations.json'), show('HEAD', 'supabase/baselines/one-shot-migrations.json')];
+    if (!oHead?.one_shot) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
+    for (const stem of Object.keys(oBase?.one_shot ?? {})) {
+      if (!(stem in (oHead?.one_shot ?? {}))) problems.push(`one-shot-migrations.json: ${stem} was removed from the one-shot list; a record-only data migration would then run`);
+    }
     for (const stem of Object.keys(oHead?.one_shot ?? {})) {
       if (!(stem in (oBase?.one_shot ?? {})) && !added.includes(`${stem}.sql`)) problems.push(`one-shot-migrations.json: ${stem} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
     }

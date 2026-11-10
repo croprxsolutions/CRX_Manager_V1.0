@@ -9,8 +9,10 @@ export function toSentryError(err: unknown): Error {
     if (message === err.message) return err;
     const blanked = new Error(message);
     blanked.name = err.name;
-    // Keep where it was thrown; the stack's first line repeats the message.
-    if (err.stack) blanked.stack = err.stack.replace(err.message, message);
+    // Keep where it was thrown; the stack's first line repeats the message (split/join: no `$&` patterns).
+    if (err.stack) blanked.stack = err.stack.split(err.message).join(message);
+    // Sentry reports the underlying cause as a linked error.
+    if ('cause' in err) Object.assign(blanked, { cause: (err as { cause?: unknown }).cause });
     return blanked;
   }
   const message = typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err);

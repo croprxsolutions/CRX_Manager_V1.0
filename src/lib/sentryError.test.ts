@@ -16,6 +16,15 @@ describe('toSentryError', () => {
     expect(result.stack).toContain('sentryError.test');
   });
 
+  it('keeps figures out of the stack even when the message holds a $& sequence, and keeps the cause', () => {
+    const cause = new TypeError('network timeout');
+    const err = Object.assign(new Error('Charge $& 125.75 failed'), { cause });
+    const result = toSentryError(err);
+    expect(result.message).toBe('Charge $& # failed');
+    expect(result.stack).not.toContain('125.75');
+    expect((result as { cause?: unknown }).cause).toBe(cause);
+  });
+
   it('titles a Supabase error object with its own message, not [object Object]', () => {
     const err = { code: 'P0001', details: null, hint: null, message: 'PRODUCT_PARENT_GROUP_CHANGED: a size changed, build a new proposal' };
     expect(toSentryError(err).message).toBe('PRODUCT_PARENT_GROUP_CHANGED: a size changed, build a new proposal');

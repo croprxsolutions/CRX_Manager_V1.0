@@ -547,7 +547,7 @@ RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive not
 - CONFIRMED, LOW, re-checked 2026-11-10 (code-read + live read-only). Cancelling a quick delivery marks the order
   cancelled and then marks its open draft invoice cancelled without zeroing the money. The invoice guard allows
   that only when the total is 0 cents; otherwise it raises `ORDER_INVOICE_TERMINAL` and the whole cancel rolls
-  back, for an admin or a rep. Container-confirmed 2026-11-10 2:40 PM Central on a fresh read-only dump of the
+  back, for an admin or a rep. Container-confirmed 2026-11-10 about 2:20 PM Central on a fresh read-only dump of the
   live schema (`cancel_delivery`, `_cancel_delivery_replay_impl_20261015` and `guard_invoice_terminal_order`
   match live by md5): a scheduled quick delivery whose order has an open draft invoice of 2,000 cents is refused
   with `ORDER_INVOICE_TERMINAL` for an admin and for a rep, and nothing changes; the same invoice at 0 cents

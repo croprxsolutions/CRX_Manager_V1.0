@@ -18,3 +18,7 @@
   on `Dry oz` showed a dash; invoice lines saved before keep their dash. Job billing's unit matching is unchanged.
 - After the live apply, download fresh pricing and setup workbooks (older downloads refuse the moved rows).
 - Proof: `node scripts/smoke/prove-unit-spellings-real-schema.mjs` (UNIT_SPELLINGS_STEP1_PROOF_PASS).
+- **Status 2026-11-10:** `20261229160000_convert_to_gl_lb_dry_oz` is applied live. The spelling move
+  (`20261229170000`) is parked (Mason: "Park it, REG-1 first"): its live apply refused safely and changed nothing,
+  because 18 of its 20 products joined new product families that night. It will be redone for families after
+  REG-1 lands, under a new migration number.

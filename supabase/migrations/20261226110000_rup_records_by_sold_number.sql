@@ -28,7 +28,9 @@
 --     the postflight proves it.
 --
 -- ACCEPTED (Mason, 2026-11-09): a re-post after un-posting uses the product and registration as they are then;
---   a product whose number changes between a sale and its posting records under the new number.
+--   a product whose number changes between a sale and its posting records under the new number; and
+--   (after Sol round 4) Sales to check judges old sales by the product's number now, so a number change can drop
+--   an unrecorded older sale from the list. The list is unpaged (admin-only, read-only, small history).
 --
 -- NOT CHANGED: invoice saving (save_invoice, the field-application saves), _fill_invoice_line_epa, the
 --   posting wrappers. Posting takes the REG-1 lock in shared mode; one colliding with a registration change
@@ -83,7 +85,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                                     AND o.unit_size IS NOT DISTINCT FROM p_line.unit_size
                                     AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
                   WHERE s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
-                    AND s.unit IS NOT DISTINCT FROM p_line.unit_size
+                    -- a line with no unit records as 'Unit not set' (the record's unit is required)
+                    AND s.unit IS NOT DISTINCT FROM COALESCE(p_line.unit_size, 'Unit not set')
                     AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents
                     AND s.quantity IS NOT DISTINCT FROM l.quantity
                     AND s.total_cents IS NOT DISTINCT FROM l.total_cents);
@@ -193,7 +196,8 @@ BEGIN
     -- says Yes, and records under the product's number (blank when it has none; Mason, 2026-11-09). One record
     -- per unit and unit price too, so a record never merges lines sold at different prices or units.
     OPEN v_items FOR
-      SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity, ii.unit_size,
+      SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity,
+             COALESCE(ii.unit_size, 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
              ii.unit_price_cents, sum(ii.extended_cents)::bigint AS extended_cents,
              public._normalize_epa_registration(p.epa_registration) AS epa_registration,
              COALESCE(r.signal_word, p.signal_word) AS signal_word
@@ -203,7 +207,7 @@ BEGIN
        WHERE ii.invoice_id = p_invoice_id
          AND (p.is_rup OR r.rup_status = 'yes')
        GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(p.epa_registration),
-                COALESCE(r.signal_word, p.signal_word), ii.unit_size, ii.unit_price_cents
+                COALESCE(r.signal_word, p.signal_word), COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents
        ORDER BY ii.product_id, 4, 5;
   ELSE
     OPEN v_items FOR

@@ -561,6 +561,15 @@ async function main() {
   assert.equal(scalar(`SELECT epa_registration FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2100;`), N2);
   raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2100; DELETE FROM public.invoice_items WHERE id = '${L6}';
     UPDATE public.products SET is_rup = true WHERE id = '${P4}';`);
+  // A line with no unit on a product whose number says Yes (P4 unticked, N2) posts and records as 'Unit not set',
+  // and a repeat call writes nothing more (Sol r4 HIGH: the record's unit is required).
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P4}';
+    INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L6}', '${INV1}', '${P4}', 'x', 1, NULL, 2200, 2200);`);
+  assert.equal(ok(ADMIN, GEN('g4e')), '1');
+  assert.equal(scalar(`SELECT epa_registration || '|' || unit FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200;`), `${N2}|Unit not set`);
+  assert.equal(ok(ADMIN, GEN('g4f')), '0');
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200; DELETE FROM public.invoice_items WHERE id = '${L6}';
+    UPDATE public.products SET is_rup = true WHERE id = '${P4}';`);
   // The same product and number sold at a second price gets its own record; neither merges price nor total.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${L7}', '${INV1}', '${P4}', 'x', 2, 'Gal', 1700, 3400);`);

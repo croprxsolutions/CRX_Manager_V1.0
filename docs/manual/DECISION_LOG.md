@@ -19,6 +19,8 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Follow-on (Mason, in session, 2026-11-09: "Yes, product's number", after Sol round 3):** restricted-use records use the product's own EPA number at posting, as live does today, never the number stored on the invoice line. **Why:** the database keeps whatever number arrives with a line, so a wrong number on a line could file the record under it and hide it from Sales to check, and an old record under the product's number could be doubled. **Trade-off accepted:** a product whose number changes between a sale and its posting records under the new number. This supersedes "record under the number each line was sold under" above.
 
+**Follow-on (Mason, in session, 2026-11-09: "Yes, accept it", after Sol round 4 on PR #1688):** Sales to check and a registration's list of posted sales to record judge each sale by its product's number and tick as they are now, the same rule posting uses. **Trade-off accepted:** if a product's number changes after a sale was posted without a record, that sale can drop off the list (live had 6 posted lines in total). Also from round 4: a sale line with no unit now records as "Unit not set" instead of failing posting, and the list's missing paging is deferred (admin-only and read-only; small history).
+
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.

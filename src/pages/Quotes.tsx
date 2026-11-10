@@ -429,14 +429,18 @@ export default function Quotes() {
     return true;
   });
 
+  // Rows on screen: status/Planned filters AND the search box, matched exactly as DataTable does.
+  // Selection, "Select all" and every bulk action work over these only; a selected row the
+  // search or a filter hides drops out of selectedRows/selectedCount (the hook derives them from `data`).
+  const visible = applyTableSearchSort(filtered, SEARCH_KEYS, search, null, 'asc');
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
-      data: filtered,
+      data: visible,
       getId: (q) => q.id,
       isSelectable: (q) => DELETABLE.includes(q.status),
     });
 
-  const selectableCount = filtered.filter((q) => DELETABLE.includes(q.status)).length;
+  const selectableCount = visible.filter((q) => DELETABLE.includes(q.status)).length;
   const hasSelectable = selectableCount > 0;
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
@@ -457,7 +461,7 @@ export default function Quotes() {
 
   const filtersActive = !!statusFilter || plannedFilter;
   const clearFilters = () => { setStatusFilter(''); setPlannedFilter(false); };
-  const shownCount = applyTableSearchSort(filtered, SEARCH_KEYS, search, null, 'asc').length;
+  const shownCount = visible.length;
 
   // ─── Bulk action handlers ───────────────────────────────────
   const handleExportCSV = () => {

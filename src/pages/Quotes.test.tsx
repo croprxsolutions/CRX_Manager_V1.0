@@ -125,6 +125,58 @@ describe('Quotes list', () => {
     expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
   });
 
+  describe('bulk selection covers visible quotes only', () => {
+    const SEARCH = { name: 'Search by quote number, customer or product' };
+    const seed = () => {
+      H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent'), quote(3, 'revised'), quote(4, 'accepted')];
+      // Search "Test Farm 1" hides everything but Q-TEST-1; use a shared term instead.
+      H.tables.quotes[0].customer = { farm_name: 'Hidden Acres' };
+    };
+    const search = (v: string) => fireEvent.change(screen.getByRole('textbox', SEARCH), { target: { value: v } });
+
+    it('Select all selects only selectable rows that pass the search', async () => {
+      seed();
+      at('/quotes');
+      await screen.findByText('Q-TEST-1');
+      search('Test Farm');
+      expect(screen.queryByText('Q-TEST-1')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all quotes' }));
+      expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-2' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-3' })).toBeChecked();
+      expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('2 selected');
+      search('');
+      expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' })).not.toBeChecked();
+    });
+
+    it('a selected row that a search hides leaves the selection and the bar', async () => {
+      seed();
+      at('/quotes');
+      await screen.findByText('Q-TEST-1');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-2' }));
+      expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('2 selected');
+      search('Test Farm');
+      expect(screen.getByRole('region', { name: 'Bulk actions' })).toHaveTextContent('1 selected');
+      search('Hidden Acres');
+      expect(screen.getByText('Q-TEST-1')).toBeInTheDocument();
+      search('Test Farm 3');
+      expect(screen.queryByRole('region', { name: 'Bulk actions' })).not.toBeInTheDocument();
+    });
+
+    it('the delete confirm counts only visible selected quotes', async () => {
+      seed();
+      at('/quotes');
+      await screen.findByText('Q-TEST-1');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-2' }));
+      search('Test Farm');
+      fireEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Delete quotes' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog.textContent).toMatch(/\b1 quote\b/);
+      expect(dialog.textContent).not.toMatch(/\b2 quotes\b/);
+    });
+  });
+
   it('Clear filters appears only when a filter is active', async () => {
     H.tables.quotes = [quote(1, 'draft', { is_planned: true }), quote(2, 'sent')];
     at('/quotes');

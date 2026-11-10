@@ -98,8 +98,8 @@ export function nextVersion(tags, kind) {
 
 // The releaser can change the version by editing the PR title to "release: vX.Y.Z".
 export function versionFromTitle(title) {
-  const m = /^release:\s*(v\d+\.\d+\.\d+)\s*$/i.exec(title ?? '');
-  return m ? m[1] : null;
+  const m = /^release:\s*v(\d+\.\d+\.\d+)\s*$/i.exec(title ?? '');
+  return m ? `v${m[1]}` : null;
 }
 
 // The releaser's version wins only if it is newer than everything shipped (tags + main's package.json).
@@ -285,7 +285,7 @@ function dubaiDate(now = new Date()) {
 // The first real paragraph of a PR description: no headings, comments or badges, one line.
 export function firstParagraph(body, max = 200) {
   for (const para of (body ?? '').replace(/<!--[\s\S]*?-->/g, '').split(/\n\s*\n/)) {
-    const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l)).join(' ').replace(/\s+/g, ' ').trim();
+    const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l) && !/^\s*(what users see|staging proof|held off):/i.test(l)).join(' ').replace(/\s+/g, ' ').trim();
     if (text) return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
   }
   return '';

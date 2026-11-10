@@ -1,5 +1,5 @@
 import { useState, useMemo, type ReactNode } from 'react';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import { applyTableSearchSort, type SortDir } from '../../lib/tableSearchSort';
 import { useIsPhone } from '../../hooks/useIsPhone';
@@ -69,6 +69,7 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
 }) {
   if (columns.length === 0) return null;
   return (
+    <div className="relative">
     <select
       value={sortKey ? `${sortKey}:${sortDir}` : ''}
       onChange={(e) => {
@@ -76,7 +77,7 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
         onChange(key ? { key, dir: dir as SortDir } : { key: null, dir: 'asc' });
       }}
       aria-label="Sort by"
-      className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+      className="w-full h-11 pl-3 pr-10 text-base text-nav-dark bg-white border border-gray-300 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
     >
       <option value="">Sort: as listed</option>
       {columns.flatMap((col) => {
@@ -87,6 +88,8 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
         ];
       })}
     </select>
+    <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+    </div>
   );
 }
 

@@ -7,10 +7,16 @@
 --   C  Re-saving the draft as the screen sends it (its discount line included) never discounts twice
 --   D  A hand edit of the discount line, and deleting it, are put right at commit
 --   E  A sales rep can't set a standing discount (STANDING_DISCOUNT_ADMIN_ONLY); an admin can
---   F  A customer's new discount reaches their open draft; their posted invoice never changes
+--   F  A customer's new rate does not change their existing draft (each invoice keeps the rate it was drafted at);
+--      the draft posts as drafted, and the posted invoice never changes
 --   G  Bill Split 50/50, one payer at 3% and one with none: each payer's own discount on their own
 --      share; a payer's re-save keeps it, and the group posts (its fingerprint covers the discount)
 --   H  A customer with no discount: one line, the product total, nothing added
+--   J  A sales rep's misc-charge draft with a negative 'standing_discount' line is refused (only a chemical sale has one)
+--   K  A discounted draft switched to misc charge loses its discount line at commit
+--   L  A customer's rate changes while they have an open Bill Split payer draft: the customer save succeeds
+--   M  A posted Bill Split group unposts after a payer's rate changes, and its amounts stay as posted
+--   N  The office's rate moved from 3% to 3.01%: the line's label follows even when the cents don't change
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -170,9 +176,9 @@ BEGIN
   UPDATE customers SET standing_discount_pct = 2 WHERE id = v_customer;
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice)
-     IS DISTINCT FROM v_product_cents - round(v_product_cents * 2 / 100.0) + 4500 THEN
-    v_fails := v_fails || format(' (F) the draft is %s cents after the customer moved to 2%%, want %s;',
-      (SELECT total_amount_cents FROM invoices WHERE id = v_invoice), v_product_cents - round(v_product_cents * 2 / 100.0) + 4500);
+     IS DISTINCT FROM v_product_cents - v_off + 4500 THEN
+    v_fails := v_fails || format(' (F) the draft moved to %s cents when the customer moved to 2%%, want it kept at its 3%% (%s);',
+      (SELECT total_amount_cents FROM invoices WHERE id = v_invoice), v_product_cents - v_off + 4500);
   END IF;
   BEGIN
     PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-dsc-post-' || v_suffix);
@@ -184,7 +190,7 @@ BEGIN
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF (SELECT status FROM invoices WHERE id = v_invoice) IS DISTINCT FROM 'posted'
      OR (SELECT total_amount_cents FROM invoices WHERE id = v_invoice)
-        IS DISTINCT FROM v_product_cents - round(v_product_cents * 2 / 100.0) + 4500 THEN
+        IS DISTINCT FROM v_product_cents - v_off + 4500 THEN
     v_fails := v_fails || format(' (F) the posted invoice is %s at %s cents, want posted and unchanged;',
       (SELECT status FROM invoices WHERE id = v_invoice), (SELECT total_amount_cents FROM invoices WHERE id = v_invoice));
   END IF;
@@ -387,9 +393,118 @@ BEGIN
       (SELECT total_amount_cents FROM invoices WHERE id = v_invoice), v_off - round(v_off * 3 / 100.0));
   END IF;
 
+  -- J: a rep's misc-charge draft with a negative 'standing_discount' line.
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  BEGIN
+    PERFORM save_invoice(jsonb_build_object('customer_id', v_payer2, 'invoice_type', 'misc_charge', 'status', 'draft', 'salesman_id', v_rep),
+      jsonb_build_array(jsonb_build_object('description', 'Freight', 'quantity', 1, 'unit_price_cents', 1000, 'extended_cents', 1000, 'cost_cents', 0, 'sort_order', 1, 'charge_type', 'freight'),
+                        jsonb_build_object('description', 'Standing discount 90%', 'quantity', 1, 'unit_price_cents', -900, 'extended_cents', -900, 'cost_cents', 0, 'sort_order', 2, 'charge_type', 'standing_discount')),
+      'smk-dsj-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    v_fails := v_fails || ' (J) a misc-charge draft took a standing discount line;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'STANDING_DISCOUNT_LINE_SCOPE:%' THEN v_fails := v_fails || ' (J) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- K: a fresh 3% draft switched to misc charge (as owner: the type switch path) loses its discount line.
+  UPDATE customers SET standing_discount_pct = 3 WHERE id = v_customer;
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+    VALUES ('SMK-DSK-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, quantity_delivered, quantity_remaining)
+    VALUES (v_order, v_product.id, '[SMOKE] Type switch', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+      10, (v_product.current_cost + 1.37) * 10, 0, 10) RETURNING id INTO v_line;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    VALUES ('SMK-DSK-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    VALUES (v_delivery, v_line, v_product.id, 10, 'gal');
+  PERFORM confirm_delivery(v_delivery, v_admin, 'smk-dsk-confirm-' || v_suffix);
+  PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+    'smk-dsk-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; type switch');
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND invoice_type <> 'credit_memo';
+  UPDATE invoices SET invoice_type = 'misc_charge' WHERE id = v_invoice;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount')
+     OR (SELECT total_amount_cents FROM invoices WHERE id = v_invoice)
+        IS DISTINCT FROM (SELECT sum(extended_cents) FROM invoice_items WHERE invoice_id = v_invoice) THEN
+    v_fails := v_fails || ' (K) a draft switched to misc charge kept its standing discount line;';
+  END IF;
+
+  -- L, M: a fresh Bill Split 50/50 (main 3%, payer 2 none). L: payer 2's rate changes while the drafts are open.
+  UPDATE customers SET standing_discount_pct = 0 WHERE id = v_payer2;
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+    VALUES ('SMK-DSL-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, quantity_delivered, quantity_remaining)
+    VALUES (v_order, v_product.id, '[SMOKE] Rate change on split', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+      100, (v_product.current_cost + 1.37) * 100, 0, 100) RETURNING id INTO v_line;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  INSERT INTO order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents, is_primary, sort_order)
+    VALUES (v_order, v_customer, '[SMOKE] main', 50, 0, true, 1), (v_order, v_payer2, '[SMOKE] payer 2', 50, 0, false, 2);
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    VALUES ('SMK-DSL-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    VALUES (v_delivery, v_line, v_product.id, 100, 'gal');
+  PERFORM confirm_delivery(v_delivery, v_admin, 'smk-dsl-confirm-' || v_suffix);
+  PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+    'smk-dsl-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; rate change on split');
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  SELECT id, invoice_group_id INTO v_invoice, v_group FROM invoices
+   WHERE order_id = v_order AND customer_id = v_customer AND status NOT IN ('voided', 'cancelled');
+  SELECT id INTO v_invoice2 FROM invoices WHERE order_id = v_order AND customer_id = v_payer2 AND status NOT IN ('voided', 'cancelled');
+  v_off := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2);
+  BEGIN
+    UPDATE customers SET standing_discount_pct = 4 WHERE id = v_payer2;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (L) a customer''s rate change failed while they had an open split draft: ' || SQLERRM || ';';
+  END;
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2) IS DISTINCT FROM v_off THEN
+    v_fails := v_fails || ' (L) the open split draft changed with the customer''s rate;';
+  END IF;
+  -- M: post the group, change payer 2's rate again, unpost the group: it unposts at its posted amounts.
+  BEGIN
+    PERFORM post_invoice_group(v_group, v_admin,
+      (SELECT jsonb_object_agg(id, _invoice_post_version(id)) FROM invoices
+        WHERE invoice_group_id = v_group AND status NOT IN ('voided', 'cancelled') AND deleted_at IS NULL),
+      'smk-dsm-post-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    UPDATE customers SET standing_discount_pct = 7 WHERE id = v_payer2;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM unpost_invoice_group(v_group, v_admin, 'smk-dsm-unpost-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (M) post, rate change, unpost failed: ' || SQLERRM || ';';
+  END;
+  IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2) IS DISTINCT FROM v_off THEN
+    v_fails := v_fails || format(' (M) the unposted payer invoice moved to %s cents, want it kept at %s;',
+      (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2), v_off);
+  END IF;
+
+  -- N: the office moves the main customer's draft (K's invoice is misc now; use a fresh chemical draft: the group's
+  -- main payer, now unposted) from 3% to 3.01%: the label follows.
+  BEGIN
+    PERFORM set_invoice_standing_discount(v_invoice, 3.01, 'smk-dsn-301-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (N) setting 3.01% failed: ' || SQLERRM || ';';
+  END;
+  IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'
+                   AND description = 'Standing discount 3.01%') THEN
+    v_fails := v_fails || format(' (N) the label is %s, want Standing discount 3.01%%;',
+      COALESCE((SELECT description FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'), 'missing'));
+  END IF;
+
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL standing grower discount:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK standing grower discount: off product lines only, per payer, to the cent, re-saves and hand edits put right, admin only, drafts follow the customer, posted invoices never change, the split group posts';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK standing grower discount: off product lines only, per payer, to the cent, re-saves and hand edits put right, admin only, each invoice keeps its drafted rate, posted and unposted amounts never move, only a chemical sale carries the line, the split group posts';
 END
 $smoke$;

@@ -5012,19 +5012,19 @@ export type Database = {
           invoice_id: string
           rate_pct: number
           set_at: string
-          set_by: string
+          set_by: string | null
         }
         Insert: {
           invoice_id: string
           rate_pct: number
           set_at?: string
-          set_by: string
+          set_by?: string | null
         }
         Update: {
           invoice_id?: string
           rate_pct?: number
           set_at?: string
-          set_by?: string
+          set_by?: string | null
         }
         Relationships: []
       }

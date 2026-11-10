@@ -6983,8 +6983,7 @@
     "invoice_standing_discount_rates": {
       "no_default": [
         "invoice_id",
-        "rate_pct",
-        "set_by"
+        "rate_pct"
       ],
       "with_default": [
         "set_at"

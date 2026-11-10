@@ -12,7 +12,10 @@
 --      draft: delivery completion, Bill Split, Create Invoice, quick delivery, save_invoice,
 --      consolidation, pricing. A line sent back by the screen is replaced, never counted twice.
 --      Each payer's invoice uses its own customer's discount, so a split is exact per payer.
---   4. A customer's new discount recomputes their open chemical-sale drafts. Posted invoices never change.
+--   4. Each invoice keeps the rate it was first drafted at (recorded in invoice_standing_discount_rates). A
+--      customer's new rate applies to new sales; the office changes one draft through section 6. Posted invoices
+--      never change, and unposting keeps the posted amounts. Posting refuses a draft whose discount line is stale.
+--      Only a chemical sale carries the line: it is refused elsewhere and removed from a draft switched away.
 --   5. Split invoices (Bill Split, field split) take the discount just before their content fingerprint.
 --   6. invoice_standing_discount_rates: the office's rate for one sale (Mason 2026-11-09: "easy for the
 --      office to change or remove it on a sale before it's posted"). No row follows the customer; 0 removes it.
@@ -20,10 +23,12 @@
 --      re-saves the draft through save_invoice so a split payer's fingerprint stays right. A side table, so the
 --      invoices table, its view and its column grants are untouched.
 --
--- NOT CHANGED: every writer function, every guard, posting, commission (worked out on the order,
---   before any discount: question 1 to Mason, 2026-11-09), field application and credit memo invoices.
+-- NOT CHANGED: every writer function and existing guard, the posting functions themselves (only a BEFORE trigger is
+--   added), commission (still worked out on the order before any discount; Mason 2026-11-09: after the discount,
+--   built with the week 4 commission PR, and this goes live only with it), returns and credit memos (a return of
+--   a discounted sale is handled with that PR too), field application invoices.
 --
--- ROLLBACK (its own reviewed migration): drop the three triggers and their functions, delete the
+-- ROLLBACK (its own reviewed migration): drop this migration's triggers and functions, delete the
 --   'standing_discount' lines from draft invoices and re-total them, restore the two invoice_items
 --   CHECKs to their 20261108160000 text, drop invoice_standing_discount_rates and set_invoice_standing_discount,
 --   drop customers.standing_discount_pct.
@@ -103,12 +108,12 @@ CREATE TABLE public.invoice_standing_discount_rates (
   invoice_id uuid PRIMARY KEY REFERENCES public.invoices(id) ON DELETE CASCADE,
   rate_pct numeric(5,2) NOT NULL
     CONSTRAINT invoice_standing_discount_rates_range CHECK (rate_pct >= 0 AND rate_pct <= 100),
-  set_by uuid NOT NULL REFERENCES public.profiles(id),
+  set_by uuid REFERENCES public.profiles(id),   -- NULL: recorded from the customer's rate when first drafted
   set_at timestamptz NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE public.invoice_standing_discount_rates IS
-  'The office''s standing discount rate for one chemical-sale invoice; no row follows the customer. Written only by set_invoice_standing_discount.';
+  'The standing discount rate one chemical-sale invoice was drafted at (set_by NULL: copied from the customer) or the office set (set_invoice_standing_discount).';
 
 ALTER TABLE public.invoice_standing_discount_rates ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.invoice_standing_discount_rates FROM PUBLIC, anon, authenticated;
@@ -135,6 +140,32 @@ ALTER TABLE public.invoice_items ADD CONSTRAINT invoice_items_charge_line_shape_
     AND CASE WHEN charge_type = 'standing_discount' THEN unit_price_cents < 0 ELSE unit_price_cents > 0 END));
 
 -- Recompute one invoice's discount line and total. A no-op unless it's a live chemical-sale draft.
+-- What an invoice's discount line should be: cents (0 = no line) and its label. The invoice's recorded rate,
+-- else (never yet drafted) the customer's. Product lines only. Read-only.
+CREATE FUNCTION public._standing_discount_expected_20261231(p_invoice_id uuid, OUT o_cents bigint, OUT o_label text, OUT o_pct numeric)
+ LANGUAGE plpgsql
+ STABLE
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_base bigint;
+BEGIN
+  SELECT COALESCE((SELECT r.rate_pct FROM invoice_standing_discount_rates r WHERE r.invoice_id = i.id), c.standing_discount_pct)
+    INTO o_pct
+    FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+   WHERE i.id = p_invoice_id;
+  SELECT COALESCE(sum(extended_cents), 0) INTO v_base
+    FROM invoice_items WHERE invoice_id = p_invoice_id AND product_id IS NOT NULL AND charge_type IS NULL;
+  o_cents := CASE WHEN COALESCE(o_pct, 0) > 0 AND v_base > 0 THEN round(v_base * o_pct / 100) ELSE 0 END;
+  o_label := format('Standing discount %s%%', trim_scale(COALESCE(o_pct, 0)));
+END
+$function$;
+
+REVOKE ALL ON FUNCTION public._standing_discount_expected_20261231(uuid) FROM PUBLIC, anon, authenticated;
+
+-- Recompute one draft's discount line and total. A chemical-sale draft gets its line at its recorded rate (the
+-- first time, the customer's rate is recorded for it); any other draft loses a discount line it should not have.
 CREATE FUNCTION public._recompute_standing_discount_20261231(p_invoice_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -143,32 +174,34 @@ CREATE FUNCTION public._recompute_standing_discount_20261231(p_invoice_id uuid)
 AS $function$
 DECLARE
   v_inv record;
+  v_cents bigint := 0;
+  v_label text;
   v_pct numeric;
-  v_base bigint;
-  v_cents bigint;
   v_same boolean;
 BEGIN
-  SELECT i.id, i.customer_id INTO v_inv
+  SELECT i.id, i.customer_id, i.invoice_type INTO v_inv
     FROM invoices i
-   WHERE i.id = p_invoice_id AND i.invoice_type = 'chemical_sale'
-     AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
+   WHERE i.id = p_invoice_id AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
    FOR UPDATE;
   IF NOT FOUND THEN
     RETURN;
   END IF;
 
-  -- The sale's own rate if the office set one, else the customer's.
-  v_pct := COALESCE((SELECT r.rate_pct FROM invoice_standing_discount_rates r WHERE r.invoice_id = v_inv.id),
-                    (SELECT c.standing_discount_pct FROM customers c WHERE c.id = v_inv.customer_id));
-  SELECT COALESCE(sum(extended_cents), 0) INTO v_base
-    FROM invoice_items WHERE invoice_id = v_inv.id AND product_id IS NOT NULL AND charge_type IS NULL;
-  v_cents := CASE WHEN COALESCE(v_pct, 0) > 0 AND v_base > 0 THEN round(v_base * v_pct / 100) ELSE 0 END;
+  IF v_inv.invoice_type = 'chemical_sale' THEN
+    -- The rate this invoice is drafted at, recorded once so a later customer change never moves it.
+    IF NOT EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id) THEN
+      INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by)
+      SELECT v_inv.id, COALESCE(c.standing_discount_pct, 0), NULL FROM customers c WHERE c.id = v_inv.customer_id
+      ON CONFLICT (invoice_id) DO NOTHING;
+    END IF;
+    SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(v_inv.id) e;
+  END IF;
 
-  -- Nothing to change: keep the existing line (and its id), so a plain re-save is quiet.
+  -- Nothing to change (cents, label and total): keep the existing line and its id, so a plain re-save is quiet.
   -- (Worked out first: plpgsql ends an IF condition at its first THEN, a CASE's included.)
-  v_same := (SELECT COALESCE(array_agg(-extended_cents), '{}'::bigint[]) FROM invoice_items
+  v_same := (SELECT COALESCE(array_agg(-extended_cents || '|' || description), '{}'::text[]) FROM invoice_items
               WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount')
-            = (CASE WHEN v_cents > 0 THEN ARRAY[v_cents] ELSE '{}'::bigint[] END)
+            = (CASE WHEN v_cents > 0 THEN ARRAY[v_cents || '|' || v_label] ELSE '{}'::text[] END)
         AND (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id)
             = (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items WHERE invoice_id = v_inv.id);
   IF v_same THEN
@@ -187,7 +220,7 @@ BEGIN
   IF v_cents > 0 THEN
     INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents,
                                sort_order, charge_type)
-    VALUES (v_inv.id, format('Standing discount %s%%', trim_scale(v_pct)), 1, -v_cents, -v_cents, 0,
+    VALUES (v_inv.id, v_label, 1, -v_cents, -v_cents, 0,
             (SELECT COALESCE(max(sort_order), 0) + 1 FROM invoice_items WHERE invoice_id = v_inv.id),
             'standing_discount');
   END IF;
@@ -248,33 +281,61 @@ CREATE CONSTRAINT TRIGGER invoices_standing_discount_20261231
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public._standing_discount_after_invoice_change_20261231();
 
--- 4. A customer's new discount reaches their open drafts -----------------------------------------
-CREATE FUNCTION public._standing_discount_after_customer_change_20261231()
+-- 4. Guards: the line only on a chemical sale; no stale line at posting -----------------------------
+-- A 'standing_discount' line on any other invoice type is refused (it is the only negative charge line).
+CREATE FUNCTION public.guard_standing_discount_line_scope_20261231()
  RETURNS trigger
  LANGUAGE plpgsql
- SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE
-  v_id uuid;
 BEGIN
-  FOR v_id IN SELECT id FROM invoices
-               WHERE customer_id = NEW.id AND invoice_type = 'chemical_sale'
-                 AND status IN ('draft', 'unposted') AND deleted_at IS NULL
-               ORDER BY id
-  LOOP
-    PERFORM public._recompute_standing_discount_20261231(v_id);
-  END LOOP;
-  RETURN NULL;
+  IF NEW.charge_type = 'standing_discount'
+     AND (SELECT invoice_type FROM invoices WHERE id = NEW.invoice_id) IS DISTINCT FROM 'chemical_sale' THEN
+    RAISE EXCEPTION 'STANDING_DISCOUNT_LINE_SCOPE: a standing discount line belongs only on a chemical-sale invoice'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
 END
 $function$;
 
-REVOKE ALL ON FUNCTION public._standing_discount_after_customer_change_20261231() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.guard_standing_discount_line_scope_20261231() FROM PUBLIC, anon, authenticated;
 
-CREATE TRIGGER customers_standing_discount_drafts_20261231
-  AFTER UPDATE OF standing_discount_pct ON public.customers
-  FOR EACH ROW WHEN (NEW.standing_discount_pct IS DISTINCT FROM OLD.standing_discount_pct)
-  EXECUTE FUNCTION public._standing_discount_after_customer_change_20261231();
+CREATE TRIGGER invoice_items_standing_discount_scope_20261231
+  BEFORE INSERT OR UPDATE OF charge_type, invoice_id ON public.invoice_items
+  FOR EACH ROW WHEN (NEW.charge_type = 'standing_discount')
+  EXECUTE FUNCTION public.guard_standing_discount_line_scope_20261231();
+
+-- Posting a chemical sale refuses a discount line that doesn't match its rate: every writer today commits a draft
+-- before anyone posts it, so this only catches a future path that writes lines and posts in one transaction.
+CREATE FUNCTION public.guard_standing_discount_current_on_post_20261231()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_cents bigint;
+  v_label text;
+  v_pct numeric;
+BEGIN
+  SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(NEW.id) e;
+  IF (SELECT COALESCE(array_agg(-extended_cents || '|' || description), '{}'::text[]) FROM invoice_items
+       WHERE invoice_id = NEW.id AND charge_type = 'standing_discount')
+     IS DISTINCT FROM (CASE WHEN v_cents > 0 THEN ARRAY[v_cents || '|' || v_label] ELSE '{}'::text[] END) THEN
+    RAISE EXCEPTION 'STANDING_DISCOUNT_STALE: this draft''s standing discount is out of date; save it again, then post'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$function$;
+
+REVOKE ALL ON FUNCTION public.guard_standing_discount_current_on_post_20261231() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER invoices_standing_discount_current_on_post_20261231
+  BEFORE UPDATE OF status ON public.invoices
+  FOR EACH ROW
+  WHEN (OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue')
+        AND NEW.invoice_type = 'chemical_sale' AND NEW.deleted_at IS NULL)
+  EXECUTE FUNCTION public.guard_standing_discount_current_on_post_20261231();
 
 -- 5. Split invoices: the discount goes in before the fingerprint ---------------------------------
 -- A Bill Split or field split invoice records its total and a content fingerprint (split_invoice_provenance),
@@ -350,7 +411,8 @@ BEGIN
   END IF;
 
   -- Re-saved as the invoice screen would, so a split payer's draft keeps its fingerprint (save_invoice's split
-  -- guard refreshes it, and the discount goes in just before). Its own key: keys are unique across operations.
+  -- guard refreshes it, and the discount goes in just before). A fresh key of its own: keys are unique across
+  -- operations, and a reused one could replay an older save that never refreshes the fingerprint.
   v_header := jsonb_build_object('id', v_inv.id, 'customer_id', v_inv.customer_id, 'invoice_type', v_inv.invoice_type,
     'status', v_inv.status, 'season', v_inv.season, 'salesman_id', v_inv.salesman_id, 'invoice_date', v_inv.invoice_date,
     'due_date', v_inv.due_date, 'payment_terms', v_inv.payment_terms, 'purchase_order_ref', v_inv.purchase_order_ref,
@@ -360,7 +422,7 @@ BEGIN
            'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
            'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order), '[]'::jsonb)
     INTO v_items FROM invoice_items it WHERE it.invoice_id = v_inv.id;
-  PERFORM public.save_invoice(v_header, v_items, p_idempotency_key || ':save');
+  PERFORM public.save_invoice(v_header, v_items, 'set_invoice_standing_discount:' || gen_random_uuid()::text);
   PERFORM public._recompute_standing_discount_20261231(v_inv.id);
 
   v_result := jsonb_build_object('invoice_id', v_inv.id,

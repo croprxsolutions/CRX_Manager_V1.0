@@ -26,6 +26,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Follow-on (Sol round 6 on PR #1688, implementing the decision above):** a record counts only the lines that are restricted-use under that rule (a same-price line saved under a No number is not added in), and a sale saved under a Not reviewed number stays on Sales to check even when its product's number now says No.
 
 **Follow-on (Mason, in session, 2026-11-09: "One more round", after Sol round 7 on PR #1688):** the seed refuses while any active restricted-use record does not hold all the lines sharing its product, unit and price (today's posting records only the first line; live had no records at review), and a sale saved under a Not reviewed number stays listed even when its product has no number. The three files were restamped to 20261229180000, 190000 and 200000 to sort after RT-2a. If Sol round 8 is not clean, the PR is parked.
+## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
+
+**Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.
+**Why:** Sol's third round on #1710 found the same "save races a turn-off" gap again, plus grouping sizes that hold a turned-off option failing. Mason chose the business trade-off that removes the mechanism: a rare product may keep a just-turned-off timing; it stays visible and an admin can remove it.
+**What this forbids/implies:** do not re-add a database lock or refusal for turned-off timings without a new decision; the screens (USE-1 screens PR) must not offer a turned-off option. One pair twice on one row is still refused.
+
 ## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
 
 **Decision (Mason, in chat, 2026-11-09: "yes do it").** Sol round 5 on PR #1705 found that a label maximum written in a counted unit (`each`, `ea`, `unit`, for example "1 each/acre") was reported "not comparable", so a house rate above it needed no reason. The build sheet (section 3.5 step 4) had listed only ounce, pint, quart, gallon, pound, gram and milligram as comparable. Counted units now compare too, with an each-kind row only, and the suggested-rate reader also reads `each`. Sol round 6 may run on the fixed head.

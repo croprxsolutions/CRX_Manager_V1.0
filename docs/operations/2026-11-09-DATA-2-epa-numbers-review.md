@@ -199,8 +199,8 @@ Start Right 2.0 (2 rows), BoostMax-D (2), BoostMax-M (2), Residue RX (2), Bio-Re
 | Draft A / B / C / D | done (this doc) |
 | Mason's review | list A plus restricted-use fix approved in principle 2026-11-09; brand batch still needs its own `approve <code>` |
 | Restricted-use flags | **done 2026-11-09 ~9:55 PM Central** (Mason `approve 947437`): 15 products ticked on the product page as Mason (13 generic rows outside PAR-2 batch 1, plus Leverage 360 - 1 Gal and Mustang Maxx - 1 Gal). Verified live: `is_rup` true on all 15, and `product_change_history` shows only `is_rup false->true` by Mason Wells on each. |
-| Restricted-use, Gen Capture LFR 2.5 Gal + Bulk | held: in PAR-2 batch 1 (group 17); do after batch 1 is approved |
-| Order with PAR-2 grouping | agreed: brand rows go on every size of a product IDENTICALLY (grouping then merges them to the parent with no picks); nothing written to a batch 1 size until PAR-2 says batch 1 is approved; batch 1 sizes then get brands on the parent |
+| Restricted-use, Gen Capture LFR 2.5 Gal + Bulk | **done 2026-11-09 after PAR-2 batch 1 approval** (Mason `approve 398186`): ticked per size on the product page (is_rup stays on the size after grouping). Verified live: both true, history shows only `is_rup false->true` by Mason Wells. All 17 restricted-use fixes from this review are now live. |
+| Order with PAR-2 grouping | batch 1 APPROVED ~9:57 PM 2026-11-09 (36 parents, 72 sizes; ids in the shared notes file PAR2-batch1-approved-product-ids-2026-11-09.md): its brands go on the parent via `upsert_parent_brand`. Agreed: brand rows go on every size of a product IDENTICALLY (grouping then merges them to the parent with no picks); nothing written to a batch 1 size until PAR-2 says batch 1 is approved; batch 1 sizes then get brands on the parent |
 | Order with REG-1 seed | asked REG-1 session; no brand write until it answers |
 | Approved brand rows written to live | not started |
 | Read-only verification of brand rows | not started |

@@ -19,7 +19,8 @@
 --     captures any line without a capture (source 'posting'), then writes one record per product, captured number,
 --     captured signal word, unit and unit price for the 'yes' lines. An active record matching all of those with a
 --     different quantity or amount is refused (RUP_RECORD_CONFLICT).
---   - _rup_record_covers_line: only a 'yes' line can be covered (or, for a line posted before the seed, today's rule).
+--   - _rup_record_covers_line: only a 'yes' line can be covered, by exactly one record for its whole key (no pre-seed
+--     exception: Mason, 2026-11-10, "Yes, drop it").
 --   - _epa_registration_unrecorded_posted_lines re-issued (same signature and grants) and get_epa_sales_to_check()
 --     (admin, read-only), each line judged on its own capture.
 --   - Q7 (invoice_items half): INSERT, UPDATE and DELETE stay revoked from anon and authenticated (none today).
@@ -157,8 +158,8 @@ CREATE TRIGGER trg_zz_capture_invoice_line_rup AFTER INSERT OR UPDATE OF product
 
 -- A posted line has its restricted-use record when it was captured 'yes' and an active record carries its invoice,
 -- product, captured number, captured signal word, unit and unit price, with the quantity and amount of the 'yes'
--- lines sharing all of those (posting writes one per each). A line captured by the seed on an invoice posted before
--- it is also covered by today's rule: an active record for its invoice and product written before the seed.
+-- lines sharing all of those (posting writes one per each), and no duplicate. A line posted before the seed is judged
+-- the same way (Mason, 2026-11-10, "Yes, drop it"): an old record that does not match lands it on Sales to check.
 CREATE FUNCTION public._rup_record_covers_line(p_line public.invoice_items) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT EXISTS (
@@ -187,16 +188,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                                WHERE d.invoice_id = s.invoice_id AND d.product_id = s.product_id AND d.voided_at IS NULL
                                  AND d.id <> s.id AND d.epa_registration IS NOT DISTINCT FROM s.epa_registration
                                  AND d.signal_word IS NOT DISTINCT FROM s.signal_word AND d.unit = s.unit
-                                 AND d.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents))
-      OR EXISTS (
-           SELECT 1
-             FROM public.invoice_line_rup_captures c
-             JOIN public.epa_registration_seed_run sr ON c.captured_at >= sr.seeded_at
-             JOIN public.invoices i ON i.id = p_line.invoice_id AND i.posted_at < sr.seeded_at
-             JOIN public.rup_sales_records s
-               ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
-              AND s.created_at < sr.seeded_at
-            WHERE c.invoice_item_id = p_line.id AND c.source = 'seed');
+                                 AND d.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents));
 $function$;
 ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;
@@ -223,7 +215,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                               AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
                               AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
                   WHERE c.invoice_item_id = p_line.id
-                    AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents);
+                    AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents
+                    -- a duplicate active record for the key records nothing (Luna 2026-11-10)
+                    AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records d
+                                     WHERE d.invoice_id = s.invoice_id AND d.product_id = s.product_id AND d.voided_at IS NULL
+                                       AND d.id <> s.id AND d.epa_registration IS NOT DISTINCT FROM s.epa_registration
+                                       AND d.signal_word IS NOT DISTINCT FROM s.signal_word AND d.unit = s.unit
+                                       AND d.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents));
 $function$;
 
 -- Re-issued from 20261229180000 (same signature and grants): posted lines whose captured number or saved number is
@@ -393,14 +391,6 @@ BEGIN
     END IF;
 
     IF v_seeded THEN
-      -- REG-1 (Luna 2026-11-10): an invoice posted before the seed whose product already has an active record written
-      -- before the seed is covered by today's rule (as in _rup_record_covers_line); never write it a second record.
-      IF EXISTS (SELECT 1 FROM epa_registration_seed_run sr
-                   JOIN invoices i ON i.id = p_invoice_id AND i.posted_at < sr.seeded_at
-                   JOIN rup_sales_records s ON s.invoice_id = p_invoice_id AND s.product_id = v_item.product_id
-                    AND s.voided_at IS NULL AND s.created_at < sr.seeded_at) THEN
-        CONTINUE;
-      END IF;
       -- REG-1 (Luna 2026-11-10): two active records for one key are a duplicate a person must void; never pick one.
       IF (SELECT count(*) FROM rup_sales_records r
            WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id

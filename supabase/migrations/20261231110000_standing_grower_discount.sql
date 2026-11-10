@@ -323,8 +323,8 @@ CREATE FUNCTION public._standing_discount_after_invoice_change_20261231()
 AS $function$
 BEGIN
   -- A draft moved to another customer drops a rate it copied from the old one (an office rate stays), so the
-  -- recompute records the new customer's.
-  IF TG_OP = 'UPDATE' AND OLD.customer_id IS DISTINCT FROM NEW.customer_id THEN
+  -- recompute records the new customer's. An unposted invoice keeps its rate, so its posted amounts don't move.
+  IF TG_OP = 'UPDATE' AND OLD.customer_id IS DISTINCT FROM NEW.customer_id AND NEW.status = 'draft' THEN
     DELETE FROM invoice_standing_discount_rates WHERE invoice_id = NEW.id AND set_by IS NULL;
   END IF;
   PERFORM public._recompute_standing_discount_20261231(NEW.id);
@@ -491,12 +491,13 @@ BEGIN
     'rate_pct', (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id),
     'total_amount_cents', (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id));
   -- The office's change has its own audit entry, also when the rounded cents don't move (3% to 3.01% on a small sale).
+  -- It records the rate only: the recompute's own entry already carries the change in total, so the trail adds up once.
   INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
                                    total_impact_cents, description)
   VALUES ('invoice_updated', 'invoice', v_inv.id, v_actor, (SELECT role FROM profiles WHERE id = v_actor),
           jsonb_build_object('rate_pct', v_old_rate),
           jsonb_build_object('rate_pct', (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id)),
-          (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id) - v_inv.total_amount_cents,
+          0,
           format('Standing discount rate set to %s', COALESCE(trim_scale(p_pct)::text || '%', 'the customer''s rate')));
   PERFORM public.save_idempotency(p_idempotency_key, 'set_invoice_standing_discount', v_result);
   PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'set_invoice_standing_discount', v_fingerprint);

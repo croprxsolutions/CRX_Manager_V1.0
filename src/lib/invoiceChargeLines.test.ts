@@ -52,7 +52,7 @@ describe('the standing discount line (billing plan M4b)', () => {
 });
 
 describe('charge types', () => {
-  it('are exactly the four the database accepts (invoice_items_charge_type_check)', () => {
+  it('offer staff the four types they can pick (the database also accepts its own standing_discount line)', () => {
     expect(CHARGE_TYPE_OPTIONS.map((o) => o.value)).toEqual(['freight', 'application_fee', 'service', 'other']);
     expect(chargeTypeLabel('application_fee')).toBe('Application fee');
     expect(chargeTypeLabel(null)).toBe('');

@@ -30,6 +30,7 @@
 --   X  The office's rate change has its own audit entry, even when the cents don't move
 --   Y  Returns of a 3% customer's posted sale (two lines, one in two parts) credit its posted total, to the cent
 --   Z  A Bill Split payer at 3% returns its whole share: its credit is its own posted total
+--   I  (also: the change's audit entries add up to the change in total, once)
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -61,6 +62,8 @@ DECLARE
   v_header jsonb;
   v_lines jsonb;
   v_fails text := '';
+  v_before bigint;
+  v_audit bigint;
   v_case text;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -295,8 +298,17 @@ BEGIN
 
   -- I: the office's rate on one sale. v_invoice is H's draft (payer 2, no customer rate).
   BEGIN
+    v_before := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    v_audit := (SELECT COALESCE(sum(total_impact_cents), 0) FROM financial_audit_log WHERE entity_id = v_invoice);
     PERFORM set_invoice_standing_discount(v_invoice, 1.5, 'smk-dsi-15-' || v_suffix);
     SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    -- The audit trail adds up: the change's entries carry the change in total once.
+    IF (SELECT COALESCE(sum(total_impact_cents), 0) FROM financial_audit_log WHERE entity_id = v_invoice) - v_audit
+       IS DISTINCT FROM (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) - v_before THEN
+      v_fails := v_fails || format(' (I) the audit entries for the 1.5%% change add up to %s cents, the total moved %s;',
+        (SELECT COALESCE(sum(total_impact_cents), 0) FROM financial_audit_log WHERE entity_id = v_invoice) - v_audit,
+        (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) - v_before);
+    END IF;
     v_product_cents := (SELECT sum(extended_cents) FROM invoice_items WHERE invoice_id = v_invoice AND product_id IS NOT NULL);
     IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_product_cents - round(v_product_cents * 1.5 / 100.0) THEN
       v_fails := v_fails || format(' (I) at 1.5%% the draft is %s cents, want %s;', (SELECT total_amount_cents FROM invoices WHERE id = v_invoice),

@@ -37,6 +37,16 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Follow-on (Sol round 6 on PR #1688, implementing the decision above):** a record counts only the lines that are restricted-use under that rule (a same-price line saved under a No number is not added in), and a sale saved under a Not reviewed number stays on Sales to check even when its product's number now says No.
 
 **Follow-on (Mason, in session, 2026-11-09: "One more round", after Sol round 7 on PR #1688):** the seed refuses while any active restricted-use record does not hold all the lines sharing its product, unit and price (today's posting records only the first line; live had no records at review), and a sale saved under a Not reviewed number stays listed even when its product has no number. The three files were restamped to 20261229180000, 190000 and 200000 to sort after RT-2a. If Sol round 8 is not clean, the PR is parked.
+## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.
+**What this forbids/implies:** do not extend the product guard to billed tickets, or re-check units on invoice void, without a new decision. If round 6 finds anything new, stop and bring it to Mason.
+
+## 2026-11-10 — #1733 (KI-16 rate units) gets one more Sol round (round 5) after a merge of main
+
+**Decision (Mason, in chat, 2026-11-10: "Yes, run round 5").** PR #1733 may run Sol round 5. Sol round 4 was clean at `1334014e7`; the only later change is a merge of `main` whose one conflict was the "Last verified" stamp line in `docs/manual/KNOWN_ISSUES.md`, and carry-forward refuses a merge that conflicted. No finding keeps returning: each Sol round found a different issue, all fixed or recorded as follow-ups.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
 
 **Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.

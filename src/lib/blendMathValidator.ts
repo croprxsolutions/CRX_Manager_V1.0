@@ -314,7 +314,8 @@ export function validateBlendMath(
     // rather than inferring it from an empty string; tracked in KNOWN_ISSUES.md.
     // Billing reads the sold unit WITHOUT the fold, so one that is nothing but invisible characters
     // neither falls back to unit_size nor converts: say so instead of going quiet.
-    if (rateUnit !== '' && soldUnit === '' && (product.product_inventory_unit ?? '').trim() !== '') {
+    // ASCII spaces only, as SQL btrim: JS .trim() would also drop the NBSP-only unit billing cannot read.
+    if (rateUnit !== '' && soldUnit === '' && (product.product_inventory_unit ?? '').replace(/^ +| +$/g, '') !== '') {
       mismatch(`${name}: the unit this product is sold in contains only invisible characters, so this ticket will fail when you invoice it. Fix the product's unit.`);
       continue;
     }

@@ -8,6 +8,12 @@ describe('validateBlendMath', () => {
         product_rate_unit: null, product_inventory_unit: String.fromCharCode(0x200b) },
     ]);
     expect(warnings.some((w) => /only invisible characters/.test(w.message))).toBe(true);
+    // A non-breaking-space-only unit too: JS .trim() strips it, SQL btrim does not.
+    const nbsp = validateBlendMath({ total_acres: null } as never, [
+      { product_name: 'Atrazine', quantity: 200, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: 'oz/ac', product_form: 'liquid',
+        product_rate_unit: null, product_inventory_unit: String.fromCharCode(0x00a0) },
+    ]);
+    expect(nbsp.some((w) => /only invisible characters/.test(w.message))).toBe(true);
   });
 
   it('keeps matching seed units but flags seed conversions before billing', () => {

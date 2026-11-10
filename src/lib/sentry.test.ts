@@ -136,6 +136,12 @@ describe('initSentry', () => {
       expect(send(synthetic(), { originalException: original }).exception.values[0].value).toBe('bad token [JWT_REDACTED] end');
     });
 
+    it('redacts a JWT from a real Error message', async () => {
+      const send = await beforeSend();
+      const event = { exception: { values: [{ type: 'Error', value: 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln' }] } };
+      expect(send(event, { originalException: new Error('x') }).exception.values[0].value).toBe('bad token [JWT_REDACTED]');
+    });
+
     it('leaves real Error objects alone', async () => {
       const send = await beforeSend();
       const event = { exception: { values: [{ type: 'Error', value: 'boom' }] } };

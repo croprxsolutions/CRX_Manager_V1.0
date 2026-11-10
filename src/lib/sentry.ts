@@ -60,9 +60,12 @@ export function initSentry() {
       if (plain !== null) {
         if (NETWORK_BLIP.test(plain)) return null;
         const first = event.exception?.values?.[0];
-        if (first) first.value = plain.replace(JWT, '[JWT_REDACTED]');
+        if (first) first.value = plain;
       }
-      // Strip PII from error messages
+      // Strip tokens from every error message, real Errors included
+      for (const value of event.exception?.values ?? []) {
+        if (value.value) value.value = value.value.replace(JWT, '[JWT_REDACTED]');
+      }
       if (event.message) {
         event.message = event.message.replace(JWT, '[JWT_REDACTED]');
       }

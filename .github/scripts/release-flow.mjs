@@ -80,6 +80,8 @@ export function pickPr(sha, pulls) {
   return pulls.find((p) => p.merge_commit_sha === sha && p.base?.ref === 'staging' && p.merged_at) ?? null;
 }
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const SEMVER = /^v(\d+)\.(\d+)\.(\d+)$/;
 
 // Next tag: a release bumps MINOR, a hotfix bumps PATCH. v1.0.0 (go-live) is typed by hand.
@@ -171,6 +173,15 @@ export interface ReleaseNotes {
 
 export const releaseNotes: ReleaseNotes = ${JSON.stringify(notes, null, 2)};
 `;
+}
+
+// One version's section of CHANGELOG.md (without its heading), or null.
+export function changelogSection(markdown, version) {
+  const head = new RegExp(`^## ${escapeRegExp(version)} \\(`, 'm').exec(markdown);
+  if (!head) return null;
+  const rest = markdown.slice(head.index).split('\n').slice(1).join('\n');
+  const end = rest.search(/^## v/m);
+  return (end === -1 ? rest : rest.slice(0, end)).trim();
 }
 
 const INLINE_BLOCKS = new Set(['version', 'date']);
@@ -328,7 +339,7 @@ const commands = {
     const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
     const section = `## ${plan.version} (${plan.date})\n\n${changelogMarkdown(groupChangelog(shipping))}\n`;
     const old = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8') : '# Changelog\n\nReleases of CRX Manager, newest first.\n';
-    const without = old.replace(new RegExp(`## ${plan.version.replace(/\./g, '\\.')} \\([^)]*\\)\\n[\\s\\S]*?(?=\\n## v|$)`), '').trimEnd();
+    const without = old.replace(new RegExp(`## ${escapeRegExp(plan.version)} \\([^)]*\\)\\n[\\s\\S]*?(?=\\n## v|$)`), '').trimEnd();
     const [head, ...rest] = without.split(/\n(?=## v)/);
     writeFileSync('CHANGELOG.md', `${[head.trimEnd(), section.trimEnd(), ...rest.map((r) => r.trimEnd())].join('\n\n')}\n`);
     writeFileSync('src/releaseNotes.ts', releaseNotesModule({ version: bare, date: plan.date, items: shipping.flatMap((p) => usersSee(p.body)) }));
@@ -390,6 +401,36 @@ const commands = {
       body: { state: problem ? 'failure' : 'success', context: 'release-gate', description: problem ? `Hotfix refused: ${problem}` : 'Hotfix: no weekly release gate', target_url: pr.html_url },
     });
     console.log(`#${pr.number} hotfix gate: ${problem ?? 'ok'}`);
+    return 0;
+  },
+  // pull_request closed into main: tag the merge commit and publish the GitHub Release.
+  async 'tag-release'() {
+    const { pull_request: pr } = await readEvent();
+    const sha = pr.merge_commit_sha;
+    let version;
+    let notes;
+    if (pr.head.ref === 'release/next') {
+      version = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
+      notes = changelogSection(git('show', `${sha}:CHANGELOG.md`), version);
+      if (!notes) throw new Error(`CHANGELOG.md at ${sha} has no ${version} section`);
+    } else if (isReleaseOrHotfixHead(pr.head.ref)) {
+      version = nextVersion(git('tag', '--list', 'v*').split('\n').filter(Boolean), 'hotfix');
+      notes = `#### 🚑 Hotfix\n* ${pr.title} (#${pr.number})\n\n${firstParagraph(pr.body, 600)}`;
+    } else {
+      return 0;
+    }
+    if (await gh(`/git/ref/tags/${version}`, { allow404: true })) {
+      // A re-run after the release was created (response lost) is already done.
+      const existing = await gh(`/releases/tags/${version}`, { allow404: true });
+      if (existing && git('rev-list', '-n', '1', version) === sha) {
+        console.log(`${version} already tagged at ${sha}: ${existing.html_url}`);
+        return 0;
+      }
+      console.log(`::error::Tag ${version} already exists on another commit; change the version and tag ${sha} by hand.`);
+      return 1;
+    }
+    const rel = await gh('/releases', { method: 'POST', body: { tag_name: version, target_commitish: sha, name: version, body: notes } });
+    console.log(`${version} tagged at ${sha}: ${rel.html_url}`);
     return 0;
   },
   // pull_request closed into staging: label the merged work on-staging (not the back-merge PR).

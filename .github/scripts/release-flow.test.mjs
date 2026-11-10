@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, foreignReleaseCommits, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, firstParagraph, releaseNotesModule, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
+  pickPr, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -156,4 +156,13 @@ test('releaseNotesModule writes a safe TypeScript literal', () => {
   assert.match(src, /export const releaseNotes: ReleaseNotes = \{/);
   const literal = src.slice(src.indexOf('= ') + 2, src.lastIndexOf(';'));
   assert.deepEqual(JSON.parse(literal).items, ['Quotes show "booked" prices`${x}`', 'Line\nbreak']);
+});
+
+test('changelogSection returns one version\'s notes from CHANGELOG.md', () => {
+  const md = '# Changelog\n\nIntro.\n\n## v0.2.0 (2026-11-19)\n\n#### ✨ New Features\n* b (#2)\n\n## v0.1.0 (2026-11-12)\n\n#### 🐛 Bug Fixes\n* a (#1)\n';
+  assert.equal(changelogSection(md, 'v0.2.0'), '#### ✨ New Features\n* b (#2)');
+  assert.equal(changelogSection(md, 'v0.1.0'), '#### 🐛 Bug Fixes\n* a (#1)');
+  assert.equal(changelogSection(md, 'v0.3.0'), null);
+  assert.equal(changelogSection(md, 'v0.1.00'), null);
+  assert.equal(changelogSection('## v1.2.3+build.4 (2026-12-15)\n\n* x (#9)\n', 'v1.2.3+build.4'), '* x (#9)');
 });

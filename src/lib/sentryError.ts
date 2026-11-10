@@ -9,7 +9,7 @@ const TOKENS = [
 // Amounts and invoice numbers: Sentry needs the reason, not the figures.
 const FIGURES = /\p{Nd}+(?:[.,]\p{Nd}+)*/gu;
 
-export function scrubMessage(text: string): string {
+function scrubMessage(text: string): string {
   return TOKENS.reduce((out, token) => out.replace(token, '[REDACTED]'), text).replace(FIGURES, '#');
 }
 

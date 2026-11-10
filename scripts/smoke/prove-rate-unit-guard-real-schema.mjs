@@ -13,8 +13,10 @@
  *       'oz/ac' schedules.
  *   P2  load_recipe_into_job with a product rated 'oz per cwt' is refused, the job's lines untouched.
  *   P3  blend lines: per-cwt units, a lookalike slash, or a blank unit on a per-cwt product are refused at save;
- *       per-acre spellings save and pass the invoice check; an invisible-only unit is stored blank; edits
- *       to a per-cwt unit or product are refused; an unrelated edit saves.
+ *       per-acre spellings save (each is then run through the invoice's unit query, which still refuses
+ *       'fl. oz/acre' — a known KI-16 gap); an invisible-only unit is refused; edits to a per-cwt unit or
+ *       product are refused; an unrelated edit saves. The invoice checks run the invoice's unit query, not the
+ *       full invoice RPC.
  *   P4  a priced job line rated 'oz'+U+2215+'cwt' is refused; unpriced it saves (save_job's price gate).
  *   P5  normalize_rate_unit folds invisible characters; a non-acre unit stays whole.
  *   P6  the blend invoice's unit check now passes the 'oz'+ZWSP line.

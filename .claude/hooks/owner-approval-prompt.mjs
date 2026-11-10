@@ -25,6 +25,7 @@ import {
   approvalAttemptIn, approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordPromptHookSeen, recordReplyApproval, replyMark,
   replyWithoutReminders, resolvePlainReply,
 } from "./owner-approval-lib.mjs";
+import { acceptAttemptIn, acceptFromReply } from "./sol-accept-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -42,6 +43,30 @@ catch { /* a missing marker only makes the request script refuse */ }
 
 // The app's reminder block in front of his words is not part of his reply (2026-10-20).
 const reply = replyWithoutReminders(payload?.prompt);
+
+// `accept <code> <reason>`: Mason accepts ONE Sol finding (sol-accept-lib.mjs, 2026-11-10).
+const accept = acceptFromReply(reply);
+if (accept || acceptAttemptIn(reply)) {
+  if (!accept) {
+    emit("SOL FINDING NOT ACCEPTED — Mason's message had an accept line, but other text came with it. Nothing was accepted. " +
+      "Ask him to send accept <code> followed by his reason as a message of its own, on one line.");
+  }
+  let res;
+  try {
+    res = recordReplyApproval({
+      code: accept.code, dirs: ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), reply,
+      sessionId: payload?.session_id, form: "accept", reason: accept.reason, readMark: () => replyMark(payload?.transcript_path, reply),
+    });
+  } catch (error) {
+    res = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
+  }
+  if (!res.ok) emit(`SOL FINDING NOT ACCEPTED — Mason replied "${reply.trim().slice(0, 60)}", but ${res.reason}. Nothing was accepted. Tell him in one line.`);
+  const p = res.payload;
+  emit(`SOL FINDING ACCEPTED — Mason accepted finding ${p.finding.n} of ${p.findingCount} on PR #${p.pullRequest} ` +
+    `(head ${String(p.prHead).slice(0, 12)}) with the reason "${accept.reason}". ` +
+    "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted.");
+}
 let code = approvalCodeFromReply(reply);
 const plain = !code && isPlainApprovalReply(reply);
 // Not a whole reply, but one of its lines is: say it did not count rather than

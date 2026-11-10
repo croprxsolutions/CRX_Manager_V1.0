@@ -116,7 +116,9 @@ AS $function$
                     THEN line.cost - (SELECT COALESCE(sum(o.floor_cost), 0) FROM shares o WHERE o.rn > 1)
                     ELSE sh.floor_cost END, 2),
          true
-    FROM shares sh, line;
+    FROM shares sh, line
+   -- Like the invoices, a payer whose share is 0 cents and 0 units gets no row (its cost share is 0 too).
+   WHERE sh.rn = 1 OR sh.cents <> 0 OR sh.units <> 0;
 $function$;
 
 ALTER FUNCTION public._sales_line_payers(uuid) OWNER TO postgres;

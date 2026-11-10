@@ -62,8 +62,8 @@ BEGIN
     INTO v_rows_before, v_detail_before FROM get_sales_detail_report() r;
   v_dash_before := (financial_dashboard_summary() ->> 'total_revenue')::numeric;
   CREATE TEMP TABLE smk_srpp_sum ON COMMIT DROP AS
-    SELECT g.by, (SELECT coalesce(sum(s.total_revenue), 0) FROM get_sales_summary_report(p_group_by => g.by) s) AS total
-      FROM unnest(ARRAY['product', 'customer', 'sales_rep', 'month', 'category']) AS g(by);
+    SELECT g.grp, (SELECT coalesce(sum(s.total_revenue), 0) FROM get_sales_summary_report(p_group_by => g.grp) s) AS total
+      FROM unnest(ARRAY['product', 'customer', 'sales_rep', 'month', 'category']) AS g(grp);
 
   -- B: a rep's Bill Split, 60 / 40, delivered as the admin.
   v_order_number := 'SMK-SRPP-' || v_suffix;
@@ -109,7 +109,7 @@ BEGIN
   IF (v_detail_after - v_detail_before) * 100 <> v_line_cents THEN
     v_fails := v_fails || format(' (D) detail total moved by %s, the line is %s cents;', v_detail_after - v_detail_before, v_line_cents);
   END IF;
-  FOR v_by, v_sum_before IN SELECT by, total FROM smk_srpp_sum LOOP
+  FOR v_by, v_sum_before IN SELECT grp, total FROM smk_srpp_sum LOOP
     SELECT coalesce(sum(s.total_revenue), 0) INTO v_sum_after FROM get_sales_summary_report(p_group_by => v_by) s;
     IF (v_sum_after - v_sum_before) * 100 <> v_line_cents THEN
       v_fails := v_fails || format(' (D) summary by %s moved by %s;', v_by, v_sum_after - v_sum_before);

@@ -231,6 +231,7 @@ const P = id('f1'); const P2 = id('f2');
 const O1 = id('e1'); const O1A = id('e11');                        // $1,000, card: landlord 40%
 const O2 = id('e2'); const O2A = id('e21'); const O2B = id('e22'); // card: farmer 60 + landlord 40; line A has its own shares
 const O3 = id('e3'); const O3A = id('e31');                        // unsplit
+const O4 = id('e4'); const O4A = id('e41');                        // $10, landlord 0.001% (rounds to nothing)
 const INV_F = id('d1'); const INV_L = id('d2'); const INV_X = id('d3');
 
 function claims(uid) {
@@ -396,6 +397,23 @@ function main() {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public._sales_line_payers(uuid)', 'EXECUTE')::text;`), 'false', `${role} may not call the helper`);
   }
   console.log('[prover] a rep sees the shares without cost; the helper is callable by no API role');
+
+  // A payer whose share rounds to 0 cents and 0 units gets no row, as on the invoices (Sol round 1).
+  psql(`INSERT INTO public.orders (id, order_number, customer_id, order_date, status, booking_draw, salesman_id) VALUES
+      ('${O4}', 'PROVER-SP-4', '${FARM}', current_date, 'confirmed', false, '${REP}');
+    INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit, cost_at_time_cents,
+        total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining) VALUES
+      ('${O4A}', '${O4}', '${P}', '[PROVER] Herbicide', 10, 6, NULL, 1, 10, 4, 40, 0, 1);
+    INSERT INTO public.order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents) VALUES
+      ('${O4}', '${LAND}', '[PROVER] Landlord', 0.001, 0);`);
+  assert.equal(as(ADMIN, `SELECT string_agg(customer_name || '|' || total_price, ';') FROM public.get_sales_detail_report() WHERE order_number = 'PROVER-SP-4'`),
+    '[PROVER] Farmer|10.00', 'a zero share gets no row; the main customer keeps the whole line');
+  console.log('[prover] a payer whose share rounds to nothing gets no row');
+
+  // The live smoke chain runs here end to end and must end in SMOKE_PASS_ROLLBACK.
+  const smoke = docker(psqlArgs(), { input: readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-sales-reports-per-payer.sql'), 'utf8'), allowFailure: true });
+  console.log(`[prover] live smoke chain in the test database: ${(smoke.stderr || smoke.stdout).trim().split(/\r?\n/)[0]}`);
+  assert.match(smoke.stderr, /SMOKE_PASS_ROLLBACK/, smoke.stderr);
   console.log('SALES_REPORTS_PER_PAYER_PROOF_PASS');
 }
 

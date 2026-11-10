@@ -175,7 +175,7 @@ function installLiveAuthUid() {
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
 function buildContainer() {
-  docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  docker(['run', '-d', '--pull', 'never', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -288,6 +288,37 @@ async function main() {
     .map((t, i) => `DELETE FROM public.${t} = '${i < 2 ? pid : i === 2 ? parent : pid}';`).join('\n'));
   console.log('[prover] the preflight refuses while a grouped size has its own brand rows, and changes nothing');
 
+  // Sol: a brand save that already holds its product row (and has read the switch as off) when the apply starts must
+  // finish first, so the preflight sees its row. The writer holds the row, waits 2 s, then saves a brand.
+  const rpid = id('e1'); const rparent = id('e2');
+  asOwner(`INSERT INTO public.products (id, product_name, product_form) VALUES ('${rpid}', '[PROVER] Racing size', 'liquid');
+    INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${rparent}', '[PROVER] Racing parent', 'liquid', '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.product_parent_members (product_id, parent_id, added_by) VALUES ('${rpid}', '${rparent}', '${ADMIN}');`);
+  const writer = spawn('docker', psqlArgs(), { stdio: ['pipe', 'pipe', 'pipe'] });
+  let writerOut = '';
+  writer.stdout.on('data', (d) => { writerOut += d; }); writer.stderr.on('data', (d) => { writerOut += d; });
+  const writerDone = new Promise((resolve) => writer.on('close', resolve));
+  writer.stdin.end(`BEGIN;
+SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+SELECT 1 FROM public.products WHERE id = '${rpid}' FOR NO KEY UPDATE;
+SELECT pg_sleep(2);
+SET LOCAL ROLE authenticated;
+SELECT public.upsert_product_brand('${rpid}', '[PROVER] Racing brand', NULL, NULL, true, false, NULL, NULL, NULL, 'prover-race');
+COMMIT;
+`);
+  await new Promise((r) => setTimeout(r, 700));
+  stageText('cand-race.sql', lf(CANDIDATE));
+  const raced = apply('cand-race.sql');
+  assert.equal(await writerDone, 0, writerOut);
+  assert.notEqual(raced.status, 0, 'the apply must wait for the in-flight save and then refuse');
+  assert.match(raced.output, /grouped size has its own brand rows/);
+  assert.equal(shape(), before, 'a refused apply must leave the switch as it was');
+  asOwner(`DELETE FROM public.product_brands WHERE product_id = '${rpid}';
+    DELETE FROM public.product_parent_members WHERE product_id = '${rpid}';
+    DELETE FROM public.product_parents WHERE id = '${rparent}';
+    DELETE FROM public.products WHERE id = '${rpid}';`);
+  console.log('[prover] a brand save already holding its product row finishes first; the preflight then sees its row and refuses');
+
   const rowsBefore = counts();
   stageText('cand.sql', lf(CANDIDATE));
   const r = apply('cand.sql');
@@ -305,6 +336,25 @@ async function main() {
 
   // The gates now pass: each writer goes on to its next check instead of NOT_OPEN.
   const a = as(ADMIN, APPROVE); assert.notEqual(a.status, 0); assert.doesNotMatch(a.output, /GROUPING_NOT_OPEN/);
+  // Sol: a real group is approved end to end. Two sizes of one product (same EPA number, form and unit) are built
+  // into a proposal and approved; both join one parent and keep their ID, unit, size and prices.
+  const [z1, z2] = [id('f1'), id('f2')];
+  psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid') ON CONFLICT DO NOTHING;
+    INSERT INTO public.products (id, product_name, sku, category, epa_registration, product_form, inventory_unit, is_active, container_size, container_unit) VALUES
+    ('${z1}', '[PROVER] Zorbex 1 gal', 'ZB-1', 'Herbicide', '700-1', 'liquid', 'Gal', true, 1, 'Gal'),
+    ('${z2}', '[PROVER] Zorbex 2.5 gal', 'ZB-25', 'Herbicide', '700-1', 'liquid', 'Gal', true, 2.5, 'Gal');`);
+  const keep = () => scalar(`SELECT string_agg(md5((to_jsonb(p) - 'updated_at' - 'updated_by' - 'row_version')::text), ',' ORDER BY id) FROM public.products p WHERE id IN ('${z1}', '${z2}');`);
+  const kept = keep();
+  const P = JSON.parse(ok(ADMIN, "SELECT public.build_product_parent_proposal('prover-build');"));
+  const G = JSON.parse(scalar(`SELECT to_jsonb(g) FROM public.product_parent_proposal_groups g WHERE g.proposal_id = '${P.proposal_id}'
+    AND g.members @> '[{"product_id":"${z1}"}]' AND g.members @> '[{"product_id":"${z2}"}]';`));
+  assert.ok(G, 'the build puts both Zorbex sizes in one group');
+  const done = JSON.parse(ok(ADMIN, `SELECT public.approve_product_parent_groups('${P.proposal_id}', ${P.proposal_version},
+    '${JSON.stringify([{ group_id: G.id, group_fingerprint: G.group_fingerprint, name: G.suggested_name }])}'::jsonb, 'prover-approve-ok');`));
+  const parentId = done.groups[0].parent_id;
+  assert.equal(scalar(`SELECT count(*) FROM public.product_parent_members WHERE parent_id = '${parentId}' AND product_id IN ('${z1}', '${z2}');`), '2');
+  assert.equal(keep(), kept, 'approval changed a grouped size beyond its bookkeeping columns');
+  console.log('[prover] after: a real two-size group is built and approved; both sizes join one parent and are otherwise unchanged');
   const b = as(ADMIN, BRAND); assert.notEqual(b.status, 0); assert.doesNotMatch(b.output, /GROUPING_NOT_OPEN/); assert.match(b.output, /PRODUCT_ID_REQUIRED/);
   refused(STAFF, APPROVE, /ADMIN_REQUIRED/);
   refused(STAFF, BRAND, /ADMIN_REQUIRED/);

@@ -63,6 +63,8 @@ export interface UseTimingOption {
   category: 'Herbicide' | 'Foliar Fertilizer';
   sort_order: number;
   is_active: boolean;
+  /** Moves on every turn-off or turn-on; sent back so a late click cannot undo a later one (USE-1). */
+  option_version?: number;
 }
 
 /** A crop a use-timing option can name (`product_crop_options`, USE-1). */

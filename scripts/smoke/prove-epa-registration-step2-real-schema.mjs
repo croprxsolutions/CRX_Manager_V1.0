@@ -32,7 +32,10 @@ const CANDIDATE = path.join(MIGRATIONS, '20261226100000_epa_registration_tools.s
 const FOLLOW_UPS = ['20261226110000_rup_records_by_sold_number.sql', '20261226120000_epa_registration_seed.sql']
   .map((f) => path.join(MIGRATIONS, f));
 // Later files that only READ what this proof covers and redefine none of it.
-const LATER_READ_ONLY = new Set();
+// Later migrations checked by hand: they name a covered function but change nothing this proof covers.
+// 20261229100000 only turns the product-grouping switch on (one function body); the brand functions appear in
+// its comments and checks, and no product here is grouped.
+const LATER_READ_ONLY = new Set(['20261229100000_product_grouping_switch_on.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

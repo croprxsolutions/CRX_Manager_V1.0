@@ -3,14 +3,17 @@
  * Real-schema proof for 20261229170000_unit_spellings_remap (RT-2 step 1, data only).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
- * replays every post-baseline migration before the candidate, seeds live's 14 unit_conversions rows, the 22
- * listed products (live ids, names, forms and units; made-up prices) and three control products, then proves
+ * replays every post-baseline migration before the candidate, seeds live's 14 unit_conversions rows, the 20
+ * listed products (live ids, names, forms and units; made-up prices) and five control products (two of them the
+ * dry oz-rate products that wait for step 2), then proves
  * (build sheet docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md section 6, step-1 cases):
  *   U7  rate lock on: refused, nothing changed.        U8  an unlisted LB product: refused.
  *   U9  a listed product in a family, or a family on Qt: refused.   Drift: a moved row or unit row: refused.
  *   U10b a product save holding an Oz insert open: the migration waits for it, then refuses.
- *   Apply: exactly the 22 rows move, history records each, pricing_version +1 on the 3 rate rows only,
+ *   Apply: exactly the 20 rows move, history records each, pricing_version +1 on the one rate row only,
  *          every price column of every product unchanged, the setup guard is enabled again (U13).
+ *   Inventory: old-spelling snapshots of the stock products move with them (pinned count; any other count
+ *          refuses) and recovery moves them back.
  *   U1  three quotes (tier 1-3) saved through save_quote with every fixture product: identical lines
  *       before, after, after recovery and after re-apply; a line still sent with an old spelling prices the same.
  *   U2  an ordinary edit of every fixture product saves; new products in oz, qt and Lb save.
@@ -223,6 +226,11 @@ function buildContainer() {
       psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT u, 1, 'both' FROM (VALUES ('Ea'), ('Unit')) v(u)
         WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = v.u);`);
     }
+    // RT-1's preflight pins live's unit factors; give it live's 14 unit rows (seed() re-seeds the same rows).
+    if (base === '20261229110000_product_rates_draft.sql') {
+      raw(`DELETE FROM public.unit_conversions;
+        INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${unitRows().join(', ')};`);
+    }
     if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
       psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
         INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
@@ -249,7 +257,7 @@ const FIXTURE = "sku LIKE 'RT2A-%'";
 function listed() {
   const rows = [...lf(CANDIDATE).matchAll(/\('([0-9a-f-]{36})'::uuid, '([^']*)', '(liquid|dry)', '(stock|rate)', '([^']*)', '([^']*)'\)/g)]
     .map(([, id, name, form, kind, old, neu]) => ({ id, name, form, kind, old, neu }));
-  assert.equal(rows.length, 22, 'the candidate must list 22 products');
+  assert.equal(rows.length, 20, 'the candidate must list 20 products');
   return rows;
 }
 function unitRows() {
@@ -261,6 +269,9 @@ const CONTROLS = [
   { id: '7a7e5000-0000-4000-8000-0000000000c1', name: '[PROVER] Gal per qt', form: 'liquid', inv: 'Gal', rate: 'qt', per: 2 },
   { id: '7a7e5000-0000-4000-8000-0000000000c2', name: '[PROVER] Lb per Lb', form: 'dry', inv: 'Lb', rate: 'Lb', per: 1.5 },
   { id: '7a7e5000-0000-4000-8000-0000000000c3', name: '[PROVER] Gal per Pt', form: 'liquid', inv: 'Gal', rate: 'Pt', per: 0.75 },
+  // Sol round 10 HIGH: the two dry products on a liquid "oz" rate stay as they are until step 2's watchdog fix.
+  { id: '61ac0e28-bdbe-4197-a764-93aa33bf036a', name: 'Autumn Super 51 WDG', form: 'dry', inv: 'Dry oz', rate: 'oz', per: 0.5 },
+  { id: '1ec38578-6eaa-4cff-acd5-0ee0ec8dceda', name: 'Cimarron Plus - 10 oz', form: 'dry', inv: 'Dry oz', rate: 'oz', per: 0.25 },
 ];
 
 function seed(rows) {
@@ -296,7 +307,7 @@ function seed(rows) {
       ('${ADMIN}', 'rt2a-admin@example.invalid', '{"full_name":"[PROVER] RT2A Admin","role":"admin"}'::jsonb);
     INSERT INTO public.customers (farm_name, is_active) VALUES ('[PROVER] RT2A Farm', true);`);
   assert.equal(scalar(`SELECT role || ',' || is_active FROM public.profiles WHERE id = '${ADMIN}';`), 'admin,true');
-  console.log(`[prover] seeded live's 14 unit rows, the 22 listed products and ${CONTROLS.length} controls`);
+  console.log(`[prover] seeded live's 14 unit rows, the ${rows.length} listed products and ${CONTROLS.length} controls`);
 }
 
 // Unit columns, money columns and pricing version of every fixture product.
@@ -362,10 +373,10 @@ async function main() {
   seed(rows);
   stageText('cand.sql', lf(CANDIDATE));
   stageText('reverse.sql', lf(REVERSE));
-  const MIG = path.join(ROOT, 'supabase', 'migrations');
-  const fnBlock = (t) => t.match(/CREATE OR REPLACE FUNCTION public\.convert_to_gl_lb[\s\S]*?\$function\$;\n/)[0];
-  stageText('gllb-old.sql', fnBlock(lf(path.join(MIG, '20261104150000_product_forms_seed_each.sql'))));
-  stageText('gllb-new.sql', lf(path.join(MIG, '20261229160000_convert_to_gl_lb_dry_oz.sql')));
+  // The candidate with its pinned inventory count raised to the 3 snapshots seeded below, to prove the move itself.
+  const PIN = 'v_inv_expected constant integer := 0;';
+  assert.equal(lf(CANDIDATE).split(PIN).length, 2, 'the candidate pins 0 inventory snapshots');
+  stageText('cand-inv.sql', lf(CANDIDATE).replace(PIN, 'v_inv_expected constant integer := 3;'));
   const s0 = { units: units(), money: money(), versions: versions(), fns: fnBodies(), perAcre: perAcre() };
   assert.match(s0.fns, /:14$/, 'the 14 functions that read unit_conversions are present');
   const q0 = quotes(rows);
@@ -400,17 +411,16 @@ async function main() {
   console.log('[prover] U8: an unlisted product, or a form-unit entry, using LB refuses');
 
   // Sol round 2 HIGH: a product whose rate unit moves must not carry a label maximum (it would stop being checked).
-  const dryRow = rows.find((r) => r.neu === 'Dry oz');
-  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'oz' WHERE id = '${dryRow.id}';`);
-  refused('cand.sql', new RegExp(`RT2A_LABEL_RATE[^\\n]*${esc(dryRow.name)}`));
-  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${dryRow.id}';`);
+  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Lb' WHERE id = '${imazuron.id}';`);
+  refused('cand.sql', /RT2A_LABEL_RATE[^\n]*Imazuron/);
+  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${imazuron.id}';`);
   console.log('[prover] label: a moving rate unit with a label maximum refuses');
 
-  // The remap refuses until 20261229160000 is live (put the old converter back, refuse, re-apply the new one).
-  assert.equal(apply('gllb-old.sql').status, 0);
-  refused('cand.sql', /RT2A_GLLB_FIRST/);
-  { const g = apply('gllb-new.sql'); assert.equal(g.status, 0, g.output); }
-  console.log('[prover] order: without the Dry oz converter the remap refuses; the converter migration re-applies cleanly');
+  // Sol round 10 MED: an old-spelling inventory snapshot of a listed stock product beyond the pinned count refuses.
+  raw(`INSERT INTO public.inventory (product_id, location, unit_size) VALUES ('${armezon.id}', 'Main Warehouse', 'Oz');`);
+  refused('cand.sql', /RT2A_INVENTORY_DRIFT: 1 inventory rows/);
+  raw(`DELETE FROM public.inventory WHERE product_id = '${armezon.id}';`);
+  console.log('[prover] inventory: an unexpected old-spelling inventory snapshot refuses');
 
   // U9. A listed product used in a family refuses; so does a family rate unit on a losing spelling.
   raw(`INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${FAM}', 'RT2A family', 'liquid', '${ADMIN}', '${ADMIN}');
@@ -467,19 +477,20 @@ async function main() {
   }
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_validate_product_setup_fields';"), 'O', 'U13: setup guard enabled');
   assert.equal(scalar('SELECT count(*) FROM public.unit_conversions;'), '14', 'unit rows untouched');
-  console.log(`[prover] apply: 22 products moved, ${historyRows} history rows, pricing version +1 on the 3 rate rows only, every price and per-acre value unchanged, setup guard on`);
+  console.log(`[prover] apply: ${rows.length} products moved, ${historyRows} history rows, pricing version +1 on the rate row only, every price and per-acre value unchanged, the two dry oz-rate products untouched, setup guard on`);
 
   // U13. The setup guard still refuses an ordinary stock-unit change.
   const u13 = psql(`UPDATE public.products SET inventory_unit = 'Gal', unit_size = 'Gal' WHERE id = '${armezon.id}';`, { allowFailure: true });
   assert.match(`${u13.stdout}\n${u13.stderr}`, /can't change on a saved product/);
-  // Sol round 1 HIGH: the two products moved to Dry oz keep their pound equivalent (20261229160000).
-  for (const row of rows.filter((x) => x.neu === 'Dry oz')) {
+  // 20261229160000: Dry oz on a dry product has a pound equivalent; the two unmoved dry oz-rate products keep theirs.
+  for (const c of CONTROLS.filter((x) => x.inv === 'Dry oz')) {
     assert.equal(scalar(`SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.products p,
-        public.convert_to_gl_lb(16, p.rate_unit, p.product_form) c WHERE p.id = '${row.id}';`), '1.00000000000000000000 LB', `${row.name} pound equivalent`);
+        public.convert_to_gl_lb(16, p.rate_unit, p.product_form) c WHERE p.id = '${c.id}';`), '1.00000000000000000000 LB', `${c.name} pound equivalent`);
   }
+  assert.equal(scalar("SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.convert_to_gl_lb(16, 'Dry oz', 'dry') c;"), '1.00000000000000000000 LB');
   // Sol round 2 LOW: the saved figure trims the unit, as the screen preview does.
   assert.equal(scalar("SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.convert_to_gl_lb(16, ' Dry oz ', 'dry') c;"), '1.00000000000000000000 LB');
-  console.log('[prover] gl/lb: 16 Dry oz of each moved dry product is 1 LB');
+  console.log('[prover] gl/lb: 16 Dry oz on a dry product is 1 LB; the two dry oz-rate products keep 1 LB per 16 oz');
   console.log('[prover] U13: after the apply a stock-unit change is still refused');
 
   // U1 at S1: the same quotes price to the cent.
@@ -503,9 +514,9 @@ async function main() {
   refused('reverse.sql', /RT2A_REVERSE_GUARD_STATE/);
   raw('ALTER TABLE public.products ENABLE TRIGGER trigger_zzz_guard_product_rate_lock;');
   // Sol round 3 HIGH: recovery also refuses a moving rate unit that gained a label maximum.
-  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Dry oz' WHERE id = '${dryRow.id}';`);
-  refused('reverse.sql', new RegExp(`RT2A_REVERSE_LABEL_RATE[^\\n]*${esc(dryRow.name)}`));
-  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${dryRow.id}';`);
+  raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Lb' WHERE id = '${imazuron.id}';`);
+  refused('reverse.sql', /RT2A_REVERSE_LABEL_RATE[^\n]*Imazuron/);
+  raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${imazuron.id}';`);
   const rv = apply('reverse.sql');
   assert.equal(rv.status, 0, rv.output);
   assert.equal(units(), s0.units, 'U15: recovery restored every unit column');
@@ -519,6 +530,24 @@ async function main() {
   assert.equal(money(), s0.money);
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after re-apply');
   console.log('[prover] U15: a second run refuses; recovery restores every unit column exactly; re-apply works; quotes equal throughout');
+
+  // Sol round 10 MED: inventory snapshots move with their product, so the stock card's exact-match total still shows.
+  { const back = apply('reverse.sql'); assert.equal(back.status, 0, back.output); }
+  const qtRow = rows.find((r) => r.old === 'Qt');
+  const inv = () => scalar(`SELECT string_agg(product_id || '@' || location || '=' || coalesce(unit_size, '-'), ',' ORDER BY product_id, location)
+      FROM public.inventory WHERE product_id IN ('${armezon.id}', '${qtRow.id}', '${CONTROLS[0].id}');`);
+  raw(`INSERT INTO public.inventory (product_id, location, unit_size) VALUES ('${armezon.id}', 'Main Warehouse', 'Oz'),
+      ('${armezon.id}', 'North Barn', 'Oz'), ('${qtRow.id}', 'Main Warehouse', 'Qt'), ('${CONTROLS[0].id}', 'Main Warehouse', 'Gal');`);
+  const inv0 = inv();
+  refused('cand.sql', /RT2A_INVENTORY_DRIFT: 3 inventory rows/);
+  assert.equal(inv(), inv0, 'a refused run moved an inventory snapshot');
+  { const m = apply('cand-inv.sql'); assert.equal(m.status, 0, m.output); }
+  assert.equal(inv(), inv0.replaceAll('=Oz', '=oz').replaceAll('=Qt', '=qt'), 'snapshots moved with their products');
+  assert.equal(scalar(`SELECT count(DISTINCT i.unit_size) || '/' || bool_and(i.unit_size = p.unit_size) FROM public.inventory i
+      JOIN public.products p ON p.id = i.product_id WHERE i.product_id = '${armezon.id}';`), '1/true', 'stock card total still shows');
+  { const back = apply('reverse.sql'); assert.equal(back.status, 0, back.output); }
+  assert.equal(inv(), inv0, 'recovery moved the snapshots back');
+  console.log('[prover] inventory: 3 old-spelling snapshots move with their products (an unrelated Gal row does not), and recovery moves them back');
 
   console.log('UNIT_SPELLINGS_STEP1_PROOF_PASS');
 }

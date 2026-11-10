@@ -3,7 +3,7 @@
 -- WHY: convert_to_gl_lb gives a field job's chemical line its gallon (liquid) or pound (dry) equivalent, which
 -- the job-to-invoice transfer and the field-app invoice save copy onto the invoice line. Its dry branch knows
 -- "oz" but not "Dry oz", so the 76 live products whose rate unit is "Dry oz" get no pound figure (NULL, the
--- screen shows a dash). RT-2 step 1 (20261227100000) moves two more dry products from "oz" to "Dry oz";
+-- screen shows a dash). RT-2 step 2 will move two more dry products from "oz" to "Dry oz";
 -- without this they would lose the pound figure they show today. Mason, 2026-11-09: these products are
 -- priced by the pound, so the figure must be pounds.
 --

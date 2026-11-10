@@ -203,7 +203,7 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
     expect(serverGlLb(16, 'Dry oz', 'liquid')).toBeNull();
   });
 
-  // RT-2 step 1 moves Autumn Super 51 WDG and Cimarron Plus (dry, stock 'Dry oz') from rate 'oz' to 'Dry oz'.
+  // RT-2 step 2 will move Autumn Super 51 WDG and Cimarron Plus (dry, stock 'Dry oz') from rate 'oz' to 'Dry oz'.
   // Job billing must not move: the line keeps its stock unit, the hazard guard sees equal units, and the
   // priced quantity is the applied ounces both before and after (SQL field_app_priced_quantity agrees: oz == dry oz == 1).
   it('RT-2: a dry Dry-oz-stock product bills the same on an oz rate and on a Dry oz rate', () => {

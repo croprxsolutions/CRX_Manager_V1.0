@@ -1,26 +1,31 @@
--- RT-2 step 1 (RT-2a, Product Master Stage 4): move 22 products onto one spelling per unit (data only).
+-- RT-2 step 1 (RT-2a, Product Master Stage 4): move 20 products onto one spelling per unit (data only).
 --
 -- WHY: unit_conversions spells three units two ways (oz/Oz, qt/Qt, Lb/LB). validate_product_units matches a
 -- product's stock and container unit EXACTLY, so the alias rows cannot be deleted (step 2) while products still
 -- use them. Mason chose the winners on 2026-11-09 ("Yes, all three"): oz, qt and Lb stay; Unit and Ea stay
--- separate; the two dry products whose rate unit is the liquid "oz" move to "Dry oz".
+-- separate. The two dry products whose rate unit is the liquid "oz" (Autumn Super 51 WDG, Cimarron Plus) are NOT
+-- moved here: refresh_watchdog_flags compares a saved job's rate unit with the product's, so "oz" against
+-- "Dry oz" would drop an over-rate warning. They move in step 2 with a watchdog fix (Mason, 2026-11-09).
 -- Build sheet: docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md, section 4 (PR #1703).
 --
--- WHAT: exactly these 22 rows change, each pinned by id, name, form and its current spelling:
+-- WHAT: exactly these 20 rows change, each pinned by id, name, form and its current spelling:
 --   11 stock units Oz -> oz and 8 stock units Qt -> qt (inventory_unit and unit_size together),
---   1 rate unit LB -> Lb (Imazuron Herbicide), 2 rate units oz -> Dry oz (Autumn Super 51 WDG, Cimarron Plus).
--- Every factor is unchanged (oz = Oz = 1, qt = Qt = 32, Lb = LB = 16, oz = Dry oz = 1), so no price moves.
+--   1 rate unit LB -> Lb (Imazuron Herbicide).
+-- The stock rows' inventory.unit_size snapshots move with them (the product stock card totals only rows whose
+-- units match exactly); their count is pinned (0 live 2026-11-10).
+-- Every factor is unchanged (oz = Oz = 1, qt = Qt = 32, Lb = LB = 16), so no price moves.
 -- unit_conversions is NOT changed: both spellings keep working until step 2.
 -- guard_product_setup_fields refuses any change to a saved product's stock unit ("it waits for the reviewed unit
 -- change"); this migration is that reviewed change, so it disables that one trigger for its own UPDATE and
 -- enables it again in the same transaction. Every other product trigger runs: validate_product_units checks
--- each new spelling, the rate-lock and pricing guards see the rate changes (pricing_version +1 on the three rate
--- rows), and write_product_change_history records old and new values (actor null, as in any migration).
+-- each new spelling, the rate-lock and pricing guards see the rate change (pricing_version +1 on the one rate
+-- row), and write_product_change_history records old and new values (actor null, as in any migration).
 -- No schema, function, grant or policy change.
 --
 -- REFUSES (and changes nothing) if: the rate lock is on; unit_conversions is not exactly its 14 reviewed rows;
 -- any listed product moved (id, name, form or current spelling); any other product or family uses Oz, Qt or LB;
--- a listed product is in a product family or has a net weight.
+-- a listed product is in a product family or has a net weight; the stock rows' old-spelling inventory snapshots
+-- are not the pinned count.
 --
 -- ROLLBACK: scripts/smoke/rt2a-unit-spellings-remap-reverse.sql puts each listed product back to its old
 -- spelling with the same trigger handling (proven by scripts/smoke/prove-unit-spellings-real-schema.mjs).
@@ -32,14 +37,17 @@ DECLARE
   v_done integer;
   v_fn_before text;
   v_fn_after text;
+  -- inventory rows of the 19 stock products still on the old spelling (read live 2026-11-10).
+  v_inv_expected constant integer := 0;
 BEGIN
   -- Set here, not with SET LOCAL above the block, so it holds however the file is run.
   PERFORM set_config('lock_timeout', '10s', true);
   -- Product tables first, then the units table (the same order as step 2, so the two never deadlock). This
   -- waits for any product save in flight and holds new ones until commit, so no save can add an Oz, Qt or LB
-  -- product, join a family or gain a net weight between the checks below and the update.
+  -- product, join a family, gain a net weight or add an inventory snapshot between the checks below and the update.
   LOCK TABLE public.products, public.product_parents, public.product_parent_members,
-             public.product_size_net_weight_values, public.product_form_units IN SHARE ROW EXCLUSIVE MODE;
+             public.product_size_net_weight_values, public.product_form_units,
+             public.inventory IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.unit_conversions IN SHARE MODE;
 
   CREATE TEMP TABLE rt2a_map (id uuid PRIMARY KEY, product_name text NOT NULL, product_form text NOT NULL,
@@ -64,16 +72,10 @@ BEGIN
     ('30bd948b-f0c0-4d02-8cd5-89b729395262'::uuid, 'Milestone - 1 Qt', 'liquid', 'stock', 'Qt', 'qt'),
     ('e453fc17-c8b9-4e6c-89c1-7468b7875184'::uuid, 'Prevent Foam - 1  Qt', 'liquid', 'stock', 'Qt', 'qt'),
     ('28087f6b-e3f4-4caa-8d0f-3c25ea2cf8e5'::uuid, 'Tordon RTU - 1 Qt', 'liquid', 'stock', 'Qt', 'qt'),
-    ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'Imazuron Herbicide', 'dry', 'rate', 'LB', 'Lb'),
-    ('61ac0e28-bdbe-4197-a764-93aa33bf036a'::uuid, 'Autumn Super 51 WDG', 'dry', 'rate', 'oz', 'Dry oz'),
-    ('1ec38578-6eaa-4cff-acd5-0ee0ec8dceda'::uuid, 'Cimarron Plus - 10 oz', 'dry', 'rate', 'oz', 'Dry oz');
+    ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'Imazuron Herbicide', 'dry', 'rate', 'LB', 'Lb');
 
-  -- The rate lock must be off: the three rate changes and the stock-unit changes of rated products pass
+  -- The rate lock must be off: the rate change and the stock-unit changes of rated products pass
   -- guard_product_rate_lock only while it is.
-  -- 20261227090000 must be live first, or the two products moved to Dry oz lose their pound equivalent.
-  IF (SELECT c.converted_value FROM public.convert_to_gl_lb(16, 'Dry oz', 'dry') c) IS DISTINCT FROM 1 THEN
-    RAISE EXCEPTION 'RT2A_GLLB_FIRST: apply 20261227090000_convert_to_gl_lb_dry_oz first. Nothing was changed.';
-  END IF;
   -- FOR SHARE holds the lock state until commit, so nobody can lock rates halfway through.
   IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'RT2A_RATE_LOCK_ON: product rates are locked; unlock them with a reason, apply, then lock again. Nothing was changed.';
@@ -136,7 +138,7 @@ BEGIN
   END IF;
 
   -- A rate-unit move must not split a product's label maximum from its rate (the label check compares unit
-  -- names, so "2 oz" against a "Dry oz" rate would stop being checked). Live 2026-11-09: none of the three has one.
+  -- names, so a maximum in "LB" against an "Lb" rate would stop being checked). Live 2026-11-09: Imazuron has none.
   SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad
     FROM rt2a_map m JOIN public.products p ON p.id = m.id
    WHERE m.kind = 'rate' AND (p.max_label_rate IS NOT NULL OR NULLIF(btrim(p.max_label_rate_unit), '') IS NOT NULL);
@@ -152,6 +154,13 @@ BEGIN
       OR EXISTS (SELECT 1 FROM public.product_size_net_weight_values w WHERE w.product_id = m.id);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RT2A_FAMILY_OR_WEIGHT: these listed products are in a product family or have a net weight, nothing was changed: %', v_bad;
+  END IF;
+
+  -- The stock rows' inventory snapshots on the old spelling must be the reviewed count.
+  SELECT count(*) INTO v_done FROM public.inventory i JOIN rt2a_map m ON m.id = i.product_id
+   WHERE m.kind = 'stock' AND i.unit_size = m.old_unit;
+  IF v_done <> v_inv_expected THEN
+    RAISE EXCEPTION 'RT2A_INVENTORY_DRIFT: % inventory rows of the listed products are on the old spelling, % reviewed. Nothing was changed.', v_done, v_inv_expected;
   END IF;
 
   -- Before-images: money fields of every product (no unit column, so an approved unit change cannot fail it),
@@ -185,10 +194,19 @@ BEGIN
     FROM rt2a_map m
    WHERE m.kind = 'rate' AND p.id = m.id AND p.rate_unit = m.old_unit;
   GET DIAGNOSTICS v_done = ROW_COUNT;
-  IF v_done <> 3 THEN
-    RAISE EXCEPTION 'RT2A_UPDATE_COUNT: moved % of 3 rate units', v_done;
+  IF v_done <> 1 THEN
+    RAISE EXCEPTION 'RT2A_UPDATE_COUNT: moved % of 1 rate unit', v_done;
   END IF;
   ALTER TABLE public.products ENABLE TRIGGER trg_validate_product_setup_fields;
+  -- Their inventory snapshots follow (no inventory trigger watches unit_size).
+  UPDATE public.inventory i
+     SET unit_size = m.new_unit
+    FROM rt2a_map m
+   WHERE m.kind = 'stock' AND i.product_id = m.id AND i.unit_size = m.old_unit;
+  GET DIAGNOSTICS v_done = ROW_COUNT;
+  IF v_done <> v_inv_expected THEN
+    RAISE EXCEPTION 'RT2A_UPDATE_COUNT: moved % of % inventory snapshots', v_done, v_inv_expected;
+  END IF;
 
   -- Postflight.
   IF (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
@@ -200,6 +218,10 @@ BEGIN
                  OR rate_unit IN ('Oz', 'Qt', 'LB') OR container_unit IN ('Oz', 'Qt', 'LB')
                  OR max_label_rate_unit IN ('Oz', 'Qt', 'LB')) THEN
     RAISE EXCEPTION 'RT2A_POSTFLIGHT: a product still uses Oz, Qt or LB';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.inventory i JOIN rt2a_map m ON m.id = i.product_id
+              WHERE m.kind = 'stock' AND i.unit_size = m.old_unit) THEN
+    RAISE EXCEPTION 'RT2A_POSTFLIGHT: an inventory snapshot of a listed product is still on the old spelling';
   END IF;
   -- validate_product_units' rule, for every product: stock and container units match a row of the form exactly.
   SELECT string_agg(p.product_name, ', ' ORDER BY p.product_name) INTO v_bad

@@ -403,7 +403,7 @@ async function main() {
   assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname LIKE '%reg1%';`), '0');
   assert.equal(scalar(`SELECT to_regclass('public.epa_registration_copy_passes') IS NULL;`), 't');
   assert.equal(scalar(`SELECT has_any_column_privilege('authenticated', 'public.products', 'INSERT');`), 't');
-  assert.equal(scalar(`SELECT relrowsecurity || '|' || has_table_privilege('authenticated', 'public.invoice_line_rup_captures', 'SELECT') || '|' || has_table_privilege('service_role', 'public.invoice_line_rup_captures', 'SELECT') FROM pg_class WHERE oid = 'public.invoice_line_rup_captures'::regclass;`), 'true|false|false');
+  assert.equal(scalar(`SELECT relrowsecurity || '|' || has_table_privilege('authenticated', 'public.invoice_line_rup_captures', 'SELECT') || '|' || has_table_privilege('service_role', 'public.invoice_line_rup_captures', 'SELECT') || '|' || has_table_privilege('metabase_ro', 'public.invoice_line_rup_captures', 'SELECT') FROM pg_class WHERE oid = 'public.invoice_line_rup_captures'::regclass;`), 'true|false|false|false');
   assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_zz_capture_invoice_line_rup' AND tgrelid = 'public.invoice_items'::regclass AND (tgtype & 2) = 0;`), '1');
   refused(ADMIN, `${line(id('99'), INV1, P1, 1)}`, /permission denied/);
   refused(ADMIN, `UPDATE public.invoice_items SET quantity = 9 WHERE id = '${L1}';`, /permission denied/);

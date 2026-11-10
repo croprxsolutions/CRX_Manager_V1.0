@@ -83,7 +83,7 @@ CREATE TABLE public.invoice_line_rup_captures (
 );
 ALTER TABLE public.invoice_line_rup_captures OWNER TO postgres;
 ALTER TABLE public.invoice_line_rup_captures ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.invoice_line_rup_captures FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON TABLE public.invoice_line_rup_captures FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 -- Private: written and read only by SECURITY DEFINER functions owned by postgres. No app role holds a grant, so
 -- this policy only states that intent (an admin read, should a grant ever be added).
 CREATE POLICY invoice_line_rup_captures_admin_read ON public.invoice_line_rup_captures FOR SELECT TO authenticated
@@ -546,6 +546,7 @@ BEGIN
     END IF;
   END LOOP;
   IF has_table_privilege('service_role', 'public.invoice_line_rup_captures', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('metabase_ro', 'public.invoice_line_rup_captures', 'SELECT')
      OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.invoice_line_rup_captures'::regclass)
      OR has_function_privilege('authenticated', 'public._rup_record_covers_line(public.invoice_items)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._rup_record_for_line_key(public.invoice_items)', 'EXECUTE')

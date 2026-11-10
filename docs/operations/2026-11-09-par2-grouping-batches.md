@@ -124,7 +124,7 @@ An agent then checks read-only that each approved group has a parent, every memb
 
 **Still to do (as of batch 12, 2026-11-10):**
 - All NO RETURN rows are now sizes of their normal product; the "still to sort" list is done.
-- Wheat Mix and Wheat Mix II (Mason): each is sold as 2.5 gal and as a 275 gal tote, but the app has only the 2.5 gal rows. The tote sizes must be added as new products (need prices) before they can join.
+- Wheat Mix and Wheat Mix II (Mason): each is sold as 2.5 gal and as a 275 gal tote. Mason approved "Add totes, price later" (2026-11-10): "Wheat Mix - 275 Gal Tote" and "Wheat Mix II - 275 Gal Tote" were created with Add a size (Fixed tote, 275 Gal Tote) and joined their parents (435 parents, 571 sizes, 0 stock movements). **They have no price yet**; quotes, jobs and orders refuse them until Mason sets prices on each product page.
 - Held, rate differs: Buck Barrier (Bulk has 16 oz; the 2.5 gal has no rate, so joining would give it one).
 - Held, "Tote" rows recorded as 1 gal: BoostMax-D, Concept-Z9, Fulvic Force, Sweet Fulvic, Sweet Sucess (the size must be corrected first).
 - Kept separate (Mason), now each its own parent: Piksi Dust Infurrow / Piksi Dust Plus; Topguard / Topguard EQ.

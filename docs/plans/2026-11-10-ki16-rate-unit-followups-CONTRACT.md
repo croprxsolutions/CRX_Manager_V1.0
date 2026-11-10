@@ -146,3 +146,18 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
   binding). Recorded in KI-16 as inherited, unverified.
 - **#44 (suggestion: handle dotted spellings only in billing):** declined — billing's conversion input *is*
   `normalize_rate_unit`; a second path would be one more place to drift.
+
+## Luna round 1 (gpt-6-luna xhigh, head 1d8a02b44, 6 findings) — dispositions
+
+- **#1 HIGH (undotted `fl oz` on a dry product bills as weight ounces): deferred, out of this diff.** The `fl oz → oz`
+  line is unchanged since `20260630170000`. Live read-only 2026-11-10: 0 products, job lines or blend lines use any
+  `fl`/`fluid` spelling, so no record is affected. The obvious fix (map it to `fl oz` like the dotted forms) is unsafe
+  alone: `field_app_priced_quantity` would return NULL on a dry product, and job demand
+  (`COALESCE(…, jc.quantity)`, `20261206110000`) and stock deduction (`20261217100000`) would then use the raw
+  quantity. It needs its own plan; KI-16 now records it as HIGH, latent.
+- **#2 (RLS visibility in invoker triggers), #3 (`no_charge` → billable), #4 (line moved between tickets), #6
+  (`pt per ac`):** inherited from `20261231100000`, already named as deferrals above and in KI-16; this PR neither
+  creates nor widens them (#2's trigger only gains `deleted_at IS NULL`).
+- **#5 (retry of a pre-deploy `save_job` key whose payload had a foldable character):** accepted as named in "State and
+  failure": the retry gets the intent-mismatch refusal (fail closed, nothing written twice); live has 0 job lines
+  with such characters.

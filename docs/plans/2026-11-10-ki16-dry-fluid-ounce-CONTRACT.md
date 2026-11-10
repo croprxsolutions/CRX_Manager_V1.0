@@ -156,3 +156,13 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
   `raw()` runs with `session_replication_role = replica`, which skips triggers by design; the run reaches G5 and
   prints `RATE_UNIT_GUARD_PROOF_PASS`.
 - #1741's file (not changed here): the save_job retry fingerprint MED, as in round 1.
+
+## Luna round 3 (head 276516171): 1 HIGH, 2 MED (#1741), 1 LOW — round cap reached
+
+- Fixed (HIGH): a product whose form was never set reads a plain `oz` as a fluid ounce, so turning it dry would
+  re-read those lines as weight ounces. The becoming-dry check now counts any unit that reads as an ounce
+  (`unit_reads_as_ounce`: a fluid-ounce spelling, or anything `normalize_rate_unit` maps to `oz`; service_role
+  only). Live: 0 products with no form. Prover G4.
+- #1741's file: the two MEDs from rounds 1-2. LOW (recipes and product parents not guarded at save): named above,
+  fails closed.
+- Round 3 was the last round `ship.md` allows; a round-4 Luna run needs Mason's OK before Sol.

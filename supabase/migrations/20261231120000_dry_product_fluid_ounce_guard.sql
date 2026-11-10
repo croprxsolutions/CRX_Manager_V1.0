@@ -44,7 +44,8 @@ BEGIN
      OR public.normalize_rate_unit('fl. oz') IS DISTINCT FROM 'fl oz' THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_PREFLIGHT: 20261231110000 (KI-16 follow-ups) is not applied; nothing was changed.';
   END IF;
-  IF to_regprocedure('public.unit_names_fluid_ounce(text)') IS NOT NULL THEN
+  IF to_regprocedure('public.unit_names_fluid_ounce(text)') IS NOT NULL
+     OR to_regprocedure('public.unit_reads_as_ounce(text)') IS NOT NULL THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_PREFLIGHT: unit_names_fluid_ounce already exists; nothing was changed.';
   END IF;
 END;
@@ -72,6 +73,19 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.unit_names_fluid_ounce(text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.unit_names_fluid_ounce(text) TO authenticated, service_role;
+
+-- A unit a non-dry product reads as a fluid ounce: any fluid-ounce spelling, or anything that normalizes to 'oz'.
+CREATE FUNCTION public.unit_reads_as_ounce(p_unit text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT public.unit_names_fluid_ounce(p_unit) OR COALESCE(lower(public.normalize_rate_unit(p_unit)) = 'oz', false);
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.unit_reads_as_ounce(text) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.unit_reads_as_ounce(text) TO service_role;
 
 CREATE FUNCTION public.guard_job_chemical_dry_fluid_ounce()
  RETURNS trigger
@@ -182,21 +196,23 @@ BEGIN
       v_name, COALESCE(NEW.rate_unit, ''), COALESCE(NEW.unit_size, ''), COALESCE(NEW.inventory_unit, '');
   END IF;
   IF TG_OP = 'UPDATE' AND lower(COALESCE(OLD.product_form::text, '')) IS DISTINCT FROM 'dry' THEN
-    -- Becoming dry: lines saved against the old form must not start reading fluid ounces as weight. A blend line
+    -- Becoming dry (only a product whose form was never set can: guard_product_setup_fields locks a saved form):
+    -- lines saved against the old form must not start reading fluid ounces as weight. Under a non-dry form a plain
+    -- 'oz' is a fluid ounce too (field_app_priced_quantity), so any unit that reads as an ounce counts. A blend line
     -- with no rate unit of its own was entered against the OLD product rate unit, so that is the one it names.
     PERFORM pg_advisory_xact_lock(160017, hashtext(NEW.id::text));
     IF EXISTS (SELECT 1 FROM public.job_chemicals jc
                 WHERE jc.product_id = NEW.id
-                  AND (public.unit_names_fluid_ounce(jc.unit) OR public.unit_names_fluid_ounce(jc.rate_unit)))
+                  AND (public.unit_reads_as_ounce(jc.unit) OR public.unit_reads_as_ounce(jc.rate_unit)))
        OR EXISTS (SELECT 1 FROM public.blend_ticket_products b
                    WHERE b.product_id = NEW.id
-                     AND (public.unit_names_fluid_ounce(b.unit)
-                          OR public.unit_names_fluid_ounce(COALESCE(NULLIF(btrim(b.rate_per_acre_unit), ''), OLD.rate_unit))))
+                     AND (public.unit_reads_as_ounce(b.unit)
+                          OR public.unit_reads_as_ounce(COALESCE(NULLIF(btrim(b.rate_per_acre_unit), ''), OLD.rate_unit))))
        OR EXISTS (SELECT 1 FROM public.quote_items qi
                    WHERE qi.product_id = NEW.id
-                     AND (public.unit_names_fluid_ounce(qi.rate_unit) OR public.unit_names_fluid_ounce(qi.price_unit))) THEN
+                     AND (public.unit_reads_as_ounce(qi.rate_unit) OR public.unit_reads_as_ounce(qi.price_unit))) THEN
       RAISE EXCEPTION
-        'CHEM_UNIT_FORM_MISMATCH: % cannot become a DRY product while bookings, jobs or blend tickets measure it in fluid ounces -- they would be billed and taken from stock as weight ounces. Set up a separate dry product instead.',
+        'CHEM_UNIT_FORM_MISMATCH: % cannot become a DRY product while bookings, jobs or blend tickets measure it in ounces (read as fluid ounces until now) -- they would be billed and taken from stock as weight ounces. Set up a separate dry product instead.',
         v_name;
     END IF;
   END IF;
@@ -268,6 +284,10 @@ BEGIN
       RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce flags "%"', v_unit;
     END IF;
   END LOOP;
+  IF NOT (public.unit_reads_as_ounce('oz') AND public.unit_reads_as_ounce('OZ/ac') AND public.unit_reads_as_ounce('fl. oz'))
+     OR public.unit_reads_as_ounce('dry oz') OR public.unit_reads_as_ounce('lb') OR public.unit_reads_as_ounce(NULL) THEN
+    RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_reads_as_ounce is not as reviewed';
+  END IF;
   IF public.unit_names_fluid_ounce(NULL) THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce flags NULL';
   END IF;
@@ -278,6 +298,8 @@ BEGIN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: guard triggers are missing or disabled';
   END IF;
   IF has_function_privilege('anon', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.unit_reads_as_ounce(text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.unit_reads_as_ounce(text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
      OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r(role),

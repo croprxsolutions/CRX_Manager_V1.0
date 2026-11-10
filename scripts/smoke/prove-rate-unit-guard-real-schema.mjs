@@ -759,23 +759,26 @@ async function dryFluidOunce() {
   // LIQ3 has a job line in fl oz (G1's liquid booking).
   const g4 = refusedWith('G4 liquid to dry under a fl oz job line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   assert.match(g4, /cannot become a DRY product/);
-  raw(`UPDATE public.job_chemicals SET unit = 'oz', rate_unit = 'oz/ac' WHERE product_id = '${LIQ3}';`);
+  raw(`UPDATE public.job_chemicals SET unit = 'lb', rate_unit = 'lb/ac' WHERE product_id = '${LIQ3}';`);
   // Still refused: booking 4 measures LIQ3 in fl oz.
   refusedWith('G4 liquid to dry under a fl oz booking line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   raw(`UPDATE public.quote_items SET price_unit = 'oz', rate_unit = 'oz/ac' WHERE product_id = '${LIQ3}';`);
+  // A plain oz on a product whose form was never set is a fluid ounce today (Luna round 3): still refused.
+  refusedWith('G4 unset to dry under a plain oz booking line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  raw(`UPDATE public.quote_items SET price_unit = 'lb', rate_unit = 'lb/ac' WHERE product_id = '${LIQ3}';`);
   const T_G4 = 'a16a1600-0000-4000-8000-00000000f204';
-  clean('G4 liquid fl oz blend line', ticketLines(T_G4, [["'fl oz/ac'", LIQ3, "'oz'"]]), { commit: true });
+  clean('G4 liquid fl oz blend line', ticketLines(T_G4, [["'fl oz/ac'", LIQ3, "'lb'"]]), { commit: true });
   raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_G4}';`);
   refusedWith('G4 liquid to dry under a soft-deleted ticket line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
-  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'oz/ac' WHERE blend_ticket_id = '${T_G4}';`);
+  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'lb/ac' WHERE blend_ticket_id = '${T_G4}';`);
   // A blank-rate blend line was entered against the product's OLD rate unit: fl oz, even if the flip also changes it.
   raw(`UPDATE public.products SET rate_unit = 'fl oz' WHERE id = '${LIQ3}';`);
   const T_G4B = 'a16a1600-0000-4000-8000-00000000f205';
-  clean('G4 blank-rate liquid line on a fl oz product', ticketLines(T_G4B, [['NULL', LIQ3, "'oz'"]]), { commit: true });
-  refusedWith('G4 liquid to dry and rate unit to oz in one edit, under a blank-rate line', `UPDATE public.products SET product_form = 'dry', rate_unit = 'oz' WHERE id = '${LIQ3}';`,
+  clean('G4 blank-rate liquid line on a fl oz product', ticketLines(T_G4B, [['NULL', LIQ3, "'lb'"]]), { commit: true });
+  refusedWith('G4 liquid to dry and rate unit to oz in one edit, under a blank-rate line', `UPDATE public.products SET product_form = 'dry', rate_unit = 'lb' WHERE id = '${LIQ3}';`,
     'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
-  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'oz/ac' WHERE blend_ticket_id = '${T_G4B}';
-    UPDATE public.products SET rate_unit = 'oz' WHERE id = '${LIQ3}';`);
+  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'lb/ac' WHERE blend_ticket_id = '${T_G4B}';
+    UPDATE public.products SET rate_unit = 'lb' WHERE id = '${LIQ3}';`);
   clean('G4 liquid to dry once no line names fl oz', toDry, { asOwner: true, commit: true });
   // The stock side of a dry product (an earlier unit trigger may refuse first; either way it is refused).
   const g4Size = refusedWith('G4 dry unit size to fl oz', `UPDATE public.products SET unit_size = 'fl oz' WHERE id = '${DRY}';`, 'ERROR', { asOwner: true });

@@ -298,8 +298,12 @@ export function validateBlendMath(
     if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
     const name = product.product_name || 'Unnamed product';
     const form = asProductForm(product.product_form) ?? 'liquid';
-    // An invisible-only line unit is stored blank by the database (20261231100000), so it falls back too.
     const lineRateUnit = foldInvisibleUnitChars(product.rate_per_acre_unit ?? '').trim();
+    // The database refuses an invisible-only line unit (20261231100000): billing would not fall back from it.
+    if (lineRateUnit === '' && (product.rate_per_acre_unit ?? '').replace(/^ +| +$/g, '') !== '') {
+      mismatch(`${name}: the rate unit contains only invisible characters, so this ticket cannot be saved. Clear the rate unit or re-type it.`);
+      continue;
+    }
     const rateUnit = rateBaseUnit(lineRateUnit !== '' ? lineRateUnit : product.product_rate_unit);
     const soldUnit = rateBaseUnit(product.product_inventory_unit);
     // Deliberately silent when either side is blank, though the SQL would refuse such

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  unitHasCharacterSaveJobRefuses,
   fmt4,
   exactDecimalSum,
   sumAcres,
@@ -1117,3 +1118,13 @@ describe('chemCalculator — chemUnitUnspecifiedSides (blank units mirror CHEM_U
   });
 });
 
+describe('unitHasCharacterSaveJobRefuses (mirror of save_job, KI-16)', () => {
+  it('passes plain units and the characters save_job folds, flags the ones it does not', () => {
+    for (const ok of ['oz', 'pt/ac', 'fl. oz', 'Gal', `o${String.fromCharCode(0x200b)}z`, `fl${String.fromCharCode(0x00a0)}oz`, '', null]) {
+      expect(unitHasCharacterSaveJobRefuses(ok)).toBe(false);
+    }
+    for (const bad of [`o${String.fromCharCode(0x00ad)}z/ac`, `fl${String.fromCharCode(0x2007)}oz`, `o${String.fromCharCode(0x2060)}z`, `oz${String.fromCharCode(0x2215)}cwt`, 'oz	ac']) {
+      expect(unitHasCharacterSaveJobRefuses(bad)).toBe(true);
+    }
+  });
+});

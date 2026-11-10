@@ -379,12 +379,10 @@ can make old splits refuse to save (LOW-MED).
   TypeScript mirrors now fold zero-width and non-breaking characters, so a pasted unit no longer blocks billing.
   (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.) Still open,
   LOW: "fl. oz" with a period is not in `normalize_rate_unit`'s list, so billing refuses it (fails closed).
-  Also open from the 2026-11-10 Luna review, each failing closed at billing or save, LOW-MED: (a) the blend guard
-  runs when a line is written, not when a product's default rate unit is later edited to a per-X unit, so an
-  existing ticket line with no unit of its own can become unbillable; (b) `save_job` itself does not fold invisible
-  characters, so "pt/a<zero-width>c" passes the screen and the new trigger but `save_job` refuses it (its own copy
-  of the rule needs re-emitting to match); (c) JavaScript trims tabs and SQL `btrim` does not, so "oz<tab>" looks
-  fine on screen and billing refuses it.
+  Also open from the 2026-11-10 reviews, each failing closed at save or billing, LOW: (b) `save_job`'s denominator
+  probe does not fold invisible characters, so "pt/a<zero-width>c" passes the screen and the new trigger but
+  `save_job` refuses it (its own copy of the rule needs re-emitting to match); (c) JavaScript trims tabs and SQL
+  `btrim` does not, so "oz<tab>" looks fine on the blend screen and billing refuses it.
 - A job chemical line's per-unit COST is still rounded to whole cents when it is converted from the product's
   stock unit to the rate's unit (`reconcileChemAutofillUnits`, and `save_job`'s cost fill in `20261019230000`):
   $5/GAL is 3.90625¢/oz, saved as 4¢, so 400 oz shows $16.00 of cost against $15.625 and the job's margin is off

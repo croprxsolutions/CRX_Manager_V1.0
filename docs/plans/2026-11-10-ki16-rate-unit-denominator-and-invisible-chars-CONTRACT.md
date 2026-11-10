@@ -69,8 +69,11 @@ Authority: unchanged. Triggers fire for every writer, including SECURITY DEFINER
   product), so a value another BEFORE trigger fills (`trg_guard_seed_each_job_chemical_units`, which sorts first) is
   judged, and an existing row whose judged values did not change is never re-judged by this guard. save_job's own
   validation of the lines it is sent is unchanged.
-- Blend lines: an invisible-only rate unit is stored as NULL, so billing falls back to the product's unit as it does
-  for a blank one.
+- Blend lines: a blank or spaces-only line unit is judged through the product's rate unit, as billing reads it; an
+  invisible-only line unit is refused (billing would not fall back from it) (Sol rounds 1-2).
+- Products: a rate unit edit that a blend line would refuse is refused while an unbilled blend ticket line with no unit
+  of its own relies on it (`trg_z_products_rate_unit_blend_guard`, Sol round 2).
+- Job lines on screen: `unitHasCharacterSaveJobRefuses` mirrors save_job's narrower character probe on priced lines.
 
 ## Existing rows
 

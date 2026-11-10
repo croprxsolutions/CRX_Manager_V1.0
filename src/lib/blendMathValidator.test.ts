@@ -16,6 +16,14 @@ describe('validateBlendMath', () => {
     expect(nbsp.some((w) => /only invisible characters/.test(w.message))).toBe(true);
   });
 
+  it('flags a line rate unit made only of invisible characters, which the database refuses (KI-16)', () => {
+    const warnings = validateBlendMath({ total_acres: null } as never, [
+      { product_name: 'Atrazine', quantity: 200, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: String.fromCharCode(0x200b, 0x00a0),
+        product_form: 'liquid', product_rate_unit: 'oz', product_inventory_unit: 'oz' },
+    ]);
+    expect(warnings.some((w) => /rate unit contains only invisible characters/.test(w.message))).toBe(true);
+  });
+
   it('keeps matching seed units but flags seed conversions before billing', () => {
     const ticket = { total_acres: 10, total_volume: null, total_volume_unit: null, application_rate: null };
     const seed = { product_name: 'Seed', quantity: 20, unit: 'Lb', rate_per_acre: 2,

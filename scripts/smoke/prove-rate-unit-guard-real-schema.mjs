@@ -381,10 +381,12 @@ async function main() {
   const p3b = refusedWith('P3 blank unit, per-cwt product', ticket('a16a1600-0000-4000-8000-00000000f007', [["NULL", CWT]]), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
   assert.match(p3b, /rate unit of "oz per cwt"/);
   const T_OK = 'a16a1600-0000-4000-8000-00000000f006';
-  clean('P3 blend per-acre spellings', ticket(T_OK, ["'pt/ac'", "'gal per acre'", "'oz'", "'fl. oz/acre'", `'pt/a' || ${ZWSP} || 'c'`, `${ZWSP} || chr(160)`]), { commit: true });
+  clean('P3 blend per-acre spellings', ticket(T_OK, ["'pt/ac'", "'gal per acre'", "'oz'", "'fl. oz/acre'", `'pt/a' || ${ZWSP} || 'c'`, 'NULL']), { commit: true });
   assert.equal(scalar(`SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = '${T_OK}';`), '6');
   assert.equal(scalar(`SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = '${T_OK}' AND rate_per_acre_unit IS NULL;`), '1',
-    'P3: an invisible-only unit was not stored blank');
+    'P3: the blank-unit line did not save');
+  // Sol round 2 HIGH: an invisible-only line unit is refused, not blanked (billing would not fall back).
+  refusedWith('P3 invisible-only unit', ticket('a16a1600-0000-4000-8000-00000000f008', [`${ZWSP} || chr(160)`]), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
   // 'fl. oz' (with the period) has never been in normalize_rate_unit's list, so billing refuses that one line
   // before and after this change; every other saved spelling passes the invoice's unit check.
   assert.equal(scalar(`SELECT string_agg(btp.rate_per_acre_unit, ',') FROM public.blend_ticket_products btp
@@ -401,6 +403,12 @@ async function main() {
     refusedWith(`P3 line unit ${blank} on a per-cwt product`, `UPDATE public.blend_ticket_products SET product_id = '${CWT}', rate_per_acre_unit = ${blank} WHERE blend_ticket_id = '${T_OK}' AND rate_per_acre_unit = 'oz';`,
       'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
   }
+  // Sol round 2 MED: a product's rate unit cannot become one a blank-unit unbilled line would refuse.
+  refusedWith('P9 product edit to oz/cwt under a blank-unit line', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQUID}';`,
+    'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
+  clean('P9 product edit to gal/ac', `UPDATE public.products SET rate_unit = 'gal/ac' WHERE id = '${LIQUID}';`, { asOwner: true });
+  clean('P9 per-cwt edit on a product no blank line uses', `UPDATE public.products SET rate_unit = 'oz/bu' WHERE id = '${CWT}';`, { asOwner: true });
+  console.log("[prover] P9: a product's rate unit edit is refused only while an unbilled blank-unit blend line relies on it");
   clean('P3 unrelated edit', `UPDATE public.blend_ticket_products SET quantity = quantity + 1 WHERE blend_ticket_id = '${T_OK}';`, { asOwner: true });
   console.log('[prover] P3: blend lines oz/cwt/ac, oz/cwt, a lookalike slash, and a blank unit on a per-cwt product are refused at save; per-acre spellings (one with a pasted zero-width space) save and pass the invoice check; edits to a per-cwt unit are refused');
 

@@ -23,8 +23,10 @@
 --     (so a value another BEFORE trigger sets is still judged) and compare OLD with NEW: a row whose judged
 --     values did not change is never re-judged. Job lines check characters only when priced, as save_job
 --     does. Blend lines check the unit billing will use: the line's own, or the product's rate unit when the
---     line's is blank (an invisible-only unit is stored as NULL so billing falls back the same way); they
+--     line's is blank (an invisible-only line unit is refused, since billing would not fall back); they
 --     check characters on product lines, which billing converts, not on free-text lines.
+--   * A BEFORE UPDATE trigger on products refuses a rate unit edit that such a line would refuse while an
+--     unbilled blend ticket line with no unit of its own relies on it.
 --
 -- LIVE EVIDENCE (read-only, 2026-11-10): normalize_rate_unit prosrc md5 3a0e2e8f1ed5611ae7ee343d40a7b3ad,
 --   owner postgres, IMMUTABLE, invoker, EXECUTE postgres/authenticated/service_role. No index, constraint or
@@ -37,7 +39,7 @@
 --   guard_seed_each_job_chemical_units),
 --   so such a unit now matches its plain spelling instead of matching nothing.
 --
--- ROLLBACK: drop the two triggers and four new functions; re-create the 20260630170000 normalize_rate_unit
+-- ROLLBACK: drop the three triggers and five new functions; re-create the 20260630170000 normalize_rate_unit
 --   body. No data changes.
 
 SET LOCAL lock_timeout = '5s';
@@ -50,7 +52,8 @@ BEGIN
     RAISE EXCEPTION 'KI16_RATE_UNIT_PREFLIGHT: normalize_rate_unit is not the reviewed 20260630170000 body; nothing was changed.';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger
-              WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard')) THEN
+              WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard',
+                               'trg_z_products_rate_unit_blend_guard')) THEN
     RAISE EXCEPTION 'KI16_RATE_UNIT_PREFLIGHT: a rate-unit guard trigger already exists; nothing was changed.';
   END IF;
 END;
@@ -193,13 +196,15 @@ DECLARE
   v_refusal text;
   v_unit    text;
 BEGIN
-  -- Billing reads NULLIF(btrim(rate_per_acre_unit), '') before folding, so an invisible-only unit would
-  -- skip the product fallback and fail to convert. Store it as blank (NULL) instead.
-  -- Only on a row whose unit is being written, so an unrelated edit never rewrites a stored value.
+  -- Billing reads NULLIF(btrim(rate_per_acre_unit), '') before folding, so an invisible-only unit skips the
+  -- product fallback, normalizes to nothing and can pass the unit check with no unit at all. Refuse it
+  -- (Sol round 2 HIGH) rather than blank it; only when that unit is being written.
   IF (TG_OP = 'INSERT' OR NEW.rate_per_acre_unit IS DISTINCT FROM OLD.rate_per_acre_unit)
      AND btrim(COALESCE(NEW.rate_per_acre_unit, '')) <> ''
      AND btrim(public.unit_fold_invisible(NEW.rate_per_acre_unit)) = '' THEN
-    NEW.rate_per_acre_unit := NULL;
+    RAISE EXCEPTION
+      'CHEM_UNIT_UNSUPPORTED_CHARACTER: % has a rate unit made only of invisible characters, usually from a copy-and-paste. Clear the rate unit or re-type it using plain letters.',
+      COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product');
   END IF;
   IF TG_OP = 'UPDATE'
      AND NEW.rate_per_acre_unit IS NOT DISTINCT FROM OLD.rate_per_acre_unit
@@ -234,6 +239,39 @@ CREATE TRIGGER trg_blend_ticket_products_rate_unit_guard
   BEFORE INSERT OR UPDATE ON public.blend_ticket_products
   FOR EACH ROW EXECUTE FUNCTION public.guard_blend_ticket_product_rate_unit();
 
+-- A blend line with no unit of its own bills at its product's rate unit, so editing that unit to one a line
+-- would be refused (Sol round 2 MED) is refused while an unbilled ticket line relies on it.
+CREATE FUNCTION public.guard_product_rate_unit_for_blend_lines()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_refusal text;
+BEGIN
+  IF NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit THEN RETURN NEW; END IF;
+  v_refusal := public.rate_unit_line_refusal(NEW.rate_unit, true);
+  IF v_refusal IS NULL THEN RETURN NEW; END IF;
+  IF EXISTS (SELECT 1 FROM public.blend_ticket_products b
+               JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
+              WHERE b.product_id = NEW.id
+                AND NULLIF(btrim(b.rate_per_acre_unit), '') IS NULL
+                AND t.payment_status NOT IN ('billed', 'no_charge')) THEN
+    RAISE EXCEPTION
+      '%: % has blend ticket lines not yet billed that use its rate unit, so it cannot become "%". Give those lines their own per-acre rate unit first.',
+      v_refusal, COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product'), btrim(NEW.rate_unit);
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.guard_product_rate_unit_for_blend_lines() FROM PUBLIC, anon, authenticated, service_role;
+
+-- 'z' so it fires after every other BEFORE trigger on products and judges the final value.
+CREATE TRIGGER trg_z_products_rate_unit_blend_guard
+  BEFORE UPDATE ON public.products
+  FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_unit_for_blend_lines();
+
 DO $postflight$
 BEGIN
   IF public.normalize_rate_unit('oz' || chr(8203)) IS DISTINCT FROM 'oz'
@@ -264,8 +302,9 @@ BEGIN
     RAISE EXCEPTION 'KI16_RATE_UNIT_POSTFLIGHT: rate_unit_line_refusal does not match the save_job rule';
   END IF;
   IF (SELECT count(*) FROM pg_trigger
-       WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard')
-         AND tgenabled = 'O') <> 2 THEN
+       WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard',
+                        'trg_z_products_rate_unit_blend_guard')
+         AND tgenabled = 'O') <> 3 THEN
     RAISE EXCEPTION 'KI16_RATE_UNIT_POSTFLIGHT: guard triggers are missing or disabled';
   END IF;
   IF has_function_privilege('anon', 'public.normalize_rate_unit(text)', 'EXECUTE')
@@ -273,6 +312,7 @@ BEGIN
      OR has_function_privilege('anon', 'public.rate_unit_line_refusal(text, boolean)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.guard_job_chemical_rate_unit()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.guard_blend_ticket_product_rate_unit()', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.guard_product_rate_unit_for_blend_lines()', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.normalize_rate_unit(text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.rate_unit_line_refusal(text, boolean)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.unit_fold_invisible(text)', 'EXECUTE') THEN

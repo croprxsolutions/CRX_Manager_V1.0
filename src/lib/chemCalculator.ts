@@ -761,6 +761,16 @@ export function rateDenominatorIsUnrecognized(rateUnit: string | null | undefine
   return stripped.includes('/') || /(?:^| )per(?: |$)/.test(stripped);
 }
 
+// save_job's own fold (20260904185900) is narrower than unit_fold_invisible: it does not clear U+00AD,
+// U+2007 or U+2060, so those still fail its character check on a priced line.
+const SAVE_JOB_AS_SPACE = new RegExp(`[${String.fromCharCode(0x00a0, 0x202f)}]`, 'g');
+const SAVE_JOB_DELETED = new RegExp([0x200b, 0x200c, 0x200d, 0xfeff].map((c) => String.fromCharCode(c)).join("|"), "g"); // alternation: a joiner inside [] trips no-misleading-character-class
+
+/** Mirror of save_job's CHEM_UNIT_UNSUPPORTED_CHARACTER probe, which it applies to priced lines only. */
+export function unitHasCharacterSaveJobRefuses(unit: string | null | undefined): boolean {
+  return /[^a-z0-9 ./-]/.test((unit ?? '').toLowerCase().replace(SAVE_JOB_AS_SPACE, ' ').replace(SAVE_JOB_DELETED, ''));
+}
+
 /** Which side(s) of a chemical line name no unit at all. See chemUnitUnspecifiedSides. */
 export interface ChemUnitBlankSides {
   /** The stock `unit` (what the per-unit cost/price is quoted per) names no unit. */

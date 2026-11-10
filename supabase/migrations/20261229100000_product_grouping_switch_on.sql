@@ -42,7 +42,7 @@ BEGIN
      OR to_regprocedure('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)') IS NULL THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: a grouping function this depends on is missing';
   END IF;
-  -- Opening the switch changes how these six behave; refuse unless their installed bodies are the reviewed ones
+  -- Opening the switch changes how these six behave (and the seventh, the admin read the screen uses, reports it); refuse unless their installed bodies are the reviewed ones
   -- (read from live 2026-11-09).
   IF EXISTS (
     SELECT 1 FROM (VALUES
@@ -51,7 +51,8 @@ BEGIN
       ('public._move_group_brands(uuid,uuid[],jsonb,boolean,text)', 'd16a8c2861ecebe7d0463e77e8c17181'),
       ('public.upsert_parent_brand(uuid,uuid,text,text,text,boolean,boolean,text,uuid,integer,boolean,text,text)', 'f18b13871f36097d515c8c6860ab48b1'),
       ('public.upsert_product_brand(uuid,text,text,text,boolean,boolean,text,uuid,integer,text)', '7cf9cf1ebf7e77f3cedba8ed7456b2bd'),
-      ('public.get_product_brands(uuid)', '81e64a4d2ccd638670407581310c57cb')
+      ('public.get_product_brands(uuid)', '81e64a4d2ccd638670407581310c57cb'),
+      ('public.get_product_grouping_open()', '7d6e9e54525fad6e0849c9cece7a9cfb')
     ) AS pin(fn, h)
     WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(pin.fn)) IS DISTINCT FROM pin.h
   ) THEN

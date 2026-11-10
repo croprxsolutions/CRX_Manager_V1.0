@@ -1,4 +1,4 @@
-import { groupUseTimingOptionsByCrop, replacementFor, visibleProductUseTimingOptions } from '../../lib/productUseTimings';
+import { groupUseTimingOptionsByCrop, replacementFor, samePair, visibleProductUseTimingOptions } from '../../lib/productUseTimings';
 import type { CropOption, UseTimingOption } from '../../types';
 
 /**
@@ -16,6 +16,11 @@ export default function UseTimingPicker({ options, crops, category, selected, he
 }) {
   const visible = visibleProductUseTimingOptions(options, category, selected, held ?? []);
   const groups = groupUseTimingOptionsByCrop(visible, crops);
+  // One code per crop + timing: ticking a choice unticks any other with the same pair (the database refuses both).
+  const tick = (option: UseTimingOption) => [...selected.filter((code) => {
+    const held = options.find((item) => item.code === code);
+    return !held || !samePair(held, option);
+  }), option.code];
   return (
     <div className="space-y-2">
       {groups.map((group) => (
@@ -30,7 +35,7 @@ export default function UseTimingPicker({ options, crops, category, selected, he
                   <input
                     type="checkbox"
                     checked={checked}
-                    onChange={(event) => onChange(event.target.checked ? [...selected, option.code] : selected.filter((code) => code !== option.code))}
+                    onChange={(event) => onChange(event.target.checked ? tick(option) : selected.filter((code) => code !== option.code))}
                     disabled={disabled}
                     className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
                   />

@@ -34,6 +34,14 @@ describe('UseTimingPicker', () => {
     expect(onChange).toHaveBeenCalledWith(['burndown_preplant', 'post_emerge_wheat']);
   });
 
+  it('ticking a choice unticks another with the same crop and timing', () => {
+    const onChange = vi.fn();
+    render(<UseTimingPicker options={[burndown, oldWheat, newWheat]} crops={crops} category="Herbicide"
+      selected={['burndown_preplant', 'post_emerge_wheat']} held={['post_emerge_wheet']} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('Post-Emerge Wheet (retired)'));
+    expect(onChange).toHaveBeenCalledWith(['burndown_preplant', 'post_emerge_wheet']);
+  });
+
   it('hides a turned-off choice nobody holds', () => {
     render(<UseTimingPicker options={[oldWheat, newWheat]} crops={crops} category="Herbicide" selected={[]} held={[]} onChange={vi.fn()} />);
     expect(screen.queryByText(/Wheet/)).toBeNull();

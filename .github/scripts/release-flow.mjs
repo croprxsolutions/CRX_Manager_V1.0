@@ -7,12 +7,26 @@ export function isReleaseOrHotfixHead(ref) {
   return typeof ref === 'string' && /^(release\/next|hotfix\/[^/]+)$/.test(ref);
 }
 
+// release/next may carry only staging's commits and the bot's own "chore(release): vX.Y.Z" commits.
+// lines = `git log --no-merges --format=%an%x09%s origin/main..HEAD --not origin/staging`.
+export function foreignReleaseCommits(lines) {
+  return lines.filter((l) => !/^crx-release-bot\[bot\]\tchore\(release\): v\d+\.\d+\.\d+\S*$/.test(l));
+}
+
 // Every enforcing check stays inert until the repository variable RELEASE_FLOW is "on".
 export function flowEnabled(env) {
   return env.RELEASE_FLOW === 'on';
 }
 
 const commands = {
+  // usage (stdin = the git log lines above): release-flow.mjs check-release-commits
+  async 'check-release-commits'() {
+    const { readFileSync } = await import('node:fs');
+    const bad = foreignReleaseCommits(readFileSync(0, 'utf8').split('\n').filter(Boolean));
+    if (!bad.length) return 0;
+    console.log(`::error::release/next carries commits that are neither on staging nor the release bot's version commit: ${bad.join(' | ').slice(0, 900)}`);
+    return 1;
+  },
   // usage: release-flow.mjs check-head <head ref>
   'check-head'([ref]) {
     if (isReleaseOrHotfixHead(ref)) return 0;

@@ -59,6 +59,11 @@ jobs:
             echo "::error::This branch is missing commits that are on main. Merge main into it (merge commit), then push."
             exit 1
           fi
+          if [ "$HEAD_REF" = "release/next" ]; then
+            # Everything it brings must already be on staging, apart from the bot's version commit.
+            git log --no-merges --format='%an%x09%s' "origin/main..$HEAD_SHA" --not origin/staging \
+              | node "$RUNNER_TEMP/release-flow.mjs" check-release-commits
+          fi
 
   main-inside-staging:
     # Never make this a required check: it is skipped on PRs, and a skipped required job counts as passed.

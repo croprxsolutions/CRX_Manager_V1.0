@@ -1058,7 +1058,10 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   with the product unit and its return is refused. Not backfilled (Mason's call): 2 open drafts have a line with
   no unit (2026-11-10): **CS-2026-0056** and **CS-2026-0070**, one customer, a `Gal` product. Once applied, posting
   either is refused until it is saved (it then takes `Gal`); a return on them stays refused, because their order
-  lines also have no unit (5 such order lines, all on fulfilled orders). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
+  lines also have no unit (5 such order lines, all on fulfilled orders). Also open (PR #1731 follow-ups): a line
+  inserted at the same instant as a post, or an order line edited between the order-invoice check and its copy,
+  races the check like every post-time check (LOW); the screen message drops the line names the database gives
+  (LOW); one unposted field-application invoice has a product line with no unit (not checked by design). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
   concurrent split-invoice void can leave a requested return unreceivable; credits apply manually; multi-price
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the

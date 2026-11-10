@@ -383,6 +383,12 @@ can make old splits refuse to save (LOW-MED).
   probe does not fold invisible characters, so "pt/a<zero-width>c" passes the screen and the new trigger but
   `save_job` refuses it (its own copy of the rule needs re-emitting to match); (c) JavaScript trims tabs and SQL
   `btrim` does not, so "oz<tab>" looks fine on the blend screen and billing refuses it.
+  Accepted (Mason, 2026-11-10, Sol round 5 HIGH): the product rate-unit guard skips billed tickets, so if a ticket
+  with a blank line unit is billed, its product's unit then changes to a per-X unit, and the invoice is voided,
+  re-billing is refused until someone types the line's unit (may need the order unlinked first). Also LOW: the guard
+  counts soft-deleted tickets, so one can block a product unit edit; the blend screen's invisible-only unit warning
+  skips a zero-rate line (the database still refuses the save); the rate-unit prover checks the invoice unit query,
+  not a full invoice created by the RPC.
 - A job chemical line's per-unit COST is still rounded to whole cents when it is converted from the product's
   stock unit to the rate's unit (`reconcileChemAutofillUnits`, and `save_job`'s cost fill in `20261019230000`):
   $5/GAL is 3.90625¢/oz, saved as 4¢, so 400 oz shows $16.00 of cost against $15.625 and the job's margin is off

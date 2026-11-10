@@ -1,6 +1,7 @@
 // Staging-first release flow: every decision the workflows make lives here as a plain function,
 // tested in release-flow.test.mjs. The workflows only call the CLI at the bottom.
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 // Only the bot's release branch and hotfix branches may open a PR into main.
@@ -75,6 +76,141 @@ export function labelProblem({ label, merged, baseRef, headRef, texts }) {
   return null;
 }
 
+// The PR a staging commit came from: GitHub's own commit-to-PR link, accepted only when that PR
+// was merged into staging as exactly this commit. A title ending "(#N)" proves nothing.
+export function pickPr(sha, pulls) {
+  return pulls.find((p) => p.merge_commit_sha === sha && p.base?.ref === 'staging' && p.merged_at) ?? null;
+}
+
+const SEMVER = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+// Next tag: a release bumps MINOR, a hotfix bumps PATCH. v1.0.0 (go-live) is typed by hand.
+export function nextVersion(tags, kind) {
+  const latest = tags
+    .map((t) => SEMVER.exec(t))
+    .filter(Boolean)
+    .map((m) => m.slice(1).map(Number))
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2])
+    .at(-1) ?? [0, 0, 0];
+  const [maj, min, pat] = latest;
+  return kind === 'hotfix' ? `v${maj}.${min}.${pat + 1}` : `v${maj}.${min + 1}.0`;
+}
+
+// The releaser can change the version by editing the PR title to "release: vX.Y.Z".
+export function versionFromTitle(title) {
+  const m = /^release:\s*v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\s*$/i.exec(title ?? '');
+  return m ? `v${m[1]}` : null;
+}
+
+// The releaser's version wins only if it is newer than everything shipped (tags + main's package.json).
+export function releaseVersion(title, shipped) {
+  const auto = nextVersion(shipped, 'release');
+  const typed = versionFromTitle(title);
+  if (!typed) return auto;
+  const floor = nextVersion(shipped, 'hotfix'); // one patch past the newest shipped version
+  const n = (v) => SEMVER.exec(v).slice(1).map(Number);
+  const [a, b] = [n(typed), n(floor)];
+  const cmp = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  return cmp >= 0 ? typed : auto;
+}
+
+const CHORE_TYPES = new Set(['refactor', 'chore', 'docs', 'ci', 'build', 'test', 'perf', 'style']);
+
+export function groupChangelog(prs) {
+  const g = { features: [], fixes: [], chores: [], other: [] };
+  for (const pr of prs) {
+    const m = /^(\w+)(?:\([^)]*\))?!?:\s*(.+)$/.exec(pr.title);
+    const type = m?.[1].toLowerCase();
+    const entry = { number: pr.number, text: m ? m[2] : pr.title };
+    if (type === 'feat') g.features.push(entry);
+    else if (type === 'fix') g.fixes.push(entry);
+    else if (CHORE_TYPES.has(type)) g.chores.push(entry);
+    else g.other.push(entry);
+  }
+  return g;
+}
+
+export function changelogMarkdown(g) {
+  const sections = [
+    ['✨ New Features', g.features],
+    ['🐛 Bug Fixes', g.fixes],
+    ['🧹 Refactors & Chore', g.chores],
+    ['🧩 Other', g.other],
+  ].filter(([, items]) => items.length);
+  if (!sections.length) return '_Nothing yet._';
+  return sections.map(([h, items]) => `#### ${h}\n${items.map((e) => `* ${e.text} (#${e.number})`).join('\n')}`).join('\n\n');
+}
+
+const NOTHING = /^(none|nothing|n\/a|-)\.?$/i;
+
+// What a PR says users will notice: a "What users see: …" line, or a "## What users see" list.
+// "None" means nothing; the template's "<…>" placeholder counts as not filled in.
+export function usersSee(body) {
+  const text = body ?? '';
+  const line = /^[ \t]*what users see:[ \t]*(.*)$/im.exec(text);
+  const said = line?.[1].trim() ?? '';
+  if (NOTHING.test(said)) return [];
+  if (said && !said.startsWith('<')) return [said];
+  const section = /^[ ]{0,3}#+\s*what users see\s*$/im.exec(text);
+  if (!section) return [];
+  const out = [];
+  for (const l of text.slice(section.index + section[0].length).split('\n')) {
+    if (/^[ ]{0,3}#/.test(l)) break;
+    const item = l.replace(/^\s*[-*]\s*/, '').trim();
+    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(item);
+  }
+  return out;
+}
+
+// A PR's release state, read fresh each run: held-off needs its reason (and wins over verified),
+// verified needs its proof link still present.
+export function prState(p) {
+  const texts = [p.body, ...(p.comments ?? [])];
+  if (p.labels.includes('held-off')) return heldOffNote(texts) ? 'held' : 'missing';
+  if (p.labels.includes('verified-on-staging')) return proofLink(texts) ? 'verified' : 'missing';
+  return 'unverified';
+}
+
+// The release can merge only when every included PR is verified (with proof) or held off (with a
+// reason). Deleting the evidence after labelling turns the gate red again at the next refresh.
+export function gateState(prs, orphans) {
+  const blocking = [];
+  for (const p of prs) {
+    const state = prState(p);
+    if (state === 'missing') blocking.push(`#${p.number} (label without its proof or reason)`);
+    else if (state === 'unverified') blocking.push(`#${p.number}`);
+  }
+  blocking.push(...orphans.map((x) => `commit without a PR: ${x}`));
+  return { ok: blocking.length === 0 && prs.length + orphans.length > 0, blocking };
+}
+
+// The app's "What's new" source. JSON.stringify makes every PR-supplied string a safe literal.
+export function releaseNotesModule(notes) {
+  return `// Written by the release bot (.github/scripts/release-flow.mjs) for each release. Don't edit by hand.
+export interface ReleaseNotes {
+  version: string;
+  date: string;
+  items: string[];
+}
+
+export const releaseNotes: ReleaseNotes = ${JSON.stringify(notes, null, 2)};
+`;
+}
+
+const INLINE_BLOCKS = new Set(['version', 'date']);
+
+// Fill the <!-- bot:NAME --> … <!-- /bot:NAME --> blocks; everything else (ticked boxes,
+// deployment notes) is kept from the current PR body.
+export function renderReleaseBody(template, data, previousBody) {
+  return (previousBody || template).replace(/<!-- bot:(\w+) -->[\s\S]*?<!-- \/bot:\1 -->/g, (block, key) => {
+    if (!(key in data)) return block;
+    // PR text can't close or open a bot block.
+    const clean = String(data[key]).replace(/<!--|-->/g, '');
+    const value = INLINE_BLOCKS.has(key) ? clean : `\n${clean}\n`;
+    return `<!-- bot:${key} -->${value}<!-- /bot:${key} -->`;
+  });
+}
+
 // Minimal GitHub REST helper (GITHUB_TOKEN, GITHUB_REPOSITORY from the Actions environment).
 async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE', allow422 = false } = {}) {
   const res = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${path}`, {
@@ -110,19 +246,70 @@ async function allPages(path) {
   }
 }
 
+const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
 // Conversation comments, review summaries and inline review comments written by people.
 async function humanComments(number) {
   const all = [
     ...(await allPages(`/issues/${number}/comments`)),
-    ...(await allPages(`/pulls/${number}/reviews`)),
+    ...(await allPages(`/pulls/${number}/reviews`)).filter((r) => r.state !== 'DISMISSED'),
     ...(await allPages(`/pulls/${number}/comments`)),
   ];
-  return all.filter((c) => c.user?.type !== 'Bot' && c.body).map((c) => c.body);
+  // On a public repo anyone can comment: only people with access to the repository count.
+  return all.filter((c) => TRUSTED.has(c.author_association) && c.user?.type !== 'Bot' && c.body).map((c) => c.body);
 }
 
 async function readEvent() {
   const { readFile } = await import('node:fs/promises');
   return JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'));
+}
+
+function git(...args) {
+  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 26 }).trim();
+}
+
+function isAncestor(a, b) {
+  try {
+    git('merge-base', '--is-ancestor', a, b);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Today's date where Taha works (the release opens Thursday 08:00 Dubai).
+function dubaiDate(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(now);
+}
+
+// The first real paragraph of a PR description: no headings, comments or badges, one line.
+export function firstParagraph(body, max = 200) {
+  for (const para of (body ?? '').replace(/<!--[\s\S]*?-->/g, '').split(/\n\s*\n/)) {
+    const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l) && !/^\s*(what users see|staging proof|held off):/i.test(l)).join(' ').replace(/\s+/g, ' ').trim();
+    if (text) return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+  }
+  return '';
+}
+
+function summaryMarkdown(prs, gate) {
+  const verified = prs.filter((p) => prState(p) === 'verified').length;
+  const held = prs.filter((p) => prState(p) === 'held').length;
+  const lines = [`${prs.length} PR(s) since the last release: ${verified} verified on staging, ${held} held off.`];
+  lines.push(gate.ok ? 'Release gate: ✅ ready.' : `Release gate: ❌ waiting on ${gate.blocking.join(', ')}.`);
+  for (const p of prs) {
+    const first = firstParagraph(p.body);
+    if (first) lines.push(`* #${p.number}: ${first}`);
+  }
+  return lines.join('\n');
+}
+
+function statusMarkdown(prs, orphans) {
+  const row = (p) => {
+    const state = { verified: '✅ verified', held: '⏸️ held off', missing: '❌ label without proof or reason', unverified: '❌ not verified' }[prState(p)];
+    const proof = proofLink([p.body, ...(p.comments ?? [])]);
+    return `| #${p.number} | ${p.title.replace(/\|/g, '\\|')} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
+  };
+  return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${s.replace(/\|/g, '\\|')} | ❌ commit without a PR | |`)].join('\n');
 }
 
 const commands = {
@@ -132,6 +319,118 @@ const commands = {
     if (!extra.length) return 0;
     console.log(`::error::release/next differs from staging + main outside the bot's files (${extra.slice(0, 20).join(', ')}). If staging just moved, the bot refreshes release/next on that push.`);
     return 1;
+  },
+  // Collects what staging has that main lacks; writes $RUNNER_TEMP/release.json for the next steps.
+  async 'release-plan'() {
+    // Merge commits count too (a PR merged with a merge commit); only back-merges and catch-ups,
+    // whose second parent is already on main, are skipped.
+    const lines = git('log', '--first-parent', '--format=%H%x09%P%x09%s', 'origin/main..origin/staging').split('\n').filter(Boolean);
+    const prs = [];
+    const orphans = [];
+    for (const line of lines) {
+      const [sha, parents, subject] = line.split('\t');
+      const second = parents.split(' ')[1];
+      if (second && isAncestor(second, 'origin/main')) continue;
+      const p = pickPr(sha, await gh(`/commits/${sha}/pulls`));
+      if (!p) orphans.push(subject);
+      else if (!prs.some((x) => x.number === p.number)) {
+        prs.push({ number: p.number, title: p.title, body: p.body ?? '', labels: p.labels.map((l) => l.name), comments: await humanComments(p.number) });
+      }
+    }
+    const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
+    const [existing] = await gh(`/pulls?state=open&base=main&head=${owner}:release/next`);
+    // Tags plus main's package.json, so a forgotten tag never reuses a shipped version.
+    const tags = [...git('tag', '--list', 'v*').split('\n').filter(Boolean), `v${JSON.parse(git('show', 'origin/main:package.json')).version}`];
+    const version = releaseVersion(existing?.title, tags);
+    // Until this run posts the new result, the open release PR's gate is "pending", so a run that
+    // fails half-way can't leave an old green gate behind.
+    if (existing && prs.length + orphans.length > 0) {
+      await gh(`/statuses/${existing.head.sha}`, { method: 'POST', body: { state: 'pending', context: 'release-gate', description: 'Release PR is being refreshed' } });
+    }
+    const migrations = git('diff', '--name-only', '--diff-filter=AM', 'origin/main...origin/staging', '--', 'supabase/migrations')
+      .split('\n').filter(Boolean).map((f) => f.split('/').pop());
+    const gate = gateState(prs, orphans);
+    const plan = { version, date: dubaiDate(), prs, orphans, gate, migrations, existing: existing ? { number: existing.number, body: existing.body } : null };
+    writeFileSync(`${process.env.RUNNER_TEMP}/release.json`, JSON.stringify(plan));
+    appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\nhas_work=${prs.length + orphans.length > 0 ? 1 : ''}\npr_exists=${existing ? 1 : ''}\n`);
+    console.log(`${version}: ${prs.length} PRs, ${orphans.length} orphan commits, gate ${gate.ok ? 'green' : 'red'}`);
+    return 0;
+  },
+  // On the release/next checkout: version in package.json (+ lock), CHANGELOG.md, src/releaseNotes.ts.
+  async 'release-files'() {
+    const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/release.json`, 'utf8'));
+    const bare = plan.version.slice(1);
+    for (const f of ['package.json', 'package-lock.json']) {
+      const j = JSON.parse(readFileSync(f, 'utf8'));
+      j.version = bare;
+      if (j.packages?.['']) j.packages[''].version = bare;
+      writeFileSync(f, `${JSON.stringify(j, null, 2)}\n`);
+    }
+    const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
+    const section = `## ${plan.version} (${plan.date})\n\n${changelogMarkdown(groupChangelog(shipping))}\n`;
+    const old = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf8') : '# Changelog\n\nReleases of CRX Manager, newest first.\n';
+    const without = old.replace(new RegExp(`## ${plan.version.replace(/\./g, '\\.')} \\([^)]*\\)\\n[\\s\\S]*?(?=\\n## v|$)`), '').trimEnd();
+    const [head, ...rest] = without.split(/\n(?=## v)/);
+    writeFileSync('CHANGELOG.md', `${[head.trimEnd(), section.trimEnd(), ...rest.map((r) => r.trimEnd())].join('\n\n')}\n`);
+    writeFileSync('src/releaseNotes.ts', releaseNotesModule({ version: bare, date: plan.date, items: shipping.flatMap((p) => usersSee(p.body)) }));
+    return 0;
+  },
+  // Opens or updates the release PR and posts the release-gate status on its head.
+  async 'release-pr'() {
+    const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/release.json`, 'utf8'));
+    const template = readFileSync(`${process.env.RUNNER_TEMP}/release-pr-template.md`, 'utf8');
+    const shipping = plan.prs.filter((p) => !p.labels.includes('held-off'));
+    const body = renderReleaseBody(template, {
+      version: plan.version,
+      date: plan.date,
+      summary: summaryMarkdown(plan.prs, plan.gate),
+      changelog: changelogMarkdown(groupChangelog(shipping)),
+      status: statusMarkdown(plan.prs, plan.orphans),
+      users: shipping.flatMap((p) => usersSee(p.body)).map((s) => `* ${s}`).join('\n') || '_Nothing user-facing._',
+      migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
+    }, plan.existing?.body);
+    const title = `release: ${plan.version}`;
+    if (process.env.DRY_RUN) {
+      console.log(`DRY RUN: would ${plan.existing ? `update #${plan.existing.number}` : 'open'} "${title}", release-gate ${plan.gate.ok ? 'success' : 'failure'}\n\n${body}`);
+      return 0;
+    }
+    const pr = plan.existing
+      ? await gh(`/pulls/${plan.existing.number}`, { method: 'PATCH', body: { title, body } })
+      : await gh('/pulls', { method: 'POST', body: { title, body, head: 'release/next', base: 'main' } });
+    // The commit this run built and pushed; anything pushed after it has no green status.
+    const sha = process.env.RELEASE_SHA;
+    if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error('RELEASE_SHA is not set');
+    await gh(`/statuses/${sha}`, {
+      method: 'POST',
+      body: {
+        state: plan.gate.ok ? 'success' : 'failure',
+        context: 'release-gate',
+        description: (plan.gate.ok ? 'Every PR is verified on staging or held off' : `Waiting on ${plan.gate.blocking.join(', ')}`).slice(0, 140),
+        target_url: pr.html_url,
+      },
+    });
+    console.log(`${pr.html_url} (${plan.version}), release-gate ${plan.gate.ok ? 'success' : 'failure'}`);
+    return 0;
+  },
+  // A hotfix PR into main gets release-gate from the release bot (dispatched by the guard), after
+  // the same checks the guard makes: this repository, hotfix/<name>, contains main, no staging work.
+  async 'hotfix-gate'() {
+    const pr = await gh(`/pulls/${Number(process.env.HOTFIX_PR)}`);
+    const sha = pr.head.sha;
+    let problem = null;
+    if (pr.state !== 'open' || pr.base.ref !== 'main') problem = 'not an open PR into main';
+    else if (pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || !/^hotfix\/[^/]+$/.test(pr.head.ref)) problem = 'not a hotfix/<name> branch of this repository';
+    else {
+      git('fetch', '--no-tags', 'origin', sha);
+      if (!isAncestor('origin/main', sha)) problem = 'missing commits from main';
+      else if (!isAncestor(git('merge-base', sha, 'origin/staging'), 'origin/main')) problem = 'carries staging work that has not been released';
+    }
+    await gh(`/statuses/${sha}`, {
+      method: 'POST',
+      body: { state: problem ? 'failure' : 'success', context: 'release-gate', description: problem ? `Hotfix refused: ${problem}` : 'Hotfix: no weekly release gate', target_url: pr.html_url },
+    });
+    console.log(`#${pr.number} hotfix gate: ${problem ?? 'ok'}`);
+    return 0;
   },
   // pull_request closed into staging: label the merged work on-staging (not the back-merge PR).
   async 'mark-on-staging'() {

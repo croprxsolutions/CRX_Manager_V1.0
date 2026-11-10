@@ -1,6 +1,6 @@
 ## 2026-11-09 — RT-2 step 1: one spelling per unit on 20 products (data migration)
 
-- New data-only migration `20261231150000_unit_spellings_remap.sql` (record in `docs/reference/migrations.d/`),
+- New data-only migration `20261231230000_unit_spellings_remap.sql` (record in `docs/reference/migrations.d/`),
   per the RT-2 build sheet (`docs/plans/2026-11-09-product-RT2-BUILD-SHEET.md`, section 4) and Mason's answers
   of 2026-11-09.
 - Moves 11 products' stock unit from `Oz` to `oz`, 8 from `Qt` to `qt`, and Imazuron Herbicide's rate unit from
@@ -22,8 +22,8 @@
   (`20261229170000`) is parked (Mason: "Park it, REG-1 first"): its live apply refused safely and changed nothing,
   because 18 of its 20 products joined new product families that night. It will be redone for families after
   REG-1 lands, under a new migration number.
-- **2026-11-10, redone for product families:** the spelling move is now `20261231150000` (the parked `20261229170000`
+- **2026-11-10, redone for product families:** the spelling move is now `20261231230000` (the parked `20261229170000`
   was renamed; it never ran). 18 of the 20 products are each the only size of a product family; the families keep
   their `oz` rate unit, except the Imazuron Herbicide family, which moves from `LB` to `Lb` together with its product.
   The migration checks every family is exactly as read live on 2026-11-10, or changes nothing.
-- **2026-11-10, renumbered to `20261231150000`:** the KI-16 unit guard (`20261231100000`) went live first, so the spelling move now runs after it. Nothing else changed.
+- **2026-11-10, renumbered to `20261231230000`:** the KI-16 unit guard (`20261231100000`) went live first, so the spelling move now runs after it. Nothing else changed.

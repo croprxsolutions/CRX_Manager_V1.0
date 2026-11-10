@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261231150000_unit_spellings_remap (RT-2 step 1, data only).
+ * Real-schema proof for 20261231230000_unit_spellings_remap (RT-2 step 1, data only).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's 14 unit_conversions rows, the 20
@@ -42,7 +42,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261231150000_unit_spellings_remap.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261231230000_unit_spellings_remap.sql');
 const FOLLOW_UPS = []; // the check-only follow-up was dropped (Mason, 2026-11-09)
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();

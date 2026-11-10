@@ -44,6 +44,19 @@ describe('suggestBrandNamesFromProductName', () => {
   it('suggests nothing for a name without parentheses', () => {
     expect(suggestBrandNamesFromProductName('Callisto - 1 Gal')).toEqual([]);
   });
+
+  it('suggests no notes and does not split a ratio on its slash', () => {
+    expect(suggestBrandNamesFromProductName('Gen Mix (50/50) (Alpha, retired, 25%) - 2.5 Gal')).toEqual(['Alpha']);
+  });
+
+  it('suggests the brands of a cut-off name without the size it swallowed', () => {
+    expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, 2.5G')).toEqual(['Alpha', 'Bravo']);
+  });
+
+  it('never suggests a brand the name may have cut off', () => {
+    expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, Cha')).toEqual(['Alpha', 'Bravo']);
+    expect(suggestBrandNamesFromProductName('Gen Cut: (Alpha, Bravo, Alpha')).toEqual(['Alpha', 'Bravo']);
+  });
 });
 
 describe('EPA_REGISTRATION_PATTERN', () => {

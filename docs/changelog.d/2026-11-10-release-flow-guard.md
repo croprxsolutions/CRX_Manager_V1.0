@@ -32,3 +32,5 @@ Nothing is enforced until the repository variable `RELEASE_FLOW` is set to `on`,
 together with the branch rulesets once Mason agrees. Until then each check passes with a notice.
 Actions are pinned to commit SHAs, each job has only the permissions it needs, and there is no
 `pull_request_target`.
+
+**Doc stamps (evidence):** `docs/manual/CURRENT_STATE.md` and `KNOWN_ISSUES.md` move to "Last verified 2026-11-10, for the live ledger only". Read-only `list_migrations` on live (2026-11-10, Taha's OK): 1,186 ledger rows, newest `20261110061547` (`20261229160000_convert_to_gl_lb_dry_oz`). The five files dated 20261110 that made the stamps due were all applied live on 2026-11-05 (rows `20261105203216`, `…205727`, `…213209`, `…224006`, `…225320`). Nothing else was re-checked; KI-30 keeps its 2026-11-09 date.

@@ -1051,9 +1051,10 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): changes when `20261230100000` applies. A new order line with no unit takes the product's
   unit; a sale line with no unit takes the order line's unit, else the product's; a delivery always completes, and
-  posting is refused (`INVOICE_LINE_UNIT_MISSING`) while a sale line still has no unit; `create_invoice_from_order`
+  posting a chemical-sale invoice is refused (`INVOICE_LINE_UNIT_MISSING`) while any product line, with or without an
+  order line, still has no unit (Mason, 2026-11-10: no sale line posts without a unit); `create_invoice_from_order`
   refuses a no-unit line (`ORDER_LINE_UNIT_MISSING`). Not backfilled (Mason's call): 2 open drafts have a line with
-  no unit (2026-11-10): **CS-2026-0056** and **CS-2026-0070**, both Zannis SC, a `Gal` product. Once applied, posting
+  no unit (2026-11-10): **CS-2026-0056** and **CS-2026-0070**, one customer, a `Gal` product. Once applied, posting
   either is refused until it is saved (it then takes `Gal`); a return on them stays refused, because their order
   lines also have no unit (5 such order lines, all on fulfilled orders). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
   concurrent split-invoice void can leave a requested return unreceivable; credits apply manually; multi-price

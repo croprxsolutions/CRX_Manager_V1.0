@@ -204,12 +204,13 @@ BEGIN
 END;
 $function$;
 
--- A sale line tied to an order line, written with no unit, takes the order line's unit (the unit its returns
--- are matched on), else the order line's product unit. The product fallback bills the right unit, but a
--- return on that line still reads the blank order line and stays refused, as it is today; an order line
--- cannot be edited once delivered, so this is the fix staff can reach (set the product unit, save the draft).
--- Return-credit lines are left alone: their unit must equal the line they credit.
--- Runs before every other BEFORE trigger on invoice_items (a0_ sorts first), so their checks see the final unit.
+-- A sale line (a product line) written with no unit takes its order line's unit (the unit its returns are
+-- matched on), else the product's: the order line's product, or the line's own when it has no order line.
+-- The product fallback bills the right unit, but a return on a line whose order line is blank still reads
+-- that order line and stays refused, as it is today; an order line cannot be edited once delivered, so this
+-- is the fix staff can reach (set the product unit, save the draft). Return-credit lines are left alone:
+-- their unit must equal the line they credit. Runs before every other BEFORE trigger on invoice_items
+-- (a0_ sorts first), so their checks see the final unit.
 CREATE FUNCTION public._fill_invoice_line_unit()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -217,24 +218,27 @@ CREATE FUNCTION public._fill_invoice_line_unit()
  SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' AND NEW.order_item_id IS NOT NULL
+  IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' AND (NEW.order_item_id IS NOT NULL OR NEW.product_id IS NOT NULL)
      AND NEW.return_credit_source_item_id IS NULL AND COALESCE(NEW.quantity, 0) >= 0
-     -- A line whose unit already equals its order line's (e.g. both empty text) is credited today: leave it.
-     AND NOT EXISTS (SELECT 1 FROM public.order_items oi WHERE oi.id = NEW.order_item_id AND oi.unit_size = NEW.unit_size) THEN
+     -- A line with no order line is filled only on a chemical sale (field-application lines bill differently).
+     AND (NEW.order_item_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = NEW.invoice_id AND i.invoice_type = 'chemical_sale')) THEN
     NEW.unit_size := COALESCE(
-      (SELECT COALESCE(CASE WHEN COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') <> '' THEN oi.unit_size END,
-                       CASE WHEN COALESCE(btrim(p.unit_size, E' \t\r\n' || chr(160)), '') <> '' THEN p.unit_size END)
-         FROM public.order_items oi
-         LEFT JOIN public.products p ON p.id = COALESCE(oi.product_id, NEW.product_id)
-        WHERE oi.id = NEW.order_item_id),
+      (SELECT oi.unit_size FROM public.order_items oi
+        WHERE oi.id = NEW.order_item_id AND COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') <> ''),
+      (SELECT p.unit_size FROM public.products p
+        WHERE p.id = COALESCE((SELECT oi.product_id FROM public.order_items oi WHERE oi.id = NEW.order_item_id), NEW.product_id)
+          AND COALESCE(btrim(p.unit_size, E' \t\r\n' || chr(160)), '') <> ''),
       NEW.unit_size);
   END IF;
   RETURN NEW;
 END;
 $function$;
 
--- Posting refuses a sale line tied to an order line that still has no unit. Runs last (zz_) on any update
--- into a financial status, so a status set by an earlier trigger is still checked.
+-- Posting a chemical-sale invoice refuses any sale line (a product line, with or without an order line)
+-- that still has no unit (Mason, 2026-11-10: no sale line posts without a unit). Field-application and
+-- misc-charge invoices bill differently and are not checked. Runs last (zz_) on any update into a
+-- financial status, so a status set by an earlier trigger is still checked.
 CREATE FUNCTION public._refuse_post_blank_unit_line()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -247,11 +251,9 @@ BEGIN
   SELECT string_agg(COALESCE(NULLIF(btrim(ii.description), ''), 'unnamed line'), ', ' ORDER BY ii.sort_order NULLS LAST, ii.id)
     INTO v_lines
     FROM public.invoice_items ii
-   WHERE ii.invoice_id = NEW.id AND ii.order_item_id IS NOT NULL AND ii.quantity > 0
-     AND ii.return_credit_source_item_id IS NULL
-     AND COALESCE(btrim(ii.unit_size, E' \t\r\n' || chr(160)), '') = ''
-     -- Same exemption as the fill: a unit equal to its order line's still matches its return.
-     AND NOT EXISTS (SELECT 1 FROM public.order_items oi WHERE oi.id = ii.order_item_id AND oi.unit_size = ii.unit_size);
+   WHERE ii.invoice_id = NEW.id AND (ii.order_item_id IS NOT NULL OR ii.product_id IS NOT NULL)
+     AND ii.quantity > 0 AND ii.return_credit_source_item_id IS NULL
+     AND COALESCE(btrim(ii.unit_size, E' \t\r\n' || chr(160)), '') = '';
   IF v_lines IS NOT NULL THEN
     RAISE EXCEPTION 'INVOICE_LINE_UNIT_MISSING: invoice % has a line with no unit (%). Set the unit on the product, save the draft invoice, then post it again',
       NEW.invoice_number, v_lines
@@ -270,14 +272,14 @@ CREATE TRIGGER trg_fill_order_line_unit
   FOR EACH ROW EXECUTE FUNCTION public._fill_order_line_unit();
 
 CREATE TRIGGER a0_fill_invoice_line_unit
-  BEFORE INSERT OR UPDATE OF unit_size, order_item_id ON public.invoice_items
+  BEFORE INSERT OR UPDATE OF unit_size, order_item_id, product_id ON public.invoice_items
   FOR EACH ROW EXECUTE FUNCTION public._fill_invoice_line_unit();
 
 CREATE TRIGGER zz_refuse_post_blank_unit_line
   BEFORE UPDATE ON public.invoices
   FOR EACH ROW
   WHEN (NEW.status IN ('posted', 'paid', 'overdue') AND OLD.status NOT IN ('posted', 'paid', 'overdue')
-        AND NEW.invoice_type IS DISTINCT FROM 'credit_memo')
+        AND NEW.invoice_type = 'chemical_sale')
   EXECUTE FUNCTION public._refuse_post_blank_unit_line();
 
 DO $postflight$

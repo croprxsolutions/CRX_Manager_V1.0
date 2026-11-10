@@ -34,15 +34,18 @@ A unit is **blank** when it is NULL or only spaces, tabs, line breaks or non-bre
 
 1. **Order line fill.** An order line inserted, or whose product changes, with a blank unit takes the product's unit
    when the product has one. Never refuses. Other updates never touch it (no backfill by side effect).
-2. **Invoice line fill.** A sale line tied to an order line (`order_item_id` set, no return-credit source, quantity not
-   negative) inserted, or whose unit or order line is written, with a blank unit takes the order line's unit, else the
-   order line's product unit, unless its unit already equals its order line's exactly. Never refuses. Trigger `a0_fill_invoice_line_unit` sorts before every other BEFORE
+2. **Invoice line fill.** A sale line (a product line: `order_item_id` or `product_id` set; no return-credit
+   source; quantity not negative) inserted, or whose unit, order line or product is written, with a blank unit takes the
+   order line's unit, else the product's (the order line's product, or its own). A line with no order line is filled
+   only on a chemical-sale invoice. Never refuses. Trigger `a0_fill_invoice_line_unit` sorts before every other BEFORE
    trigger on `invoice_items`, so their checks see the final unit.
 3. **Delivery completion never fails on a unit.** Neither fill can raise; nothing new runs on `deliveries` or
    `delivery_items`; the container proof completes deliveries with every trigger enabled.
-4. **Posting refusal.** Any update moving an invoice (not a credit memo) from a non-financial status into `posted`,
-   `paid` or `overdue` is refused (`INVOICE_LINE_UNIT_MISSING`, naming the lines) while a positive, non-credit sale
-   line tied to an order line still has a blank unit not equal to its order line's. Trigger `zz_refuse_post_blank_unit_line` has no column list and
+4. **Posting refusal (Mason, 2026-11-10: no sale line posts without a unit).** Any update moving a chemical-sale
+   invoice from a non-financial status into `posted`, `paid` or `overdue` is refused (`INVOICE_LINE_UNIT_MISSING`,
+   naming the lines) while any positive, non-credit product line, with or without an order line, has a blank unit.
+   Field-application and misc-charge invoices bill differently and are not checked (live: one unposted field invoice
+   has a blank product line). Trigger `zz_refuse_post_blank_unit_line` has no column list and
    sorts after the other status triggers, so a status set by an earlier trigger is still checked. Staff fix: set the
    product's unit, save the draft (the fill runs again), post. A group post refuses as a whole, naming the invoice.
 5. **Order invoice refusal (kept).** `create_invoice_from_order` refuses an order with a line with no unit
@@ -132,3 +135,11 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
     such pairs; the only 2 blank invoice lines tied to an order line are the two NULL drafts.
   - LOW, the screen message drops the line names the database gives: deferred. Staff see which invoice; the
     database message (in the error log) names the lines.
+- **Sol r3** (2 HIGH, 1 LOW), settled by Mason's decision (2026-11-10, "Refuse every blank line"):
+  - HIGH, the r2 exemption let a matching blank pair post with no unit; HIGH, lines with no order line were never
+    checked: both closed. The exemption is gone from the fill and the refusal, and the refusal covers every product
+    line on a chemical-sale invoice; a hand-entered line with no unit takes its product's unit when saved. Cost, accepted
+    by Mason: an old line whose order line and invoice line both hold the same blank text (0 live) now takes the product
+    unit and its return is refused (Sol r2's case). Proved: hand-replaced lines (product with and without a unit) and
+    the empty-text legacy line.
+  - LOW, line names dropped from the screen message: deferred, as in r2.

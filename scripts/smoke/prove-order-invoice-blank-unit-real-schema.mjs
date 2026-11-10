@@ -12,6 +12,9 @@
  *           refused (INVOICE_LINE_UNIT_MISSING); once the product has a unit and the draft is saved, it posts.
  *           An order line written before the candidate with no unit: the invoice line takes the product unit
  *           and posts; its return credit stays refused, as today (the return reads the order line).
+ *           An existing line whose order line and invoice line are both empty text takes the product unit
+ *           (Mason, 2026-11-10: no sale line posts without a unit); its return is refused.
+ *           A hand-replaced draft line (no order link, no unit) takes its product unit, or posting is refused.
  *           A line with a unit is unchanged throughout.
  *  Order side (create_invoice_from_order; the delivered cap is switched off inside these rolled-back probes
  *  only, since no order can pass it today): a line with no unit is refused (ORDER_LINE_UNIT_MISSING) and
@@ -265,6 +268,9 @@ const DCASES = {
   gal: [id('d3'), id('d31'), id('d32'), PROD, "'gal'", "'gal'", true],
   legacy: [LEGACY, LEGACY_LINE, id('d42'), PROD, null, 'NULL', false],
   legacyempty: [LEGACY_E, LEGACY_E_LINE, id('d62'), PROD, null, "''", false],
+  // Hand-replaced draft line (order link and unit cleared, as a draft edit can): product with a unit / without.
+  handgal: [id('d7'), id('d71'), id('d72'), PROD, "'gal'", "'gal'", true],
+  handno: [id('d8'), id('d81'), id('d82'), PROD_NO, 'NULL', 'NULL', true],
 };
 
 function claims(uid) {
@@ -375,7 +381,7 @@ ROLLBACK;` });
 // signed-in admin through the API role. Returns what each step saw:
 //  { order: order-line unit, done: delivery completed, unit: draft invoice line unit, post: 'posted' | error,
 //    fixed: { unit, post } after the product gets a unit and the draft is saved, credit: credit memo | error }
-function deliver(kind, { fix = false } = {}) {
+function deliver(kind, { fix = false, unlink = false } = {}) {
   const [order, line, del, prod, orderUnit, deliveryUnit, fresh] = DCASES[kind];
   const setup = fresh ? `INSERT INTO public.orders (id, order_number, customer_id, salesman_id, order_date, status)
   VALUES ('${order}', 'PROVER-DU-${kind}', '${CUST}', '${REP}', current_date, 'confirmed');
@@ -396,6 +402,8 @@ SELECT 'DONE=' || (public.complete_delivery(p_delivery_id => '${del}', p_signed_
   p_idempotency_key => gen_random_uuid()::text, p_evidence => 'no_proof', p_evidence_ref => '[PROVER] fixture') IS NOT NULL)::text;
 RESET ROLE;
 SELECT 'STATUS=' || status FROM public.deliveries WHERE id = '${del}';
+${unlink ? `UPDATE public.invoice_items SET order_item_id = NULL, unit_size = NULL
+  WHERE invoice_id = (SELECT id FROM public.invoices WHERE delivery_id = '${del}');` : ''}
 CREATE TEMP TABLE v ON COMMIT DROP AS SELECT id, public._invoice_post_version(id) AS ver FROM public.invoices WHERE delivery_id = '${del}';
 GRANT SELECT ON v TO authenticated;
 SELECT 'UNIT=' || coalesce('[' || ii.unit_size || ']', '<null>') FROM public.invoice_items ii WHERE ii.invoice_id = (SELECT id FROM v);
@@ -474,7 +482,8 @@ function main() {
   seed();
   const settingsBefore = settings();
 
-  const dBefore = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit'), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty') };
+  const dBefore = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit'), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty'),
+    handgal: deliver('handgal', { unlink: true }), handno: deliver('handno', { unlink: true }) };
   console.log(`[prover] BEFORE delivery side: ${JSON.stringify(dBefore)}`);
   assert.deepEqual(dBefore.fill, { order: '<null>', done: 'true completed', unit: '<null>', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
     'BEFORE: a delivered line with no unit is invoiced blank, posts, and its return credit is refused');
@@ -483,6 +492,8 @@ function main() {
   assert.equal(dBefore.legacy.post, 'posted', 'BEFORE: an existing no-unit line posts blank');
   assert.deepEqual(dBefore.legacyempty, { order: '', done: 'true completed', unit: '', post: 'posted', credit: 'posted -1  -1000' },
     'BEFORE: an existing empty-text order line and its empty-text invoice line match, so the return is credited');
+  assert.deepEqual([dBefore.handgal.unit, dBefore.handgal.post, dBefore.handno.unit, dBefore.handno.post], ['<null>', 'posted', '<null>', 'posted'],
+    'BEFORE: a hand-replaced draft line with no order link and no unit posts blank');
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
@@ -501,7 +512,8 @@ function main() {
     .map((n) => `${n} true search_path=public, pg_temp falsefalsefalse`).join('; '), 'new trigger functions: definer, pinned path, no API execute');
   console.log(`[prover] candidate applied once (body md5 ${md5()}); a second apply refuses at the preflight; settings and grants unchanged (${settingsBefore})`);
 
-  const dAfter = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit', { fix: true }), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty') };
+  const dAfter = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit', { fix: true }), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty'),
+    handgal: deliver('handgal', { unlink: true }), handno: deliver('handno', { unlink: true }) };
   console.log(`[prover] AFTER delivery side: ${JSON.stringify(dAfter)}`);
   const GOOD = { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' };
   assert.deepEqual(dAfter.fill, GOOD, 'AFTER: a new line with no unit takes the product unit; the invoice line carries it, posts and is credited');
@@ -516,7 +528,11 @@ function main() {
   assert.deepEqual(dAfter.legacy, { order: '<null>', done: 'true completed', unit: 'gal', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
     'AFTER: an existing order line with no unit invoices with the product unit and posts; its return stays refused, as today');
   assert.deepEqual(dAfter.gal, dBefore.gal, 'AFTER: a line with a unit is unchanged');
-  assert.deepEqual(dAfter.legacyempty, dBefore.legacyempty, 'AFTER: a line whose unit already equals its order line (empty text) is left alone, posts and is credited, as today');
+  assert.deepEqual(dAfter.legacyempty, { order: '', done: 'true completed', unit: 'gal', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
+    'AFTER (Mason 2026-11-10, no sale line posts without a unit): an existing empty-text line takes the product unit and posts; its return reads the empty order line and is refused');
+  assert.deepEqual([dAfter.handgal.unit, dAfter.handgal.post], ['gal', 'posted'], 'AFTER: a hand-replaced line with no unit takes its product unit and posts');
+  assert.equal(dAfter.handno.unit, '<null>', 'AFTER: a hand-replaced line whose product has no unit stays blank');
+  assert.match(dAfter.handno.post ?? '', /^INVOICE_LINE_UNIT_MISSING: invoice \S+ has a line with no unit \(\[PROVER\] DU handno\)/,'AFTER: posting it is refused');
 
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);

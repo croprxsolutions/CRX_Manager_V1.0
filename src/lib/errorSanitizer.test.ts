@@ -9,6 +9,13 @@ describe('sanitizeError', () => {
       .toBe('Atrazine 4L: order ORD-42; purchase order PO-9');
   });
 
+  it('turns a crop + timing refusal into plain words (USE-1)', () => {
+    expect(sanitizeError({ message: 'USE_TIMING_PAIR_TWICE: "Post-Emerge Wheet" and "Post-Emerge Wheat" are the same crop and timing; keep one.' }))
+      .toBe('Nothing was saved. "Post-Emerge Wheet" and "Post-Emerge Wheat" are the same crop and timing; keep one.');
+    expect(sanitizeError(new Error('USE_TIMING_LABEL_TAKEN: "Post-Emergence" is already a choice')))
+      .toBe('Nothing was saved. "Post-Emergence" is already a choice');
+  });
+
   it('uses a safe fallback when an active-status refusal has no detail', () => {
     expect(sanitizeError('PRODUCT_INACTIVE:   '))
       .toBe('This product is turned off. Ask an admin to reactivate it.');

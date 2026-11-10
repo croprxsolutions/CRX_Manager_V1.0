@@ -34,11 +34,12 @@ export function proofLink(texts) {
   return null;
 }
 
-// "Held off: <revert PR or flag name>": why a PR on staging isn't shipping this week.
+// "Held off: <revert PR or flag name>": why a PR on staging isn't shipping this week. It must name
+// how: a PR (#123 or a link) or a flag ("flag <name>").
 export function heldOffNote(texts) {
   for (const t of texts) {
     const m = /^[ \t]*held off:[ \t]*(\S.*?)[ \t]*$/im.exec(t ?? '');
-    if (m) return m[1];
+    if (m && /#\d+|https:\/\/\S+|\bflag\s+\S+/i.test(m[1])) return m[1];
   }
   return null;
 }
@@ -140,8 +141,11 @@ const commands = {
     return 0;
   },
   // pull_request labeled: verified-on-staging needs a proof link, held-off needs a reason.
+  // Reads the PR fresh, so an edit made while this queued is seen; removes only a label still there.
   async 'check-label'() {
-    const { pull_request: pr, label } = await readEvent();
+    const { pull_request: event, label } = await readEvent();
+    const pr = await gh(`/pulls/${event.number}`);
+    if (!pr.labels.some((l) => l.name === label?.name)) return 0;
     const texts = [pr.body, ...(await humanComments(pr.number))];
     const problem = labelProblem({ label: label?.name, merged: pr.merged, baseRef: pr.base.ref, headRef: pr.head.ref, texts });
     if (!problem) return 0;

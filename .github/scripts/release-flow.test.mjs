@@ -39,7 +39,9 @@ test('proofLink finds the first https "Staging proof:" line in the body or any c
 test('heldOffNote needs some text after "Held off:"', () => {
   assert.equal(heldOffNote(['Held off: #1712 reverts it']), '#1712 reverts it');
   assert.equal(heldOffNote(['held off:   flag bill_split_v2 off']), 'flag bill_split_v2 off');
+  assert.equal(heldOffNote(['Held off: https://github.com/o/r/pull/9']), 'https://github.com/o/r/pull/9');
   assert.equal(heldOffNote(['Held off:', 'Held off:   ']), null);
+  assert.equal(heldOffNote(['Held off: maybe later']), null);
 });
 
 test('a back-merge PR has main as its head', () => {

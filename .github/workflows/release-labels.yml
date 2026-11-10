@@ -32,11 +32,15 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       ACTION: ${{ github.event.action }}
     steps:
-      # The rules come from staging's copy of the script, never from the PR under review.
+      # The rules come from staging as it was before this PR (its base commit), never from the PR.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: staging
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
+      - id: script
+        run: |
+          if [ -f .github/scripts/release-flow.mjs ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
+          else echo "::notice::No release flow script on staging before this PR yet."; fi
       - run: |
           if [ "$ACTION" = "closed" ]; then node .github/scripts/release-flow.mjs mark-on-staging
           else node .github/scripts/release-flow.mjs check-label; fi

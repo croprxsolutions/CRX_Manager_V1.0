@@ -39,7 +39,11 @@ export default function UseTimingChoicesModal({ options, crops, defaultCategory,
   const toggleKey = useIdempotencyKey('set_use_timing_option_active', profileId);
   // A reply that lands after the box closed is ignored.
   const open = useRef(true);
-  useEffect(() => () => { open.current = false; }, []);
+  useEffect(() => {
+    // Set on every mount: React's development double-mount runs the cleanup once before the real mount.
+    open.current = true;
+    return () => { open.current = false; };
+  }, []);
 
   const timingCode = timing === NEW_TIMING ? newTiming.trim() : timing;
   const timingCodes = [...new Set(options.map((option) => option.timing_code))].sort();

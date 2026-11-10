@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { CropOption, UseTimingOption } from '../../types';
@@ -42,8 +43,9 @@ describe('UseTimingPicker', () => {
 
 describe('UseTimingChoicesModal', () => {
   const renderModal = (onReload = vi.fn(async () => [burndown, oldWheat, newWheat])) => {
-    render(<UseTimingChoicesModal options={[burndown, oldWheat, newWheat]} crops={crops} defaultCategory="Herbicide"
-      profileId="admin-1" onReload={onReload} onClose={vi.fn()} />);
+    // StrictMode mounts twice, as the development build does; a reply must still unlock the form.
+    render(<StrictMode><UseTimingChoicesModal options={[burndown, oldWheat, newWheat]} crops={crops} defaultCategory="Herbicide"
+      profileId="admin-1" onReload={onReload} onClose={vi.fn()} /></StrictMode>);
     return onReload;
   };
   const rowOf = (label: string) => screen.getByText(label).closest('div')!.parentElement as HTMLElement;
@@ -67,6 +69,8 @@ describe('UseTimingChoicesModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add choice' }));
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'Nothing was saved. "Burndown (preplant)" already offers this crop and timing'));
     expect(onReload).not.toHaveBeenCalled();
+    // The form unlocks so the admin can fix the request.
+    await waitFor(() => expect((screen.getByLabelText('Name shown on products') as HTMLInputElement).closest('fieldset')!.disabled).toBe(false));
   });
 
   it('after a dropped connection, checks the list before saying whether the add saved', async () => {

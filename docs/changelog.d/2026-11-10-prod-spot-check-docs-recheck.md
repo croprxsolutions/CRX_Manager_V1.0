@@ -6,10 +6,12 @@ failures that the ignore list could not see; Group Products reports its error as
 
 Evidence for the 2026-11-10 "Last verified" stamps (read-only, about 6:30-6:45 AM Central):
 
-- Live ledger (`supabase_migrations.schema_migrations`): newest row `20261110061547`
-  (`20261229160000_convert_to_gl_lb_dry_oz`). Every migration file dated `20261110` (the one that made the
-  freshness check due today) was applied 2026-11-05, ledger `20261105203216` to `20261105225320`. Applied since
-  the 2026-11-09 stamp (`20261109123130`): `20261221100000`, `20261222100000`, `20261222110000`,
+- Live ledger (`supabase_migrations.schema_migrations`). A ledger version is the UTC time a migration was
+  applied; a migration file's stamp is when it was written, so the two differ. Newest ledger version
+  `20261110061547` (applied 2026-11-10 06:15 UTC) is migration file `20261229160000_convert_to_gl_lb_dry_oz`.
+  Every migration file stamped `20261110` (the date that made the freshness check due today) was applied
+  2026-11-05, ledger versions `20261105203216` to `20261105225320`. Migration files applied after ledger version
+  `20261109123130` (the 2026-11-09 stamp): `20261221100000`, `20261222100000`, `20261222110000`,
   `20261229100000`, `20261229110000`, `20261229120000`, `20261229150000`, `20261229160000`.
 - KI-25 corrected: PR #1649 merged 2026-11-09; `close_delivery_receipt` is live but no screen on `main` calls it.
 - KI-114: RT-2's converter is live with PR #1706 still open; its remap `20261229170000` is not in the ledger.

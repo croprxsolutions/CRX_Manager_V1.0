@@ -2254,6 +2254,125 @@ export interface IngredientChangePreview {
   refusal: string | null;
 }
 
+// RT-1 draft rates (20261229110000_product_rates_draft.sql). Read by nothing in the app until RT-4.
+export type ProductRateBasis = 'per_acre' | 'per_100_gal' | 'per_unit' | 'per_cwt_seed' | 'per_seed_unit';
+export type ProductRateSource = 'label' | 'house_standard';
+export type ProductRateUnitCode = 'fl_oz' | 'pt' | 'qt' | 'gal' | 'dry_oz' | 'lb' | 'g' | 'mg' | 'each';
+export type ProductRateUnitKind = 'volume' | 'weight' | 'each';
+export type ProductRateStatus = 'draft' | 'approved';
+export type ProductRateOrigin = 'derived_house' | 'derived_text' | 'manual';
+export type ProductRateNoteCode =
+  | 'no_rate' | 'unit_unknown' | 'unit_not_for_form' | 'basis_suspect' | 'basis_from_text' | 'text_unparsed'
+  | 'sizes_disagree' | 'stock_units_differ' | 'above_label' | 'value_invalid';
+
+/** product_rate_units: factor is fluid ounces (volume), milligrams (weight) or 1 (each). */
+export interface ProductRateUnit {
+  code: ProductRateUnitCode;
+  kind: ProductRateUnitKind;
+  factor: number;
+  label: string;
+  legacy_spellings: string[];
+}
+
+/** product_rates row (admins only). Rates are below 1e9 with at most 6 decimals (15 significant digits), so the JSON number reads back as the same 6-decimal value; for arithmetic or comparisons convert to exact integer micro-units first, never compute on the raw float. */
+export interface ProductRate {
+  id: string;
+  parent_id: string;
+  basis: ProductRateBasis;
+  source: ProductRateSource;
+  low: number | null;
+  recommended: number | null;
+  high: number | null;
+  unit: ProductRateUnitCode;
+  is_quoting_default: boolean;
+  status: ProductRateStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  origin: ProductRateOrigin;
+  basis_confirmed: boolean;
+  source_text: string | null;
+  over_label_reason: string | null;
+  row_version: number;
+  created_by: string;
+  created_at: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+/** One linked registration a label check could not compare, or one whose maximum the rate exceeds. */
+export interface ProductRateLabelEntry {
+  epa_registration: string;
+  why?: 'registration_missing' | 'no_label_max' | 'max_basis_differs' | 'max_unit_not_comparable';
+  max_label_rate?: number;
+  max_label_rate_unit?: string;
+}
+
+/** The label-maximum check (house rows only; warns, never blocks once a reason is saved). */
+export type ProductRateLabelCheck =
+  | { status: 'not_applicable' }
+  | { status: 'within' }
+  | { status: 'not_checked'; why: 'basis_has_no_label_max' | 'basis_unconfirmed' | 'no_registration' | 'registrations_not_seeded' }
+  | { status: 'not_checked'; why: 'max_not_comparable'; not_checked: ProductRateLabelEntry[] }
+  | { status: 'above'; above: ProductRateLabelEntry[]; not_checked: ProductRateLabelEntry[]; reason_missing: boolean };
+
+/** save_draft_product_rate */
+export interface SaveDraftProductRateResult {
+  rate_id: string;
+  row_version: number;
+  label_check: ProductRateLabelCheck;
+}
+
+/** delete_draft_product_rate */
+export interface DeleteDraftProductRateResult {
+  rate_id: string;
+  deleted: true;
+}
+
+export interface ProductRateDeriveNote {
+  note_code: ProductRateNoteCode;
+  rate_id: string | null;
+  text: string | null;
+  detail: unknown;
+}
+
+export interface ProductRateDerivedRow {
+  rate_id: string;
+  source: ProductRateSource;
+  basis: ProductRateBasis;
+  unit: ProductRateUnitCode;
+  low: number | null;
+  recommended: number | null;
+  high: number | null;
+  is_quoting_default: boolean;
+  basis_confirmed: boolean;
+}
+
+/** derive_draft_product_rates: one entry per parent, in ID order, plus totals. */
+export interface DeriveDraftProductRatesResult {
+  parents: {
+    parent_id: string;
+    outcome: 'derived' | 'skipped_has_rows' | 'skipped_sizes_disagree' | 'nothing_to_derive';
+    rows: ProductRateDerivedRow[];
+    notes: ProductRateDeriveNote[];
+  }[];
+  totals: {
+    parents: number;
+    derived: number;
+    skipped_has_rows: number;
+    skipped_sizes_disagree: number;
+    nothing_to_derive: number;
+    rows: number;
+    notes: number;
+  };
+}
+
+/** get_parent_draft_rates (admin). */
+export interface ParentDraftRates {
+  parent_id: string;
+  rates: (ProductRate & { unit_label: string; unit_kind: ProductRateUnitKind; label_check: ProductRateLabelCheck })[];
+  notes: (ProductRateDeriveNote & { event_id: number; changed_at: string })[];
+}
+
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';
 export type BlendTicketReviewStatus = 'unreviewed' | 'approved' | 'rejected';
 export type BlendTicketOrderLinkStatus = 'unlinked' | 'linked';

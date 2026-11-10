@@ -543,14 +543,15 @@ async function main() {
   raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 1800; DELETE FROM public.invoice_items WHERE id = '${L6}';
     UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
   // The product's tick records it when its number's registration says No (P1 on N1): L1 (1600) and a new line (1900).
-  // A line on an unticked product whose number says No (P3 on N1) is not recorded, even carrying N2 (Yes).
+  // Any Yes records it (Mason, 2026-11-09, "Yes, any Yes"; Sol r5 HIGH): a line on an unticked product whose number
+  // says No (P3 on N1) but saved under N2 (Yes), as when the product moved off N2 before posting, records under N1.
   raw(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';
     INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES
       ('${L6}', '${INV1}', '${P1}', 'x', 1, 'Gal', 1900, 1900, '${N1}'),
       ('${id('2a')}', '${INV1}', '${P3}', 'x', 1, 'Gal', 2000, 2000, '${N2}');`);
-  assert.equal(ok(ADMIN, GEN('g4c')), '2');
+  assert.equal(ok(ADMIN, GEN('g4c')), '3');
   assert.equal(scalar(`SELECT string_agg(epa_registration || '|' || signal_word, ',' ORDER BY unit_price_cents) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);`),
-    `${N1}|Caution,${N1}|Caution`);
+    `${N1}|Caution,${N1}|Caution,${N1}|Caution`);
   raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);
     DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2a')}'); UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
   // The product's number's registration records it when the product is not ticked: P4 unticked, N2 says Yes, the line
@@ -568,7 +569,14 @@ async function main() {
   assert.equal(ok(ADMIN, GEN('g4e')), '1');
   assert.equal(scalar(`SELECT epa_registration || '|' || unit FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200;`), `${N2}|Unit not set`);
   assert.equal(ok(ADMIN, GEN('g4f')), '0');
-  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200; DELETE FROM public.invoice_items WHERE id = '${L6}';
+  // A line with no unit and one saved as 'Unit not set' at the same price share one record, and both count as
+  // recorded, so the list does not keep them (Sol r5 MED).
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2b')}', '${INV1}', '${P4}', 'x', 1, 'Unit not set', 2200, 2200);
+    DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200;`);
+  assert.equal(ok(ADMIN, GEN('g4g')), '1');
+  assert.equal(scalar(`SELECT quantity || '|' || total_cents FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200;`), '2.0000|4400');
+  assert.equal(scalar(`SELECT bool_and(public._rup_record_covers_line(ii))::text FROM public.invoice_items ii WHERE id IN ('${L6}', '${id('2b')}');`), 'true');
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200; DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2b')}');
     UPDATE public.products SET is_rup = true WHERE id = '${P4}';`);
   // The same product and number sold at a second price gets its own record; neither merges price nor total.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
@@ -602,6 +610,12 @@ async function main() {
   // A line is judged by its product's number, not the one it carries: 999-9 on restricted-use P4 is listed as unrecorded.
   raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P4}', 'x', 1, 'Gal', 1500, 1500, '999-9');`);
   assert.equal(reasons()[L6], 'restricted_use_to_record');
+  raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  // Any Yes lists it (Sol r5 HIGH): an unrecorded line on unticked P3 (N1, No) saved under N2 (Yes) is listed.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES ('${L6}', '${INV3}', '${P3}', 'x', 1, 'Gal', 1500, 1500, '${N2}');
+    UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N1}';`);
+  assert.equal(reasons()[L6], 'restricted_use_to_record');
+  assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N2}') @> jsonb_build_array(jsonb_build_object('invoice_item_id', '${L6}'::uuid)))::text;`), 'true');
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   // A number with no registration, or a Not reviewed one, is listed even when its product is not ticked (Luna r13 HIGH).
   raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${P1}';`);

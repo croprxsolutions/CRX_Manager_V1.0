@@ -13,24 +13,25 @@
 --
 -- WHAT:
 --   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After the seed a
---     line needs a record when its product is ticked restricted-use OR its product's number's registration
---     says Yes (either Yes records it; recording one extra sale is the safe side). One record per product,
---     unit and unit price (lines sold at different prices or units never merge), under the product's number.
+--     line needs a record when ANY Yes says so: its product's tick, its product's number's registration, or the
+--     registration of the number saved on the line (Mason, 2026-11-09, "Yes, any Yes", after Sol round 5; a
+--     wrong saved number can only add a record, never lose one). One record per product, unit and unit price
+--     (lines sold at different prices or units never merge), always under the product's number.
 --     An active record that disagrees with what posting would write is refused (RUP_RECORD_CONFLICT), never
 --     silently kept; one that agrees is kept even if the product's number changed since.
 --   - _rup_record_covers_line: the one rule for "this posted line has its record"; used by
 --     _epa_registration_unrecorded_posted_lines (re-issued from 20261226100000, same grants) and the list below.
---   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines (same either-Yes rule) with no
---     record (restricted_use_to_record); posted lines whose product has no number and that are restricted-use or
+--   - get_epa_sales_to_check() (admin, read-only): posted restricted-use lines with no
+--     record (restricted_use_to_record; the same any-Yes rule); posted lines whose product has no number and that are restricted-use or
 --     have a record (no_epa_number); unrecorded lines whose product's number has no registration
 --     (no_registration) or a Not reviewed one (not_reviewed).
 --   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today);
 --     the postflight proves it.
 --
 -- ACCEPTED (Mason, 2026-11-09): a re-post after un-posting uses the product and registration as they are then;
---   a product whose number changes between a sale and its posting records under the new number; and
---   (after Sol round 4) Sales to check judges old sales by the product's number now, so a number change can drop
---   an unrecorded older sale from the list. The list is unpaged (admin-only, read-only, small history).
+--   a product whose number changes between a sale and its posting records under the new number (the any-Yes
+--   rule still records it when the number saved on the line says Yes). The list is unpaged (admin-only,
+--   read-only, small history).
 --
 -- NOT CHANGED: invoice saving (save_invoice, the field-application saves), _fill_invoice_line_epa, the
 --   posting wrappers. Posting takes the REG-1 lock in shared mode; one colliding with a registration change
@@ -82,7 +83,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                         LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
                                    FROM public.invoice_items o
                                   WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
-                                    AND o.unit_size IS NOT DISTINCT FROM p_line.unit_size
+                                    AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
                                     AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
                   WHERE s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
                     -- a line with no unit records as 'Unit not set' (the record's unit is required)
@@ -102,8 +103,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
     FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
     JOIN public.products p ON p.id = ii.product_id
    WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
-     -- posting reads the product's own number
-     AND public._normalize_epa_registration(p.epa_registration) = p_number
+     -- posting's any-Yes rule reads the product's number and the number saved on the line (Mason, 2026-11-09)
+     AND (public._normalize_epa_registration(p.epa_registration) = p_number
+          OR public._normalize_epa_registration(ii.epa_registration) = p_number)
      AND NOT public._rup_record_covers_line(ii);
 $function$;
 
@@ -192,9 +194,10 @@ BEGIN
   END;
 
   IF v_seeded THEN
-    -- REG-1 (sheet 4.C): a line needs a record when its product's tick or its product's number's registration
-    -- says Yes, and records under the product's number (blank when it has none; Mason, 2026-11-09). One record
-    -- per unit and unit price too, so a record never merges lines sold at different prices or units.
+    -- REG-1 (sheet 4.C): lines need a record when ANY Yes says so: the product's tick, its number's registration,
+    -- or the registration of the number saved on a line (Mason, 2026-11-09, "Yes, any Yes", after Sol round 5).
+    -- They record under the product's number (blank when it has none). One record per product, unit and unit
+    -- price, holding every line sharing them (so it matches the coverage rule); one Yes line records the group.
     OPEN v_items FOR
       SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity,
              COALESCE(ii.unit_size, 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
@@ -204,10 +207,11 @@ BEGIN
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(p.epa_registration)
+        LEFT JOIN epa_registrations lr ON lr.epa_registration = public._normalize_epa_registration(ii.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
-         AND (p.is_rup OR r.rup_status = 'yes')
        GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(p.epa_registration),
                 COALESCE(r.signal_word, p.signal_word), COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents
+      HAVING bool_or(p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes')
        ORDER BY ii.product_id, 4, 5;
   ELSE
     OPEN v_items FOR
@@ -328,12 +332,13 @@ BEGIN
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            public._normalize_epa_registration(p.epa_registration) AS epa_registration, ii.quantity,
            r.rup_status AS registration_rup_status, p.is_rup AS product_is_rup,
-           COALESCE(p.is_rup OR r.rup_status = 'yes', false) AS restricted_use,
+           COALESCE(p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes', false) AS restricted_use,
            public._rup_record_covers_line(ii) AS has_record
       FROM invoice_items ii
       JOIN invoices i ON i.id = ii.invoice_id
       JOIN products p ON p.id = ii.product_id
       LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(p.epa_registration)
+      LEFT JOIN epa_registrations lr ON lr.epa_registration = public._normalize_epa_registration(ii.epa_registration)
      WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(

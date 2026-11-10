@@ -446,31 +446,38 @@ const commands = {
   async 'tag-release'() {
     const { pull_request: pr } = await readEvent();
     const sha = pr.merge_commit_sha;
-    let version;
-    let notes;
-    if (pr.head.ref === 'release/next') {
-      version = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
-      notes = changelogSection(git('show', `${sha}:CHANGELOG.md`), version);
-      if (!notes) throw new Error(`CHANGELOG.md at ${sha} has no ${version} section`);
-    } else if (isReleaseOrHotfixHead(pr.head.ref)) {
-      version = nextVersion(git('tag', '--list', 'v*').split('\n').filter(Boolean), 'hotfix');
-      notes = `#### 🚑 Hotfix\n* ${pr.title} (#${pr.number})\n\n${firstParagraph(pr.body, 600)}`;
-    } else {
-      return 0;
-    }
-    if (await gh(`/git/ref/tags/${version}`, { allow404: true })) {
-      // A re-run after the release was created (response lost) is already done.
+    const tagSha = async (v) => (await gh(`/git/ref/tags/${v}`, { allow404: true }))?.object.sha ?? null;
+    // Creating the tag ref is atomic: if it already exists (422), it's ours only if it points here.
+    const claim = async (v) => (await gh('/git/refs', { method: 'POST', body: { ref: `refs/tags/${v}`, sha }, allow422: true })) !== null || (await tagSha(v)) === sha;
+    // Publish (or finish publishing) the release for a tag that points at this merge commit.
+    const publish = async (version, notes) => {
       const existing = await gh(`/releases/tags/${version}`, { allow404: true });
-      if (existing && git('rev-list', '-n', '1', version) === sha) {
-        console.log(`${version} already tagged at ${sha}: ${existing.html_url}`);
-        return 0;
+      const rel = existing ?? (await gh('/releases', { method: 'POST', body: { tag_name: version, target_commitish: sha, name: version, body: notes } }));
+      console.log(`${version} at ${sha}: ${rel.html_url}`);
+      return 0;
+    };
+    if (pr.head.ref === 'release/next') {
+      const version = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
+      const notes = changelogSection(git('show', `${sha}:CHANGELOG.md`), version);
+      if (!notes) throw new Error(`CHANGELOG.md at ${sha} has no ${version} section`);
+      if (!(await claim(version))) {
+        console.log(`::error::Tag ${version} already exists on another commit; tag ${sha} by hand with a new version.`);
+        return 1;
       }
-      console.log(`::error::Tag ${version} already exists on another commit; change the version and tag ${sha} by hand.`);
-      return 1;
+      return publish(version, notes);
     }
-    const rel = await gh('/releases', { method: 'POST', body: { tag_name: version, target_commitish: sha, name: version, body: notes } });
-    console.log(`${version} tagged at ${sha}: ${rel.html_url}`);
-    return 0;
+    if (!isReleaseOrHotfixHead(pr.head.ref)) return 0;
+    // A hotfix takes the next free patch above every tag and the version in its own package.json.
+    // Two hotfixes merged together each move on to the next number instead of colliding.
+    // ponytail: the commit's package.json keeps the release version; only the tag says vX.Y.(Z+1).
+    const notes = `#### 🚑 Hotfix\n* ${pr.title} (#${pr.number})\n\n${firstParagraph(pr.body, 600)}`;
+    const known = [...git('tag', '--list', 'v*').split('\n').filter(Boolean), `v${JSON.parse(git('show', `${sha}:package.json`)).version}`];
+    for (let i = 0; i < 10; i++) {
+      const version = nextVersion(known, 'hotfix');
+      if (await claim(version)) return publish(version, notes);
+      known.push(version);
+    }
+    throw new Error('no free hotfix version after 10 tries');
   },
   // pull_request closed into staging: label the merged work on-staging (not the back-merge PR).
   async 'mark-on-staging'() {

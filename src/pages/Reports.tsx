@@ -40,6 +40,7 @@ import type {
   YearEndSummaryData,
 } from '../types';
 import type { Database } from '../types/supabase';
+import { toSentryError } from '../lib/sentryError';
 
 // ─── Category / Tab types ──────────────────────────────────────
 type Category = 'profitability' | 'logbook' | 'financial' | 'operational' | 'year_end';
@@ -427,7 +428,7 @@ export default function Reports() {
       return true;
     } catch (err) {
       if (loadId !== commissionsLoadId.current) return true;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'load_commissions' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'load_commissions' } });
       fail();
       return false;
     }
@@ -895,7 +896,7 @@ export default function Reports() {
       }
       setShowYeDialog(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'generate_year_end_summary' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'generate_year_end_summary' } });
       toast('error', sanitizeError(err));
     }
     setYeLoading(false);
@@ -1063,7 +1064,7 @@ export default function Reports() {
       const rejection = getIdempotencyBindingRejection(err);
       if (rejection) {
         if (scopeInFlight) markPaidKeys.current.delete(scopeInFlight);
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `mark_commissions_paid_${rejection}_mismatch` } });
+        Sentry.captureException(toSentryError(err), { extra: { context: `mark_commissions_paid_${rejection}_mismatch` } });
         const refusalListIsCurrent = await fetchCommissions();
         // Never claim "nothing was created" outright — recipients processed
         // before the refusal really were paid, and telling the admin otherwise
@@ -1076,7 +1077,7 @@ export default function Reports() {
           ? `That retry could not be matched to this request. ${totalBatched} commission(s) were already added to a payment batch before it stopped — check Commission Payments before trying again.${refusalListIsCurrent ? '' : STALE_COMMISSION_LIST_NOTE}`
           : `That retry could not be matched to this request, so nothing new was created by this attempt — but an earlier attempt may already have created a batch. Check Commission Payments before trying again.${refusalListIsCurrent ? '' : STALE_COMMISSION_LIST_NOTE}`);
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'mark_commissions_paid' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'mark_commissions_paid' } });
         // Ordinary failure (timeout, network, a server guard). Earlier recipients
         // in this same click may already be batched, so refresh the list BEFORE
         // saying anything and name how many landed — a bare error message reads

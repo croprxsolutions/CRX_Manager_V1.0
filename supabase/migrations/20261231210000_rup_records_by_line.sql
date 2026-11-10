@@ -280,7 +280,7 @@ BEGIN
   -- REG-1: the buyer is the order's customer (unchanged; a bill-split payer invoice names the sale's customer). A
   -- field application has no order and records under the invoice's own customer (Mason, 2026-11-10).
   SELECT i.id, i.order_id, c.id AS customer_id, c.farm_name, i.invoice_date,
-         i.invoice_number, i.status, i.deleted_at, i.invoice_type
+         i.invoice_number, i.status, i.deleted_at, i.invoice_type, i.posted_at
   INTO v_invoice
   FROM invoices i
   LEFT JOIN orders o ON o.id = i.order_id AND i.invoice_type <> 'field_application'
@@ -337,6 +337,18 @@ BEGIN
       FROM invoice_items ii, LATERAL public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f
      WHERE ii.invoice_id = p_invoice_id AND ii.product_id IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM invoice_line_rup_captures c WHERE c.invoice_item_id = ii.id);
+    -- A Yes at posting wins too (Mason, 2026-11-10, "Yes, Yes at post wins", after Sol r1): only when the invoice is
+    -- posted in this transaction, a line captured No or Not reviewed that any Yes covers now is upgraded (never down);
+    -- its saved number and signal word stay. A later run on a posted invoice leaves it to Sales to check.
+    IF v_invoice.posted_at = now() THEN
+      UPDATE invoice_line_rup_captures c
+         SET rup_status = 'yes', source = 'posting', captured_at = now()
+        FROM invoice_items ii
+       WHERE ii.invoice_id = p_invoice_id AND c.invoice_item_id = ii.id AND c.rup_status <> 'yes'
+         AND ((SELECT f.rup_status FROM public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f) = 'yes'
+              OR EXISTS (SELECT 1 FROM epa_registrations r
+                          WHERE r.epa_registration = c.epa_registration AND r.rup_status = 'yes'));
+    END IF;
     -- One record per line captured 'yes' that has none: the record names its line, so nothing is matched or grouped.
     OPEN v_items FOR
       SELECT ii.id AS invoice_item_id, ii.product_id, p.product_name, ii.quantity,

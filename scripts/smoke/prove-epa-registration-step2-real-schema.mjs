@@ -688,7 +688,37 @@ async function main() {
   assert.equal(ok(REP, GEN(INVF, 'g-fa')), '1');
   assert.equal(scalar(`SELECT customer_id || '|' || buyer_name || '|' || (order_id IS NULL) || '|' || invoice_item_id FROM public.rup_sales_records WHERE invoice_id = '${INVF}';`),
     `${id('d2')}|[PROVER] Other Farm|true|${id('2f')}`);
-  console.log('[prover] case 12: posting writes one record per restricted-use line, each naming its line, from what was captured at save; a second post writes nothing and a key replays only for its invoice; the database refuses a second active record for a line, a record without its line or on another invoice or product, and deleting a recorded line; nobody signed in writes records; a return credit gets none; a field application records under its own customer');
+  // A Yes at posting wins too (Mason, 2026-11-10, after Sol r1): a line saved No whose size is ticked before posting,
+  // then re-saved for quantity, records when posted. Posting and the generator run in one transaction, as post_invoice does.
+  const postAndGen = (inv, key) => {
+    const r = psql(`BEGIN; SET LOCAL session_replication_role = replica;
+      UPDATE public.invoices SET status = 'posted', posted_at = now() WHERE id = '${inv}';
+      SET LOCAL session_replication_role = origin;
+      SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+      SELECT 'GEN=' || public.generate_rup_sales_records('${inv}', '${key}'); COMMIT;`, { user: 'supabase_admin', allowFailure: true });
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    return r.stdout.match(/GEN=(\d+)/)[1];
+  };
+  const INV5 = id('16'), INV6 = id('17');
+  raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by) VALUES
+      ('${INV5}', '${CUST}', '${ORD}', 'E2-I5', 'draft', current_date, '${ADMIN}'), ('${INV6}', '${CUST}', '${ORD}', 'E2-I6', 'draft', current_date, '${ADMIN}');`);
+  ownerOk(lineAt(id('4a'), INV5, P1, 1, 2600));
+  assert.match(cap(id('4a')), /^no\|/);
+  raw(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';`);
+  ownerOk(`UPDATE public.invoice_items SET quantity = 2, extended_cents = 5200 WHERE id = '${id('4a')}';`);
+  assert.match(cap(id('4a')), /^no\|.*\|save$/);  // a quantity save keeps the capture
+  assert.equal(postAndGen(INV5, 'g-up'), '1');
+  assert.equal(cap(id('4a')), `yes|${N1}|Caution|posting`);
+  assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_item_id = '${id('4a')}' AND voided_at IS NULL;`), '1');
+  // Only at posting: a later run on an already-posted invoice changes nothing (the line goes to Sales to check).
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
+  ownerOk(lineAt(id('4b'), INV6, P1, 1, 2700));
+  assert.equal(postAndGen(INV6, 'g-up2'), '0');
+  raw(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';`);
+  assert.equal(ok(ADMIN, GEN(INV6, 'g-up3')), '0');
+  assert.match(cap(id('4b')), /^no\|.*\|save$/);
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
+  console.log('[prover] case 12: posting writes one record per restricted-use line, each naming its line, from what was captured at save, or a Yes known at posting (only in the posting transaction); a second post writes nothing and a key replays only for its invoice; the database refuses a second active record for a line, a record without its line or on another invoice or product, and deleting a recorded line; nobody signed in writes records; a return credit gets none; a field application records under its own customer');
 
   // 13. Sales to check: a line is recorded when an active record names it.
   refused(REP, 'SELECT public.get_epa_sales_to_check();', /ADMIN_REQUIRED/);

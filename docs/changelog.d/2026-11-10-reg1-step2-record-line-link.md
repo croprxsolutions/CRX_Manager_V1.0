@@ -11,6 +11,8 @@
   invoice's own customer; sales from before the switch-on are out of scope.
 - Kept from #1688: the answer captured when each sale line is saved (private table `invoice_line_rup_captures`,
   trigger `trg_zz_capture_invoice_line_rup`), "a Yes always wins", the registration tools, the seed.
+- Mason, 2026-11-10 ("Yes, Yes at post wins", after Sol round 1): a restricted-use Yes known when the invoice is
+  posted also upgrades the line and creates its record.
 - App users can no longer write invoice lines or restricted-use records directly (the app never does).
 - Contract: `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md`.
 - Proof: `node scripts/smoke/prove-epa-registration-step2-real-schema.mjs`.

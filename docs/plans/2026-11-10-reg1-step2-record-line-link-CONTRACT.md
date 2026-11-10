@@ -115,7 +115,7 @@ on it yet. Recovery: a forward migration; the link column and captures stay.
 6. When a field-application invoice with a Yes line and no order is posted, then one record exists under the invoice's customer.
 7. When a bill-split group is posted, then each payer invoice has its own linked records naming the order's customer.
 8. When a line is captured No and any Yes applies now (its number's registration, its size's tick, or the number its size carries today), then Sales to check lists it (`now_restricted_use`); a Yes line with a record and a number is not listed; a Yes line whose record was voided (by an unpost, or by the database owner) is listed.
-9. When a label changes between save and post, then posting records what was captured at save.
+9. When a label changes between save and post, then posting records what was captured at save, except that a Yes at posting wins too (Mason, 2026-11-10, "Yes, Yes at post wins", after Sol r1): a line captured No or Not reviewed that any Yes covers when the invoice is posted is upgraded to Yes and recorded, under its saved number. A later run on an already-posted invoice upgrades nothing; the line stays on Sales to check.
 10. When a second active record for one line is inserted, or an active record is given no line, or a line with an active record is deleted (all as postgres), then each is refused.
 11. When `authenticated` (admin included) inserts, updates or deletes a record directly, then it is refused; an applicator calling the generator is refused.
 12. When the migration is applied to a database holding an active record (which has no line), then it refuses.

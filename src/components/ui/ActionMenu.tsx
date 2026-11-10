@@ -94,7 +94,7 @@ export default function ActionMenu({ label, items, trigger = 'icon', disabled }:
         placement="bottom end"
         className="min-w-60 bg-white rounded-xl border border-gray-200 shadow-lg p-1.5 outline-none"
       >
-        <Menu className="outline-none max-h-80 overflow-auto">
+        <Menu className="outline-none max-h-80 overflow-auto scroll-thin scroll-shadows">
           {plain.map((i) => <Item key={i.id} item={i} />)}
           {[...groups].map(([name, list]) => (
             <MenuSection key={name}>

@@ -143,6 +143,15 @@ describe('Quotes list', () => {
     expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
   });
 
+  it('desktop keeps the planned-programs tip in the toolbar and uses brand-green checkboxes', async () => {
+    H.tables.quotes = [quote(1, 'sent')];
+    at('/quotes');
+    await screen.findByText('Q-TEST-1');
+    expect(within(screen.getByTestId('quote-results')).queryByRole('button', { name: 'More info' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select all quotes' })).toHaveClass('accent-crx-green');
+    expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' })).toHaveClass('accent-crx-green');
+  });
+
   it('the results strip is always there: count, then "N of M", then the selection bar with the same actions', async () => {
     H.tables.quotes = [quote(1, 'draft', { is_planned: true }), quote(2, 'sent'), quote(3, 'accepted')];
     at('/quotes');
@@ -166,7 +175,8 @@ describe('Quotes list', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-2' }));
     const bar = within(strip()).getByRole('region', { name: 'Bulk actions' });
     expect(bar).toHaveTextContent('1 selected');
-    expect(within(bar).getAllByRole('button').map((b) => b.textContent)).toEqual(['Deselect', 'Export CSV', 'Download PDF', 'Delete quotes']);
+    // Short labels show below lg (narrow card with the sidebar open); the full names stay the accessible names.
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Deselect', 'Export CSV', 'Download PDF', 'Delete quotes']);
     // The bar is the strip, so it sits after the search, never above it.
     expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }).compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
@@ -280,6 +290,26 @@ describe('Quotes list on a phone', () => {
     expect(line().textContent).toBe('2 of 2 selectedClear filters');
   });
 
+  it('the planned-programs tip sits in the results line, checkboxes are brand green, and a selected card is outlined', async () => {
+    H.tables.quotes = [quote(1, 'sent'), quote(2, 'draft')];
+    atWithQuotePage('/quotes');
+    await screen.findByText('Q-TEST-1');
+    const line = screen.getByTestId('quote-results');
+    expect(within(line).getByRole('button', { name: 'More info' })).toBeInTheDocument();
+    // The tip is no longer in the chip row (only the open-bookings tip and this one exist).
+    expect(screen.getByRole('button', { name: 'Planned programs' }).parentElement).not.toContainElement(within(line).getByRole('button', { name: 'More info' }));
+    expect(within(line).getByRole('checkbox', { name: 'Select all quotes' })).toHaveClass('accent-crx-green');
+
+    const box = screen.getByRole('checkbox', { name: 'Select Q-TEST-1' });
+    expect(box).toHaveClass('accent-crx-green');
+    const card = screen.getByRole('button', { name: 'Q-TEST-1' }).closest('[data-selected]')!;
+    expect(card).toHaveAttribute('data-selected', 'false');
+    expect(card).not.toHaveClass('ring-crx-green');
+    fireEvent.click(box);
+    expect(card).toHaveAttribute('data-selected', 'true');
+    expect(card).toHaveClass('ring-2', 'ring-crx-green', 'bg-crx-green-tint');
+  });
+
   it('the bulk bar docks at the bottom, after the list, with Deselect and all three actions', async () => {
     H.tables.quotes = [quote(1, 'sent'), quote(2, 'draft')];
     atWithQuotePage('/quotes');
@@ -313,7 +343,8 @@ describe('Quotes list on a phone', () => {
     const cards = () => screen.getAllByRole('button', { name: /^Q-TEST-/ }).map((el) => el.textContent);
     expect(cards()).toEqual(['Q-TEST-2', 'Q-TEST-5', 'Q-TEST-3']);
 
-    const chip = screen.getByRole('button', { name: /^Sort/ });
+    // One "Sort" in the name, not "Sort Sort ...".
+    const chip = screen.getByRole('button', { name: 'Sort order' });
     expect(chip).toHaveTextContent(/^Sort$/);
     expect(chip).not.toHaveClass('bg-crx-green-light');
     fireEvent.click(chip);
@@ -338,7 +369,7 @@ describe('Quotes list on a phone', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Status, A to Z/ }));
     fireEvent.click(screen.getByRole('option', { name: 'As listed' }));
     expect(cards()).toEqual(['Q-TEST-2', 'Q-TEST-5', 'Q-TEST-3']);
-    expect(screen.getByRole('button', { name: /^Sort/ })).toHaveTextContent(/^Sort$/);
+    expect(screen.getByRole('button', { name: 'Sort order' })).toHaveTextContent(/^Sort$/);
   });
 
   it('phone search has the short placeholder, long names wrap, and expiry shows a year only when it differs', async () => {

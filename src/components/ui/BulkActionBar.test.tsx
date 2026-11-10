@@ -79,4 +79,13 @@ describe('BulkActionBar', () => {
     fireEvent.click(screen.getByText('Deselect'));
     expect(onDeselect).toHaveBeenCalledTimes(1);
   });
+
+  it('bar mode shows short labels below lg when given, keeps full accessible names, and its actions can shrink', () => {
+    const actions: BulkAction[] = mockActions.map((a) => ({ ...a, shortLabel: a.label.split(' ').pop() }));
+    render(<BulkActionBar bar selectedCount={2} actions={actions} onDeselectAll={vi.fn()} />);
+    const csv = screen.getByRole('button', { name: 'Export CSV' });
+    expect(screen.getByText('CSV', { selector: 'span' })).toHaveClass('lg:hidden');
+    expect(screen.getByText('Export CSV', { selector: 'span' })).toHaveClass('hidden', 'lg:inline');
+    expect(csv.parentElement).toHaveClass('min-w-0');
+  });
 });

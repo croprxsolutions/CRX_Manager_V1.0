@@ -76,6 +76,12 @@ describe('Dropdown', () => {
     expect(onChange).toHaveBeenCalledWith('sent');
   });
 
+  it('the option list gets the thin scrollbar and scroll shadows', () => {
+    render(<Dropdown label="Status" value="draft" onChange={vi.fn()} options={options} />);
+    fireEvent.click(screen.getByRole('button', { name: /Status/ }));
+    expect(screen.getByRole('listbox')).toHaveClass('scroll-thin', 'scroll-shadows');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

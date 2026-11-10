@@ -101,6 +101,8 @@ export function createCheckboxColumn<T>(
   isSelectable?: (row: T) => boolean,
   /** Accessible name for each row's checkbox, e.g. "Select Q-0001". */
   getLabel?: (row: T) => string,
+  /** Extra classes for each row's checkbox (opt-in, e.g. the brand accent colour). */
+  checkboxClassName = '',
 ): Column<T> {
   return {
     key: '_select',
@@ -120,7 +122,7 @@ export function createCheckboxColumn<T>(
             toggleSelect(id);
           }}
           onClick={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+          className={`w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green ${checkboxClassName}`.trimEnd()}
         />
       ) as ReactNode;
     },

@@ -112,7 +112,7 @@ export default function Dropdown({
         </div>
       )}
       <Popover className="min-w-(--trigger-width) bg-white rounded-xl border border-gray-200 shadow-lg p-1.5 outline-none">
-        <ListBox className="outline-none max-h-72 overflow-auto">
+        <ListBox className="outline-none max-h-72 overflow-auto scroll-thin scroll-shadows">
           {options.map((o) => (
             <ListBoxItem
               key={o.value}

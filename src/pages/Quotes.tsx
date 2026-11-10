@@ -46,23 +46,15 @@ const ALL = 'all';
 const STATUS_OPTIONS = [{ value: ALL, label: 'All' }, ...STATUSES.map((s) => ({ value: s, label: quoteStatusLabel(s) }))];
 const SEARCH_KEYS = ['quote_number', 'customer_name', 'product_names'];
 const SEARCH_LABEL = 'Search by quote number, customer or product';
-// Phone sort chip: every sortable column both ways, in words; the value is the same key:dir the table headers set.
+// Phone sort chip wording per sortable column (ascending, descending); others read "<Header>, A to Z / Z to A".
 const AS_LISTED = 'as_listed';
-const SORT_OPTIONS = [
-  { value: AS_LISTED, label: 'As listed' },
-  { value: 'quote_number:asc', label: 'Quote number, A to Z' },
-  { value: 'quote_number:desc', label: 'Quote number, Z to A' },
-  { value: 'status:asc', label: 'Status, A to Z' },
-  { value: 'status:desc', label: 'Status, Z to A' },
-  { value: 'tier:asc', label: 'Tier, 1 to 3' },
-  { value: 'tier:desc', label: 'Tier, 3 to 1' },
-  { value: 'total_price:asc', label: 'Total, low to high' },
-  { value: 'total_price:desc', label: 'Total, high to low' },
-  { value: 'created_at:asc', label: 'Created, oldest first' },
-  { value: 'created_at:desc', label: 'Created, newest first' },
-  { value: 'expires_at:asc', label: 'Expires, soonest first' },
-  { value: 'expires_at:desc', label: 'Expires, latest first' },
-];
+const SORT_WORDS: Record<string, [string, string, string]> = {
+  quote_number: ['Quote number', 'A to Z', 'Z to A'],
+  tier: ['Tier', '1 to 3', '3 to 1'],
+  total_price: ['Total', 'low to high', 'high to low'],
+  created_at: ['Created', 'oldest first', 'newest first'],
+  expires_at: ['Expires', 'soonest first', 'latest first'],
+};
 const quotesWord = (n: number) => (n === 1 ? 'quote' : 'quotes');
 
 const shortDate = (d: Date, withYear = true) =>
@@ -105,6 +97,13 @@ export default function Quotes() {
   // Held here too, so the phone Sort chip and the table headers share one sort.
   const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: 'asc' });
   const isPhone = useIsPhone();
+  // Right-edge fade while the phone chip row has more to scroll sideways.
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  const [chipsMore, setChipsMore] = useState(false);
+  const checkChips = useCallback(() => {
+    const el = chipRowRef.current;
+    setChipsMore(!!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const { toast } = useToast();
   const { profile } = useAuth();
@@ -442,7 +441,7 @@ export default function Quotes() {
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
   const checkboxCol: Column<QuoteRow> = {
-    ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`),
+    ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`, 'accent-crx-green'),
     header: (
       <input
         type="checkbox"
@@ -451,7 +450,7 @@ export default function Quotes() {
         ref={(el) => { if (el) el.indeterminate = someSelected; }}
         onChange={toggleAll}
         disabled={!hasSelectable}
-        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+        className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green accent-crx-green"
       />
     ),
   };
@@ -644,12 +643,24 @@ export default function Quotes() {
 
   const columns = canBulkAction ? [checkboxCol, ...dataColumns] : dataColumns;
 
+  // Built from the sortable columns, so a newly sortable column shows up here too; value = the key:dir a header click sets.
+  const sortOptions = [
+    { value: AS_LISTED, label: 'As listed' },
+    ...dataColumns.filter((c) => c.sortable).flatMap((c) => {
+      const [name, up, down] = SORT_WORDS[c.key] ?? [typeof c.header === 'string' ? c.header : c.key, 'A to Z', 'Z to A'];
+      return [{ value: `${c.key}:asc`, label: `${name}, ${up}` }, { value: `${c.key}:desc`, label: `${name}, ${down}` }];
+    }),
+  ];
+
   // Phone card (Style D list row): number and status, customer, then tier, planned and expiry beside the total.
   const mobileRow = (row: QuoteRow) => {
     const pastDue = isPastDue(row);
     return (
       // The quote-number button stretches over the whole card (after:inset-0); the checkbox and menu sit above it.
-      <div className="relative flex flex-col gap-1.5 px-3.5 py-2.5">
+      <div
+        data-selected={selected.has(row.id)}
+        className={`relative flex flex-col gap-1.5 px-3.5 py-2.5 ${selected.has(row.id) ? 'ring-2 ring-inset ring-crx-green bg-crx-green-tint' : ''}`}
+      >
         <div className="flex items-center gap-2">
           {canBulkAction && DELETABLE.includes(row.status) && (
             <label className="relative z-10 -ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{checkboxCol.render?.(row)}</label>
@@ -715,7 +726,7 @@ export default function Quotes() {
             ref={(el) => { if (el) el.indeterminate = someSelected; }}
             onChange={toggleAll}
             disabled={!hasSelectable}
-            className="h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green focus:ring-crx-green disabled:opacity-50"
+            className="h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green focus:ring-crx-green accent-crx-green disabled:opacity-50"
           />
           <span className="truncate tabular-nums">
             {selecting ? <><strong className="font-semibold text-nav-dark">{selectedCount}</strong> of {selectableCount} selected</> : countText}
@@ -724,6 +735,8 @@ export default function Quotes() {
       ) : (
         <span className="truncate tabular-nums">{countText}</span>
       )}
+      {/* The planned-programs tip lives here on phones, which keeps the chip row short. */}
+      <HelpTip className="shrink-0" text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />
       {clearButton}
     </div>
   ) : (
@@ -740,6 +753,15 @@ export default function Quotes() {
   );
 
   const showPrepaid = rolloverRows.some((b) => (b.prepay_remaining_cents ?? 0) > 0 || (b.prepay_earmarked_cents ?? 0) > 0);
+
+  useEffect(() => {
+    checkChips();
+    const el = chipRowRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(checkChips);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [checkChips, loading, isPhone, statusFilter, plannedFilter, sort]);
 
   if (loading) {
     return (
@@ -893,7 +915,11 @@ export default function Quotes() {
               />
             </div>
             {/* One row of chips; on a narrow phone it scrolls inside itself instead of widening the page. */}
-            <div className="-my-1 flex min-w-0 items-center gap-1.5 overflow-x-auto py-1 [scrollbar-width:none] md:shrink-0 md:gap-2 md:overflow-visible">
+            <div
+              ref={chipRowRef}
+              onScroll={checkChips}
+              className={`-my-1 flex min-w-0 items-center gap-1.5 overflow-x-auto py-1 scrollbar-hide md:shrink-0 md:gap-2 md:overflow-visible ${chipsMore ? 'max-md:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]' : ''}`}
+            >
               <Dropdown
                 inline
                 label="Status"
@@ -901,37 +927,39 @@ export default function Quotes() {
                 active={!!statusFilter}
                 onChange={(v) => setStatusFilter(v === ALL ? '' : v)}
                 options={STATUS_OPTIONS}
-                className="shrink-0"
+                className="shrink-0 max-md:[&>button]:gap-1.5 max-md:[&>button]:px-2.5"
               />
               <button
                 type="button"
                 aria-label="Planned programs"
                 aria-pressed={plannedFilter}
                 onClick={() => setPlannedFilter(!plannedFilter)}
-                className={`inline-flex h-11 md:h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 md:gap-2 md:px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
+                className={`inline-flex h-11 md:h-10 shrink-0 items-center gap-1.5 rounded-full border px-2.5 md:gap-2 md:px-3.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30 ${plannedFilter ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
               >
                 {plannedFilter ? <Check className="w-4 h-4" aria-hidden="true" /> : <Plus className="w-4 h-4" aria-hidden="true" />}
-                <span className="md:hidden">Planned</span>
-                <span className="hidden md:inline">Planned programs</span>
+                {/* Short below lg too: a narrow card (sidebar open) keeps room for the search. */}
+                <span className="lg:hidden">Planned</span>
+                <span className="hidden lg:inline">Planned programs</span>
               </button>
               {/* Phones have no column headers, so the sort lives here (the same key and direction a header click sets). */}
               {isPhone && (
                 <Dropdown
                   inline
-                  aria-label="Sort quotes"
+                  aria-label="Sort order"
                   icon={<ArrowUpDown className={`h-4 w-4 shrink-0 ${sort.key ? '' : 'text-gray-500'}`} aria-hidden="true" />}
                   value={sort.key ? `${sort.key}:${sort.dir}` : AS_LISTED}
-                  valueLabel={sort.key ? undefined : 'Sort'}
+                  // Hidden from the name so it reads "Sort order", not "Sort Sort order"; a chosen sort reads first.
+                  valueLabel={sort.key ? undefined : <span aria-hidden="true">Sort</span>}
                   active={!!sort.key}
                   onChange={(v) => {
                     const [key, dir] = v.split(':');
                     setSort(v === AS_LISTED ? { key: null, dir: 'asc' } : { key, dir: dir as SortDir });
                   }}
-                  options={SORT_OPTIONS}
-                  className="shrink-0"
+                  options={sortOptions}
+                  className="shrink-0 max-md:[&>button]:gap-1.5 max-md:[&>button]:px-2.5"
                 />
               )}
-              <HelpTip className="shrink-0" text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />
+              {!isPhone && <HelpTip className="shrink-0" text="Planned quotes reserve inventory but aren't committed orders yet. Turn on Planned programs to see all of them." />}
             </div>
           </div>
           {resultsLine}

@@ -6,7 +6,7 @@ import Badge from './Badge';
 export interface BulkAction {
   key: string;
   label: string;
-  /** dock mode: the short visible text (the full label stays the accessible name). */
+  /** dock mode, and bar mode below lg: the short visible text (the full label stays the accessible name). */
   shortLabel?: string;
   icon: ReactNode;
   onClick: () => void;
@@ -36,7 +36,7 @@ export default function BulkActionBar({ selectedCount, actions, onDeselectAll, b
     <button
       type="button"
       onClick={onDeselectAll}
-      className="h-11 md:h-10 rounded-lg px-2 text-sm font-medium text-crx-green hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
+      className="h-11 md:h-10 shrink-0 rounded-lg px-2 text-sm font-medium text-crx-green hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green/30"
     >
       Deselect
     </button>
@@ -73,9 +73,10 @@ export default function BulkActionBar({ selectedCount, actions, onDeselectAll, b
   if (bar) {
     return (
       <div role="region" aria-label="Bulk actions" className="flex h-full min-h-12 items-center gap-2 bg-crx-green-light pl-4 pr-3">
-        <span className="text-sm font-semibold text-nav-dark tabular-nums">{selectedCount} selected</span>
+        <span className="shrink-0 text-sm font-semibold text-nav-dark tabular-nums">{selectedCount} selected</span>
         {deselect}
-        <div className="ml-auto flex gap-2">
+        {/* Narrow cards (sidebar open below lg) get the short labels; scrolls only as a last resort. */}
+        <div className="ml-auto flex min-w-0 gap-2 overflow-x-auto scrollbar-hide">
           {actions.map((action) => (
             <Button
               key={action.key}
@@ -84,9 +85,15 @@ export default function BulkActionBar({ selectedCount, actions, onDeselectAll, b
               onClick={action.onClick}
               loading={action.loading}
               disabled={action.disabled}
-              className="h-10"
+              aria-label={action.shortLabel ? action.label : undefined}
+              className="h-10 shrink-0"
             >
-              {action.label}
+              {action.shortLabel ? (
+                <>
+                  <span className="lg:hidden">{action.shortLabel}</span>
+                  <span className="hidden lg:inline">{action.label}</span>
+                </>
+              ) : action.label}
             </Button>
           ))}
         </div>

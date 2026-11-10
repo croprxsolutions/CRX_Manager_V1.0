@@ -5026,7 +5026,22 @@ export type Database = {
           set_at?: string
           set_by?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "invoice_standing_discount_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_standing_discount_rates_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invoices: {
         Row: {

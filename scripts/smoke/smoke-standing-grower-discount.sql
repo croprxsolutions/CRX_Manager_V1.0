@@ -17,6 +17,9 @@
 --   L  A customer's rate changes while they have an open Bill Split payer draft: the customer save succeeds
 --   M  A posted Bill Split group unposts after a payer's rate changes, and its amounts stay as posted
 --   N  The office's rate moved from 3% to 3.01%: the line's label follows even when the cents don't change
+--   O  The discount's own audit entry: an 'invoice_updated' record with the change in total, so the trail adds up
+--   P  A rate change keeps every field of the draft's lines (rate per acre, acres, price source)
+--   Q  A new empty chemical-sale draft records its customer's rate at commit
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -501,6 +504,60 @@ BEGIN
     v_fails := v_fails || format(' (N) the label is %s, want Standing discount 3.01%%;',
       COALESCE((SELECT description FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'), 'missing'));
   END IF;
+
+  -- O: the group's main payer (v_invoice) was discounted at drafting; its trail has the discount's own entry.
+  IF NOT EXISTS (SELECT 1 FROM financial_audit_log WHERE entity_id = v_invoice AND operation_type = 'invoice_updated'
+                   AND description LIKE 'Standing discount%' AND total_impact_cents < 0) THEN
+    v_fails := v_fails || ' (O) no audit entry records the standing discount''s change to the total;';
+  END IF;
+
+  -- P: line fields survive the office's rate change (set as owner on a fresh 3% delivery draft's product line).
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+    VALUES ('SMK-DSP-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, quantity_delivered, quantity_remaining)
+    VALUES (v_order, v_product.id, '[SMOKE] Fields kept', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+      10, (v_product.current_cost + 1.37) * 10, 0, 10) RETURNING id INTO v_line;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    VALUES ('SMK-DSP-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    VALUES (v_delivery, v_line, v_product.id, 10, 'gal');
+  PERFORM confirm_delivery(v_delivery, v_admin, 'smk-dsp-confirm-' || v_suffix);
+  PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+    'smk-dsp-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; fields kept');
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND invoice_type <> 'credit_memo';
+  BEGIN
+    UPDATE invoice_items SET rate_per_acre = 1.5, acres = 10, rate_unit = 'gal/ac', notes = '[SMOKE] keep me'
+     WHERE invoice_id = v_invoice AND product_id IS NOT NULL;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    PERFORM set_invoice_standing_discount(v_invoice, 1, 'smk-dsp-rate-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (P) setting up or changing the rate failed: ' || SQLERRM || ';';
+  END;
+  IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND product_id IS NOT NULL
+                   AND rate_per_acre = 1.5 AND acres = 10 AND rate_unit = 'gal/ac' AND notes = '[SMOKE] keep me') THEN
+    v_fails := v_fails || ' (P) the rate change dropped fields from the draft''s product line;';
+  END IF;
+
+  -- Q: an empty chemical-sale draft (inserted directly on a fresh order: the app's paths always draft with lines) records
+  -- its customer's 3% at commit.
+  BEGIN
+    INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+      VALUES ('SMK-DSQ-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+    INSERT INTO invoices (order_id, customer_id, invoice_type, status, invoice_date, salesman_id, created_by, total_amount_cents)
+      VALUES (v_order, v_customer, 'chemical_sale', 'draft', CURRENT_DATE, v_admin, v_admin, 0) RETURNING id INTO v_invoice;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_invoice) IS DISTINCT FROM 3 THEN
+      v_fails := v_fails || format(' (Q) the new empty draft recorded rate %s, want 3;',
+        (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_invoice));
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (Q) creating an empty chemical-sale draft failed: ' || SQLERRM || ';';
+  END;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL standing grower discount:%', v_fails;

@@ -178,8 +178,9 @@ DECLARE
   v_label text;
   v_pct numeric;
   v_same boolean;
+  v_new_total bigint;
 BEGIN
-  SELECT i.id, i.customer_id, i.invoice_type INTO v_inv
+  SELECT i.id, i.customer_id, i.invoice_type, i.total_amount_cents, i.created_by INTO v_inv
     FROM invoices i
    WHERE i.id = p_invoice_id AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
    FOR UPDATE;
@@ -224,9 +225,19 @@ BEGIN
             (SELECT COALESCE(max(sort_order), 0) + 1 FROM invoice_items WHERE invoice_id = v_inv.id),
             'standing_discount');
   END IF;
-  UPDATE invoices
-     SET total_amount_cents = (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items WHERE invoice_id = v_inv.id)
-   WHERE id = v_inv.id;
+  v_new_total := (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items WHERE invoice_id = v_inv.id);
+  UPDATE invoices SET total_amount_cents = v_new_total WHERE id = v_inv.id;
+  -- The writers logged the draft's total before this line went in; this entry records the change, so the trail adds up.
+  IF v_new_total IS DISTINCT FROM v_inv.total_amount_cents THEN
+    INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
+                                     total_impact_cents, description)
+    VALUES ('invoice_updated', 'invoice', v_inv.id, COALESCE(auth.uid(), v_inv.created_by),
+            (SELECT role FROM profiles WHERE id = COALESCE(auth.uid(), v_inv.created_by)),
+            jsonb_build_object('total_amount_cents', v_inv.total_amount_cents),
+            jsonb_build_object('total_amount_cents', v_new_total, 'standing_discount_cents', v_cents, 'rate_pct', v_pct),
+            v_new_total - v_inv.total_amount_cents,
+            CASE WHEN v_cents > 0 THEN v_label ELSE 'Standing discount removed' END);
+  END IF;
   PERFORM set_config('app.crx_standing_discount_busy', '', true);
 END
 $function$;
@@ -268,6 +279,11 @@ CREATE FUNCTION public._standing_discount_after_invoice_change_20261231()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
+  -- A draft moved to another customer drops a rate it copied from the old one (an office rate stays), so the
+  -- recompute records the new customer's.
+  IF TG_OP = 'UPDATE' AND OLD.customer_id IS DISTINCT FROM NEW.customer_id THEN
+    DELETE FROM invoice_standing_discount_rates WHERE invoice_id = NEW.id AND set_by IS NULL;
+  END IF;
   PERFORM public._recompute_standing_discount_20261231(NEW.id);
   RETURN NULL;
 END
@@ -275,9 +291,10 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._standing_discount_after_invoice_change_20261231() FROM PUBLIC, anon, authenticated;
 
--- A draft moved to another customer, or back to draft, takes that customer's discount.
+-- A new draft records its customer's rate; a draft moved to another customer, switched in type or unposted is
+-- checked again (an unposted invoice keeps its recorded rate, so its posted amounts don't move).
 CREATE CONSTRAINT TRIGGER invoices_standing_discount_20261231
-  AFTER UPDATE OF customer_id, status, invoice_type ON public.invoices
+  AFTER INSERT OR UPDATE OF customer_id, status, invoice_type ON public.invoices
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION public._standing_discount_after_invoice_change_20261231();
 
@@ -417,10 +434,8 @@ BEGIN
     'status', v_inv.status, 'season', v_inv.season, 'salesman_id', v_inv.salesman_id, 'invoice_date', v_inv.invoice_date,
     'due_date', v_inv.due_date, 'payment_terms', v_inv.payment_terms, 'purchase_order_ref', v_inv.purchase_order_ref,
     'header_notes', v_inv.header_notes, 'footer_notes', v_inv.footer_notes);
-  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', it.id, 'order_item_id', it.order_item_id, 'product_id', it.product_id,
-           'description', it.description, 'quantity', it.quantity, 'unit_price_cents', it.unit_price_cents,
-           'extended_cents', it.extended_cents, 'cost_cents', it.cost_cents, 'sort_order', it.sort_order,
-           'unit_size', it.unit_size, 'notes', it.notes, 'charge_type', it.charge_type, 'vendor', it.vendor) ORDER BY it.sort_order), '[]'::jsonb)
+  -- Every field of every line, so the re-save keeps acres, rates, price source and the rest exactly as they are.
+  SELECT COALESCE(jsonb_agg(to_jsonb(it) ORDER BY it.sort_order, it.id), '[]'::jsonb)
     INTO v_items FROM invoice_items it WHERE it.invoice_id = v_inv.id;
   PERFORM public.save_invoice(v_header, v_items, 'set_invoice_standing_discount:' || gen_random_uuid()::text);
   PERFORM public._recompute_standing_discount_20261231(v_inv.id);

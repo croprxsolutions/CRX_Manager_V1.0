@@ -2549,7 +2549,8 @@ export interface BlendRecipeItem {
 
 export type InvoiceType = 'chemical_sale' | 'field_application' | 'misc_charge' | 'credit_memo';
 /** invoice_items.charge_type (CHECK invoice_items_charge_type_check, mig 20261021050000). */
-export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other';
+// 'standing_discount' is written only by the database (billing plan M4b); it is never offered as a type to pick.
+export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other' | 'standing_discount';
 export type InvoiceStatus = 'draft' | 'unposted' | 'posted' | 'paid' | 'overdue' | 'voided' | 'cancelled';
 
 export interface Invoice {

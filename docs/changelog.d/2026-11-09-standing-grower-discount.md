@@ -7,4 +7,5 @@
 - The office can change or remove the rate on one sale's draft (`set_invoice_standing_discount`, kept in its own `invoice_standing_discount_rates` table).
 - The line is worked out by the database on every draft save, so it can't be counted twice or edited by hand.
 - A return of a discounted sale credits the discounted price; partial returns add up to what was billed.
+- The invoice editor shows the discount line read-only and saves a discounted draft (it used to refuse the negative line as a $0 charge).
 - No screen yet; commission after the discount comes with the commission PR (week 4).

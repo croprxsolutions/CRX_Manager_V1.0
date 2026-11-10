@@ -664,7 +664,10 @@ BEGIN
     SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
     v_fails := v_fails || ' (V) lines were added to a chemical sale created already posted;';
   EXCEPTION WHEN OTHERS THEN
-    v_case := SQLERRM;   -- refused: right (recorded for the report)
+    -- Refused by the existing rule that an invoice is created as a draft; any other error is a broken fixture.
+    IF SQLERRM NOT LIKE 'Invoices must be created with status draft%' THEN
+      v_fails := v_fails || ' (V) refused for another reason: ' || SQLERRM || ';';
+    END IF;
   END;
 
   -- W: the anonymous role.

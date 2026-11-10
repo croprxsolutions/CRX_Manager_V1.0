@@ -7,8 +7,9 @@ on:
   pull_request:
     branches: [staging]
     types: [closed, labeled, unlabeled, edited]
-# unlabeled/edited only refresh the release gate, which re-reads labels and proof every time.
-# A deleted comment is picked up at the next refresh (push, label change or Thursday).
+  issue_comment:
+    types: [edited, deleted]
+# unlabeled/edited and comment edits only refresh the release gate, which re-reads labels and proof.
 
 permissions: {}
 
@@ -17,6 +18,7 @@ jobs:
     name: Release labels
     # Fork PRs get a read-only token; labels are only managed on this repository's branches.
     if: >-
+      github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       ((github.event.action == 'closed' && github.event.pull_request.merged) ||
        github.event.action == 'edited' ||
@@ -62,3 +64,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
         # Before the first release puts release-pr.yml on main there is nothing to refresh.
         run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
+
+  refresh-on-comment:
+    # An edited or deleted comment may have held a proof line: let the release gate re-read it.
+    name: Refresh release gate
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."

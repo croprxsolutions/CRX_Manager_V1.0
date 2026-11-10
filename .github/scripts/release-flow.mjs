@@ -101,6 +101,18 @@ export function versionFromTitle(title) {
   return m ? m[1] : null;
 }
 
+// The releaser's version wins only if it is newer than everything shipped (tags + main's package.json).
+export function releaseVersion(title, shipped) {
+  const auto = nextVersion(shipped, 'release');
+  const typed = versionFromTitle(title);
+  if (!typed) return auto;
+  const floor = nextVersion(shipped, 'hotfix'); // one patch past the newest shipped version
+  const n = (v) => SEMVER.exec(v).slice(1).map(Number);
+  const [a, b] = [n(typed), n(floor)];
+  const cmp = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  return cmp >= 0 ? typed : auto;
+}
+
 const CHORE_TYPES = new Set(['refactor', 'chore', 'docs', 'ci', 'build', 'test', 'perf', 'style']);
 
 export function groupChangelog(prs) {
@@ -131,33 +143,43 @@ export function changelogMarkdown(g) {
 const NOTHING = /^(none|nothing|n\/a|-)\.?$/i;
 
 // What a PR says users will notice: a "What users see: …" line, or a "## What users see" list.
+// "None" means nothing; the template's "<…>" placeholder counts as not filled in.
 export function usersSee(body) {
   const text = body ?? '';
-  const line = /^\s*what users see:[ \t]*(.*)$/im.exec(text);
-  if (line) return line[1].trim() && !NOTHING.test(line[1].trim()) ? [line[1].trim()] : [];
-  const section = /^#+\s*what users see\s*$/im.exec(text);
+  const line = /^[ \t]*what users see:[ \t]*(.*)$/im.exec(text);
+  const said = line?.[1].trim() ?? '';
+  if (NOTHING.test(said)) return [];
+  if (said && !said.startsWith('<')) return [said];
+  const section = /^[ ]{0,3}#+\s*what users see\s*$/im.exec(text);
   if (!section) return [];
   const out = [];
   for (const l of text.slice(section.index + section[0].length).split('\n')) {
-    if (/^#/.test(l)) break;
+    if (/^[ ]{0,3}#/.test(l)) break;
     const item = l.replace(/^\s*[-*]\s*/, '').trim();
-    if (item && !NOTHING.test(item)) out.push(item);
+    if (item && !NOTHING.test(item) && !item.startsWith('<') && !/^what users see:/i.test(item)) out.push(item);
   }
   return out;
 }
 
-// The release can merge only when every included PR is verified on staging (with its proof link
-// still there) or held off (with its reason still there). Read fresh each run, so deleting the
-// evidence after labelling turns the gate red again.
+// A PR's release state, read fresh each run: held-off needs its reason (and wins over verified),
+// verified needs its proof link still present.
+export function prState(p) {
+  const texts = [p.body, ...(p.comments ?? [])];
+  if (p.labels.includes('held-off')) return heldOffNote(texts) ? 'held' : 'missing';
+  if (p.labels.includes('verified-on-staging')) return proofLink(texts) ? 'verified' : 'missing';
+  return 'unverified';
+}
+
+// The release can merge only when every included PR is verified (with proof) or held off (with a
+// reason). Deleting the evidence after labelling turns the gate red again at the next refresh.
 export function gateState(prs, orphans) {
   const blocking = [];
   for (const p of prs) {
-    const texts = [p.body, ...(p.comments ?? [])];
-    if (p.labels.includes('held-off') && heldOffNote(texts)) continue;
-    if (p.labels.includes('verified-on-staging') && proofLink(texts)) continue;
-    blocking.push(p.labels.includes('verified-on-staging') || p.labels.includes('held-off') ? `#${p.number} (label without its proof or reason)` : `#${p.number}`);
+    const state = prState(p);
+    if (state === 'missing') blocking.push(`#${p.number} (label without its proof or reason)`);
+    else if (state === 'unverified') blocking.push(`#${p.number}`);
   }
-  blocking.push(...orphans.map((s) => `commit without a PR: ${s}`));
+  blocking.push(...orphans.map((x) => `commit without a PR: ${x}`));
   return { ok: blocking.length === 0 && prs.length + orphans.length > 0, blocking };
 }
 
@@ -245,6 +267,15 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 26 }).trim();
 }
 
+function isAncestor(a, b) {
+  try {
+    git('merge-base', '--is-ancestor', a, b);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Today's date where Taha works (the release opens Thursday 08:00 Dubai).
 function dubaiDate(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(now);
@@ -273,7 +304,7 @@ function summaryMarkdown(prs, gate) {
 
 function statusMarkdown(prs, orphans) {
   const row = (p) => {
-    const state = p.labels.includes('verified-on-staging') ? '✅ verified' : p.labels.includes('held-off') ? '⏸️ held off' : '❌ not verified';
+    const state = { verified: '✅ verified', held: '⏸️ held off', missing: '❌ label without proof or reason', unverified: '❌ not verified' }[prState(p)];
     const proof = proofLink([p.body, ...(p.comments ?? [])]);
     return `| #${p.number} | ${p.title.replace(/\|/g, '\\|')} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
   };
@@ -290,11 +321,15 @@ const commands = {
   },
   // Collects what staging has that main lacks; writes $RUNNER_TEMP/release.json for the next steps.
   async 'release-plan'() {
-    const lines = git('log', '--first-parent', '--no-merges', '--format=%H%x09%s', 'origin/main..origin/staging').split('\n').filter(Boolean);
+    // Merge commits count too (a PR merged with a merge commit); only back-merges and catch-ups,
+    // whose second parent is already on main, are skipped.
+    const lines = git('log', '--first-parent', '--format=%H%x09%P%x09%s', 'origin/main..origin/staging').split('\n').filter(Boolean);
     const prs = [];
     const orphans = [];
     for (const line of lines) {
-      const [sha, subject] = line.split('\t');
+      const [sha, parents, subject] = line.split('\t');
+      const second = parents.split(' ')[1];
+      if (second && isAncestor(second, 'origin/main')) continue;
       const p = pickPr(sha, await gh(`/commits/${sha}/pulls`));
       if (!p) orphans.push(subject);
       else if (!prs.some((x) => x.number === p.number)) {
@@ -305,7 +340,12 @@ const commands = {
     const [existing] = await gh(`/pulls?state=open&base=main&head=${owner}:release/next`);
     // Tags plus main's package.json, so a forgotten tag never reuses a shipped version.
     const tags = [...git('tag', '--list', 'v*').split('\n').filter(Boolean), `v${JSON.parse(git('show', 'origin/main:package.json')).version}`];
-    const version = versionFromTitle(existing?.title) ?? nextVersion(tags, 'release');
+    const version = releaseVersion(existing?.title, tags);
+    // Until this run posts the new result, the open release PR's gate is "pending", so a run that
+    // fails half-way can't leave an old green gate behind.
+    if (existing) {
+      await gh(`/statuses/${existing.head.sha}`, { method: 'POST', body: { state: 'pending', context: 'release-gate', description: 'Release PR is being refreshed' } });
+    }
     const migrations = git('diff', '--name-only', '--diff-filter=A', 'origin/main...origin/staging', '--', 'supabase/migrations')
       .split('\n').filter(Boolean).map((f) => f.split('/').pop());
     const gate = gateState(prs, orphans);
@@ -381,7 +421,6 @@ const commands = {
     else if (pr.head.repo?.full_name !== process.env.GITHUB_REPOSITORY || !/^hotfix\/[^/]+$/.test(pr.head.ref)) problem = 'not a hotfix/<name> branch of this repository';
     else {
       git('fetch', '--no-tags', 'origin', sha);
-      const isAncestor = (a, b) => { try { git('merge-base', '--is-ancestor', a, b); return true; } catch { return false; } };
       if (!isAncestor('origin/main', sha)) problem = 'missing commits from main';
       else if (!isAncestor(git('merge-base', sha, 'origin/staging'), 'origin/main')) problem = 'carries staging work that has not been released';
     }

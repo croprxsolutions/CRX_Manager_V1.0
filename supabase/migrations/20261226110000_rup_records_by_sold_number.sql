@@ -74,14 +74,26 @@ $preflight$;
 -- ---------------------------------------------------------------------------------------------
 
 -- A posted line has its restricted-use record when an active record has its invoice, product, unit and unit
--- price (posting writes one per each, under the product's number) and that record's quantity and amount are the sum of every
--- line on the invoice sharing them (an older record written for only some of those lines does not count).
+-- price (posting writes one per each, under the product's number) and that record's quantity and amount are the sum of
+-- the restricted-use lines on the invoice sharing them, as posting counts them (any Yes: the product's tick, its
+-- number's registration, or the line's saved number's registration). When none of them is restricted-use now, the
+-- sum of all of them, so a record kept from before still covers its sale. An older record written for only some of
+-- those lines does not count.
 CREATE FUNCTION public._rup_record_covers_line(p_line public.invoice_items) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT EXISTS (SELECT 1
                    FROM public.rup_sales_records s,
-                        LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
+                        LATERAL (SELECT COALESCE(sum(o.quantity) FILTER (WHERE o_rup), sum(o.quantity)) AS quantity,
+                                        COALESCE(sum(o.extended_cents) FILTER (WHERE o_rup), sum(o.extended_cents))::bigint
+                                          AS total_cents
                                    FROM public.invoice_items o
+                                   JOIN public.products op ON op.id = o.product_id
+                                   LEFT JOIN public.epa_registrations opr
+                                     ON opr.epa_registration = public._normalize_epa_registration(op.epa_registration)
+                                   LEFT JOIN public.epa_registrations olr
+                                     ON olr.epa_registration = public._normalize_epa_registration(o.epa_registration),
+                                   LATERAL (SELECT COALESCE(op.is_rup OR opr.rup_status = 'yes' OR olr.rup_status = 'yes',
+                                                            false) AS o_rup) q
                                   WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
                                     AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
                                     AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
@@ -197,7 +209,7 @@ BEGIN
     -- REG-1 (sheet 4.C): lines need a record when ANY Yes says so: the product's tick, its number's registration,
     -- or the registration of the number saved on a line (Mason, 2026-11-09, "Yes, any Yes", after Sol round 5).
     -- They record under the product's number (blank when it has none). One record per product, unit and unit
-    -- price, holding every line sharing them (so it matches the coverage rule); one Yes line records the group.
+    -- price, holding only the restricted-use lines sharing them (the coverage rule counts the same lines; Sol r6).
     OPEN v_items FOR
       SELECT ii.product_id, p.product_name, sum(ii.quantity) AS quantity,
              COALESCE(ii.unit_size, 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
@@ -209,9 +221,9 @@ BEGIN
         LEFT JOIN epa_registrations r ON r.epa_registration = public._normalize_epa_registration(p.epa_registration)
         LEFT JOIN epa_registrations lr ON lr.epa_registration = public._normalize_epa_registration(ii.epa_registration)
        WHERE ii.invoice_id = p_invoice_id
+         AND (p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes')
        GROUP BY ii.product_id, p.product_name, public._normalize_epa_registration(p.epa_registration),
                 COALESCE(r.signal_word, p.signal_word), COALESCE(ii.unit_size, 'Unit not set'), ii.unit_price_cents
-      HAVING bool_or(p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes')
        ORDER BY ii.product_id, 4, 5;
   ELSE
     OPEN v_items FOR
@@ -332,6 +344,7 @@ BEGIN
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            public._normalize_epa_registration(p.epa_registration) AS epa_registration, ii.quantity,
            r.rup_status AS registration_rup_status, p.is_rup AS product_is_rup,
+           lr.rup_status AS line_registration_rup_status,
            COALESCE(p.is_rup OR r.rup_status = 'yes' OR lr.rup_status = 'yes', false) AS restricted_use,
            public._rup_record_covers_line(ii) AS has_record
       FROM invoice_items ii
@@ -349,13 +362,15 @@ BEGIN
            'reason', CASE WHEN epa_registration IS NULL THEN 'no_epa_number'
                           WHEN restricted_use THEN 'restricted_use_to_record'
                           WHEN registration_rup_status IS NULL THEN 'no_registration'
-                          ELSE 'not_reviewed' END)
+                          ELSE 'not_reviewed' END)  -- includes a Not reviewed number saved on the line
            ORDER BY invoice_date, invoice_number, line_id), '[]'::jsonb)
     INTO v_out
     FROM lines
    -- a number whose registration is missing or Not reviewed is listed too (sheet 4.C: unknown lines are findable)
+   -- and so is a line whose saved number's registration is Not reviewed (Sol r6 MED)
    WHERE (epa_registration IS NOT NULL AND NOT has_record
-          AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'))
+          AND (restricted_use OR registration_rup_status IS DISTINCT FROM 'no'
+               OR line_registration_rup_status = 'unknown'))
       OR (epa_registration IS NULL AND (restricted_use OR has_record));
   RETURN v_out;
 END;

@@ -23,6 +23,8 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in session, 2026-11-09: "Yes" to "any Yes records it", after Sol round 5 on PR #1688):** Sol would not pass the accepted gap above (a product moved from a restricted-use number to a non-restricted one before posting got no record and left the list), and Sol has no owner override, so the gap is closed instead. A sale needs a restricted-use record when ANY Yes says so: the product's tick, its number's registration, or the registration of the number saved on the line. The record still goes under the product's number at posting. **Why:** a wrong number saved on a line can only add a record, never lose one, and re-posting clears anything Sales to check lists, because posting and the list use the same rule. This replaces the round 4 trade-off above.
 
+**Follow-on (Sol round 6 on PR #1688, implementing the decision above):** a record counts only the lines that are restricted-use under that rule (a same-price line saved under a No number is not added in), and a sale saved under a Not reviewed number stays on Sales to check even when its product's number now says No.
+
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.

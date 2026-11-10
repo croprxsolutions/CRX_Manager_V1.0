@@ -557,6 +557,17 @@ async function main() {
     `${N1}|Caution,${N1}|Caution,${N1}|Caution`);
   raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents IN (1600, 1900, 2000);
     DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2a')}'); UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
+  // Only the restricted-use lines count (Sol r6 HIGH): two P3 lines at one price, one saved under N2 (Yes), one under
+  // N1 (No), record a quantity of 1, both count as recorded, and a repeat writes nothing.
+  raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration) VALUES
+      ('${L6}', '${INV1}', '${P3}', 'x', 1, 'Gal', 2400, 2400, '${N2}'),
+      ('${id('2a')}', '${INV1}', '${P3}', 'x', 1, 'Gal', 2400, 2400, '${N1}');`);
+  assert.equal(ok(ADMIN, GEN('g4h')), '1');
+  assert.equal(scalar(`SELECT quantity || '|' || total_cents FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2400;`), '1.0000|2400');
+  assert.equal(scalar(`SELECT bool_and(public._rup_record_covers_line(ii))::text FROM public.invoice_items ii WHERE id IN ('${L6}', '${id('2a')}');`), 'true');
+  assert.equal(ok(ADMIN, GEN('g4i')), '0');
+  raw(`DELETE FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND unit_price_cents = 2400;
+    DELETE FROM public.invoice_items WHERE id IN ('${L6}', '${id('2a')}');`);
   // The product's number's registration records it when the product is not ticked: P4 unticked, N2 says Yes, the line
   // carries N1 (No) and still records, under N2.
   raw(`UPDATE public.products SET is_rup = false WHERE id = '${P4}';
@@ -619,6 +630,10 @@ async function main() {
     UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N1}';`);
   assert.equal(reasons()[L6], 'restricted_use_to_record');
   assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N2}') @> jsonb_build_array(jsonb_build_object('invoice_item_id', '${L6}'::uuid)))::text;`), 'true');
+  // A Not reviewed number saved on the line keeps it listed though its product's number says No (Sol r6 MED).
+  raw(`UPDATE public.epa_registrations SET rup_status = 'unknown' WHERE epa_registration = '${N2}';`);
+  assert.equal(reasons()[L6], 'not_reviewed');
+  raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   raw(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   // A number with no registration, or a Not reviewed one, is listed even when its product is not ticked (Luna r13 HIGH).
   raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${P1}';`);

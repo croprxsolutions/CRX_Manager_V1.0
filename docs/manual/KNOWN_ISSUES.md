@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110061547`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -502,7 +502,9 @@ this number is fixed and live (archive, 2026-11-05).
 
 ### KI-114 — Four kinds of old product rate data are wrong or have no rate basis
 **MED · OPEN, planned (RT-2/RT-3) · products/rates · found 2026-11-08 ([RT-1 build sheet](../plans/2026-11-08-product-RT1-BUILD-SHEET.md) section 1)**
-RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
+RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
+(PR #1706, open) has its unit converter live (`20261229160000`, ledger `20261110061547`); its spelling remap
+`20261229170000` is not live (2026-11-10). Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
 - Seed treatments: the 9 liquid seed treatments with `/unit` text store the per-seed-unit number as a per-acre rate
   (Ilevo 2.5 Gal: `1.18 oz` "per acre", text `1.18 oz/unit`), so a quote multiplies it by acres. RT-3.
 - Liquid unit on a dry product: `Autumn Super 51 WDG` and `Cimarron Plus - 10 oz` are dry with `rate_unit = 'oz'`.
@@ -535,12 +537,14 @@ RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive not
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (sender live; app switch in PR #1649) · UI/database/Edge Function · Claude**
+**MED · OPEN (sender and app switch live; close action live in the database, not on a screen yet) · UI/database/Edge Function · Claude**
 The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
 save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
 2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
-that asks for the server receipt is PR #1649; it must not land before the sender's secrets are stored. Not built:
-provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+that asks for the server receipt (PR #1649) merged 2026-11-09. Not built: provider bounce handling (no email
+bounces are tracked today on any path). The database half of a "mark handled" action is live
+(`20261221100000_close_delivery_receipt`, ledger `20261109152447`, PR #1678), but no screen calls it yet (checked on
+`main` 2026-11-10), so the points below still hold. The office
 card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
 Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
 chose (2026-11-08) to land the app switch first; the close action is a follow-up migration PR.

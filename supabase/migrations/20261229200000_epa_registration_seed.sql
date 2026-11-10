@@ -234,10 +234,14 @@ BEGIN
   END LOOP;
 
   -- Capture every invoice line that exists, posted or not, from the facts now (Mason, 2026-11-10, "Capture it at
-  -- save"; sheet 4.C). The table lock above holds every line writer off, so none is left uncaptured.
+  -- save"; sheet 4.C). The table lock above holds every line writer off, so none is left uncaptured. A line already
+  -- posted is marked seed_posted, so Sales to check lists it for a person (Mason, 2026-11-10; Sol r9).
   INSERT INTO public.invoice_line_rup_captures (invoice_item_id, epa_registration, rup_status, signal_word, source)
-  SELECT ii.id, f.epa_registration, f.rup_status, f.signal_word, 'seed'
-    FROM public.invoice_items ii, LATERAL public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f
+  SELECT ii.id, f.epa_registration, f.rup_status, f.signal_word,
+         CASE WHEN i.status IN ('posted', 'paid', 'overdue') THEN 'seed_posted' ELSE 'seed' END
+    FROM public.invoice_items ii
+    JOIN public.invoices i ON i.id = ii.invoice_id
+   CROSS JOIN LATERAL public._invoice_line_rup_facts(ii.product_id, ii.epa_registration) f
    WHERE ii.product_id IS NOT NULL;
   GET DIAGNOSTICS v_line_count = ROW_COUNT;
 

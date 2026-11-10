@@ -464,7 +464,9 @@ async function main() {
   const seeded = okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1'));
   const productLines = Number(scalar('SELECT count(*) FROM public.invoice_items WHERE product_id IS NOT NULL;'));
   assert.deepEqual(seeded, { registrations: 4, lines_captured: productLines, rup_default: 'no', fingerprint: pv.fingerprint });
-  assert.equal(scalar("SELECT count(*) FROM public.invoice_line_rup_captures WHERE source = 'seed';"), String(productLines));
+  assert.equal(scalar("SELECT count(*) FROM public.invoice_line_rup_captures WHERE source IN ('seed', 'seed_posted');"), String(productLines));
+  // A line on an invoice already posted is marked seed_posted (Sol r9): only L3, on posted INV2.
+  assert.equal(scalar("SELECT string_agg(invoice_item_id::text, ',') FROM public.invoice_line_rup_captures WHERE source = 'seed_posted';"), L3);
   assert.deepEqual(okJ(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's1')), seeded);
   refused(ADMIN, SEED({}, 'no', pv.fingerprint, 's1'), /IDEMPOTENCY|mismatch|another request/i);
   refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's2'), /EPA_REGISTRATION_SEED_DONE/);
@@ -524,7 +526,7 @@ async function main() {
   const lineAt = (lid, inv, pid, qty, cents, n = null) => `INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, epa_registration)
     VALUES ('${lid}', '${inv}', '${pid}', '[PROVER] line', ${qty}, 'Gal', ${cents}, ${cents * qty}, ${q(n)});`;
   // The seed captured every line (case 5): L4's size was ticked only afterwards (case 6), so L4 stays No.
-  assert.deepEqual([cap(L1), cap(L2), cap(L3), cap(L4)], [`no|${N1}|Warning|seed`, 'no|||seed', `yes|${N2}|Danger|seed`, 'no|||seed']);
+  assert.deepEqual([cap(L1), cap(L2), cap(L3), cap(L4)], [`no|${N1}|Warning|seed`, 'no|||seed', `yes|${N2}|Danger|seed_posted`, 'no|||seed']);
   ownerOk(line(L5, INV1, P4, 3));
   assert.equal(num(L5), N2);
   assert.equal(cap(L5), `yes|${N2}|Danger|save`);
@@ -543,6 +545,12 @@ async function main() {
   ownerOk(`UPDATE public.invoice_items SET quantity = 5, extended_cents = 7500 WHERE id = '${L5}';`);
   ownerOk(`UPDATE public.invoice_items SET unit_price_cents = 1500, epa_registration = ' ${N2} ' WHERE id = '${L5}';`);
   assert.equal(cap(L5), `yes|${N2}|Danger|save`);
+  // A Yes always wins (Mason, 2026-11-10): a changed number re-captures, but on the same product never turns a Yes
+  // back, here to Not reviewed (999-9 unregistered, N2 now No, tick off).
+  ownerOk(`UPDATE public.invoice_items SET epa_registration = '999-9' WHERE id = '${L5}';`);
+  assert.equal(cap(L5), `yes|${N2}|Danger|save`);
+  ownerOk(`UPDATE public.invoice_items SET epa_registration = '${N2}' WHERE id = '${L5}';`);
+  assert.equal(cap(L5), `yes|${N2}|Danger|save`);
   // A new line saved now is No; a changed saved number re-captures (999-9 has no registration: Not reviewed).
   ownerOk(lineAt(L6, INV1, P4, 1, 1600));
   assert.equal(cap(L6), `no|${N2}|Danger|save`);
@@ -554,12 +562,20 @@ async function main() {
   ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}'; UPDATE public.products SET is_rup = true WHERE id = '${P4}';`);
   ownerOk(`UPDATE public.invoice_items SET quantity = 3, extended_cents = 4500 WHERE id = '${L5}';`);
-  // A blank line filled with its size's later number during a price edit keeps its capture (Astra 2026-11-10).
+  // Sol r9 HIGH 2: a blank line filled with its size's later (Yes) number during a price edit re-captures Yes.
   ownerOk(lineAt(L6, INV1, P2, 1, 1600));
   assert.equal(cap(L6), 'no|||save');
   raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P2}';`);
   ownerOk(`UPDATE public.invoice_items SET unit_price_cents = 1650, extended_cents = 1650 WHERE id = '${L6}';`);
-  assert.equal(num(L6), N2); assert.equal(cap(L6), 'no|||save');
+  assert.equal(num(L6), N2); assert.equal(cap(L6), `yes|${N2}|Danger|save`);
+  ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
+  raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}';`);
+  // Sol r9 HIGH 1: the writer setting a blank line to its size's new (Yes) number re-captures Yes.
+  ownerOk(lineAt(L6, INV1, P2, 1, 1600));
+  assert.equal(cap(L6), 'no|||save');
+  raw(`UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P2}';`);
+  ownerOk(`UPDATE public.invoice_items SET epa_registration = '${N2}' WHERE id = '${L6}';`);
+  assert.equal(cap(L6), `yes|${N2}|Danger|save`);
   ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}';`);
   // A number typed onto a blank line that its size does not carry is a new sale fact and re-captures (Luna 2026-11-10).
@@ -659,7 +675,17 @@ async function main() {
   assert.equal(reasons()[L3], 'restricted_use_to_record');
   // Recording it now writes the record the capture asks for, which takes it off the list.
   assert.equal(ok(ADMIN, GEN(INV2, 'g7')), '1');
-  assert.equal(reasons()[L3], undefined);
+  // Posted before the seed, it stays listed for a person even when recorded (Mason, 2026-11-10; Sol r9).
+  assert.equal(reasons()[L3], 'posted_before_seed');
+  // Sol r9 HIGH 4: a line posted before the seed whose product had been unticked by then is captured No from the
+  // seed day's facts; with no record and every number now No, it is still listed.
+  raw(`UPDATE public.invoice_line_rup_captures SET rup_status = 'no' WHERE invoice_item_id = '${L3}';
+    UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV2}';
+    UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N2}';`);
+  assert.equal(reasons()[L3], 'posted_before_seed');
+  raw(`UPDATE public.invoice_line_rup_captures SET rup_status = 'yes' WHERE invoice_item_id = '${L3}';
+    UPDATE public.rup_sales_records SET voided_at = NULL WHERE invoice_id = '${INV2}';
+    UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);
   // A sale captured No or Not reviewed whose number is now registered Yes is listed for a person (posting never adds it);
   // reviewed No, it leaves the list.
   raw(`INSERT INTO public.epa_registrations (epa_registration, rup_status, created_by, updated_by) VALUES ('999-9', 'no', '${ADMIN}', '${ADMIN}');`);

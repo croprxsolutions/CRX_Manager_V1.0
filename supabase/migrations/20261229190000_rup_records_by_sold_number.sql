@@ -12,9 +12,10 @@
 -- WHAT:
 --   - invoice_line_rup_captures (private, RLS on, no grants): one row per invoice line, removed with its line.
 --   - _invoice_line_rup_facts(product, saved number): the capture rule, read in one statement.
---   - trg_zz_capture_invoice_line_rup (AFTER INSERT OR UPDATE OF product_id, epa_registration on invoice_items),
---     after the seed only: captures every new product line, and re-captures when the product changes or the saved
---     number changes to a different one. A blank number being filled, or a price, quantity or unit edit, keeps it.
+--   - trg_zz_capture_invoice_line_rup (AFTER INSERT OR UPDATE on invoice_items), after the seed only: captures every
+--     new product line, and re-captures when the product changes or the saved number changes, a blank number filled
+--     in included (by the writer or by _fill_invoice_line_epa). A price, quantity or unit edit keeps it. A re-capture
+--     on the same product never turns a Yes back (Mason, 2026-11-10, "a Yes always wins").
 --   - generate_rup_sales_records re-issued (md5 pinned): before the seed, today's rule. After it, posting first
 --     captures any line without a capture (source 'posting'), then writes one record per product, captured number,
 --     captured signal word, unit and unit price for the 'yes' lines. An active record matching all of those with a
@@ -79,7 +80,7 @@ CREATE TABLE public.invoice_line_rup_captures (
   epa_registration text,  -- the product's own number, normalized; NULL when the product has none
   rup_status text NOT NULL CHECK (rup_status IN ('yes', 'no', 'unknown')),
   signal_word text,
-  source text NOT NULL CHECK (source IN ('save', 'seed', 'posting')),
+  source text NOT NULL CHECK (source IN ('save', 'seed', 'seed_posted', 'posting')),
   captured_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.invoice_line_rup_captures OWNER TO postgres;
@@ -112,6 +113,8 @@ $function$;
 
 CREATE FUNCTION public._capture_invoice_line_rup() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_same_product boolean;
 BEGIN
   IF NOT public._epa_registrations_seeded() THEN
     RETURN NULL;  -- before the seed nothing is captured; the seed captures every line that exists
@@ -120,36 +123,32 @@ BEGIN
     DELETE FROM public.invoice_line_rup_captures WHERE invoice_item_id = NEW.id;
     RETURN NULL;
   END IF;
-  -- Kept unless the product changed or the saved number changed to a different number. A blank number filled in with
-  -- the captured number or the size's own number (by the writer or by _fill_invoice_line_epa) is not a new sale fact;
-  -- any other number filled in is, and re-captures (Luna 2026-11-10). The trigger fires only on these columns, so a
-  -- price, quantity or unit edit never reaches here.
+  -- Kept unless the product changed or the saved number changed. Any change re-captures, a blank number filled in
+  -- included, whether the writer or _fill_invoice_line_epa filled it (Sol r9: the fill can ride a price edit, so the
+  -- trigger fires on every update and compares here). A price, quantity or unit edit keeps the capture.
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-     AND EXISTS (SELECT 1 FROM public.invoice_line_rup_captures c
-                   JOIN public.products p ON p.id = NEW.product_id
-                  WHERE c.invoice_item_id = NEW.id
-                    AND CASE WHEN public._normalize_epa_registration(OLD.epa_registration) IS NULL
-                             THEN public._normalize_epa_registration(NEW.epa_registration) IS NULL
-                               OR public._normalize_epa_registration(NEW.epa_registration) = c.epa_registration
-                               OR public._normalize_epa_registration(NEW.epa_registration)
-                                  = public._normalize_epa_registration(p.epa_registration)
-                             ELSE public._normalize_epa_registration(NEW.epa_registration)
-                                  IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration) END) THEN
+     AND public._normalize_epa_registration(NEW.epa_registration)
+         IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration)
+     AND EXISTS (SELECT 1 FROM public.invoice_line_rup_captures c WHERE c.invoice_item_id = NEW.id) THEN
     RETURN NULL;
   END IF;
+  v_same_product := TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id;
   PERFORM public._epa_registration_lock(false);
-  INSERT INTO public.invoice_line_rup_captures (invoice_item_id, epa_registration, rup_status, signal_word, source)
+  INSERT INTO public.invoice_line_rup_captures AS c (invoice_item_id, epa_registration, rup_status, signal_word, source)
   SELECT NEW.id, f.epa_registration, f.rup_status, f.signal_word, 'save'
     FROM public._invoice_line_rup_facts(NEW.product_id, NEW.epa_registration) f
   ON CONFLICT (invoice_item_id) DO UPDATE
-    SET epa_registration = EXCLUDED.epa_registration, rup_status = EXCLUDED.rup_status,
+    SET epa_registration = EXCLUDED.epa_registration,
+        -- a Yes always wins (Mason, 2026-11-10): a re-capture on the same product never turns a Yes back
+        rup_status = CASE WHEN v_same_product AND c.rup_status = 'yes' THEN 'yes' ELSE EXCLUDED.rup_status END,
         signal_word = EXCLUDED.signal_word, source = EXCLUDED.source, captured_at = now();
   RETURN NULL;
 END;
 $function$;
 
--- AFTER, so it reads the row as saved (after trg_fill_invoice_line_epa filled a blank number).
-CREATE TRIGGER trg_zz_capture_invoice_line_rup AFTER INSERT OR UPDATE OF product_id, epa_registration
+-- AFTER, so it reads the row as saved (after trg_fill_invoice_line_epa filled a blank number). Every column: the
+-- function decides whether the product or the saved number changed.
+CREATE TRIGGER trg_zz_capture_invoice_line_rup AFTER INSERT OR UPDATE
   ON public.invoice_items FOR EACH ROW EXECUTE FUNCTION public._capture_invoice_line_rup();
 
 -- ---------------------------------------------------------------------------------------------
@@ -497,6 +496,9 @@ BEGIN
            CASE WHEN rup_status IS NULL THEN 'not_captured'
                 WHEN epa_registration IS NULL AND (rup_status = 'yes' OR has_record) THEN 'no_epa_number'
                 WHEN rup_status = 'yes' AND NOT covered THEN 'restricted_use_to_record'
+                -- a line already posted at the seed, on a product with a number, was captured from the facts on the
+                -- seed day, which may not be the ones it sold under: a person looks at it (Mason, 2026-11-10; Sol r9)
+                WHEN capture_source = 'seed_posted' AND epa_registration IS NOT NULL THEN 'posted_before_seed'
                 WHEN rup_status = 'yes' THEN NULL
                 WHEN has_record THEN NULL
                 WHEN registration_rup_status_now = 'yes' OR saved_registration_rup_status_now = 'yes' THEN 'now_restricted_use'

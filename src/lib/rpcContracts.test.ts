@@ -3163,7 +3163,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // REG-1 Step 2 (local candidate 20261229190000): trigger function, never called as an RPC.
   _capture_invoice_line_rup:
-    'AFTER INSERT/UPDATE OF product_id, epa_registration row trigger on invoice_items (after the seed only): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
+    'AFTER INSERT/UPDATE row trigger on invoice_items (after the seed only; re-captures only on a product or saved-number change): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
   _record_customer_document_restore:
     'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',

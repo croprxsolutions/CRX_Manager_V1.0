@@ -36,13 +36,13 @@ A unit is **blank** when it is NULL or only spaces, tabs, line breaks or non-bre
    when the product has one. Never refuses. Other updates never touch it (no backfill by side effect).
 2. **Invoice line fill.** A sale line tied to an order line (`order_item_id` set, no return-credit source, quantity not
    negative) inserted, or whose unit or order line is written, with a blank unit takes the order line's unit, else the
-   order line's product unit. Never refuses. Trigger `a0_fill_invoice_line_unit` sorts before every other BEFORE
+   order line's product unit, unless its unit already equals its order line's exactly. Never refuses. Trigger `a0_fill_invoice_line_unit` sorts before every other BEFORE
    trigger on `invoice_items`, so their checks see the final unit.
 3. **Delivery completion never fails on a unit.** Neither fill can raise; nothing new runs on `deliveries` or
    `delivery_items`; the container proof completes deliveries with every trigger enabled.
 4. **Posting refusal.** Any update moving an invoice (not a credit memo) from a non-financial status into `posted`,
    `paid` or `overdue` is refused (`INVOICE_LINE_UNIT_MISSING`, naming the lines) while a positive, non-credit sale
-   line tied to an order line still has a blank unit. Trigger `zz_refuse_post_blank_unit_line` has no column list and
+   line tied to an order line still has a blank unit not equal to its order line's. Trigger `zz_refuse_post_blank_unit_line` has no column list and
    sorts after the other status triggers, so a status set by an earlier trigger is still checked. Staff fix: set the
    product's unit, save the draft (the fill runs again), post. A group post refuses as a whole, naming the invoice.
 5. **Order invoice refusal (kept).** `create_invoice_from_order` refuses an order with a line with no unit
@@ -124,3 +124,11 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
     decides (KI-76).
   - MED, the order-invoice message promised a retry the delivered cap still refuses: fixed; the screen now says
     "Set each line's unit on the order before billing it".
+- **Sol r2** (1 HIGH, 1 LOW):
+  - HIGH, an existing order line and invoice line that both hold the same blank text (e.g. `''`) are credited
+    today; the fill would give the invoice line the product unit and break that return: fixed. The fill and the
+    posting refusal now leave alone a line whose unit already equals its order line's exactly (the value returns
+    match on). Proved with an empty-text legacy line: unchanged, posts and is credited, before and after. Live: 0
+    such pairs; the only 2 blank invoice lines tied to an order line are the two NULL drafts.
+  - LOW, the screen message drops the line names the database gives: deferred. Staff see which invoice; the
+    database message (in the error log) names the lines.

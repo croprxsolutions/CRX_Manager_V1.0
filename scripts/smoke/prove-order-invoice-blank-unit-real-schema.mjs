@@ -254,6 +254,8 @@ const CASES = { null: [id('e1'), id('e11'), 'NULL'], empty: [id('e3'), id('e31')
 const MIXED = id('e4'); const MIXED_GAL = id('e41'); const MIXED_BLANK = id('e42');
 // Delivery side: order line written before the candidate with no unit (an existing legacy line).
 const LEGACY = id('e5'); const LEGACY_LINE = id('e51');
+// ...and one written before the candidate with an empty-text unit, delivered as empty text: today it credits.
+const LEGACY_E = id('e6'); const LEGACY_E_LINE = id('e61');
 const NO_PROOF_SIGNER = 'No proof — recorded by office';
 // Delivery cases: [order, line, delivery, product, order-line unit, delivery-line unit, line inserted in the probe?]
 const DCASES = {
@@ -262,6 +264,7 @@ const DCASES = {
   tab: [id('d5'), id('d51'), id('d52'), PROD, "E'\t'", "E'\t'", true],
   gal: [id('d3'), id('d31'), id('d32'), PROD, "'gal'", "'gal'", true],
   legacy: [LEGACY, LEGACY_LINE, id('d42'), PROD, null, 'NULL', false],
+  legacyempty: [LEGACY_E, LEGACY_E_LINE, id('d62'), PROD, null, "''", false],
 };
 
 function claims(uid) {
@@ -295,14 +298,16 @@ function seed() {
     INSERT INTO public.orders (id, order_number, customer_id, salesman_id, order_date, status) VALUES
       ${Object.entries(CASES).map(([k, [o]]) => `('${o}', 'PROVER-OU-${k}', '${CUST}', '${REP}', current_date, 'confirmed')`).join(',\n      ')},
       ('${MIXED}', 'PROVER-OU-mixed', '${CUST}', '${REP}', current_date, 'confirmed'),
-      ('${LEGACY}', 'PROVER-DU-legacy', '${CUST}', '${REP}', current_date, 'confirmed')
+      ('${LEGACY}', 'PROVER-DU-legacy', '${CUST}', '${REP}', current_date, 'confirmed'),
+      ('${LEGACY_E}', 'PROVER-DU-legacyempty', '${CUST}', '${REP}', current_date, 'confirmed')
       ON CONFLICT (id) DO UPDATE SET salesman_id = EXCLUDED.salesman_id;
     INSERT INTO public.order_items (id, order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
         total_units_needed, total_price, quantity_delivered, quantity_remaining, sort_order) VALUES
       ${Object.values(CASES).map(([o, l, u]) => `('${l}', '${o}', '${PROD}', '[PROVER] Herbicide', ${u}, 10, 6, 2, 20, 2, 0, 0)`).join(',\n      ')},
       ('${MIXED_GAL}', '${MIXED}', '${PROD}', '[PROVER] Herbicide', 'gal', 10, 6, 2, 20, 2, 0, 0),
       ('${MIXED_BLANK}', '${MIXED}', '${PROD}', '[PROVER] No Unit', NULL, 10, 6, 1, 10, 1, 0, 1),
-      ('${LEGACY_LINE}', '${LEGACY}', '${PROD}', '[PROVER] Herbicide', NULL, 10, 6, 2, 20, 0, 2, 0)
+      ('${LEGACY_LINE}', '${LEGACY}', '${PROD}', '[PROVER] Herbicide', NULL, 10, 6, 2, 20, 0, 2, 0),
+      ('${LEGACY_E_LINE}', '${LEGACY_E}', '${PROD}', '[PROVER] Herbicide', '', 10, 6, 2, 20, 0, 2, 0)
       ON CONFLICT (id) DO UPDATE SET unit_size = EXCLUDED.unit_size;`);
   assert.equal(scalar(`SELECT string_agg(coalesce('[' || unit_size || ']', '<null>'), ',' ORDER BY id) FROM public.order_items
     WHERE order_id IN (${Object.values(CASES).map(([o]) => `'${o}'`).join(',')});`), '<null>,[gal],[ \t]');
@@ -469,13 +474,15 @@ function main() {
   seed();
   const settingsBefore = settings();
 
-  const dBefore = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit'), gal: deliver('gal'), legacy: deliver('legacy') };
+  const dBefore = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit'), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty') };
   console.log(`[prover] BEFORE delivery side: ${JSON.stringify(dBefore)}`);
   assert.deepEqual(dBefore.fill, { order: '<null>', done: 'true completed', unit: '<null>', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
     'BEFORE: a delivered line with no unit is invoiced blank, posts, and its return credit is refused');
   assert.equal(dBefore.tab.post, 'posted', 'BEFORE: a tab-only unit posts');
   assert.equal(dBefore.nounit.post, 'posted', 'BEFORE: a unitless product line posts blank');
   assert.equal(dBefore.legacy.post, 'posted', 'BEFORE: an existing no-unit line posts blank');
+  assert.deepEqual(dBefore.legacyempty, { order: '', done: 'true completed', unit: '', post: 'posted', credit: 'posted -1  -1000' },
+    'BEFORE: an existing empty-text order line and its empty-text invoice line match, so the return is credited');
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
@@ -494,7 +501,7 @@ function main() {
     .map((n) => `${n} true search_path=public, pg_temp falsefalsefalse`).join('; '), 'new trigger functions: definer, pinned path, no API execute');
   console.log(`[prover] candidate applied once (body md5 ${md5()}); a second apply refuses at the preflight; settings and grants unchanged (${settingsBefore})`);
 
-  const dAfter = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit', { fix: true }), gal: deliver('gal'), legacy: deliver('legacy') };
+  const dAfter = { fill: deliver('fill'), tab: deliver('tab'), nounit: deliver('nounit', { fix: true }), gal: deliver('gal'), legacy: deliver('legacy'), legacyempty: deliver('legacyempty') };
   console.log(`[prover] AFTER delivery side: ${JSON.stringify(dAfter)}`);
   const GOOD = { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' };
   assert.deepEqual(dAfter.fill, GOOD, 'AFTER: a new line with no unit takes the product unit; the invoice line carries it, posts and is credited');
@@ -509,6 +516,7 @@ function main() {
   assert.deepEqual(dAfter.legacy, { order: '<null>', done: 'true completed', unit: 'gal', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
     'AFTER: an existing order line with no unit invoices with the product unit and posts; its return stays refused, as today');
   assert.deepEqual(dAfter.gal, dBefore.gal, 'AFTER: a line with a unit is unchanged');
+  assert.deepEqual(dAfter.legacyempty, dBefore.legacyempty, 'AFTER: a line whose unit already equals its order line (empty text) is left alone, posts and is credited, as today');
 
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);

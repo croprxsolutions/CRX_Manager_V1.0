@@ -218,7 +218,9 @@ CREATE FUNCTION public._fill_invoice_line_unit()
 AS $function$
 BEGIN
   IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' AND NEW.order_item_id IS NOT NULL
-     AND NEW.return_credit_source_item_id IS NULL AND COALESCE(NEW.quantity, 0) >= 0 THEN
+     AND NEW.return_credit_source_item_id IS NULL AND COALESCE(NEW.quantity, 0) >= 0
+     -- A line whose unit already equals its order line's (e.g. both empty text) is credited today: leave it.
+     AND NOT EXISTS (SELECT 1 FROM public.order_items oi WHERE oi.id = NEW.order_item_id AND oi.unit_size = NEW.unit_size) THEN
     NEW.unit_size := COALESCE(
       (SELECT COALESCE(CASE WHEN COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') <> '' THEN oi.unit_size END,
                        CASE WHEN COALESCE(btrim(p.unit_size, E' \t\r\n' || chr(160)), '') <> '' THEN p.unit_size END)
@@ -247,7 +249,9 @@ BEGIN
     FROM public.invoice_items ii
    WHERE ii.invoice_id = NEW.id AND ii.order_item_id IS NOT NULL AND ii.quantity > 0
      AND ii.return_credit_source_item_id IS NULL
-     AND COALESCE(btrim(ii.unit_size, E' \t\r\n' || chr(160)), '') = '';
+     AND COALESCE(btrim(ii.unit_size, E' \t\r\n' || chr(160)), '') = ''
+     -- Same exemption as the fill: a unit equal to its order line's still matches its return.
+     AND NOT EXISTS (SELECT 1 FROM public.order_items oi WHERE oi.id = ii.order_item_id AND oi.unit_size = ii.unit_size);
   IF v_lines IS NOT NULL THEN
     RAISE EXCEPTION 'INVOICE_LINE_UNIT_MISSING: invoice % has a line with no unit (%). Set the unit on the product, save the draft invoice, then post it again',
       NEW.invoice_number, v_lines

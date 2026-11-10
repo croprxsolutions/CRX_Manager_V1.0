@@ -284,7 +284,11 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.blend_ticket_products b LEFT JOIN public.products p ON p.id = b.product_id
                  WHERE public.rate_unit_line_refusal(
                          COALESCE(NULLIF(btrim(public.unit_fold_invisible(b.rate_per_acre_unit)), ''), p.rate_unit),
-                         b.product_id IS NOT NULL) IS NOT NULL) THEN
+                         b.product_id IS NOT NULL) IS NOT NULL)
+     -- Billing does not fold before its blank test, so a stored invisible-only unit would fail there (live: 0 rows).
+     OR EXISTS (SELECT 1 FROM public.blend_ticket_products b
+                 WHERE btrim(COALESCE(b.rate_per_acre_unit, '')) <> ''
+                   AND btrim(public.unit_fold_invisible(b.rate_per_acre_unit)) = '') THEN
     RAISE EXCEPTION 'KI16_RATE_UNIT_POSTFLIGHT: an existing line would be refused; review it before applying';
   END IF;
 END;

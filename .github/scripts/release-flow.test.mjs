@@ -41,6 +41,7 @@ test('heldOffNote needs some text after "Held off:"', () => {
   assert.equal(heldOffNote(['Held off: https://github.com/o/r/pull/9']), 'https://github.com/o/r/pull/9');
   assert.equal(heldOffNote(['Held off:', 'Held off:   ']), null);
   assert.equal(heldOffNote(['Held off: maybe later']), null);
+  assert.equal(heldOffNote(['Held off: https://example.com/weather']), null);
 });
 
 test('a back-merge PR has main as its head', () => {

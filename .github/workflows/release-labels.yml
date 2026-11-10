@@ -22,8 +22,6 @@ jobs:
        (github.event.action == 'labeled' &&
         contains(fromJSON('["on-staging","verified-on-staging","held-off"]'), github.event.label.name)))
     runs-on: ubuntu-latest
-    concurrency:
-      group: release-labels-${{ github.event.pull_request.number }}
     permissions:
       contents: read
       issues: write
@@ -32,15 +30,26 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       ACTION: ${{ github.event.action }}
     steps:
-      # The rules come from staging as it was before this PR (its base commit), never from the PR.
+      # The rules come from staging as it was before this PR: the parent of its merge commit once
+      # merged, its base commit before that. Never the PR's own copy of the script.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: staging
+          fetch-depth: 0
           persist-credentials: false
       - id: script
+        env:
+          MERGED: ${{ github.event.pull_request.merged }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -f .github/scripts/release-flow.mjs ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
-          else echo "::notice::No release flow script on staging before this PR yet."; fi
-      - run: |
-          if [ "$ACTION" = "closed" ]; then node .github/scripts/release-flow.mjs mark-on-staging
-          else node .github/scripts/release-flow.mjs check-label; fi
+          if [ "$MERGED" = "true" ]; then src="$MERGE_SHA^1"; else src="$BASE_SHA"; fi
+          if git show "$src:.github/scripts/release-flow.mjs" > "$RUNNER_TEMP/release-flow.mjs" 2>/dev/null; then
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No release flow script on staging before this PR yet."
+          fi
+      - if: steps.script.outputs.ok && (github.event.action == 'closed' || github.event.action == 'labeled')
+        run: |
+          if [ "$ACTION" = "closed" ]; then node "$RUNNER_TEMP/release-flow.mjs" mark-on-staging
+          else node "$RUNNER_TEMP/release-flow.mjs" check-label; fi

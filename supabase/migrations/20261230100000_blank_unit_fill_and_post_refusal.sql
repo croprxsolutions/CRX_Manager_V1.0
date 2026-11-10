@@ -13,7 +13,8 @@
 --
 -- Delivery side (below): a new order line takes the product unit; an invoice line takes its order line
 -- unit, else the product unit, when written; neither ever stops a delivery from completing. Posting
--- refuses a sale line that still has no unit (INVOICE_LINE_UNIT_MISSING). Existing rows are not changed.
+-- refuses a sale line that still has no unit (INVOICE_LINE_UNIT_MISSING). A quick-delivery line always
+-- records its product's unit. Existing rows are not changed.
 
 DO $preflight$
 DECLARE
@@ -184,7 +185,7 @@ $function$;
 
 -- A new order line (or one whose product changes) with no unit takes the product's unit.
 -- Delivery lines take their unit from the order line (NewDelivery, DeliveryDetail) or, for a quick
--- delivery, from the product (which also inserts its order line with no unit), so they agree with this
+-- delivery, from the product (locked below; it also inserts its order line with no unit), so they agree with this
 -- fill. Live 2026-11-10: 0 of 406 delivery lines have a unit their order line lacks or differs from.
 CREATE FUNCTION public._fill_order_line_unit()
  RETURNS trigger
@@ -263,9 +264,30 @@ BEGIN
 END;
 $function$;
 
+-- A quick-delivery line always records its product's own unit, whatever unit the request named (Mason,
+-- 2026-11-10). The app's quick-delivery screen sends the product's unit, so nothing it does changes; a request
+-- built outside the app can no longer record a delivery in one unit (e.g. case) while the order and invoice
+-- lines carry the product's (e.g. Gal) and are credited in it. Never refuses: a driver is never stopped.
+-- Live 2026-11-10: 0 quick-delivery lines.
+CREATE FUNCTION public._lock_quick_delivery_line_unit()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.product_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.deliveries d WHERE d.id = NEW.delivery_id AND d.is_quick_delivery) THEN
+    NEW.unit_size := (SELECT p.unit_size FROM public.products p WHERE p.id = NEW.product_id);
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
 REVOKE ALL ON FUNCTION public._fill_order_line_unit() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._fill_invoice_line_unit() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public._refuse_post_blank_unit_line() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._lock_quick_delivery_line_unit() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER trg_fill_order_line_unit
   BEFORE INSERT OR UPDATE OF product_id ON public.order_items
@@ -274,6 +296,10 @@ CREATE TRIGGER trg_fill_order_line_unit
 CREATE TRIGGER a0_fill_invoice_line_unit
   BEFORE INSERT OR UPDATE OF unit_size, order_item_id, product_id ON public.invoice_items
   FOR EACH ROW EXECUTE FUNCTION public._fill_invoice_line_unit();
+
+CREATE TRIGGER a0_lock_quick_delivery_line_unit
+  BEFORE INSERT ON public.delivery_items
+  FOR EACH ROW EXECUTE FUNCTION public._lock_quick_delivery_line_unit();
 
 CREATE TRIGGER zz_refuse_post_blank_unit_line
   BEFORE UPDATE ON public.invoices
@@ -312,17 +338,19 @@ $ki76_block$, '')) <> '454e04c4e199549a4f5be9975e397e17'
   END IF;
   IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public'
-         AND p.proname IN ('_fill_order_line_unit', '_fill_invoice_line_unit', '_refuse_post_blank_unit_line')
+         AND p.proname IN ('_fill_order_line_unit', '_fill_invoice_line_unit', '_refuse_post_blank_unit_line',
+                           '_lock_quick_delivery_line_unit')
          AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
          AND pg_get_userbyid(p.proowner) = 'postgres'
          AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
          AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
-         AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) <> 3
+         AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) <> 4
      OR (SELECT count(*) FROM pg_trigger t
           WHERE NOT t.tgisinternal AND t.tgenabled = 'O'
             AND (t.tgrelid, t.tgname) IN (('public.order_items'::regclass, 'trg_fill_order_line_unit'),
                                           ('public.invoice_items'::regclass, 'a0_fill_invoice_line_unit'),
-                                          ('public.invoices'::regclass, 'zz_refuse_post_blank_unit_line'))) <> 3 THEN
+                                          ('public.delivery_items'::regclass, 'a0_lock_quick_delivery_line_unit'),
+                                          ('public.invoices'::regclass, 'zz_refuse_post_blank_unit_line'))) <> 4 THEN
     RAISE EXCEPTION 'POSTFLIGHT_BLANK_UNIT_TRIGGERS';
   END IF;
 END;

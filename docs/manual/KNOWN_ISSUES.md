@@ -1053,7 +1053,9 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   unit; a sale line with no unit takes the order line's unit, else the product's; a delivery always completes, and
   posting a chemical-sale invoice is refused (`INVOICE_LINE_UNIT_MISSING`) while any product line, with or without an
   order line, still has no unit (Mason, 2026-11-10: no sale line posts without a unit); `create_invoice_from_order`
-  refuses a no-unit line (`ORDER_LINE_UNIT_MISSING`). Not backfilled (Mason's call): 2 open drafts have a line with
+  refuses a no-unit line (`ORDER_LINE_UNIT_MISSING`); a quick-delivery line always records its product's unit
+  (Mason, 2026-11-10). Known limit: an old line whose order and invoice units are both empty text (0 live) is filled
+  with the product unit and its return is refused. Not backfilled (Mason's call): 2 open drafts have a line with
   no unit (2026-11-10): **CS-2026-0056** and **CS-2026-0070**, one customer, a `Gal` product. Once applied, posting
   either is refused until it is saved (it then takes `Gal`); a return on them stays refused, because their order
   lines also have no unit (5 such order lines, all on fulfilled orders). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a

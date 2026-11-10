@@ -39,8 +39,12 @@ A unit is **blank** when it is NULL or only spaces, tabs, line breaks or non-bre
    order line's unit, else the product's (the order line's product, or its own). A line with no order line is filled
    only on a chemical-sale invoice. Never refuses. Trigger `a0_fill_invoice_line_unit` sorts before every other BEFORE
    trigger on `invoice_items`, so their checks see the final unit.
-3. **Delivery completion never fails on a unit.** Neither fill can raise; nothing new runs on `deliveries` or
-   `delivery_items`; the container proof completes deliveries with every trigger enabled.
+3. **Delivery completion never fails on a unit.** No fill can raise; the container proof completes deliveries with
+   every trigger enabled.
+3a. **Quick-delivery lines carry the product's unit (Mason, 2026-11-10, after Sol r4).** A delivery line inserted on a
+   quick delivery always records its product's own unit, whatever unit the request named
+   (`a0_lock_quick_delivery_line_unit` on `delivery_items`). Never refuses. The app's screen already sends the
+   product's unit, so nothing it does changes; live has 0 quick-delivery lines.
 4. **Posting refusal (Mason, 2026-11-10: no sale line posts without a unit).** Any update moving a chemical-sale
    invoice from a non-financial status into `posted`, `paid` or `overdue` is refused (`INVOICE_LINE_UNIT_MISSING`,
    naming the lines) while any positive, non-credit product line, with or without an order line, has a blank unit.
@@ -60,7 +64,7 @@ A unit is **blank** when it is NULL or only spaces, tabs, line breaks or non-bre
    schema-qualified table names, EXECUTE revoked from PUBLIC, anon, authenticated and service_role. The order invoice
    function keeps its settings and grants (CREATE OR REPLACE).
 9. **Delivery.** Database plus two new screen messages in `src/lib/errorSanitizer.ts`. Works with the deployed app.
-10. **Rollback.** A reviewed migration that drops the three triggers and functions and re-emits `20260827041400`'s
+10. **Rollback.** A reviewed migration that drops the four triggers and functions and re-emits `20260827041400`'s
     order-invoice body (md5 `454e04c4…`).
 
 ## Proof cases (container: `scripts/smoke/prove-order-invoice-blank-unit-real-schema.mjs`)
@@ -157,3 +161,6 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
     only an API call outside the app differs (Sol r1's refuted case, from the quick-delivery side).
   - LOW, line names dropped from the screen message: deferred.
   Per AGENTS.md (same mechanism three rounds), patching stopped; the business trade-off went to Mason.
+  **Mason's decision (2026-11-10, "Yes, option A"):** quick-delivery lines are locked to the product's own unit
+  (item 3a, closes the second HIGH); the empty-text legacy pair (first HIGH, 0 live) is a written, accepted limit
+  (DECISION_LOG 2026-11-10). Sol round 5 runs with both written down.

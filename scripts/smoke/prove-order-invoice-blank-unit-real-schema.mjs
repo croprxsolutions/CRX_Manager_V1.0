@@ -462,11 +462,28 @@ ROLLBACK;` });
   if (res.post === undefined || res.credit === undefined) res.raw = /ERROR:.*/.exec(out)?.[0] ?? out.trim().slice(0, 800);
   return res;
 }
+// Quick delivery through the real RPC as the signed-in rep, naming a unit other than the product's ('case' on a
+// 'gal' product), as only a request built outside the app could. Reads the delivery, order and invoice line units.
+function quick() {
+  const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `BEGIN;
+${claims(REP)}
+SET LOCAL ROLE authenticated;
+CREATE TEMP TABLE q ON COMMIT DROP AS SELECT public.create_quick_delivery(p_customer_id => '${CUST}',
+  p_items => jsonb_build_array(jsonb_build_object('product_id', '${PROD}', 'quantity', 2, 'unit_size', 'case')),
+  p_performed_by => '${REP}', p_idempotency_key => gen_random_uuid()::text) AS res;
+RESET ROLE;
+SELECT 'QUICK=[' || (SELECT coalesce(di.unit_size, '<null>') FROM public.delivery_items di WHERE di.delivery_id = (q.res->>'delivery_id')::uuid)
+  || ',' || (SELECT coalesce(oi.unit_size, '<null>') FROM public.order_items oi WHERE oi.order_id = (q.res->>'order_id')::uuid)
+  || ',' || (SELECT coalesce(ii.unit_size, '<null>') FROM public.invoice_items ii WHERE ii.invoice_id = (q.res->>'invoice_id')::uuid) || ']' FROM q;
+ROLLBACK;` });
+  const out = `${r.stdout}\n${r.stderr}`;
+  return /QUICK=\[(.*)\]\s*$/m.exec(out)?.[1] ?? (/ERROR:.*/.exec(out)?.[0] ?? out.trim().slice(0, 800));
+}
 const FN = 'public._create_invoice_from_order_impl_20260718(uuid,uuid,text,text)';
 const md5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${FN}'::regprocedure;`);
 const settings = () => scalar(`SELECT prosecdef::text || ' ' || array_to_string(proconfig, ',') || ' ' || pg_get_userbyid(proowner) || ' '
   || coalesce(proacl::text, '<default>') FROM pg_proc WHERE oid = '${FN}'::regprocedure;`);
-const NEW_FNS = "('_fill_order_line_unit', '_fill_invoice_line_unit', '_refuse_post_blank_unit_line')";
+const NEW_FNS = "('_fill_order_line_unit', '_fill_invoice_line_unit', '_refuse_post_blank_unit_line', '_lock_quick_delivery_line_unit')";
 const newFnAcl = () => scalar(`SELECT string_agg(proname || ' ' || prosecdef::text || ' ' || array_to_string(proconfig, ',') || ' '
   || has_function_privilege('anon', oid, 'EXECUTE')::text || has_function_privilege('authenticated', oid, 'EXECUTE')::text
   || has_function_privilege('service_role', oid, 'EXECUTE')::text, '; ' ORDER BY proname) FROM pg_proc WHERE proname IN ${NEW_FNS};`);
@@ -497,6 +514,9 @@ function main() {
   assert.deepEqual([dBefore.handgal.unit, dBefore.handgal.post, dBefore.handno.unit, dBefore.handno.post], ['<null>', 'posted', '<null>', 'posted'],
     'BEFORE: a hand-replaced draft line with no order link and no unit posts blank');
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
+  const quickBefore = quick();
+  console.log(`[prover] BEFORE quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickBefore}`);
+  assert.equal(quickBefore, 'case,<null>,<null>', 'BEFORE: the delivery records the named unit; the order and invoice lines have none');
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
   assert.deepEqual(before, { null: { unit: '<null>' }, empty: { unit: ' \t' }, gal: { unit: 'gal' } }, 'BEFORE: each line is billed with its unit as is, blank included');
@@ -510,7 +530,7 @@ function main() {
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /PREFLIGHT_ORDER_INVOICE_UNIT_DRIFT/);
   assert.equal(settings(), settingsBefore, 'SECURITY DEFINER, search_path, owner and grants unchanged');
-  assert.equal(newFnAcl(), ['_fill_invoice_line_unit', '_fill_order_line_unit', '_refuse_post_blank_unit_line']
+  assert.equal(newFnAcl(), ['_fill_invoice_line_unit', '_fill_order_line_unit', '_lock_quick_delivery_line_unit', '_refuse_post_blank_unit_line']
     .map((n) => `${n} true search_path=public, pg_temp falsefalsefalse`).join('; '), 'new trigger functions: definer, pinned path, no API execute');
   console.log(`[prover] candidate applied once (body md5 ${md5()}); a second apply refuses at the preflight; settings and grants unchanged (${settingsBefore})`);
 
@@ -536,6 +556,9 @@ function main() {
   assert.equal(dAfter.handno.unit, '<null>', 'AFTER: a hand-replaced line whose product has no unit stays blank');
   assert.match(dAfter.handno.post ?? '', /^INVOICE_LINE_UNIT_MISSING: invoice \S+ has a line with no unit \(\[PROVER\] DU handno\)/,'AFTER: posting it is refused');
 
+  const quickAfter = quick();
+  console.log(`[prover] AFTER quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickAfter}`);
+  assert.equal(quickAfter, 'gal,gal,gal', "AFTER (Mason 2026-11-10): a quick delivery records the product's own unit on every line");
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);
   assert.deepEqual(after.null, { error: 'ORDER_LINE_UNIT_MISSING' }, 'AFTER: a line with no unit is refused');

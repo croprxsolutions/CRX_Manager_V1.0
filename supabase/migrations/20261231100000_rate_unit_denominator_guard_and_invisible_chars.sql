@@ -129,7 +129,11 @@ DECLARE
   v_canon text;
   v_probe text;
 BEGIN
-  IF v_raw = '' THEN RETURN NULL; END IF;
+  IF v_raw = '' THEN
+    -- Invisible-only: billing's blank test does not fold, so it normalizes to nothing (Luna round 3).
+    RETURN CASE WHEN p_check_characters AND btrim(COALESCE(p_rate_unit, '')) <> ''
+                THEN 'CHEM_UNIT_UNSUPPORTED_CHARACTER' END;
+  END IF;
   -- save_job's denominator rule (20260820120000 / 20260904185900), verbatim, on the invisible-folded unit: fold every
   -- separator except '/', strip ONE trailing per-acre suffix, refuse whatever denominator survives.
   v_canon := btrim(regexp_replace(v_raw, '[^a-z0-9/]+', ' ', 'g'));
@@ -215,6 +219,9 @@ BEGIN
   -- so a line unit of '' or spaces is checked through the product's unit exactly as billing reads it.
   v_unit := NULLIF(btrim(NEW.rate_per_acre_unit), '');
   IF v_unit IS NULL AND NEW.product_id IS NOT NULL THEN
+    -- Takes turns with guard_product_rate_unit_for_blend_lines, so a product edit committing at the same
+    -- moment cannot pass unseen (Luna round 3); the read below then sees the committed unit.
+    PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.product_id::text));
     SELECT p.rate_unit INTO v_unit FROM public.products p WHERE p.id = NEW.product_id;
   END IF;
   v_refusal := public.rate_unit_line_refusal(v_unit, NEW.product_id IS NOT NULL);
@@ -252,6 +259,7 @@ BEGIN
   IF NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit THEN RETURN NEW; END IF;
   v_refusal := public.rate_unit_line_refusal(NEW.rate_unit, true);
   IF v_refusal IS NULL THEN RETURN NEW; END IF;
+  PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.id::text));
   IF EXISTS (SELECT 1 FROM public.blend_ticket_products b
                JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
               WHERE b.product_id = NEW.id
@@ -291,6 +299,9 @@ BEGIN
      OR public.rate_unit_line_refusal('oz' || chr(8725) || 'cwt', true) IS DISTINCT FROM 'CHEM_UNIT_UNSUPPORTED_CHARACTER'
      OR public.rate_unit_line_refusal('oz' || chr(8725) || 'cwt', false) IS NOT NULL
      OR public.rate_unit_line_refusal('pt/ac', true) IS NOT NULL
+     OR public.rate_unit_line_refusal(chr(8203), true) IS DISTINCT FROM 'CHEM_UNIT_UNSUPPORTED_CHARACTER'
+     OR public.rate_unit_line_refusal(chr(8203), false) IS NOT NULL
+     OR public.rate_unit_line_refusal('  ', true) IS NOT NULL
      OR public.rate_unit_line_refusal('gal per acre', true) IS NOT NULL
      OR public.rate_unit_line_refusal('fl. oz/acre', true) IS NOT NULL
      OR public.rate_unit_line_refusal('oz p' || chr(8203) || 'er cwt', false) IS DISTINCT FROM 'CHEM_RATE_DENOMINATOR_NOT_ACRES'

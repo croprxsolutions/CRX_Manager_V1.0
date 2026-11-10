@@ -1,6 +1,6 @@
 ## 2026-11-09 - RT-1: draft application rates per product parent (database half)
 
-Local candidate migration `20261229110000_product_rates_draft.sql` (not applied). It adds draft rates per product
+Migration `20261229110000_product_rates_draft.sql`, applied live 2026-11-09 (ledger `20261110032302`). It adds draft rates per product
 parent: a fixed unit list (`product_rate_units`), the rates themselves (`product_rates`, exact to 6 decimals, one row
 for each parent, source and basis pair, so a parent can have several) and an append-only history (`product_rate_draft_events`). Four admin calls save, delete,
 read and derive draft rows; derive copies today's per-size `products.rate` fields into draft rows and records a note

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  unitHasCharacterSaveJobRefuses,
   fmt4,
   exactDecimalSum,
   sumAcres,
@@ -172,7 +173,7 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
    *  authority the client must equal. Reproduces BOTH CASE statements verbatim,
    *  including every fl-oz / pound / ton spelling and NULL-on-unrecognized. */
   function serverGlLb(q: number, unit: string, form: 'liquid' | 'dry'): { value: number; unit: 'gal' | 'lb' } | null {
-    const u = unit.trim().toUpperCase();
+    const u = unit.replace(/^ +| +$/g, '').toUpperCase(); // SQL btrim strips spaces only, never tabs or line breaks
     if (form === 'dry') {
       const f = (u === 'OZ' || u === 'DRY OZ' || u === 'OUNCE' || u === 'OUNCES') ? 1 / 16
         : (u === 'LB' || u === 'LBS' || u === 'POUND' || u === 'POUNDS') ? 1
@@ -213,6 +214,19 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
       expect(fieldAppPricedQuantity(30, rate, 'Dry oz', 'dry')).toBe(30);
     }
     expect(chemLineBillingHazard({ quantity: '30', rate_per_acre: '0.3', rate_unit: 'Dry oz/ac', unit: 'Dry oz' }, 100, 'dry').hazard).toBe(false);
+  });
+
+  it('unit cleaning matches the server btrim: edge spaces are stripped, a tab or line break is not', () => {
+    expect(toGallonOrLbEquivalent(16, '\tlb\n', 'dry')).toBeNull();
+    expect(serverGlLb(16, '\tlb\n', 'dry')).toBeNull();
+    expect(toGallonOrLbEquivalent(4, '\tqt', 'liquid')).toBeNull();
+    expect(serverGlLb(4, '\tqt', 'liquid')).toBeNull();
+    expect(toGallonOrLbEquivalent(16, '  lb  ', 'dry')).toEqual(serverGlLb(16, '  lb  ', 'dry'));
+    expect(toGallonOrLbEquivalent(4, '  qt  ', 'liquid')).toEqual({ value: 1, unit: 'gal' });
+    expect(toGallonOrLbEquivalent(4, '  qt  ', 'liquid')).toEqual(serverGlLb(4, '  qt  ', 'liquid'));
+    // field_app_priced_quantity uses the same btrim, so the priced preview follows the same rule.
+    expect(fieldAppPricedQuantity(4, '  qt  ', 'Gal', 'liquid')).toBe(1);
+    expect(fieldAppPricedQuantity(4, '\tqt', 'Gal', 'liquid')).toBeNull();
   });
 
   it('LIQUID qt / pt / gal → GALLONS, equal to the server', () => {
@@ -776,12 +790,37 @@ describe('chemCalculator — chemLineBillingHazard (production fail-closed guard
 });
 
 describe('chemCalculator — rateDenominatorIsUnrecognized (the original divergence)', () => {
-  it('flags a NON-acre denominator, which baseUnitOfRate silently strips', () => {
-    for (const u of ['oz/cwt', 'fl oz/100 gal', 'L/ha', 'oz/1000 sq ft', 'pt/ton']) {
+  it('flags a NON-acre denominator, and baseUnitOfRate keeps it whole instead of truncating it (KI-16)', () => {
+    for (const u of ['oz/cwt', 'fl oz/100 gal', 'L/ha', 'oz/1000 sq ft', 'pt/ton', 'oz/cwt/ac', 'oz per acre/ac']) {
       expect(rateDenominatorIsUnrecognized(u)).toBe(true);
-      // The reason it matters: the base unit comes back as if it were a per-acre rate.
-      expect(baseUnitOfRate(u)).not.toContain('/');
+      expect(baseUnitOfRate(u)).toBe(u.toLowerCase());
+      // Whole, it matches no bare unit, so no hazard or quantity check treats it as per-acre 'oz'.
+      expect(normalizeRateUnit(baseUnitOfRate(u))).not.toBe('oz');
+      // The row-defect check refuses it; the price-mismatch check does not add advice to type 'oz/cwt/ac'.
+      expect(chemLineBillingHazard({ quantity: '200', rate_per_acre: '2', rate_unit: u, unit: 'oz' }, 100, 'liquid').hazard).toBe(false);
     }
+  });
+
+  it('judges the denominator the way the database does: invisible characters and separators folded first (KI-16)', () => {
+    const ZWSP = String.fromCharCode(0x200b);
+    for (const u of [`oz p${ZWSP}er cwt`, 'oz_per_cwt', 'oz.per.cwt']) {
+      expect(rateDenominatorIsUnrecognized(u)).toBe(true);
+    }
+    for (const u of [`pt/a${ZWSP}c`, 'gal-per-acre', 'oz', 'pt/ac', '']) {
+      expect(rateDenominatorIsUnrecognized(u)).toBe(false);
+    }
+    // An invisible-only unit is blank, as the server's normalize_rate_unit now reads it.
+    expect(chemUnitUnspecifiedSides(ZWSP, 'oz')).toEqual({ stockBlank: false, rateBlank: true });
+    expect(chemUnitUnspecifiedSides('oz/ac', ZWSP)).toEqual({ stockBlank: true, rateBlank: false });
+  });
+
+  it('baseUnitOfRate still strips one per-acre suffix and folds invisible characters', () => {
+    const ZWSP = String.fromCharCode(0x200b);
+    const NBSP = String.fromCharCode(0x00a0);
+    expect(baseUnitOfRate('pt/ac')).toBe('pt');
+    expect(baseUnitOfRate('GAL per acre')).toBe('gal');
+    expect(baseUnitOfRate(`oz${ZWSP}/ac`)).toBe('oz');
+    expect(baseUnitOfRate(`${NBSP}Dry oz${NBSP}`)).toBe('dry oz');
   });
 
   it('accepts every per-acre spelling the app actually uses', () => {
@@ -1112,3 +1151,13 @@ describe('chemCalculator — chemUnitUnspecifiedSides (blank units mirror CHEM_U
   });
 });
 
+describe('unitHasCharacterSaveJobRefuses (mirror of save_job, KI-16)', () => {
+  it('passes plain units and the characters save_job folds, flags the ones it does not', () => {
+    for (const ok of ['oz', 'pt/ac', 'fl. oz', 'Gal', `o${String.fromCharCode(0x200b)}z`, `fl${String.fromCharCode(0x00a0)}oz`, '', null]) {
+      expect(unitHasCharacterSaveJobRefuses(ok)).toBe(false);
+    }
+    for (const bad of [`o${String.fromCharCode(0x00ad)}z/ac`, `fl${String.fromCharCode(0x2007)}oz`, `o${String.fromCharCode(0x2060)}z`, `oz${String.fromCharCode(0x2215)}cwt`, 'oz	ac']) {
+      expect(unitHasCharacterSaveJobRefuses(bad)).toBe(true);
+    }
+  });
+});

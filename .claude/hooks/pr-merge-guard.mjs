@@ -651,7 +651,9 @@ function gateRequest(request) {
           collision_check: "conflict-free merge of main, collision check clean; Mason, 2026-10-21",
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
-        }[carried.mode]}).\n`,
+          owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
+        }[carried.mode]})` +
+        `${carried.mode !== "owner_accepted" && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
       );
     }
     advisoryQueue.push(request);

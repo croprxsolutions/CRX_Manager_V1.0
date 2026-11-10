@@ -9,7 +9,7 @@
  *  • change the ACRES         → the row's DRIVER side is held and the other re-derived
  */
 
-import { normalizeRateUnit } from './labelGuardrails';
+import { foldInvisibleUnitChars, normalizeRateUnit } from './labelGuardrails';
 import type { ProductForm } from '../types';
 
 export type ChemDriver = 'rate' | 'qty';
@@ -429,7 +429,8 @@ export function toGallonOrLbEquivalent(
   productForm?: ProductForm | null,
 ): AppliedConversion | null {
   if (!Number.isFinite(quantity) || quantity === 0) return null;
-  const key = (unit || '').trim().toLowerCase();
+  // Strip ordinary spaces only, like the server's btrim in convert_to_gl_lb (a tab or line break is not trimmed there).
+  const key = (unit || '').replace(/^ +| +$/g, '').toLowerCase();
   if (key === '') return null;
   if (productForm === 'seed' || productForm === 'each') return null;
 
@@ -493,8 +494,9 @@ export function fieldAppPricedQuantity(
   productForm?: ProductForm | null,
 ): number | null {
   if (!Number.isFinite(appliedQty)) return null;
-  const r = (rateUnit || '').trim().toLowerCase();
-  const i = (inventoryUnit || '').trim().toLowerCase();
+  // Spaces only, like the server's btrim in field_app_priced_quantity.
+  const r = (rateUnit || '').replace(/^ +| +$/g, '').toLowerCase();
+  const i = (inventoryUnit || '').replace(/^ +| +$/g, '').toLowerCase();
   if (r === i) return appliedQty;            // same unit: no conversion needed
   if (r === '' || i === '') return null;
   if (productForm === 'seed' || productForm === 'each') return null;
@@ -551,18 +553,21 @@ export function fieldAppPricedQuantity(
  * Changing the shared normalizer would drift the client away from the server.
  */
 function isExplicitlyFluidUnit(unit: string | null | undefined): boolean {
-  const canonical = String(unit ?? '').toLowerCase().replace(/[\s.]+/g, ' ').trim();
+  const canonical = foldInvisibleUnitChars(String(unit ?? '')).toLowerCase().replace(/[\s.]+/g, ' ').trim();
   return /^(fl|fluid) ?(oz|ozs|ounce|ounces)$/.test(canonical);
 }
 
 /**
  * Strip a per-acre suffix ('/ac', '/acre', '/a', ' per acre') from a rate_unit and
  * return the bare base measure unit (e.g. 'pt/ac' → 'pt', 'GAL' → 'gal'). Empty in →
- * empty out.
+ * empty out. A rate measured per something other than acres ('oz/cwt') is returned WHOLE,
+ * never truncated to 'oz': it then matches no unit, as on the server, which refuses it
+ * (CHEM_RATE_DENOMINATOR_NOT_ACRES, KI-16).
  */
 export function baseUnitOfRate(rateUnit: string | null | undefined): string {
-  const raw = (rateUnit || '').trim().toLowerCase();
+  const raw = foldInvisibleUnitChars(rateUnit || '').trim().toLowerCase();
   if (raw === '') return '';
+  if (rateDenominatorIsUnrecognized(raw)) return raw;
   // take the part before the first '/' (handles 'pt/ac', 'pt/acre', 'pt/a')
   let base = raw.split('/')[0].trim();
   // also handle the spelled-out ' per acre' form
@@ -741,7 +746,10 @@ export function reconcileChemAutofillUnits(
  * import could introduce, not a defect with live rows behind it today.
  */
 export function rateDenominatorIsUnrecognized(rateUnit: string | null | undefined): boolean {
-  const raw = (rateUnit || '').trim().toLowerCase();
+  // The database's form exactly (rate_unit_line_refusal, 20261231100000): fold invisible characters,
+  // then every run of anything but a-z, 0-9 and '/' becomes one space, so 'oz_per_cwt',
+  // 'oz.per.cwt' and 'oz p<ZWSP>er cwt' are judged as 'oz per cwt'.
+  const raw = foldInvisibleUnitChars(rateUnit || '').trim().toLowerCase().replace(/[^a-z0-9/]+/g, ' ').trim();
   if (raw === '') return false;
   // SUBTRACTIVE, mirroring the server's round-8/round-11 rule exactly: remove ONE trailing
   // per-acre suffix, then refuse if ANY denominator survives. The previous form asked only
@@ -753,8 +761,19 @@ export function rateDenominatorIsUnrecognized(rateUnit: string | null | undefine
   // survives" is not the same rule as "remove every spelling and then look", and only the
   // first is safe ('oz per acre/ac' must lose ONE suffix, not both).
   let stripped = raw.replace(/\s*\/\s*(?:ac|acre|acres|a)\s*$/, '');
-  if (stripped === raw) stripped = raw.replace(/(?:^|[\s-])per[\s-]+(?:acres|acre|ac|a)$/, '');
-  return stripped.includes('/') || /(?:^|[\s-])per(?:[\s-]|$)/.test(stripped);
+  // A bare 'per acre' (no unit before it) is left to chemUnitUnspecifiedSides' blank-unit message.
+  if (stripped === raw) stripped = raw.replace(/(?:^|\s+)per\s+(?:acres|acre|ac|a)$/, '');
+  return stripped.includes('/') || /(?:^| )per(?: |$)/.test(stripped);
+}
+
+// save_job's own fold (20260904185900) is narrower than unit_fold_invisible: it does not clear U+00AD,
+// U+2007 or U+2060, so those still fail its character check on a priced line.
+const SAVE_JOB_AS_SPACE = new RegExp(`[${String.fromCharCode(0x00a0, 0x202f)}]`, 'g');
+const SAVE_JOB_DELETED = new RegExp([0x200b, 0x200c, 0x200d, 0xfeff].map((c) => String.fromCharCode(c)).join("|"), "g"); // alternation: a joiner inside [] trips no-misleading-character-class
+
+/** Mirror of save_job's CHEM_UNIT_UNSUPPORTED_CHARACTER probe, which it applies to priced lines only. */
+export function unitHasCharacterSaveJobRefuses(unit: string | null | undefined): boolean {
+  return /[^a-z0-9 ./-]/.test((unit ?? '').toLowerCase().replace(SAVE_JOB_AS_SPACE, ' ').replace(SAVE_JOB_DELETED, ''));
 }
 
 /** Which side(s) of a chemical line name no unit at all. See chemUnitUnspecifiedSides. */
@@ -795,11 +814,11 @@ export function chemUnitUnspecifiedSides(
   rateUnit: string | null | undefined,
   unit: string | null | undefined,
 ): ChemUnitBlankSides | null {
-  const u = String(unit ?? '').trim().toLowerCase();
+  const u = foldInvisibleUnitChars(String(unit ?? '')).trim().toLowerCase();
   const stockBlank = u === ''
     || (STOCK_ACRE_DENOM_ONLY.test(u) && u.replace(STOCK_ACRE_DENOM_ONLY, '').trim() === '');
 
-  const rFirst = String(rateUnit ?? '').trim().toLowerCase().split('/')[0].trim();
+  const rFirst = foldInvisibleUnitChars(String(rateUnit ?? '')).trim().toLowerCase().split('/')[0].trim();
   const rateBlank = rFirst.replace(RATE_PER_ACRE_SUFFIX, '').trim() === ''
     || RATE_PER_ACRE_ONLY.test(rFirst);
 
@@ -855,6 +874,9 @@ export function chemLineBillingHazard(
   acres: number | string,
   productForm?: ProductForm | null,
 ): ChemBillingHazard {
+  // A non-acre rate ('oz/cwt') is refused outright by the row-defect check (and the database),
+  // so there is no quantity unit to compare; staying silent avoids advice to type 'oz/cwt/ac'.
+  if (rateDenominatorIsUnrecognized(row.rate_unit)) return NO_HAZARD;
   const rateBaseRaw = baseUnitOfRate(row.rate_unit);
   const quantityUnit = normalizeRateUnit(rateBaseRaw);
   const priceUnit = normalizeRateUnit(row.unit);

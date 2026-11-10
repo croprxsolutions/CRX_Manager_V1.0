@@ -697,6 +697,8 @@ async function dryFluidOunce() {
     '${ADMIN}', 'prover-ki16-booking-${n}');`;
   refusedWith('G1 save a booking with a dry fl oz price unit', saveBooking(5, DRY, "'fl oz'", "'oz/ac'"), 'CHEM_UNIT_FORM_MISMATCH');
   refusedWith('G1 save a booking with a dry FLOZ/acre rate unit', saveBooking(6, DRY, "'oz'", "'FLOZ/acre'"), 'CHEM_UNIT_FORM_MISMATCH');
+  refusedWith('G1 save a booking priced per 32 fl oz on a dry product', saveBooking(9, DRY, "'32 fl oz'", "'oz/ac'"), 'CHEM_UNIT_FORM_MISMATCH');
+  refusedWith('G1 dry job line in 2.5 fl oz', jobLine(job, DRY, "'2.5 fl oz'", "'oz/ac'", 45), 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   clean('G1 save a booking with dry oz units', saveBooking(7, DRY, "'oz'", "'oz/ac'"));
   clean('G1 save a booking with liquid fl oz units', saveBooking(8, LIQUID, "'fl oz'", "'fl oz/ac'"));
   refusedWith('G1 edit a stored dry booking line to fl oz', `UPDATE public.quote_items qi SET price_unit = 'fl oz' ${bookingLines(3)};`,
@@ -809,7 +811,7 @@ async function dryFluidOunce() {
 
   // G5
   for (const [expr, want] of [["'fl oz'", 't'], ["'FLOZ/acre'", 't'], ["'fl. oz. per acre'", 't'], ["'fluid ounces'", 't'], ["'fl' || chr(8208) || 'oz'", 't'],
-    ["'fl' || chr(8203) || 'oz/ac'", 't'], ["'oz'", 'f'], ["'Dry oz'", 'f'], ["'lb/ac'", 'f'], ["'flour oz'", 'f'], ['NULL', 'f'], ["''", 'f']]) {
+    ["'fl' || chr(8203) || 'oz/ac'", 't'], ["'32 fl oz'", 't'], ["'2.5 FLOZ/ac'", 't'], ["'32 oz'", 'f'], ["'32'", 'f'], ["'oz'", 'f'], ["'Dry oz'", 'f'], ["'lb/ac'", 'f'], ["'flour oz'", 'f'], ['NULL', 'f'], ["''", 'f']]) {
     assert.equal(scalar(`SELECT public.unit_names_fluid_ounce(${expr});`), want, `G5: unit_names_fluid_ounce(${expr})`);
   }
   console.log('[prover] G5: unit_names_fluid_ounce matches every fluid-ounce spelling and no dry unit');

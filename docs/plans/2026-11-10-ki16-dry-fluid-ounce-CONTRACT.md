@@ -35,7 +35,8 @@ fallback on demand and job deduction).
 
 1. `unit_names_fluid_ounce(text) → boolean`, IMMUTABLE: save_job's concept test, verbatim, after
    `unit_fold_invisible`: fold separators, drop everything from the first `/`, drop a `per …` tail, delete every
-   non-alphanumeric, match `^(fl|fluid)(oz|ozs|ounce|ounces)$`. Catches `fl oz`, `FLOZ/acre`, `fl. oz`,
+   non-alphanumeric, match `^(fl|fluid)(oz|ozs|ounce|ounces)$`. It also drops a leading package count first
+   (`32 fl oz`, `2.5 fl oz`), which save_job does not (Luna round 2). Catches `fl oz`, `FLOZ/acre`, `fl. oz`,
    `fluid ounces per acre`, `fl<NBSP>oz`; passes `oz`, `dry oz`, `lb`, `flour oz`.
 2. Four BEFORE row triggers, each a new SECURITY DEFINER function (reads only; EXECUTE revoked from everyone; definer
    so RLS never hides a row from the check), raising `CHEM_UNIT_FORM_MISMATCH` with save_job's wording:
@@ -146,3 +147,12 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
   (prover G4).
 - #1741's file (not changed here): a restored soft-deleted ticket can become unbillable, and a save_job retry with
   foldable characters returns `IDEMPOTENCY_INTENT_MISMATCH`; both fail closed and are recorded in #1741's contract.
+
+## Luna round 2 (head d4968734e): 1 HIGH, 2 MED
+
+- Fixed (HIGH): a line unit with a package count (`32 fl oz` on a booking, job or blend line) passed the line guards;
+  the helper itself now drops a leading count, so every guard catches it (prover G1, G5).
+- Refuted (MED, prover): "restoring booking 2's fl oz fixture after G0 is refused by the new trigger" — the prover's
+  `raw()` runs with `session_replication_role = replica`, which skips triggers by design; the run reaches G5 and
+  prints `RATE_UNIT_GUARD_PROOF_PASS`.
+- #1741's file (not changed here): the save_job retry fingerprint MED, as in round 1.

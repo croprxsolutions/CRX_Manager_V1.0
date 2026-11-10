@@ -58,10 +58,12 @@ CREATE FUNCTION public.unit_names_fluid_ounce(p_unit text)
 AS $function$
   -- save_job's rule (20260904185900): reduce the unit to what it names (fold separators keeping '/', drop from the
   -- first '/', drop a 'per ...' tail, delete every non-alphanumeric), then match the concept, not a spelling list.
+  -- Also drops a leading package count ('32 fl oz', '2.5 fl oz'), which save_job's rule does not.
   SELECT regexp_replace(
            regexp_replace(
              split_part(
-               btrim(regexp_replace(lower(public.unit_fold_invisible(COALESCE(p_unit, ''))), '[^a-z0-9/]+', ' ', 'g')),
+               regexp_replace(btrim(regexp_replace(lower(public.unit_fold_invisible(COALESCE(p_unit, ''))), '[^a-z0-9/]+', ' ', 'g')),
+                              '^[0-9]+( [0-9]+)* ?', ''),
                '/', 1),
              '\s+per\s+.*$', ''),
            '[^a-z0-9]', '', 'g')
@@ -171,11 +173,10 @@ BEGIN
      AND NEW.product_form IS NOT DISTINCT FROM OLD.product_form THEN
     RETURN NEW;
   END IF;
-  -- Its own units: rate_unit is a blank blend line's rate; unit_size/inventory_unit are the stock side, where a
-  -- package size may lead with a number ('32 fl oz').
+  -- Its own units: rate_unit is a blank blend line's rate; unit_size/inventory_unit are the stock side.
   IF public.unit_names_fluid_ounce(NEW.rate_unit)
-     OR public.unit_names_fluid_ounce(regexp_replace(COALESCE(NEW.unit_size, ''), '^\s*[0-9][0-9.,]*\s*', ''))
-     OR public.unit_names_fluid_ounce(regexp_replace(COALESCE(NEW.inventory_unit, ''), '^\s*[0-9][0-9.,]*\s*', '')) THEN
+     OR public.unit_names_fluid_ounce(NEW.unit_size)
+     OR public.unit_names_fluid_ounce(NEW.inventory_unit) THEN
     RAISE EXCEPTION
       'CHEM_UNIT_FORM_MISMATCH: % is a DRY product, so its rate unit or stock unit cannot be fluid ounces (rate "%", unit "%", stock "%") -- a fluid ounce measures volume and a dry product is billed by weight. Use a dry unit (oz, lb or ton).',
       v_name, COALESCE(NEW.rate_unit, ''), COALESCE(NEW.unit_size, ''), COALESCE(NEW.inventory_unit, '');
@@ -256,13 +257,13 @@ BEGIN
   -- Every fluid-ounce spelling save_job refuses, and none of the dry units it accepts.
   FOREACH v_unit IN ARRAY ARRAY['fl oz', 'FL OZ', 'floz', 'fl oz/ac', 'FLOZ/acre', 'fl. oz', 'fl.oz/a', 'fl oz.',
       'fluid ounce', 'Fluid Ounces per acre', 'fl-oz', 'fl_oz', 'fl ozs', 'fl' || chr(160) || 'oz', 'fl' || chr(8203) || 'oz',
-      'fl' || chr(8208) || 'oz', 'fl' || chr(9) || 'oz/ac', ' fl oz ', 'fl oz/cwt'] LOOP
+      'fl' || chr(8208) || 'oz', 'fl' || chr(9) || 'oz/ac', ' fl oz ', 'fl oz/cwt', '32 fl oz', '2.5 fl oz', '1,000 FLOZ'] LOOP
     IF NOT public.unit_names_fluid_ounce(v_unit) THEN
       RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce misses "%"', v_unit;
     END IF;
   END LOOP;
   FOREACH v_unit IN ARRAY ARRAY['oz', 'OZ/ac', 'dry oz', 'Dry oz/acre', 'lb', 'lbs/ac', 'ton', 'mg', 'g', 'gal', 'pt/ac',
-      'flour oz', 'oz fl', '', ' '] LOOP
+      'flour oz', 'oz fl', '', ' ', '32 oz', '2.5 lb', '32'] LOOP
     IF public.unit_names_fluid_ounce(v_unit) THEN
       RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce flags "%"', v_unit;
     END IF;
@@ -306,8 +307,8 @@ BEGIN
      OR EXISTS (SELECT 1 FROM public.products p
                  WHERE lower(p.product_form::text) = 'dry'
                    AND (public.unit_names_fluid_ounce(p.rate_unit)
-                        OR public.unit_names_fluid_ounce(regexp_replace(COALESCE(p.unit_size, ''), '^\s*[0-9][0-9.,]*\s*', ''))
-                        OR public.unit_names_fluid_ounce(regexp_replace(COALESCE(p.inventory_unit, ''), '^\s*[0-9][0-9.,]*\s*', '')))) THEN
+                        OR public.unit_names_fluid_ounce(p.unit_size)
+                        OR public.unit_names_fluid_ounce(p.inventory_unit))) THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: an existing dry product line or product names a fluid ounce; review it before applying';
   END IF;
 END;

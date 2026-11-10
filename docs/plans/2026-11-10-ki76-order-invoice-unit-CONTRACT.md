@@ -106,3 +106,21 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
   - #15: the order-invoice probe is labelled an isolated test of the refusal.
   - #16: blank now includes tabs, line breaks and non-breaking spaces; proved with a tab.
   - #17: table names are schema-qualified; the functions follow the repo's definer pattern.
+
+## Review rounds after code
+
+- **Luna r1** (5 findings, no BLOCKER/HIGH): the order-invoice blank test missed tabs (fixed, proved with a
+  space-and-tab line); prover reuse now checks the container label (fixed). Product fallback on legacy lines and the
+  post-vs-insert race: settled above (Round 2 #1, #2, #11).
+- **Sol r1** (2 HIGH, 1 MED):
+  - HIGH, a delivery line naming a unit other than the product while the order line is blank: refuted. Delivery lines
+    take their unit from the order line (`NewDelivery.tsx`, `DeliveryDetail.tsx`) or, for a quick delivery, from the
+    product, and the quick delivery inserts its order line with no unit, so the order fill gives the same unit. Live:
+    0 of 406 delivery lines have a unit their order line lacks or differs from. Only a hand-built API call could
+    differ, and a differing unit on an order line that has a unit already fails the same way today (Round 2 #3).
+  - HIGH, the product fallback leaves a legacy line's return refused: not a regression (the container proof's BEFORE
+    shows the same refusal) and the coordinating session's scope decision: fill from the order line, then the
+    product, no backfill. Making those returns work needs the order line written, which is the backfill Mason
+    decides (KI-76).
+  - MED, the order-invoice message promised a retry the delivered cap still refuses: fixed; the screen now says
+    "Set each line's unit on the order before billing it".

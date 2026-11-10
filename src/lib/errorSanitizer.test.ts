@@ -152,7 +152,7 @@ describe('sanitizeError', () => {
 
   it('explains an order line with no unit (KI-76)', () => {
     expect(sanitizeError("ORDER_LINE_UNIT_MISSING: order SO-1 has a line with no unit (Roundup). Set each line's unit on the order, then create the invoice again"))
-      .toBe("Nothing was billed. A line on this order has no unit. Set each line's unit on the order, then create the invoice again");
+      .toBe("Nothing was billed. A line on this order has no unit. Set each line's unit on the order before billing it");
   });
 
   it('explains an invoice line with no unit at posting (KI-76)', () => {

@@ -183,6 +183,9 @@ $function$;
 -- NULL or only spaces, tabs, line breaks or non-breaking spaces.
 
 -- A new order line (or one whose product changes) with no unit takes the product's unit.
+-- Delivery lines take their unit from the order line (NewDelivery, DeliveryDetail) or, for a quick
+-- delivery, from the product (which also inserts its order line with no unit), so they agree with this
+-- fill. Live 2026-11-10: 0 of 406 delivery lines have a unit their order line lacks or differs from.
 CREATE FUNCTION public._fill_order_line_unit()
  RETURNS trigger
  LANGUAGE plpgsql

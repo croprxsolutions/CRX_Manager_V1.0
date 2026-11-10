@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import WhatsNewDialog, { seenKey } from './WhatsNewDialog';
+import WhatsNewDialog from './WhatsNewDialog';
+
+const seenKey = (userId: string) => `crx.whatsNew.seen.${userId}`;
 
 const NOTES = { version: '0.2.0', date: '2026-11-19', items: ['Quotes show the booked price.', 'Bill Split has a payer table.'] };
 

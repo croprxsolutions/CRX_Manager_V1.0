@@ -4,7 +4,7 @@ import Button from './Button';
 import { releaseNotes, type ReleaseNotes } from '../../releaseNotes';
 
 // Remembered per user and per browser: someone on two devices sees a release's notes twice.
-export const seenKey = (userId: string) => `crx.whatsNew.seen.${userId}`;
+const seenKey = (userId: string) => `crx.whatsNew.seen.${userId}`;
 
 function readSeen(userId: string): string | null {
   try {

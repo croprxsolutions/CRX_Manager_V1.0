@@ -122,7 +122,7 @@ function EditParentModal({ parent, profileId, categoryOptions, timingOptions, cr
               <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
               <div className="space-y-1 rounded-lg border border-gray-200 bg-white p-2">
                 <UseTimingPicker options={timingOptions} crops={cropOptions} category={category}
-                  selected={keptTimings} held={parent.use_timings ?? []} onChange={setTimings} />
+                  selected={keptTimings} held={parent.use_timings} onChange={setTimings} />
               </div>
             </fieldset>
           )}

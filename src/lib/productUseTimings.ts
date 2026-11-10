@@ -54,7 +54,7 @@ export async function setUseTimingOptionActive(input: {
 }
 
 /** Same (category, timing, crop): one crop + timing, whatever its label. */
-export const samePair = (a: UseTimingOption, b: UseTimingOption) =>
+const samePair = (a: UseTimingOption, b: UseTimingOption) =>
   a.category === b.category && a.timing_code === b.timing_code && (a.crop ?? null) === (b.crop ?? null);
 
 /**

@@ -10,11 +10,11 @@ export default function UseTimingPicker({ options, crops, category, selected, he
   crops: readonly CropOption[];
   category: string | null | undefined;
   selected: readonly string[];
-  held: readonly string[];
+  held: readonly string[] | null | undefined;
   disabled?: boolean;
   onChange: (next: string[]) => void;
 }) {
-  const visible = visibleProductUseTimingOptions(options, category, selected, held);
+  const visible = visibleProductUseTimingOptions(options, category, selected, held ?? []);
   const groups = groupUseTimingOptionsByCrop(visible, crops);
   return (
     <div className="space-y-2">

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261223100000_product_rates_draft.sql (RT-1; build sheet
+ * Real-schema proof for 20261229110000_product_rates_draft.sql (RT-1; build sheet
  * docs/plans/2026-11-08-product-RT1-BUILD-SHEET.md, section 6, cases R1-R18).
  *
  * Builds the checked-in production baseline plus every post-baseline migration before the candidate in a
@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, replay, removeContainer, seedUsers, scalar, psql, attempt, asUser, refuse, claims, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20261223100000_product_rates_draft.sql';
+const CANDIDATE = '20261229110000_product_rates_draft.sql';
 const PARENT_MIGRATION = '20261217100000_job_access_ends_with_the_job.sql';
 const reuse = process.env.RT1_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');

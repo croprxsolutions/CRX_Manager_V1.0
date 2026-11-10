@@ -2246,7 +2246,7 @@ export interface IngredientChangePreview {
   refusal: string | null;
 }
 
-// RT-1 draft rates (20261223100000_product_rates_draft.sql). Read by nothing in the app until RT-4.
+// RT-1 draft rates (20261229110000_product_rates_draft.sql). Read by nothing in the app until RT-4.
 export type ProductRateBasis = 'per_acre' | 'per_100_gal' | 'per_unit' | 'per_cwt_seed' | 'per_seed_unit';
 export type ProductRateSource = 'label' | 'house_standard';
 export type ProductRateUnitCode = 'fl_oz' | 'pt' | 'qt' | 'gal' | 'dry_oz' | 'lb' | 'g' | 'mg' | 'each';

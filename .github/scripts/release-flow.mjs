@@ -1,5 +1,6 @@
 // Staging-first release flow: every decision the workflows make lives here as a plain function,
 // tested in release-flow.test.mjs. The workflows only call the CLI at the bottom.
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 // Only the bot's release branch and hotfix branches may open a PR into main.
@@ -7,10 +8,11 @@ export function isReleaseOrHotfixHead(ref) {
   return typeof ref === 'string' && /^(release\/next|hotfix\/[^/]+)$/.test(ref);
 }
 
-// release/next may carry only staging's commits and the bot's own "chore(release): vX.Y.Z" commits.
-// lines = `git log --no-merges --format=%an%x09%s origin/main..HEAD --not origin/staging`.
-export function foreignReleaseCommits(lines) {
-  return lines.filter((l) => !/^crx-release-bot\[bot\]\tchore\(release\): v\d+\.\d+\.\d+\S*$/.test(l));
+// release/next may differ from "staging merged with main" only in the files the bot writes.
+// Comparing trees (not commits or authors) also catches a change hidden in a merge commit.
+export const BOT_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'src/releaseNotes.ts'];
+export function releaseExtraFiles(files) {
+  return files.filter((f) => !BOT_FILES.includes(f));
 }
 
 // Every enforcing check stays inert until the repository variable RELEASE_FLOW is "on".
@@ -123,12 +125,11 @@ async function readEvent() {
 }
 
 const commands = {
-  // usage (stdin = the git log lines above): release-flow.mjs check-release-commits
-  async 'check-release-commits'() {
-    const { readFileSync } = await import('node:fs');
-    const bad = foreignReleaseCommits(readFileSync(0, 'utf8').split('\n').filter(Boolean));
-    if (!bad.length) return 0;
-    console.log(`::error::release/next carries commits that are neither on staging nor the release bot's version commit: ${bad.join(' | ').slice(0, 900)}`);
+  // usage (stdin = changed file names): release-flow.mjs check-release-files
+  async 'check-release-files'() {
+    const extra = releaseExtraFiles(readFileSync(0, 'utf8').split('\n').filter(Boolean));
+    if (!extra.length) return 0;
+    console.log(`::error::release/next differs from staging + main outside the bot's files (${extra.slice(0, 20).join(', ')}). If staging just moved, the bot refreshes release/next on that push.`);
     return 1;
   },
   // pull_request closed into staging: label the merged work on-staging (not the back-merge PR).

@@ -60,9 +60,9 @@ jobs:
             exit 1
           fi
           if [ "$HEAD_REF" = "release/next" ]; then
-            # Everything it brings must already be on staging, apart from the bot's version commit.
-            git log --no-merges --format='%an%x09%s' "origin/main..$HEAD_SHA" --not origin/staging \
-              | node "$RUNNER_TEMP/release-flow.mjs" check-release-commits
+            # Its files must equal staging merged with main, apart from the bot's version files.
+            expected=$(git merge-tree --write-tree origin/staging origin/main) || { echo "::error::staging and main don't merge cleanly; merge the back-merge PR first."; exit 1; }
+            git diff --name-only "$expected" "$HEAD_SHA" | node "$RUNNER_TEMP/release-flow.mjs" check-release-files
           fi
 
   main-inside-staging:

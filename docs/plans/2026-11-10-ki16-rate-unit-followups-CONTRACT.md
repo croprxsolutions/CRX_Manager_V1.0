@@ -166,6 +166,7 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
 
 - **#1 HIGH (undotted `fl oz` on dry):** same as round 1 #1; it survived two rounds, so it goes to Mason as a decision
   (fix here, widening into demand and deduction, or its own plan).
+  **Mason 2026-11-10: "Separate fix later"** — deferred to its own plan; recorded in KI-16.
 - **#2 MED (spent pre-deploy idempotency key):** accepted, as round 1 #5.
 - **#3 MED (invoker product guard misses RLS-hidden lines): refuted for live.** Live policies 2026-11-10:
   `products_update` is `is_admin()` only, and `blend_ticket_products_office_all` / `blend_tickets` select allow

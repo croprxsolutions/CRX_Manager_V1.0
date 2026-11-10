@@ -39,7 +39,7 @@ use after posting is listed on Sales to check for a person (recording it from th
    - `get_epa_sales_to_check()` and `_epa_registration_unrecorded_posted_lines`: a line is recorded when an active
      record links to it. Credit memos are never listed. The two fingerprint functions (`_rup_record_covers_line`,
      `_rup_record_for_line_key`) are not created.
-   - `rup_sales_records`: INSERT, UPDATE, DELETE revoked from `anon` and `authenticated` (table and columns) and the
+   - `rup_sales_records`: INSERT, UPDATE, DELETE, TRUNCATE revoked from `anon`, `authenticated` and `service_role` (table and columns) and the
      admin insert policy dropped. Only the posting function writes records, so a record's line, invoice and product
      always belong together. No screen writes this table (checked: `src/` only calls `get_rup_sales_register`).
    - Q7 `invoice_items` revoke: kept from #1688.
@@ -86,8 +86,8 @@ number, signal word, customer, quantity and amounts.
 
 **Existing rows.** Live 2026-11-10: 0 restricted-use records, 6 posted product lines on 3 invoices. Mason,
 2026-11-10: *"we will not make sales before it is turned on so it doesnt matter this is not a live active SAAS"*.
-So: no backfill of links; the migration refuses if any record exists with no line (`SELECT count(*) FROM
-rup_sales_records` expected 0 at apply). Lines already posted at the seed get no special listing (`posted_before_seed` is dropped: it could never be
+So: no backfill of links; the migration refuses if any active record exists (it would have no line; `SELECT count(*) FROM
+rup_sales_records WHERE voided_at IS NULL` expected 0 at apply). Voided records are history and stay. Lines already posted at the seed get no special listing (`posted_before_seed` is dropped: it could never be
 cleared, and old data is out of scope); they are judged like any other line from the seed day's capture. Before the seed runs, posting keeps today's rule and
 writes the link for the line it records. The deployed app keeps working: `post_invoice` and
 `get_rup_sales_register` signatures and columns are unchanged (one added column).
@@ -114,11 +114,11 @@ on it yet. Recovery: a forward migration; the link column and captures stay.
 5. When a return credit is issued against a restricted-use sale, then no record is written, the original record is unchanged, and Sales to check does not list the credit lines.
 6. When a field-application invoice with a Yes line and no order is posted, then one record exists under the invoice's customer.
 7. When a bill-split group is posted, then each payer invoice has its own linked records naming the order's customer.
-8. When a line is captured No and any Yes applies now (its number's registration, its size's tick, or the number its size carries today), then Sales to check lists it (`now_restricted_use`); a Yes line with a record and a number is not listed; a Yes line whose record was voided by hand is listed.
+8. When a line is captured No and any Yes applies now (its number's registration, its size's tick, or the number its size carries today), then Sales to check lists it (`now_restricted_use`); a Yes line with a record and a number is not listed; a Yes line whose record was voided (by an unpost, or by the database owner) is listed.
 9. When a label changes between save and post, then posting records what was captured at save.
 10. When a second active record for one line is inserted, or an active record is given no line, or a line with an active record is deleted (all as postgres), then each is refused.
 11. When `authenticated` (admin included) inserts, updates or deletes a record directly, then it is refused; an applicator calling the generator is refused.
-12. When the migration is applied to a database holding a record with no line, then it refuses.
+12. When the migration is applied to a database holding an active record (which has no line), then it refuses.
 13. Carried from #1688's prover: registration edit, reason required and capped, `infinity` dates, seed preview/seed/locks, grants.
 
 ## Decisions (Mason, 2026-11-10, this session)

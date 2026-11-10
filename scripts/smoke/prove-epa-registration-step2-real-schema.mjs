@@ -339,6 +339,8 @@ const PRIVATE_FNS = [
   'public._void_rup_records_off_posted()', 'public._epa_registration_seed_plan(text)',
   'public._epa_registration_unrecorded_posted_lines(text)', 'public._epa_registration_lock(boolean)',
   'public._invoice_line_rup_facts(uuid,text)', 'public._capture_invoice_line_rup()',
+  'public._epa_registrations_seeded()', 'public._epa_registration_insert(text,jsonb)',
+  'public._epa_registration_update(text,jsonb)', 'public._epa_registration_event(text,text,text,jsonb,jsonb,jsonb)',
 ];
 const SET = (n, v, changes, key, draft = null) => `SELECT public.set_epa_registration('${n}', ${v ?? 'NULL'}, ${J(changes)}, 'label checked', ${draft ? `'${draft}'` : 'NULL'}, ${q(key)});`;
 const PREVIEW_SEED = (d) => `SELECT public.preview_epa_registration_seed(${q(d)});`;
@@ -643,31 +645,37 @@ async function main() {
   refused(ADMIN, copyOf(L5), /permission denied/);
   // The server-side role cannot write the register either (RLS review M1).
   assert.equal(scalar(`SELECT has_table_privilege('service_role', 'public.rup_sales_records', 'INSERT,UPDATE,DELETE,TRUNCATE')::text;`), 'false');
+  assert.equal(scalar(`SELECT (has_table_privilege('authenticated', 'public.invoice_items', 'TRUNCATE') OR has_table_privilege('anon', 'public.invoice_items', 'TRUNCATE'))::text;`), 'false');
   assert.equal(scalar("SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'rup_sales_records' AND cmd <> 'SELECT';"), '0');
   // A line with no unit records as 'Unit not set' (Sol r4); the record's unit is required.
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2b')}', '${INV1}', '${P4}', 'x', 1, NULL, 2200, 2200);`);
+  // A blank or spaces-only unit counts as no unit too (Luna 2026-11-10 r1).
+  ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2a0')}', '${INV1}', '${P4}', 'x', 1, '  ', 2400, 2400);`);
   // A zero-quantity line is not a sale to record.
   ownerOk(lineAt(id('2d'), INV1, P4, 0, 2500));
   post(INV1);
-  assert.equal(ok(ADMIN, GEN(INV1, 'g5')), '1');
+  assert.equal(ok(ADMIN, GEN(INV1, 'g5')), '2');
   assert.equal(scalar(`SELECT epa_registration || '|' || unit FROM public.rup_sales_records WHERE invoice_item_id = '${id('2b')}';`), `${N2}|Unit not set`);
+  assert.equal(scalar(`SELECT unit FROM public.rup_sales_records WHERE invoice_item_id = '${id('2a0')}';`), 'Unit not set');
   // A line on a posted invoice with no capture (a bug, or written around the trigger) is captured at posting and keeps it.
   raw(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2c')}', '${INV1}', '${P4}', 'x', 1, 'Gal', 2300, 2300);`);
   assert.equal(cap(id('2c')), '-');
   assert.equal(ok(ADMIN, GEN(INV1, 'g6')), '1');
   assert.equal(cap(id('2c')), `yes|${N2}|Danger|posting`);
-  assert.equal(scalar(`SELECT count(*) || '|' || count(DISTINCT invoice_item_id) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`), '5|5');
+  assert.equal(scalar(`SELECT count(*) || '|' || count(DISTINCT invoice_item_id) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`), '6|6');
   // A return credit (born posted, negative lines) never gets a record (Mason, 2026-11-10), from posting or by hand.
   raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_type, invoice_date, posted_at, created_by)
       VALUES ('${INVC}', '${CUST}', '${ORD}', 'E2-CM', 'posted', 'credit_memo', current_date, now(), '${ADMIN}');
     INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents)
       VALUES ('${id('2e')}', '${INVC}', '${P4}', '[PROVER] return', -1, 'Gal', 1500, -1500);`);
   assert.equal(ok(ADMIN, GEN(INVC, 'g-cm')), '0');
+  // A return credit does not skip the key check: another invoice's key is refused (Luna 2026-11-10 r1).
+  refused(ADMIN, GEN(INVC, 'g0'), /IDEMPOTENCY_KEY_REUSED/);
   assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_id = '${INVC}';`), '0');
   ownerRefused(`INSERT INTO public.rup_sales_records (${REC_COLS})
     SELECT '${INVC}', '${id('2e')}', order_id, customer_id, product_id, sale_date, product_name, epa_registration, 1, unit, unit_price_cents, total_cents, season, buyer_name
       FROM public.rup_sales_records WHERE invoice_item_id = '${L5}';`, /RUP_RECORD_LINE_MISMATCH/);
-  assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`), '5');  // the sale's own records stand
+  assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_id = '${INV1}' AND voided_at IS NULL;`), '6');  // the sale's own records stand
   // A field application has no order: its record goes under the invoice's own customer (Mason, 2026-11-10).
   raw(`INSERT INTO public.customers (id, farm_name) VALUES ('${id('d2')}', '[PROVER] Other Farm');
     INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_type, invoice_date, posted_at, created_by)

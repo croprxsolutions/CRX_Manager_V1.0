@@ -23,8 +23,9 @@
 --     invoice's customer; other invoices under the order's customer (unchanged), else the invoice's.
 --   - _epa_registration_unrecorded_posted_lines re-issued and get_epa_sales_to_check() (admin, read-only): a line is
 --     recorded when an active record links to it.
---   - Only the posting function writes records: INSERT, UPDATE, DELETE revoked from anon and authenticated, the
---     admin insert policy dropped. Q7 (invoice_items half) likewise.
+--   - Only the posting function, unpost_invoice and the void trigger write records: INSERT, UPDATE, DELETE and
+--     TRUNCATE revoked from anon, authenticated and service_role, the admin insert policy dropped. Q7 (invoice_items
+--     half): INSERT, UPDATE, DELETE and TRUNCATE revoked from anon and authenticated (service_role keeps its writes).
 --
 -- ACCEPTED (Mason, 2026-11-10): a save that deletes and re-inserts lines captures them again. The list is unpaged.
 --   A posted line that turns restricted use later is listed for a person; recording it from the list is a later step.
@@ -61,8 +62,10 @@ BEGIN
     RAISE EXCEPTION 'RUP_RECORDS_BY_LINE_PREFLIGHT: generate_rup_sales_records drifted from the body this file was written from';
   END IF;
   -- No backfill (Mason, 2026-11-10: no sales before the switch-on; live had 0 records). Locked so none arrives meanwhile.
-  -- invoices first: the order posting takes them, so this file cannot deadlock a posting.
+  -- invoices first: the order posting takes them, so this file cannot deadlock a posting. invoice_items next, taken
+  -- up front rather than by the DDL below, so a save cannot hold lines while this file waits on them (reviews r2).
   LOCK TABLE public.invoices IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.invoice_items IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.rup_sales_records IN SHARE ROW EXCLUSIVE MODE;
   IF EXISTS (SELECT 1 FROM public.rup_sales_records WHERE voided_at IS NULL) THEN
     RAISE EXCEPTION 'RUP_RECORDS_BY_LINE_PREFLIGHT: an active restricted-use record exists; void it first (it has no line to link)';
@@ -272,7 +275,8 @@ BEGIN
 
   -- REG-1: the invoice first, then the shared registration lock: the order a save takes (its line write holds the
   -- invoice, then the capture trigger takes the shared lock), so a queued registration edit cannot deadlock them
-  -- (Luna 2026-11-10). FOR UPDATE: two postings of one invoice run one after the other (sheet 4.C de-duplication).
+  -- (Luna 2026-11-10). FOR NO KEY UPDATE: two postings of one invoice run one after the other (sheet 4.C
+  -- de-duplication) without blocking rows that only point at the invoice (RLS review r2 L1).
   -- REG-1: the buyer is the order's customer (unchanged; a bill-split payer invoice names the sale's customer). A
   -- field application has no order and records under the invoice's own customer (Mason, 2026-11-10).
   SELECT i.id, i.order_id, c.id AS customer_id, c.farm_name, i.invoice_date,
@@ -282,7 +286,7 @@ BEGIN
   LEFT JOIN orders o ON o.id = i.order_id AND i.invoice_type <> 'field_application'
   JOIN customers c ON c.id = COALESCE(o.customer_id, i.customer_id)
   WHERE i.id = p_invoice_id
-  FOR UPDATE OF i;
+  FOR NO KEY UPDATE OF i;
   -- REG-1: no registration changes while this posting reads them (sheet 3.2, shared mode).
   PERFORM public._epa_registration_lock(false);
   v_seeded := public._epa_registrations_seeded();
@@ -297,9 +301,6 @@ BEGIN
       CASE WHEN v_invoice.deleted_at IS NOT NULL THEN 'deleted' ELSE coalesce(v_invoice.status, 'without a status') END;
   END IF;
 
-  -- REG-1 (Mason, 2026-11-10): a return credit never creates or needs a restricted-use record.
-  IF v_invoice.invoice_type = 'credit_memo' THEN RETURN 0; END IF;
-
   -- Replay only after the posted check, so a key reused for an unposted invoice cannot return a cached success.
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := check_idempotency(p_idempotency_key, 'generate_rup_sales_records');
@@ -311,6 +312,10 @@ BEGIN
       RETURN (v_existing->>'count')::integer;
     END IF;
   END IF;
+
+  -- REG-1 (Mason, 2026-11-10): a return credit never creates or needs a restricted-use record. After the key check,
+  -- so another invoice's key is refused here too (Luna 2026-11-10 r1).
+  IF v_invoice.invoice_type = 'credit_memo' THEN RETURN 0; END IF;
 
   v_season := CASE
     WHEN EXTRACT(MONTH FROM LEAST(v_invoice.invoice_date, (now() AT TIME ZONE 'America/Chicago')::date)) >= 10
@@ -329,7 +334,7 @@ BEGIN
     -- One record per line captured 'yes' that has none: the record names its line, so nothing is matched or grouped.
     OPEN v_items FOR
       SELECT ii.id AS invoice_item_id, ii.product_id, p.product_name, ii.quantity,
-             COALESCE(ii.unit_size, 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
+             COALESCE(NULLIF(btrim(ii.unit_size), ''), 'Unit not set') AS unit_size, -- never fail posting on a line with no unit (Sol r4)
              ii.unit_price_cents, ii.extended_cents, c.epa_registration, c.signal_word
         FROM invoice_items ii
         JOIN products p ON p.id = ii.product_id
@@ -340,7 +345,7 @@ BEGIN
   ELSE
     OPEN v_items FOR
     SELECT ii.id AS invoice_item_id, ii.product_id, p.product_name, ii.quantity,
-           COALESCE(ii.unit_size, 'Unit not set') AS unit_size,  -- as the seeded branch: a missing unit never blocks a post
+           COALESCE(NULLIF(btrim(ii.unit_size), ''), 'Unit not set') AS unit_size,  -- as the seeded branch: a missing unit never blocks a post
            ii.unit_price_cents, ii.extended_cents,
            p.epa_registration, p.signal_word
     FROM invoice_items ii
@@ -488,7 +493,7 @@ GRANT EXECUTE ON FUNCTION public.get_epa_sales_to_check() TO authenticated;
 -- 5. Q7 (invoice_items half): no direct line writes from the app roles
 -- ---------------------------------------------------------------------------------------------
 
-REVOKE INSERT, UPDATE, DELETE ON TABLE public.invoice_items FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.invoice_items FROM anon, authenticated;
 -- A table REVOKE leaves column grants in place; revoke those explicitly too (none live 2026-11-10).
 DO $q7_columns$
 DECLARE
@@ -522,6 +527,7 @@ BEGIN
     IF has_table_privilege(v_role, 'public.invoice_items', 'INSERT')
        OR has_table_privilege(v_role, 'public.invoice_items', 'UPDATE')
        OR has_table_privilege(v_role, 'public.invoice_items', 'DELETE')
+       OR has_table_privilege(v_role, 'public.invoice_items', 'TRUNCATE')
        OR has_any_column_privilege(v_role, 'public.invoice_items', 'INSERT')
        OR has_any_column_privilege(v_role, 'public.invoice_items', 'UPDATE')
        OR has_table_privilege(v_role, 'public.rup_sales_records', 'INSERT')

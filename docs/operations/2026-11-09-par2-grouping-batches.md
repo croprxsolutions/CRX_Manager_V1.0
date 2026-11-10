@@ -1,6 +1,6 @@
 # PAR-2 grouping batches (DATA-9 / DATA-12): tracking
 
-**Status, 2026-11-09 (Central): grouping switch ON (PR #1712, ledger `20261110023059`); batch 1 APPROVED live by Mason (36 parents, 72 sizes). Batch 2 waits for DATA-2 brand writes.**
+**Status, 2026-11-09 (Central): grouping switch ON (PR #1712, ledger `20261110023059`); batches 1 and 2 APPROVED live by Mason (91 parents, 183 sizes); 42 "2.5G/265G/275G" names renamed to "2.5 Gal/265 Gal/275 Gal Tote". Next build waits for DATA-2 brand writes.**
 
 What this is: CRX Manager keeps each container size of a chemical as its own product row (a 2.5 gal jug and a Bulk row of the same chemical are two rows). PAR-2 puts those rows under one **parent** per chemical, so shared values (rate, Use Timing, later weight and ingredients) are typed once. Grouping never changes a product ID, price, cost, stock, unit or any old order or invoice. Plan: `docs/plans/2026-10-29-product-GRAND-PLAN.md` overlaps 13 and 14, PAR-2, DATA-9 and DATA-12; build sheet `docs/plans/2026-11-04-product-stage2-BUILD-SHEET.md` section 5.
 
@@ -104,7 +104,16 @@ An agent then checks read-only that each approved group has a parent, every memb
 |---|---|---|
 | 2026-11-09 | 1 | Drafted (36 groups). Waiting on Mason: turn on grouping, then approve. |
 | 2026-11-09 | 1 | **Approved** about 9:57 PM Central, proposal 88c57e35 (built 9:38 PM): 36 parents, 72 sizes (29 Bulk, 43 Package). Read-only check: for all 72 sizes the approval record has identical before/after rate, per-acre tier prices, EPA and category; 0 stock movements; no brand rows. |
+| 2026-11-09 | 2 | **Approved** by Mason on screen, proposal 697a26a3 (built 10:07 PM): 55 parents, 111 sizes. Live totals now 91 parents, 183 sizes. Read-only check: all 183 logged sizes have identical before/after values; 0 stock movements. Left out: the 7 disagreement groups (section 4 item 7), BroadAxe XC, Ilevo, Milestone (RT-2a), and 14 fertilizer Bulk + Tote pairs. |
+| 2026-11-09 | renames | Mason approved: 42 product names changed in the app (product page, Save Changes) from "2.5G / 265G / 275G" to "2.5 Gal / 265 Gal / 275 Gal Tote" (plus a missing bracket on one Gen Dual S Moc row). Read-only check: a fingerprint of every other products column was identical before and after, no other product name changed, 0 stock movements. Old invoices and orders keep their saved names. |
 
 **Size roles (Mason, 2026-11-09):** only fertilizer is kept in real bulk storage. For chemicals and adjuvants, a "- Bulk" row is a tote filled to the customer's amount (usually by the vendor, sometimes by the shop from spare totes) and sold by the gallon, so it keeps the **Bulk** role. A set-size vendor container (110/120/125/250 gal) with no Bulk size in its group is a **Package**, not a Tote. Tracking shop-filled chemical totes as a stock movement is not built (shop fill is fertilizer only, DECISION_LOG 2026-11-04).
+
+**Mason's answers to section 4 (2026-11-09):**
+1. Atrazine 4L 265 gal tote: group it under Atrazine 4L (move this size).
+2. BroadAxe XC and Authority Elite are different products; the EPA number was wrong on BroadAxe XC, fixed by DATA-2 to 279-3442-100.
+3. Fertilizer: each is either Bulk or a set factory tote; all totes are 275 gal except Black Strap Molasses (250 gal).
+4. The "1 gal" Tote rows are a Bulk or tote row (size to be corrected before grouping).
+5. "2.5G" means a 2.5 gal jug (Package); "275G" means a set factory tote. Renamed (see log).
 
 **Order with DATA-2 (EPA brand numbers, PR #1709):** DATA-2 writes identical brand lists on every size of the ungrouped products, and writes on the parent (`upsert_parent_brand`) for batch 1. Batch 2 and later proposals are built only after DATA-2's writes land.

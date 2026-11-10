@@ -148,3 +148,12 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
   order-invoice check and copy, are the existing race class every post-time line check shares (deferred, LOW; the
   order path cannot bill a product line today); line names in the screen message deferred; the prover now removes
   only a container it created (fixed).
+- **Sol r4** (2 HIGH, 1 LOW; head 6e7b9a29c), STOPPED: the product fallback has now drawn a HIGH in four Sol rounds.
+  - HIGH, an old `''`/`''` pair is filled to the product unit and its return refused: Mason's accepted cost (Sol r3),
+    disputed by Sol again.
+  - HIGH, a hand-built quick-delivery call naming a unit other than the product's (e.g. `case` on a `Gal` product)
+    gets the product unit on the order and invoice lines, so its return is credited in `Gal` while the delivery says
+    `case`. The app's quick-delivery screen always sends the product's own unit (`QuickDeliveryModal.tsx:333`), so
+    only an API call outside the app differs (Sol r1's refuted case, from the quick-delivery side).
+  - LOW, line names dropped from the screen message: deferred.
+  Per AGENTS.md (same mechanism three rounds), patching stopped; the business trade-off went to Mason.

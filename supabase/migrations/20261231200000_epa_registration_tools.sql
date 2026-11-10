@@ -6,7 +6,7 @@
 -- (False positive: the hook misreads _epa_registration_insert's VALUES list. registration_status is written only as
 --  'active', 'cancelled' or 'unknown', which the table's CHECK holds; no CHECK is expanded here.)
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261229180000_epa_registration_tools.md.
+-- docs/reference/migrations.d/20261231200000_epa_registration_tools.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2 (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md; cut down 2026-11-09, Mason: "Drop them"
@@ -14,7 +14,7 @@
 --   storage and stub tools that refuse EPA_REGISTRATION_NOT_SEEDED. This file adds the private seed-run record,
 --   the small shared helpers and a working set_epa_registration: a plain edit of one registration (plus its
 --   event). Nothing copies a registration's facts to sizes or brands, and no product edit is refused.
---   Every tool still refuses EPA_REGISTRATION_NOT_SEEDED until Mason runs the one-time seed (20261229200000),
+--   Every tool still refuses EPA_REGISTRATION_NOT_SEEDED until Mason runs the one-time seed (20261231220000),
 --   so applying this file changes no live behaviour.
 --
 -- WHAT:
@@ -34,7 +34,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit Step 1's set_epa_registration stub (md5 pinned below), drop
 --   the helpers and the private table (empty until the seed).
 --
--- ORDERING: after 20261210100000_epa_registrations and every older pending migration; before 20261229190000.
+-- ORDERING: after 20261210100000_epa_registrations and every older pending migration; before 20261231210000.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -229,7 +229,7 @@ END;
 $function$;
 
 -- Posted invoice lines sold under p_number with no active RUP record (shown when a label turns Yes).
--- 20261229190000 re-issues it to match by the product's number or the line's saved number, with the one coverage rule.
+-- 20261231210000 re-issues it to match by the product's number or the line's saved number, with the one coverage rule.
 CREATE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for REG-1 Step 2 (20261229180000, 20261229190000, 20261229200000), cut down 2026-11-09
+ * Real-schema proof for REG-1 Step 2 (20261231200000, 20261231210000, 20261231220000), cut down 2026-11-09
  * (Mason: "Yes, simplify", then "Drop them"): the registration edit tool, restricted-use posting by the number each
  * line was sold under (either the registration or the product's tick says Yes), Sales to check, the seed preview
  * and the one-time seed, and the invoice-line grant check. No guard: sizes and brands stay directly editable.
@@ -28,8 +28,8 @@ const KEEP = REUSE !== '' || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261229180000_epa_registration_tools.sql');
-const FOLLOW_UPS = ['20261229190000_rup_records_by_sold_number.sql', '20261229200000_epa_registration_seed.sql']
+const CANDIDATE = path.join(MIGRATIONS, '20261231200000_epa_registration_tools.sql');
+const FOLLOW_UPS = ['20261231210000_rup_records_by_sold_number.sql', '20261231220000_epa_registration_seed.sql']
   .map((f) => path.join(MIGRATIONS, f));
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -327,8 +327,8 @@ function seed() {
 }
 
 const SIG = {
-  A: '20261229180000_epa_registration_tools.sql',
-  C: '20261229190000_rup_records_by_sold_number.sql', D: '20261229200000_epa_registration_seed.sql',
+  A: '20261231200000_epa_registration_tools.sql',
+  C: '20261231210000_rup_records_by_sold_number.sql', D: '20261231220000_epa_registration_seed.sql',
 };
 const PUBLIC_FNS = [
   'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)',

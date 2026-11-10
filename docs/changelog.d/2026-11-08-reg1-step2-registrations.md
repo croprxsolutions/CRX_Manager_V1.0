@@ -1,6 +1,6 @@
 ## 2026-11-08 — REG-1 Step 2: EPA registrations become the one source of label facts (database, not applied)
 
-- Three migrations (`20261229180000`, `20261229190000`, `20261229200000`): the registration edit tool,
+- Three migrations (`20261231200000`, `20261231210000`, `20261231220000`): the registration edit tool,
   restricted-use posting from what was captured when each sale line was saved (Mason, 2026-11-10, "Capture it at
   save": the answer is Yes when any Yes says so: the product's tick, its number's registration, or the number saved on
   the line; the record goes under the product's own number at save; a product with no number records with the number

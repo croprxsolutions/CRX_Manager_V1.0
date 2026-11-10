@@ -1,5 +1,5 @@
 -- Written 2026-11-08, rebuilt 2026-11-10. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20261229190000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
+-- docs/reference/migrations.d/20261231210000_rup_records_by_sold_number.md (REG-1 Step 2, file 2 of 3).
 -- Re-read the live ledger before applying.
 --
 -- WHY: REG-1 Step 2 part C (docs/plans/2026-11-06-product-REG1-BUILD-SHEET.md 4.C). Mason, 2026-11-10, "Capture
@@ -37,7 +37,7 @@
 -- ROLLBACK (its own reviewed migration, forward repair): keep the captures; a generator that ignores them would
 --   lose a sale captured Yes. Drop the trigger only with a generator that still reads the captures.
 --
--- ORDERING: after 20261229180000_epa_registration_tools; before 20261229200000.
+-- ORDERING: after 20261231200000_epa_registration_tools; before 20261231220000.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -51,7 +51,7 @@ BEGIN
     RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
   IF to_regprocedure('public._epa_registration_unrecorded_posted_lines(text)') IS NULL THEN
-    RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: apply 20261229180000_epa_registration_tools first';
+    RAISE EXCEPTION 'RUP_RECORDS_BY_SOLD_NUMBER_PREFLIGHT: apply 20261231200000_epa_registration_tools first';
   END IF;
   IF to_regprocedure('public.get_epa_sales_to_check()') IS NOT NULL
      OR to_regclass('public.invoice_line_rup_captures') IS NOT NULL THEN
@@ -223,7 +223,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                                        AND d.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents));
 $function$;
 
--- Re-issued from 20261229180000 (same signature and grants): posted lines whose captured number or saved number is
+-- Re-issued from 20261231200000 (same signature and grants): posted lines whose captured number or saved number is
 -- p_number and that are not covered.
 CREATE OR REPLACE FUNCTION public._epa_registration_unrecorded_posted_lines(p_number text) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$

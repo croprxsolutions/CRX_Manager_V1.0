@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110061547`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
-**WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
+**WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
 **Shipment reconciliation: 2026-10-27 (America/Chicago).** Compared all 68 PRs in the October 25–27 UTC merge query with `main` at `fe258c2fe`, current source and the live read-only migration ledger. KI-15 is closed; KI-30's completed category/vendor work is removed from its open scope; KI-47/KI-52/KI-72 are narrowed. The [audit record](../audits/2026-10-27-shipped-work-reconciliation.md) lists every PR and the evidence limits. All other open and accepted risks remain; this is not a fresh full security audit.
 
@@ -38,8 +38,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09) | 63 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
-| Closed as FIXED, with proof (bottom of file and archive) | 18 |
-| WP-PM-3 checks still owed (KI-92) | 1 |
+| Closed as FIXED, with proof (bottom of file and archive) | 19 |
+| WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
 Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
@@ -445,10 +445,12 @@ live when this was written.
 - Split billing, per delivery of a partly delivered order: the old "each delivery rounds on its own and loses
   cents" description was not reproduced on 2026-11-10 (code-read + live read-only). Current Bill Split
   (`20261215110000`) bills the cumulative cents through this delivery minus the cents already billed, and the
-  other payers round down while the main customer takes the leftover cent. Not closed: the container proofs
-  (`prove-allocated-line-cents.mjs` and `smoke-chem-sale-bill-split-invoices.sql`) did not run in this check
-  (Docker is not installed here). Negative-quantity credits and reopening a saved split set are still not
-  supported (they fail closed). LOW.
+  other payers round down while the main customer takes the leftover cent. Not closed. Follow-up the same day
+  on a Docker machine: `prove-allocated-line-cents.mjs` PASSES, but it proves a different bug (the August
+  tier-split draw-down, against function bodies pinned on 2026-08-17), not the per-delivery Bill Split case.
+  `smoke-chem-sale-bill-split-invoices.sql` has no container runner, only a live rolled-back run, which a
+  read-only check may not do. Still owed: run that smoke in a container on a live schema dump.
+  Negative-quantity credits and reopening a saved split set are still not supported (they fail closed). LOW.
 - Auto-draft invoice does nothing when an applicator completes a job; policy is Mason's, switch is off. MED, dormant.
 - Two commission design choices wait on Mason (do blend tickets create commissions; may applicators see a job's
   commission split). UNVERIFIED, LOW.
@@ -545,8 +547,13 @@ RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive not
 - CONFIRMED, LOW, re-checked 2026-11-10 (code-read + live read-only). Cancelling a quick delivery marks the order
   cancelled and then marks its open draft invoice cancelled without zeroing the money. The invoice guard allows
   that only when the total is 0 cents; otherwise it raises `ORDER_INVOICE_TERMINAL` and the whole cancel rolls
-  back, for an admin or a rep. The container replay was not repeated here (Docker is not installed). Recommended
-  fix, not applied: zero the draft's money before cancelling it, the way voiding an order already does.
+  back, for an admin or a rep. Container-confirmed 2026-11-10 2:40 PM Central on a fresh read-only dump of the
+  live schema (`cancel_delivery`, `_cancel_delivery_replay_impl_20261015` and `guard_invoice_terminal_order`
+  match live by md5): a scheduled quick delivery whose order has an open draft invoice of 2,000 cents is refused
+  with `ORDER_INVOICE_TERMINAL` for an admin and for a rep, and nothing changes; the same invoice at 0 cents
+  cancels the delivery, the order and the draft. Live read-only the same day: no open quick delivery has a
+  non-zero draft, so nobody is stuck today. Recommended fix, not applied: zero the draft's money before
+  cancelling it, the way voiding an order already does.
 - CONFIRMED, LOW, re-checked 2026-11-10 (live read-only grants; policies re-read in the repo). `finance_charges`
   still grants table writes to signed-in users. Its policies are admin-only, so the row rules refuse them. This
   is clean-up debt, not a hole. Recommended fix, not applied: drop the extra table grants.
@@ -651,15 +658,6 @@ sent, but every outbound path uses Main Warehouse only and no transfer exists, s
 ship. A live check on 2026-11-02 found all 117 inventory rows at Main Warehouse, so nothing has been stranded yet.
 Fix: list active `warehouses` rows only, refuse unknown locations on the server, and print the real location.
 Multi-warehouse support stays (`docs/manual/DECISION_LOG.md`, 2026-11-02; checklist in `docs/workflows/INVENTORY_RULES.md`).
-
-### KI-92 — Accepted quote with live order needs proof
-**LOW · STILL UNVERIFIED (re-checked 2026-11-10) · product database · WP-PM-3 applied live 2026-11-02**
-The "LOCAL CANDIDATE — NOT APPLIED" label was stale. `20261103100000_product_active_guard` is applied live
-(2026-11-02). The review already skips an accepted quote that has an order which is not deleted, cancelled or
-voided (code-read + live read-only). The checked-in prover only plants accepted quotes whose orders are cancelled
-or voided. Still owed, and not run in this check because Docker is not installed: an accepted quote with a
-confirmed order must not appear in the turn-off warnings, and an accepted quote whose order is soft-deleted must
-appear. No fix applied.
 
 ### KI-93 — One blend ticket can deduct its stock twice
 **MED · FIXED 2026-11-04 (`20261107050000` applied live, ledger `20261105014219`; PR #1459) (found 2026-11-02, Ponytail audit #11, confirmed by Sol) · database/inventory · Claude**
@@ -956,13 +954,15 @@ on 2026-11-05 because that narrowing kept leaking the same class of hole; the br
 cases only. Workaround: run a delete or cleanup as its own command, not in one that `cd`s into a worktree.
 
 ### KI-112 — A draft return-credit prover failed just after midnight UTC
-**LOW · STILL UNVERIFIED (re-checked 2026-11-10) · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+**LOW · PARTLY CHECKED (main's version passes in the daytime, 2026-11-10; the after-midnight-UTC run is still owed) · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
 The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.mjs` (closed PR #1319) failed just
-after midnight UTC with "fractional credit A PNL COGS delta=-1251". Not checked whether `main`'s live-dump version
-fails the same way; it fits the known pattern of live checks that fail between 6 PM and midnight Central.
-Still unverified on 2026-11-10: this session has no Docker (`docker` is not installed), no Supabase CLI, and no
-linked schema dump, so `supabase db dump --linked` was not run and the container proof was not started. A
-credential was not requested. When it can run, set the database time zone to America/Chicago first.
+after midnight UTC with "fractional credit A PNL COGS delta=-1251"; it fits the known pattern of live checks that
+fail between 6 PM and midnight Central. On 2026-11-10 at 2:15 PM Central (8:15 PM UTC, the same date in both
+zones) `main`'s live-dump version PASSED on a fresh read-only dump of the live schema:
+`RETURN_CREDIT_LIVE_SCHEMA_PASS ... smoke=SMOKE_PASS_ROLLBACK residue=0`, including the fractional COGS proofs.
+That does not test the failure window. The script runs psql inside the container, so `PGTZ` set on the host does
+not reach it and the container runs on UTC. Still owed: one run between 6 PM and midnight Central; if it fails,
+the fix is to set the container session time zone to America/Chicago.
 
 ### KI-113 — The customer-document byte-boundary prover is out of date
 **LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
@@ -1177,11 +1177,11 @@ the first uploader's name and time. LOW.
 ## Unverified items (could not confirm either way; treat as open until checked)
 
 KI-20 (commission design choices; the per-delivery cent-loss claim was not reproduced by code read on
-2026-11-10 and is not closed until the container proof runs), KI-29/KI-30 (live-data counts), KI-41 (real-phone
-offline test: needs a person with a phone), KI-52 (prover, live-testdata false positives), KI-92 (accepted quote
-with a confirmed order, and with a soft-deleted order), KI-111 (real boundary file: needs Mason), KI-112
-(return-credit prover: no Docker and no linked database dump in the 2026-11-10 check). KI-16 split-acre rounding
-was confirmed on 2026-11-10 and is no longer in this list.
+2026-11-10 and is not closed until the Bill Split smoke runs in a container), KI-29/KI-30 (live-data counts),
+KI-41 (real-phone offline test: needs a person with a phone), KI-52 (prover, live-testdata false positives),
+KI-111 (real boundary file: needs Mason), KI-112 (return-credit prover: passes in the daytime; one run between
+6 PM and midnight Central still owed). KI-16 split-acre rounding was confirmed and KI-92 closed on 2026-11-10;
+neither is in this list.
 
 ---
 
@@ -1215,6 +1215,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 15. **KI-89, inventory position used UTC dates** — closed 2026-11-08: already fixed by `20261204100000_ki18_batch1_chicago_today` (applied live 2026-11-06, ledger `20261107041703`), which re-emitted `_get_inventory_position_cost_impl_20261019` after WP-PM-3 with the Chicago date for season start and both hold-expiry checks. A read-only live query on 2026-11-08 found no `CURRENT_DATE` in that body or `get_inventory_position`, and the body's md5 (`6a74347a…`) is the one that migration's postflight expects. No new migration was needed.
 16. **KI-90, reopen race through `set_product_active` had no automated proof** — closed 2026-11-08: `scripts/smoke/prove-product-retire-race-and-negative-stock-real-schema.mjs` replays every migration on `main` and races an order reopen against the real preview-and-confirm turn-off in both arrival orders on separate connections, with an observed row-lock wait. Reopen first: the stale preview's Confirm is refused (`PRODUCT_DEACTIVATION_BLOCKED`) and the product stays on. Turn-off first: the reopen is refused (`PRODUCT_INACTIVE`) and the order stays closed. Neither leaves an open order holding a turned-off product.
 17. **KI-91, retired product with negative stock was checked by hand only** — closed 2026-11-08 by the same prover: a product at −2.5 on hand is turned off through `set_product_active` (one "stock" warning, no blocker), then stays in the inventory position report at −2.5, not flagged low, and in the admin cost report at −2.50 value; the same balance on an active product is flagged low.
+18. **KI-92, accepted quote with a live order needed proof** — closed 2026-11-10 with no bug found. `scripts/smoke/prove-product-active-guard-real-schema.mjs`, temporarily extended with two cases, printed `PRODUCT_ACTIVE_GUARD_PROOF_PASS`: an accepted quote whose order is confirmed is not in the turn-off warnings, and an accepted quote whose only order is soft-deleted is. The container's `_product_active_review` matches live by md5 (`3c9f0b26…`, read-only live query the same day). The two cases were not committed (verification only). The checked-in prover no longer runs on `main` as is: it refuses because `20261204100000_ki18_batch1_chicago_today` sorts after WP-PM-3 and re-emits the inventory cost function it watches; the run skipped that file, which does not touch the quote warnings. Original text appended to the archive.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

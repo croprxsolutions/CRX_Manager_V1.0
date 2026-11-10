@@ -7212,3 +7212,18 @@ The reopen race through `set_product_active` has no automated real-schema proof.
 ### KI-91 — Retired negative stock needs proof
 **MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
 A retired product with a negative balance in the position report was checked by hand only.
+
+### Closed 2026-11-10 — KI-92
+
+No bug found. `scripts/smoke/prove-product-active-guard-real-schema.mjs`, temporarily extended with two cases, printed `PRODUCT_ACTIVE_GUARD_PROOF_PASS`: an accepted quote with a confirmed order is not in the turn-off warnings, and an accepted quote whose only order is soft-deleted is. The container's `_product_active_review` matched live by md5 (read-only live query, 2026-11-10).
+
+Original text:
+
+### KI-92 — Accepted quote with live order needs proof
+**LOW · STILL UNVERIFIED (re-checked 2026-11-10) · product database · WP-PM-3 applied live 2026-11-02**
+The "LOCAL CANDIDATE — NOT APPLIED" label was stale. `20261103100000_product_active_guard` is applied live
+(2026-11-02). The review already skips an accepted quote that has an order which is not deleted, cancelled or
+voided (code-read + live read-only). The checked-in prover only plants accepted quotes whose orders are cancelled
+or voided. Still owed, and not run in this check because Docker is not installed: an accepted quote with a
+confirmed order must not appear in the turn-off warnings, and an accepted quote whose order is soft-deleted must
+appear. No fix applied.

@@ -11,8 +11,8 @@ import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
 import { SIZE_ROLE_LABELS, updateProductParent, type ProductParent } from '../../lib/productParents';
 import { visibleProductCategories } from '../../lib/productSetup';
-import { visibleProductUseTimingOptions } from '../../lib/productUseTimings';
-import type { ProductCategory, UseTimingOption } from '../../types';
+import type { CropOption, ProductCategory, UseTimingOption } from '../../types';
+import UseTimingPicker from './UseTimingPicker';
 import ParentRatesModal from './ParentRatesModal';
 import ParentIdentityModal from './ParentIdentityModal';
 import MoveProductSizeModal from './MoveProductSizeModal';
@@ -36,11 +36,12 @@ export function ReasonField({ id, label, value, onChange }: { id: string; label:
 const timingLabels = (codes: readonly string[] | null, options: readonly UseTimingOption[]) =>
   (codes ?? []).map((code) => options.find((option) => option.code === code)?.label ?? code).join(', ') || 'None';
 
-function EditParentModal({ parent, profileId, categoryOptions, timingOptions, onClose, onSaved }: {
+function EditParentModal({ parent, profileId, categoryOptions, timingOptions, cropOptions, onClose, onSaved }: {
   parent: ProductParent;
   profileId: string;
   categoryOptions: ProductCategory[];
   timingOptions: UseTimingOption[];
+  cropOptions: CropOption[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -120,14 +121,8 @@ function EditParentModal({ parent, profileId, categoryOptions, timingOptions, on
             <fieldset>
               <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
               <div className="space-y-1 rounded-lg border border-gray-200 bg-white p-2">
-                {visibleProductUseTimingOptions(timingOptions, category, keptTimings).map((option) => (
-                  <label key={option.code} className="flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark hover:bg-gray-50">
-                    <input type="checkbox" checked={keptTimings.includes(option.code)}
-                      onChange={(event) => setTimings(event.target.checked ? [...keptTimings, option.code] : keptTimings.filter((code) => code !== option.code))}
-                      className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green" />
-                    {option.label}{option.is_active ? '' : ' (retired)'}
-                  </label>
-                ))}
+                <UseTimingPicker options={timingOptions} crops={cropOptions} category={category}
+                  selected={keptTimings} held={parent.use_timings ?? []} onChange={setTimings} />
               </div>
             </fieldset>
           )}
@@ -191,7 +186,7 @@ function SizeRow({ size, isThisSize, isAdmin, busy, blocked, onMove }: {
  * admin actions. Every write goes through the parent's own checked database call.
  */
 export default function ProductParentPanel({
-  parent, productId, isAdmin, profileId, ratesLocked, categoryOptions, timingOptions, rateUnitOptions, busy, onChanged,
+  parent, productId, isAdmin, profileId, ratesLocked, categoryOptions, timingOptions, cropOptions = [], rateUnitOptions, busy, onChanged,
 }: {
   parent: ProductParent;
   productId: string;
@@ -200,6 +195,8 @@ export default function ProductParentPanel({
   ratesLocked: boolean | null;
   categoryOptions: ProductCategory[];
   timingOptions: UseTimingOption[];
+  /** Crop names for the picker's groups (USE-1); without them a group shows its crop code. */
+  cropOptions?: CropOption[];
   rateUnitOptions: string[];
   /** Other unsaved edits on the page: parent actions wait for them. */
   busy: boolean;
@@ -246,7 +243,7 @@ export default function ProductParentPanel({
         </div>
       </div>
       {open === 'edit' && (
-        <EditParentModal parent={parent} profileId={profileId} categoryOptions={categoryOptions} timingOptions={timingOptions}
+        <EditParentModal parent={parent} profileId={profileId} categoryOptions={categoryOptions} timingOptions={timingOptions} cropOptions={cropOptions}
           onClose={close} onSaved={saved} />
       )}
       {open === 'rates' && ratesLocked !== null && (

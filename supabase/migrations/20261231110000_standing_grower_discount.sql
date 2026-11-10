@@ -22,16 +22,21 @@
 --      Written only by set_invoice_standing_discount (an active admin, a chemical-sale draft, replay-safe), which
 --      re-saves the draft through save_invoice so a split payer's fingerprint stays right. A side table, so the
 --      invoices table, its view and its column grants are untouched.
+--   7. Returns of a discounted sale credit what was billed after the discount (Taha 2026-11-10): each billed line
+--      carries its share of its invoice's discount line, and such a line is priced from what was billed, as a
+--      split payer's share is, so partial returns add up to the billed total exactly. One function re-emitted
+--      (_return_customer_line_share, pinned); every return step reads it.
 --
 -- NOT CHANGED: every writer function and existing guard, the posting functions themselves (only a BEFORE trigger is
 --   added), commission (still worked out on the order before any discount; Mason 2026-11-09: after the discount,
---   built with the week 4 commission PR, and this goes live only with it), returns and credit memos (a return of
---   a discounted sale is handled with that PR too), field application invoices.
+--   built with the week 4 commission PR, and this goes live only with it), the return functions themselves,
+--   field application invoices.
 --
 -- ROLLBACK (its own reviewed migration): drop this migration's triggers and functions, delete the
 --   'standing_discount' lines from draft invoices and re-total them, restore the two invoice_items
 --   CHECKs to their 20261108160000 text, drop invoice_standing_discount_rates and set_invoice_standing_discount,
---   drop customers.standing_discount_pct.
+--   drop customers.standing_discount_pct, restore _return_customer_line_share to its 20261021155000 text and drop
+--   _standing_discount_net_cents_20261231.
 --
 -- ORDERING: apply after every older pending migration.
 
@@ -217,13 +222,12 @@ BEGIN
     -- for that type (a field application's is not the sum of its lines).
     SELECT COALESCE(sum(extended_cents), 0) INTO v_old_discount
       FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount';
-    IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount')
-       OR current_setting('app.crx_standing_discount_busy', true) = v_inv.id::text THEN
+    IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount') THEN
       RETURN;
     END IF;
-    PERFORM set_config('app.crx_standing_discount_busy', v_inv.id::text, true);
-    DELETE FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount';
     v_new_total := v_inv.total_amount_cents - v_old_discount;
+    -- One statement (see below): the line-change event it queues finds no stray line and stops.
+    WITH del AS (DELETE FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount')
     UPDATE invoices SET total_amount_cents = v_new_total WHERE id = v_inv.id;
     INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
                                      total_impact_cents, description)
@@ -232,7 +236,6 @@ BEGIN
             jsonb_build_object('total_amount_cents', v_inv.total_amount_cents),
             jsonb_build_object('total_amount_cents', v_new_total, 'standing_discount_cents', 0),
             v_new_total - v_inv.total_amount_cents, 'Standing discount removed (not a chemical sale)');
-    PERFORM set_config('app.crx_standing_discount_busy', '', true);
     RETURN;
   END IF;
 
@@ -249,23 +252,22 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Its own writes queue line-change events for this invoice. Fired after it finishes (at commit) they
-  -- find the line right and stop; fired inside it (constraints set IMMEDIATE) they'd recurse, so they
-  -- see this marker and skip. A failure rolls the marker back with everything else.
-  IF current_setting('app.crx_standing_discount_busy', true) = v_inv.id::text THEN
-    RETURN;
-  END IF;
-  PERFORM set_config('app.crx_standing_discount_busy', v_inv.id::text, true);
-
-  DELETE FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount';
-  IF v_cents > 0 THEN
+  -- The line and the total change in ONE statement. Its own line-change events fire only after the whole
+  -- statement (at commit, or at its end when constraints are IMMEDIATE), find the line and total right, and stop:
+  -- no session flag, so nothing a caller sets can make the recompute skip a draft.
+  v_new_total := (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items
+                   WHERE invoice_id = v_inv.id AND charge_type IS DISTINCT FROM 'standing_discount') - v_cents;
+  WITH del AS (
+    DELETE FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type = 'standing_discount'
+  ), ins AS (
     INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents,
                                sort_order, charge_type)
-    VALUES (v_inv.id, v_label, 1, -v_cents, -v_cents, 0,
-            (SELECT COALESCE(max(sort_order), 0) + 1 FROM invoice_items WHERE invoice_id = v_inv.id),
-            'standing_discount');
-  END IF;
-  v_new_total := (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items WHERE invoice_id = v_inv.id);
+    SELECT v_inv.id, v_label, 1, -v_cents, -v_cents, 0,
+           (SELECT COALESCE(max(sort_order), 0) + 1 FROM invoice_items
+             WHERE invoice_id = v_inv.id AND charge_type IS DISTINCT FROM 'standing_discount'),
+           'standing_discount'
+     WHERE v_cents > 0
+  )
   UPDATE invoices SET total_amount_cents = v_new_total WHERE id = v_inv.id;
   -- The writers logged the draft's total before this line went in; this entry records the change, so the trail adds up.
   IF v_new_total IS DISTINCT FROM v_inv.total_amount_cents THEN
@@ -280,7 +282,6 @@ BEGIN
             v_new_total - v_inv.total_amount_cents,
             CASE WHEN v_cents > 0 THEN v_label ELSE 'Standing discount removed' END);
   END IF;
-  PERFORM set_config('app.crx_standing_discount_busy', '', true);
 END
 $function$;
 
@@ -505,3 +506,136 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.set_invoice_standing_discount(uuid, numeric, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.set_invoice_standing_discount(uuid, numeric, text) TO authenticated;
+
+-- 7. Returns credit what was billed, after the discount ---------------------------------------------
+-- A billed product line's cents after its share of its invoice's discount line. The discount is spread over the
+-- invoice's product lines in proportion to their cents, rounded on running totals, so the shares add up to the
+-- discount line exactly. A line on an invoice without a discount is its own cents. Read-only.
+CREATE FUNCTION public._standing_discount_net_cents_20261231(p_invoice_item_id uuid)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH me AS (
+    SELECT invoice_id, extended_cents FROM public.invoice_items WHERE id = p_invoice_item_id
+  ), d AS (
+    SELECT sum(x.extended_cents)::numeric AS cents
+      FROM public.invoice_items x, me
+     WHERE x.invoice_id = me.invoice_id AND x.charge_type = 'standing_discount'
+  ), lines AS (
+    SELECT x.id, x.extended_cents,
+           sum(x.extended_cents) OVER (ORDER BY x.id) AS running,
+           sum(x.extended_cents) OVER () AS base
+      FROM public.invoice_items x, me
+     WHERE x.invoice_id = me.invoice_id AND x.product_id IS NOT NULL AND x.charge_type IS NULL
+  )
+  SELECT me.extended_cents + COALESCE((
+    SELECT (round(d.cents * l.running / l.base) - round(d.cents * (l.running - l.extended_cents) / l.base))::bigint
+      FROM lines l, d
+     WHERE l.id = p_invoice_item_id AND d.cents IS NOT NULL AND l.base > 0), 0)
+    FROM me;
+$function$;
+
+REVOKE ALL ON FUNCTION public._standing_discount_net_cents_20261231(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- The return share (20261021155000) re-emitted with two changes, marked below:
+--   a. billed cents are each line's cents after its invoice's discount (_standing_discount_net_cents_20261231);
+--   b. a line billed on an invoice with a discount line is priced from what was billed (share mode), as a split
+--      payer's is, so returns credit the discounted price and partial returns add up to the billed total exactly.
+--      Every return step reads this one function: creation prices from it, receiving and crediting re-check it.
+-- Each line's credit can't exceed what is left of its billed cents, so a return never credits more than was paid.
+DO $pin$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+     WHERE p.oid = to_regprocedure('public._return_customer_line_share(uuid,uuid,uuid,uuid)')
+       AND md5(replace(p.prosrc, chr(13), '')) = '674576f7f195ba9c980dc195ce34e159'
+       AND p.proowner = 'postgres'::regrole
+       AND NOT p.prosecdef
+       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
+       AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]
+  ) THEN
+    RAISE EXCEPTION 'STANDING_DISCOUNT_PREFLIGHT: public._return_customer_line_share drifted';
+  END IF;
+END
+$pin$;
+
+CREATE OR REPLACE FUNCTION public._return_customer_line_share(p_order_id uuid, p_order_item_id uuid, p_customer_id uuid, p_exclude_return_id uuid)
+ RETURNS TABLE(share_mode boolean, billed_qty numeric, billed_cents bigint, other_returned_qty numeric, other_returned_cents bigint)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH ord AS (
+    SELECT o.customer_id,
+           COALESCE(o.needs_split_billing, false)
+             OR EXISTS (
+               SELECT 1 FROM public.order_item_field_allocations oifa
+                 JOIN public.order_items alloc_oi ON alloc_oi.id = oifa.order_item_id
+                WHERE alloc_oi.order_id = o.id
+             )
+             OR EXISTS (SELECT 1 FROM public.split_invoice_provenance p WHERE p.order_id = o.id)
+             AS split_evidence
+      FROM public.orders o WHERE o.id = p_order_id
+  ), billed AS (
+    -- (a) after the invoice's discount
+    SELECT i.id AS invoice_id, i.customer_id, i.invoice_group_id, ii.quantity,
+           public._standing_discount_net_cents_20261231(ii.id) AS extended_cents
+      FROM public.invoice_items ii
+      JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.order_items oi ON oi.id = ii.order_item_id
+     WHERE ii.order_item_id = p_order_item_id
+       AND ii.product_id = oi.product_id
+       AND ii.unit_size IS NOT DISTINCT FROM coalesce(oi.unit_size, 'ea')
+       AND ii.quantity > 0
+       AND i.order_id = p_order_id
+       AND i.invoice_type <> 'credit_memo'
+       AND i.deleted_at IS NULL
+       AND i.status IN ('posted', 'overdue', 'paid')
+  ), own AS (
+    SELECT b.quantity, b.extended_cents
+      FROM billed b
+     WHERE b.customer_id = p_customer_id
+       AND (
+         p_customer_id IS NOT DISTINCT FROM (SELECT customer_id FROM ord)
+         OR EXISTS (
+           SELECT 1 FROM public.split_invoice_provenance p
+            WHERE p.invoice_id = b.invoice_id
+              AND p.order_id = p_order_id
+              AND p.customer_id = p_customer_id
+              AND p.invoice_group_id = b.invoice_group_id
+         )
+       )
+  ), other_returns AS (
+    SELECT ri.quantity, ri.extended_cents
+      FROM public.return_items ri
+      JOIN public.returns r ON r.id = ri.return_id
+     WHERE ri.order_item_id = p_order_item_id
+       AND r.order_id = p_order_id
+       AND r.customer_id = p_customer_id
+       AND r.deleted_at IS NULL
+       AND r.status NOT IN ('rejected', 'cancelled')
+       AND r.id IS DISTINCT FROM p_exclude_return_id
+  )
+  SELECT
+    p_customer_id IS DISTINCT FROM (SELECT customer_id FROM ord)
+      OR COALESCE((SELECT split_evidence FROM ord), false)
+      -- (b) this line is on one of the customer's invoices with a discount line (any live invoice, so a return
+      --     raised before the invoice posts is held until it does, rather than priced at the full price)
+      OR EXISTS (
+        SELECT 1 FROM public.invoice_items di
+          JOIN public.invoices i ON i.id = di.invoice_id
+         WHERE di.order_item_id = p_order_item_id
+           AND i.order_id = p_order_id
+           AND i.customer_id = p_customer_id
+           AND i.invoice_type <> 'credit_memo'
+           AND i.deleted_at IS NULL
+           AND i.status NOT IN ('voided', 'cancelled')
+           AND EXISTS (SELECT 1 FROM public.invoice_items dl
+                        WHERE dl.invoice_id = i.id AND dl.charge_type = 'standing_discount')),
+    coalesce((SELECT sum(quantity) FROM own), 0),
+    coalesce((SELECT sum(extended_cents) FROM own), 0)::bigint,
+    coalesce((SELECT sum(quantity) FROM other_returns), 0),
+    coalesce((SELECT sum(extended_cents) FROM other_returns), 0)::bigint;
+$function$;

@@ -28,6 +28,8 @@
 --   V  A chemical sale written already posted, with its lines, in one transaction for a 3% customer: refused at commit
 --   W  The anonymous role can't set a customer's standing discount
 --   X  The office's rate change has its own audit entry, even when the cents don't move
+--   Y  Returns of a 3% customer's posted sale (two lines, one in two parts) credit its posted total, to the cent
+--   Z  A Bill Split payer at 3% returns its whole share: its credit is its own posted total
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -694,6 +696,93 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (X) the rate change failed: ' || SQLERRM || ';';
   END;
+
+  -- Y: returns of a 3% customer's posted sale credit what was billed after the discount. Two lines; line 1
+  --    comes back in two returns (3, then 7), line 2 whole. The credits add up to the posted total, to the cent.
+  -- Z: a Bill Split payer at 3% returns its whole share: its credit is its own posted total.
+  FOREACH v_case IN ARRAY ARRAY['Y', 'Z'] LOOP
+    BEGIN
+      INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+        VALUES ('SMK-DS' || v_case || '-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+      PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+      INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+        total_units_needed, total_price, quantity_delivered, quantity_remaining)
+        VALUES (v_order, v_product.id, '[SMOKE] Return line 1', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+                10, (v_product.current_cost + 1.37) * 10, 0, 10),
+               (v_order, v_product.id, '[SMOKE] Return line 2', 'gal', v_product.current_cost + 2.11, v_product.current_cost,
+                7, (v_product.current_cost + 2.11) * 7, 0, 7);
+      PERFORM set_config('app.crx_below_cost_operation', '', true);
+      IF v_case = 'Z' THEN
+        INSERT INTO order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents, is_primary, sort_order)
+          VALUES (v_order, v_customer, '[SMOKE] main', 50, 0, true, 1), (v_order, v_payer2, '[SMOKE] payer 2', 50, 0, false, 2);
+      END IF;
+      INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+        VALUES ('SMK-DS' || v_case || '-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+      INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+        SELECT v_delivery, oi.id, oi.product_id, oi.total_units_needed, 'gal' FROM order_items oi WHERE oi.order_id = v_order;
+      PERFORM confirm_delivery(v_delivery, v_admin, 'smk-ds' || v_case || '-confirm-' || v_suffix);
+      PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+        'smk-ds' || v_case || '-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; return of a discounted sale');
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      SELECT id, invoice_group_id INTO v_invoice, v_group FROM invoices
+       WHERE order_id = v_order AND customer_id = v_customer AND invoice_type <> 'credit_memo' AND status NOT IN ('voided', 'cancelled');
+      IF v_invoice IS NULL THEN
+        v_invoice := create_invoice_for_unbilled_delivery(v_delivery, v_admin, 'smk-ds' || v_case || '-invoice-' || v_suffix);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      END IF;
+      IF v_group IS NULL THEN
+        PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-ds' || v_case || '-post-' || v_suffix);
+      ELSE
+        PERFORM post_invoice_group(v_group, v_admin,
+          (SELECT jsonb_object_agg(id, _invoice_post_version(id)) FROM invoices
+            WHERE invoice_group_id = v_group AND status NOT IN ('voided', 'cancelled') AND deleted_at IS NULL),
+          'smk-ds' || v_case || '-post-' || v_suffix);
+      END IF;
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount') THEN
+        RAISE EXCEPTION 'the posted sale has no discount line';
+      END IF;
+      -- Each return: create, approve, receive, credit; v_lines lists (order item, quantity) per return.
+      FOR v_lines IN
+        SELECT CASE WHEN v_case = 'Y' THEN r ELSE NULL END FROM (VALUES
+          (jsonb_build_array(jsonb_build_object('n', 1, 'q', 3))),
+          (jsonb_build_array(jsonb_build_object('n', 1, 'q', 7), jsonb_build_object('n', 2, 'q', 7)))) v(r)
+        UNION ALL
+        SELECT jsonb_agg(jsonb_build_object('n', n, 'q', q))
+          FROM (SELECT row_number() OVER (ORDER BY oi.total_units_needed DESC) AS n, ii.quantity AS q
+                  FROM invoice_items ii JOIN order_items oi ON oi.id = ii.order_item_id
+                 WHERE ii.invoice_id = v_invoice AND ii.product_id IS NOT NULL AND ii.charge_type IS NULL) s
+         WHERE v_case = 'Z'
+      LOOP
+        CONTINUE WHEN v_lines IS NULL;
+        v_header := create_return(jsonb_build_object('customer_id', v_customer, 'order_id', v_order, 'reason', 'damaged'),
+          (SELECT jsonb_agg(jsonb_build_object('order_item_id', oi.id, 'quantity', (x ->> 'q')::numeric,
+                    'condition', 'unopened', 'restock', false))
+             FROM jsonb_array_elements(v_lines) x
+             JOIN (SELECT id, row_number() OVER (ORDER BY total_units_needed DESC) AS n FROM order_items WHERE order_id = v_order) oi
+               ON oi.n = (x ->> 'n')::int),
+          'smk-ds' || v_case || '-ret-' || md5(v_lines::text) || v_suffix);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+        v_invoice2 := (v_header ->> 'return_id')::uuid;
+        PERFORM approve_return(v_invoice2, v_admin, 'smk-ds' || v_case || '-ap-' || v_invoice2);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+        PERFORM receive_return(v_invoice2, v_admin, 'smk-ds' || v_case || '-rc-' || v_invoice2);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+        PERFORM issue_return_credit(v_invoice2, v_admin, 'smk-ds' || v_case || '-ic-' || v_invoice2);
+        SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+      END LOOP;
+      IF (SELECT abs(sum(total_amount_cents)) FROM invoices
+           WHERE order_id = v_order AND customer_id = v_customer AND invoice_type = 'credit_memo' AND deleted_at IS NULL)
+         IS DISTINCT FROM (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) THEN
+        v_fails := v_fails || format(' (%s) the returns credited %s cents, want the posted sale''s %s (after its discount);', v_case,
+          (SELECT abs(sum(total_amount_cents)) FROM invoices
+            WHERE order_id = v_order AND customer_id = v_customer AND invoice_type = 'credit_memo' AND deleted_at IS NULL),
+          (SELECT total_amount_cents FROM invoices WHERE id = v_invoice));
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_fails := v_fails || format(' (%s) the return of a discounted sale failed: %s;', v_case, SQLERRM);
+    END;
+  END LOOP;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL standing grower discount:%', v_fails;

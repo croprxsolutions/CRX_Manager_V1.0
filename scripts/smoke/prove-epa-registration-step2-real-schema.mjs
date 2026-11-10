@@ -614,6 +614,13 @@ async function main() {
   assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'false');
   raw(`DELETE FROM public.rup_sales_records WHERE product_name = '[PROVER] dup';`);
   assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'true');
+  // A record with every line's number, unit, price and amount but another signal word records neither (Luna 2026-11-10).
+  raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word)
+    VALUES ('${INV3}', '${ORD}', '${CUST}', '${P3}', current_date, '[PROVER] sw', '${N1}', 2, 'Gal', 2400, 4800, 2027, 'x', 'Danger');`);
+  assert.equal(scalar(`SELECT public._rup_record_for_line_key(ii)::text FROM public.invoice_items ii WHERE id = '${id('2a')}';`), 'false');
+  raw(`UPDATE public.rup_sales_records SET signal_word = 'Caution' WHERE product_name = '[PROVER] sw';`);
+  assert.equal(scalar(`SELECT public._rup_record_for_line_key(ii)::text FROM public.invoice_items ii WHERE id = '${id('2a')}';`), 'true');
+  raw(`DELETE FROM public.rup_sales_records WHERE product_name = '[PROVER] sw';`);
   // A line with no unit records as 'Unit not set' (Sol r4); the record's unit is required.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2b')}', '${INV1}', '${P4}', 'x', 1, NULL, 2200, 2200);`);

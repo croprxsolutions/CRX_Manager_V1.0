@@ -201,8 +201,8 @@ $function$;
 ALTER FUNCTION public._rup_record_covers_line(public.invoice_items) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._rup_record_covers_line(public.invoice_items) FROM PUBLIC, anon, authenticated, service_role;
 
--- A line not captured 'yes' counts as recorded only when an active record carries its captured number, unit and
--- price with the quantity and amount of EVERY captured line sharing them (a record added by hand that includes it).
+-- A line not captured 'yes' counts as recorded only when an active record carries its captured number, signal word,
+-- unit and price with the quantity and amount of EVERY captured line sharing them (a record added by hand that includes it).
 -- A record holding only a 'yes' sibling never hides it (Astra 2026-11-10).
 CREATE FUNCTION public._rup_record_for_line_key(p_line public.invoice_items) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -211,6 +211,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                    JOIN public.rup_sales_records s
                      ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
                     AND s.epa_registration IS NOT DISTINCT FROM c.epa_registration
+                    AND s.signal_word IS NOT DISTINCT FROM c.signal_word  -- Luna 2026-11-10: the full key
                     AND s.unit = COALESCE(p_line.unit_size, 'Unit not set')
                     AND s.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents,
                   LATERAL (SELECT sum(o.quantity) AS quantity, sum(o.extended_cents)::bigint AS total_cents
@@ -218,6 +219,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                              JOIN public.invoice_line_rup_captures oc ON oc.invoice_item_id = o.id
                             WHERE o.invoice_id = p_line.invoice_id AND o.product_id = p_line.product_id
                               AND oc.epa_registration IS NOT DISTINCT FROM c.epa_registration
+                              AND oc.signal_word IS NOT DISTINCT FROM c.signal_word
                               AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
                               AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
                   WHERE c.invoice_item_id = p_line.id

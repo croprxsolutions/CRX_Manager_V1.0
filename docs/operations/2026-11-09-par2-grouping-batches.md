@@ -130,7 +130,10 @@ An agent then checks read-only that each approved group has a parent, every memb
 - Kept separate (Mason), now each its own parent: Piksi Dust Infurrow / Piksi Dust Plus; Topguard / Topguard EQ.
 - Held: Ilevo, Milestone, Zannis, the per-unit seed treatment rows (Accelerate, CruiserMaxx, Trilex, Vibrance, Saltro, Victrato), retired and test rows.
 
-**Open questions for Mason (label data):** Kyber Pro and Fierce MTZ both carry EPA 59639-236 (one is wrong); Steward's 135 gal size says Corteva while the 2.5 gal says FMC (EPA 279 is FMC); Topguard and Topguard EQ both carry 279-3557.
+**Label data checked against the labels (2026-11-10):**
+- Kyber Pro / Fierce MTZ: both correct. Kyber Pro is Corteva's brand on Valent's registration 59639-236 (same three actives); kept as two products.
+- Steward: EPA 279-9596 is FMC's Steward EC. Mason approved "fix both": the 135 gal size's manufacturer was changed from Corteva to FMC on the product page (no price, rate or stock change).
+- Topguard EQ: its label is **EPA 279-3596** (flutriafol + azoxystrobin); 279-3557 is plain Topguard. Mason approved the fix, but Correct identity refuses EPA changes until REG-1 switches EPA correction on (`_product_parent_epa_correction_enabled()`, see `docs/reference/product-corrections-record-map.md`). **Open:** set Topguard EQ to 279-3596 once that lands.
 
 **Size roles (Mason, 2026-11-09):** only fertilizer is kept in real bulk storage. For chemicals and adjuvants, a "- Bulk" row is a tote filled to the customer's amount (usually by the vendor, sometimes by the shop from spare totes) and sold by the gallon, so it keeps the **Bulk** role. A set-size vendor container (110/120/125/250 gal) with no Bulk size in its group is a **Package**, not a Tote. Tracking shop-filled chemical totes as a stock movement is not built (shop fill is fertilizer only, DECISION_LOG 2026-11-04).
 

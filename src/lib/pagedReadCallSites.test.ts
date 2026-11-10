@@ -40,6 +40,7 @@ const SHARED_FILES = [
   'lib/reconciliation.ts',
   'lib/sellPriceHistory.ts',
   'lib/toteFill.ts',
+  'lib/useVendorNames.ts',
 ];
 
 // Components (under src/components) that page with fetchAllRows: Goal 4 part 2's

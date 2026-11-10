@@ -1857,6 +1857,7 @@ export default function OrderDetail() {
                 <thead>
                   <tr className="border-b border-gray-100">
                     <th className="px-4 py-3 text-left font-medium text-secondary">Product</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Vendor</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Price/Unit</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Units Needed</th>
                     <th className="px-4 py-3 text-left font-medium text-secondary">Delivered</th>
@@ -1879,6 +1880,9 @@ export default function OrderDetail() {
                         <tr key={item.id} className="border-b border-gray-50">
                           <td className="px-4 py-3 font-medium text-nav-dark">
                             {item.product_name}
+                          </td>
+                          <td className="px-4 py-3 text-secondary">
+                            {item.vendor || '-'}
                           </td>
                           <td className="px-4 py-3 font-mono">
                             {editing ? (
@@ -1947,6 +1951,7 @@ export default function OrderDetail() {
                             <span className="text-xs text-crx-green font-normal">(new)</span>
                           </div>
                         </td>
+                        <td className="px-4 py-3 text-secondary">-</td>
                         <td className="px-4 py-3 font-mono">
                           <input
                             type="number"
@@ -1985,7 +1990,7 @@ export default function OrderDetail() {
                     ))}
                     {/* Add Product button */}
                     <tr className="border-t border-dashed border-gray-300">
-                      <td colSpan={7} className="px-4 py-2">
+                      <td colSpan={8} className="px-4 py-2">
                         <button
                           type="button"
                           onClick={() => { setShowProductModal(true); setProductSearch(''); }}
@@ -2002,7 +2007,7 @@ export default function OrderDetail() {
                       <td colSpan={2} className="px-4 py-3 font-medium text-nav-dark">
                         New Total:
                       </td>
-                      <td colSpan={5} className="px-4 py-3 font-semibold text-nav-dark">
+                      <td colSpan={6} className="px-4 py-3 font-semibold text-nav-dark">
                         {/* Each line as the order functions store it, exact to the cent (To-Do 1.7). */}
                         {fmt(
                           [...editItems, ...newItems].reduce((cents, i) => cents + Math.round(exactRound2([i.price_per_unit, i.total_units_needed]) * 100), 0) / 100

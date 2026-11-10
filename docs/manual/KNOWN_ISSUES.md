@@ -386,11 +386,15 @@ can make old splits refuse to save (LOW-MED).
   Accepted (Mason, 2026-11-10, Sol round 5 HIGH): the product rate-unit guard skips billed tickets, so if a ticket
   with a blank line unit is billed, its product's unit then changes to a per-X unit, and the invoice is voided,
   re-billing is refused until someone types the line's unit (may need the order unlinked first).
-  Still open, HIGH but latent (Luna 2026-11-10): an undotted "fl oz" rate on a dry product reads as "oz" and bills as
-  weight ounces, so 16 fl oz/ac can bill as 1 lb/ac (pre-existing since `20260630170000`; live read-only 2026-11-10:
-  0 products, job lines or blend lines carry any "fl"/"fluid" spelling). Not fixed in `20261231110000`: mapping it to
-  `fl oz` makes the dry converter return nothing, and job demand and stock deduction then fall back to the raw
-  quantity (16 lb), so the fix needs its own plan across billing, demand and deduction. Mason 2026-11-10: fix it separately later, not in PR #1741. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  Dry-product fluid ounce (HIGH, latent; Luna 2026-11-10): an undotted "fl oz" on a dry product reads as "oz" and
+  bills, holds and deducts as weight ounces (16 fl oz/ac as 1 lb/ac; pre-existing since `20260630170000`; live
+  read-only 2026-11-10: 0 rows on any form). FIX PENDING LIVE APPLY (`20261231120000`, contract
+  `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`): save_job's existing refusal now covers every writer:
+  a job line, booking line, blend line or product rate/size/stock unit naming a fluid ounce on a dry product, and a
+  product turning dry while its lines name one, are refused (`CHEM_UNIT_FORM_MISMATCH`). The normalizer is unchanged. Not covered (existing):
+  gal/pt/qt on a dry product converts to nothing, so billing refuses it and job completion deducts the raw number
+  flagged for office review.
+  Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
   at billing).

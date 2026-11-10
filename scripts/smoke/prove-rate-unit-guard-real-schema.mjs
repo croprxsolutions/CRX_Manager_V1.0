@@ -31,6 +31,19 @@
  *   F4  a soft-deleted ticket no longer blocks the product edit; a live unbilled ticket still does.
  *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
  *
+ * Then 20261231120000 (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md):
+ *   GB  BEFORE: a dry product's job line in 'fl oz' saves and its hold/deduction sizes 16 as 1 (lb); a booking with a
+ *       dry fl oz line schedules; a dry blend line rated 'fl oz/ac' saves and its real invoice bills 200 fl oz as 12.5 lb.
+ *   G0  the guard applies (postflight passed); a second run refuses.
+ *   G1  scheduling a booking whose dry line is in fl oz is refused, no job; save_job still refuses; liquid schedules.
+ *   G2  dry blend lines in fl oz (rate, quantity unit, edits, moves, a direct table edit) are refused; dry oz/lb and a
+ *       liquid fl oz line save, and the liquid one invoices.
+ *   G3  direct job_chemicals writes (as every definer RPC writes them) with fl oz on a dry product are refused; oz on
+ *       dry and fl oz on liquid save; an unrelated edit saves.
+ *   G4  a dry product's rate unit cannot become fl oz; a product cannot turn dry while a job or blend line (also on a
+ *       soft-deleted ticket) names fl oz for it; it can once none does.
+ *   G5  unit_names_fluid_ounce table.
+ *
  * Run: node scripts/smoke/prove-rate-unit-guard-real-schema.mjs   (needs Docker)
  * Prints RATE_UNIT_GUARD_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
@@ -50,7 +63,9 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261231100000_rate_unit_denominator_guard_and_invisible_chars.sql');
 // KI-16 follow-ups (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md), applied after P1-P9.
 const FOLLOW_UP = path.join(MIGRATIONS, '20261231110000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql');
-const FOLLOW_UPS = [FOLLOW_UP];
+// KI-16 dry fluid ounce (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md), applied after F0-F5.
+const DRY_FLOZ = path.join(MIGRATIONS, '20261231120000_dry_product_fluid_ounce_guard.sql');
+const FOLLOW_UPS = [FOLLOW_UP, DRY_FLOZ];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
@@ -461,6 +476,7 @@ async function main() {
   console.log("[prover] P7: lines rated '32', 'pt/ac' and 'oz' take edits, price changes included");
 
   followUps();
+  await dryFluidOunce();
   console.log('RATE_UNIT_GUARD_PROOF_PASS');
 }
 
@@ -582,6 +598,218 @@ function followUps() {
     assert.equal(scalar(`SELECT coalesce(public.normalize_rate_unit(${expr}), '<null>');`), want, `F5: normalize_rate_unit(${expr})`);
   }
   console.log('[prover] F5: normalize_rate_unit keeps every earlier output; whitespace folds and dotted fl. oz maps to fl oz');
+}
+
+// ── 20261231120000: a fluid ounce on a dry product ──
+const LIQ3 = 'a16a1600-0000-4000-8000-0000000000b5';
+const jobLine = (job, pid, unit, rateUnit, sort) => `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
+    VALUES ('${job}', '${pid}', 16, ${unit}, 16, ${rateUnit}, 0, 0, ${sort});`;
+// A blend ticket with full control of each line: [rate_per_acre_unit expr, product id, quantity unit expr].
+const ticketLines = (id, lines) => `SELECT public.create_blend_ticket('${id}', jsonb_build_object('customer_id', '${CUSTOMER}', 'total_acres', 100),
+  jsonb_build_array(${lines.map(([u, pid, qu], i) => `jsonb_build_object('product_name', '[PROVER] KI16 line ${i}', 'product_id', '${pid}',
+    'quantity', 200, 'unit', ${qu}, 'rate_per_acre', 2, 'rate_per_acre_unit', ${u}, 'sequence_order', ${i})`).join(', ')}),
+  '[]'::jsonb, false, '${ADMIN}', 'prover-ki16-${id.slice(-4)}');`;
+// The hold and deduction expression (complete_job 20261217100000, holds 20261206110000) on a stored unit.
+const sized = (qty, unit, pid) => scalar(`SELECT coalesce(round(public.field_app_priced_quantity(${qty}, public.normalize_rate_unit(${unit}), p.inventory_unit, p.product_form), 4)::text, '<null>')
+  FROM public.products p WHERE p.id = '${pid}';`);
+function bookingFor(n, pid, priceUnit, rateUnit) {
+  clean(`booking ${n}`, `DO $b$ BEGIN
+      PERFORM public.save_quote(NULL, jsonb_build_object('quote_number', 'PROVER-KI16-${n}', 'status', 'draft', 'tier', 1,
+          'commission_split', '{"splits": []}'::jsonb, 'customer_id', '${CUSTOMER}'),
+        jsonb_build_array(jsonb_build_object('section_name', 'S1', 'sort_order', 0, 'items', jsonb_build_array(
+          jsonb_build_object('product_id', '${pid}', 'sort_order', 0, 'calc_mode', 'units_direct', 'total_units_needed', 2)))),
+        '${ADMIN}', 'prover-ki16-booking-${n}');
+    END $b$;`, { commit: true, asOwner: true });
+  raw(`UPDATE public.quotes SET is_planned = true WHERE quote_number = 'PROVER-KI16-${n}';
+    UPDATE public.quote_items qi SET price_unit = ${priceUnit}, rate_unit = ${rateUnit}, actual_rate = 16
+      FROM public.quotes q WHERE q.id = qi.quote_id AND q.quote_number = 'PROVER-KI16-${n}';`);
+  const q = scalar(`SELECT id FROM public.quotes WHERE quote_number = 'PROVER-KI16-${n}';`);
+  const sec = scalar(`SELECT id FROM public.quote_sections WHERE quote_id = '${q}';`);
+  return { run: (key) => `SELECT public.create_job_from_quote_section('${q}', '${sec}', '${ADMIN}', '${key}');`,
+    jobs: () => scalar(`SELECT count(*) FROM public.jobs WHERE quote_id = '${q}';`) };
+}
+
+// A second session, run in the background: resolves with its output once it exits.
+function background(sql) {
+  const c = spawn('docker', psqlArgs(), { cwd: ROOT });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+  c.stdin.end(sql);
+  return new Promise((resolve) => c.on('close', (code) => resolve({ code, out })));
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const bookingLines = (n) => `FROM public.quotes q WHERE q.id = qi.quote_id AND q.quote_number = 'PROVER-KI16-${n}'`;
+
+async function dryFluidOunce() {
+  raw(`INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form, current_cost, tier1_price, tier1_margin, is_active)
+    VALUES ('${LIQ3}', '[PROVER] KI16 Unset Three', 'Ea', 'Ea', 'oz', NULL, 10.00, 12.80, 21.875, true);
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
+    VALUES ('${LIQ3}', 'Main Warehouse', 1000, 0, 0);`);
+  const job = scalar(`SELECT j.id FROM public.jobs j WHERE j.quote_id = '${quoteId()}';`);
+  assert.match(job, /^[0-9a-f-]{36}$/, 'GB: P1 job not found');
+
+  // GB: the hole, after both earlier files and before this one (nothing committed).
+  clean('GB dry job line in fl oz saves', jobLine(job, DRY, "'fl oz'", "'fl oz/ac'", 40), { asOwner: true });
+  assert.equal(sized(16, "'fl oz'", DRY), '1.0000', 'GB: 16 fl oz of a dry product sizes as 1 lb for holds and deduction');
+  const bk = bookingFor(2, DRY, "'fl oz'", "'fl oz/ac'");
+  clean('GB booking with a dry fl oz line schedules', bk.run('k-gb'));
+  const T_GB = 'a16a1600-0000-4000-8000-00000000f200';
+  clean('GB dry blend line rated fl oz/ac saves', ticketLines(T_GB, [["'fl oz/ac'", DRY, "'oz'"]]), { commit: true });
+  approve(T_GB);
+  clean('GB its invoice', invoice(T_GB), { commit: true });
+  const gbBilled = billed(T_GB);
+  assert.equal(gbBilled, '12.5000', 'GB: 200 fl oz of a dry product bills as 12.5 lb');
+  // The proof database now holds a billed dry fl oz line, which the postflight would (rightly) refuse; make it lb.
+  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'lb/ac' WHERE blend_ticket_id IN ('${T_GB}', 'a16a1600-0000-4000-8000-00000000f104');
+    UPDATE public.quote_items qi SET price_unit = 'oz', rate_unit = 'oz/ac' ${bookingLines(2)};`);
+  console.log(`[prover] GB: before the guard a dry job line in fl oz saves (16 fl oz sizes as ${sized(16, "'fl oz'", DRY)} lb for holds and deduction), a booking schedules it, and a dry blend line bills 200 fl oz as ${gbBilled} lb`);
+
+  // G0
+  const guard = lf(DRY_FLOZ);
+  stageText('dry-floz.sql', guard);
+  const gApplied = apply('dry-floz.sql');
+  assert.equal(gApplied.status, 0, gApplied.output);
+  const gAgain = apply('dry-floz.sql');
+  assert.notEqual(gAgain.status, 0); assert.match(gAgain.output, /KI16_DRY_FLOZ_PREFLIGHT: unit_names_fluid_ounce already exists/);
+  console.log('[prover] G0: the guard applies (postflight passed); a second run refuses');
+  // Booking 2 back to the fl oz units it was stored with before the guard (a legacy row: the job side still refuses it).
+  raw(`UPDATE public.quote_items qi SET price_unit = 'fl oz', rate_unit = 'fl oz/ac' ${bookingLines(2)};`);
+
+  // G1
+  const g1 = refusedWith('G1 schedule dry fl oz', bk.run('k-g1'), 'CHEM_UNIT_FORM_MISMATCH');
+  assert.match(g1, /\[PROVER\] KI16 Dry is a DRY product/);
+  assert.equal(bk.jobs(), '0', 'G1: a refused scheduling left a job behind');
+  const bk3 = bookingFor(3, DRY, "'fl. oz'", "'oz/ac'");
+  refusedWith('G1 schedule dry fl. oz (quantity unit only)', bk3.run('k-g1b'), 'CHEM_UNIT_FORM_MISMATCH');
+  const bk4 = bookingFor(4, LIQ3, "'fl oz'", "'fl oz/ac'");
+  clean('G1 schedule liquid fl oz', bk4.run('k-g1c'), { commit: true });
+  assert.equal(bk4.jobs(), '1');
+  refusedWith('G1 save_job dry fl oz', `SELECT public.save_job(NULL, jsonb_build_object('customer_id', '${CUSTOMER}', 'job_date', to_char(CURRENT_DATE, 'YYYY-MM-DD')),
+    jsonb_build_array(jsonb_build_object('field_id', '${FIELD}', 'acres_to_treat', 10, 'sort_order', 0)),
+    jsonb_build_array(jsonb_build_object('product_id', '${DRY}', 'quantity', 160, 'unit', 'fl oz', 'rate_per_acre', 16, 'rate_unit', 'fl oz/ac',
+      'cost_per_unit_cents', 0, 'price_per_unit_cents', 10, 'sort_order', 0)), '${ADMIN}', NULL);`, 'CHEM_UNIT_FORM_MISMATCH');
+  // Bookings themselves (save_quote as the signed-in admin, and a direct edit).
+  const saveBooking = (n, pid, priceUnit, rateUnit) => `SELECT public.save_quote(NULL, jsonb_build_object('quote_number', 'PROVER-KI16-${n}', 'status', 'draft', 'tier', 1,
+      'commission_split', '{"splits": []}'::jsonb, 'customer_id', '${CUSTOMER}'),
+    jsonb_build_array(jsonb_build_object('section_name', 'S1', 'sort_order', 0, 'items', jsonb_build_array(
+      jsonb_build_object('product_id', '${pid}', 'sort_order', 0, 'calc_mode', 'units_direct', 'total_units_needed', 2,
+        'price_unit', ${priceUnit}, 'rate_unit', ${rateUnit}, 'actual_rate', 16)))),
+    '${ADMIN}', 'prover-ki16-booking-${n}');`;
+  refusedWith('G1 save a booking with a dry fl oz price unit', saveBooking(5, DRY, "'fl oz'", "'oz/ac'"), 'CHEM_UNIT_FORM_MISMATCH');
+  refusedWith('G1 save a booking with a dry FLOZ/acre rate unit', saveBooking(6, DRY, "'oz'", "'FLOZ/acre'"), 'CHEM_UNIT_FORM_MISMATCH');
+  clean('G1 save a booking with dry oz units', saveBooking(7, DRY, "'oz'", "'oz/ac'"));
+  clean('G1 save a booking with liquid fl oz units', saveBooking(8, LIQUID, "'fl oz'", "'fl oz/ac'"));
+  refusedWith('G1 edit a stored dry booking line to fl oz', `UPDATE public.quote_items qi SET price_unit = 'fl oz' ${bookingLines(3)};`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  refusedWith('G1 move the liquid fl oz booking line to the dry product', `UPDATE public.quote_items qi SET product_id = '${DRY}' ${bookingLines(4)};`,
+    'CHEM_UNIT_FORM_MISMATCH|QUOTE_ITEM_PRODUCT_IMMUTABLE', { asOwner: true });
+  console.log(`[prover] G1: scheduling a dry fl oz (or fl. oz) booking line is refused with no job (${g1.replace(/^.*ERROR:\s*/, '').slice(0, 60)}...); save_job still refuses; a liquid fl oz line schedules; saving or editing a booking line in fl oz on a dry product is refused, dry oz and liquid fl oz bookings save`);
+
+  // G2
+  for (const [label, lines] of [
+    ['rate fl oz/ac', [["'fl oz/ac'", DRY, "'oz'"]]],
+    ['rate FLUID OUNCES per acre', [["'FLUID OUNCES per acre'", DRY, "'oz'"]]],
+    ['rate fl. oz', [["'fl. oz'", DRY, "'lb'"]]],
+    ['rate fl+NBSP+oz/a', [["'fl' || chr(160) || 'oz/a'", DRY, "'oz'"]]],
+    ['quantity unit fl oz', [["'oz/ac'", DRY, "'fl oz'"]]],
+    ['second line of two', [["'lb/ac'", DRY, "'lb'"], ["'floz/acre'", DRY, "'oz'"]]],
+  ]) refusedWith(`G2 dry ${label}`, ticketLines('a16a1600-0000-4000-8000-00000000f201', lines), 'CHEM_UNIT_FORM_MISMATCH');
+  const T_G2 = 'a16a1600-0000-4000-8000-00000000f202';
+  clean('G2 dry oz/lb and liquid fl oz save', ticketLines(T_G2, [["'oz/ac'", DRY, "'oz'"], ["'Dry oz'", DRY, "'dry oz'"], ["'lb/ac'", DRY, "'lb'"], ['NULL', DRY, "'lb'"],
+    ["'fl oz/ac'", LIQUID, "'fl oz'"]]), { commit: true });
+  refusedWith('G2 edit a dry rate to fl oz/ac', `UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'fl oz/ac' WHERE blend_ticket_id = '${T_G2}' AND rate_per_acre_unit = 'oz/ac';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  refusedWith('G2 edit a dry quantity unit to fl oz', `UPDATE public.blend_ticket_products SET unit = 'fl oz' WHERE blend_ticket_id = '${T_G2}' AND unit = 'lb';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  refusedWith('G2 move the liquid fl oz line to the dry product', `UPDATE public.blend_ticket_products SET product_id = '${DRY}' WHERE blend_ticket_id = '${T_G2}' AND product_id = '${LIQUID}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // As the signed-in admin through the column grants (no RPC), the same refusal.
+  refusedWith('G2 direct table edit as authenticated', `UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'fl oz' WHERE blend_ticket_id = '${T_G2}' AND rate_per_acre_unit = 'lb/ac';`,
+    'CHEM_UNIT_FORM_MISMATCH');
+  clean('G2 unrelated edit', `UPDATE public.blend_ticket_products SET quantity = quantity + 1 WHERE blend_ticket_id = '${T_G2}';`, { asOwner: true });
+  approve(T_G2);
+  clean('G2 dry oz/lb ticket invoices', invoice(T_G2), { commit: true });
+  const g2Billed = billed(T_G2);
+  assert.ok(g2Billed && !/null/.test(g2Billed), `G2: dry oz/lb lines did not bill: ${g2Billed}`);
+  const T_G2L = 'a16a1600-0000-4000-8000-00000000f203';
+  clean('G2 liquid fl oz/ac ticket', ticketLines(T_G2L, [["'fl oz/ac'", LIQUID, "'fl oz'"]]), { commit: true });
+  approve(T_G2L);
+  clean('G2 liquid invoice', invoice(T_G2L), { commit: true });
+  assert.equal(billed(T_G2L), '1.5625', 'G2: 200 fl oz of a liquid bills as 1.5625 Gal');
+  console.log(`[prover] G2: dry blend lines in fl oz (rate, quantity unit, edits, a move, a direct table edit) are refused; dry oz/lb save and bill (${g2Billed}); a liquid fl oz line bills ${billed(T_G2L)} Gal`);
+
+  // G3 (owner session: every definer RPC writes job_chemicals as the owner)
+  refusedWith('G3 dry unit fl oz', jobLine(job, DRY, "'fl oz'", "'oz/ac'", 41), 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  refusedWith('G3 dry rate_unit fluid ounce/ac', jobLine(job, DRY, "'oz'", "'fluid ounce/ac'", 42), 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  clean('G3 dry oz', jobLine(job, DRY, "'oz'", "'oz/ac'", 43), { asOwner: true, commit: true });
+  clean('G3 liquid fl oz', jobLine(job, LIQUID, "'fl oz'", "'fl oz/ac'", 44), { asOwner: true, commit: true });
+  refusedWith('G3 edit the dry oz line to FL OZ', `UPDATE public.job_chemicals SET unit = 'FL OZ' WHERE job_id = '${job}' AND sort_order = 43;`, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  refusedWith('G3 move the liquid fl oz line to the dry product', `UPDATE public.job_chemicals SET product_id = '${DRY}' WHERE job_id = '${job}' AND sort_order = 44;`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  clean('G3 unrelated edit', `UPDATE public.job_chemicals SET sort_order = 46 WHERE job_id = '${job}' AND sort_order = 44;`, { asOwner: true });
+  console.log('[prover] G3: direct job_chemicals writes with fl oz on a dry product are refused (insert, edit, move); oz on dry and fl oz on liquid save; an unrelated edit saves');
+
+  // G4
+  refusedWith('G4 dry rate unit to fl oz', `UPDATE public.products SET rate_unit = 'fl oz' WHERE id = '${DRY}';`, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // A saved form cannot change (guard_product_setup_fields): only a product whose form was never set can become dry.
+  refusedWith('G4 liquid to dry is already locked', `UPDATE public.products SET product_form = 'dry' WHERE id = '${LIQUID}';`, "can't change on a saved product", { asOwner: true });
+  const toDry = `UPDATE public.products SET product_form = 'dry' WHERE id = '${LIQ3}';`;
+  // LIQ3 has a job line in fl oz (G1's liquid booking).
+  const g4 = refusedWith('G4 liquid to dry under a fl oz job line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  assert.match(g4, /cannot become a DRY product/);
+  raw(`UPDATE public.job_chemicals SET unit = 'oz', rate_unit = 'oz/ac' WHERE product_id = '${LIQ3}';`);
+  // Still refused: booking 4 measures LIQ3 in fl oz.
+  refusedWith('G4 liquid to dry under a fl oz booking line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  raw(`UPDATE public.quote_items SET price_unit = 'oz', rate_unit = 'oz/ac' WHERE product_id = '${LIQ3}';`);
+  const T_G4 = 'a16a1600-0000-4000-8000-00000000f204';
+  clean('G4 liquid fl oz blend line', ticketLines(T_G4, [["'fl oz/ac'", LIQ3, "'oz'"]]), { commit: true });
+  raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_G4}';`);
+  refusedWith('G4 liquid to dry under a soft-deleted ticket line', toDry, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'oz/ac' WHERE blend_ticket_id = '${T_G4}';`);
+  // A blank-rate blend line was entered against the product's OLD rate unit: fl oz, even if the flip also changes it.
+  raw(`UPDATE public.products SET rate_unit = 'fl oz' WHERE id = '${LIQ3}';`);
+  const T_G4B = 'a16a1600-0000-4000-8000-00000000f205';
+  clean('G4 blank-rate liquid line on a fl oz product', ticketLines(T_G4B, [['NULL', LIQ3, "'oz'"]]), { commit: true });
+  refusedWith('G4 liquid to dry and rate unit to oz in one edit, under a blank-rate line', `UPDATE public.products SET product_form = 'dry', rate_unit = 'oz' WHERE id = '${LIQ3}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  raw(`UPDATE public.blend_ticket_products SET rate_per_acre_unit = 'oz/ac' WHERE blend_ticket_id = '${T_G4B}';
+    UPDATE public.products SET rate_unit = 'oz' WHERE id = '${LIQ3}';`);
+  clean('G4 liquid to dry once no line names fl oz', toDry, { asOwner: true, commit: true });
+  // The stock side of a dry product (an earlier unit trigger may refuse first; either way it is refused).
+  const g4Size = refusedWith('G4 dry unit size to fl oz', `UPDATE public.products SET unit_size = 'fl oz' WHERE id = '${DRY}';`, 'ERROR', { asOwner: true });
+  const g4Stock = refusedWith('G4 dry stock unit to fl oz', `UPDATE public.products SET inventory_unit = 'fl oz' WHERE id = '${DRY}';`, 'ERROR', { asOwner: true });
+  console.log(`[prover] G4: dry unit size fl oz refused (${g4Size.replace(/^.*ERROR:\s*/, '').slice(0, 50)}...); dry stock unit fl oz refused (${g4Stock.replace(/^.*ERROR:\s*/, '').slice(0, 50)}...)`);
+
+  // G4 race: a line save and a product turning dry, in two sessions, each order. Without the advisory lock both commit.
+  const LIQ4 = 'a16a1600-0000-4000-8000-0000000000b6';
+  const LIQ5 = 'a16a1600-0000-4000-8000-0000000000b7';
+  raw(`INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form, current_cost, tier1_price, tier1_margin, is_active)
+    VALUES ('${LIQ4}', '[PROVER] KI16 Unset Four', 'Ea', 'Ea', 'oz', NULL, 10.00, 12.80, 21.875, true),
+           ('${LIQ5}', '[PROVER] KI16 Unset Five', 'Ea', 'Ea', 'oz', NULL, 10.00, 12.80, 21.875, true);`);
+  // Line first: the line session holds its lock 4 s; the flip waits, then sees the committed line and refuses.
+  const lineFirst = background(`BEGIN; ${jobLine(job, LIQ4, "'fl oz'", "'fl oz/ac'", 60)} SELECT pg_sleep(4); COMMIT;`);
+  await pause(1500);
+  const raceA = asAdmin(`UPDATE public.products SET product_form = 'dry' WHERE id = '${LIQ4}';`, { asOwner: true, commit: true });
+  const lineA = await lineFirst;
+  assert.equal(lineA.code, 0, `G4 race (line first): the line session failed: ${lineA.out}`);
+  assert.match(raceA, /CHEM_UNIT_FORM_MISMATCH/, `G4 race (line first): the flip committed past a line saved at the same time: ${raceA || 'success'}`);
+  // Flip first: the flip session holds its lock 4 s; the line waits, then reads DRY and refuses.
+  const flipFirst = background(`BEGIN; UPDATE public.products SET product_form = 'dry' WHERE id = '${LIQ5}'; SELECT pg_sleep(4); COMMIT;`);
+  await pause(1500);
+  const raceB = asAdmin(jobLine(job, LIQ5, "'fl oz'", "'fl oz/ac'", 61), { asOwner: true, commit: true });
+  const flipB = await flipFirst;
+  assert.equal(flipB.code, 0, `G4 race (flip first): the flip session failed: ${flipB.out}`);
+  assert.match(raceB, /CHEM_UNIT_FORM_MISMATCH/, `G4 race (flip first): a fl oz line committed onto a product turning dry: ${raceB || 'success'}`);
+  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals jc JOIN public.products p ON p.id = jc.product_id
+    WHERE p.product_form = 'dry' AND (public.unit_names_fluid_ounce(jc.unit) OR public.unit_names_fluid_ounce(jc.rate_unit));`), '0', 'G4 race: a dry fl oz job line was stored');
+  console.log('[prover] G4: a dry product cannot take a fl oz rate unit; a saved form cannot change at all, and a product whose form was never set cannot turn dry while a job, booking or blend line (even on a deleted ticket, or a blank line under the old rate unit) names fl oz; it can once none does; two sessions racing each way never store a dry fl oz line');
+
+  // G5
+  for (const [expr, want] of [["'fl oz'", 't'], ["'FLOZ/acre'", 't'], ["'fl. oz. per acre'", 't'], ["'fluid ounces'", 't'], ["'fl' || chr(8208) || 'oz'", 't'],
+    ["'fl' || chr(8203) || 'oz/ac'", 't'], ["'oz'", 'f'], ["'Dry oz'", 'f'], ["'lb/ac'", 'f'], ["'flour oz'", 'f'], ['NULL', 'f'], ["''", 'f']]) {
+    assert.equal(scalar(`SELECT public.unit_names_fluid_ounce(${expr});`), want, `G5: unit_names_fluid_ounce(${expr})`);
+  }
+  console.log('[prover] G5: unit_names_fluid_ounce matches every fluid-ounce spelling and no dry unit');
 }
 
 try { await main(); }

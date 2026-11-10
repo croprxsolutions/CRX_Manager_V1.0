@@ -1,0 +1,13 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20261231120000_dry_product_fluid_ounce_guard.sql` (SQL sha256: `590ad1e7046c799a71b6cfa05c9d8b1a1165718c03274a38c59a355ea638fc17`). KI-16 last gap: a fluid ounce on a DRY product is refused wherever it is stored, so it can no longer bill, hold or deduct as weight ounces (16 fl oz as 1 lb).
+
+**What changes.** New `unit_names_fluid_ounce(text)` (IMMUTABLE; save_job's fluid-ounce concept test after `unit_fold_invisible`). Four new BEFORE row triggers, each on its own SECURITY DEFINER read-only function, raising `CHEM_UNIT_FORM_MISMATCH`: `trg_job_chemicals_zz_dry_fluid_ounce_guard` (`unit` or `rate_unit` on a dry product), `trg_zz_blend_ticket_products_dry_fluid_ounce_guard` (`unit`, or the unit billing uses: the line's rate unit, else the product's), `zzz_quote_items_dry_fluid_ounce_guard` (a booking line's `rate_unit` or `price_unit`), `trigger_zzzzz_products_dry_fluid_ounce_guard` (a dry product's `rate_unit`, `unit_size` or `inventory_unit`; a product whose form was never set turning dry while any job, booking or blend line names a fluid ounce for it, a blank blend line counting by the old rate unit). Line and product sides take turns on advisory key `(160017, product)`. `normalize_rate_unit` and every reader are unchanged.
+
+**Who may call.** `unit_names_fluid_ounce`: EXECUTE authenticated and service_role only. Trigger functions: SECURITY DEFINER, `search_path = public, pg_temp`, EXECUTE revoked from PUBLIC, anon, authenticated, service_role. No other grant, policy or RPC changes.
+
+**Preflight.** One transaction, `lock_timeout` 5s; refuses unless `20261231110000` is applied (tab folding and dotted `fl. oz`) and unless `unit_names_fluid_ounce` does not exist yet. Postflight checks the helper on 19 fluid-ounce spellings and 15 non-matches, the four triggers enabled, grants, and that no stored row or product would be refused.
+
+**Proof.** `scripts/smoke/prove-rate-unit-guard-real-schema.mjs` GB-G5 (real schema, including a two-session race in both orders; BEFORE: a dry blend line bills 200 fl oz as 12.5 lb through `create_invoice_from_blend_ticket`; AFTER: refused at save on every path; prints `RATE_UNIT_GUARD_PROOF_PASS`).
+
+**Rollback** (its own reviewed migration): drop the four triggers, their functions and `unit_names_fluid_ounce`. No data changes.
+
+Contract: `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`.

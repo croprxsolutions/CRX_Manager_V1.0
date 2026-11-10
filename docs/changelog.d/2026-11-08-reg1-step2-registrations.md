@@ -11,3 +11,5 @@
 - Simplified 2026-11-09 (Mason: "Yes, simplify", then "Drop them"): no product-master guards: sizes and brands keep their own label facts and stay directly editable; the registration list sits beside
   them. Label drafts, product setup and brand tools are unchanged.
 - Proof: `node scripts/smoke/prove-epa-registration-step2-real-schema.mjs`.
+
+- Live ledger re-read 2026-11-10 (read-only, America/Chicago): newest row `20261110061547` (`20261229160000_convert_to_gl_lb_dry_oz`); `20261229170000` not yet live; none of this PR's three files is live. CURRENT_STATE and KNOWN_ISSUES ledger stamps bumped from that read.

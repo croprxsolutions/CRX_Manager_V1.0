@@ -89,6 +89,37 @@ describe('initSentry', () => {
     expect(result).toEqual(event);
   });
 
+  describe('beforeSend with a Supabase error object', () => {
+    async function beforeSend() {
+      import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
+      const { initSentry } = await import('./sentry');
+      initSentry();
+      return mockInit.mock.calls[0][0].beforeSend;
+    }
+    const synthetic = () => ({
+      exception: { values: [{ type: 'Error', value: 'Object captured as exception with keys: code, details, hint, message' }] },
+    });
+
+    it('drops a network blip the ignore list cannot see', async () => {
+      const send = await beforeSend();
+      const original = { code: '', details: 'TypeError: Failed to fetch', hint: '', message: 'TypeError: Failed to fetch (x.supabase.co)' };
+      expect(send(synthetic(), { originalException: original })).toBeNull();
+    });
+
+    it('titles the event with the database message', async () => {
+      const send = await beforeSend();
+      const original = { code: '22P02', details: null, hint: null, message: 'invalid input syntax for type uuid: "group"' };
+      expect(send(synthetic(), { originalException: original }).exception.values[0].value)
+        .toBe('invalid input syntax for type uuid: "group"');
+    });
+
+    it('leaves real Error objects alone', async () => {
+      const send = await beforeSend();
+      const event = { exception: { values: [{ type: 'Error', value: 'boom' }] } };
+      expect(send(event, { originalException: new Error('Failed to fetch') })).toEqual(event);
+    });
+  });
+
   describe('beforeBreadcrumb', () => {
     const FILTERED_PATH = '/rest/v1/allocation_sets?customer_id=eq.11111111-2222-3333-4444-555555555555'
       + '&total_payment_cents=eq.123456';

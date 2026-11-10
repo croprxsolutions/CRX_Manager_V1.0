@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09) | 63 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check) | 65 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 18 |
 | WP-PM-3 checks still owed (KI-92) | 1 |
@@ -709,6 +709,14 @@ Next step: re-run the check (the `/integrity-report` admin page shows the same c
 read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
 (`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
 
+### KI-116 — Product Detail treats a non-product address as a load failure
+**LOW · OPEN (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**
+Opening `/products/group` (no link on `main` points there; most likely typed or an old bookmark for
+`/group-products`) sends "group" to the database as a product id. Two reads fail with "invalid input syntax for type
+uuid" and the page shows a load failure, not "product not found". Nothing is saved or changed. Fix when next in
+`src/pages/ProductDetail.tsx` (Sol-listed): check the id is a uuid before loading, or send `/products/group` to
+`/group-products`.
+
 ## Database and release process
 
 ### KI-35 — Live ledger vs files on `main` is checked only by noticing
@@ -925,6 +933,16 @@ pass. Not a customer risk today: live read-only 2026-11-09, the `customer-docume
 `storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
 `customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
 boundary. Fix when next needed: rebuild it on the real-schema harness.
+
+### KI-115 — Many screens send database errors to Sentry as "[object Object]"
+**LOW · PARTLY FIXED · observability · source: 2026-11-10 prod spot-check (Sentry CRX-MANAGER-1W, -1S)**
+About 70 files under `src/` report a caught error as `err instanceof Error ? err : new Error(String(err))`. A
+Supabase error is a plain object, so Sentry receives only "[object Object]" and the real reason is lost (1W was an
+expected "a size changed, build a new proposal" refusal on Group Products; 1S on the Office Cockpit finance card had no
+matching database error, so it was most likely a network blip). The 2026-11-10 fix makes `src/lib/sentry.ts` title
+plain error objects with their own message and drop network blips, and Group Products now passes the error as-is.
+Still open: the other call sites. Fix by passing the error itself to `Sentry.captureException`; many of those files
+are Sol-listed, so batch them by area.
 
 ---
 

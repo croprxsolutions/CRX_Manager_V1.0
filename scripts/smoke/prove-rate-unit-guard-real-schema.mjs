@@ -27,7 +27,7 @@
  *   F0  a changed save_job body refuses the follow-up with nothing changed; it applies; a second run refuses.
  *   F1  the 'fl. oz/ac' ticket now invoices (200 fl oz = 1.5625 Gal); a dry product's 'fl. oz/ac' is still refused.
  *   F2  'oz'+TAB and 'fl'+TAB+'oz/ac' save and invoice as ounces; a tab-only unit is refused at save.
- *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac'); 'oz/'+ZWSP+'cwt' is still refused.
+ *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac') and a stock Unit 'Pt'+TAB; 'oz/'+ZWSP+'cwt' is still refused.
  *   F4  a soft-deleted ticket no longer blocks the product edit; a live unbilled ticket still does.
  *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
  *
@@ -479,9 +479,9 @@ const invoice = (t) => `SELECT public.create_invoice_from_blend_ticket('${t}', '
 const billed = (t) => scalar(`SELECT string_agg(round(ii.quantity, 4)::text, ' | ' ORDER BY ii.sort_order, ii.quantity)
   FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
  WHERE i.blend_ticket_id = '${t}' AND ii.product_id IS NOT NULL AND NOT coalesce(ii.is_application_fee, false);`);
-const saveJobLine = (unit) => `SELECT public.save_job(NULL, jsonb_build_object('customer_id', '${CUSTOMER}', 'job_date', to_char(CURRENT_DATE, 'YYYY-MM-DD')),
+const saveJobLine = (unit, stock = "'Pt'") => `SELECT public.save_job(NULL, jsonb_build_object('customer_id', '${CUSTOMER}', 'job_date', to_char(CURRENT_DATE, 'YYYY-MM-DD')),
   jsonb_build_array(jsonb_build_object('field_id', '${FIELD}', 'acres_to_treat', 10, 'sort_order', 0)),
-  jsonb_build_array(jsonb_build_object('product_id', '${LIQUID}', 'quantity', 10, 'unit', 'Pt', 'rate_per_acre', 1, 'rate_unit', ${unit},
+  jsonb_build_array(jsonb_build_object('product_id', '${LIQUID}', 'quantity', 10, 'unit', ${stock}, 'rate_per_acre', 1, 'rate_unit', ${unit},
     'cost_per_unit_cents', 0, 'price_per_unit_cents', 400, 'sort_order', 0)),
   '${ADMIN}', NULL);`;
 
@@ -559,9 +559,10 @@ function followUps() {
   assert.equal(jobs(), jobsBefore + 1);
   assert.equal(scalar(`SELECT jc.rate_unit FROM public.job_chemicals jc JOIN public.jobs j ON j.id = jc.job_id
     WHERE j.customer_id = '${CUSTOMER}' ORDER BY j.created_at DESC, jc.sort_order LIMIT 1;`), 'pt/ac', 'F3: the stored rate unit is folded');
+  clean('F3 save_job stock Unit Pt<TAB>', saveJobLine("'pt/ac'", `'Pt' || ${TAB}`));
   refusedWith('F3 save_job oz/<ZWSP>cwt', saveJobLine(`'oz/' || ${ZWSP} || 'cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
   refusedWith('F3 save_job oz<TAB>/cwt', saveJobLine(`'oz' || ${TAB} || '/cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
-  console.log("[prover] F3: save_job saves a priced pt/a+ZWSP+c line (stored 'pt/ac'); oz/+ZWSP+cwt and oz+TAB+/cwt are still refused");
+  console.log("[prover] F3: save_job saves a priced pt/a+ZWSP+c line (stored 'pt/ac') and a stock Unit Pt+TAB; oz/+ZWSP+cwt and oz+TAB+/cwt are still refused");
 
   // F4
   clean('F4 soft-deleted ticket no longer blocks', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQ2}';`, { asOwner: true, commit: true });

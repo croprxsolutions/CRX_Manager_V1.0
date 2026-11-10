@@ -172,3 +172,10 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
   `products_update` is `is_admin()` only, and `blend_ticket_products_office_all` / `blend_tickets` select allow
   `is_admin()`, so any REST writer that can change a product sees every blend line; SECURITY DEFINER callers run as
   the owner and bypass RLS. Becomes real only if product edits are opened to a non-admin role.
+
+## Taha review (PR #1741 comment, head b7349ce1c): fine to apply, one LOW
+
+- **LOW (`save_job` folded the rate unit but not the stock Unit, so `gal`+TAB was refused
+  `CHEM_UNIT_UNSUPPORTED_CHARACTER` while the screen trims it): fixed.** The wrapper now folds the string `unit` the
+  same way; prover F3 saves a priced line with stock Unit `Pt`+TAB. The impl still runs its own character rule on
+  what reaches it, and the same idempotency note as `rate_unit` applies.

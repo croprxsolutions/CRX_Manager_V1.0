@@ -16,7 +16,7 @@
 --   * normalize_rate_unit: same body; dotted spellings 'fl. oz', 'fl.oz', 'fl oz.', 'fl. oz.', 'fl.oz.', 'floz.' map
 --     to 'fl oz', NOT 'oz'. field_app_priced_quantity sizes 'fl oz' on the liquid branch and not on the dry one, so a
 --     dry product still refuses a fluid ounce at billing; mapping to 'oz' would bill it as a weight ounce.
---   * save_job (the 731-char wrapper only): each chemical line's string rate_unit is passed through
+--   * save_job (the 731-char wrapper only): each chemical line's string rate_unit and unit (Taha, PR #1741) pass through
 --     unit_fold_invisible before _save_job_cost_step2_impl sees it, so its denominator and character rules judge the
 --     same folded text as rate_unit_line_refusal. The impl is NOT re-emitted: its md5 is pinned before and after.
 --   * guard_product_rate_unit_for_blend_lines: ignores soft-deleted tickets (blend_tickets.deleted_at IS NOT NULL).
@@ -171,15 +171,19 @@ BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
-  -- Fold invisible characters and tabs out of each line's rate unit first, as the job_chemicals trigger's
-  -- rate_unit_line_refusal does, so the impl's own unit rules judge the same text (KI-16). Order and other keys kept.
+  -- Fold invisible characters and tabs out of each line's rate unit and stock Unit first, as the job_chemicals
+  -- trigger's rate_unit_line_refusal does, so the impl's own unit rules judge the same text the screen shows
+  -- (KI-16). Order and other keys kept.
   IF jsonb_typeof(p_chemicals) = 'array' THEN
-    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
-                                   THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
-                                   ELSE t.e END
-                              ORDER BY t.o), '[]'::jsonb)
+    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(r.e -> 'unit') = 'string'
+                                   THEN jsonb_set(r.e, '{unit}', to_jsonb(public.unit_fold_invisible(r.e ->> 'unit')))
+                                   ELSE r.e END
+                              ORDER BY r.o), '[]'::jsonb)
       INTO v_chemicals
-      FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
+      FROM (SELECT CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
+                        THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
+                        ELSE t.e END AS e, t.o
+              FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o)) r;
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
   -- The impl keeps every check it had (actor, role, units, totals, idempotency).

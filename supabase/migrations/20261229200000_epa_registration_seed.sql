@@ -120,7 +120,7 @@ BEGIN
     UNION ALL SELECT 'pp' || jsonb_build_array(pp.id, pp.generic_epa_registration)::text FROM public.product_parents pp
     UNION ALL SELECT 'm' || jsonb_build_array(m.product_id, m.parent_id)::text FROM public.product_parent_members m
     UNION ALL SELECT 'j' || jsonb_build_array(j.job_id, j.product_id, j.epa_registration)::text FROM public.job_product_epa j
-    UNION ALL SELECT 'i' || jsonb_build_array(ii.id, ii.epa_registration)::text FROM public.invoice_items ii
+    UNION ALL SELECT 'i' || jsonb_build_array(ii.id, ii.product_id, ii.epa_registration)::text FROM public.invoice_items ii
   ) rows_read;
 
   RETURN jsonb_build_object('rup_default', p_rup_default, 'registrations', v_regs, 'rows_md5', COALESCE(v_rows, ''));

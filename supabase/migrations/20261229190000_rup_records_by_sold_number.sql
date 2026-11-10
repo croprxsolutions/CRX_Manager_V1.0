@@ -22,7 +22,7 @@
 --   - _rup_record_covers_line: only a 'yes' line can be covered (or, for a line posted before the seed, today's rule).
 --   - _epa_registration_unrecorded_posted_lines re-issued (same signature and grants) and get_epa_sales_to_check()
 --     (admin, read-only), each line judged on its own capture.
---   - Q7 (invoice_items half): INSERT and UPDATE stay revoked from anon and authenticated (none today).
+--   - Q7 (invoice_items half): INSERT, UPDATE and DELETE stay revoked from anon and authenticated (none today).
 --
 -- ACCEPTED (Mason, 2026-11-10): a save that deletes and re-inserts lines captures them again (the capture is as of
 --   the latest save). The list is unpaged (admin-only, read-only, small history).
@@ -119,14 +119,21 @@ BEGIN
     DELETE FROM public.invoice_line_rup_captures WHERE invoice_item_id = NEW.id;
     RETURN NULL;
   END IF;
-  -- Kept unless the product changed or the saved number changed to a different number. A blank number being filled
-  -- in (by the writer or by _fill_invoice_line_epa) is not a new sale fact; the trigger fires only on these columns,
-  -- so a price, quantity or unit edit never reaches here.
+  -- Kept unless the product changed or the saved number changed to a different number. A blank number filled in with
+  -- the captured number or the size's own number (by the writer or by _fill_invoice_line_epa) is not a new sale fact;
+  -- any other number filled in is, and re-captures (Luna 2026-11-10). The trigger fires only on these columns, so a
+  -- price, quantity or unit edit never reaches here.
   IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-     AND (public._normalize_epa_registration(OLD.epa_registration) IS NULL
-          OR public._normalize_epa_registration(NEW.epa_registration)
-             IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration))
-     AND EXISTS (SELECT 1 FROM public.invoice_line_rup_captures c WHERE c.invoice_item_id = NEW.id) THEN
+     AND EXISTS (SELECT 1 FROM public.invoice_line_rup_captures c
+                   JOIN public.products p ON p.id = NEW.product_id
+                  WHERE c.invoice_item_id = NEW.id
+                    AND CASE WHEN public._normalize_epa_registration(OLD.epa_registration) IS NULL
+                             THEN public._normalize_epa_registration(NEW.epa_registration) IS NULL
+                               OR public._normalize_epa_registration(NEW.epa_registration) = c.epa_registration
+                               OR public._normalize_epa_registration(NEW.epa_registration)
+                                  = public._normalize_epa_registration(p.epa_registration)
+                             ELSE public._normalize_epa_registration(NEW.epa_registration)
+                                  IS NOT DISTINCT FROM public._normalize_epa_registration(OLD.epa_registration) END) THEN
     RETURN NULL;
   END IF;
   PERFORM public._epa_registration_lock(false);
@@ -312,6 +319,10 @@ BEGIN
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := check_idempotency(p_idempotency_key, 'generate_rup_sales_records');
     IF v_existing IS NOT NULL THEN
+      -- REG-1 (Luna 2026-11-10): a key replays only for the invoice it was first used on.
+      IF v_existing->>'invoice_id' IS DISTINCT FROM p_invoice_id::text THEN
+        RAISE EXCEPTION 'IDEMPOTENCY_KEY_REUSED: this key was already used for a different invoice';
+      END IF;
       RETURN (v_existing->>'count')::integer;
     END IF;
   END IF;
@@ -384,6 +395,14 @@ BEGIN
     END IF;
 
     IF v_seeded THEN
+      -- REG-1 (Luna 2026-11-10): an invoice posted before the seed whose product already has an active record written
+      -- before the seed is covered by today's rule (as in _rup_record_covers_line); never write it a second record.
+      IF EXISTS (SELECT 1 FROM epa_registration_seed_run sr
+                   JOIN invoices i ON i.id = p_invoice_id AND i.posted_at < sr.seeded_at
+                   JOIN rup_sales_records s ON s.invoice_id = p_invoice_id AND s.product_id = v_item.product_id
+                    AND s.voided_at IS NULL AND s.created_at < sr.seeded_at) THEN
+        CONTINUE;
+      END IF;
       -- REG-1: one active record per invoice, product, number, signal word, unit and unit price (the coverage rule);
       -- one that disagrees with what this posting would write is an error, never skipped.
       SELECT r.quantity, r.total_cents INTO v_rec_qty, v_rec_total FROM rup_sales_records r
@@ -437,7 +456,7 @@ BEGIN
   END LOOP;
   CLOSE v_items;
 
-  v_result := jsonb_build_object('count', v_count);
+  v_result := jsonb_build_object('count', v_count, 'invoice_id', p_invoice_id);
 
   IF p_idempotency_key IS NOT NULL THEN
     PERFORM save_idempotency(p_idempotency_key, 'generate_rup_sales_records', v_result);
@@ -510,7 +529,7 @@ GRANT EXECUTE ON FUNCTION public.get_epa_sales_to_check() TO authenticated;
 -- 5. Q7 (invoice_items half): no direct line writes from the app roles
 -- ---------------------------------------------------------------------------------------------
 
-REVOKE INSERT, UPDATE ON TABLE public.invoice_items FROM anon, authenticated;
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.invoice_items FROM anon, authenticated;
 
 DO $postflight$
 DECLARE
@@ -519,10 +538,11 @@ BEGIN
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
     IF has_table_privilege(v_role, 'public.invoice_items', 'INSERT')
        OR has_table_privilege(v_role, 'public.invoice_items', 'UPDATE')
+       OR has_table_privilege(v_role, 'public.invoice_items', 'DELETE')
        OR has_any_column_privilege(v_role, 'public.invoice_items', 'INSERT')
        OR has_any_column_privilege(v_role, 'public.invoice_items', 'UPDATE')
        OR has_any_column_privilege(v_role, 'public.invoice_line_rup_captures', 'SELECT,INSERT,UPDATE,REFERENCES') THEN
-      RAISE EXCEPTION 'POSTFLIGHT_RUP_RECORDS_BY_SOLD_NUMBER: % can write invoice_items or read captures', v_role;
+      RAISE EXCEPTION 'POSTFLIGHT_RUP_RECORDS_BY_SOLD_NUMBER: % can write or delete invoice_items or read captures', v_role;
     END IF;
   END LOOP;
   IF has_table_privilege('service_role', 'public.invoice_line_rup_captures', 'SELECT,INSERT,UPDATE,DELETE')

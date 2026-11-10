@@ -407,6 +407,8 @@ async function main() {
   assert.equal(scalar(`SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_zz_capture_invoice_line_rup' AND tgrelid = 'public.invoice_items'::regclass AND (tgtype & 2) = 0;`), '1');
   refused(ADMIN, `${line(id('99'), INV1, P1, 1)}`, /permission denied/);
   refused(ADMIN, `UPDATE public.invoice_items SET quantity = 9 WHERE id = '${L1}';`, /permission denied/);
+  refused(ADMIN, `DELETE FROM public.invoice_items WHERE id = '${L1}';`, /permission denied/);
+  assert.equal(scalar(`SELECT has_table_privilege('authenticated', 'public.invoice_items', 'DELETE');`), 'f');
   console.log('[prover] case 2: every new function is owned by postgres, pins search_path, and only the public ones run for signed-in users; no guard trigger, wrapper or pass table exists; nobody signed in writes invoice lines');
 
   // 3. Before the seed nothing changes: the guards are off, the tools refuse.
@@ -435,6 +437,12 @@ async function main() {
   assert.deepEqual([pv.registration_count, pv.disagreement_count, pv.invalid_numbers], [4, 1, []]);
   assert.equal(pv.open_lines, undefined);
   assert.notEqual(okJ(ADMIN, PREVIEW_SEED('unknown')).fingerprint, pv.fingerprint);
+  // A line moved to another size between preview and seed changes the fingerprint (Luna 2026-11-10).
+  const l1Product = scalar(`SELECT product_id FROM public.invoice_items WHERE id = '${L1}';`);
+  raw(`UPDATE public.invoice_items SET product_id = '${P5}' WHERE id = '${L1}';`);
+  assert.notEqual(okJ(ADMIN, PREVIEW_SEED('no')).fingerprint, pv.fingerprint);
+  raw(`UPDATE public.invoice_items SET product_id = '${l1Product}' WHERE id = '${L1}';`);
+  assert.equal(okJ(ADMIN, PREVIEW_SEED('no')).fingerprint, pv.fingerprint);
   console.log('[prover] case 4: the preview lists each number with its agreed facts and disagreements, and a fingerprint that depends on the default');
 
   // 5. Seed refusals, then the seed.
@@ -553,6 +561,12 @@ async function main() {
   assert.equal(num(L6), N2); assert.equal(cap(L6), 'no|||save');
   ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}';`);
+  // A number typed onto a blank line that its size does not carry is a new sale fact and re-captures (Luna 2026-11-10).
+  ownerOk(lineAt(L6, INV1, P2, 1, 1600));
+  assert.equal(cap(L6), 'no|||save');
+  ownerOk(`UPDATE public.invoice_items SET epa_registration = '${N2}' WHERE id = '${L6}';`);
+  assert.match(cap(L6), /^yes\|\|[^|]*\|save$/);
+  ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L6}';`);
   console.log('[prover] case 11: after the seed every line is captured when saved (the size\'s number, the any-Yes answer, the signal word); label changes and price, quantity or same-number edits keep it; a new size or a different saved number re-captures; an unregistered number saves as Not reviewed; nobody signed in touches a capture');
 
   // 12. Posting records exactly what was captured.
@@ -586,6 +600,8 @@ async function main() {
   assert.deepEqual([cap(L6), cap(id('2a'))], [`yes|${N1}|Caution|save`, `unknown|${N1}|Caution|save`]);
   post(INV3);
   assert.equal(ok(ADMIN, GEN(INV3, 'g3')), '1');
+  // A key replays only for its own invoice (Luna 2026-11-10).
+  refused(ADMIN, GEN(INV1, 'g3'), /IDEMPOTENCY_KEY_REUSED/);
   assert.equal(scalar(`SELECT epa_registration || '|' || quantity || '|' || total_cents FROM public.rup_sales_records WHERE invoice_id = '${INV3}';`), `${N1}|1.0000|2400`);
   assert.equal(scalar(`SELECT string_agg(public._rup_record_covers_line(ii)::text, ',' ORDER BY id) FROM public.invoice_items ii WHERE id IN ('${L6}', '${id('2a')}');`), 'true,false');
   assert.equal(ok(ADMIN, GEN(INV3, 'g4')), '0');
@@ -616,6 +632,9 @@ async function main() {
     VALUES ('${INV2}', '${ORD}', '${CUST}', '${P4}', current_date, 'x', '${N2}', 1, 'Gal', 1500, 1500, 2027, 'x', '2000-01-01');
     UPDATE public.invoices SET posted_at = '2000-01-01' WHERE id = '${INV2}';`);
   assert.equal(reasons()[L3], undefined);
+  // Posting it again after the seed writes no second record beside the one from before it (Luna 2026-11-10).
+  assert.equal(ok(ADMIN, GEN(INV2, 'g7')), '0');
+  assert.equal(scalar(`SELECT count(*) FROM public.rup_sales_records WHERE invoice_id = '${INV2}' AND voided_at IS NULL;`), '1');
   // A sale captured No or Not reviewed whose number is now registered Yes is listed for a person (posting never adds it);
   // reviewed No, it leaves the list.
   raw(`INSERT INTO public.epa_registrations (epa_registration, rup_status, created_by, updated_by) VALUES ('999-9', 'no', '${ADMIN}', '${ADMIN}');`);

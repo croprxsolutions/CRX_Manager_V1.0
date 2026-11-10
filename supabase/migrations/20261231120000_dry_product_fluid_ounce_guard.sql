@@ -13,16 +13,18 @@
 --   * blend_ticket_products: unit (blend stock deduction) or the unit billing uses, NULLIF(btrim(rate_per_acre_unit),
 --     ''), else the product's rate_unit.
 --   * quote_items (bookings): rate_unit or price_unit, so a dry fluid-ounce booking line is refused when saved.
---   * products: a dry product's rate_unit, unit_size or inventory_unit; and a product becoming dry (only a product
---     whose form was never set can: guard_product_setup_fields locks a saved form) while any job,
---     blend or booking line (soft-deleted tickets included: deleted_at can be cleared through the table API) names a
---     fluid ounce for it -- a blank blend line counts by the product's OLD rate unit, the one it was entered against.
+--   * products: a dry product's rate_unit, unit_size or inventory_unit; and every product must have a form
+--     (Mason 2026-11-10: "require a form"). products.product_form becomes NOT NULL. guard_product_setup_fields
+--     (20261102102000) already refuses changing a saved form, so with no blank forms a product's form never changes:
+--     no line can be re-read under a new form, and the line checks need no lock against a product turning dry.
 --   The trigger functions only read; they are SECURITY DEFINER so RLS never hides a row from the check, and no role
---   may EXECUTE them. Line side and product side take turns on advisory key (160017, product) only when it matters.
+--   may EXECUTE them.
 --
 -- LIVE EVIDENCE (read-only, 2026-11-10): 0 rows in job_chemicals.unit/rate_unit, blend_ticket_products.unit/
 --   rate_per_acre_unit, products.rate_unit, quote_items.rate_unit/price_unit or blend_recipe_items.unit pass the
---   concept test, on any form; blend_tickets has 0 rows; job_chemicals has 4 rows, all liquid.
+--   concept test, on any form; blend_tickets has 0 rows; job_chemicals has 4 rows, all liquid; 0 of 606 products
+--   have no product_form. Product parents already require a form (product_parents.product_form NOT NULL), so only
+--   the spreadsheet import (apply_product_setup) could still create a product with a blank form; it is now refused.
 --
 -- idempotency-body-check: exempt -- no RPC is added or changed; the triggers only refuse, inside the caller's
 --   transaction, so a refused RPC rolls back with its idempotency record.
@@ -31,8 +33,8 @@
 -- caller-analysis: job_chemicals / blend_ticket_products / quote_items / products writers :: a write naming a fluid ounce on a dry
 --   product now raises CHEM_UNIT_FORM_MISMATCH; every other write is unchanged (0 live rows affected).
 --
--- ROLLBACK (its own reviewed migration): DROP the four triggers, their four functions and unit_names_fluid_ounce.
---   No data changes.
+-- ROLLBACK (its own reviewed migration): DROP the four triggers, their four functions and unit_names_fluid_ounce;
+--   ALTER products.product_form DROP NOT NULL. No data changes.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -44,9 +46,11 @@ BEGIN
      OR public.normalize_rate_unit('fl. oz') IS DISTINCT FROM 'fl oz' THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_PREFLIGHT: 20261231110000 (KI-16 follow-ups) is not applied; nothing was changed.';
   END IF;
-  IF to_regprocedure('public.unit_names_fluid_ounce(text)') IS NOT NULL
-     OR to_regprocedure('public.unit_reads_as_ounce(text)') IS NOT NULL THEN
+  IF to_regprocedure('public.unit_names_fluid_ounce(text)') IS NOT NULL THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_PREFLIGHT: unit_names_fluid_ounce already exists; nothing was changed.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.products WHERE product_form IS NULL) THEN
+    RAISE EXCEPTION 'KI16_DRY_FLOZ_PREFLIGHT: a product has no form (liquid, dry, seed or each); set it before applying; nothing was changed.';
   END IF;
 END;
 $preflight$;
@@ -74,19 +78,6 @@ $function$;
 REVOKE EXECUTE ON FUNCTION public.unit_names_fluid_ounce(text) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.unit_names_fluid_ounce(text) TO authenticated, service_role;
 
--- A unit a non-dry product reads as a fluid ounce: any fluid-ounce spelling, or anything that normalizes to 'oz'.
-CREATE FUNCTION public.unit_reads_as_ounce(p_unit text)
- RETURNS boolean
- LANGUAGE sql
- IMMUTABLE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  SELECT public.unit_names_fluid_ounce(p_unit) OR COALESCE(lower(public.normalize_rate_unit(p_unit)) = 'oz', false);
-$function$;
-
-REVOKE EXECUTE ON FUNCTION public.unit_reads_as_ounce(text) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.unit_reads_as_ounce(text) TO service_role;
-
 CREATE FUNCTION public.guard_job_chemical_dry_fluid_ounce()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -107,8 +98,6 @@ BEGIN
      OR NOT (public.unit_names_fluid_ounce(NEW.unit) OR public.unit_names_fluid_ounce(NEW.rate_unit)) THEN
     RETURN NEW;
   END IF;
-  -- Takes turns with a product turning dry (guard_product_dry_fluid_ounce), so neither commits unseen.
-  PERFORM pg_advisory_xact_lock_shared(160017, hashtext(NEW.product_id::text));
   SELECT lower(p.product_form::text), p.product_name INTO v_form, v_name FROM public.products p WHERE p.id = NEW.product_id;
   IF v_form = 'dry' THEN
     RAISE EXCEPTION
@@ -145,8 +134,6 @@ BEGIN
     RETURN NEW;
   END IF;
   IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
-  -- Always taken: a blank line unit bills at the product's rate unit, which this read must see committed.
-  PERFORM pg_advisory_xact_lock_shared(160017, hashtext(NEW.product_id::text));
   SELECT lower(p.product_form::text), p.product_name, p.rate_unit INTO v_form, v_name, v_prod_rate
     FROM public.products p WHERE p.id = NEW.product_id;
   IF v_form IS DISTINCT FROM 'dry' THEN RETURN NEW; END IF;
@@ -179,7 +166,12 @@ AS $function$
 DECLARE
   v_name text := COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product');
 BEGIN
-  IF lower(COALESCE(NEW.product_form::text, '')) IS DISTINCT FROM 'dry' THEN RETURN NEW; END IF;
+  -- Every product has a form (the NOT NULL below); say so in words before the constraint does.
+  IF NEW.product_form IS NULL THEN
+    RAISE EXCEPTION 'PRODUCT_SETUP_INVALID: % needs a product form (liquid, dry, seed or each) -- it decides how its units are measured and billed.', v_name
+      USING ERRCODE = '22023';
+  END IF;
+  IF lower(NEW.product_form::text) IS DISTINCT FROM 'dry' THEN RETURN NEW; END IF;
   IF TG_OP = 'UPDATE'
      AND NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit
      AND NEW.unit_size IS NOT DISTINCT FROM OLD.unit_size
@@ -195,27 +187,6 @@ BEGIN
       'CHEM_UNIT_FORM_MISMATCH: % is a DRY product, so its rate unit or stock unit cannot be fluid ounces (rate "%", unit "%", stock "%") -- a fluid ounce measures volume and a dry product is billed by weight. Use a dry unit (oz, lb or ton).',
       v_name, COALESCE(NEW.rate_unit, ''), COALESCE(NEW.unit_size, ''), COALESCE(NEW.inventory_unit, '');
   END IF;
-  IF TG_OP = 'UPDATE' AND lower(COALESCE(OLD.product_form::text, '')) IS DISTINCT FROM 'dry' THEN
-    -- Becoming dry (only a product whose form was never set can: guard_product_setup_fields locks a saved form):
-    -- lines saved against the old form must not start reading fluid ounces as weight. Under a non-dry form a plain
-    -- 'oz' is a fluid ounce too (field_app_priced_quantity), so any unit that reads as an ounce counts. A blend line
-    -- with no rate unit of its own was entered against the OLD product rate unit, so that is the one it names.
-    PERFORM pg_advisory_xact_lock(160017, hashtext(NEW.id::text));
-    IF EXISTS (SELECT 1 FROM public.job_chemicals jc
-                WHERE jc.product_id = NEW.id
-                  AND (public.unit_reads_as_ounce(jc.unit) OR public.unit_reads_as_ounce(jc.rate_unit)))
-       OR EXISTS (SELECT 1 FROM public.blend_ticket_products b
-                   WHERE b.product_id = NEW.id
-                     AND (public.unit_reads_as_ounce(b.unit)
-                          OR public.unit_reads_as_ounce(COALESCE(NULLIF(btrim(b.rate_per_acre_unit), ''), OLD.rate_unit))))
-       OR EXISTS (SELECT 1 FROM public.quote_items qi
-                   WHERE qi.product_id = NEW.id
-                     AND (public.unit_reads_as_ounce(qi.rate_unit) OR public.unit_reads_as_ounce(qi.price_unit))) THEN
-      RAISE EXCEPTION
-        'CHEM_UNIT_FORM_MISMATCH: % cannot become a DRY product while bookings, jobs or blend tickets measure it in ounces (read as fluid ounces until now) -- they would be billed and taken from stock as weight ounces. Set up a separate dry product instead.',
-        v_name;
-    END IF;
-  END IF;
   RETURN NEW;
 END;
 $function$;
@@ -226,6 +197,9 @@ REVOKE EXECUTE ON FUNCTION public.guard_product_dry_fluid_ounce() FROM PUBLIC, a
 CREATE TRIGGER trigger_zzzzz_products_dry_fluid_ounce_guard
   BEFORE INSERT OR UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_dry_fluid_ounce();
+
+-- Every product has a form, so a saved form never changes (guard_product_setup_fields) and nothing is re-read.
+ALTER TABLE public.products ALTER COLUMN product_form SET NOT NULL;
 
 -- Bookings: refused when saved, so a dry fluid-ounce line never reaches scheduling (the job trigger refuses it there too).
 CREATE FUNCTION public.guard_quote_item_dry_fluid_ounce()
@@ -248,7 +222,6 @@ BEGIN
      OR NOT (public.unit_names_fluid_ounce(NEW.rate_unit) OR public.unit_names_fluid_ounce(NEW.price_unit)) THEN
     RETURN NEW;
   END IF;
-  PERFORM pg_advisory_xact_lock_shared(160017, hashtext(NEW.product_id::text));
   SELECT lower(p.product_form::text), p.product_name INTO v_form, v_name FROM public.products p WHERE p.id = NEW.product_id;
   IF v_form = 'dry' THEN
     RAISE EXCEPTION
@@ -284,10 +257,6 @@ BEGIN
       RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce flags "%"', v_unit;
     END IF;
   END LOOP;
-  IF NOT (public.unit_reads_as_ounce('oz') AND public.unit_reads_as_ounce('OZ/ac') AND public.unit_reads_as_ounce('fl. oz'))
-     OR public.unit_reads_as_ounce('dry oz') OR public.unit_reads_as_ounce('lb') OR public.unit_reads_as_ounce(NULL) THEN
-    RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_reads_as_ounce is not as reviewed';
-  END IF;
   IF public.unit_names_fluid_ounce(NULL) THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: unit_names_fluid_ounce flags NULL';
   END IF;
@@ -298,8 +267,6 @@ BEGIN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: guard triggers are missing or disabled';
   END IF;
   IF has_function_privilege('anon', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.unit_reads_as_ounce(text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.unit_reads_as_ounce(text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public.unit_names_fluid_ounce(text)', 'EXECUTE')
      OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r(role),
@@ -314,6 +281,9 @@ BEGIN
                               'public.guard_product_dry_fluid_ounce()'::regprocedure, 'public.guard_quote_item_dry_fluid_ounce()'::regprocedure)
                 AND NOT (r.rolbypassrls OR r.rolsuper)) THEN
     RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: the guard functions are owned by a role that RLS can filter';
+  END IF;
+  IF NOT (SELECT attnotnull FROM pg_attribute WHERE attrelid = 'public.products'::regclass AND attname = 'product_form') THEN
+    RAISE EXCEPTION 'KI16_DRY_FLOZ_POSTFLIGHT: products.product_form is not NOT NULL';
   END IF;
   -- Every stored row passes its new guard.
   IF EXISTS (SELECT 1 FROM public.job_chemicals jc JOIN public.products p ON p.id = jc.product_id

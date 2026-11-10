@@ -48,16 +48,13 @@ fallback on demand and job deduction).
    - `quote_items` (bookings) INSERT, or UPDATE changing `rate_unit`, `price_unit` or `product_id`: refused when the
      product is dry and either unit names a fluid ounce (scheduling copies both into the job line).
    - `products` INSERT, or UPDATE changing `rate_unit`, `unit_size`, `inventory_unit` or `product_form`: refused when
-     the product is (or becomes) dry and any of those three units names a fluid ounce, or, when it becomes dry, any job,
-     booking or blend line names a fluid ounce for it (soft-deleted tickets included: an admin can clear `deleted_at`
-     through the table API; a blend line with a blank rate unit counts by the product's OLD rate unit, the one it was
-     entered against, so changing form and rate unit in one edit cannot slip past).
-3. Race between a line save and a product turning dry: the job and booking sides take
-   `pg_advisory_xact_lock_shared(160017, hashtext(product_id))` only when a unit names a fluid ounce (the blend side
-   always, since a blank line inherits the product's unit), then reads the
-   form; the product side takes the exclusive lock when the form becomes dry, then looks for lines. Whichever commits
-   first is seen by the other (READ COMMITTED, which every app path uses: each statement in the trigger takes a fresh
-   snapshot). Shared locks never block each other, so line saves never wait on one another.
+     the product is dry and any of those three units names a fluid ounce; refused (`PRODUCT_SETUP_INVALID`, "needs a
+     product form") when the form is blank.
+3. Every product has a form (Mason, 2026-11-10: "Yes, require a form"): `products.product_form` becomes NOT NULL
+   (live: 0 of 606 blank; the preflight refuses if any is). `guard_product_setup_fields` already refuses changing a
+   saved form, so a product's form never changes: no line is re-read under a new form, and no lock or race handling
+   is needed. Product parents already require a form; the spreadsheet import (`apply_product_setup`), the one path
+   that could still insert a blank form, is now refused with a plain message.
 
 Who may act is unchanged: no grant, policy or RPC signature changes.
 
@@ -91,11 +88,9 @@ Who may act is unchanged: no grant, policy or RPC signature changes.
   the dry product is refused.
 - G3: a direct `job_chemicals` insert/update (owner) with `unit` or `rate_unit` `fl oz` on a dry product is refused;
   `oz` on dry and `fl oz` on liquid save; an unrelated edit saves.
-- G4: products: setting a dry product's rate unit, unit size or stock unit to `fl oz` is refused; flipping a liquid
-  product to dry is refused while a job, booking or blend line (also on a soft-deleted ticket, and a blank-rate line
-  when the same edit changes the rate unit) names a fluid ounce for it; allowed once none does. Race, both orders, two
-  real sessions: a line saved while the product turns dry (and the reverse) — the second one is refused, and no dry
-  fluid-ounce line is stored.
+- G4: products: setting a dry product's rate unit, unit size or stock unit to `fl oz` is refused, as is a new dry
+  product sized `32 fl oz`; changing or clearing a saved form is refused; a new product with no form is refused by a
+  direct insert and by the spreadsheet import, which still imports a product that has one; `product_form` is NOT NULL.
 - G5: helper table: the spellings in item 1.
 
 ## Open business decisions
@@ -166,3 +161,11 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
 - #1741's file: the two MEDs from rounds 1-2. LOW (recipes and product parents not guarded at save): named above,
   fails closed.
 - Round 3 was the last round `ship.md` allows; a round-4 Luna run needs Mason's OK before Sol.
+
+## Mason's decision (2026-11-10): require a form
+
+Asked (NEEDS MASON - DECISION REQUIRED, after three Luna rounds each found a new gap in the "blank form turns dry"
+path): keep patching that path, or require every product to have a form. Mason: "Yes, require a form". The redesign
+deletes the becoming-dry check, `unit_reads_as_ounce`, the advisory locks and the two-session race proofs; it adds
+`product_form NOT NULL`, a preflight that refuses while any product has no form, and a plain refusal for a blank form
+(direct insert or import). The next Luna run reviews this simpler design from round 1.

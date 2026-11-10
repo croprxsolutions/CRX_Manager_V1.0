@@ -390,8 +390,9 @@ can make old splits refuse to save (LOW-MED).
   bills, holds and deducts as weight ounces (16 fl oz/ac as 1 lb/ac; pre-existing since `20260630170000`; live
   read-only 2026-11-10: 0 rows on any form). FIX PENDING LIVE APPLY (`20261231120000`, contract
   `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`): save_job's existing refusal now covers every writer:
-  a job line, booking line, blend line or product rate/size/stock unit naming a fluid ounce on a dry product, and a
-  product turning dry while its lines name one, are refused (`CHEM_UNIT_FORM_MISMATCH`). The normalizer is unchanged. Not covered (existing):
+  a job line, booking line, blend line or product rate/size/stock unit naming a fluid ounce on a dry product is
+  refused (`CHEM_UNIT_FORM_MISMATCH`), and every product must have a form (Mason 2026-11-10; a saved form cannot
+  change, so no product turns dry under its lines; importing a product with a blank form is now refused). The normalizer is unchanged. Not covered (existing):
   gal/pt/qt on a dry product converts to nothing, so billing refuses it and job completion deducts the raw number
   flagged for office review.
   Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved

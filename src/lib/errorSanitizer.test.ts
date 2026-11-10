@@ -150,6 +150,16 @@ describe('sanitizeError', () => {
       .toBe('Nothing was changed. This delivery is already completed, so it cannot be cancelled. An admin can void it instead');
   });
 
+  it('explains an order line with no unit (KI-76)', () => {
+    expect(sanitizeError("ORDER_LINE_UNIT_MISSING: order SO-1 has a line with no unit (Roundup). Set each line's unit on the order, then create the invoice again"))
+      .toBe("Nothing was billed. A line on this order has no unit. Set each line's unit on the order, then create the invoice again");
+  });
+
+  it('explains an invoice line with no unit at posting (KI-76)', () => {
+    expect(sanitizeError('INVOICE_LINE_UNIT_MISSING: invoice INV-1 has a line with no unit (Roundup). Set the unit on the product, save the draft invoice, then post it again'))
+      .toBe('Nothing was posted. A line on this invoice has no unit. Set the unit on the product, save the draft invoice, then post it again');
+  });
+
   it('explains an incomplete order invoice line separately from the delivered cap', () => {
     expect(sanitizeError('ORDER_INVOICE_LINE_INVALID: a non-product line requires a charge type'))
       .toBe('Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line');

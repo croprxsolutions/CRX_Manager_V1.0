@@ -131,6 +131,21 @@
 > PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
+> **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
+> `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it). For a finding Mason judges
+> a business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
+> `main` at that head, the session he replies in) builds a request bound to that PR, head, base, Sol run and finding
+> text; Mason replies `accept <code> <reason>` and `owner-approval-prompt.mjs` records it (the code works once, for
+> 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request). Once
+> every finding of the run is accepted, `--log` writes the deterministic `DECISION_LOG.md` entry (PR, each finding,
+> his reason, date); commit that file alone on top of the reviewed head, then
+> `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
+> `owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when the commit's sole change is
+> exactly that entry. A new Sol run on the head voids earlier acceptances. It satisfies the merge gate and the apply
+> landing gate; it does NOT cover the content-bound migration charter proofs from `write-apply-proofs.mjs`. The log is
+> public: the finding text and his reason are published, so never accept a finding whose text would explain how to
+> exploit a hole that is not yet fixed live.
+>
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
 > refuses with no Codex call otherwise: the head contains the exact origin/main the review pins, no Codex App review of
 > this commit is still running, no open Codex App thread stands on it, no open CodeRabbit thread stands on current code,

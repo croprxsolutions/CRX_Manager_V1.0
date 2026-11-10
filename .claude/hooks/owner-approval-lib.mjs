@@ -53,6 +53,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 import { accessChangeCheck, dataRewriteCheck } from "./migration-access-lib.mjs";
+import { OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, solAcceptFileName } from "./sol-accept-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -508,6 +509,8 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
       let p;
       try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); }
       catch (e) { return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` }; }
+      // A Sol-finding request is answered only by `accept <code> <reason>` (sol-accept-lib.mjs).
+      if (p?.purpose !== OWNER_APPROVAL_PURPOSE && p?.purpose !== OWNER_SELFTEST_PURPOSE) continue;
       const deadline = Date.parse(p?.expiresAt);
       if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
     }
@@ -610,7 +613,11 @@ export function hooklessSessionRefusal({ checkout, sessionId }) {
  *
  * @returns {{ok: true, kind: "migration"|"selftest", payload: object, file: string, requestLeft: boolean}|{ok: false, reason: string}}
  */
-export function recordReplyApproval({ code, dirs, reply, sessionId, readMark, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }) }) {
+// `form` is "accept" for Mason's `accept <code> <reason>` reply to a Sol-finding request
+// (sol-accept-lib.mjs); each form answers only its own kind of request.
+export function recordReplyApproval({
+  code, dirs, reply, sessionId, readMark, form = "approve", reason = "", now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }),
+}) {
   const no = (reason) => ({ ok: false, reason });
   if (!usableSessionId(sessionId)) return no("the message carried no usable session id");
   const hits = [];
@@ -632,7 +639,14 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, readMark, no
   }
   if (String(p?.code) !== code) return no(`the request file does not carry the code ${code}`);
   const selftest = p.purpose === OWNER_SELFTEST_PURPOSE;
-  if (!selftest && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
+  const solAccept = p.purpose === OWNER_SOL_ACCEPT_PURPOSE;
+  if (form === "accept" && !solAccept) return no(`the request for code ${code} is not a Sol finding; approve it with: approve ${code}`);
+  if (form !== "accept" && solAccept) return no(`the request for code ${code} is a Sol finding; accept it with: accept ${code} followed by your reason`);
+  if (!selftest && !solAccept && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
+  const why = String(reason ?? "").trim();
+  if (solAccept && (why.length < 3 || /[\r\n\x85\p{Zl}\p{Zp}]/u.test(why))) {
+    return no(`his reply gave no reason; ask him to reply: accept ${code} followed by his reason, on one line`);
+  }
   // Sessions that share a checkout share its session-state: the request names the
   // session that built it, and only a reply in that session counts (Luna HIGH,
   // round 2, PR #894).
@@ -645,9 +659,15 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, readMark, no
   catch (e) { return no(`where his reply is in the conversation could not be read (${errText(e)})`); }
   if (!mark || typeof mark !== "object") return no("where his reply is in the conversation is unknown");
   const approval = {
-    payload: payloadText, approvedAt: new Date(now).toISOString(), via: OWNER_APPROVAL_VIA, reply: clip(String(reply ?? "").trim(), 40), replyMark: mark,
+    payload: payloadText,
+    approvedAt: new Date(now).toISOString(),
+    via: solAccept ? OWNER_SOL_ACCEPT_VIA : OWNER_APPROVAL_VIA,
+    reply: clip(String(reply ?? "").trim(), solAccept ? 340 : 40),
+    ...(solAccept ? { reason: why } : {}),
+    replyMark: mark,
   };
-  const out = path.join(dir, selftest ? selfTestResultName(code) : approvalFileName(safeMigrationName(p.migration)));
+  const out = path.join(dir, selftest ? selfTestResultName(code)
+    : solAccept ? solAcceptFileName(String(p.prHead), Number(p.finding?.n)) : approvalFileName(safeMigrationName(p.migration)));
   // Retire the code FIRST, exclusively: if it cannot be retired, nothing is
   // approved, so a code is never live without its retirement on disk. If the
   // approval write below then fails, the code stays retired and Mason is asked
@@ -676,7 +696,7 @@ export function recordReplyApproval({ code, dirs, reply, sessionId, readMark, no
   // P2, PR #894). A leftover request can only be re-approved by another reply.
   let requestLeft = false;
   try { removeRequest(file); } catch { requestLeft = true; }
-  return { ok: true, kind: selftest ? "selftest" : "migration", payload: p, file: out, requestLeft };
+  return { ok: true, kind: selftest ? "selftest" : solAccept ? "sol-accept" : "migration", payload: p, file: out, requestLeft };
 }
 
 // One marker FILE per used approval, created exclusively ("wx"): two applies
@@ -749,6 +769,8 @@ export const OWNER_TRUST_FILES = Object.freeze([
   ".claude/hooks/codex-push-lib.mjs",
   "scripts/apply-migration-file.mjs",
   "scripts/owner-approve-migration.mjs",
+  ".claude/hooks/sol-accept-lib.mjs",
+  "scripts/owner-accept-sol-finding.mjs",
 ]);
 // The checkout these files were loaded from: this module lives in <root>/.claude/hooks.
 export const OWNER_TRUST_ROOT = path.resolve(HERE, "..", "..");

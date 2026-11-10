@@ -66,6 +66,22 @@ import {
   readCodeRabbitRequirement,
 } from "../.claude/hooks/codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipStateDirs } from "../.claude/hooks/coderabbit-skip-lib.mjs";
+import {
+  assertOwnerTrustFilesReviewed,
+  assertReplyAlone,
+} from "../.claude/hooks/owner-approval-lib.mjs";
+import {
+  blockersRecordName,
+  blockersRecordProblem,
+  buildBlockersRecord,
+  collectAcceptances,
+  DECISION_LOG_PATH,
+  decisionLogEntry,
+  insertDecisionEntry,
+  parseSolFindings,
+  SOL_FINDING_TOKEN,
+  solAcceptFileName,
+} from "../.claude/hooks/sol-accept-lib.mjs";
 
 const SCRIPT_DIR = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const FALLBACK_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -877,6 +893,14 @@ export function codexReviewProofVerdict({ status, stdout } = {}) {
   return match[1].toUpperCase() === "CLEAN" ? "clean" : null;
 }
 
+// True only for a well-formed terminal BLOCKERS verdict (same rules as above).
+export function codexReviewIsBlockers({ status, stdout } = {}) {
+  if (status !== 0) return false;
+  const nonEmpty = String(stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const verdictLines = nonEmpty.filter((line) => VERDICT_LINE_RE.test(line));
+  return verdictLines.length === 1 && /BLOCKERS\s*$/i.test(nonEmpty.at(-1) || "") && VERDICT_LINE_RE.test(nonEmpty.at(-1));
+}
+
 // ── proof shape ─────────────────────────────────────────────────────────────
 // Mirrors what codex-push-guard's `proofValid` (in codex-push-lib.mjs) accepts:
 // codex_ran:true, Sol/high identity, verdict clean, exact head_sha/base_sha, ISO ts.
@@ -1086,6 +1110,10 @@ export function buildCodexReviewPrompt({ base = GUARDED_BASE, appliedHistory = [
     "Report EVERY defect you find; do not filter to high severity and do not be conservative.",
     "For each finding give: severity (BLOCKER/HIGH/MED/LOW), file:line, what breaks, and a",
     "concrete failure scenario (inputs -> wrong result). Rank by severity.",
+    "Then list every BLOCKER and HIGH finding again, one line each, numbered from 1 in the order",
+    "above, in exactly this form (the owner may accept one by its number):",
+    `  ${SOL_FINDING_TOKEN} <n> <BLOCKER|HIGH>: <file:line> - <one-sentence summary>`,
+    `Write no ${SOL_FINDING_TOKEN} line for a MED or LOW finding, and none at all when nothing is BLOCKER or HIGH.`,
     "Then end your reply with EXACTLY ONE final line, and NOTHING",
     "after it, choosing based ONLY on your own judgement:",
     `  ${CODEX_VERDICT_TOKEN}: CLEAN     — no blocker/high-severity problems (minor follow-ups are fine)`,
@@ -2784,7 +2812,7 @@ export function parseArgs(argv) {
   // dies on the clock is indistinguishable from a run that had nothing to say, so
   // the cap must sit well clear of a normal review, not just above the last one.
   // 1200s is ~2.3x the measured worst case and still leaves a hung run bounded.
-  const parsed = { dryRun: false, help: false, carryForward: false, carryRestamp: false, carryPostApply: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
+  const parsed = { dryRun: false, help: false, carryForward: false, carryRestamp: false, carryPostApply: false, carryOwnerAccepted: false, timeoutSec: DEFAULT_TIMEOUT_SEC };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--timeout") {
@@ -2798,6 +2826,8 @@ export function parseArgs(argv) {
       parsed.carryRestamp = true;
     } else if (arg === "--carry-post-apply") {
       parsed.carryPostApply = true;
+    } else if (arg === "--carry-owner-accepted") {
+      parsed.carryOwnerAccepted = true;
     } else if (arg === "--help" || arg === "-h") {
       parsed.help = true;
     } else {
@@ -2838,7 +2868,97 @@ function usage() {
     "                   new hash, appended justification), keep that clean review: notes alone with no",
     "                   model call, a registry or allowlist change after a focused Sol records check.",
     "                   Refuses (use the full review) when anything else changed.",
+    "  --carry-owner-accepted  When Mason accepted every BLOCKER/HIGH finding of the reviewed head's",
+    "                   Sol run (`accept <code> <reason>`, scripts/owner-accept-sol-finding.mjs) and HEAD",
+    "                   is one commit on top of it that only adds the DECISION_LOG.md entry --log wrote,",
+    "                   write a carried proof marked owner_accepted. Refuses anything else.",
   ].join("\n");
+}
+
+// ── owner-accepted findings (Mason, 2026-11-10; .claude/hooks/sol-accept-lib.mjs) ──
+// A BLOCKERS run with well-formed SOL_FINDING lines leaves its BLOCKER/HIGH list,
+// bound to the reviewed head and base, so Mason can accept a finding by name.
+function saveBlockersRecord(root, headSha, baseSha, stdout) {
+  const file = path.join(root, ".claude", "session-state", blockersRecordName(headSha));
+  const parsed = parseSolFindings(stdout);
+  if (parsed.problem) {
+    try { unlinkSync(file); } catch { /* none saved */ }
+    process.stderr.write(`Sol's findings cannot be owner-accepted (${parsed.problem}); fix them or re-run.\n`);
+    return;
+  }
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(buildBlockersRecord({ headSha, baseSha, findings: parsed.findings }), null, 2)}\n`, "utf8");
+  process.stdout.write(
+    `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity}: ${f.text}`).join("\n")}\n` +
+    "Fix them, or, for one Mason judges a business non-issue, ask him: node scripts/owner-accept-sol-finding.mjs <n> (AGENTS.md › Sol).\n",
+  );
+}
+
+const latin1ToUtf8 = (text) => Buffer.from(String(text), "latin1").toString("utf8").replace(/\r\n/g, "\n");
+
+// --carry-owner-accepted: HEAD is ONE commit on top of the reviewed head that only adds
+// the DECISION_LOG.md entry for Mason's acceptances, and every BLOCKER/HIGH of that run
+// carries a valid acceptance. Writes a carried proof bound to HEAD; refuses anything else.
+function runCarryOwnerAccepted(root, options) {
+  const refuse = (why) => {
+    process.stderr.write(`Owner-accepted carry refused: ${why}. No proof written.\n`);
+    return 1;
+  };
+  if (!worktreeIsClean(root)) return refuse("the worktree is not clean");
+  const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
+  const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
+  if (!CARRY_SHA_RE.test(headSha) || parents.length !== 1 || !CARRY_SHA_RE.test(parents[0])) {
+    return refuse("HEAD is not one ordinary commit on top of the reviewed head");
+  }
+  const [fromHead] = parents;
+  const stateDir = path.join(root, ".claude", "session-state");
+  const readJson = (name) => { try { return JSON.parse(readFileSync(path.join(stateDir, name), "utf8")); } catch { return null; } };
+  const record = readJson(blockersRecordName(fromHead));
+  const recordProblem = blockersRecordProblem(record, { headSha: fromHead, nowMs: Date.now() });
+  if (recordProblem) return refuse(`${recordProblem} (${fromHead.slice(0, 12)})`);
+  const got = collectAcceptances({ record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), checkReply: assertReplyAlone });
+  if (got.problem) return refuse(got.problem);
+  let entries;
+  try { entries = gitChangedEntries(fromHead, headSha, root); } catch { return refuse("could not list the changed files"); }
+  if (entries.length !== 1 || entries[0].path !== DECISION_LOG_PATH || entries[0].oldMode !== "100644" || entries[0].newMode !== "100644") {
+    return refuse(`the commit on top of the reviewed head must change only ${DECISION_LOG_PATH}`);
+  }
+  const before = gitBlob(root, fromHead, DECISION_LOG_PATH);
+  const after = gitBlob(root, headSha, DECISION_LOG_PATH);
+  if (before === null || after === null) return refuse(`${DECISION_LOG_PATH} could not be read`);
+  if (latin1ToUtf8(after) !== insertDecisionEntry(latin1ToUtf8(before), decisionLogEntry({ record, accepted: got.accepted }))) {
+    return refuse(`${DECISION_LOG_PATH} must gain exactly the entry \`node scripts/owner-accept-sol-finding.mjs --log\` writes, and nothing else`);
+  }
+  try { assertOwnerTrustFilesReviewed({ head: headSha, root }); } catch (error) { return refuse(error.message); }
+  process.stdout.write(
+    `Owner-accepted carry: reviewed head ${fromHead.slice(0, 12)} → head ${headSha.slice(0, 12)} (base ${record.base_sha.slice(0, 12)}); ` +
+    `Mason accepted all ${record.findings.length} BLOCKER/HIGH finding(s).\n`,
+  );
+  if (options.dryRun) {
+    process.stdout.write("[dry-run] No proof written.\n");
+    return 0;
+  }
+  if (runGit(["rev-parse", "HEAD"], { cwd: root }) !== headSha || !worktreeIsClean(root)) return refuse("HEAD or the worktree moved during the check");
+  const proof = buildCarryForwardProof({
+    headSha,
+    baseSha: record.base_sha,
+    source: { head_sha: fromHead, base_sha: record.base_sha, timestamp: record.timestamp },
+    mode: "owner_accepted",
+  });
+  proof.owner_accepted = got.accepted.map((a) => ({
+    n: a.payload.finding.n,
+    severity: a.payload.finding.severity,
+    text: a.payload.finding.text,
+    reason: a.reason,
+    pull_request: a.payload.pullRequest,
+    accepted_at: a.approvedAt,
+    ref: a.payload.nonce,
+  }));
+  const proofPath = codexPushProofPath(root, headSha);
+  mkdirSync(path.dirname(proofPath), { recursive: true });
+  writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`, "utf8");
+  process.stdout.write(`Carried Sol proof written to ${proofPath} (mode: owner_accepted).\n`);
+  return 0;
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
@@ -2858,12 +2978,13 @@ export function run(argv = process.argv.slice(2)) {
     process.stderr.write("Not inside a git work tree — cannot mint a Codex push proof.\n");
     return 2;
   }
-  if ([options.carryForward, options.carryRestamp, options.carryPostApply].filter(Boolean).length > 1) {
-    throw new Error("Use only one of --carry-forward, --carry-restamp and --carry-post-apply.");
+  if ([options.carryForward, options.carryRestamp, options.carryPostApply, options.carryOwnerAccepted].filter(Boolean).length > 1) {
+    throw new Error("Use only one of --carry-forward, --carry-restamp, --carry-post-apply and --carry-owner-accepted.");
   }
   if (options.carryForward) return runCarryForward(root, options);
   if (options.carryRestamp) return runCarryRestamp(root, options);
   if (options.carryPostApply) return runCarryPostApply(root, options);
+  if (options.carryOwnerAccepted) return runCarryOwnerAccepted(root, options);
 
   let codexBin;
   try {
@@ -3053,6 +3174,9 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   clearCodexPushProof({ root, headSha: headBefore });
+  if (!verdict && proofBase && codexReviewIsBlockers({ status: result.status, stdout: result.stdout })) {
+    saveBlockersRecord(root, headAfter, proofBase, result.stdout);
+  }
   if (!verdict) {
     process.stderr.write(
       "Codex did NOT return a clean verdict (or its output was unparseable). No proof written — " +

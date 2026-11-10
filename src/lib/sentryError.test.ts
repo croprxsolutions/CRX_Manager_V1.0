@@ -8,8 +8,13 @@ describe('toSentryError', () => {
   });
 
   it('titles a Supabase error object with its own message, not [object Object]', () => {
-    const err = { code: '22P02', details: null, hint: null, message: 'invalid input syntax for type uuid: "group"' };
-    expect(toSentryError(err).message).toBe('invalid input syntax for type uuid: "group"');
+    const err = { code: 'P0001', details: null, hint: null, message: 'PRODUCT_PARENT_GROUP_CHANGED: a size changed, build a new proposal' };
+    expect(toSentryError(err).message).toBe('PRODUCT_PARENT_GROUP_CHANGED: a size changed, build a new proposal');
+  });
+
+  it('blanks amounts and invoice numbers in a database message', () => {
+    const err = { code: 'P0001', details: null, hint: null, message: 'Allocation of 1,250.75 exceeds balance 980.10 on invoice INV-2026-0042' };
+    expect(toSentryError(err).message).toBe('Allocation of # exceeds balance # on invoice INV-#-#');
   });
 
   it.each([

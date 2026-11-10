@@ -32,7 +32,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: false
+          # Kept so the script can re-fetch tags if the repository is private (it runs main's code only).
       - run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no tag."; exit 0; fi
           node .github/scripts/release-flow.mjs tag-release

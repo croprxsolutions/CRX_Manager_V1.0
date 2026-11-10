@@ -472,6 +472,10 @@ const commands = {
     // Two hotfixes merged together each move on to the next number instead of colliding.
     // ponytail: the commit's package.json keeps the release version; only the tag says vX.Y.(Z+1).
     const notes = `#### 🚑 Hotfix\n* ${pr.title} (#${pr.number})\n\n${firstParagraph(pr.body, 600)}`;
+    git('fetch', '--tags', '--force', 'origin');
+    // A re-run (or a run whose publish failed) finishes the version this commit already has.
+    const mine = git('tag', '--points-at', sha, '--list', 'v*').split('\n').filter(Boolean)[0];
+    if (mine) return publish(mine, notes);
     const known = [...git('tag', '--list', 'v*').split('\n').filter(Boolean), `v${JSON.parse(git('show', `${sha}:package.json`)).version}`];
     for (let i = 0; i < 10; i++) {
       const version = nextVersion(known, 'hotfix');

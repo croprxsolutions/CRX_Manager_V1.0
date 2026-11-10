@@ -1,5 +1,5 @@
 -- RT-2 step 1 RECOVERY (not a migration): put the 22 products moved by
--- supabase/migrations/20261229140000_unit_spellings_remap.sql back to their old spellings.
+-- supabase/migrations/20261229170000_unit_spellings_remap.sql back to their old spellings.
 -- Proven by scripts/smoke/prove-unit-spellings-real-schema.mjs. To use it live, copy it into a new
 -- migration and take it through the normal gates. Refuses (and changes nothing) unless every listed product
 -- still holds its new spelling, the rate lock is off, no step-2 change has removed the old spellings, and no

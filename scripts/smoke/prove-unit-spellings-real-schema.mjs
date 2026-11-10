@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261229140000_unit_spellings_remap (RT-2 step 1, data only).
+ * Real-schema proof for 20261229170000_unit_spellings_remap (RT-2 step 1, data only).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's 14 unit_conversions rows, the 22
@@ -35,7 +35,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261229140000_unit_spellings_remap.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261229170000_unit_spellings_remap.sql');
 const FOLLOW_UPS = []; // the check-only follow-up was dropped (Mason, 2026-11-09)
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -365,7 +365,7 @@ async function main() {
   const MIG = path.join(ROOT, 'supabase', 'migrations');
   const fnBlock = (t) => t.match(/CREATE OR REPLACE FUNCTION public\.convert_to_gl_lb[\s\S]*?\$function\$;\n/)[0];
   stageText('gllb-old.sql', fnBlock(lf(path.join(MIG, '20261104150000_product_forms_seed_each.sql'))));
-  stageText('gllb-new.sql', lf(path.join(MIG, '20261229130000_convert_to_gl_lb_dry_oz.sql')));
+  stageText('gllb-new.sql', lf(path.join(MIG, '20261229160000_convert_to_gl_lb_dry_oz.sql')));
   const s0 = { units: units(), money: money(), versions: versions(), fns: fnBodies(), perAcre: perAcre() };
   assert.match(s0.fns, /:14$/, 'the 14 functions that read unit_conversions are present');
   const q0 = quotes(rows);
@@ -406,7 +406,7 @@ async function main() {
   raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${dryRow.id}';`);
   console.log('[prover] label: a moving rate unit with a label maximum refuses');
 
-  // The remap refuses until 20261229130000 is live (put the old converter back, refuse, re-apply the new one).
+  // The remap refuses until 20261229160000 is live (put the old converter back, refuse, re-apply the new one).
   assert.equal(apply('gllb-old.sql').status, 0);
   refused('cand.sql', /RT2A_GLLB_FIRST/);
   { const g = apply('gllb-new.sql'); assert.equal(g.status, 0, g.output); }
@@ -472,7 +472,7 @@ async function main() {
   // U13. The setup guard still refuses an ordinary stock-unit change.
   const u13 = psql(`UPDATE public.products SET inventory_unit = 'Gal', unit_size = 'Gal' WHERE id = '${armezon.id}';`, { allowFailure: true });
   assert.match(`${u13.stdout}\n${u13.stderr}`, /can't change on a saved product/);
-  // Sol round 1 HIGH: the two products moved to Dry oz keep their pound equivalent (20261229130000).
+  // Sol round 1 HIGH: the two products moved to Dry oz keep their pound equivalent (20261229160000).
   for (const row of rows.filter((x) => x.neu === 'Dry oz')) {
     assert.equal(scalar(`SELECT c.converted_value::text || ' ' || c.converted_unit FROM public.products p,
         public.convert_to_gl_lb(16, p.rate_unit, p.product_form) c WHERE p.id = '${row.id}';`), '1.00000000000000000000 LB', `${row.name} pound equivalent`);

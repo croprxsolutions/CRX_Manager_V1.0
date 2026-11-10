@@ -25,6 +25,9 @@
 --      customer moves to 5% keeps the posted amount
 --   T  The office's rate can't change on an unposted invoice (draft only), so posted amounts never move
 --   U  A discounted draft switched to misc charge and posted before any commit point is refused
+--   V  A chemical sale written already posted, with its lines, in one transaction for a 3% customer: refused at commit
+--   W  The anonymous role can't set a customer's standing discount
+--   X  The office's rate change has its own audit entry, even when the cents don't move
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -645,6 +648,51 @@ BEGIN
     v_fails := v_fails || ' (U) a misc charge posted carrying a standing discount line;';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'STANDING_DISCOUNT_STALE:%' THEN v_fails := v_fails || ' (U) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+
+  -- V: a writer that creates a chemical sale already posted and then adds its lines (owner, every trigger on):
+  -- the lines are refused, so no posted sale can miss its discount line.
+  BEGIN
+    INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+      VALUES ('SMK-DSV-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+    INSERT INTO invoices (order_id, customer_id, invoice_type, status, invoice_date, salesman_id, created_by, total_amount_cents, posted_at, posted_by)
+      VALUES (v_order, v_customer, 'chemical_sale', 'posted', CURRENT_DATE, v_admin, v_admin, 10000, now(), v_admin) RETURNING id INTO v_invoice;
+    INSERT INTO invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, sort_order)
+      VALUES (v_invoice, v_product.id, '[SMOKE] posted in one go', 1, 10000, 10000, 0, 1);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    v_fails := v_fails || ' (V) lines were added to a chemical sale created already posted;';
+  EXCEPTION WHEN OTHERS THEN
+    v_case := SQLERRM;   -- refused: right (recorded for the report)
+  END;
+
+  -- W: the anonymous role.
+  BEGIN
+    PERFORM set_config('request.jwt.claims', '{"role":"anon"}', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    SET LOCAL ROLE anon;
+    UPDATE customers SET standing_discount_pct = 100 WHERE id = v_customer;
+    RESET ROLE;
+    IF (SELECT standing_discount_pct FROM customers WHERE id = v_customer) = 100 THEN
+      v_fails := v_fails || ' (W) the anonymous role set a standing discount;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;   -- refused: right
+  END;
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- X: P's draft (1% now) moved to 1.01% by the office: the rate change has its own audit entry.
+  SELECT i.id INTO v_invoice FROM invoices i JOIN invoice_standing_discount_rates r ON r.invoice_id = i.id
+   WHERE i.status = 'draft' AND r.rate_pct = 1 AND r.set_by IS NOT NULL ORDER BY i.created_at DESC LIMIT 1;
+  BEGIN
+    PERFORM set_invoice_standing_discount(v_invoice, 1.01, 'smk-dsx-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF NOT EXISTS (SELECT 1 FROM financial_audit_log WHERE entity_id = v_invoice AND operation_type = 'invoice_updated'
+                     AND old_values ->> 'rate_pct' = '1.00' AND new_values ->> 'rate_pct' = '1.01') THEN
+      v_fails := v_fails || ' (X) the office''s rate change has no audit entry of its own;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (X) the rate change failed: ' || SQLERRM || ';';
   END;
 
   IF v_fails <> '' THEN

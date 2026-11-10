@@ -441,6 +441,7 @@ DECLARE
   v_header jsonb;
   v_items jsonb;
   v_result jsonb;
+  v_old_rate numeric;
 BEGIN
   -- IS NOT TRUE: a NULL from is_admin() refuses too.
   IF v_actor IS NULL OR public.is_admin() IS NOT TRUE THEN
@@ -463,6 +464,7 @@ BEGIN
     RAISE EXCEPTION 'INVOICE_NOT_DRAFT: a standing discount changes only on a chemical-sale draft' USING ERRCODE = '22023';
   END IF;
 
+  v_old_rate := (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id);
   IF p_pct IS NULL THEN
     DELETE FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id;
   ELSE
@@ -487,6 +489,14 @@ BEGIN
   v_result := jsonb_build_object('invoice_id', v_inv.id,
     'rate_pct', (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id),
     'total_amount_cents', (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id));
+  -- The office's change has its own audit entry, also when the rounded cents don't move (3% to 3.01% on a small sale).
+  INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, actor_role, old_values, new_values,
+                                   total_impact_cents, description)
+  VALUES ('invoice_updated', 'invoice', v_inv.id, v_actor, (SELECT role FROM profiles WHERE id = v_actor),
+          jsonb_build_object('rate_pct', v_old_rate),
+          jsonb_build_object('rate_pct', (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv.id)),
+          (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id) - v_inv.total_amount_cents,
+          format('Standing discount rate set to %s', COALESCE(trim_scale(p_pct)::text || '%', 'the customer''s rate')));
   PERFORM public.save_idempotency(p_idempotency_key, 'set_invoice_standing_discount', v_result);
   PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'set_invoice_standing_discount', v_fingerprint);
   RETURN v_result;

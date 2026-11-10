@@ -26,7 +26,24 @@
 
 import { todayInBusinessTz } from './dateUtils';
 
-// ── Unit normalization (shared with the SQL-side intent: LOWER(NULLIF(btrim(unit),''))) ──
+// ── Unit normalization (mirrors SQL normalize_rate_unit: unit_fold_invisible, then lower(btrim(unit))) ──
+// JS .trim() also strips tabs and other Unicode spaces that SQL btrim keeps (known gap, KI-16 contract #20).
+
+// Built from character codes: eslint's no-irregular-whitespace forbids writing them literally.
+const INVISIBLE_AS_SPACE = new RegExp(`[${[0x00a0, 0x2007, 0x202f].map((c) => String.fromCharCode(c)).join('')}]`, 'g');
+const INVISIBLE_DELETED = new RegExp(
+  `[${[0x00ad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff].map((c) => String.fromCharCode(c)).join('')}]`,
+  'g',
+);
+
+/**
+ * Mirror of the SQL `unit_fold_invisible` (migration 20261231100000): non-breaking and figure
+ * spaces become a space; soft hyphen, zero-width characters, word joiner and BOM are deleted.
+ * The SQL `normalize_rate_unit` applies it before trimming, so a pasted unit bills like a typed one.
+ */
+export function foldInvisibleUnitChars(text: string): string {
+  return text.replace(INVISIBLE_AS_SPACE, ' ').replace(INVISIBLE_DELETED, '');
+}
 
 /**
  * Normalize a rate/max unit for comparison: trim, lowercase, strip a trailing per-acre
@@ -38,7 +55,7 @@ import { todayInBusinessTz } from './dateUtils';
  * match, but a mismatch is never coerced into a match.
  */
 export function normalizeRateUnit(unit: string | null | undefined): string | null {
-  const raw = (unit ?? '').trim().toLowerCase();
+  const raw = foldInvisibleUnitChars(unit ?? '').trim().toLowerCase();
   if (raw === '') return null;
   // Drop ONLY a recognized per-acre denominator ('oz/acre' -> 'oz', 'pt/ac' -> 'pt',
   // 'gal per acre' -> 'gal'). A DIFFERENT denominator (e.g. 'L/ha', 'fl oz/100 gal') is

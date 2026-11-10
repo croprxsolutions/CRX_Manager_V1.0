@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1733 (KI-16 rate units) gets one more Sol round (round 5) after a merge of main
+
+**Decision (Mason, in chat, 2026-11-10: "Yes, run round 5").** PR #1733 may run Sol round 5. Sol round 4 was clean at `1334014e7`; the only later change is a merge of `main` whose one conflict was the "Last verified" stamp line in `docs/manual/KNOWN_ISSUES.md`, and carry-forward refuses a merge that conflicted. No finding keeps returning: each Sol round found a different issue, all fixed or recorded as follow-ups.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
 
 **Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.

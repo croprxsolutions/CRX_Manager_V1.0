@@ -150,6 +150,8 @@ export const RpcErrorCodes = {
   PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
   PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',
   PRODUCT_PARENT_RATES_STALE: 'PRODUCT_PARENT_RATES_STALE',
+  // Crop + timing choices (migration 20261229120000): the choice changed since it was loaded.
+  USE_TIMING_STALE: 'USE_TIMING_STALE',
   // Product weights (migration 20261207100000): a weight screen older than the subject, a lower-trust value
   // that needs Correct weight, and a draft entered for a pack or formulation that has since changed.
   PRODUCT_WEIGHT_STALE: 'PRODUCT_WEIGHT_STALE',

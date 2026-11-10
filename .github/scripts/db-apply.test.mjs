@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -36,15 +36,32 @@ test('dollarTag never appears in the text', () => {
   assert.match(dollarTag(''), /^\$crx_[0-9a-f]{16}\$$/);
 });
 
-test('wrapperSql: the file, then its ledger row holding the exact file text, in one transaction', () => {
+test('wrapperSql: file, same-transaction check, ledger row with the exact text, hash check, one transaction', () => {
   const text = "create table t(x int);\n-- it's fine\n";
-  const sql = wrapperSql({ stem: '20261110120000_add_t', text, run: true, tag: '$crx_0000000000000000$' });
-  assert.ok(sql.startsWith('BEGIN;\n' + text));
-  assert.match(sql, /INSERT INTO supabase_migrations\.schema_migrations \(version, name, statements\)/);
-  assert.match(sql, /'20261110120000_add_t', ARRAY\[\$crx_0000000000000000\$create table t\(x int\);\n-- it's fine\n\$crx_0000000000000000\$\]\);\nCOMMIT;\n$/);
-  const recordOnly = wrapperSql({ stem: '20261110120000_add_t', text, run: false, tag: '$crx_0000000000000000$' });
-  assert.ok(recordOnly.startsWith('BEGIN;\nINSERT'));
-  assert.throws(() => wrapperSql({ stem: "x'); drop table y; --", text, run: true }), /bad migration name/);
+  const sha = 'a'.repeat(64);
+  const sql = wrapperSql({ stem: '20261110120000_add_t', text, run: true, sha, tag: '$crx_0000000000000000$' });
+  const lines = sql.split('\n');
+  assert.equal(lines[0], 'BEGIN;');
+  assert.match(lines[1], /set_config\('crx\.apply_tx', txid_current\(\)::text, true\)/);
+  assert.ok(sql.includes(`${lines[1]}\n${text}\nDO $crx_check$`));
+  assert.match(sql, /MIGRATION_LEFT_ITS_TRANSACTION: 20261110120000_add_t/);
+  assert.ok(sql.includes("'20261110120000_add_t', ARRAY[$crx_0000000000000000$create table t(x int);\n-- it's fine\n$crx_0000000000000000$]);"));
+  assert.ok(sql.includes(`IS DISTINCT FROM '${sha}' THEN RAISE EXCEPTION 'LEDGER_HASH_MISMATCH`));
+  assert.ok(sql.endsWith('COMMIT;\n'));
+  const recordOnly = wrapperSql({ stem: '20261110120000_add_t', text, run: false, sha, tag: '$crx_0000000000000000$' });
+  assert.equal(recordOnly.split('\n')[2].startsWith('DO $crx_check$'), true);
+  assert.throws(() => wrapperSql({ stem: "x'); drop table y; --", text, run: true, sha }), /bad migration name/);
+  assert.throws(() => wrapperSql({ stem: '20261110120000_add_t', text, run: true, sha: "x' or 1=1" }), /bad sha256/);
+});
+
+test('fileProblems: UTF-8 only, no BOM, no own transaction control, no psql backslash commands', () => {
+  const ok = Buffer.from('create function f() returns void language plpgsql as $$\nBEGIN\n  perform 1;\nEND;\n$$;\n');
+  assert.deepEqual(fileProblems('20261110120000_f', ok), []);
+  assert.match(fileProblems('x', Buffer.from('create table a();\nCOMMIT;\nselect 1;'))[0], /own transaction control/);
+  assert.match(fileProblems('x', Buffer.from('begin;\nselect 1;'))[0], /own transaction control/);
+  assert.match(fileProblems('x', Buffer.from('\\set x 1\nselect 1;'))[0], /backslash/);
+  assert.match(fileProblems('x', Buffer.from([0xef, 0xbb, 0xbf, 0x73]))[0], /byte-order mark/);
+  assert.match(fileProblems('x', Buffer.from([0x73, 0xff, 0x0a]))[0], /not valid UTF-8/);
 });
 
 test('isNoTransaction reads a header marker in the first lines only', () => {
@@ -54,18 +71,25 @@ test('isNoTransaction reads a header marker in the first lines only', () => {
   assert.equal(isNoTransaction('create table t();'), false);
 });
 
-test('stampProblems: new files need a valid, unique stamp newer than everything already on the base branch', () => {
+test('stampProblems: new files need a valid, unique stamp newer than the base branch; existing files never change', () => {
   const base = f(['20261101000000_a', '20261222110000_future']);
   assert.deepEqual(stampProblems({ added: f(['20261223000000_new']), base, head: [...base, ...f(['20261223000000_new'])] }), []);
   assert.match(stampProblems({ added: f(['20261201000000_old']), base, head: [...base, ...f(['20261201000000_old'])] })[0], /not newer than 20261222110000/);
   assert.match(stampProblems({ added: f(['20261223000000_x']), base, head: [...base, ...f(['20261223000000_x', '20261223000000_y'])] })[0], /shares its stamp/);
   assert.match(stampProblems({ added: ['2026_bad.sql'], base, head: base })[0], /name must be/);
+  assert.match(stampProblems({ added: [], changed: ['20261101000000_a.sql'], base, head: base })[0], /edited, renamed or deleted/);
 });
 
-test('refuseTarget: only the expected project, never live or MetaHive', () => {
-  assert.equal(refuseTarget('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres', 'fsnjredpmakbmhwowjjt'), null);
-  assert.match(refuseTarget('postgresql://postgres.rhyzpcqhnizqbxphqdkr:pw@host/postgres', 'fsnjredpmakbmhwowjjt'), /live/);
-  assert.match(refuseTarget('postgresql://postgres.dyxaxsjrqprvxzxkfooi:pw@host/postgres', 'fsnjredpmakbmhwowjjt'), /MetaHive/);
-  assert.match(refuseTarget('postgresql://postgres.otherproject12345678:pw@host/postgres', 'fsnjredpmakbmhwowjjt'), /not the fsnjredpmakbmhwowjjt/);
+test('refuseTarget: exactly the expected project read from the URL, never live or MetaHive', () => {
+  const pooler = (ref, pw = 'pw') => `postgresql://postgres.${ref}:${pw}@aws-0-us-west-1.pooler.supabase.com:5432/postgres`;
+  assert.equal(refuseTarget(pooler('fsnjredpmakbmhwowjjt'), 'fsnjredpmakbmhwowjjt'), null);
+  assert.equal(refuseTarget('postgresql://postgres:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres', 'fsnjredpmakbmhwowjjt'), null);
+  assert.match(refuseTarget(pooler('rhyzpcqhnizqbxphqdkr'), 'fsnjredpmakbmhwowjjt'), /live/);
+  assert.match(refuseTarget(pooler('fsnjredpmakbmhwowjjt'), 'rhyzpcqhnizqbxphqdkr'), /live/);
+  assert.match(refuseTarget(pooler('dyxaxsjrqprvxzxkfooi'), 'fsnjredpmakbmhwowjjt'), /MetaHive/);
+  assert.match(refuseTarget(pooler('otherprojectabcdefgh', 'fsnjredpmakbmhwowjjt'), 'fsnjredpmakbmhwowjjt'), /for otherprojectabcdefgh, not/);
+  assert.match(refuseTarget('postgresql://postgres:pw@10.0.0.5:5432/postgres?x=fsnjredpmakbmhwowjjt', 'fsnjredpmakbmhwowjjt'), /unrecognised host/);
+  assert.match(refuseTarget(pooler('fsnjredpmakbmhwowjjt'), ''), /TARGET_REF is not set/);
   assert.match(refuseTarget('', 'fsnjredpmakbmhwowjjt'), /not set/);
+  assert.equal(urlRef('postgresql://postgres:postgres@127.0.0.1:56322/x'), 'local');
 });

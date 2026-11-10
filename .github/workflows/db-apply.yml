@@ -1,7 +1,7 @@
 # Database changes through GitHub, not laptops (Taha, 2026-11-10; staging half approved by Mason on
 # 2026-11-03). On every push to staging: apply new migrations to the staging database (fsnjredpmakbmhwowjjt),
 # each file plus its ledger row in one transaction, verified by sha256; then deploy changed edge
-# functions to staging. On PRs: check new migration stamps. Replaces local-supabase/catchup-staging.sh.
+# functions to staging (all of them, each run). On PRs: check new migration stamps. Replaces local-supabase/catchup-staging.sh.
 # The staging jobs are inert until the repository variable STAGING_DB_JOB is "on".
 # The live half (main, behind an approval) is a separate PR and stays off until Mason's 6 points,
 # a clean week on staging and his agents' review.
@@ -83,8 +83,9 @@ jobs:
     env:
       STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      BEFORE: ${{ github.event.before }}
       PROJECT_REF: fsnjredpmakbmhwowjjt
+      # Functions woken without a user token (see the header of each); everything else keeps verify_jwt on.
+      NO_VERIFY_JWT: send-delivery-receipts
     steps:
       - id: on
         run: |
@@ -94,20 +95,15 @@ jobs:
       - if: steps.on.outputs.yes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Deploy the functions this push changed (all of them if _shared changed or on a manual run)
+      # Every function, every run: a run that failed or was replaced never leaves one stale (there are
+      # nine). ponytail: a deleted function folder stays deployed; removing it is a manual, approved step.
+      - name: Deploy every edge function to staging
         if: steps.on.outputs.yes
         run: |
-          all=$(find supabase/functions -mindepth 1 -maxdepth 1 -type d ! -name '_shared' -exec basename {} \; | sort)
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
-            fns="$all"
-          else
-            changed=$(git diff --name-only "$BEFORE" HEAD -- supabase/functions | cut -d/ -f3 | sort -u)
-            if echo "$changed" | grep -qx '_shared'; then fns="$all"; else fns=$(comm -12 <(echo "$all") <(echo "$changed")); fi
-          fi
-          if [ -z "$fns" ]; then echo "No edge function changed."; exit 0; fi
-          for fn in $fns; do
-            echo "Deploying $fn to $PROJECT_REF"
-            npx --yes supabase@2.122.0 functions deploy "$fn" --project-ref "$PROJECT_REF" --use-api
+          for fn in $(find supabase/functions -mindepth 1 -maxdepth 1 -type d ! -name '_shared' -exec basename {} \; | sort); do
+            flags=""
+            for nv in $NO_VERIFY_JWT; do [ "$fn" = "$nv" ] && flags="--no-verify-jwt"; done
+            echo "Deploying $fn to $PROJECT_REF $flags"
+            npx --yes supabase@2.122.0 functions deploy "$fn" --project-ref "$PROJECT_REF" --use-api $flags
           done

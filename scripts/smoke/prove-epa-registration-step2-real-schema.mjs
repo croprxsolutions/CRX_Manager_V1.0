@@ -409,6 +409,7 @@ async function main() {
   refused(ADMIN, `UPDATE public.invoice_items SET quantity = 9 WHERE id = '${L1}';`, /permission denied/);
   refused(ADMIN, `DELETE FROM public.invoice_items WHERE id = '${L1}';`, /permission denied/);
   assert.equal(scalar(`SELECT has_table_privilege('authenticated', 'public.invoice_items', 'DELETE');`), 'f');
+  assert.equal(scalar(`SELECT has_any_column_privilege('authenticated', 'public.invoice_items', 'INSERT') OR has_any_column_privilege('authenticated', 'public.invoice_items', 'UPDATE');`), 'f');
   console.log('[prover] case 2: every new function is owned by postgres, pins search_path, and only the public ones run for signed-in users; no guard trigger, wrapper or pass table exists; nobody signed in writes invoice lines');
 
   // 3. Before the seed nothing changes: the guards are off, the tools refuse.
@@ -605,6 +606,14 @@ async function main() {
   assert.equal(scalar(`SELECT epa_registration || '|' || quantity || '|' || total_cents FROM public.rup_sales_records WHERE invoice_id = '${INV3}';`), `${N1}|1.0000|2400`);
   assert.equal(scalar(`SELECT string_agg(public._rup_record_covers_line(ii)::text, ',' ORDER BY id) FROM public.invoice_items ii WHERE id IN ('${L6}', '${id('2a')}');`), 'true,false');
   assert.equal(ok(ADMIN, GEN(INV3, 'g4')), '0');
+  // A duplicate active record for one key covers nothing and posting refuses it (Luna 2026-11-10).
+  raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word)
+    SELECT invoice_id, order_id, customer_id, product_id, sale_date, '[PROVER] dup', epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word
+      FROM public.rup_sales_records WHERE invoice_id = '${INV3}';`);
+  refused(ADMIN, GEN(INV3, 'g8'), /more than one active restricted-use record/);
+  assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'false');
+  raw(`DELETE FROM public.rup_sales_records WHERE product_name = '[PROVER] dup';`);
+  assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'true');
   // A line with no unit records as 'Unit not set' (Sol r4); the record's unit is required.
   raw(`UPDATE public.invoices SET status = 'draft', posted_at = NULL WHERE id = '${INV1}';`);
   ownerOk(`INSERT INTO public.invoice_items (id, invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents) VALUES ('${id('2b')}', '${INV1}', '${P4}', 'x', 1, NULL, 2200, 2200);`);

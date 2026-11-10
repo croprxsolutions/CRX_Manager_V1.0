@@ -181,7 +181,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                          AND COALESCE(o.unit_size, 'Unit not set') = COALESCE(p_line.unit_size, 'Unit not set')
                          AND o.unit_price_cents IS NOT DISTINCT FROM p_line.unit_price_cents) l
             WHERE c.invoice_item_id = p_line.id AND c.rup_status = 'yes'
-              AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents)
+              AND s.quantity = l.quantity AND s.total_cents IS NOT DISTINCT FROM l.total_cents
+              -- a duplicate active record for the key covers nothing (Luna 2026-11-10)
+              AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records d
+                               WHERE d.invoice_id = s.invoice_id AND d.product_id = s.product_id AND d.voided_at IS NULL
+                                 AND d.id <> s.id AND d.epa_registration IS NOT DISTINCT FROM s.epa_registration
+                                 AND d.signal_word IS NOT DISTINCT FROM s.signal_word AND d.unit = s.unit
+                                 AND d.unit_price_cents IS NOT DISTINCT FROM s.unit_price_cents))
       OR EXISTS (
            SELECT 1
              FROM public.invoice_line_rup_captures c
@@ -280,21 +286,9 @@ BEGIN
     RAISE EXCEPTION 'Not authorized to generate RUP sales records';
   END IF;
 
-  -- REG-1: no registration changes while this posting reads them (sheet 3.2, shared mode).
-  PERFORM public._epa_registration_lock(false);
-  v_seeded := public._epa_registrations_seeded();
-
-  IF v_seeded THEN
-    -- REG-1: two postings of one invoice run one after the other (sheet 4.C de-duplication).
-    SELECT i.id, i.order_id, o.customer_id, c.farm_name, i.invoice_date,
-           i.invoice_number, i.status, i.deleted_at
-    INTO v_invoice
-    FROM invoices i
-    JOIN orders o ON o.id = i.order_id
-    JOIN customers c ON c.id = o.customer_id
-    WHERE i.id = p_invoice_id
-    FOR UPDATE OF i;
-  ELSE
+  -- REG-1: the invoice first, then the shared registration lock: the order a save takes (its line write holds the
+  -- invoice, then the capture trigger takes the shared lock), so a queued registration edit cannot deadlock them
+  -- (Luna 2026-11-10). FOR UPDATE: two postings of one invoice run one after the other (sheet 4.C de-duplication).
   SELECT i.id, i.order_id, o.customer_id, c.farm_name, i.invoice_date,
          i.invoice_number, i.status, i.deleted_at
   INTO v_invoice
@@ -302,8 +296,10 @@ BEGIN
   JOIN orders o ON o.id = i.order_id
   JOIN customers c ON c.id = o.customer_id
   WHERE i.id = p_invoice_id
-  FOR SHARE OF i;
-  END IF;
+  FOR UPDATE OF i;
+  -- REG-1: no registration changes while this posting reads them (sheet 3.2, shared mode).
+  PERFORM public._epa_registration_lock(false);
+  v_seeded := public._epa_registrations_seeded();
 
   IF v_invoice IS NULL THEN RETURN 0; END IF;
 
@@ -402,6 +398,17 @@ BEGIN
                    JOIN rup_sales_records s ON s.invoice_id = p_invoice_id AND s.product_id = v_item.product_id
                     AND s.voided_at IS NULL AND s.created_at < sr.seeded_at) THEN
         CONTINUE;
+      END IF;
+      -- REG-1 (Luna 2026-11-10): two active records for one key are a duplicate a person must void; never pick one.
+      IF (SELECT count(*) FROM rup_sales_records r
+           WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id
+             AND r.epa_registration IS NOT DISTINCT FROM v_item.epa_registration
+             AND r.signal_word IS NOT DISTINCT FROM v_item.signal_word
+             AND r.unit = v_item.unit_size
+             AND r.unit_price_cents IS NOT DISTINCT FROM v_item.unit_price_cents
+             AND r.voided_at IS NULL) > 1 THEN
+        RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % has more than one active restricted-use record for % at this number, unit and price; void the extra one',
+          v_invoice.invoice_number, v_item.product_name;
       END IF;
       -- REG-1: one active record per invoice, product, number, signal word, unit and unit price (the coverage rule);
       -- one that disagrees with what this posting would write is an error, never skipped.
@@ -530,6 +537,16 @@ GRANT EXECUTE ON FUNCTION public.get_epa_sales_to_check() TO authenticated;
 -- ---------------------------------------------------------------------------------------------
 
 REVOKE INSERT, UPDATE, DELETE ON TABLE public.invoice_items FROM anon, authenticated;
+-- A table REVOKE leaves column grants in place; revoke those explicitly too (none live 2026-11-10).
+DO $q7_columns$
+DECLARE
+  v_cols text;
+BEGIN
+  SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum) INTO v_cols
+    FROM pg_attribute WHERE attrelid = 'public.invoice_items'::regclass AND attnum > 0 AND NOT attisdropped;
+  EXECUTE format('REVOKE INSERT (%1$s), UPDATE (%1$s) ON TABLE public.invoice_items FROM anon, authenticated', v_cols);
+END
+$q7_columns$;
 
 DO $postflight$
 DECLARE

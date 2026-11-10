@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { toSentryError } from './sentryError';
 
 describe('toSentryError', () => {
-  it('keeps a real Error as the same object', () => {
+  it('keeps a real Error with no figures as the same object', () => {
     const err = new Error('boom');
     expect(toSentryError(err)).toBe(err);
+  });
+
+  it('blanks figures in a real Error and keeps its name and stack location', () => {
+    const err = new TypeError('Payment of $1,250.75 failed for invoice INV-2026-0042');
+    const result = toSentryError(err);
+    expect(result.message).toBe('Payment of $# failed for invoice INV-#-#');
+    expect(result.name).toBe('TypeError');
+    expect(result.stack).not.toContain('1,250.75');
+    expect(result.stack).toContain('sentryError.test');
   });
 
   it('titles a Supabase error object with its own message, not [object Object]', () => {

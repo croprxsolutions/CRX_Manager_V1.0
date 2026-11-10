@@ -547,7 +547,7 @@ bounces are tracked today on any path). The database half of a "mark handled" ac
 `main` 2026-11-10), so the points below still hold. The office
 card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
 Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
-chose (2026-11-08) to land the app switch first; the close action is a follow-up migration PR.
+chose (2026-11-08) to land the app switch first; the close action's screen is the remaining follow-up.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**

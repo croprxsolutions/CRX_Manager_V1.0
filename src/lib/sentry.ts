@@ -8,8 +8,9 @@ function redactQuery(url: string): string {
 
 // Network errors that aren't bugs
 const NETWORK_ERRORS = ['Failed to fetch', 'NetworkError', 'Load failed'];
-// supabase-js wraps a browser fetch failure as "TypeError: <browser text> (host)".
-const NETWORK_BLIP = /^TypeError: (?:Failed to fetch|NetworkError|Load failed)/;
+// The whole message is a browser fetch failure (supabase-js adds "TypeError: " and " (host)"),
+// so a database error that merely mentions fetching is kept.
+const NETWORK_BLIP = /^(?:TypeError: )?(?:Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed)(?: \([^)]*\))?$/;
 // The whole token: header, payload and signature.
 const JWT = /eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*/g;
 
@@ -61,6 +62,8 @@ export function initSentry() {
         const first = event.exception?.values?.[0];
         if (first) first.value = plain.replace(JWT, '[JWT_REDACTED]');
       }
+      // The SDK also attaches the raw object as extra.__serialized__; JWT characters never need JSON escaping.
+      if (event.extra) event.extra = JSON.parse(JSON.stringify(event.extra).replace(JWT, '[JWT_REDACTED]'));
       // Strip PII from error messages
       if (event.message) {
         event.message = event.message.replace(JWT, '[JWT_REDACTED]');

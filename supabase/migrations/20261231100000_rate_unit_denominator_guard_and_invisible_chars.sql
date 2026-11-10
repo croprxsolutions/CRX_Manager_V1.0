@@ -53,7 +53,7 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard',
-                               'trg_z_products_rate_unit_blend_guard')) THEN
+                               'trigger_zzzz_products_rate_unit_blend_guard')) THEN
     RAISE EXCEPTION 'KI16_RATE_UNIT_PREFLIGHT: a rate-unit guard trigger already exists; nothing was changed.';
   END IF;
 END;
@@ -275,8 +275,9 @@ $function$;
 
 REVOKE EXECUTE ON FUNCTION public.guard_product_rate_unit_for_blend_lines() FROM PUBLIC, anon, authenticated, service_role;
 
--- 'z' so it fires after every other BEFORE trigger on products and judges the final value.
-CREATE TRIGGER trg_z_products_rate_unit_blend_guard
+-- Same-timing triggers fire in name order; 'trigger_zzzz' sorts after every products trigger (the last is
+-- trigger_zzz_guard_product_rate_lock), so it judges the final value. The postflight checks it is last.
+CREATE TRIGGER trigger_zzzz_products_rate_unit_blend_guard
   BEFORE UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_unit_for_blend_lines();
 
@@ -314,9 +315,15 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM pg_trigger
        WHERE tgname IN ('trg_job_chemicals_rate_unit_guard', 'trg_blend_ticket_products_rate_unit_guard',
-                        'trg_z_products_rate_unit_blend_guard')
+                        'trigger_zzzz_products_rate_unit_blend_guard')
          AND tgenabled = 'O') <> 3 THEN
     RAISE EXCEPTION 'KI16_RATE_UNIT_POSTFLIGHT: guard triggers are missing or disabled';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_trigger
+              WHERE tgrelid = 'public.products'::regclass AND NOT tgisinternal
+                AND (tgtype & 2) <> 0 AND (tgtype & 1) <> 0
+                AND tgname COLLATE "C" > 'trigger_zzzz_products_rate_unit_blend_guard') THEN
+    RAISE EXCEPTION 'KI16_RATE_UNIT_POSTFLIGHT: a BEFORE row trigger on products fires after the rate unit guard';
   END IF;
   IF has_function_privilege('anon', 'public.normalize_rate_unit(text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.unit_fold_invisible(text)', 'EXECUTE')

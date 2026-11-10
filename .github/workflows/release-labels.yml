@@ -38,24 +38,19 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       ACTION: ${{ github.event.action }}
     steps:
-      # The rules come from staging as it was before this PR: the parent of its merge commit once
-      # merged, its base commit before that. Never the PR's own copy of the script.
+      # The rules come from main's copy of the script: main changes only through reviewed releases,
+      # so no PR (squash, merge or rebase) can run its own version with this job's token.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: staging
-          fetch-depth: 0
+          ref: main
           persist-credentials: false
       - id: script
-        env:
-          MERGED: ${{ github.event.pull_request.merged }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$MERGED" = "true" ]; then src="$MERGE_SHA^1"; else src="$BASE_SHA"; fi
-          if git show "$src:.github/scripts/release-flow.mjs" > "$RUNNER_TEMP/release-flow.mjs" 2>/dev/null; then
+          if [ -f .github/scripts/release-flow.mjs ]; then
+            cp .github/scripts/release-flow.mjs "$RUNNER_TEMP/release-flow.mjs"
             echo "ok=1" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::No release flow script on staging before this PR yet."
+            echo "::notice::No release flow script on main yet (it arrives with the first release)."
           fi
       - if: steps.script.outputs.ok && (github.event.action == 'closed' || github.event.action == 'labeled')
         run: |
@@ -76,7 +71,9 @@ jobs:
     if: >-
       github.event_name != 'pull_request' &&
       (github.event.issue.pull_request || github.event.pull_request) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association) &&
       (contains(github.event.comment.body, 'roof:') || contains(github.event.comment.body, 'eld off:') ||
+       contains(github.event.changes.body.from, 'roof:') || contains(github.event.changes.body.from, 'eld off:') ||
        contains(github.event.review.body, 'roof:') || contains(github.event.review.body, 'eld off:'))
     runs-on: ubuntu-latest
     permissions:

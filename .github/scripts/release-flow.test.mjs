@@ -87,6 +87,7 @@ test('versionFromTitle keeps a version the releaser typed', () => {
   assert.equal(versionFromTitle('release: v1.0.0'), 'v1.0.0');
   assert.equal(versionFromTitle('Release: v0.4.0 '), 'v0.4.0');
   assert.equal(versionFromTitle('release: soon'), null);
+  assert.equal(versionFromTitle('release: v1.02.0'), null);
   assert.equal(versionFromTitle('release: V1.0.0'), 'v1.0.0');
   assert.equal(releaseVersion('release: V1.0.0', ['v0.2.0']), 'v1.0.0');
   assert.equal(versionFromTitle(undefined), null);

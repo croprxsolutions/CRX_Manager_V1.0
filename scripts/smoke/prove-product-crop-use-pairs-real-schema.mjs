@@ -6,8 +6,8 @@
  * signed-in roles: every product keeps its codes and joined text; 10 options and 8 crops; only an admin adds or
  * turns options on/off (retry-safe, one active option per crop+timing pair, labels checked); Burndown plus an
  * in-season timing on one product; pairs on ungrouped and grouped products; a turned-off option leaves the
- * pick list, holders keep it, every write path refuses it, sizes still inherit it from their parent; a row
- * never holds one pair twice.
+ * pick list, holders keep it, and the database no longer refuses it (Mason, 2026-11-09: the pickers hide it);
+ * a row never holds one pair twice.
  *
  * Run: node scripts/smoke/prove-product-crop-use-pairs-real-schema.mjs   (needs local Docker image)
  * Prints PRODUCT_CROP_USE_PAIRS_PROOF_PASS on success.
@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,7 +50,7 @@ const LEDGER_ONLY = new Set([
   '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_use_timing_options|product_crop_options|sync_product_use_timings|use_timing_option|guard_product_parent_retired_timings)/i;
+const TOUCHED = /(product_use_timing_options|product_crop_options|sync_product_use_timings|use_timing_option|guard_product_parent_timing_pairs)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -286,7 +286,6 @@ const editParent = (pp, changes, key, v = version(pp)) => `SELECT public.update_
 const PRODUCTS_MD5 = "SELECT md5(string_agg(concat_ws('|', id, use_timings::text, use_timing, pricing_version), '#' ORDER BY id)) FROM public.products;";
 const CODE_COUNTS = "SELECT coalesce(string_agg(c || '=' || n, ',' ORDER BY c), '-') FROM (SELECT unnest(use_timings) c, count(*) n FROM public.products GROUP BY 1) x;";
 const OPTIONS = "SELECT count(*) FROM public.product_use_timing_options;";
-const UNAVAILABLE = /Use timing "[^"]+" is unavailable/;
 
 function main() {
   if (!REUSE) { buildContainer(); seed(); }  // a reused container stops before the candidate, already seeded
@@ -398,20 +397,16 @@ function main() {
   ok(ADMIN, `UPDATE public.products SET notes = 'kept' WHERE id = '${P('b3')}';`);
   assert.equal(timings(P('b3')), 'pre_emerge_corn|Pre-Emerge Corn');
   ok(ADMIN, `UPDATE public.products SET use_timings = ARRAY['pre_emerge_corn', 'post_emerge_soybeans', 'burndown_preplant'] WHERE id = '${H2}';`);
-  refused(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', 'pre_emerge_corn'] WHERE id = '${H3}';`, UNAVAILABLE);
-  refused(ADMIN, `UPDATE public.products SET use_timing = 'Post-Emergence; Pre-Emerge Corn' WHERE id = '${H3}';`, UNAVAILABLE);
-  refused(ADMIN, setupSave(H3, { use_timings: ['post_emergence', 'pre_emerge_corn'] }, 'k-setup-pec'), UNAVAILABLE);
-  refused(ADMIN, save([{ insert: { product_name: '[PROVER] Import PEC', sku: 'IM-PEC', category: 'Herbicide', product_form: 'liquid', inventory_unit: 'Gal', use_timing: 'Pre-Emerge Corn' } }], 'k-import-pec'), UNAVAILABLE);
-  refused(ADMIN, create({ name: '[PROVER] Beta', product_form: 'liquid', category: 'Herbicide', use_timings: ['pre_emerge_corn'] },
-    { product_name: '[PROVER] Beta 1', sku: 'BE-1', inventory_unit: 'Gal' }, 'k-pb-pec'), /PRODUCT_PARENT_TIMING_RETIRED: "Pre-Emerge Corn"/);
-  call(ADMIN, editParent(PA.parent_id, { category: 'Herbicide' }, 'k-pa-herb'));
-  refused(ADMIN, editParent(PA.parent_id, { use_timings: ['pre_emerge_corn'] }, 'k-pa-pec'), /PRODUCT_PARENT_TIMING_RETIRED: "Pre-Emerge Corn"/);
-  assert.equal(timings(H3), 'post_emergence|Post-Emergence');
-  assert.equal(scalar("SELECT count(*) FROM public.products WHERE sku = 'IM-PEC' OR sku = 'BE-1';"), '0');
-  const back = setOpt('pre_emerge_corn', true, 'k-on-pec');
-  assert.deepEqual([back.is_active, back.sizes_holding], [true, 2]);
+  // Mason, 2026-11-09: the database no longer refuses a turned-off option; the pickers hide it.
   ok(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', 'pre_emerge_corn'] WHERE id = '${H3}';`);
-  console.log('[prover] case 7: a turned-off option leaves the active list; holders keep it and still save; the product page, legacy text, setup workbook, bulk import, new parent and parent edit are refused it; turning it back on works and reports holders');
+  assert.match(timings(H3), /pre_emerge_corn/);
+  call(ADMIN, editParent(PA.parent_id, { category: 'Herbicide' }, 'k-pa-herb'));
+  call(ADMIN, editParent(PA.parent_id, { use_timings: ['pre_emerge_corn'] }, 'k-pa-pec'));
+  assert.equal(parentTimings(PA.parent_id), 'pre_emerge_corn');
+  const back = setOpt('pre_emerge_corn', true, 'k-on-pec');
+  assert.equal(back.is_active, true);
+  ok(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', 'pre_emerge_corn'] WHERE id = '${H3}';`);
+  console.log('[prover] case 7: a turned-off option leaves the active list; holders keep it and still save; the product page and a parent edit can still save it; turning it back on works and reports holders');
 
   // Case 9: a retired option a parent already holds.
   const RET = addOpt('Herbicide', 'post_emergence', 'milo', 'Post-Emerge Milo', 'k-milo').code;
@@ -433,24 +428,14 @@ function main() {
   call(ADMIN, editParent(PC.parent_id, { use_timings: [RET, 'pre_emerge', 'burndown_preplant'] }, 'k-pc-add'));
   assert.equal(parentTimings(PC.parent_id), `burndown_preplant,pre_emerge,${RET}`);
   for (const pid of [PC.product_id, C2, C3, D2]) assert.equal(timings(pid), `burndown_preplant,pre_emerge,${RET}|Burndown (preplant); Pre-Emerge; Post-Emerge Milo`);
-  const vD = version(PD.parent_id);
-  refused(ADMIN, editParent(PD.parent_id, { use_timings: ['post_emergence', RET] }, 'k-pd-ret'), /PRODUCT_PARENT_TIMING_RETIRED: "Post-Emerge Milo"/);
-  assert.equal(version(PD.parent_id), vD);
-  refused(ADMIN, create({ name: '[PROVER] Epsilon', product_form: 'liquid', category: 'Herbicide', use_timings: [RET] },
-    { product_name: '[PROVER] Epsilon 1', sku: 'EP-1', inventory_unit: 'Gal' }, 'k-pe-ret'), /PRODUCT_PARENT_TIMING_RETIRED/);
-  assert.equal(scalar("SELECT count(*) FROM public.product_parents WHERE name = '[PROVER] Epsilon';"), '0');
-  refused(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', '${RET}'] WHERE id = '${H3}';`, UNAVAILABLE);
-  refused(ADMIN, setupSave(P('b2'), { use_timings: ['pre_emerge_soybean', RET] }, 'k-setup-ret'), UNAVAILABLE);
-  refused(ADMIN, save([{ insert: { product_name: '[PROVER] Import Milo', sku: 'IM-MILO', category: 'Herbicide', product_form: 'liquid', inventory_unit: 'Gal', use_timing: 'Post-Emerge Milo' } }], 'k-import-ret'), UNAVAILABLE);
-  // Even the owner cannot fake an inheritance without a parent copy pass.
-  const owner = psql(`UPDATE public.products SET use_timings = ARRAY['${RET}'] WHERE id = '${P('b9')}';`, { allowFailure: true });
-  assert.notEqual(owner.status, 0); assert.match(`${owner.stdout}${owner.stderr}`, UNAVAILABLE);
-  console.log('[prover] case 9: with a held option retired, Add a size and a move into the parent succeed and inherit it; renames and additions keep it; a new or other parent and every ungrouped write path are refused it');
+  call(ADMIN, editParent(PD.parent_id, { use_timings: ['post_emergence', RET] }, 'k-pd-ret'));
+  assert.equal(parentTimings(PD.parent_id), `post_emergence,${RET}`);
+  console.log('[prover] case 9: with a held option retired, Add a size and a move into the parent succeed and inherit it; renames and additions keep it; another parent can take it');
 
   // One pair once per row, on sizes and parents.
   setOpt('wheat_post', false, 'k-off-wp');
   setOpt('post_emerge_wheat', true, 'k-on-pew');
-  refused(ADMIN, editParent(PC.parent_id, { use_timings: [RET, 'pre_emerge', 'burndown_preplant', 'post_emerge_wheat', 'wheat_post'] }, 'k-pc-twice'), /PRODUCT_PARENT_TIMING_RETIRED: "Wheat Post"/);
+  refused(ADMIN, editParent(PC.parent_id, { use_timings: [RET, 'pre_emerge', 'burndown_preplant', 'post_emerge_wheat', 'wheat_post'] }, 'k-pc-twice'), /USE_TIMING_PAIR_TWICE/);
   ok(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emerge_wheat'] WHERE id = '${P('b9')}';`);
   const reMilo = setOpt(RET, true, 'k-on-milo');
   assert.equal(reMilo.is_active, true);
@@ -460,41 +445,8 @@ function main() {
   ownerOkPair(PC.parent_id);
   console.log('[prover] one pair once per row: a size and a parent holding a retired option cannot also take its replacement');
 
-  // Race (Sol round 1): a save that starts while an admin's turn-off is still open waits for it, then sees it off.
-  const RACE = addOpt('Herbicide', 'post_emergence', 'cotton', 'Post-Emerge Cotton', 'k-cotton').code;
-  const raceOff = (tag) => {
-    const bg = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT, stdio: ['pipe', 'ignore', 'ignore'] });
-    bg.stdin.end(`BEGIN;
-SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
-SET LOCAL ROLE authenticated;
-${setSql(RACE, false, optVersion(RACE), tag)}
-SELECT pg_sleep(4);
-COMMIT;
-`);
-    for (let i = 0; i < 100 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();") === '0'; i += 1) wait(100);
-    return Date.now();
-  };
-  const raceDone = () => {
-    for (let i = 0; i < 200 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();") !== '0'; i += 1) wait(100);
-    assert.equal(scalar(`SELECT is_active FROM public.product_use_timing_options WHERE code = '${RACE}';`), 'f');
-  };
-  const h3Before = timings(H3);
-  let t0 = raceOff('k-race-off1');
-  refused(ADMIN, `UPDATE public.products SET use_timings = ARRAY['post_emergence', '${RACE}'] WHERE id = '${H3}';`, UNAVAILABLE);
-  assert.ok(Date.now() - t0 > 1500, 'the size save did not wait for the open turn-off');
-  raceDone();
-  assert.equal(timings(H3), h3Before);
-  setOpt(RACE, true, 'k-race-on1');
-  const vRace = version(PD.parent_id);
-  t0 = raceOff('k-race-off2');
-  refused(ADMIN, editParent(PD.parent_id, { use_timings: ['post_emergence', RACE] }, 'k-race-pd', vRace), /PRODUCT_PARENT_TIMING_RETIRED: "Post-Emerge Cotton"/);
-  assert.ok(Date.now() - t0 > 1500, 'the parent save did not wait for the open turn-off');
-  raceDone();
-  assert.equal(version(PD.parent_id), vRace);
-  console.log('[prover] race: a size save and a parent save that start while a turn-off is open wait for it and are refused');
-
   // Rerun refused; the parent trigger function is not callable.
-  refused(ADMIN, 'SELECT public.guard_product_parent_retired_timings();', /permission denied|trigger functions can only be called as triggers/);
+  refused(ADMIN, 'SELECT public.guard_product_parent_timing_pairs();', /permission denied|trigger functions can only be called as triggers/);
   stageText('again.sql', lf(CANDIDATE));
   const again = apply('again.sql');
   assert.notEqual(again.status, 0);
@@ -502,18 +454,9 @@ COMMIT;
   console.log('[prover] a second apply is refused by the preflight');
   console.log('PRODUCT_CROP_USE_PAIRS_PROOF_PASS');
 }
-// A parent holding the retired post_emerge_wheat (written by the owner, as before it was retired) cannot add its active replacement.
+// A parent cannot hold both options of one pair, even written directly by the owner.
 function ownerOkPair(pp) {
-  const holdAndAdd = (sql) => psql(sql, { allowFailure: true });
-  let r = holdAndAdd(`UPDATE public.product_parents SET use_timings = use_timings || ARRAY['post_emerge_wheat'] WHERE id = '${pp}';`);
-  assert.notEqual(r.status, 0); assert.match(`${r.stdout}${r.stderr}`, /PRODUCT_PARENT_TIMING_RETIRED: "Post-Emerge Wheat"/);
-  setOpt('wheat_post', false, 'k-off-wp3');
-  setOpt('post_emerge_wheat', true, 'k-on-pew3');
-  r = holdAndAdd(`UPDATE public.product_parents SET use_timings = use_timings || ARRAY['post_emerge_wheat'] WHERE id = '${pp}';`);
-  assert.equal(r.status, 0, r.stderr);
-  setOpt('post_emerge_wheat', false, 'k-off-pew4');
-  setOpt('wheat_post', true, 'k-on-wp4');
-  r = holdAndAdd(`UPDATE public.product_parents SET use_timings = use_timings || ARRAY['wheat_post'] WHERE id = '${pp}';`);
+  const r = psql(`UPDATE public.product_parents SET use_timings = use_timings || ARRAY['post_emerge_wheat', 'wheat_post'] WHERE id = '${pp}';`, { allowFailure: true });
   assert.notEqual(r.status, 0); assert.match(`${r.stdout}${r.stderr}`, /USE_TIMING_PAIR_TWICE: "Post-Emerge Wheat" and "Wheat Post"/);
 }
 try { main(); }

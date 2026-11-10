@@ -6,13 +6,14 @@
 --     Volunteer Corn is re-filed to "Any crop" and Range/Pasture/Turf to its own crop (Mason, question 2);
 --     one option is added: Burndown (preplant), any crop, Herbicide (Mason, 2026-11-09).
 --   * add_use_timing_option / set_use_timing_option_active: admin RPCs to add a pair or turn one off/on.
---   * sync_product_use_timings re-emitted with two rules: a size may inherit a retired option only during a
---     parent copy when its parent already holds it; one row never holds two options of the same pair.
---   * guard_product_parent_retired_timings: a parent never newly takes a retired option or one pair twice.
+--   * sync_product_use_timings re-emitted: a turned-off option is no longer refused (Mason, 2026-11-09: the
+--     pickers hide it instead; a save racing a turn-off may keep it, and an admin can remove it); one row
+--     never holds two options of the same pair.
+--   * guard_product_parent_timing_pairs: a parent never holds one pair twice.
 -- NON-DESTRUCTIVE: no products or product_parents column, grant or row changes (postflight md5s prove it).
 -- New grants only on the new objects (SELECT on the crop table, EXECUTE on the two RPCs, to authenticated).
 -- ROLLBACK (its own reviewed migration; sheet 4.D): re-emit sync_product_use_timings from 20261103210000;
--- drop trg_guard_product_parent_retired_timings and its function; drop the two RPCs; drop
+-- drop trg_guard_product_parent_timing_pairs and its function; drop the two RPCs; drop
 -- product_use_timing_options_crop_fkey, product_use_timing_options_active_pair_key and
 -- product_use_timing_options_timing_code_check; drop created_by, updated_by, updated_at, option_version;
 -- set volunteer_corn's crop back to 'corn' and range_pasture_turf's back to NULL; delete burndown_preplant
@@ -30,11 +31,11 @@ BEGIN
   IF to_regclass('public.product_crop_options') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
                  AND proname IN ('add_use_timing_option', 'set_use_timing_option_active',
-                                 'guard_product_parent_retired_timings'))
+                                 'guard_product_parent_timing_pairs'))
      OR EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.product_use_timing_options'::regclass
                  AND conname IN ('product_use_timing_options_crop_fkey', 'product_use_timing_options_timing_code_check'))
      OR to_regclass('public.product_use_timing_options_active_pair_key') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_guard_product_parent_retired_timings')
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_guard_product_parent_timing_pairs')
      OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
                  AND table_name = 'product_use_timing_options'
                  AND column_name IN ('created_by', 'updated_by', 'updated_at', 'option_version')) THEN
@@ -309,7 +310,7 @@ REVOKE ALL ON FUNCTION public.set_use_timing_option_active(text, boolean, bigint
 GRANT EXECUTE ON FUNCTION public.set_use_timing_option_active(text, boolean, bigint, text) TO authenticated;
 
 -- ---------------------------------------------------------------------------------------------
--- Size trigger: re-emitted from 20261103210000 with two additions (marked USE-1)
+-- Size trigger: re-emitted from 20261103210000 with two changes (marked USE-1)
 -- ---------------------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.sync_product_use_timings() RETURNS trigger
@@ -324,7 +325,6 @@ DECLARE
   v_legacy boolean := false;
   v_list_changed boolean := false;
   v_codes_changed boolean := true;
-  v_inherits boolean;
   v_twice text[];
 BEGIN
   IF NEW.use_timings IS NULL THEN
@@ -380,13 +380,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- USE-1: wait out an in-flight turn-off or add (they hold this key exclusively) before reading
-  -- is_active, so a choice turned off mid-save is seen as off; each read below is a new snapshot.
-  IF cardinality(v_codes) > 0 AND (TG_OP = 'INSERT' OR v_codes_changed
-                                   OR NEW.category IS DISTINCT FROM OLD.category) THEN
-    PERFORM pg_advisory_xact_lock_shared(hashtext('crx_use_timing_options'));
-  END IF;
-
   FOR v_code IN SELECT DISTINCT x FROM unnest(v_codes) x LOOP
     IF TG_OP = 'UPDATE' AND NOT v_codes_changed AND NEW.category IS NOT DISTINCT FROM OLD.category THEN
       CONTINUE;
@@ -395,23 +388,8 @@ BEGIN
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Unknown use timing "%". Pick from the list.', v_code USING ERRCODE = '22023';
     END IF;
-    -- USE-1: a size may take a retired option it did not hold only from its parent's copy (the parent
-    -- holds it, and a parent copy pass for this size exists in this transaction). Only the parent
-    -- functions (as owner) can read or write the pass; any other caller is refused as before.
-    v_inherits := false;
-    IF NOT v_option.is_active AND NOT (v_code = ANY(v_old_codes)) THEN
-      BEGIN
-        v_inherits := EXISTS (SELECT 1 FROM public.product_parent_copy_passes cp
-                                JOIN public.product_parent_members m ON m.product_id = cp.product_id
-                                JOIN public.product_parents pp ON pp.id = m.parent_id
-                               WHERE cp.txid = txid_current() AND cp.product_id = NEW.id
-                                 AND v_code = ANY(pp.use_timings));
-      EXCEPTION WHEN insufficient_privilege THEN
-        v_inherits := false;
-      END;
-    END IF;
-    IF v_option.category IS DISTINCT FROM NEW.category OR
-       (NOT v_option.is_active AND NOT (v_code = ANY(v_old_codes)) AND NOT v_inherits) THEN
+    -- USE-1 (Mason, 2026-11-09): a turned-off option is no longer refused here; the pickers hide it.
+    IF v_option.category IS DISTINCT FROM NEW.category THEN
       RAISE EXCEPTION 'Use timing "%" is unavailable for category "%".', v_option.label, NEW.category
         USING ERRCODE = '22023';
     END IF;
@@ -448,29 +426,15 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
--- Parent trigger: a parent never newly takes a retired option, nor one pair twice
+-- Parent trigger: a parent never holds one pair twice
 -- ---------------------------------------------------------------------------------------------
 
-CREATE FUNCTION public.guard_product_parent_retired_timings() RETURNS trigger
+CREATE FUNCTION public.guard_product_parent_timing_pairs() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $function$
 DECLARE
-  v_old text[] := '{}';
-  v_label text;
   v_twice text[];
 BEGIN
-  IF TG_OP = 'UPDATE' THEN
-    IF NEW.use_timings IS NOT DISTINCT FROM OLD.use_timings THEN RETURN NEW; END IF;
-    v_old := OLD.use_timings;
-  END IF;
-  -- USE-1: same wait as the size trigger, so a choice turned off mid-save is seen as off.
-  PERFORM pg_advisory_xact_lock_shared(hashtext('crx_use_timing_options'));
-  SELECT o.label INTO v_label FROM public.product_use_timing_options o
-   WHERE o.code = ANY(NEW.use_timings) AND NOT o.is_active AND NOT (o.code = ANY(v_old))
-   ORDER BY o.sort_order, o.code LIMIT 1;
-  IF FOUND THEN
-    RAISE EXCEPTION 'PRODUCT_PARENT_TIMING_RETIRED: "%" is turned off; pick an active crop and timing', v_label
-      USING ERRCODE = '22023';
-  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.use_timings IS NOT DISTINCT FROM OLD.use_timings THEN RETURN NEW; END IF;
   SELECT array_agg(o.label ORDER BY o.sort_order, o.code) INTO v_twice
     FROM public.product_use_timing_options o
    WHERE o.code = ANY(NEW.use_timings)
@@ -483,11 +447,11 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
-ALTER FUNCTION public.guard_product_parent_retired_timings() OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.guard_product_parent_retired_timings() FROM PUBLIC, anon, authenticated, service_role;
-CREATE TRIGGER trg_guard_product_parent_retired_timings
+ALTER FUNCTION public.guard_product_parent_timing_pairs() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_product_parent_timing_pairs() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_guard_product_parent_timing_pairs
   BEFORE INSERT OR UPDATE OF use_timings ON public.product_parents
-  FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_retired_timings();
+  FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_timing_pairs();
 
 -- ---------------------------------------------------------------------------------------------
 -- Postflight
@@ -602,7 +566,7 @@ BEGIN
   -- The size trigger: changed only by the re-emit, same owner, search_path and trigger.
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public.sync_product_use_timings()'::regprocedure) = (SELECT sync_fp FROM pg_temp.use1_before_misc)
      OR NOT (SELECT NOT prosecdef AND proowner = 'postgres'::regrole AND proconfig = ARRAY['search_path=public, pg_temp']
-                    AND position('product_parent_copy_passes' IN prosrc) > 0 AND position('USE_TIMING_PAIR_TWICE' IN prosrc) > 0
+                    AND position('USE_TIMING_PAIR_TWICE' IN prosrc) > 0
                FROM pg_proc WHERE oid = 'public.sync_product_use_timings()'::regprocedure)
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
                      AND tgname = 'trg_sync_product_use_timings' AND tgenabled = 'O' AND tgtype = 23
@@ -612,20 +576,20 @@ BEGIN
 
   -- The parent trigger: BEFORE INSERT OR UPDATE OF use_timings, row level; its function has no EXECUTE.
   IF NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.product_parents'::regclass
-                  AND t.tgname = 'trg_guard_product_parent_retired_timings' AND t.tgenabled = 'O' AND t.tgtype = 23
-                  AND t.tgfoid = 'public.guard_product_parent_retired_timings()'::regprocedure
+                  AND t.tgname = 'trg_guard_product_parent_timing_pairs' AND t.tgenabled = 'O' AND t.tgtype = 23
+                  AND t.tgfoid = 'public.guard_product_parent_timing_pairs()'::regprocedure
                   AND t.tgattr::text = (SELECT attnum::text FROM pg_attribute
                                          WHERE attrelid = 'public.product_parents'::regclass AND attname = 'use_timings')) THEN
     RAISE EXCEPTION 'USE1_POSTFLIGHT_PARENT_TRIGGER';
   END IF;
   IF NOT (SELECT NOT prosecdef AND proowner = 'postgres'::regrole AND proconfig = ARRAY['search_path=public, pg_temp']
-            FROM pg_proc WHERE oid = 'public.guard_product_parent_retired_timings()'::regprocedure)
+            FROM pg_proc WHERE oid = 'public.guard_product_parent_timing_pairs()'::regprocedure)
      OR EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
-                 WHERE p.oid = 'public.guard_product_parent_retired_timings()'::regprocedure AND a.grantee = 0) THEN
+                 WHERE p.oid = 'public.guard_product_parent_timing_pairs()'::regprocedure AND a.grantee = 0) THEN
     RAISE EXCEPTION 'USE1_POSTFLIGHT_PARENT_TRIGGER_FUNCTION';
   END IF;
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
-    IF has_function_privilege(v_role, 'public.guard_product_parent_retired_timings()', 'EXECUTE') THEN
+    IF has_function_privilege(v_role, 'public.guard_product_parent_timing_pairs()', 'EXECUTE') THEN
       RAISE EXCEPTION 'USE1_POSTFLIGHT_PARENT_TRIGGER_GRANT: %', v_role;
     END IF;
   END LOOP;

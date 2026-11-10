@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
+
+**Decision:** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.
+**Why:** Sol's third round on #1710 found the same "save races a turn-off" gap again, plus grouping sizes that hold a turned-off option failing. Mason chose the business trade-off that removes the mechanism: a rare product may keep a just-turned-off timing; it stays visible and an admin can remove it.
+**What this forbids/implies:** do not re-add a database lock or refusal for turned-off timings without a new decision; the screens (USE-1 screens PR) must not offer a turned-off option. One pair twice on one row is still refused.
+
 ## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
 
 **Decision (Mason, in chat, 2026-11-09: "yes do it").** Sol round 5 on PR #1705 found that a label maximum written in a counted unit (`each`, `ea`, `unit`, for example "1 each/acre") was reported "not comparable", so a house rate above it needed no reason. The build sheet (section 3.5 step 4) had listed only ounce, pint, quart, gallon, pound, gram and milligram as comparable. Counted units now compare too, with an each-kind row only, and the suggested-rate reader also reads `each`. Sol round 6 may run on the fixed head.

@@ -2096,7 +2096,7 @@
     },
     "sales_reports_per_payer": {
       "chain": "smoke-sales-reports-per-payer.sql",
-      "description": "Migration 20261228100000: reads Sales Detail, every Sales Summary grouping and the dashboard as an admin; a rep sells a Bill Split 60/40, delivered and billed per payer; Sales Detail shows one row per payer (payer 2 exactly 40% rounded down, the main customer the rest), each with that payer's own invoice, and every other row unchanged; detail, every summary grouping and the dashboard headline grew by exactly the line; the customer filter and \"by customer\" credit payer 2; a rep gets the payer rows with cost, profit and margin empty; no API role may call _sales_line_payers. Terminal rollback.",
+      "description": "Migration 20261229150000: reads Sales Detail, every Sales Summary grouping and the dashboard as an admin; a rep sells a Bill Split 60/40, delivered and billed per payer; Sales Detail shows one row per payer (payer 2 exactly 40% rounded down, the main customer the rest), each with that payer's own invoice, and every other row unchanged; detail, every summary grouping and the dashboard headline grew by exactly the line; the customer filter and \"by customer\" credit payer 2; a rep gets the payer rows with cost, profit and margin empty; no API role may call _sales_line_payers. Terminal rollback.",
       "covers": ["get_sales_detail_report", "get_sales_summary_report", "financial_dashboard_summary", "_sales_line_payers"],
       "area": ["billing", "regression"]
     }

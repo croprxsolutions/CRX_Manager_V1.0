@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: sales reports show each payer's share of a Bill Split sale
 -- ----------------------------------------------------------------------------
--- Migration 20261228100000_sales_reports_per_payer.
+-- Migration 20261229150000_sales_reports_per_payer.
 --   A  Read every report as an admin (the live totals and every existing row, fingerprinted)
 --   B  A rep sells a Bill Split, main customer 60 / payer 2 40, delivered and billed per payer
 --   C  Sales Detail: one row per payer, payer 2 has exactly 40% of the line (rounded down), the main
@@ -52,7 +52,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: needs an active admin, a sales rep, two customers and a product with a cost';
   END IF;
   IF to_regprocedure('public._sales_line_payers(uuid)') IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: 20261228100000 is not applied';
+    RAISE EXCEPTION 'SMOKE_SETUP: 20261229150000 is not applied';
   END IF;
 
   -- A: the reports as they stand.

@@ -45,7 +45,7 @@ change totals.
 
 ## Files
 
-- `supabase/migrations/20261228100000_sales_reports_per_payer.sql`: new read-only helper
+- `supabase/migrations/20261229150000_sales_reports_per_payer.sql`: new read-only helper
   `_sales_line_payers`, and the two report bodies and `financial_dashboard_summary` re-written to use it.
 - Its record, a changelog entry, a smoke chain and a real-schema proof with split fixtures.
 - No screen change: the reports return the same columns.

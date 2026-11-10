@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261228100000 (sales reports show each payer's share of a Bill Split sale).
+ * Real-schema proof for 20261229150000 (sales reports show each payer's share of a Bill Split sale).
  * Builds the checked-in schema baseline in a network-disabled PostgreSQL container, replays migrations up to
  * the candidate, reads Sales Detail, Sales Summary and the dashboard as an admin and a rep on invented sales,
  * applies the candidate (a second apply refuses), reads them again and checks:
@@ -34,7 +34,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261228100000_sales_reports_per_payer.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20261229150000_sales_reports_per_payer.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

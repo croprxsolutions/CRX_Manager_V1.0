@@ -436,6 +436,7 @@ export default function Quotes() {
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
       data: visible,
+      pruneTo: visible,
       getId: (q) => q.id,
       isSelectable: (q) => DELETABLE.includes(q.status),
     });

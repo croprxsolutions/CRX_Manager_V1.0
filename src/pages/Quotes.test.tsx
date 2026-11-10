@@ -163,6 +163,17 @@ describe('Quotes list', () => {
       expect(screen.queryByRole('region', { name: 'Bulk actions' })).not.toBeInTheDocument();
     });
 
+    it('a row hidden by search is not selected again when the search is cleared', async () => {
+      seed();
+      at('/quotes');
+      await screen.findByText('Q-TEST-1');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' }));
+      search('Test Farm');
+      search('');
+      expect(screen.getByRole('checkbox', { name: 'Select Q-TEST-1' })).not.toBeChecked();
+      expect(screen.queryByRole('region', { name: 'Bulk actions' })).not.toBeInTheDocument();
+    });
+
     it('the delete confirm counts only visible selected quotes', async () => {
       seed();
       at('/quotes');

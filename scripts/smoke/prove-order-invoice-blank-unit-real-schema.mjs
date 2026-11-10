@@ -39,6 +39,10 @@ if (REUSE && !/^crx-order-unit-\d+-[0-9a-z]+$/.test(NAME)) {
   console.error(`CRX_PROVER_REUSE_CONTAINER must name a container this prover created (crx-order-unit-<pid>-<id>), not "${NAME}"`);
   process.exit(1);
 }
+if (REUSE && spawnSync('docker', ['inspect', '-f', '{{index .Config.Labels "crx-prover"}}', NAME], { encoding: 'utf8' }).stdout.trim() !== 'order-unit') {
+  console.error(`CRX_PROVER_REUSE_CONTAINER "${NAME}" is not labelled crx-prover=order-unit; refusing to touch it`);
+  process.exit(1);
+}
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -245,7 +249,7 @@ const CUST = id('c1');
 const PROD = id('f1');
 const PROD_NO = id('f2');
 // Order side: one delivered order per order-line unit: NULL (the KI-76 case), '' and 'gal' (billed as before).
-const CASES = { null: [id('e1'), id('e11'), 'NULL'], empty: [id('e3'), id('e31'), "'  '"], gal: [id('e2'), id('e21'), "'gal'"] };
+const CASES = { null: [id('e1'), id('e11'), 'NULL'], empty: [id('e3'), id('e31'), "E' \t'"], gal: [id('e2'), id('e21'), "'gal'"] };
 // A two-line order: one 'gal' line and one line with no unit (named "[PROVER] No Unit").
 const MIXED = id('e4'); const MIXED_GAL = id('e41'); const MIXED_BLANK = id('e42');
 // Delivery side: order line written before the candidate with no unit (an existing legacy line).
@@ -301,7 +305,7 @@ function seed() {
       ('${LEGACY_LINE}', '${LEGACY}', '${PROD}', '[PROVER] Herbicide', NULL, 10, 6, 2, 20, 0, 2, 0)
       ON CONFLICT (id) DO UPDATE SET unit_size = EXCLUDED.unit_size;`);
   assert.equal(scalar(`SELECT string_agg(coalesce('[' || unit_size || ']', '<null>'), ',' ORDER BY id) FROM public.order_items
-    WHERE order_id IN (${Object.values(CASES).map(([o]) => `'${o}'`).join(',')});`), '<null>,[gal],[  ]');
+    WHERE order_id IN (${Object.values(CASES).map(([o]) => `'${o}'`).join(',')});`), '<null>,[gal],[ \t]');
 }
 // Order side, as the signed-in user (the API role), rolled back: invoice the order. Returns { unit } (the
 // invoice line's unit) or { error } (the first error token). A return needs a completed delivery, which an
@@ -475,7 +479,7 @@ function main() {
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
-  assert.deepEqual(before, { null: { unit: '<null>' }, empty: { unit: '  ' }, gal: { unit: 'gal' } }, 'BEFORE: each line is billed with its unit as is, blank included');
+  assert.deepEqual(before, { null: { unit: '<null>' }, empty: { unit: ' \t' }, gal: { unit: 'gal' } }, 'BEFORE: each line is billed with its unit as is, blank included');
   const mixedBefore = mixed();
   assert.equal(mixedBefore.raw, 'MIXED_NOT_REFUSED', `BEFORE: the two-line order is billed: ${JSON.stringify(mixedBefore)}`);
 
@@ -509,7 +513,7 @@ function main() {
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);
   assert.deepEqual(after.null, { error: 'ORDER_LINE_UNIT_MISSING' }, 'AFTER: a line with no unit is refused');
-  assert.deepEqual(after.empty, { error: 'ORDER_LINE_UNIT_MISSING' }, 'AFTER: a blank-text unit is refused');
+  assert.deepEqual(after.empty, { error: 'ORDER_LINE_UNIT_MISSING' }, 'AFTER: a space-and-tab unit is refused');
   assert.deepEqual(after.gal, before.gal, "AFTER: a 'gal' line is billed exactly as before");
   assert.deepEqual(flow('gal', ADMIN), before.gal, 'AFTER: the same for an admin');
   const m = mixed();

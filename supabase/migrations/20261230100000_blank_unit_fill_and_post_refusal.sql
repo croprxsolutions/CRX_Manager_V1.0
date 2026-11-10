@@ -101,11 +101,11 @@ BEGIN
 
   -- KI-76: every line needs a unit before it is billed. A return is matched to its invoice line by the
   -- order line's unit, so a line billed with no unit could never be credited. Refuse rather than guess.
-  IF EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = p_order_id AND NULLIF(btrim(oi.unit_size), '') IS NULL) THEN
+  IF EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = p_order_id AND COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') = '') THEN
     RAISE EXCEPTION 'ORDER_LINE_UNIT_MISSING: order % has a line with no unit (%). Set each line''s unit on the order, then create the invoice again',
       v_order.order_number,
       (SELECT string_agg(COALESCE(NULLIF(btrim(oi.product_name), ''), 'unnamed product'), ', ' ORDER BY oi.sort_order NULLS LAST, oi.id)
-         FROM order_items oi WHERE oi.order_id = p_order_id AND NULLIF(btrim(oi.unit_size), '') IS NULL)
+         FROM order_items oi WHERE oi.order_id = p_order_id AND COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') = '')
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -282,11 +282,11 @@ BEGIN
   -- The new body is live's with only the KI-76 refusal added before the invoice is written.
   IF md5(replace(v_src, $ki76_block$  -- KI-76: every line needs a unit before it is billed. A return is matched to its invoice line by the
   -- order line's unit, so a line billed with no unit could never be credited. Refuse rather than guess.
-  IF EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = p_order_id AND NULLIF(btrim(oi.unit_size), '') IS NULL) THEN
+  IF EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = p_order_id AND COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') = '') THEN
     RAISE EXCEPTION 'ORDER_LINE_UNIT_MISSING: order % has a line with no unit (%). Set each line''s unit on the order, then create the invoice again',
       v_order.order_number,
       (SELECT string_agg(COALESCE(NULLIF(btrim(oi.product_name), ''), 'unnamed product'), ', ' ORDER BY oi.sort_order NULLS LAST, oi.id)
-         FROM order_items oi WHERE oi.order_id = p_order_id AND NULLIF(btrim(oi.unit_size), '') IS NULL)
+         FROM order_items oi WHERE oi.order_id = p_order_id AND COALESCE(btrim(oi.unit_size, E' \t\r\n' || chr(160)), '') = '')
       USING ERRCODE = 'check_violation';
   END IF;
 

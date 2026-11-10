@@ -197,10 +197,13 @@ Start Right 2.0 (2 rows), BoostMax-D (2), BoostMax-M (2), Residue RX (2), Bio-Re
 |---|---|
 | Recount (2026-11-09) | done: 137 rows (104 generic-type, 31 not registered, 2 test) |
 | Draft A / B / C / D | done (this doc) |
-| Mason's review | waiting |
-| Restricted-use flags on 15 generic rows | waiting on Mason |
+| Mason's review | list A plus restricted-use fix approved in principle 2026-11-09; brand batch still needs its own `approve <code>` |
+| Restricted-use flags | **done 2026-11-09 ~9:55 PM Central** (Mason `approve 947437`): 15 products ticked on the product page as Mason (13 generic rows outside PAR-2 batch 1, plus Leverage 360 - 1 Gal and Mustang Maxx - 1 Gal). Verified live: `is_rup` true on all 15, and `product_change_history` shows only `is_rup false->true` by Mason Wells on each. |
+| Restricted-use, Gen Capture LFR 2.5 Gal + Bulk | held: in PAR-2 batch 1 (group 17); do after batch 1 is approved |
+| Order with PAR-2 grouping | agreed: brand rows go on every size of a product IDENTICALLY (grouping then merges them to the parent with no picks); nothing written to a batch 1 size until PAR-2 says batch 1 is approved; batch 1 sizes then get brands on the parent |
+| Order with REG-1 seed | asked REG-1 session; no brand write until it answers |
 | Approved brand rows written to live | not started |
-| Read-only verification on live | not started |
+| Read-only verification of brand rows | not started |
 | C items answered by Mason | not started |
 
 Also noticed, not DATA-2: some numbers already on products may have moved at EPA (for example 524-475 Roundup Ultra now points to 105211-77). A re-check of existing numbers is a separate task.

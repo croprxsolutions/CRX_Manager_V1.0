@@ -429,7 +429,8 @@ export function toGallonOrLbEquivalent(
   productForm?: ProductForm | null,
 ): AppliedConversion | null {
   if (!Number.isFinite(quantity) || quantity === 0) return null;
-  const key = (unit || '').trim().toLowerCase();
+  // Strip ordinary spaces only, like the server's btrim in convert_to_gl_lb (a tab or line break is not trimmed there).
+  const key = (unit || '').replace(/^ +| +$/g, '').toLowerCase();
   if (key === '') return null;
   if (productForm === 'seed' || productForm === 'each') return null;
 
@@ -490,8 +491,9 @@ export function fieldAppPricedQuantity(
   productForm?: ProductForm | null,
 ): number | null {
   if (!Number.isFinite(appliedQty)) return null;
-  const r = (rateUnit || '').trim().toLowerCase();
-  const i = (inventoryUnit || '').trim().toLowerCase();
+  // Spaces only, like the server's btrim in field_app_priced_quantity.
+  const r = (rateUnit || '').replace(/^ +| +$/g, '').toLowerCase();
+  const i = (inventoryUnit || '').replace(/^ +| +$/g, '').toLowerCase();
   if (r === i) return appliedQty;            // same unit: no conversion needed
   if (r === '' || i === '') return null;
   if (productForm === 'seed' || productForm === 'each') return null;

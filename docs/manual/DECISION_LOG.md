@@ -10,6 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.
+**What this forbids/implies:** do not extend the product guard to billed tickets, or re-check units on invoice void, without a new decision. If round 6 finds anything new, stop and bring it to Mason.
+
+## 2026-11-10 — #1733 (KI-16 rate units) gets one more Sol round (round 5) after a merge of main
+
+**Decision (Mason, in chat, 2026-11-10: "Yes, run round 5").** PR #1733 may run Sol round 5. Sol round 4 was clean at `1334014e7`; the only later change is a merge of `main` whose one conflict was the "Last verified" stamp line in `docs/manual/KNOWN_ISSUES.md`, and carry-forward refuses a merge that conflicted. No finding keeps returning: each Sol round found a different issue, all fixed or recorded as follow-ups.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
 
 **Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.

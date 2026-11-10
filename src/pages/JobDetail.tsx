@@ -49,7 +49,7 @@ import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
-import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
+import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, unitHasCharacterSaveJobRefuses, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
 import { rateUnitOptionsForProduct, asProductForm } from '../lib/units';
 import type { ProductForm } from '../types';
@@ -1574,6 +1574,12 @@ export default function JobDetail() {
       if (!c.product_id) return;
       if (rateDenominatorIsUnrecognized(c.rate_unit)) {
         byIndex.set(i, `the rate unit "${c.rate_unit}" is measured per something other than acres, so a per-acre quantity cannot be derived from it`);
+        return;
+      }
+      // save_job refuses a priced line whose units carry a character it cannot read; say so before Save.
+      if ((parseInt(c.price_per_unit_cents) || 0) !== 0
+          && (unitHasCharacterSaveJobRefuses(c.rate_unit) || unitHasCharacterSaveJobRefuses(c.unit))) {
+        byIndex.set(i, 'its Unit or rate unit contains a character this system cannot read, usually from a copy-and-paste; re-type both using plain letters');
         return;
       }
       // BLANK UNIT on a line that BILLS. chemLineBillingHazard can only flag a PROVEN

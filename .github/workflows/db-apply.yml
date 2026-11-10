@@ -13,7 +13,7 @@ on:
     paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/workflows/db-apply.yml']
   push:
     branches: [staging]
-    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', '.github/scripts/db-apply.mjs', '.github/workflows/db-apply.yml']
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/workflows/db-apply.yml']
   workflow_dispatch:
 
 permissions: {}

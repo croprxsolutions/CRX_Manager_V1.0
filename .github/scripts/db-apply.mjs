@@ -189,6 +189,7 @@ function pgEnv(dbUrl) {
     PGPASSWORD: decodeURIComponent(u.password),
     PGDATABASE: decodeURIComponent(u.pathname.slice(1)) || 'postgres',
     PGSSLMODE: u.searchParams.get('sslmode') ?? (['127.0.0.1', 'localhost'].includes(u.hostname) ? 'disable' : 'require'),
+    PGCLIENTENCODING: 'UTF8', // the files are UTF-8; never let an inherited setting re-encode them
   };
 }
 function psql(dbUrl, args, input) {
@@ -261,8 +262,10 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     const f = path.join(work, `backfill-${stem}.sql`);
     writeFileSync(f, `UPDATE supabase_migrations.schema_migrations SET statements = ARRAY[${tag}${text}${tag}] WHERE name = '${stem}' AND statements[1] IS NULL;\n`);
     runFile(dbUrl, f);
+    const back = query(dbUrl, `SELECT encode(sha256(convert_to(statements[1], 'UTF8')), 'hex') FROM supabase_migrations.schema_migrations WHERE name = '${stem}'`);
+    if (back[0] !== sha256(fileBytes(stem))) throw new Error(`HASH MISMATCH after backfilling ${stem}`);
   }
-  if (bare.length) console.log(`backfilled statements on ${bare.length} older ledger rows`);
+  if (bare.length) console.log(`backfilled statements on ${bare.length} older ledger rows (hash-checked)`);
 
   for (const { stem, run } of steps) {
     const buf = fileBytes(stem);
@@ -309,7 +312,7 @@ const commands = {
     const added = diff('A');
     const problems = stampProblems({
       added,
-      changed: diff('MD'),
+      changed: diff('MDT'),
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),
     });

@@ -1,11 +1,21 @@
 // A Supabase error is a plain object, so `new Error(String(err))` sent Sentry "[object Object]" (KI-115).
-// Give it its own message instead. Messages can quote amounts and invoice numbers (e.g. an allocation
-// above a balance): Sentry needs the reason, not the figures, so every run of digits becomes "#".
-const blankFigures = (text: string) => text.replace(/\d+(?:[.,]\d+)*/g, '#');
+// Give it its own message instead (Mason, 2026-11-10: send the wording, figures blanked).
+// Login tokens go first, whole, so blanking figures can never leave a token behind in pieces.
+const TOKENS = [
+  /eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*/g, // a whole JWT: header, payload and signature
+  /\bBearer\s+[^\s"',;]+/gi,
+  /\b\w*(?:token|code)(?:_hash)?=[^&#\s"',;]+/gi, // access_token=, refresh_token=, token_hash=, code=
+];
+// Amounts and invoice numbers: Sentry needs the reason, not the figures.
+const FIGURES = /\p{Nd}+(?:[.,]\p{Nd}+)*/gu;
+
+export function scrubMessage(text: string): string {
+  return TOKENS.reduce((out, token) => out.replace(token, '[REDACTED]'), text).replace(FIGURES, '#');
+}
 
 export function toSentryError(err: unknown): Error {
   if (err instanceof Error) {
-    const message = blankFigures(err.message);
+    const message = scrubMessage(err.message);
     if (message === err.message) return err;
     const blanked = new Error(message);
     blanked.name = err.name;
@@ -16,5 +26,5 @@ export function toSentryError(err: unknown): Error {
     return blanked;
   }
   const message = typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err);
-  return new Error(blankFigures(message));
+  return new Error(scrubMessage(message));
 }

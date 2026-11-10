@@ -36,6 +36,16 @@ describe('toSentryError', () => {
   });
 
   it.each([
+    ['a whole JWT', 'expired eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2ln42 at 10', 'expired [REDACTED] at #'],
+    ['a Bearer header', 'sent Bearer abc123def456 twice', 'sent [REDACTED] twice'],
+    ['link tokens', '/reset#access_token=ab12&refresh_token=r3fr35h&type=recovery ?token_hash=pk9&code=x1', '/reset#[REDACTED]&[REDACTED]&type=recovery ?[REDACTED]&[REDACTED]'],
+    ['fullwidth digits', 'Invoice ２０２６-００４２', 'Invoice #-#'],
+  ])('removes %s before blanking figures, leaving no piece of it', (_label, message, expected) => {
+    expect(toSentryError({ message }).message).toBe(expected);
+    expect(toSentryError(new Error(message)).message).toBe(expected);
+  });
+
+  it.each([
     ['a string', 'plain text', 'plain text'],
     ['an object without a message', { code: 'X' }, '[object Object]'],
     ['null', null, 'null'],

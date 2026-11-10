@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — Sentry gets a database error's wording, figures blanked (KI-115)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.
+**What this forbids/implies:** do not send free text other than this scrubbed message, for example `details` or `hint`. Do not blank figures before tokens are removed. A new database message that would quote a customer's name or contact details must not be raised.
+
 ## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
 
 **Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.

@@ -1,7 +1,7 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Billing plan M4b: `20261231110000_standing_grower_discount.sql` (SQL sha256: `cd0a0e291fa4b01f358355c27eba204e7309cb58612ecd5e9dd7b647d6dae19b`). A standing grower discount on chemical-sale invoices: a customer's rate, taken off product lines as one computed "Standing discount" line, per payer, to the cent.
+**LOCAL CANDIDATE — NOT APPLIED.** Billing plan M4b: `20261231110000_standing_grower_discount.sql` (SQL sha256: `0197a5727b50976c63937c4b04da003abc5ab72d41d036cdf9c6ad6e833655ba`). A standing grower discount on chemical-sale invoices: a customer's rate, taken off product lines as one computed "Standing discount" line, per payer, to the cent.
 
 **What it does.**
-- `customers.standing_discount_pct` (0 to 100, default 0) holds the customer's rate. Only an admin sets it (`STANDING_DISCOUNT_ADMIN_ONLY`, on every signed-in path), as with price tiers and credit limits.
+- `customers.standing_discount_pct` (0 to 100, default 0) holds the customer's rate. Only an admin sets it (`STANDING_DISCOUNT_ADMIN_ONLY`, on every signed-in path; an anonymous request is refused even through an owner-run function; no user id passes only for a migration, the SQL editor or the service role), as with price tiers and credit limits.
 - A chemical-sale draft gets one line, `charge_type = 'standing_discount'`: minus round(product lines x rate / 100) to the cent, half up. Charge lines such as freight are not discounted. The invoice total is the sum of its lines, as every chemical-sale writer already sets it.
 - The line is recomputed when the transaction commits (a deferred constraint trigger on `invoice_items`), whichever writer touched the draft. A line sent back by the screen, or edited or deleted by hand, is put right; a plain re-save changes nothing.
 - At apply, every existing chemical-sale invoice gets its rate recorded (0%, the new column's default), so no older draft or unposted invoice takes a later customer rate.

@@ -26,7 +26,7 @@
 --   T  The office's rate can't change on an unposted invoice (draft only), so posted amounts never move
 --   U  A discounted draft switched to misc charge and posted before any commit point is refused
 --   V  A chemical sale written already posted, with its lines, in one transaction for a 3% customer: refused at commit
---   W  The anonymous role can't set a customer's standing discount
+--   W  The anonymous role can't set a customer's standing discount, by grant or (through an owner-run path) by the guard
 --   X  The office's rate change has its own audit entry, even when the cents don't move
 --   Y  Returns of a 3% customer's posted sale (two lines, one in two parts) credit its posted total, to the cent
 --   Z  A Bill Split payer at 3% returns its whole share: its credit is its own posted total
@@ -695,6 +695,20 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     RESET ROLE;   -- refused: right
   END;
+  -- W2: an anonymous request that reaches the table through an owner-run function (no grant in the way): the guard
+  -- itself refuses it, since it has no user id but is not a migration or the service role.
+  BEGIN
+    PERFORM set_config('request.jwt.claims', '{"role":"anon"}', true);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    PERFORM set_config('request.jwt.claim.role', 'anon', true);
+    UPDATE customers SET standing_discount_pct = 100 WHERE id = v_customer;
+    v_fails := v_fails || ' (W) an anonymous request set a standing discount through an owner-run path;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'STANDING_DISCOUNT_ADMIN_ONLY:%' THEN
+      v_fails := v_fails || ' (W) wrong refusal for the anonymous request: ' || SQLERRM || ';';
+    END IF;
+  END;
+  PERFORM set_config('request.jwt.claim.role', '', true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 

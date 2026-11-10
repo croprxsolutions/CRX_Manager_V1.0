@@ -1186,7 +1186,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           footer_notes: invoice.footer_notes || null,
         };
 
-        const itemsPayload = items.map((it, idx) => ({
+        // The standing discount line is the database's (rebuilt at commit, dropped if the type changes): never sent back.
+        const itemsPayload = items.filter((it) => it.charge_type !== 'standing_discount').map((it, idx) => ({
           // Existing generated lines carry their server identity back to the
           // writer so it can preserve immutable order-line and historical-cost
           // lineage while rebuilding a draft invoice. New manual lines omit id.

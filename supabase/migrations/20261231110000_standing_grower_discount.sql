@@ -89,8 +89,10 @@ CREATE FUNCTION public.guard_customer_standing_discount_20261231()
 AS $function$
 BEGIN
   -- Any signed-in non-admin is refused, on every path (the API, save_customer, Bulk Customer Import).
-  -- No signed-in user is a migration or the service role.
-  IF auth.uid() IS NULL OR public.is_admin() THEN
+  -- No user id passes only outside an API client request (a migration, the SQL editor, the service role): an
+  -- anonymous or signed-in request without one is refused, even through an owner-run function.
+  IF public.is_admin()
+     OR (auth.uid() IS NULL AND COALESCE(auth.role(), '') NOT IN ('anon', 'authenticated')) THEN
     RETURN NEW;
   END IF;
   IF (TG_OP = 'INSERT' AND NEW.standing_discount_pct <> 0)

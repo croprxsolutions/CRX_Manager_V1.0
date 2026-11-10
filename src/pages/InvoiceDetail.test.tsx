@@ -2237,5 +2237,9 @@ describe('InvoiceDetail — standing discount line (billing plan M4b)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('amount above $0.00'));
+    // The database owns that line (and drops it when the type changes): the editor never sends it back.
+    const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
+    const sent = (saveCall?.[1].p_items as Array<{ charge_type: string | null }>).map((it) => it.charge_type);
+    expect(sent).toEqual([null, 'freight']);
   });
 });

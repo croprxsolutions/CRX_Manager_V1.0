@@ -225,7 +225,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^RETURN_QUANTITY_EXCEEDS_BILLED_SHARE\b/i,
    'This customer can return only the quantity billed to them on posted invoices (a split share or a discounted sale), less their other open returns. No changes were saved'],
   [/^RETURN_SPLIT_SHARE_NOT_BILLED\b/i,
-   'This customer has no posted invoice for this product on the order yet (a split share or a discounted sale), so it cannot be returned until that invoice is posted. No changes were saved'],
+   'This customer has no posted invoice for this product on the order (a split share or a discounted sale), so it cannot be returned. If their invoice for it is still a draft, post it first. No changes were saved'],
   [/^RETURN_CREDIT_EXCEEDS_BILLED_SHARE\b/i,
    "This return would credit more than this customer was billed for the product. Check the customer's invoice and earlier returns. No changes were saved"],
   [/^RETURN_SPLIT_INVOICE_NOT_VISIBLE\b/i,

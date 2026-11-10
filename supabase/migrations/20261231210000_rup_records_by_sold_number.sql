@@ -166,6 +166,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
              FROM public.invoice_line_rup_captures c
              JOIN public.rup_sales_records s
                ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+              -- the record is this invoice's customer's and order's (Sol r12)
+              AND EXISTS (SELECT 1 FROM public.invoices iv WHERE iv.id = p_line.invoice_id
+                    AND iv.customer_id IS NOT DISTINCT FROM s.customer_id AND iv.order_id IS NOT DISTINCT FROM s.order_id)
               AND s.epa_registration IS NOT DISTINCT FROM c.epa_registration
               AND s.signal_word IS NOT DISTINCT FROM c.signal_word
               -- a line with no unit records as 'Unit not set' (the record's unit is required)
@@ -201,6 +204,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                    FROM public.invoice_line_rup_captures c
                    JOIN public.rup_sales_records s
                      ON s.invoice_id = p_line.invoice_id AND s.product_id = p_line.product_id AND s.voided_at IS NULL
+                    AND EXISTS (SELECT 1 FROM public.invoices iv WHERE iv.id = p_line.invoice_id
+                          AND iv.customer_id IS NOT DISTINCT FROM s.customer_id AND iv.order_id IS NOT DISTINCT FROM s.order_id)
                     AND s.epa_registration IS NOT DISTINCT FROM c.epa_registration
                     AND s.signal_word IS NOT DISTINCT FROM c.signal_word  -- Luna 2026-11-10: the full key
                     AND s.unit = COALESCE(p_line.unit_size, 'Unit not set')
@@ -233,7 +238,10 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
     LEFT JOIN public.invoice_line_rup_captures c ON c.invoice_item_id = ii.id
    WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL AND ii.product_id IS NOT NULL
      AND (c.epa_registration = p_number OR public._normalize_epa_registration(ii.epa_registration) = p_number)
-     AND NOT public._rup_record_covers_line(ii);  -- a record that does not cover the line hides nothing (Sol r11)
+     -- the Sales to check rule: a Yes line needs a record that covers it (Sol r11); any other captured line is
+     -- recorded by a record for its whole key (Sol r12)
+     AND NOT public._rup_record_covers_line(ii)
+     AND NOT (c.rup_status IS NOT NULL AND c.rup_status <> 'yes' AND public._rup_record_for_line_key(ii));
 $function$;
 
 DO $owners$
@@ -274,6 +282,7 @@ DECLARE
   v_seeded boolean;
   v_items refcursor;
   v_rec_qty numeric;
+  v_rec_other_party boolean;
   v_rec_total bigint;
 BEGIN
   -- N2-4 role gate (matches the sole caller post_invoice): block applicators/drivers.
@@ -403,7 +412,8 @@ BEGIN
       END IF;
       -- REG-1: one active record per invoice, product, number, signal word, unit and unit price (the coverage rule);
       -- one that disagrees with what this posting would write is an error, never skipped.
-      SELECT r.quantity, r.total_cents INTO v_rec_qty, v_rec_total FROM rup_sales_records r
+      SELECT r.quantity, r.total_cents, (r.customer_id, r.order_id) IS DISTINCT FROM (v_invoice.customer_id, v_invoice.order_id)
+        INTO v_rec_qty, v_rec_total, v_rec_other_party FROM rup_sales_records r
        WHERE r.invoice_id = p_invoice_id AND r.product_id = v_item.product_id
          AND r.epa_registration IS NOT DISTINCT FROM v_item.epa_registration
          AND r.signal_word IS NOT DISTINCT FROM v_item.signal_word
@@ -411,9 +421,14 @@ BEGIN
          AND r.unit_price_cents IS NOT DISTINCT FROM v_item.unit_price_cents
          AND r.voided_at IS NULL
        -- a disagreeing record sorts first, so any one of several active records that disagrees is refused
-       ORDER BY (r.quantity IS DISTINCT FROM v_item.quantity OR r.total_cents IS DISTINCT FROM v_item.extended_cents) DESC,
+       ORDER BY (r.quantity IS DISTINCT FROM v_item.quantity OR r.total_cents IS DISTINCT FROM v_item.extended_cents
+                 OR (r.customer_id, r.order_id) IS DISTINCT FROM (v_invoice.customer_id, v_invoice.order_id)) DESC,
                 r.id LIMIT 1;
       IF FOUND THEN
+        IF v_rec_other_party THEN
+          RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % has a restricted-use record for % under another customer or order; void it',
+            v_invoice.invoice_number, v_item.product_name;
+        END IF;
         IF v_rec_qty IS DISTINCT FROM v_item.quantity OR v_rec_total IS DISTINCT FROM v_item.extended_cents THEN
           RAISE EXCEPTION 'RUP_RECORD_CONFLICT: invoice % already has a restricted-use record for % at this number, unit and price with a different quantity or amount',
             v_invoice.invoice_number, v_item.product_name;
@@ -496,9 +511,9 @@ BEGIN
            CASE WHEN rup_status IS NULL THEN 'not_captured'
                 WHEN epa_registration IS NULL AND (rup_status = 'yes' OR has_record) THEN 'no_epa_number'
                 WHEN rup_status = 'yes' AND NOT covered THEN 'restricted_use_to_record'
-                -- a line already posted at the seed, on a product with a number, was captured from the facts on the
-                -- seed day, which may not be the ones it sold under: a person looks at it (Mason, 2026-11-10; Sol r9)
-                WHEN capture_source = 'seed_posted' AND epa_registration IS NOT NULL THEN 'posted_before_seed'
+                -- a line already posted at the seed was captured from the facts on the seed day, which may not be the
+                -- ones it sold under: a person looks at it, number or not (Mason, 2026-11-10; Sol r9, r12)
+                WHEN capture_source = 'seed_posted' THEN 'posted_before_seed'
                 WHEN rup_status = 'yes' THEN NULL
                 WHEN has_record THEN NULL
                 -- any Yes now, the product's own tick included (Mason, 2026-11-10, Sol r10)

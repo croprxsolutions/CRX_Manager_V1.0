@@ -148,6 +148,14 @@ BEGIN
   IF p ? 'rup_status' AND COALESCE(p->>'rup_status', '') NOT IN ('yes', 'no', 'unknown') THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_FACTS_INVALID: rup_status is yes, no or unknown';
   END IF;
+  -- Sol r12 LOW: PostgreSQL takes 'infinity' as a date; a regulatory date must be a real day.
+  SELECT e.key INTO v_bad FROM jsonb_each_text(p) e
+   WHERE e.key IN ('cancelled_on', 'label_accepted_on', 'checked_at')
+     AND lower(btrim(e.value)) IN ('infinity', '+infinity', '-infinity')
+   ORDER BY e.key LIMIT 1;
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'EPA_REGISTRATION_FACTS_INVALID: % must be a real date', v_bad;
+  END IF;
   IF p_create AND NOT p ? 'rup_status' THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_FACTS_REQUIRED: a new EPA registration needs its restricted-use answer (yes, no or unknown)';
   END IF;

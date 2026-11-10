@@ -198,6 +198,8 @@ BEGIN
   LOCK TABLE public.products, public.product_brands, public.product_parent_brands, public.product_parents,
     public.product_parent_members, public.invoice_items, public.job_product_epa
     IN SHARE ROW EXCLUSIVE MODE;
+  -- Sol r12: nobody adds a restricted-use record between the check below and the seed's commit.
+  LOCK TABLE public.rup_sales_records IN SHARE ROW EXCLUSIVE MODE;
   IF public._epa_registrations_seeded() OR EXISTS (SELECT 1 FROM public.epa_registrations) THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_SEED_DONE: EPA registrations are already set up';
   END IF;

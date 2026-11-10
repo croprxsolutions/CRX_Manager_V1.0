@@ -466,6 +466,8 @@ async function main() {
     VALUES ('${INV2}', '${ORD}', '${CUST}', '${P4}', current_date, '[PROVER] pre-seed', '${N2}', 1, 'Gal', 1500, 1500, 2027, 'x');`);
   refused(ADMIN, PREVIEW_SEED('no'), /EPA_REGISTRATION_SEED_RECORDS_EXIST/);
   refused(ADMIN, SEED(PICKS, 'no', pv.fingerprint, 's-x8'), /EPA_REGISTRATION_SEED_RECORDS_EXIST/);
+  // Sol r12 HIGH: the seed locks the records table before that check, so none can be added beside it.
+  assert.equal(scalar(`SELECT (pg_get_functiondef('public.seed_epa_registrations(jsonb,text,text,text)'::regprocedure) ~ 'LOCK TABLE public.rup_sales_records IN SHARE ROW EXCLUSIVE MODE')::text;`), 'true');
   raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE product_name = '[PROVER] pre-seed';`);
   assert.equal(okJ(ADMIN, PREVIEW_SEED('no')).fingerprint, pv.fingerprint);
   raw(`DELETE FROM public.rup_sales_records WHERE product_name = '[PROVER] pre-seed';`);
@@ -507,6 +509,8 @@ async function main() {
   // Every registration change says why (Mason, 2026-11-10, Sol r10): a missing or blank reason is refused.
   refused(ADMIN, `SELECT public.set_epa_registration('${N1}', 1, '{"rup_status": "no"}'::jsonb, NULL, NULL, 'k-noreason');`, /EPA_REGISTRATION_REASON_REQUIRED/);
   refused(ADMIN, `SELECT public.set_epa_registration('${N1}', 1, '{"rup_status": "no"}'::jsonb, '   ', NULL, 'k-blankreason');`, /EPA_REGISTRATION_REASON_REQUIRED/);
+  // Sol r12 LOW: 'infinity' is not a real date.
+  refused(ADMIN, SET(N1, 1, { registration_status: 'cancelled', cancelled_on: 'infinity' }, 'k-inf'), /EPA_REGISTRATION_FACTS_INVALID: cancelled_on must be a real date/);
   const set1 = okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1'));
   assert.equal(set1.registration_version, 2); assert.equal(set1.event_type, 'updated'); assert.equal(set1.affected_count, undefined);
   assert.deepEqual(okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1')), set1);
@@ -634,6 +638,13 @@ async function main() {
   assert.equal(scalar(`SELECT epa_registration || '|' || quantity || '|' || total_cents FROM public.rup_sales_records WHERE invoice_id = '${INV3}';`), `${N1}|1.0000|2400`);
   assert.equal(scalar(`SELECT string_agg(public._rup_record_covers_line(ii)::text, ',' ORDER BY id) FROM public.invoice_items ii WHERE id IN ('${L6}', '${id('2a')}');`), 'true,false');
   assert.equal(ok(ADMIN, GEN(INV3, 'g4')), '0');
+  // Sol r12 MED: a record under another customer covers nothing, and posting refuses it.
+  raw(`INSERT INTO public.customers (id, farm_name) VALUES ('${id('d2')}', '[PROVER] Other Farm');
+    UPDATE public.rup_sales_records SET customer_id = '${id('d2')}' WHERE invoice_id = '${INV3}';`);
+  assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'false');
+  refused(ADMIN, GEN(INV3, 'g9'), /another customer or order/);
+  raw(`UPDATE public.rup_sales_records SET customer_id = '${CUST}' WHERE invoice_id = '${INV3}';`);
+  assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'true');
   // A duplicate active record for one key covers nothing and posting refuses it (Luna 2026-11-10).
   raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word)
     SELECT invoice_id, order_id, customer_id, product_id, sale_date, '[PROVER] dup', epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word
@@ -655,6 +666,8 @@ async function main() {
   // registration turning restricted use still lists L6.
   assert.equal(scalar(`SELECT public._rup_record_covers_line(ii)::text FROM public.invoice_items ii WHERE id = '${L6}';`), 'false');
   assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N1}') @> '[{"invoice_item_id": "${L6}"}]')::text;`), 'true');
+  // Sol r12 MED: the Not reviewed sibling 2a, recorded by that whole-key record, is not listed (as on Sales to check).
+  assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N1}') @> '[{"invoice_item_id": "${id('2a')}"}]')::text;`), 'false');
   raw(`INSERT INTO public.rup_sales_records (invoice_id, order_id, customer_id, product_id, sale_date, product_name, epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word)
     SELECT invoice_id, order_id, customer_id, product_id, sale_date, '[PROVER] sw2', epa_registration, quantity, unit, unit_price_cents, total_cents, season, buyer_name, signal_word
       FROM public.rup_sales_records WHERE product_name = '[PROVER] sw';`);
@@ -701,6 +714,10 @@ async function main() {
     UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV2}';
     UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N2}';`);
   assert.equal(reasons()[L3], 'posted_before_seed');
+  // Sol r12 HIGH: the same line captured with no number is listed too (every line posted before the seed is).
+  raw(`UPDATE public.invoice_line_rup_captures SET epa_registration = NULL WHERE invoice_item_id = '${L3}';`);
+  assert.equal(reasons()[L3], 'posted_before_seed');
+  raw(`UPDATE public.invoice_line_rup_captures SET epa_registration = '${N2}' WHERE invoice_item_id = '${L3}';`);
   raw(`UPDATE public.invoice_line_rup_captures SET rup_status = 'yes' WHERE invoice_item_id = '${L3}';
     UPDATE public.rup_sales_records SET voided_at = NULL WHERE invoice_id = '${INV2}';
     UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N2}';`);

@@ -364,7 +364,7 @@ CREATE TRIGGER invoice_items_standing_discount_scope_20261231
   FOR EACH ROW WHEN (NEW.charge_type = 'standing_discount')
   EXECUTE FUNCTION public.guard_standing_discount_line_scope_20261231();
 
--- Posting a chemical sale refuses a discount line that doesn't match its rate: every writer today commits a draft
+-- Posting refuses a chemical sale whose discount line doesn't match its rate, and any other invoice carrying one: every writer today commits a draft
 -- before anyone posts it, so this only catches a future path that writes lines and posts in one transaction.
 CREATE FUNCTION public.guard_standing_discount_current_on_post_20261231()
  RETURNS trigger
@@ -372,14 +372,17 @@ CREATE FUNCTION public.guard_standing_discount_current_on_post_20261231()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  v_cents bigint;
+  v_cents bigint := 0;
   v_label text;
   v_pct numeric;
 BEGIN
-  SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(NEW.id) e;
+  -- A chemical sale must carry exactly the line its rate gives; any other invoice must carry none.
+  IF NEW.invoice_type = 'chemical_sale' THEN
+    SELECT e.o_cents, e.o_label, e.o_pct INTO v_cents, v_label, v_pct FROM public._standing_discount_expected_20261231(NEW.id) e;
+  END IF;
   IF (SELECT COALESCE(array_agg((-(extended_cents::numeric))::text || '|' || description), '{}'::text[]) FROM invoice_items
        WHERE invoice_id = NEW.id AND charge_type = 'standing_discount')
-     IS DISTINCT FROM (CASE WHEN v_cents > 0 THEN ARRAY[v_cents || '|' || v_label] ELSE '{}'::text[] END) THEN
+     IS DISTINCT FROM (CASE WHEN v_cents > 0 THEN ARRAY[v_cents::text || '|' || v_label] ELSE '{}'::text[] END) THEN
     RAISE EXCEPTION 'STANDING_DISCOUNT_STALE: this draft''s standing discount is out of date; save it again, then post'
       USING ERRCODE = '55000';
   END IF;
@@ -392,8 +395,7 @@ REVOKE ALL ON FUNCTION public.guard_standing_discount_current_on_post_20261231()
 CREATE TRIGGER invoices_standing_discount_current_on_post_20261231
   BEFORE UPDATE OF status ON public.invoices
   FOR EACH ROW
-  WHEN (OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue')
-        AND NEW.invoice_type = 'chemical_sale' AND NEW.deleted_at IS NULL)
+  WHEN (OLD.status IN ('draft', 'unposted') AND NEW.status IN ('posted', 'paid', 'overdue') AND NEW.deleted_at IS NULL)
   EXECUTE FUNCTION public.guard_standing_discount_current_on_post_20261231();
 
 -- 5. Split invoices: the discount goes in before the fingerprint ---------------------------------
@@ -456,8 +458,8 @@ BEGIN
   END IF;
 
   SELECT * INTO v_inv FROM invoices WHERE id = p_invoice_id FOR UPDATE;
-  IF NOT FOUND OR v_inv.deleted_at IS NOT NULL OR v_inv.invoice_type <> 'chemical_sale'
-     OR v_inv.status NOT IN ('draft', 'unposted') THEN
+  -- A draft only (Mason: "before it's posted"): an unposted invoice keeps the amounts it was posted at.
+  IF NOT FOUND OR v_inv.deleted_at IS NOT NULL OR v_inv.invoice_type <> 'chemical_sale' OR v_inv.status <> 'draft' THEN
     RAISE EXCEPTION 'INVOICE_NOT_DRAFT: a standing discount changes only on a chemical-sale draft' USING ERRCODE = '22023';
   END IF;
 

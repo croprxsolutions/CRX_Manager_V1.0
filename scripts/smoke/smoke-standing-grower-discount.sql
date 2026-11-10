@@ -23,6 +23,8 @@
 --   R  A field application draft whose total is not the sum of its lines: editing a line never changes its total
 --   S  A chemical sale drafted and posted in one transaction still records its rate (0%), so unposting after the
 --      customer moves to 5% keeps the posted amount
+--   T  The office's rate can't change on an unposted invoice (draft only), so posted amounts never move
+--   U  A discounted draft switched to misc charge and posted before any commit point is refused
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
 --      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
@@ -475,6 +477,18 @@ BEGIN
   IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2) IS DISTINCT FROM v_off THEN
     v_fails := v_fails || ' (L) the open split draft changed with the customer''s rate;';
   END IF;
+  -- N: the office moves the main payer's open split draft from 3% to 3.01%: the label follows.
+  BEGIN
+    PERFORM set_invoice_standing_discount(v_invoice, 3.01, 'smk-dsn-301-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (N) setting 3.01% failed: ' || SQLERRM || ';';
+  END;
+  IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'
+                   AND description = 'Standing discount 3.01%') THEN
+    v_fails := v_fails || format(' (N) the label is %s, want Standing discount 3.01%%;',
+      COALESCE((SELECT description FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'), 'missing'));
+  END IF;
   -- M: post the group, change payer 2's rate again, unpost the group: it unposts at its posted amounts.
   BEGIN
     PERFORM post_invoice_group(v_group, v_admin,
@@ -492,20 +506,6 @@ BEGIN
   IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2) IS DISTINCT FROM v_off THEN
     v_fails := v_fails || format(' (M) the unposted payer invoice moved to %s cents, want it kept at %s;',
       (SELECT total_amount_cents FROM invoices WHERE id = v_invoice2), v_off);
-  END IF;
-
-  -- N: the office moves the main customer's draft (K's invoice is misc now; use a fresh chemical draft: the group's
-  -- main payer, now unposted) from 3% to 3.01%: the label follows.
-  BEGIN
-    PERFORM set_invoice_standing_discount(v_invoice, 3.01, 'smk-dsn-301-' || v_suffix);
-    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  EXCEPTION WHEN OTHERS THEN
-    v_fails := v_fails || ' (N) setting 3.01% failed: ' || SQLERRM || ';';
-  END;
-  IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'
-                   AND description = 'Standing discount 3.01%') THEN
-    v_fails := v_fails || format(' (N) the label is %s, want Standing discount 3.01%%;',
-      COALESCE((SELECT description FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount'), 'missing'));
   END IF;
 
   -- O: the group's main payer (v_invoice) was discounted at drafting; its trail has the discount's own entry.
@@ -610,6 +610,41 @@ BEGIN
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (S) the same-transaction post check failed: ' || SQLERRM || ';';
+  END;
+
+  -- T: S's invoice is unposted now.
+  BEGIN
+    PERFORM set_invoice_standing_discount(v_invoice, 9, 'smk-dst-' || v_suffix);
+    v_fails := v_fails || ' (T) an unposted invoice took a new rate;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'INVOICE_NOT_DRAFT:%' THEN v_fails := v_fails || ' (T) wrong refusal: ' || SQLERRM || ';'; END IF;
+  END;
+
+  -- U: a fresh 3% draft switched to misc charge (as owner) and posted with no commit point between.
+  UPDATE customers SET standing_discount_pct = 3 WHERE id = v_customer;
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+    VALUES ('SMK-DSU-' || v_suffix, v_customer, CURRENT_DATE, 'confirmed', v_admin) RETURNING id INTO v_order;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, quantity_delivered, quantity_remaining)
+    VALUES (v_order, v_product.id, '[SMOKE] Switch and post', 'gal', v_product.current_cost + 1.37, v_product.current_cost,
+      10, (v_product.current_cost + 1.37) * 10, 0, 10) RETURNING id INTO v_line;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    VALUES ('SMK-DSU-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_delivery;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    VALUES (v_delivery, v_line, v_product.id, 10, 'gal');
+  PERFORM confirm_delivery(v_delivery, v_admin, 'smk-dsu-confirm-' || v_suffix);
+  PERFORM complete_delivery(v_delivery, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+    'smk-dsu-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; switch and post');
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND invoice_type <> 'credit_memo';
+  BEGIN
+    UPDATE invoices SET invoice_type = 'misc_charge' WHERE id = v_invoice;
+    PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-dsu-post-' || v_suffix);
+    v_fails := v_fails || ' (U) a misc charge posted carrying a standing discount line;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'STANDING_DISCOUNT_STALE:%' THEN v_fails := v_fails || ' (U) wrong refusal: ' || SQLERRM || ';'; END IF;
   END;
 
   IF v_fails <> '' THEN

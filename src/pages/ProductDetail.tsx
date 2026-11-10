@@ -75,6 +75,7 @@ import {
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
 import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
+import { quoteLineChange } from '../lib/quoteNotes';
 import type { ProductCategory, UseTimingOption } from '../types';
 
 const PRODUCT_NONPRICING_FIELDS = [
@@ -1256,6 +1257,8 @@ export default function ProductDetail() {
     : null;
 
   const missingSetup = missingProductSetup(product);
+  // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
+  const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
   return (
     <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
@@ -1956,6 +1959,11 @@ export default function ProductDetail() {
                 rows={3}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
               />
+              {quoteLine && (
+                <p className="mt-1 text-xs text-amber-800" role="status">
+                  New quote lines will show: {quoteLine.after ? `"${quoteLine.after}"` : '(blank)'}. Existing quotes keep their notes.
+                </p>
+              )}
             </div>
           </Card>
           </PhoneSection>

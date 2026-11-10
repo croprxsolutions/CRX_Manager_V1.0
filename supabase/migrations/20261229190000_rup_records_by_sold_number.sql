@@ -481,7 +481,7 @@ BEGIN
   WITH lines AS (
     SELECT ii.id AS line_id, ii.invoice_id, i.invoice_number, i.invoice_date, ii.product_id, p.product_name,
            c.epa_registration, public._normalize_epa_registration(ii.epa_registration) AS saved_number,
-           ii.quantity, c.rup_status, c.source AS capture_source,
+           ii.quantity, c.rup_status, c.source AS capture_source, COALESCE(p.is_rup, false) AS product_ticked_now,
            r.rup_status AS registration_rup_status_now, lr.rup_status AS saved_registration_rup_status_now,
            public._rup_record_covers_line(ii) AS covered, public._rup_record_for_line_key(ii) AS has_record
       FROM invoice_items ii
@@ -501,7 +501,9 @@ BEGIN
                 WHEN capture_source = 'seed_posted' AND epa_registration IS NOT NULL THEN 'posted_before_seed'
                 WHEN rup_status = 'yes' THEN NULL
                 WHEN has_record THEN NULL
-                WHEN registration_rup_status_now = 'yes' OR saved_registration_rup_status_now = 'yes' THEN 'now_restricted_use'
+                -- any Yes now, the product's own tick included (Mason, 2026-11-10, Sol r10)
+                WHEN product_ticked_now OR registration_rup_status_now = 'yes' OR saved_registration_rup_status_now = 'yes'
+                  THEN 'now_restricted_use'
                 WHEN rup_status = 'unknown'
                  AND ((epa_registration IS NOT NULL AND COALESCE(registration_rup_status_now, 'unknown') = 'unknown')
                       OR (saved_number IS NOT NULL AND COALESCE(saved_registration_rup_status_now, 'unknown') = 'unknown'))

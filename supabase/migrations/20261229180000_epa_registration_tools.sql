@@ -2,6 +2,9 @@
 -- (Every mutating RPC here requires p_idempotency_key and checks it before any write with PAR-1's
 --  _product_parent_replay(key, scope, fingerprint), which refuses a key reused for another request or
 --  another actor, then saves its receipt with save_idempotency. The hook only recognises check_idempotency.)
+-- status-enum-check: exempt
+-- (False positive: the hook misreads _epa_registration_insert's VALUES list. registration_status is written only as
+--  'active', 'cancelled' or 'unknown', which the table's CHECK holds; no CHECK is expanded here.)
 -- Written 2026-11-08. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migrations.d/20261229180000_epa_registration_tools.md.
 -- Re-read the live ledger before applying.
@@ -282,6 +285,10 @@ BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED'; END IF;
   IF NOT public._epa_registrations_seeded() THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_NOT_SEEDED: EPA registrations are not set up yet';
+  END IF;
+  -- every change to a regulatory fact says why (Mason, 2026-11-10, Sol r10)
+  IF COALESCE(length(btrim(p_reason)), 0) = 0 THEN
+    RAISE EXCEPTION 'EPA_REGISTRATION_REASON_REQUIRED: say why this registration is changing';
   END IF;
   v_n := public._normalize_epa_registration(p_epa_registration);
   IF v_n IS NULL OR v_n !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN

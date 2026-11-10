@@ -495,6 +495,9 @@ async function main() {
   refused(REP, SET(N1, 1, { phi_days: 30 }, 'k-rep'), /ADMIN_REQUIRED/);
   refused(ADMIN, SET(N1, 7, { phi_days: 30 }, 'k-st'), /EPA_REGISTRATION_STALE/);
   refused(ADMIN, SET(N1, 1, {}, 'k-empty'), /EPA_REGISTRATION_NO_CHANGES/);
+  // Every registration change says why (Mason, 2026-11-10, Sol r10): a missing or blank reason is refused.
+  refused(ADMIN, `SELECT public.set_epa_registration('${N1}', 1, '{"rup_status": "no"}'::jsonb, NULL, NULL, 'k-noreason');`, /EPA_REGISTRATION_REASON_REQUIRED/);
+  refused(ADMIN, `SELECT public.set_epa_registration('${N1}', 1, '{"rup_status": "no"}'::jsonb, '   ', NULL, 'k-blankreason');`, /EPA_REGISTRATION_REASON_REQUIRED/);
   const set1 = okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1'));
   assert.equal(set1.registration_version, 2); assert.equal(set1.event_type, 'updated'); assert.equal(set1.affected_count, undefined);
   assert.deepEqual(okJ(ADMIN, SET(N1, 1, { signal_word: 'Caution', phi_days: 30 }, 'k-set1')), set1);
@@ -665,7 +668,9 @@ async function main() {
   assert.equal(check[L3], 'restricted_use_to_record');  // posted before the seed, captured Yes by it, never recorded
   assert.equal(check[L7], 'no_epa_number');             // recorded, no number
   assert.equal(check[id('2a')], 'not_reviewed');        // its Yes sibling's record does not hide it
-  for (const lid of [L1, L2, L4, L5, L6]) assert.equal(check[lid], undefined, lid);
+  // L4: captured No, its size ticked after the sale (case 6), never recorded: listed (Sol r10, any Yes now).
+  assert.equal(check[L4], 'now_restricted_use');
+  for (const lid of [L1, L2, L5, L6]) assert.equal(check[lid], undefined, lid);
   assert.equal(scalar(`SELECT (public._epa_registration_unrecorded_posted_lines('${N2}') @> '[{"invoice_item_id": "${L3}"}]')::text;`), 'true');
   // No pre-seed exception (Mason, 2026-11-10, "Yes, drop it"): an old record written before the seed by today's rule,
   // without the captured signal word, does not record a line posted before the seed; it stays on the list.
@@ -696,6 +701,11 @@ async function main() {
   raw(`UPDATE public.epa_registrations SET rup_status = 'yes' WHERE epa_registration = '${N1}';`);
   assert.equal(reasons()[L1], 'now_restricted_use');
   raw(`UPDATE public.epa_registrations SET rup_status = 'no' WHERE epa_registration = '${N1}';`);
+  // Sol r10: the product's own tick turned on later, its registration still No, lists the sale too (any Yes now).
+  assert.equal(reasons()[L1], undefined);
+  raw(`UPDATE public.products SET is_rup = true WHERE id = '${P1}';`);
+  assert.equal(reasons()[L1], 'now_restricted_use');
+  raw(`UPDATE public.products SET is_rup = false WHERE id = '${P1}';`);
   // A Yes line whose record was voided is listed; a line with no capture is listed as not captured.
   raw(`UPDATE public.rup_sales_records SET voided_at = now() WHERE invoice_id = '${INV1}' AND unit_price_cents = 2200;`);
   assert.equal(reasons()[id('2b')], 'restricted_use_to_record');

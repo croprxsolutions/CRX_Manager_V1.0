@@ -636,12 +636,12 @@
     {
       "predicate": "actor-forgery",
       "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)",
-      "justification": "Re-reviewed 2026-10-20 against live pg_get_functiondef after migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) changed the pinned wrapper digest. Not actor identity: p_group_by is a text grouping selector on a STABLE, read-only report; the predicate matches it only because its name fits p_%by and the wrapper forwards it to its private implementation before any ACTOR_MISMATCH refusal (there is no actor to refuse). Neither the wrapper nor the implementation contains INSERT/UPDATE/DELETE/MERGE or an exception handler, and nothing attributes a row to anyone. Migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) renamed the reviewed body unchanged to _get_sales_summary_report_cost_impl_20261019 (EXECUTE: postgres only) and installed a SECURITY DEFINER wrapper that sets v_admin := public.is_admin(), returns the implementation's rows, and blanks total_cost/total_profit/margin_pct (CASE WHEN v_admin) for non-admins. The implementation is the body reviewed 2026-09-12: it checks active admin/sales_rep via profiles.id = auth.uid() before RETURN QUERY and uses p_group_by only in CASE p_group_by. Revenue stays visible to reps by design. This is scanner noise, not an accepted actor-forgery hole. Pins cover the wrapper, the private implementation, auth.uid() and every role helper either body calls; any change to a pinned definition, owner or EXECUTE grant un-matches this exception and the flag returns for a fresh review. Digests were read live 2026-10-20 with the sweep's own contract expression, after the review above.",
+      "justification": "Re-reviewed 2026-10-20 against live pg_get_functiondef after migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) changed the pinned wrapper digest. Not actor identity: p_group_by is a text grouping selector on a STABLE, read-only report; the predicate matches it only because its name fits p_%by and the wrapper forwards it to its private implementation before any ACTOR_MISMATCH refusal (there is no actor to refuse). Neither the wrapper nor the implementation contains INSERT/UPDATE/DELETE/MERGE or an exception handler, and nothing attributes a row to anyone. Migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) renamed the reviewed body unchanged to _get_sales_summary_report_cost_impl_20261019 (EXECUTE: postgres only) and installed a SECURITY DEFINER wrapper that sets v_admin := public.is_admin(), returns the implementation's rows, and blanks total_cost/total_profit/margin_pct (CASE WHEN v_admin) for non-admins. The implementation is the body reviewed 2026-09-12: it checks active admin/sales_rep via profiles.id = auth.uid() before RETURN QUERY and uses p_group_by only in CASE p_group_by. Revenue stays visible to reps by design. This is scanner noise, not an accepted actor-forgery hole. Pins cover the wrapper, the private implementation, auth.uid() and every role helper either body calls; any change to a pinned definition, owner or EXECUTE grant un-matches this exception and the flag returns for a fresh review. Digests were read live 2026-10-20 with the sweep's own contract expression, after the review above. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: the impl now splits Bill Split lines per payer via _sales_line_payers; p_group_by is still a grouping selector, not an actor.",
       "dated": "2026-10-20",
       "suspect_param": "p_group_by",
       "reviewed_contracts": {
         "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
-        "public._get_sales_summary_report_cost_impl_20261019(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)": "1791ed1cc27b6cf4d3176084126ddfc0",
+        "public._get_sales_summary_report_cost_impl_20261019(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)": "8a4e22e795ded148b9bec7bbe132016b",
         "public.get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)": "c6e0c816f6e141c6b4e73a0fd7bfe27e",
         "public.is_admin()": "8c4f9cb1ee80faa22ed435f970e2fd9f",
         "public.is_sales_rep()": "b8de9969af7ef55d133e7b20758ff1a0"
@@ -1255,8 +1255,8 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "financial_dashboard_summary()#3390d8094cb2",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-06 after 20261121090000 (applied live, ledger 20261106152929): the body now ages by the Chicago date with the get_ar_aging ranges; is_admin() is still checked first and it returns the same admin-only figures, so still SAFE.",
+      "violation_key": "financial_dashboard_summary()#fa9be08469f7",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-06 after 20261121090000 (applied live, ledger 20261106152929): the body now ages by the Chicago date with the get_ar_aging ranges; is_admin() is still checked first and it returns the same admin-only figures, so still SAFE. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
       "dated": "2026-11-06"
     },
     {
@@ -1423,14 +1423,14 @@
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_sales_detail_report(p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#8b3b385b7fc5",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_sales_detail_report(p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#5451b8b0092f",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
       "dated": "2026-11-02"
     },
     {
       "predicate": "cost-exposure-review",
-      "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#b6b85b4f888a",
-      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#43fcfceffb24",
+      "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
       "dated": "2026-11-02"
     },
     {

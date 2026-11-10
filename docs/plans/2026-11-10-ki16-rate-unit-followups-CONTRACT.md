@@ -161,3 +161,13 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
 - **#5 (retry of a pre-deploy `save_job` key whose payload had a foldable character):** accepted as named in "State and
   failure": the retry gets the intent-mismatch refusal (fail closed, nothing written twice); live has 0 job lines
   with such characters.
+
+## Luna round 2 (head 9d30760b3, 3 findings)
+
+- **#1 HIGH (undotted `fl oz` on dry):** same as round 1 #1; it survived two rounds, so it goes to Mason as a decision
+  (fix here, widening into demand and deduction, or its own plan).
+- **#2 MED (spent pre-deploy idempotency key):** accepted, as round 1 #5.
+- **#3 MED (invoker product guard misses RLS-hidden lines): refuted for live.** Live policies 2026-11-10:
+  `products_update` is `is_admin()` only, and `blend_ticket_products_office_all` / `blend_tickets` select allow
+  `is_admin()`, so any REST writer that can change a product sees every blend line; SECURITY DEFINER callers run as
+  the owner and bypass RLS. Becomes real only if product edits are opened to a non-admin role.

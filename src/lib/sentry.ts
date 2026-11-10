@@ -62,8 +62,6 @@ export function initSentry() {
         const first = event.exception?.values?.[0];
         if (first) first.value = plain.replace(JWT, '[JWT_REDACTED]');
       }
-      // The SDK also attaches the raw object as extra.__serialized__; JWT characters never need JSON escaping.
-      if (event.extra) event.extra = JSON.parse(JSON.stringify(event.extra).replace(JWT, '[JWT_REDACTED]'));
       // Strip PII from error messages
       if (event.message) {
         event.message = event.message.replace(JWT, '[JWT_REDACTED]');

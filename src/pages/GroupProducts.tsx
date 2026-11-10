@@ -44,8 +44,9 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 const PAGE = 50;
 
 function report(err: unknown, action: string) {
-  // Pass the error as-is: String() on a Supabase error object sends "[object Object]".
-  Sentry.captureException(err, { tags: { source: 'group_products', action } });
+  // String() on a Supabase error object sends "[object Object]"; keep its message instead.
+  const message = typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err);
+  Sentry.captureException(err instanceof Error ? err : new Error(message), { tags: { source: 'group_products', action } });
 }
 
 function BuildSummary({ proposal, groups, build }: { proposal: Proposal; groups: ProposalGroup[]; build: BuildResult | null }) {

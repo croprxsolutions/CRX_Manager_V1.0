@@ -123,13 +123,6 @@ describe('initSentry', () => {
       expect(send(synthetic(), { originalException: { code: '', details: '', hint: '', message } })).toBeNull();
     });
 
-    it('redacts a JWT in the serialized copy of the error', async () => {
-      const send = await beforeSend();
-      const original = { code: '', details: null, hint: null, message: 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln' };
-      const event = { ...synthetic(), extra: { __serialized__: { ...original } } };
-      expect(JSON.stringify(send(event, { originalException: original }).extra)).not.toContain('eyJ');
-    });
-
     it('keeps a database error that only mentions fetching', async () => {
       const send = await beforeSend();
       const original = { code: 'P0001', details: null, hint: null, message: 'Failed to fetch the current inventory row' };

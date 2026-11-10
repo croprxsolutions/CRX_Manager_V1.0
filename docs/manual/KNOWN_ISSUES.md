@@ -944,9 +944,10 @@ About 70 files under `src/` report a caught error as `err instanceof Error ? err
 Supabase error is a plain object, so Sentry receives only "[object Object]" and the real reason is lost (1W was an
 expected "a size changed, build a new proposal" refusal on Group Products; 1S on the Office Cockpit finance card had no
 matching database error, so it was most likely a network blip). The 2026-11-10 fix makes `src/lib/sentry.ts` title
-plain error objects with their own message and drop network blips, and Group Products now passes the error as-is.
-Still open: the other call sites. Fix by passing the error itself to `Sentry.captureException`; many of those files
-are Sol-listed, so batch them by area.
+plain error objects with their own message and drop network blips, and Group Products now sends the error's own
+message. Still open: the other call sites (fix the Group Products way; many of those files are Sol-listed, so batch
+them by area). Also open (Luna, PR #1730): login-token scrubbing covers `event.message` and plain-object titles only,
+not a real `Error`'s message or the serialized copy Sentry attaches to a plain object; widen it in its own small PR.
 
 ---
 

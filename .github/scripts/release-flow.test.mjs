@@ -87,6 +87,8 @@ test('versionFromTitle keeps a version the releaser typed', () => {
   assert.equal(versionFromTitle('release: v1.0.0'), 'v1.0.0');
   assert.equal(versionFromTitle('Release: v0.4.0 '), 'v0.4.0');
   assert.equal(versionFromTitle('release: soon'), null);
+  assert.equal(versionFromTitle('release: V1.0.0'), 'v1.0.0');
+  assert.equal(releaseVersion('release: V1.0.0', ['v0.2.0']), 'v1.0.0');
   assert.equal(versionFromTitle(undefined), null);
 });
 
@@ -150,6 +152,7 @@ test('firstParagraph skips headings and comments and trims long text', () => {
   assert.equal(firstParagraph('<!-- note -->\n## What\nFixes the red check.'), 'Fixes the red check.');
   assert.equal(firstParagraph('x'.repeat(250)).length, 201);
   assert.equal(firstParagraph(null), '');
+  assert.equal(firstParagraph('What users see: <one plain sentence>\n\nReal summary.'), 'Real summary.');
 });
 
 test('releaseNotesModule writes a safe TypeScript literal', () => {

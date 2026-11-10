@@ -86,14 +86,23 @@ jobs:
         run: |
           git config user.name "crx-release-bot[bot]"
           git config user.email "crx-release-bot[bot]@users.noreply.github.com"
+          # A conflict only in the bot's own version files (e.g. a hotfix also bumped package.json) is
+          # resolved by keeping ours, since release-files rewrites them next; any other conflict stops here.
+          merge() {
+            git merge --no-edit "$1" && return 0
+            other=$(git diff --name-only --diff-filter=U | grep -vxE 'package\.json|package-lock\.json|CHANGELOG\.md|src/releaseNotes\.ts' || true)
+            if [ -n "$other" ]; then echo "::error::Merging $1 into release/next conflicts in: $other"; exit 1; fi
+            git diff --name-only --diff-filter=U | xargs git checkout --ours --
+            git add -A && git commit --no-edit
+          }
           if git rev-parse --verify -q origin/release/next >/dev/null; then
             git switch -c release/next origin/release/next
-            git merge --no-edit origin/staging
+            merge origin/staging
           else
             git switch -c release/next origin/staging
           fi
           # Normally a no-op; after a hotfix (back-merge still open) it keeps the release containing main.
-          git merge --no-edit origin/main
+          merge origin/main
           node "$RUNNER_TEMP/release-flow.mjs" release-files
           git add package.json package-lock.json CHANGELOG.md src/releaseNotes.ts
           git diff --cached --quiet || git commit -m "chore(release): $VERSION"

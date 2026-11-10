@@ -8,7 +8,11 @@ on:
     branches: [staging]
     types: [closed, labeled, unlabeled, edited]
   issue_comment:
-    types: [edited, deleted]
+    types: [created, edited, deleted]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
 # unlabeled/edited and comment edits only refresh the release gate, which re-reads labels and proof.
 
 permissions: {}
@@ -66,9 +70,14 @@ jobs:
         run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
 
   refresh-on-comment:
-    # An edited or deleted comment may have held a proof line: let the release gate re-read it.
+    # A comment or review that mentions a proof or held-off line (added, edited or deleted) can
+    # change the release gate: let it re-read. Other comments don't dispatch anything.
     name: Refresh release gate
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event.issue.pull_request || github.event.pull_request) &&
+      (contains(github.event.comment.body, 'roof:') || contains(github.event.comment.body, 'eld off:') ||
+       contains(github.event.review.body, 'roof:') || contains(github.event.review.body, 'eld off:'))
     runs-on: ubuntu-latest
     permissions:
       actions: write

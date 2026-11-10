@@ -53,7 +53,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 import { accessChangeCheck, dataRewriteCheck } from "./migration-access-lib.mjs";
-import { OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, solAcceptFileName } from "./sol-accept-lib.mjs";
+import { OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, reasonProblem, solAcceptFileName } from "./sol-accept-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -644,8 +644,11 @@ export function recordReplyApproval({
   if (form !== "accept" && solAccept) return no(`the request for code ${code} is a Sol finding; accept it with: accept ${code} followed by your reason`);
   if (!selftest && !solAccept && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
   const why = String(reason ?? "").trim();
-  if (solAccept && (why.length < 3 || /[\r\n\x85\p{Zl}\p{Zp}]/u.test(why))) {
-    return no(`his reply gave no reason; ask him to reply: accept ${code} followed by his reason, on one line`);
+  if (solAccept && reasonProblem(why)) {
+    return no(`his reason cannot be logged (${reasonProblem(why)}); ask him to reply again: accept ${code} followed by his reason, on one line`);
+  }
+  if (solAccept && (!/^[0-9a-f]{40}$/i.test(String(p.prHead)) || !Number.isInteger(p.finding?.n) || p.finding.n < 1 || p.finding.n > 99)) {
+    return no(`the request for code ${code} names no usable head or finding`);
   }
   // Sessions that share a checkout share its session-state: the request names the
   // session that built it, and only a reply in that session counts (Luna HIGH,

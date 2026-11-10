@@ -132,19 +132,25 @@
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
 > **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
-> `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it). For a finding Mason judges
-> a business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
+> `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
+> `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a
+> business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
 > `main` at that head, the session he replies in) builds a request bound to that PR, head, base, Sol run and finding
 > text; Mason replies `accept <code> <reason>` and `owner-approval-prompt.mjs` records it (the code works once, for
-> 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request). Once
-> every finding of the run is accepted, `--log` writes the deterministic `DECISION_LOG.md` entry (PR, each finding,
-> his reason, date); commit that file alone on top of the reviewed head, then
-> `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
-> `owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when the commit's sole change is
-> exactly that entry. A new Sol run on the head voids earlier acceptances. It satisfies the merge gate and the apply
-> landing gate; it does NOT cover the content-bound migration charter proofs from `write-apply-proofs.mjs`. The log is
-> public: the finding text and his reason are published, so never accept a finding whose text would explain how to
-> exploit a hole that is not yet fixed live.
+> 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request; a reason
+> under two words, over 300 characters, or with money amounts, emails, phone numbers, `#<number>` or markup is
+> refused without using the code). Once every finding of the run is accepted, `--log` writes the deterministic
+> `DECISION_LOG.md` entry (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
+> because an accepted finding is unfixed and the repo is public); commit that file alone on top of the reviewed head,
+> then `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
+> `owner_accepted`, `root_review.owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when
+> the commit's sole change is exactly that entry and the code running is the bytes committed at that head. A PR that
+> changes hooks, `.codex`, `.husky`, `.github`, `scripts/lib`, `package.json` or the proof, approval and apply scripts
+> cannot use this path: a review that was not clean cannot vouch for gate code. Later carries (main merge, restamp,
+> post-apply) keep the acceptances and tell their focused Sol check the findings are accepted, not fixed. It satisfies
+> the merge gate and the apply landing gate; it does NOT cover the content-bound migration charter proofs from
+> `write-apply-proofs.mjs`. Same trust boundary as the migration approval: it stops a mistaken or relayed acceptance,
+> not an agent forging files or feeding the reply hook by hand.
 >
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
 > refuses with no Codex call otherwise: the head contains the exact origin/main the review pins, no Codex App review of

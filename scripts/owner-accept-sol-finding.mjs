@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   OWNER_REQUEST_MAX_AGE_MS,
+  OWNER_TRUST_ROOT,
   assertOwnerTrustFilesReviewed,
   assertReplyAlone,
   hooklessSessionRefusal,
@@ -33,6 +34,7 @@ import {
   buildSolAcceptPayload,
   collectAcceptances,
   decisionLogEntry,
+  gateFilesIn,
   insertDecisionEntry,
   solAcceptFileName,
   solAcceptSummary,
@@ -55,6 +57,8 @@ const readJson = (name) => { try { return JSON.parse(readFileSync(path.join(stat
 const record = readJson(blockersRecordName(head));
 const problem = blockersRecordProblem(record, { headSha: head });
 if (problem) die(`${problem}. Run the full Sol review at this head first: node scripts/write-codex-push-proof.mjs`);
+const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.base_sha}...${head}`]).split(/\r?\n/).filter(Boolean));
+if (gates.length) die(`this pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}); a Sol review that was not clean cannot vouch for them, so its findings must be fixed, not accepted.`);
 
 const argv = process.argv.slice(2);
 
@@ -93,7 +97,13 @@ try {
 if (String(pr?.state).toUpperCase() !== "OPEN" || pr?.baseRefName !== "main" || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
   die(`pull request #${pr?.number ?? "?"} must be open against main with head ${head.slice(0, 12)}; push first.`);
 }
-try { assertOwnerTrustFilesReviewed({ head }); } catch (err) { die(`${err?.message || err}. Refusing.`); }
+// The code running now must be the bytes committed at this head (in this checkout).
+try {
+  assertOwnerTrustFilesReviewed({
+    head, root: checkout,
+    readOnDisk: (rel) => readFileSync(path.join(OWNER_TRUST_ROOT, ...rel.split("/")), "utf8"),
+  });
+} catch (err) { die(`${err?.message || err}. Refusing.`); }
 
 const now = Date.now();
 let saved = null;

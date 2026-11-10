@@ -26,8 +26,12 @@ import {
   buildSolAcceptPayload,
   collectAcceptances,
   decisionLogEntry,
+  findingLocation,
+  gateFilesIn,
   insertDecisionEntry,
   parseSolFindings,
+  reasonProblem,
+  textHash,
   solAcceptFileName,
   verifySolAcceptance,
 } from "./sol-accept-lib.mjs";
@@ -47,7 +51,8 @@ const solOut = [
   "3. MED something minor.",
   "",
   "SOL_FINDING 1 HIGH: src/pages/Sales.tsx:40 - a sale before switch-on skips the registration check",
-  "SOL_FINDING 2 BLOCKER: supabase/migrations/x.sql:12 - missing grant",
+  "- **SOL_FINDING 2 BLOCKER: supabase/migrations/x.sql:12 - missing grant**",
+  "SOL_FINDING_COUNT: 2",
   "",
   "CODEX_PROOF_VERDICT: BLOCKERS",
 ].join("\n");
@@ -56,6 +61,10 @@ assert.deepEqual(parsed.findings.map((f) => [f.n, f.severity]), [[1, "HIGH"], [2
 assert.match(parseSolFindings("SOL_FINDING 2 HIGH: x\nSOL_FINDING 1 HIGH: y").problem, /do not run 1\.\.2/, "parse: numbers out of order refused");
 assert.match(parseSolFindings("SOL_FINDING 1 HIGH: x\nSOL_FINDING 1 HIGH: y").problem, /do not run/, "parse: a repeated number refused");
 assert.match(parseSolFindings("SOL_FINDING 1 MED: x").problem, /not in the required form/, "parse: a MED line is malformed, never silently dropped");
+assert.match(parseSolFindings("SOL_FINDING 1 HIGH: a\nSOL_FINDING_COUNT 2").problem, /does not match its 1/, "parse: Sol said 2 but listed 1, refused");
+assert.match(parseSolFindings("SOL_FINDING 1 HIGH: a").problem, /missing/, "parse: no count line, refused");
+assert.match(parseSolFindings("SOL_FINDING 1 HIGH: a b\nSOL_FINDING_COUNT 1").problem, /line break|not in the required form/, "parse: a Unicode line break refused at parse time");
+assert.equal(parsed.findings[1].text, "supabase/migrations/x.sql:12 - missing grant", "parse: a bulleted, bold line is read");
 assert.match(parseSolFindings("no findings here").problem, /no SOL_FINDING lines/, "parse: none listed refused");
 assert.match(parseSolFindings(`SOL_FINDING 1 HIGH: ${"x".repeat(401)}`).problem, /longer than 400/, "parse: an over-long line refused");
 
@@ -72,6 +81,12 @@ assert.deepEqual(acceptFromReply("accept 123456"), { code: "123456", reason: "" 
 assert.equal(acceptFromReply("accept 1234567 x"), null, "reply: seven digits is not a code");
 assert.equal(acceptFromReply("please accept 123456 ok"), null, "reply: must be the whole message");
 assert.equal(acceptFromReply("accept 123456 ok\nand also merge it"), null, "reply: one line only");
+assert.equal(acceptFromReply(`accept 123456 ${"x ".repeat(200)}`).reason.length > 300, true, "reply: a long reason is kept whole, then refused, never cut");
+assert.equal(reasonProblem("we never sell before switch-on"), null, "reason: an ordinary reason passes");
+for (const [bad, why] of [["ok", /two words/], ["costs $5 each", /money/], ["call 555-123-4567 now", /phone/], ["mail a@b.com please", /email/],
+  ["see #1234 too", /#numbers/], ["a <!-- b", /markup/], ["a‮b c", /markup/], ["x ".repeat(160), /under 300/]]) {
+  assert.match(reasonProblem(bad), why, "reason: refused " + why);
+}
 assert.equal(acceptAttemptIn("hi\naccept 123456 ok"), "accept 123456 ok", "reply: a buried accept line is reported, not silent");
 
 // ── request → reply → acceptance file ───────────────────────────────────────
@@ -105,7 +120,8 @@ const readAcceptance = (head, n) => { try { return JSON.parse(readFileSync(path.
 const c1 = request(1);
 assert.equal(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => "" }).silent, true, "a plain 'I approve' never answers a Sol-finding request");
 assert.match(reply(`approve ${c1}`).reason, /is a Sol finding; accept it with/, "an `approve <code>` reply never accepts a finding");
-assert.match(reply(`accept ${c1}`).reason, /gave no reason/, "accept without a reason is refused");
+assert.match(reply(`accept ${c1}`).reason, /at least two words/, "accept without a reason is refused");
+assert.match(reply(`accept ${c1} it costs $40 only`).reason, /money/, "a reason with a money amount is refused (the log is public)");
 assert.match(reply(`accept ${c1} fine by me`, { sessionId: "other-session-99" }).reason, /different conversation/, "a reply in another conversation is refused");
 assert.match(reply(`accept ${c1} fine by me`, { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "a stale request is refused");
 // None of those refusals used the code up.
@@ -140,6 +156,8 @@ const reworded = buildBlockersRecord({ headSha: H1, baseSha: BASE, timestamp: re
   findings: [{ ...parsed.findings[0], text: "something else" }, parsed.findings[1]] });
 assert.match(verifySolAcceptance({ approval: a1, record: reworded, n: 1 }).reason, /different finding/, "verify: a reworded finding is not the one he accepted");
 assert.match(verifySolAcceptance({ approval: { ...a1, reason: "" }, record, n: 1 }).reason, /no usable reason/, "verify: the reason is required");
+assert.match(verifySolAcceptance({ approval: { ...a1, reason: "a different reason" }, record, n: 1 }).reason, /recorded reply does not match/, "verify: the reason must be the one his reply gave");
+assert.match(verifySolAcceptance({ approval: { ...a1, reply: "accept 999999 we never sell before switch-on" }, record, n: 1 }).reason, /recorded reply does not match/, "verify: the reply must carry the request's code");
 assert.match(verifySolAcceptance({ approval: a1, record, n: 1, checkReply: () => { throw new Error("picture attached"); } }).reason, /words alone/, "verify: his reply must be words alone");
 const tampered = { ...a1, payload: JSON.stringify({ ...JSON.parse(a1.payload), finding: { ...parsed.findings[0], severity: "BLOCKER" } }) };
 assert.match(verifySolAcceptance({ approval: tampered, record, n: 1 }).reason, /different finding/, "verify: an edited payload is refused");
@@ -154,7 +172,13 @@ assert.equal(got.problem, undefined, `collect: both accepted (${got.problem})`);
 const entry = decisionLogEntry({ record, accepted: got.accepted });
 assert.match(entry, /^## \d{4}-\d{2}-\d{2} — #1688: Mason owner-accepted 2 Sol finding\(s\)/, "log: names the PR");
 assert.match(entry, /\*\*Decision \(Mason, owner-accepted/, "log: a Decision line naming Mason");
-assert.match(entry, /Finding 1 \(HIGH\): src\/pages\/Sales\.tsx:40.*\n  Mason's reason: we never sell before switch-on/, "log: finding text and his reason");
+assert.match(entry, /Finding 1 \(HIGH\) at `src\/pages\/Sales\.tsx:40`, text sha256 `[0-9a-f]{16}`.*\n  Mason's reason: we never sell before switch-on/, "log: location, hash and his reason");
+assert.equal(entry.includes("skips the registration check"), false, "log: never publishes the finding's wording (an unfixed hole)");
+assert.equal(entry.includes(textHash(parsed.findings[0].text)), true, "log: the hash names the exact text");
+assert.match(entry, /\n\n\*\*What this implies/, "log: the closing paragraph is its own paragraph");
+assert.equal(findingLocation("prose with no file"), "(location not stated)", "log: no location, none invented");
+assert.deepEqual(gateFilesIn(["src/a.ts", ".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "docs/a.md", "package.json"]),
+  [".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "package.json"], "gate files: hooks, the proof writer and package.json are refused");
 assert.equal(decisionLogEntry({ record, accepted: got.accepted }), entry, "log: deterministic");
 const log = "# Decision Log\n\nIntro.\n\n## 2026-11-09 — older\n\nbody\n";
 assert.equal(insertDecisionEntry(log, entry), `# Decision Log\n\nIntro.\n\n${entry}## 2026-11-09 — older\n\nbody\n`, "log: newest first");
@@ -172,5 +196,12 @@ assert.equal(proofValid(proof, H2, NOW, "d".repeat(40)), false, "gate: not for a
 assert.equal(proofValid({ ...proof, owner_accepted: [] }, H2, NOW, BASE), false, "gate: no acceptances, no proof");
 assert.equal(proofValid({ ...proof, carry: { ...proof.carry, from_base: "d".repeat(40) } }, H2, NOW, BASE), false, "gate: the base cannot move");
 assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gate: expires with the Sol run it came from");
+
+// A later carry (a main merge, a restamp, post-apply records) keeps the acceptance on record.
+const chained = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: BASE, source: proof, mode: "post_apply", timestamp: iso(NOW) });
+assert.equal(chained.carry.root_review.owner_accepted, true, "chain: the root review stays marked owner-accepted");
+assert.deepEqual(chained.owner_accepted, proof.owner_accepted, "chain: the acceptances travel with the proof");
+assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: BASE, source: { head_sha: H1, base_sha: BASE, timestamp: iso(NOW) }, mode: "restamp" }), false,
+  "chain: an ordinary carry gains no acceptance");
 
 console.log("sol-accept-lib.test.mjs: all assertions passed");

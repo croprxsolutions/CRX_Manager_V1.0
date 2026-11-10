@@ -69,6 +69,8 @@ import { findCodeRabbitSkip, skipStateDirs } from "../.claude/hooks/coderabbit-s
 import {
   assertOwnerTrustFilesReviewed,
   assertReplyAlone,
+  OWNER_TRUST_FILES,
+  OWNER_TRUST_ROOT,
 } from "../.claude/hooks/owner-approval-lib.mjs";
 import {
   blockersRecordName,
@@ -77,8 +79,10 @@ import {
   collectAcceptances,
   DECISION_LOG_PATH,
   decisionLogEntry,
+  gateFilesIn,
   insertDecisionEntry,
   parseSolFindings,
+  SOL_FINDING_COUNT_TOKEN,
   SOL_FINDING_TOKEN,
   solAcceptFileName,
 } from "../.claude/hooks/sol-accept-lib.mjs";
@@ -1038,6 +1042,8 @@ function clearCodexPushProof({ root, headSha }) {
   if (!headSha) return;
   const proofPath = codexPushProofPath(root, headSha);
   if (existsSync(proofPath)) unlinkSync(proofPath);
+  // An earlier run's findings never outlive a later run on the same head.
+  rmSync(path.join(root, ".claude", "session-state", blockersRecordName(headSha)), { force: true });
 }
 
 // ── Codex invocation ─────────────────────────────────────────────────────────
@@ -1114,6 +1120,7 @@ export function buildCodexReviewPrompt({ base = GUARDED_BASE, appliedHistory = [
     "above, in exactly this form (the owner may accept one by its number):",
     `  ${SOL_FINDING_TOKEN} <n> <BLOCKER|HIGH>: <file:line> - <one-sentence summary>`,
     `Write no ${SOL_FINDING_TOKEN} line for a MED or LOW finding, and none at all when nothing is BLOCKER or HIGH.`,
+    `After them, one line stating how many BLOCKER and HIGH findings you reported in total: ${SOL_FINDING_COUNT_TOKEN} <k>`,
     "Then end your reply with EXACTLY ONE final line, and NOTHING",
     "after it, choosing based ONLY on your own judgement:",
     `  ${CODEX_VERDICT_TOKEN}: CLEAN     — no blocker/high-severity problems (minor follow-ups are fine)`,
@@ -2034,6 +2041,9 @@ export function buildCarryForwardProof({
   overlap = [],
   timestamp = new Date().toISOString(),
 }) {
+  const rootReview = source.carried_forward === true && source.carry?.root_review
+    ? source.carry.root_review
+    : { head_sha: source.head_sha, base_sha: source.base_sha, timestamp: source.timestamp, ...(mode === "owner_accepted" ? { owner_accepted: true } : {}) };
   return {
     // Not a full review of this head — said plainly so nobody mistakes it for one.
     codex_ran: false,
@@ -2049,21 +2059,27 @@ export function buildCarryForwardProof({
       from_head: source.head_sha,
       from_base: source.base_sha,
       from_timestamp: source.timestamp,
-      // The full review at the root of a carry chain.
-      root_review: source.carried_forward === true && source.carry?.root_review
-        ? source.carry.root_review
-        : { head_sha: source.head_sha, base_sha: source.base_sha, timestamp: source.timestamp },
+      // The full review at the root of a carry chain (owner_accepted: true when that review
+      // found BLOCKER/HIGH findings Mason accepted by name, which every later carry keeps).
+      root_review: rootReview,
       overlap,
     },
+    ...(Array.isArray(source.owner_accepted) ? { owner_accepted: source.owner_accepted } : {}),
   };
 }
 
-export function buildCollisionCheckPrompt() {
+const priorReviewLines = (ownerAccepted) => ownerAccepted
+  ? ["The candidate branch's own changes were already reviewed by an independent",
+    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review, which found BLOCKER/HIGH findings that the owner accepted by name`,
+    "as business non-issues (they are NOT fixed; do not re-report them). That review ran against an older main. Main has since gained new"]
+  : ["The candidate branch's own changes were already reviewed clean by an independent",
+    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`];
+
+export function buildCollisionCheckPrompt({ ownerAccepted = false } = {}) {
   return [
     "You are performing a focused MERGE-COLLISION check for CRX Manager. This is NOT a full review.",
     "",
-    "The candidate branch's own changes were already reviewed clean by an independent",
-    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`,
+    ...priorReviewLines(ownerAccepted),
     "commits, and the branch was updated by a conflict-free merge of the new main with no other",
     "edits (verified mechanically before this check). This directory is a sanitized, Git-free packet:",
     "  BASE_SNAPSHOT/ is the exact NEW main tree.",
@@ -2323,7 +2339,7 @@ function runCarryForward(root, options) {
     baseRef: GUARDED_BASE,
     baseSha: facts.baseSha,
     headSha: facts.headSha,
-    prompt: buildCollisionCheckPrompt(),
+    prompt: buildCollisionCheckPrompt({ ownerAccepted: facts.source?.carry?.root_review?.owner_accepted === true }),
     label: "collision check",
     files: {
       "MAIN_DELTA.patch": delta.stdout || "",
@@ -2720,7 +2736,7 @@ function runCarryPostApply(root, options) {
       baseRef: facts.fromHead,
       baseSha: facts.fromHead,
       headSha: facts.headSha,
-      prompt: buildPostApplyCheckPrompt(),
+      prompt: buildPostApplyCheckPrompt({ ownerAccepted: facts.source?.carry?.root_review?.owner_accepted === true }),
       label: "post-apply records check",
       files: {
         "RECORDS_FOCUS.json": `${JSON.stringify({
@@ -2748,11 +2764,13 @@ function postApplyPrMigrations(root, facts) {
   return String(listed || "").split(/\r?\n/).filter((file) => /^supabase\/migrations\/[^/]+\.sql$/.test(file));
 }
 
-export function buildPostApplyCheckPrompt() {
+export function buildPostApplyCheckPrompt({ ownerAccepted = false } = {}) {
   return [
     "You are performing a focused POST-APPLY RECORDS check for CRX Manager. This is NOT a full review.",
     "",
-    "The PR's changes were already reviewed clean by an independent",
+    ownerAccepted
+      ? "The PR's changes were already reviewed (BLOCKER/HIGH findings the owner accepted by name, not fixed) by an independent"
+      : "The PR's changes were already reviewed clean by an independent",
     `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review. Its migration was then applied live, and ONE commit`,
     "updated the records. A mechanical check already confirmed that commit touches only migration records,",
     "changelog notes, docs/manual/KNOWN_ISSUES.md, .claude/schema-registry.json, and allowlist entries in",
@@ -2894,8 +2912,6 @@ function saveBlockersRecord(root, headSha, baseSha, stdout) {
   );
 }
 
-const latin1ToUtf8 = (text) => Buffer.from(String(text), "latin1").toString("utf8").replace(/\r\n/g, "\n");
-
 // --carry-owner-accepted: HEAD is ONE commit on top of the reviewed head that only adds
 // the DECISION_LOG.md entry for Mason's acceptances, and every BLOCKER/HIGH of that run
 // carries a valid acceptance. Writes a carried proof bound to HEAD; refuses anything else.
@@ -2916,6 +2932,10 @@ function runCarryOwnerAccepted(root, options) {
   const record = readJson(blockersRecordName(fromHead));
   const recordProblem = blockersRecordProblem(record, { headSha: fromHead, nowMs: Date.now() });
   if (recordProblem) return refuse(`${recordProblem} (${fromHead.slice(0, 12)})`);
+  const prFiles = runGit(["diff", "--name-only", "--no-renames", `${record.base_sha}...${fromHead}`], { cwd: root, fallback: null });
+  if (prFiles === null) return refuse("could not list the pull request's files");
+  const gates = gateFilesIn(String(prFiles).split(/\r?\n/).filter(Boolean));
+  if (gates.length) return refuse(`the pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}), which a not-clean Sol review cannot vouch for`);
   const got = collectAcceptances({ record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), checkReply: assertReplyAlone });
   if (got.problem) return refuse(got.problem);
   let entries;
@@ -2923,13 +2943,19 @@ function runCarryOwnerAccepted(root, options) {
   if (entries.length !== 1 || entries[0].path !== DECISION_LOG_PATH || entries[0].oldMode !== "100644" || entries[0].newMode !== "100644") {
     return refuse(`the commit on top of the reviewed head must change only ${DECISION_LOG_PATH}`);
   }
-  const before = gitBlob(root, fromHead, DECISION_LOG_PATH);
-  const after = gitBlob(root, headSha, DECISION_LOG_PATH);
-  if (before === null || after === null) return refuse(`${DECISION_LOG_PATH} could not be read`);
-  if (latin1ToUtf8(after) !== insertDecisionEntry(latin1ToUtf8(before), decisionLogEntry({ record, accepted: got.accepted }))) {
+  const before = gitBlobUtf8(root, fromHead, DECISION_LOG_PATH);
+  const after = gitBlobUtf8(root, headSha, DECISION_LOG_PATH);
+  if (before === null || after === null) return refuse(`${DECISION_LOG_PATH} could not be read as UTF-8`);
+  if (after.replace(/\r\n/g, "\n") !== insertDecisionEntry(before, decisionLogEntry({ record, accepted: got.accepted }))) {
     return refuse(`${DECISION_LOG_PATH} must gain exactly the entry \`node scripts/owner-accept-sol-finding.mjs --log\` writes, and nothing else`);
   }
-  try { assertOwnerTrustFilesReviewed({ head: headSha, root }); } catch (error) { return refuse(error.message); }
+  // The code running now (wherever it was started from) must be the bytes committed at this head.
+  try {
+    assertOwnerTrustFilesReviewed({
+      head: headSha, root, files: [...OWNER_TRUST_FILES, "scripts/write-codex-push-proof.mjs"],
+      readOnDisk: (rel) => readFileSync(path.join(OWNER_TRUST_ROOT, ...rel.split("/")), "utf8"),
+    });
+  } catch (error) { return refuse(error.message); }
   process.stdout.write(
     `Owner-accepted carry: reviewed head ${fromHead.slice(0, 12)} → head ${headSha.slice(0, 12)} (base ${record.base_sha.slice(0, 12)}); ` +
     `Mason accepted all ${record.findings.length} BLOCKER/HIGH finding(s).\n`,

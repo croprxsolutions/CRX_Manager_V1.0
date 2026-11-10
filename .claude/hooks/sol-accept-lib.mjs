@@ -17,9 +17,12 @@
 // The same trust boundary as Mason's migration approval (owner-approval-lib.mjs
 // header): it stops a mistaken or relayed acceptance, not an agent forging files.
 
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 export const SOL_FINDING_TOKEN = "SOL_FINDING";
+// Sol states how many BLOCKER/HIGH findings it reported, so a list that drops one is refused.
+export const SOL_FINDING_COUNT_TOKEN = "SOL_FINDING_COUNT";
 export const SOL_BLOCKERS_PURPOSE = "crx-sol-blockers-v1";
 export const OWNER_SOL_ACCEPT_PURPOSE = "crx-owner-sol-accept-v1";
 export const OWNER_SOL_ACCEPT_VIA = "chat-reply-accept";
@@ -43,18 +46,29 @@ const FINDING_RE = new RegExp(`^${SOL_FINDING_TOKEN}\\s+(\\d{1,2})\\s+(BLOCKER|H
  * Numbers must run 1..k with no gap or repeat, and every line naming the token must match,
  * so the count cannot be read wrong. { findings } or { problem }.
  */
+const COUNT_RE = new RegExp(`^${SOL_FINDING_COUNT_TOKEN}:?\\s+(\\d{1,2})$`);
+// A markdown list mark, bold or code span Sol may wrap a line in.
+const unwrap = (line) => line.replace(/^(?:[-*]\s+)?(?:\*\*|`)?/, "").replace(/(?:\*\*|`)$/, "").trim();
+
 export function parseSolFindings(stdout) {
-  const lines = String(stdout || "").split(/\r?\n/).map((l) => l.trim()).filter((l) => l.includes(SOL_FINDING_TOKEN));
+  const lines = String(stdout || "").split(/\r?\n/).map((l) => unwrap(l.trim())).filter((l) => l.includes(SOL_FINDING_TOKEN));
   const findings = [];
+  const counts = [];
   for (const line of lines) {
+    const c = COUNT_RE.exec(line);
+    if (c) { counts.push(Number(c[1])); continue; }
     const m = FINDING_RE.exec(line);
     if (!m) return { problem: `a ${SOL_FINDING_TOKEN} line is not in the required form: ${line.slice(0, 80)}` };
     const text = m[3].trim();
     if (text.length > MAX_TEXT) return { problem: `finding ${m[1]} is longer than ${MAX_TEXT} characters` };
+    if (BREAK_RE.test(text)) return { problem: `finding ${m[1]} contains a line break` };
     findings.push({ n: Number(m[1]), severity: m[2], text });
   }
   if (!findings.length) return { problem: `Sol listed no ${SOL_FINDING_TOKEN} lines` };
   if (findings.some((f, i) => f.n !== i + 1)) return { problem: `the ${SOL_FINDING_TOKEN} numbers do not run 1..${findings.length}` };
+  if (counts.length !== 1 || counts[0] !== findings.length) {
+    return { problem: `Sol's ${SOL_FINDING_COUNT_TOKEN} line is missing or does not match its ${findings.length} listed finding(s)` };
+  }
   return { findings };
 }
 
@@ -101,7 +115,27 @@ export function acceptFromReply(prompt) {
   const m = ACCEPT_RE.exec(String(prompt ?? "").replace(/\s+$/, ""));
   if (!m) return null;
   const reason = m[2].replace(/^[\s:,\-–—]+/, "").trim();
-  return { code: m[1], reason: reason.length > 300 ? reason.slice(0, 300) : reason };
+  return { code: m[1], reason };
+}
+
+export const MAX_REASON = 300;
+/**
+ * null when `reason` may be published as Mason's reason, otherwise why not. The log is public:
+ * no money amounts, emails or phone numbers (AGENTS.md › Knowledge Vaults), no `#<number>`
+ * (it would name another PR to the Sol round-cap check), and no markup or invisible characters.
+ * shortcut: customer names cannot be detected; the summary asks him to leave them out.
+ */
+export function reasonProblem(reason) {
+  const r = String(reason ?? "");
+  if (BREAK_RE.test(r)) return "the reason must be one line";
+  if (r.trim().split(/\s+/).filter(Boolean).length < 2) return "give a reason of at least two words";
+  if (r.length > MAX_REASON) return `keep the reason under ${MAX_REASON} characters`;
+  if (/\$\s*\d|\d\s*(?:dollars?|usd)\b/i.test(r)) return "leave money amounts out of the reason (the log is public)";
+  if (/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(r)) return "leave email addresses out of the reason (the log is public)";
+  if (/(?:\d[\s().-]*){7,}/.test(r)) return "leave phone numbers and long numbers out of the reason (the log is public)";
+  if (/#\s*\d/.test(r)) return "leave #numbers out of the reason";
+  if (/[<>`|[\]]/.test(r) || /\p{Cf}/u.test(r)) return "leave markup characters (< > ` | [ ]) out of the reason";
+  return null;
 }
 
 /** True when one LINE of a longer message is an accept reply (said out loud, never silent). */
@@ -117,11 +151,12 @@ export function solAcceptSummary(p) {
     `Finding ${p.finding?.n} of ${p.findingCount} (${p.finding?.severity}): ${p.finding?.text}`,
     "",
     "If you accept it, the pull request may land without fixing it.",
-    `Your reason is written word for word in ${DECISION_LOG_PATH}, which is public.`,
+    `Your reason and the finding's file and line are written in ${DECISION_LOG_PATH}, which is public:`,
+    "leave out customer names, money amounts and contact details. The finding's wording stays private.",
     "Every other finding and every other safety check still applies.",
     "",
     `To accept, reply: accept ${p.code} followed by your reason`,
-    `(for example: accept ${p.code} we never sell before switch-on)`,
+    `(for example: accept ${p.code} this case cannot happen in our business)`,
     `Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
@@ -168,7 +203,11 @@ export function verifySolAcceptance({ approval, record, n, checkReply }) {
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
   if (JSON.stringify(p.summary) !== JSON.stringify(solAcceptSummary(p))) return no("what Mason was shown does not match what the acceptance covers");
   const reason = String(approval.reason ?? "").trim();
-  if (reason.length < 3 || BREAK_RE.test(reason)) return no("it carries no usable reason");
+  const bad = reasonProblem(reason);
+  if (bad) return no(`it carries no usable reason (${bad})`);
+  // The recorded reply must itself say this code and this reason.
+  const said = acceptFromReply(approval.reply);
+  if (!said || said.code !== p.code || said.reason !== reason) return no("the recorded reply does not match the acceptance");
   const issued = Date.parse(p.issuedAt);
   const deadline = Date.parse(p.expiresAt);
   const approved = Date.parse(approval.approvedAt);
@@ -196,15 +235,28 @@ export function decisionLogEntry({ record, accepted }) {
       `(base \`${String(record.base_sha).slice(0, 12)}\`) found ${record.findings.length} BLOCKER/HIGH finding(s). ` +
       "Mason accepted each one as a business non-issue, so the PR may land without fixing them.",
     ...accepted.flatMap((a) => [
-      `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}): ${a.payload.finding.text}`,
+      `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
+        `text sha256 \`${textHash(a.payload.finding.text)}\` (the wording stays with the proof, not here)`,
       `  Mason's reason: ${a.reason} (ref ${String(a.payload.nonce).slice(0, 12)})`,
     ]),
-    "**What this implies:** the owner-accepted Sol proof covers only that review plus the one commit that adds this entry. " +
+    "",
+    "**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, " +
+      "and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). " +
       "Any later change on the Sol list needs a normal Sol review.",
     "",
     "",
   ].join("\n");
 }
+
+/**
+ * The finding's `file:line` for the public log, never its wording: an accepted finding is
+ * unfixed, and AGENTS.md forbids publishing how to exploit a hole before its fix is live.
+ */
+export function findingLocation(text) {
+  const m = /^([\w./@+-]+(?::\d+(?:-\d+)?)?)(?=\s|$)/.exec(String(text ?? ""));
+  return m && /[./]/.test(m[1]) ? `\`${m[1]}\`` : "(location not stated)";
+}
+export const textHash = (text) => createHash("sha256").update(String(text), "utf8").digest("hex").slice(0, 16);
 
 /** `log` with `entry` inserted before its first `## ` entry (newest first), LF line endings. */
 export function insertDecisionEntry(log, entry) {
@@ -228,6 +280,13 @@ export function collectAcceptances({ record, readAcceptance, checkReply }) {
   if (new Set(accepted.map((a) => a.payload.pullRequest)).size !== 1) return { problem: "the acceptances name different pull requests" };
   return { accepted };
 }
+
+// A head whose Sol review was NOT clean cannot vouch for the code that checks Mason's
+// acceptance: a PR that changes any gate, hook or approval file cannot use this path.
+const GATE_PATH_RES = [/^\.claude\/hooks\//, /^\.codex\//, /^\.husky\//, /^\.github\//, /^scripts\/lib\//,
+  /^scripts\/write-codex-push-proof/, /^scripts\/owner-accept-sol-finding/, /^scripts\/owner-approve-migration/,
+  /^scripts\/write-apply-proofs/, /^scripts\/apply-migration-file/, /^package(?:-lock)?\.json$/];
+export const gateFilesIn = (paths) => paths.filter((p) => GATE_PATH_RES.some((re) => re.test(p)));
 
 /** The session-state folder of a checkout. */
 export const stateDirOf = (root) => path.join(root, ".claude", "session-state");

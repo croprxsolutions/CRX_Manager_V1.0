@@ -2335,7 +2335,7 @@ not json
     write(".gitignore", ".claude/session-state/\n");
     write(LOG, "# Decision Log\n\nNewest first.\n\n## 2026-11-09 — an older decision\n\nbody\n");
     // The proof writer checks the files that build and check Mason's acceptance are the committed bytes.
-    for (const rel of OWNER_TRUST_FILES) write(rel, readFileSync(path.join(OWNER_TRUST_ROOT, ...rel.split("/")), "utf8"));
+    for (const rel of [...OWNER_TRUST_FILES, "scripts/write-codex-push-proof.mjs"]) write(rel, readFileSync(path.join(OWNER_TRUST_ROOT, ...rel.split("/")), "utf8"));
     const base = commitAll("base");
     git("update-ref", "refs/remotes/origin/main", base);
     git("switch", "-q", "-c", "feature");
@@ -2343,7 +2343,7 @@ not json
     const reviewed = commitAll("pr change");
 
     // What a BLOCKERS run leaves, and Mason's two accept replies.
-    const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\n").findings;
+    const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
     const accept = (n, code, reason) => {
@@ -2395,6 +2395,19 @@ not json
     };
     refused("a code change beside the log", () => write("src/sale.ts", "export const sell = () => 2;\n"), /must change only docs\/manual\/DECISION_LOG\.md/);
     refused("an edited entry", () => write(LOG, readFileSync(file(LOG), "utf8").replace("not a live SaaS yet", "approved by everyone")), /must gain exactly the entry/);
+    assert.equal(readFileSync(file(LOG), "utf8").includes("a sale before switch-on is not checked"), false, "owner-accepted e2e: the finding's wording is never published");
+    // A PR that changes gate code cannot vouch for it with a not-clean review.
+    git("reset", "-q", "--hard", logHead);
+    git("switch", "-q", "-c", "gate-pr", base);
+    write(".claude/hooks/sol-accept-lib.mjs", `${readFileSync(file(".claude/hooks/sol-accept-lib.mjs"), "utf8")}// changed\n`);
+    const gateHead = commitAll("pr changes a gate");
+    writeFileSync(path.join(stateDir, blockersRecordName(gateHead)), JSON.stringify(buildBlockersRecord({ headSha: gateHead, baseSha: base, findings })));
+    write(LOG, `${readFileSync(file(LOG), "utf8")}x\n`);
+    commitAll("log");
+    const gate = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(gate.status, 1, "owner-accepted e2e: a PR that changes gate files is refused");
+    assert.match(gate.stderr, /changes gate or approval files \(\.claude\/hooks\/sol-accept-lib\.mjs\)/);
+    git("switch", "-q", "feature");
     // A fresh Sol run on the same head voids every acceptance of the earlier run.
     writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
     git("reset", "-q", "--hard", logHead);

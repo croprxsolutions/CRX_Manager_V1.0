@@ -173,7 +173,7 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
    *  authority the client must equal. Reproduces BOTH CASE statements verbatim,
    *  including every fl-oz / pound / ton spelling and NULL-on-unrecognized. */
   function serverGlLb(q: number, unit: string, form: 'liquid' | 'dry'): { value: number; unit: 'gal' | 'lb' } | null {
-    const u = unit.trim().toUpperCase();
+    const u = unit.replace(/^ +| +$/g, '').toUpperCase(); // SQL btrim strips spaces only, never tabs or line breaks
     if (form === 'dry') {
       const f = (u === 'OZ' || u === 'OUNCE' || u === 'OUNCES') ? 1 / 16
         : (u === 'LB' || u === 'LBS' || u === 'POUND' || u === 'POUNDS') ? 1
@@ -194,6 +194,19 @@ describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (se
     expect(toGallonOrLbEquivalent(80, 'oz', 'liquid')).toEqual({ value: 0.625, unit: 'gal' });
     expect(toGallonOrLbEquivalent(80, 'oz')).toEqual({ value: 5, unit: 'lb' }); // legacy/no-form path (unchanged)
     expect(toGallonOrLbEquivalent(80, 'oz', 'liquid')).toEqual(serverGlLb(80, 'oz', 'liquid'));
+  });
+
+  it('unit cleaning matches the server btrim: edge spaces are stripped, a tab or line break is not', () => {
+    expect(toGallonOrLbEquivalent(16, '\tlb\n', 'dry')).toBeNull();
+    expect(serverGlLb(16, '\tlb\n', 'dry')).toBeNull();
+    expect(toGallonOrLbEquivalent(4, '\tqt', 'liquid')).toBeNull();
+    expect(serverGlLb(4, '\tqt', 'liquid')).toBeNull();
+    expect(toGallonOrLbEquivalent(16, '  lb  ', 'dry')).toEqual(serverGlLb(16, '  lb  ', 'dry'));
+    expect(toGallonOrLbEquivalent(4, '  qt  ', 'liquid')).toEqual({ value: 1, unit: 'gal' });
+    expect(toGallonOrLbEquivalent(4, '  qt  ', 'liquid')).toEqual(serverGlLb(4, '  qt  ', 'liquid'));
+    // field_app_priced_quantity uses the same btrim, so the priced preview follows the same rule.
+    expect(fieldAppPricedQuantity(4, '  qt  ', 'Gal', 'liquid')).toBe(1);
+    expect(fieldAppPricedQuantity(4, '\tqt', 'Gal', 'liquid')).toBeNull();
   });
 
   it('LIQUID qt / pt / gal → GALLONS, equal to the server', () => {

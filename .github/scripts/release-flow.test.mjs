@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -165,4 +165,25 @@ test('changelogSection returns one version\'s notes from CHANGELOG.md', () => {
   assert.equal(changelogSection(md, 'v0.3.0'), null);
   assert.equal(changelogSection(md, 'v0.1.00'), null);
   assert.equal(changelogSection('## v1.2.3+build.4 (2026-12-15)\n\n* x (#9)\n', 'v1.2.3+build.4'), '* x (#9)');
+});
+
+test('releaseVersion keeps a typed version only if it is newer than everything shipped', () => {
+  assert.equal(releaseVersion('release: v1.0.0', ['v0.2.0']), 'v1.0.0');
+  assert.equal(releaseVersion('release: v0.1.0', ['v0.2.0']), 'v0.3.0');
+  assert.equal(releaseVersion('release: v0.2.0', ['v0.2.0']), 'v0.3.0');
+  assert.equal(releaseVersion('release: v0.2.1', ['v0.2.0']), 'v0.2.1');
+  assert.equal(releaseVersion(undefined, ['v0.2.0', 'v0.0.0']), 'v0.3.0');
+});
+
+test('usersSee ignores the template placeholder and indented headings end the list', () => {
+  const tpl = '## What users see\nWhat users see: <one plain sentence, or "None">\n- Real change\n  ## Follow-ups\n- None';
+  assert.deepEqual(usersSee(tpl), ['Real change']);
+  assert.deepEqual(usersSee('What users see: <one plain sentence>'), []);
+});
+
+test('prState: held-off needs its reason even when also verified', () => {
+  assert.equal(prState({ labels: ['held-off', 'verified-on-staging'], body: 'Staging proof: https://x.example' }), 'missing');
+  assert.equal(prState({ labels: ['held-off'], body: 'Held off: #12' }), 'held');
+  assert.equal(prState({ labels: ['verified-on-staging'], body: '' }), 'missing');
+  assert.equal(prState({ labels: ['on-staging'], body: '' }), 'unverified');
 });

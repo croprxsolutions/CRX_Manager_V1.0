@@ -21,8 +21,8 @@
 --   P  A rate change keeps every field of the draft's lines (rate per acre, acres, price source)
 --   Q  A new empty chemical-sale draft records its customer's rate at commit
 --   R  A field application draft whose total is not the sum of its lines: editing a line never changes its total
---   S  A chemical sale drafted and posted in one transaction still records its rate (0%), so unposting after the
---      customer moves to 5% keeps the posted amount
+--   S  A chemical sale drafted and posted in one transaction still records its rate (0%), also when the customer moves
+--      to 5% before that transaction commits, so unposting keeps the posted amount
 --   T  The office's rate can't change on an unposted invoice (draft only), so posted amounts never move
 --   U  A discounted draft switched to misc charge and posted before any commit point is refused
 --   V  A chemical sale written already posted, with its lines, in one transaction for a 3% customer: refused at commit
@@ -617,9 +617,14 @@ BEGIN
       'smk-dss-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; same-transaction post');
     SELECT id INTO v_invoice FROM invoices WHERE delivery_id = v_delivery AND invoice_type <> 'credit_memo';
     PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-dss-post-' || v_suffix);
-    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
     v_off := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    -- The customer's rate changes in the same transaction, before its commit: the sale keeps the 0% it was created at.
     UPDATE customers SET standing_discount_pct = 5 WHERE id = v_payer2;
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_invoice) IS DISTINCT FROM 0 THEN
+      v_fails := v_fails || format(' (S) the posted sale recorded %s%%, want the 0%% it was created at;',
+        (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_invoice));
+    END IF;
     PERFORM unpost_invoice(v_invoice, v_admin, 'smk-dss-unpost-' || v_suffix);
     SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
     IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_off THEN

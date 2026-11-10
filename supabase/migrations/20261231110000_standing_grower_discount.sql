@@ -324,17 +324,41 @@ CREATE FUNCTION public._standing_discount_after_invoice_change_20261231()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-  -- A draft moved to another customer drops a rate it copied from the old one (an office rate stays), so the
-  -- recompute records the new customer's. An unposted invoice keeps its rate, so its posted amounts don't move.
-  IF TG_OP = 'UPDATE' AND OLD.customer_id IS DISTINCT FROM NEW.customer_id AND NEW.status = 'draft' THEN
-    DELETE FROM invoice_standing_discount_rates WHERE invoice_id = NEW.id AND set_by IS NULL;
-  END IF;
   PERFORM public._recompute_standing_discount_20261231(NEW.id);
   RETURN NULL;
 END
 $function$;
 
 REVOKE ALL ON FUNCTION public._standing_discount_after_invoice_change_20261231() FROM PUBLIC, anon, authenticated;
+
+-- The rate is recorded at once, not at commit: a chemical sale created gets its customer's rate as it is now, and a
+-- draft moved to another customer drops a rate it copied from the old one (an office rate on it stays) and copies the
+-- new customer's. A later rate change in the same transaction can't reach it. An unposted invoice keeps its rate,
+-- so its posted amounts don't move.
+CREATE FUNCTION public._standing_discount_record_rate_20261231()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.customer_id IS DISTINCT FROM NEW.customer_id AND NEW.status = 'draft' THEN
+    DELETE FROM invoice_standing_discount_rates WHERE invoice_id = NEW.id AND set_by IS NULL;
+  END IF;
+  IF NEW.invoice_type = 'chemical_sale' THEN
+    INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by)
+    SELECT NEW.id, COALESCE(c.standing_discount_pct, 0), NULL FROM customers c WHERE c.id = NEW.customer_id
+    ON CONFLICT (invoice_id) DO NOTHING;
+  END IF;
+  RETURN NULL;
+END
+$function$;
+
+REVOKE ALL ON FUNCTION public._standing_discount_record_rate_20261231() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER invoices_standing_discount_rate_20261231
+  AFTER INSERT OR UPDATE OF customer_id, invoice_type ON public.invoices
+  FOR EACH ROW EXECUTE FUNCTION public._standing_discount_record_rate_20261231();
 
 -- A new draft records its customer's rate; a draft moved to another customer, switched in type or unposted is
 -- checked again (an unposted invoice keeps its recorded rate, so its posted amounts don't move).

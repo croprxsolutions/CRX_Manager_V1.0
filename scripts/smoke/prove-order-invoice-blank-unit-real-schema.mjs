@@ -189,8 +189,10 @@ function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
 }
+let CREATED = false; // remove only a container this run created
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--label', 'crx-prover=order-unit', '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  CREATED = true;
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -550,4 +552,4 @@ function main() {
 }
 
 try { main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP && !REUSE && CREATED) docker(['rm', '-f', NAME], { allowFailure: true }); }

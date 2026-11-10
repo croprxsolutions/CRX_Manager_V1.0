@@ -143,3 +143,8 @@ Every flow runs through the real RPCs as the signed-in user (the API role), roll
     unit and its return is refused (Sol r2's case). Proved: hand-replaced lines (product with and without a unit) and
     the empty-text legacy line.
   - LOW, line names dropped from the screen message: deferred, as in r2.
+- **Luna r2** (whole branch after Mason's call; 2 MED, 3 LOW, no BLOCKER/HIGH): empty-text legacy return refused is
+  Mason's accepted cost (above); a line written in the same instant as a post, and an order line edited between the
+  order-invoice check and copy, are the existing race class every post-time line check shares (deferred, LOW; the
+  order path cannot bill a product line today); line names in the screen message deferred; the prover now removes
+  only a container it created (fixed).

@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { validateBlendMath } from './blendMathValidator';
 
 describe('validateBlendMath', () => {
+  it('warns when the sold unit is nothing but invisible characters, which billing cannot read (KI-16)', () => {
+    const warnings = validateBlendMath({ total_acres: null } as never, [
+      { product_name: 'Atrazine', quantity: 200, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: 'oz/ac', product_form: 'liquid',
+        product_rate_unit: null, product_inventory_unit: String.fromCharCode(0x200b) },
+    ]);
+    expect(warnings.some((w) => /only invisible characters/.test(w.message))).toBe(true);
+  });
+
   it('keeps matching seed units but flags seed conversions before billing', () => {
     const ticket = { total_acres: 10, total_volume: null, total_volume_unit: null, application_rate: null };
     const seed = { product_name: 'Seed', quantity: 20, unit: 'Lb', rate_per_acre: 2,
@@ -572,77 +580,48 @@ describe('validateBlendMath', () => {
       expect(warnings[0].message).toContain('200.00');
     });
 
-    // These pin the CLIENT/SERVER PARITY contract, and they are the reason
-    // `rateBaseUnit` deliberately does not reuse `normalizeUnit`'s zero-width strip.
-    //
-    // PR #426 taught `normalizeUnit` to delete zero-width characters, which is right:
-    // that function only ever compares two client-side strings. `rateBaseUnit` is a
-    // different animal — it predicts the live `normalize_rate_unit`, which is
-    // `lower(btrim(...))` plus a CASE. `btrim` strips OUTER SPACES ONLY, so the
-    // database keeps 'm<ZWSP>g' intact, matches no size table, and
-    // `create_invoice_from_blend_ticket` raises BLEND_TICKET_UNIT_UNCONVERTIBLE.
-    //
-    // So the CORRECT behaviour on a pasted unit is to refuse it here too, loudly and
-    // early, rather than to close the character up and let a ticket look invoice-ready
-    // that the database will later reject. A first pass at this branch stripped them
-    // here and was caught by gpt-5.6-sol (CRX-MONEY-PARITY-001, PR #439); the live
-    // `pg_proc.prosrc` was then read directly to confirm it. If the SQL is ever
-    // hardened to close zero-width up, relax this in the SAME change — never one side.
-    describe('zero-width characters must not out-run the database', () => {
+    // These pin the CLIENT/SERVER PARITY contract. `rateBaseUnit` predicts the live
+    // `normalize_rate_unit`, which since 20261231100000 (KI-16) folds invisible characters
+    // (zero-width deleted, non-breaking spaces read as spaces) before it trims. So a pasted
+    // 'm<ZWSP>g' now closes up to 'mg' on both sides; before that migration both sides kept
+    // it intact and refused it (CRX-MONEY-PARITY-001, PR #439). Change one side, change both.
+    describe('zero-width characters close up, as the database does (KI-16, 20261231100000)', () => {
       const ZWSP = String.fromCharCode(0x200b);
       const ZWNJ = String.fromCharCode(0x200c);
       const ZWJ = String.fromCharCode(0x200d);
       const BOM = String.fromCharCode(0xfeff);
+      const NBSP = String.fromCharCode(0x00a0);
 
-      it('refuses a zero-width RATE unit, exactly as the database will', () => {
-        // Arithmetically this is the correct ticket — 2 lb/ac × 100 ac = 3200 dry oz —
-        // and it still must NOT come back clean, because live cannot price 'l<ZWSP>b'.
+      it('prices a zero-width RATE unit as the plain unit, as normalize_rate_unit now does', () => {
+        // 2 lb/ac × 100 ac = 3200 dry oz: a correct ticket, and live now bills 'l<ZWSP>b' as 'lb'.
         const warnings = validateBlendMath(
           { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
           [{ product_name: 'Dry A', quantity: 3200, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: `l${ZWSP}b`, ...dry }]
         );
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0].level).toBe('unchecked');
-        expect(warnings[0].message).toContain('Not checked');
+        expect(warnings).toHaveLength(0);
       });
 
-      it('refuses a zero-width QUANTITY unit rather than guessing past it', () => {
-        const warnings = validateBlendMath(
-          { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
-          [{ product_name: 'A', quantity: 25600, unit: `o${ZWNJ}z`, rate_per_acre: 2, rate_per_acre_unit: 'gal', ...liquid }]
-        );
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0].level).toBe('unchecked');
+      it('closes up a zero-width QUANTITY unit, a JOINER and a non-breaking space the same way', () => {
+        for (const [unit, rateUnit] of [[`o${ZWNJ}z`, 'gal'], ['oz', `g${ZWJ}al`], ['oz', `${BOM}gal${NBSP}`]]) {
+          const warnings = validateBlendMath(
+            { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
+            [{ product_name: 'A', quantity: 25600, unit, rate_per_acre: 2, rate_per_acre_unit: rateUnit, ...liquid }]
+          );
+          expect(warnings).toHaveLength(0);
+        }
       });
 
-      // U+200D completes the set `ZERO_WIDTH` names (200B/200C/200D/FEFF), so the
-      // joiner gets the same refusal as its two siblings.
-      it('refuses a zero-width JOINER the same way', () => {
-        const warnings = validateBlendMath(
-          { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
-          [{ product_name: 'A', quantity: 25600, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: `g${ZWJ}al`, ...liquid }]
-        );
-        expect(warnings).toHaveLength(1);
-        expect(warnings[0].level).toBe('unchecked');
-      });
-
-      it('reports the refusal as "unchecked", never as a confident wrong number', () => {
-        // 200 oz against 2 gal/ac × 100 ac IS a 128x error, but with a zero-width in
-        // the quantity unit we cannot know that — the units never converted. Saying
-        // 'mismatch' here would be asserting a comparison that never ran.
+      it('still catches a wrong quantity behind a zero-width character, now as a real mismatch', () => {
+        // 200 oz against 2 gal/ac × 100 ac (25600 oz) is a 128x error the units can now prove.
         const warnings = validateBlendMath(
           { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
           [{ product_name: 'A', quantity: 200, unit: `o${ZWSP}z`, rate_per_acre: 2, rate_per_acre_unit: 'gal', ...liquid }]
         );
         expect(warnings).toHaveLength(1);
-        expect(warnings[0].level).toBe('unchecked');
-        expect(warnings[0].message).not.toContain('25600.00');
+        expect(warnings[0].level).toBe('mismatch');
       });
 
-      // The load-bearing one. This warning is TRUE: live really will refuse this
-      // ticket at invoicing, so the operator needs to hear it while the ticket is
-      // still open and the unit can be retyped.
-      it('warns that the invoice WILL fail on a zero-width rate unit', () => {
+      it('no longer warns that the invoice will fail on a zero-width MG rate unit', () => {
         const warnings = validateBlendMath(
           { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
           [{
@@ -650,7 +629,16 @@ describe('validateBlendMath', () => {
             product_form: 'dry', product_rate_unit: 'MG', product_inventory_unit: 'MG',
           }]
         );
-        expect(warnings.some((w) => w.message.includes('fail when you invoice it'))).toBe(true);
+        expect(warnings).toHaveLength(0);
+      });
+
+      it('keeps a non-acre denominator whole, so the ticket is flagged before save refuses it', () => {
+        const warnings = validateBlendMath(
+          { total_acres: 100, total_volume: null, total_volume_unit: null, application_rate: null },
+          [{ product_name: 'A', quantity: 200, unit: 'oz', rate_per_acre: 2, rate_per_acre_unit: 'oz/cwt', ...liquid }]
+        );
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0].level).toBe('unchecked');
       });
 
       // The other side of the same contract: a CLEAN unit must still sail through, or

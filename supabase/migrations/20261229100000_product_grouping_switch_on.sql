@@ -76,6 +76,14 @@ BEGIN
   IF public._product_parent_grouping_open() THEN
     RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: grouping is already switched on';
   END IF;
+  -- The switch being replaced must be the reviewed one (20261123120000's plain SELECT false, owner-only), so no
+  -- extra condition it might carry is dropped silently.
+  IF (SELECT md5(concat_ws('|', md5(replace(p.prosrc, chr(13), '')), p.prosecdef, array_to_string(p.proconfig, ','),
+             array_to_string(p.proacl, ','), p.proowner::regrole::text))
+        FROM pg_proc p WHERE p.oid = 'public._product_parent_grouping_open()'::regprocedure)
+       IS DISTINCT FROM 'ec714430fb2cfd99308b735532cfb4a9' THEN
+    RAISE EXCEPTION 'PRODUCT_GROUPING_SWITCH_ON_PREFLIGHT: the switch changed since review; re-review it first';
+  END IF;
   -- The rule 20261123120000 set for this step: a size grouped while the switch was off must not keep its own
   -- legacy brand rows, because once open its brands are read from the parent's list.
   IF EXISTS (SELECT 1 FROM public.product_brands b JOIN public.product_parent_members m ON m.product_id = b.product_id) THEN

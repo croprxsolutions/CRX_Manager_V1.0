@@ -46,7 +46,8 @@ const LEDGER_ONLY = new Set([
   '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(_product_parent_grouping_open|approve_product_parent_groups|upsert_parent_brand|get_product_grouping_open)/i;
+// Everything the candidate pins: the switch, the seven functions it opens, and every _product_parent_* / _product_name_* helper.
+const TOUCHED = /(_product_parent_|_product_name_|approve_product_parent_groups|upsert_parent_brand|upsert_product_brand|get_product_brands|get_product_grouping_open)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

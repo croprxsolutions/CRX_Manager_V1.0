@@ -84,7 +84,7 @@ export function pickPr(sha, pulls) {
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const SEMVER = /^v(\d+)\.(\d+)\.(\d+)$/;
+const SEMVER = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 // Next tag: a release bumps MINOR, a hotfix bumps PATCH. v1.0.0 (go-live) is typed by hand.
 export function nextVersion(tags, kind) {
@@ -100,7 +100,7 @@ export function nextVersion(tags, kind) {
 
 // The releaser can change the version by editing the PR title to "release: vX.Y.Z".
 export function versionFromTitle(title) {
-  const m = /^release:\s*v(\d+\.\d+\.\d+)\s*$/i.exec(title ?? '');
+  const m = /^release:\s*v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\s*$/i.exec(title ?? '');
   return m ? `v${m[1]}` : null;
 }
 
@@ -263,7 +263,7 @@ const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 async function humanComments(number) {
   const all = [
     ...(await allPages(`/issues/${number}/comments`)),
-    ...(await allPages(`/pulls/${number}/reviews`)),
+    ...(await allPages(`/pulls/${number}/reviews`)).filter((r) => r.state !== 'DISMISSED'),
     ...(await allPages(`/pulls/${number}/comments`)),
   ];
   // On a public repo anyone can comment: only people with access to the repository count.
@@ -303,8 +303,8 @@ export function firstParagraph(body, max = 200) {
 }
 
 function summaryMarkdown(prs, gate) {
-  const verified = prs.filter((p) => p.labels.includes('verified-on-staging')).length;
-  const held = prs.filter((p) => p.labels.includes('held-off')).length;
+  const verified = prs.filter((p) => prState(p) === 'verified').length;
+  const held = prs.filter((p) => prState(p) === 'held').length;
   const lines = [`${prs.length} PR(s) since the last release: ${verified} verified on staging, ${held} held off.`];
   lines.push(gate.ok ? 'Release gate: ✅ ready.' : `Release gate: ❌ waiting on ${gate.blocking.join(', ')}.`);
   for (const p of prs) {
@@ -355,10 +355,10 @@ const commands = {
     const version = releaseVersion(existing?.title, tags);
     // Until this run posts the new result, the open release PR's gate is "pending", so a run that
     // fails half-way can't leave an old green gate behind.
-    if (existing) {
+    if (existing && prs.length + orphans.length > 0) {
       await gh(`/statuses/${existing.head.sha}`, { method: 'POST', body: { state: 'pending', context: 'release-gate', description: 'Release PR is being refreshed' } });
     }
-    const migrations = git('diff', '--name-only', '--diff-filter=A', 'origin/main...origin/staging', '--', 'supabase/migrations')
+    const migrations = git('diff', '--name-only', '--diff-filter=AM', 'origin/main...origin/staging', '--', 'supabase/migrations')
       .split('\n').filter(Boolean).map((f) => f.split('/').pop());
     const gate = gateState(prs, orphans);
     const plan = { version, date: dubaiDate(), prs, orphans, gate, migrations, existing: existing ? { number: existing.number, body: existing.body } : null };
@@ -447,7 +447,12 @@ const commands = {
   async 'tag-release'() {
     const { pull_request: pr } = await readEvent();
     const sha = pr.merge_commit_sha;
-    const tagSha = async (v) => (await gh(`/git/ref/tags/${v}`, { allow404: true }))?.object.sha ?? null;
+    // The commit a tag points at (an annotated tag's ref points at a tag object first).
+    const tagSha = async (v) => {
+      const ref = await gh(`/git/ref/tags/${v}`, { allow404: true });
+      if (!ref) return null;
+      return ref.object.type === 'tag' ? (await gh(`/git/tags/${ref.object.sha}`)).object.sha : ref.object.sha;
+    };
     // Creating the tag ref is atomic: if it already exists (422), it's ours only if it points here.
     const claim = async (v) => (await gh('/git/refs', { method: 'POST', body: { ref: `refs/tags/${v}`, sha }, allow422: true })) !== null || (await tagSha(v)) === sha;
     // Publish (or finish publishing) the release for a tag that points at this merge commit.

@@ -12,7 +12,7 @@
 --   11 stock units Oz -> oz and 8 stock units Qt -> qt (inventory_unit and unit_size together),
 --   1 rate unit LB -> Lb (Imazuron Herbicide).
 -- The stock rows' inventory.unit_size snapshots move with them (the product stock card totals only rows whose
--- units match exactly); their count is pinned (0 live 2026-11-10).
+-- units match exactly); their count is pinned (0 live 2026-11-09).
 -- Every factor is unchanged (oz = Oz = 1, qt = Qt = 32, Lb = LB = 16), so no price moves.
 -- unit_conversions is NOT changed: both spellings keep working until step 2.
 -- guard_product_setup_fields refuses any change to a saved product's stock unit ("it waits for the reviewed unit
@@ -37,7 +37,7 @@ DECLARE
   v_done integer;
   v_fn_before text;
   v_fn_after text;
-  -- inventory rows of the 19 stock products still on the old spelling (read live 2026-11-10).
+  -- inventory rows of the 19 stock products still on the old spelling (read live 2026-11-09).
   v_inv_expected constant integer := 0;
 BEGIN
   -- Set here, not with SET LOCAL above the block, so it holds however the file is run.

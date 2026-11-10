@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-09 for the live ledger only (latest live row `20261109123130`) and KI-30 EPA numbers; other evidence retains its stated dates.
+**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110061547`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-92 below is a check still owed. KI-89–KI-91 closed 2026-11-08 (see the closed list).
 
@@ -372,12 +372,23 @@ can make old splits refuse to save (LOW-MED).
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
-- `baseUnitOfRate` (`src/lib/chemCalculator.ts:559`) drops everything after `/`, so "oz/cwt" reads as "oz".
-  Saving a job with such a unit is refused by the database (`20260820120000`, PR #446, applied live per the older
-  record); `_close_quote_as_applied`, the recipe-pricing path and the blend-ticket path (refuses only at billing)
-  can still create such lines. MED.
-- A zero-width character pasted into a rate unit makes a blend ticket un-invoiceable (fails closed; staff must
-  retype). `normalize_rate_unit` does not strip invisible characters. LOW-MED.
+- FIX PENDING LIVE APPLY (`20261231100000`, contract `docs/plans/2026-11-10-ki16-rate-unit-denominator-and-invisible-chars-CONTRACT.md`):
+  a rate unit measured per something other than acres ("oz/cwt", "oz per cwt") is refused when any job line or blend
+  ticket line is written (scheduling from a booking, the recipe RPC, blend ticket create/save), with save_job's rule
+  and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its
+  TypeScript mirrors now fold zero-width and non-breaking characters, so a pasted unit no longer blocks billing.
+  (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.) Still open,
+  LOW: "fl. oz" with a period is not in `normalize_rate_unit`'s list, so billing refuses it (fails closed).
+  Also open from the 2026-11-10 reviews, each failing closed at save or billing, LOW: (b) `save_job`'s denominator
+  probe does not fold invisible characters, so "pt/a<zero-width>c" passes the screen and the new trigger but
+  `save_job` refuses it (its own copy of the rule needs re-emitting to match); (c) JavaScript trims tabs and SQL
+  `btrim` does not, so "oz<tab>" looks fine on the blend screen and billing refuses it.
+  Accepted (Mason, 2026-11-10, Sol round 5 HIGH): the product rate-unit guard skips billed tickets, so if a ticket
+  with a blank line unit is billed, its product's unit then changes to a per-X unit, and the invoice is voided,
+  re-billing is refused until someone types the line's unit (may need the order unlinked first). Also LOW: the guard
+  counts soft-deleted tickets, so one can block a product unit edit; the blend screen's invisible-only unit warning
+  skips a zero-rate line (the database still refuses the save); the rate-unit prover checks the invoice unit query,
+  not a full invoice created by the RPC.
 - A job chemical line's per-unit COST is still rounded to whole cents when it is converted from the product's
   stock unit to the rate's unit (`reconcileChemAutofillUnits`, and `save_job`'s cost fill in `20261019230000`):
   $5/GAL is 3.90625¢/oz, saved as 4¢, so 400 oz shows $16.00 of cost against $15.625 and the job's margin is off

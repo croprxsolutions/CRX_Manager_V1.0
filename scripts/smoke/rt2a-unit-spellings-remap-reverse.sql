@@ -113,7 +113,7 @@ BEGIN
   IF v_done <> 1 THEN RAISE EXCEPTION 'RT2A_REVERSE_COUNT: % of 1 rate unit', v_done; END IF;
   ALTER TABLE public.products ENABLE TRIGGER trigger_zz_guard_product_parent_values;
   -- Every inventory snapshot of a stock product follows it back (rows added since step 1 included).
-  UPDATE public.inventory i SET unit_size = r.old_unit
+  UPDATE public.inventory i SET unit_size = r.old_unit, updated_at = now()
     FROM rt2a_rev r WHERE r.kind = 'stock' AND i.product_id = r.id AND i.unit_size = r.new_unit;
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
               AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zzz_guard_product_rate_lock',

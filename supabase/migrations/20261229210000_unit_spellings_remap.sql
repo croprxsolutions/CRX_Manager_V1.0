@@ -275,7 +275,7 @@ BEGIN
   ALTER TABLE public.products ENABLE TRIGGER trigger_zz_guard_product_parent_values;
   -- Their inventory snapshots follow (no inventory trigger watches unit_size).
   UPDATE public.inventory i
-     SET unit_size = m.new_unit
+     SET unit_size = m.new_unit, updated_at = now()
     FROM rt2a_map m
    WHERE m.kind = 'stock' AND i.product_id = m.id AND i.unit_size = m.old_unit;
   GET DIAGNOSTICS v_done = ROW_COUNT;

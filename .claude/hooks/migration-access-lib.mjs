@@ -738,6 +738,11 @@ function rowWrite(body) {
   // also UPDATEs must still report them (Codex P1, PR #1799).
   if (/\bdelete\s+from\b/i.test(text)) return "deletes rows (DELETE)";
   if (/\btruncate\b/i.test(text)) return "empties a table (TRUNCATE)";
+  // Dropping a table, schema or column throws its data away (Codex P1, PR #1799).
+  if (/\bdrop\s+(?:table|schema|column)\b/i.test(text)
+    || /\balter\s+table\b[^;]*?\bdrop\s+(?!constraint\b|default\b|not\s+null\b|identity\b|expression\b)/i.test(text)) {
+    return "deletes rows (DROP of a table, schema or column)";
+  }
   if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
   // Any MERGE can delete matched rows, as destructiveMigrationCheck treats a
   // top-level one (Codex P1, PR #1799).

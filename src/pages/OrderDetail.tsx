@@ -811,7 +811,8 @@ export default function OrderDetail() {
       const result = assertRpcResult<{ drafts_updated?: number }>(data, 'set_order_sales_tax');
       salesTaxIdem.resetKeyFor(scope);
       const drafts = result.drafts_updated ?? 0;
-      toast('success', `Sales tax ${next ? 'on' : 'off'}${drafts ? ` (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)` : ''}`);
+      if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
+      else toast('info', `Sales tax ${next ? 'on' : 'off'}. This sale has no draft invoices to change; posted invoices keep their tax.`);
       await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_order_sales_tax' } });

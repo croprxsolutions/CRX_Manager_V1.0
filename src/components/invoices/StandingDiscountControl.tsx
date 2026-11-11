@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -22,13 +22,17 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
   const [rate, setRate] = useState<{ pct: number; office: boolean } | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  // The invoice on screen now: a reply for another invoice (the page moved on) is dropped.
+  const currentIdRef = useRef(invoiceId);
 
   const load = async () => {
+    const forId = invoiceId;
     const { data, error } = await supabase
       .from('invoice_standing_discount_rates')
       .select('rate_pct, set_by')
       .eq('invoice_id', invoiceId)
       .maybeSingle();
+    if (currentIdRef.current !== forId) return;
     if (error) { toast('error', sanitizeError(error)); return; }
     const row = data as { rate_pct: number | string; set_by: string | null } | null;
     const next = { pct: Number(row?.rate_pct ?? 0), office: !!row?.set_by };
@@ -37,7 +41,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void load(); }, [invoiceId]);
+  useEffect(() => { currentIdRef.current = invoiceId; setRate(null); void load(); }, [invoiceId]);
 
   const apply = async (pct: number | null) => {
     if (pct !== null && (!/^[0-9]{1,3}(\.[0-9]{1,2})?$/.test(draft.trim()) || pct > 100)) {
@@ -54,6 +58,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
       assertRpcResult(data, 'set_invoice_standing_discount');
       idem.resetKeyFor(scope);
       toast('success', pct === null ? "This sale uses the customer's standing discount again" : `Standing discount for this sale set to ${pct}%`);
+      if (currentIdRef.current !== invoiceId) return;
       await load();
       await onChanged();
     } catch (err: unknown) {
@@ -74,7 +79,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
             type="number"
             min={0}
             max={100}
-            step={0.5}
+            step={0.01}
             value={draft}
             disabled={locked}
             onChange={(e) => setDraft(e.target.value)}

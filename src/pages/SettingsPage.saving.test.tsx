@@ -150,6 +150,15 @@ describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
     expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ setting_key: 'sales_tax_rate', setting_value: '7.5' }));
   });
 
+  it('locks the rate while it saves, so a newer edit is never overwritten', async () => {
+    await renderPage();
+    const input = screen.getByLabelText('Sales tax rate');
+    fireEvent.change(input, { target: { value: '7.5' } });
+    fireEvent.click(saveButton('Save sales tax'));
+    expect(input).toBeDisabled();
+    await waitFor(() => expect(input).toBeEnabled());
+  });
+
   it('refuses a rate that is not a plain percentage before saving', async () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Sales tax rate'), { target: { value: '6.25%' } });

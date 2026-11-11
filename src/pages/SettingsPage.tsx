@@ -1237,6 +1237,7 @@ export default function SettingsPage() {
               type="text"
               inputMode="decimal"
               value={salesTaxRate}
+              disabled={savingSalesTax}
               onChange={(e) => setSalesTaxRate(e.target.value)}
               className={`${FIELD_CLASS} w-24`}
             />

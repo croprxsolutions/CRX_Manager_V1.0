@@ -1400,6 +1400,33 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
     expect(updates).toEqual([]);
   });
 
+  it('a save that finishes after the page moved to another customer leaves that customer alone', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      let current: unknown = null;
+      const q = customerQuery(() => (current ?? { ...original, standing_discount_pct: 3 }) as unknown as typeof original);
+      const update = q.update as (...args: unknown[]) => unknown;
+      q.update = (...args: unknown[]) => {
+        updates.push(args[0]);
+        current = { ...original, standing_discount_pct: 2.5, row_version: 5 };
+        update(...args);
+        const then = q.then as (...a: unknown[]) => unknown;
+        q.then = (...a: unknown[]) => gate.then(() => then(...a));
+        return q;
+      };
+      return q;
+    });
+    renderDetailWithCustomerSwitch();
+    fireEvent.change(await screen.findByLabelText('Standing discount (%)'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(updates).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to customer 2' }));
+    await act(async () => { release(); await gate; });
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.stringContaining('Standing discount set'));
+  });
+
   it('a non-admin sees the rate but cannot change it', async () => {
     mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep' };
     renderDetail();

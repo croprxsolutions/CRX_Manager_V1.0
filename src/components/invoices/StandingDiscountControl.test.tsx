@@ -57,3 +57,34 @@ describe('StandingDiscountControl (billing plan M4b)', () => {
     expect(screen.getByText(/save your changes first/i)).toBeInTheDocument();
   });
 });
+
+describe('StandingDiscountControl: a late reply for another invoice (review round 1)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('never shows invoice A\'s rate on invoice B', async () => {
+    let releaseA: (v: unknown) => void = () => {};
+    mockFrom.mockImplementation(() => {
+      const self: Record<string, unknown> = {};
+      let id = '';
+      self.select = () => self;
+      self.eq = (_c: string, v: string) => { id = v; return self; };
+      self.maybeSingle = () => (id === 'inv-a'
+        ? new Promise((resolve) => { releaseA = resolve; })
+        : Promise.resolve({ data: { rate_pct: 5, set_by: null }, error: null }));
+      return self;
+    });
+    const { rerender } = render(<StandingDiscountControl invoiceId="inv-a" disabled={false} onChanged={vi.fn()} />);
+    rerender(<StandingDiscountControl invoiceId="inv-b" disabled={false} onChanged={vi.fn()} />);
+    const input = await screen.findByLabelText('Standing discount for this sale (%)');
+    expect(input).toHaveValue(5);
+    releaseA({ data: { rate_pct: 3, set_by: null }, error: null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByLabelText('Standing discount for this sale (%)')).toHaveValue(5);
+  });
+
+  it('takes hundredths of a percent (no 0.5 step)', async () => {
+    mockFrom.mockImplementation(() => rateRead({ rate_pct: 2.25, set_by: 'admin-1' }));
+    render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
+    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toHaveAttribute('step', '0.01');
+  });
+});

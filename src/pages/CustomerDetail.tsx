@@ -1270,6 +1270,8 @@ export default function CustomerDetail() {
         .eq('id', id)
         .select('*');
       checkMutationResult(result, 'update customer standing discount');
+      // The page moved to another customer meanwhile: nothing here may land on that one.
+      if (currentIdRef.current !== id) return;
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
       const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
       customerRowVersionRef.current = rowVersionResult.rowVersion;
@@ -1283,14 +1285,15 @@ export default function CustomerDetail() {
       } else {
         toast('success', `Standing discount set to ${pct}%. New sales use it; existing invoices keep their rate.`);
       }
+      // The rate is saved: a failed activity entry must not read as a failed save.
       if (profile?.id) {
-        await logActivity({
+        void Promise.resolve(logActivity({
           event: 'customer_updated',
           description: `Standing discount set to ${pct}%`,
           performedBy: profile.id,
           entityType: 'customer',
           customerId: id,
-        });
+        })).catch(() => {});
       }
     } catch (error: unknown) {
       Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerDetail.saveStandingDiscount' } });
@@ -1492,7 +1495,7 @@ export default function CustomerDetail() {
                         type="number"
                         min={0}
                         max={100}
-                        step={0.5}
+                        step={0.01}
                         disabled={!isAdmin || discountSaving}
                         value={discountDraft ?? String(customer.standing_discount_pct ?? 0)}
                         onChange={(e) => setDiscountDraft(e.target.value)}

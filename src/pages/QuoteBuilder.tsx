@@ -879,6 +879,8 @@ export default function QuoteBuilder() {
   // Status-based guards
   const currentStatus = status || 'draft';
   const canEdit = ['draft', 'revised'].includes(currentStatus);
+  // Save keeps a revised quote revised (Save changes); everything else saves as a draft.
+  const savesAsRevised = isEditing && currentStatus === 'revised';
   // Codex round-7 P2: include 'sent' so a frozen sent quote can still be re-emailed —
   // "Preview Quote" is the only route to the Email-to-Grower button, and
   // handleEmailToGrower explicitly supports re-sending an already-sent quote and
@@ -2764,10 +2766,11 @@ export default function QuoteBuilder() {
     setSaving(true);
     // Always unlock the form (it is locked while saving), whatever the steps below throw.
     try {
-      const result = await saveQuote('draft');
+      // A revised quote is a live booking and the server refuses revised -> draft: its edits save as revised.
+      const result = await saveQuote(savesAsRevised ? 'revised' : 'draft');
       if (result) {
         setIsDirty(false);
-        toast('success', 'Quote saved as draft');
+        toast('success', savesAsRevised ? 'Changes saved. Send the quote again when it is ready.' : 'Quote saved as draft');
         trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
           message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
           data: { quoteId: result, quoteNumber, customer: selectedCustomer?.farm_name ?? '' },
@@ -4340,7 +4343,7 @@ export default function QuoteBuilder() {
       disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
       className={`${tall} ${className}`}
     >
-      {saving ? 'Saving…' : 'Save draft'}
+      {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}
     </Button>
   );
   const previewButton = (variant: 'primary' | 'secondary') => (

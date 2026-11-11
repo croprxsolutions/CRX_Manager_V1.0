@@ -369,7 +369,7 @@ const RECENT_QUOTE_CREATED_AT = `${new Date(Date.now() - 5 * 86_400_000).toISOSt
 // name and contact details from it, and refuses to save a quote whose customer did not load.
 const QUOTE_FIXTURE_CUSTOMER = { id: 'customer-1', farm_name: 'Farm', email: 'grower@example.com', assigned_tier: 1, is_active: true };
 
-function makeQuoteFixture(status: 'draft' | 'sent' | 'accepted' = 'draft', rowVersion?: number) {
+function makeQuoteFixture(status: 'draft' | 'sent' | 'revised' | 'accepted' = 'draft', rowVersion?: number) {
   const quote = {
     id: `quote-${status}-${rowVersion ?? 'legacy'}`,
     quote_number: 'Q-version-test',
@@ -3862,19 +3862,19 @@ describe('QuoteBuilder', () => {
     it('a higher price needs the "grower agreed" tick before it saves', async () => {
       await openRevisedAndSetPrice('12');
       const tick = await screen.findByRole('checkbox', { name: 'Grower agreed to $12.00 (was $10.00)' });
-      fireEvent.click(screen.getByText('Save draft'));
+      fireEvent.click(screen.getByText('Save changes'));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Grower agreed')));
       expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(0);
 
       fireEvent.click(tick);
-      fireEvent.click(screen.getByText('Save draft'));
+      fireEvent.click(screen.getByText('Save changes'));
       await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 12, grower_confirmed: true }));
     });
 
     it('a lower price saves with no tick', async () => {
       await openRevisedAndSetPrice('9');
       expect(screen.queryByRole('checkbox', { name: /Grower agreed/ })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByText('Save draft'));
+      fireEvent.click(screen.getByText('Save changes'));
       await waitFor(() => expect(savedLine()).toMatchObject({ price_override: 9 }));
       expect(savedLine()).not.toHaveProperty('grower_confirmed');
     });
@@ -5051,7 +5051,8 @@ describe('QuoteBuilder', () => {
     function todaysActions(status: string, role: string, planned: boolean): string[] {
       const open = status === 'sent' || status === 'revised';
       const names = ['Download PDF', 'Customer view (hide costs)', 'Save as template', 'Roll over to next season'];
-      if (status === 'draft' || status === 'revised') names.push('Save draft');
+      if (status === 'draft') names.push('Save draft');
+      if (status === 'revised') names.push('Save changes'); // a revised quote saves as revised
       if (status === 'draft' || open) names.push('Preview & send');
       if (status === 'draft') names.push('Book as order');
       if (open || status === 'accepted') names.push('Convert whole booking');
@@ -5462,8 +5463,8 @@ describe('QuoteBuilder', () => {
     const stubPhone = () => stubWidth(390);
 
     // A draft with two lines of one product: 2 gal ($20.00, cost $6.00, profit $8.00, 40.0%) and 3 gal ($30.00).
-    function serveLines(productName = 'Product', firstPatch: Record<string, unknown> = {}) {
-      const fixture = makeQuoteFixture('draft', 7);
+    function serveLines(productName = 'Product', firstPatch: Record<string, unknown> = {}, status: 'draft' | 'revised' = 'draft') {
+      const fixture = makeQuoteFixture(status, 7);
       const product = { ...fixture.product, product_name: productName };
       const first = { ...fixture.item, product, ...firstPatch };
       const second = { ...fixture.item, id: 'item-2', sort_order: 1, product, total_units_needed: 3, total_price: 30, profit: 12 };
@@ -5604,6 +5605,32 @@ describe('QuoteBuilder', () => {
       } finally {
         vi.unstubAllGlobals();
       }
+    });
+
+    // A revised quote is a live booking: the server refuses revised -> draft, so its save keeps it revised.
+    it('a revised quote offers Save changes, which saves it as revised, never as a draft', async () => {
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: { quote_id: 'quote-revised-7', row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+      serveLines('Product', {}, 'revised');
+      await loaded();
+      expect(screen.queryByRole('button', { name: /Save draft/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      const args = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as { p_quote_payload: { status: string } };
+      expect(args.p_quote_payload.status).toBe('revised');
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Changes saved. Send the quote again when it is ready.'));
+      cleanup();
+      mockRpc.mockClear();
+
+      // A draft still saves as a draft.
+      serveLines();
+      await loaded();
+      expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
+      await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+      const draftArgs = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as { p_quote_payload: { status: string } };
+      expect(draftArgs.p_quote_payload.status).toBe('draft');
     });
 
     it('Edit note opens the line note, Done shows it, and Save draft sends it', async () => {

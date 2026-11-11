@@ -23,11 +23,12 @@ lines AS (
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
-  -- Storage tables the app's policies use (below), so whether RLS is on matters too. Only these two: the
-  -- platform adds and drops its other storage tables between storage versions.
+  -- Storage tables with a policy (below) plus objects and buckets: whether RLS is on matters there. Not the
+  -- platform's other storage tables, which come and go between storage versions.
   SELECT 'relation storage.' || c.relname || ' rls=' || c.relrowsecurity || ' force=' || c.relforcerowsecurity
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'storage' AND c.relname IN ('objects', 'buckets') AND c.relkind IN ('r', 'p')
+    WHERE n.nspname = 'storage' AND c.relkind IN ('r', 'p')
+      AND (c.relname IN ('objects', 'buckets') OR EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
   UNION ALL
   -- What the app's roles may do beyond grants (BYPASSRLS ignores every policy).
   SELECT 'role ' || rolname || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' login=' || rolcanlogin
@@ -111,9 +112,10 @@ lines AS (
          || ' inherit=' || m.inherit_option || ' set=' || m.set_option
     FROM pg_auth_members m
     WHERE (m.member IN (SELECT oid FROM approle) OR m.roleid IN (SELECT oid FROM approle))
-      -- The platform makes supabase_realtime_admin a member of anon, authenticated and service_role, with
-      -- options that differ between hosted and local. It is a platform role, not a login of the app.
-      AND m.member <> coalesce((SELECT oid FROM pg_roles WHERE rolname = 'supabase_realtime_admin'), 0)
+      -- Hosted Supabase makes supabase_realtime_admin a member of anon, authenticated and service_role; the
+      -- rebuild runs with realtime off, so it has none. Only those three are left out.
+      AND NOT (m.member = coalesce((SELECT oid FROM pg_roles WHERE rolname = 'supabase_realtime_admin'), 0)
+               AND m.roleid IN (SELECT oid FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role')))
   UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
   SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')

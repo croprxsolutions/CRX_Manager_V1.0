@@ -10,6 +10,17 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1706 (RT-2 step 1 unit spellings) redone for product families as 20270101010000; new Sol rounds
+
+**Decision (Mason, in chat, 2026-11-10: "ok reg 1 is working so continue woek", lifting the same day's "Park it, REG-1 first").** The parked `20261229170000` refused live (`RT2A_UNLISTED_SPELLING`, nothing changed) because 18 of its 20 products joined one-size product families that night. It is renamed to `20270101010000` (never applied, never on main) and redone: a family stores a rate unit but no stock unit, so the 19 stock-unit moves leave their families alone; the Imazuron Herbicide family moves `LB` to `Lb` with its one size. The family copy needs a family event with a named person, which a migration has not, so the migration moves the family row itself and disables `trigger_zz_guard_product_parent_values` for the single Imazuron UPDATE (the same pattern Sol accepted for the setup guard); no `product_parent_events` row is written. Every family is pinned by id, name, rate unit and its exact sizes. This is a new design, reviewed fresh from Sol round 12. The live apply needs Mason's fresh approval.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings): Sol round 10's two findings fixed; one more Sol round
+
+**Decision (Mason, in chat, 2026-11-09: "fix and babysit this pr and merge it").** Sol round 10 on PR #1706 found a HIGH and a MED; both are fixed as planned, and Sol may run once more on the fixed head. HIGH: Autumn Super 51 WDG and Cimarron Plus no longer move from `oz` to `Dry oz` in step 1, because `refresh_watchdog_flags` compares a saved job's rate unit with the product's, so the move would silently drop an over-rate warning; they move in RT-2 step 2 with a watchdog fix. MED: the 19 stock-unit moves (`Oz` to `oz`, `Qt` to `qt`) now move those products' `inventory.unit_size` snapshots in the same transaction, so the product page's "Total on hand" still adds them up; the snapshot count is pinned (0 live) and any other count refuses. If this Sol round is not clean, the finding goes to Mason in plain English instead of another patch.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
 ## 2026-11-10 — The P&L subtracts commissions only on sales billed in CRX (To-Do decision 15, KI-125)
 
 **Decision (Mason, in session, 2026-11-10: "Only CRX-billed"):** Bottom Line P&L and Monthly Summary subtract a sales commission only when its order has a CRX invoice counted in that period's revenue (posted, overdue or paid, by invoice date). Chem Man-billed sales are not brought into CRX revenue.

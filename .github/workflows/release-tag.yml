@@ -1,0 +1,38 @@
+# After a release or hotfix merges into main (Taha, 2026-11-10): tag the merge commit (vX.Y.Z) and
+# publish the GitHub Release. Release notes come from the release's CHANGELOG.md section; a hotfix
+# gets the next patch version. The back-merge PR comes from release-flow.yml.
+# Inert until the repository variable RELEASE_FLOW is "on".
+name: Release tag
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  tag:
+    name: Tag release
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.head.ref == 'release/next' || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
+    runs-on: ubuntu-latest
+    # One run per PR: a shared group would let GitHub drop a queued tag run.
+    concurrency:
+      group: release-tag-${{ github.event.pull_request.number }}
+    permissions:
+      contents: write
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          # Kept so the script can re-fetch tags if the repository is private (it runs main's code only).
+      - run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no tag."; exit 0; fi
+          node .github/scripts/release-flow.mjs tag-release

@@ -133,7 +133,7 @@ describe('OrderDetail sales tax box (billing plan M4a)', () => {
   });
 
   it('says plainly when the sale has no drafts to change', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null } as never);
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null });
     renderWith('admin', []);
     fireEvent.click(await screen.findByRole('checkbox', { name: /Sales tax/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('posted invoices keep')));

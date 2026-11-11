@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270103120000_po_close_short (KI-142): a partly received purchase order can be closed short,
+ * Real-schema proof for 20270103180000_po_close_short (KI-142): a partly received purchase order can be closed short,
  * so its unreceived remainder stops counting as on order. Builds the checked-in schema baseline in a network-disabled
  * PostgreSQL container, replays every migration before the candidate, applies the candidate (a second apply refuses),
  * then on invented rows, through the real RPCs as the real callers: on order drops by exactly the remainder; who may
@@ -24,7 +24,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270103120000_po_close_short.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270103180000_po_close_short.sql');
 // KI-16 follow-ups (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md), applied after P1-P9.
 const FOLLOW_UPS = [];
 // Later files that only READ what this proof covers and redefine none of it.

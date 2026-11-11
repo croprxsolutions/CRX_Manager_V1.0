@@ -1,5 +1,5 @@
 -- Written 2026-11-10. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270103120000_po_close_short.md.
+-- docs/reference/migrations.d/20270103180000_po_close_short.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-142, contract docs/plans/2026-11-10-ki142-po-close-short-CONTRACT.md): a partly received purchase order can
@@ -226,9 +226,8 @@ BEGIN
     -- Every column but cost and received is frozen on a closed PO's line (fires before the other BEFORE triggers).
     v_same_line := (to_jsonb(NEW) - c_cost - 'quantity_received') IS NOT DISTINCT FROM (to_jsonb(OLD) - c_cost - 'quantity_received');
     IF v_same_line AND NEW.quantity_received IS NOT DISTINCT FROM OLD.quantity_received THEN
-      -- Only cost columns changed. A raise is fine; a cut is refused below if the PO is closed.
-      IF round(COALESCE(NEW.quantity_received, 0) * COALESCE(NEW.unit_cost, 0) * 100)
-         >= round(COALESCE(OLD.quantity_received, 0) * COALESCE(OLD.unit_cost, 0) * 100) THEN
+      -- Only cost columns changed. A raise is fine; a cut (received or not) is refused below if the PO is closed.
+      IF COALESCE(NEW.unit_cost, 0) >= COALESCE(OLD.unit_cost, 0) THEN
         RETURN NEW;
       END IF;
       v_cost_only := true;

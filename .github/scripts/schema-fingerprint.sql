@@ -15,6 +15,7 @@ lines AS (
   SELECT 'relation ' || relname || ' kind=' || relkind::text || ' persistence=' || relpersistence::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
          || coalesce(' partition ' || pg_get_expr(relpartbound, oid), '')
          || CASE WHEN relkind = 'p' THEN ' key ' || pg_get_partkeydef(oid) ELSE '' END
+         || coalesce(' options ' || array_to_string(reloptions, ','), '')
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
@@ -69,6 +70,7 @@ lines AS (
     FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid WHERE t.typnamespace = (SELECT oid FROM pub) GROUP BY t.typname
   UNION ALL
   SELECT 'domain ' || typname || ' ' || format_type(typbasetype, typtypmod) || CASE WHEN typnotnull THEN ' not null' ELSE '' END
+         || coalesce(' default ' || typdefault, '')
     FROM pg_type WHERE typnamespace = (SELECT oid FROM pub) AND typtype = 'd'
   UNION ALL
   SELECT 'constraint domain ' || t.typname || '.' || k.conname || ' ' || pg_get_constraintdef(k.oid)
@@ -82,6 +84,11 @@ lines AS (
     FROM pg_namespace n, aclexplode(coalesce(n.nspacl, acldefault('n'::"char", n.nspowner))) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
     WHERE n.nspname = 'public' AND x.grantee <> n.nspowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
+  UNION ALL
+  SELECT 'grant USAGE on type ' || t.typname || ' to ' || coalesce(r.rolname, 'PUBLIC')
+    FROM pg_type t, aclexplode(t.typacl) x LEFT JOIN pg_roles r ON r.oid = x.grantee
+    WHERE t.typnamespace = (SELECT oid FROM pub) AND t.typacl IS NOT NULL AND x.grantee <> t.typowner
+      AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
   -- Role memberships: a role granted to another hands over all its rights, with no table ACL changing.
   SELECT 'member ' || (SELECT name FROM who WHERE who.oid = m.roleid) || ' to ' || (SELECT name FROM who WHERE who.oid = m.member)

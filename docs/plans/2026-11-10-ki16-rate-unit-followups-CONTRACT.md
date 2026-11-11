@@ -173,7 +173,7 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
   `is_admin()`, so any REST writer that can change a product sees every blend line; SECURITY DEFINER callers run as
   the owner and bypass RLS. Becomes real only if product edits are opened to a non-admin role.
 
-## Taha review (PR #1741 comment, head b7349ce1c): fine to apply, one LOW
+## Taha review (PR #1741 comment, head b7349ce1c): fine to apply, one LOW (reverted in Sol round 3, below)
 
 - **LOW (`save_job` folded the rate unit but not the stock Unit, so `gal`+TAB was refused
   `CHEM_UNIT_UNSUPPORTED_CHARACTER` while the screen trims it): fixed.** The wrapper now folds the string `unit` the
@@ -200,3 +200,19 @@ inventory unit; `blend_tickets.payment_status` is NOT NULL.
   only the per-X refusal still skips them, because billing refuses a restored per-X line. Prover F6 deletes a dry
   ticket and the edit is still refused. The postflight's dry check covers deleted unbilled tickets too.
 - **MED (spent pre-deploy idempotency key):** accepted, as Luna round 1 #5 and Sol round 1.
+
+## Sol round 3 (head 3e2b81d02, 1 HIGH, 2 MED, 1 LOW)
+
+The HIGH was the third round on one mechanism (which tickets the dry fluid-ounce product check skips: none, then
+deleted, then no-charge), so the mechanism is deleted rather than patched (AGENTS.md stop rule).
+
+- **HIGH (a no-charge ticket returns to billing after its dry product adopts a fluid-ounce default): fixed by
+  deletion.** A dry product's own rate unit can never be fluid ounces, with no ticket scan; a product turning dry is
+  refused while any blend line on any ticket is in fluid ounces. Live read-only 2026-11-10: 0 dry products and 0
+  lines in any fluid-ounce spelling, so nothing is newly blocked. Prover F6 adds the no-charge case.
+- **MED (folding the stock `unit` makes the non-admin cost lookup miss a stored `Pt`+ZWSP line and recompute its
+  admin-corrected cost): fixed by reverting Taha's LOW.** `save_job` folds only `rate_unit` again; a stock Unit with a
+  tab fails closed as before. Live read-only 2026-11-10: 0 of 4 job_chemicals units hold a foldable character.
+- **MED (spent pre-deploy idempotency key):** accepted, as before.
+- **LOW (the became-dry test never reached the new check): fixed.** Prover F6 disables the unit-lock trigger inside a
+  rolled-back transaction and the backstop refuses with `CHEM_UNIT_FORM_MISMATCH`.

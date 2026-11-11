@@ -29,7 +29,7 @@
  *   F0  a changed save_job body refuses the follow-up with nothing changed; it applies; a second run refuses.
  *   F1  the 'fl. oz/ac' ticket now invoices (200 fl oz = 1.5625 Gal); a dry product's 'fl. oz/ac' is still refused.
  *   F2  'oz'+TAB and 'fl'+TAB+'oz/ac' save and invoice as ounces; a tab-only unit is refused at save.
- *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac') and a stock Unit 'Pt'+TAB; 'oz/'+ZWSP+'cwt' is still refused.
+ *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac') ; a stock Unit 'Pt'+TAB is refused (not folded); 'oz/'+ZWSP+'cwt' is still refused.
  *   F4  a soft-deleted ticket no longer blocks the product edit; a live unbilled ticket still does.
  *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
  *   F6  a dry product refuses fluid ounces on a blend line in any spelling, through its default, and by turning dry (Sol round 1 HIGH).
@@ -566,10 +566,11 @@ function followUps() {
   assert.equal(jobs(), jobsBefore + 1);
   assert.equal(scalar(`SELECT jc.rate_unit FROM public.job_chemicals jc JOIN public.jobs j ON j.id = jc.job_id
     WHERE j.customer_id = '${CUSTOMER}' ORDER BY j.created_at DESC, jc.sort_order LIMIT 1;`), 'pt/ac', 'F3: the stored rate unit is folded');
-  clean('F3 save_job stock Unit Pt<TAB>', saveJobLine("'pt/ac'", `'Pt' || ${TAB}`));
+  // Sol round 3 MED: the stock Unit is not folded (the non-admin cost lookup matches it as stored); a tab fails closed.
+  refusedWith('F3 save_job stock Unit Pt<TAB>', saveJobLine("'pt/ac'", `'Pt' || ${TAB}`), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
   refusedWith('F3 save_job oz/<ZWSP>cwt', saveJobLine(`'oz/' || ${ZWSP} || 'cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
   refusedWith('F3 save_job oz<TAB>/cwt', saveJobLine(`'oz' || ${TAB} || '/cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
-  console.log("[prover] F3: save_job saves a priced pt/a+ZWSP+c line (stored 'pt/ac') and a stock Unit Pt+TAB; oz/+ZWSP+cwt and oz+TAB+/cwt are still refused");
+  console.log("[prover] F3: save_job saves a priced pt/a+ZWSP+c line (stored 'pt/ac'); a stock Unit Pt+TAB is refused; oz/+ZWSP+cwt and oz+TAB+/cwt are still refused");
 
   // F4
   clean('F4 soft-deleted ticket no longer blocks', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQ2}';`, { asOwner: true, commit: true });
@@ -594,11 +595,19 @@ function followUps() {
   raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_DRYN}';`);
   refusedWith('F6 dry default to fl oz/ac under a deleted ticket', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
     'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // Sol round 3 HIGH: a no-charge ticket can return to billing, so it holds it too; no ticket state is exempt.
+  raw(`UPDATE public.blend_tickets SET deleted_at = NULL, payment_status = 'no_charge' WHERE id = '${T_DRYN}';`);
+  refusedWith('F6 dry default to fl oz/ac under a no-charge ticket', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   const T_LF = 'a16a1600-0000-4000-8000-00000000f10a';
   clean('F6 liquid fl oz/ac line', ticket(T_LF, ["'fl oz/ac'"]), { commit: true });
   refusedWith('F6 liquid product turning dry', `UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
     "can't change on a saved product", { asOwner: true }); // the existing unit lock refuses first; the guard's became-dry check is a backstop
-  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line, deleted ticket or not; a saved product cannot turn dry (the existing unit lock refuses first)");
+  // Sol round 3 LOW: with the unit lock set aside (rolled back), the became-dry backstop itself refuses.
+  refusedWith('F6 became-dry backstop', `ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
+    UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
+    'CHEM_UNIT_FORM_MISMATCH: .* cannot become a dry product', { asOwner: true });
+  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line, deleted or no-charge ticket or not; a saved product cannot turn dry (unit lock first, then the backstop)");
 
   // F5
   for (const [expr, want] of [[`'oz' || ${ZWSP}`, 'oz'], [`chr(65279) || 'Gal' || chr(160)`, 'gal'], [`'fl' || chr(160) || 'oz'`, 'oz'],

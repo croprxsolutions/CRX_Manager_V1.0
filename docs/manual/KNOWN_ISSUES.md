@@ -389,7 +389,8 @@ can make old splits refuse to save (LOW-MED).
   Dry fluid ounces (Luna 2026-11-10 HIGH, Sol round 1 HIGH; Mason 2026-11-10 "Yes, fix here", PR #1741): a blend
   line on a dry product whose billed unit names fluid ounces in any spelling ("fl oz/ac", "fl<TAB>oz", "fluid ounces
   per acre") is refused at save (`CHEM_UNIT_FORM_MISMATCH`), as job lines already were; before, 16 fl oz/ac billed
-  as 1 lb/ac. Live read-only 2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
+  as 1 lb/ac. A dry product's own rate unit can never be fluid ounces, whatever its tickets' state. Live read-only
+  2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
   to "oz", so a direct table write that skips the triggers would bill it as weight. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed

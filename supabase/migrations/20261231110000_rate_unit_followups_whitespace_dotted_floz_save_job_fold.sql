@@ -16,7 +16,7 @@
 --   * normalize_rate_unit: same body; dotted spellings 'fl. oz', 'fl.oz', 'fl oz.', 'fl. oz.', 'fl.oz.', 'floz.' map
 --     to 'fl oz', NOT 'oz'. field_app_priced_quantity sizes 'fl oz' on the liquid branch and not on the dry one, so a
 --     dry product still refuses a fluid ounce at billing; mapping to 'oz' would bill it as a weight ounce.
---   * save_job (the 731-char wrapper only): each chemical line's string rate_unit and unit (Taha, PR #1741) pass through
+--   * save_job (the 731-char wrapper only): each chemical line's string rate_unit passes through
 --     unit_fold_invisible before _save_job_cost_step2_impl sees it, so its denominator and character rules judge the
 --     same folded text as rate_unit_line_refusal. The impl is NOT re-emitted: its md5 is pinned before and after.
 --   * guard_product_rate_unit_for_blend_lines: ignores soft-deleted tickets (blend_tickets.deleted_at IS NOT NULL).
@@ -24,8 +24,8 @@
 --     CHEM_UNIT_FORM_MISMATCH reduction after the fold. guard_blend_ticket_product_rate_unit refuses a blend line on a
 --     DRY product whose billed unit (line, else the product's) names fluid ounces in any spelling, which billing would
 --     otherwise size as weight ounces (16 fl oz/ac -> 1 lb/ac); guard_product_rate_unit_for_blend_lines refuses a dry
---     product's own unit becoming fluid ounces under a live unbilled blank-unit line, and a product turning dry under a
---     live line in fluid ounces. Job lines already get CHEM_UNIT_FORM_MISMATCH from _save_job_cost_step2_impl.
+--     product's own unit becoming fluid ounces at all, and a product turning dry while any blend line is in fluid
+--     ounces, whatever the ticket's state. Job lines already get CHEM_UNIT_FORM_MISMATCH from _save_job_cost_step2_impl.
 --
 -- LIVE EVIDENCE (read-only, 2026-11-10): md5(replace(prosrc, chr(13), '')): normalize_rate_unit
 --   ac8e7b56f9b08f627a035b2330f958fb, unit_fold_invisible 4966a39646767af017bd5a5289302bfe,
@@ -236,33 +236,34 @@ DECLARE
   v_became_dry boolean := NEW.product_form = 'dry' AND OLD.product_form IS DISTINCT FROM 'dry';
 BEGIN
   IF NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit AND NOT v_became_dry THEN RETURN NEW; END IF;
-  IF NEW.rate_unit IS DISTINCT FROM OLD.rate_unit THEN
-    v_refusal := public.rate_unit_line_refusal(NEW.rate_unit, true);
+  -- A dry product is never measured in fluid ounces: billing would size its blank-unit lines as weight ounces. No
+  -- ticket exceptions (deleted, no-charge): any ticket can come back to billing (Sol rounds 1-3, PR #1741).
+  IF NEW.product_form = 'dry' AND public.unit_names_fluid_ounce(NEW.rate_unit) THEN
+    RAISE EXCEPTION 'CHEM_UNIT_FORM_MISMATCH: % is a DRY product, so its rate unit cannot be fluid ounces ("%"). Use a weight unit such as oz/ac or lb/ac.',
+      COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product'), btrim(NEW.rate_unit);
   END IF;
-  -- A dry product's own unit in fluid ounces would bill a blank-unit line as weight ounces (Sol round 1 HIGH, PR #1741).
-  IF v_refusal IS NULL AND NEW.product_form = 'dry' AND public.unit_names_fluid_ounce(NEW.rate_unit) THEN
-    v_refusal := 'CHEM_UNIT_FORM_MISMATCH';
+  -- Becoming dry while any blend line, on any ticket, carries its own fluid-ounce unit (the existing unit lock
+  -- refuses a saved product's form change first; this is the backstop, PR #1741).
+  IF v_became_dry THEN
+    PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.id::text));
+    IF EXISTS (SELECT 1 FROM public.blend_ticket_products b
+                WHERE b.product_id = NEW.id
+                  AND public.unit_names_fluid_ounce(NULLIF(btrim(b.rate_per_acre_unit), ''))) THEN
+      RAISE EXCEPTION
+        'CHEM_UNIT_FORM_MISMATCH: % has blend ticket lines measured in fluid ounces, so it cannot become a dry product. Give those lines a weight rate unit first.',
+        COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product');
+    END IF;
   END IF;
-  IF v_refusal IS NULL AND NOT v_became_dry THEN RETURN NEW; END IF;
-  PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.id::text));
-  -- Becoming dry while a live unbilled line carries its own fluid-ounce unit (PR #1741).
-  IF v_became_dry AND EXISTS (SELECT 1 FROM public.blend_ticket_products b
-                                JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
-                               WHERE b.product_id = NEW.id
-                                 AND public.unit_names_fluid_ounce(NULLIF(btrim(b.rate_per_acre_unit), ''))
-                                 AND t.payment_status NOT IN ('billed', 'no_charge')) THEN
-    RAISE EXCEPTION
-      'CHEM_UNIT_FORM_MISMATCH: % has blend ticket lines not yet billed measured in fluid ounces, so it cannot become a dry product. Give those lines a weight rate unit first.',
-      COALESCE(NULLIF(btrim(NEW.product_name), ''), 'This product');
-  END IF;
+  IF NEW.rate_unit IS NOT DISTINCT FROM OLD.rate_unit THEN RETURN NEW; END IF;
+  v_refusal := public.rate_unit_line_refusal(NEW.rate_unit, true);
   IF v_refusal IS NULL THEN RETURN NEW; END IF;
-  -- A soft-deleted ticket does not hold a per-X unit: if restored, billing refuses that line (KI-16). It does hold a
-  -- dry product's unit against fluid ounces, which billing would size as weight after a restore (Sol round 2 HIGH).
+  PERFORM pg_advisory_xact_lock(160016, hashtext(NEW.id::text));
+  -- A soft-deleted ticket does not hold a per-X unit: if restored, billing refuses that line (KI-16).
   IF EXISTS (SELECT 1 FROM public.blend_ticket_products b
                JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
               WHERE b.product_id = NEW.id
                 AND NULLIF(btrim(b.rate_per_acre_unit), '') IS NULL
-                AND (t.deleted_at IS NULL OR v_refusal = 'CHEM_UNIT_FORM_MISMATCH')
+                AND t.deleted_at IS NULL
                 AND t.payment_status NOT IN ('billed', 'no_charge')) THEN
     RAISE EXCEPTION
       '%: % has blend ticket lines not yet billed that use its rate unit, so it cannot become "%". Give those lines their own per-acre rate unit first.',
@@ -286,19 +287,16 @@ BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
-  -- Fold invisible characters and tabs out of each line's rate unit and stock Unit first, as the job_chemicals
-  -- trigger's rate_unit_line_refusal does, so the impl's own unit rules judge the same text the screen shows
-  -- (KI-16). Order and other keys kept.
+  -- Fold invisible characters and tabs out of each line's rate unit first, as the job_chemicals trigger's
+  -- rate_unit_line_refusal does, so the impl's own unit rules judge the same text the screen shows (KI-16). The stock
+  -- Unit is NOT folded: the non-admin cost lookup matches the stored unit as written (Sol round 3). Order and keys kept.
   IF jsonb_typeof(p_chemicals) = 'array' THEN
-    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(r.e -> 'unit') = 'string'
-                                   THEN jsonb_set(r.e, '{unit}', to_jsonb(public.unit_fold_invisible(r.e ->> 'unit')))
-                                   ELSE r.e END
-                              ORDER BY r.o), '[]'::jsonb)
+    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
+                                   THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
+                                   ELSE t.e END
+                              ORDER BY t.o), '[]'::jsonb)
       INTO v_chemicals
-      FROM (SELECT CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
-                        THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
-                        ELSE t.e END AS e, t.o
-              FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o)) r;
+      FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
   END IF;
   -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
   -- The impl keeps every check it had (actor, role, units, totals, idempotency).
@@ -425,11 +423,12 @@ BEGIN
                    AND public.rate_unit_line_refusal(
                          COALESCE(NULLIF(btrim(public.unit_fold_invisible(b.rate_per_acre_unit)), ''), p.rate_unit),
                          b.product_id IS NOT NULL) IS NOT NULL)
-     -- No unbilled line on a dry product, deleted ticket or not, bills in fluid ounces (the new refusal, PR #1741).
+     -- No dry product is in fluid ounces, and no blend line on one on any ticket not yet billed, deleted and
+     -- no-charge included (the new refusal, PR #1741; billed lines are history, as in the accepted void case).
+     OR EXISTS (SELECT 1 FROM public.products p WHERE p.product_form = 'dry' AND public.unit_names_fluid_ounce(p.rate_unit))
      OR EXISTS (SELECT 1 FROM public.blend_ticket_products b JOIN public.products p ON p.id = b.product_id
                   JOIN public.blend_tickets t ON t.id = b.blend_ticket_id
-                 WHERE t.payment_status NOT IN ('billed', 'no_charge')
-                   AND p.product_form = 'dry'
+                 WHERE p.product_form = 'dry' AND t.payment_status <> 'billed'
                    AND public.unit_names_fluid_ounce(COALESCE(NULLIF(btrim(b.rate_per_acre_unit), ''), p.rate_unit)))
      -- Invisible-only line units stay refused on every ticket, deleted or not, as the line trigger does.
      OR EXISTS (SELECT 1 FROM public.blend_ticket_products b

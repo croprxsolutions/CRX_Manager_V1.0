@@ -260,6 +260,9 @@ BEGIN
     WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN raise_exception OR check_violation OR unique_violation OR foreign_key_violation OR not_null_violation
          OR invalid_text_representation OR numeric_value_out_of_range OR data_exception THEN
+      IF SQLERRM LIKE 'PRODUCT_WEIGHT_STALE:%' THEN
+        RETURN v_out || jsonb_build_object('status', 'stale', 'problem', 'changed by someone else since you downloaded it');
+      END IF;
       RETURN v_out || jsonb_build_object('status', 'invalid', 'problem', SQLERRM);
   END;
   RETURN v_out || jsonb_build_object('status', 'change', 'request', jsonb_build_object('value', v_value, 'unit', v_unit,
@@ -454,13 +457,17 @@ BEGIN
           FROM public.product_parent_ingredients r JOIN public.active_ingredients a ON a.id = r.ingredient_id
          WHERE r.id = v_rid AND r.parent_id = p_parent_id AND r.status = 'active';
         IF NOT FOUND THEN RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: an ingredient row is no longer on this product'; END IF;
+        -- The row ID must still name the ingredient shown on the row, for a delete as for a change.
+        IF v_name IS DISTINCT FROM v_cur.name OR v_cas IS DISTINCT FROM v_cur.cas THEN
+          RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: % cannot be renamed here; mark the row __delete and add the new ingredient as a new row', v_cur.name;
+        END IF;
         IF v_delete THEN
-          v_items := v_items || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('kind', 'ingredient', 'action', 'retire',
-            'row_id', v_rid, 'source_note', v_note)));
-        ELSE
-          IF v_name IS DISTINCT FROM v_cur.name OR v_cas IS DISTINCT FROM v_cur.cas THEN
-            RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: % cannot be renamed here; mark the row __delete and add the new ingredient as a new row', v_cur.name;
+          IF v_note IS NULL THEN
+            RAISE EXCEPTION 'WORKBOOK_SOURCE_REQUIRED: removing % needs its source document in the source note', v_cur.name;
           END IF;
+          v_items := v_items || jsonb_build_array(jsonb_build_object('kind', 'ingredient', 'action', 'retire',
+            'row_id', v_rid, 'source_note', v_note));
+        ELSE
           -- A row filled by the EPA lookup comes back unchanged on a whole-tab re-upload; it cannot be edited here.
           IF v_cur.source = 'epa_lookup' THEN
             IF NOT ((v_row->>'strength_value')::numeric IS NOT DISTINCT FROM v_cur.strength_value
@@ -505,6 +512,9 @@ BEGIN
     WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN raise_exception OR check_violation OR unique_violation OR foreign_key_violation OR not_null_violation
          OR invalid_text_representation OR numeric_value_out_of_range OR data_exception THEN
+      IF SQLERRM LIKE 'CHEMISTRY_STALE:%' THEN
+        RETURN v_out || jsonb_build_object('status', 'stale', 'problem', 'its chemistry changed since you downloaded it');
+      END IF;
       RETURN v_out || jsonb_build_object('status', 'invalid', 'problem', SQLERRM, 'items', v_items);
   END;
   RETURN v_out || jsonb_build_object('status', 'proposal', 'items', v_items,

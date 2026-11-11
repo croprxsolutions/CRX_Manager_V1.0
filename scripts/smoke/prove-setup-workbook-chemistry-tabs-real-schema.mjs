@@ -407,6 +407,12 @@ function ingredientCases() {
   assert.match(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(noNote)});`).parents[0].problem, /WORKBOOK_SOURCE_REQUIRED/);
   const renamed = [upRow(dl1, smet, { name: 'Metolachlor' })];
   assert.match(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(renamed)});`).parents[0].problem, /cannot be renamed here/);
+  // A delete must name the ingredient its row ID points at, and cite its document.
+  const gly = dl1.ingredients.find((r) => r.name === 'Glyphosate');
+  const swapped = [upRow(dl1, meso, { delete: true, name: gly.name, cas: gly.cas })];
+  assert.match(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(swapped)});`).parents[0].problem, /Mesotrione cannot be renamed here/);
+  const bareDel = [upRow(dl1, meso, { delete: true, source_note: null })];
+  assert.match(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(bareDel)});`).parents[0].problem, /WORKBOOK_SOURCE_REQUIRED: removing Mesotrione/);
   const del = [upRow(dl1, meso, { delete: true }), upRow(dl1, smet, { strength_value: 30.1, source_note: 'Halex GT label 2026, page 1' })];
   const dp = js(ADMIN, `SELECT public.commit_ingredients_tab(${J(del)}, 'dm1b-i-3');`).proposals[0];
   assert.equal(dp.has_delete, true); assert.equal(dp.item_count, 2);

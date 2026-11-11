@@ -112,7 +112,18 @@ function safeEvent<T extends Event>(event: T): T {
     // Never sent (the SDK deletes it); it carries the trace header and live SDK objects.
     sdkProcessingMetadata: meta && {
       ...meta,
-      dynamicSamplingContext: dsc && { ...dsc, transaction: pathOnly(dsc.transaction) },
+      // The trace header Sentry sends with the event: listed fields only.
+      dynamicSamplingContext: dsc && {
+        trace_id: dsc.trace_id,
+        public_key: dsc.public_key,
+        sample_rate: dsc.sample_rate,
+        sample_rand: dsc.sample_rand,
+        sampled: dsc.sampled,
+        release: dsc.release,
+        environment: dsc.environment,
+        org_id: dsc.org_id,
+        transaction: pathOnly(dsc.transaction),
+      },
     },
   };
   return safe as T;

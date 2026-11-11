@@ -176,7 +176,7 @@ describe('initSentry', () => {
     it('keeps the trace header path-only and leaves live SDK objects alone', async () => {
       class Scope { label = 'kept'; }
       const scope = new Scope();
-      const event = { sdkProcessingMetadata: { capturedSpanScope: scope, dynamicSamplingContext: { trace_id: 't1', transaction: '/x?token=pkce_123' } } };
+      const event = { sdkProcessingMetadata: { capturedSpanScope: scope, dynamicSamplingContext: { trace_id: 't1', transaction: '/x?token=pkce_123', user_segment: 'xtra' } } };
       const result = (await hooks()).beforeSendTransaction(event);
       expect(result.sdkProcessingMetadata.dynamicSamplingContext).toEqual({ trace_id: 't1', transaction: '/x' });
       expect(result.sdkProcessingMetadata.capturedSpanScope).toBe(scope);

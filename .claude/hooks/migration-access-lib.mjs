@@ -914,7 +914,8 @@ export function dataRewriteCheck(sql, { history } = {}) {
   }
   const writeTargets = (text) => [
     ...text.matchAll(new RegExp(String.raw`\bupdate\s+(?:only\s+)?(${QNAME})(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "gi")),
-    ...text.matchAll(new RegExp(String.raw`\binsert\s+into\s+(${QNAME})[^;]*?\bon\s+conflict\b[^;]*?\bdo\s+update\b`, "gi")),
+    // Any INSERT, not only upserts: an insert trigger can remove rows too (Codex P1).
+    ...text.matchAll(new RegExp(String.raw`\binsert\s+into\s+(${QNAME})`, "gi")),
     ...text.matchAll(new RegExp(String.raw`\bmerge\s+into\s+(${QNAME})`, "gi")),
   ].map((m) => objectKey(m[1]));
   const fired = new Set();

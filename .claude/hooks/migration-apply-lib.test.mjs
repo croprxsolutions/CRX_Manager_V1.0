@@ -1979,6 +1979,15 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "a DELETE-only trigger is not fired by an UPDATE");
   ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger.replace("AFTER UPDATE", "AFTER DELETE OR UPDATE OF notes") }] })).length >= 1,
     "an 'UPDATE OF column' trigger still counts");
+  const insTrigger = delTrigger.replace("AFTER UPDATE ON public.invoices", "AFTER INSERT ON public.audit_log");
+  const ins = "INSERT INTO public.audit_log (message) VALUES ('repaired');\n";
+  ok(ownerApprovalNeeded(parkedCategories(upd + ins, { history: [{ name: "a.sql", text: insTrigger }] })).length >= 1,
+    "an UPDATE then a plain INSERT that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(`CREATE FUNCTION public.w() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${ins} END $$;\nSELECT public.w();\n` + upd,
+    { history: [{ name: "a.sql", text: insTrigger }] })).length >= 1,
+    "a plain INSERT inside a called function that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd + ins, { history: [{ name: "a.sql", text: touchTrigger }] })).length === 0,
+    "an UPDATE plus a plain INSERT with no deleting trigger still needs no approval");
   ok(ownerApprovalNeeded(parkedCategories(upd)).length >= 1,
     "an UPDATE with no migration history to read triggers from waits for Mason");
   // Security review + Luna, 2026-11-11: a delete the rewrite/access checks find

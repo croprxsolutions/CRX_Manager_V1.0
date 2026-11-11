@@ -387,7 +387,7 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 16. **Settings → Page Access (KI-119).** Is it meant to lock someone out of money and reports, or only tidy their menu? Recommend: decide "security" only if you use it to keep someone away from money today; otherwise rename it "Hide from menu".
 17. **Finance charge rate (KI-127).** Do the two customers set to "1.5" mean 1.5% a month (18% a year) or 1.5% a year?
 18. **Rep credit terms (KI-120).** Should reps be able to change payment terms, finance-charge settings, parent customer or default application service? Recommend: admin-only, matching the 2026-11-01 tier and credit-limit lock.
-19. **Customer addresses.** Reps can remove addresses through the customer save, but the table rule says only admins may delete addresses. Which should win?
+19. **Customer addresses.** Two rules in the app disagree about whether reps may delete a customer's addresses (detail held privately until fixed). Should deleting addresses be admin-only, or open to reps too?
 20. **Customer deactivation (KI-148).** Admins skip the open-invoice check when deactivating a customer. Is that intended as an admin override?
 21. **Credit on account (KI-132).** Should a customer's unused prepayment or credit be subtracted before past-due reminders and finance charges?
 22. **Month close.** Month-close has never been used, so every month back to October 2025 is still open. Start closing months from 2026-07 onward? Recommend yes, once KI-129 is fixed.

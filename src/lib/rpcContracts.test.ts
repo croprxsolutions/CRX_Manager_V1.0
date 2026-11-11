@@ -3157,6 +3157,17 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // M4b standing discount (local candidate 20261231110000): trigger functions and their recompute helper, never RPCs.
+  _recompute_standing_discount_20261231:
+    'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _standing_discount_after_line_change_20261231:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on invoice_items (INSERT/UPDATE/DELETE): calls _recompute_standing_discount_20261231, a no-op when the line is right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_after_invoice_change_20261231:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on invoices (UPDATE OF customer_id, status, invoice_type): calls _recompute_standing_discount_20261231, a no-op when the line is right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_record_rate_20261231:
+    'AFTER INSERT / UPDATE OF customer_id, invoice_type row trigger on invoices: records a chemical sale\'s rate once (ON CONFLICT DO NOTHING) and drops a draft\'s copied rate on a customer change, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_before_fingerprint_20261231:
+    'BEFORE INSERT/UPDATE row trigger on split_invoice_provenance: recomputes the draft\'s discount line before its fingerprint is taken, a no-op when right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
   _record_customer_document_restore:
     'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',

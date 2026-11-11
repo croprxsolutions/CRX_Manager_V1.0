@@ -2428,6 +2428,7 @@ export type Database = {
           row_version: number
           shipping_address: string | null
           soybean_acres: number | null
+          standing_discount_pct: number
           state: string | null
           total_acres: number | null
           updated_at: string
@@ -2462,6 +2463,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -2496,6 +2498,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -5000,6 +5003,42 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_standing_discount_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+          set_by: string | null
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_standing_discount_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_standing_discount_rates_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -15929,6 +15968,14 @@ export type Database = {
           p_idempotency_key?: string
           p_override_acres: number
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      set_invoice_standing_discount: {
+        Args: {
+          p_idempotency_key: string
+          p_invoice_id: string
+          p_pct: number | null
         }
         Returns: Json
       }

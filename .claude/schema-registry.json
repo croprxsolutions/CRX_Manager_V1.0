@@ -1581,6 +1581,7 @@
     "invoice_line_share_snapshots",
     "invoice_line_shares",
     "invoice_shares",
+    "invoice_standing_discount_rates",
     "job_applied_record_crew",
     "job_attachments",
     "job_chemicals",
@@ -2387,7 +2388,8 @@
         "freight",
         "application_fee",
         "service",
-        "other"
+        "other",
+        "standing_discount"
       ],
       "constraints": [
         "invoice_items_charge_type_check"
@@ -4348,7 +4350,7 @@
     {
       "table": "invoice_items",
       "constraint": "invoice_items_charge_line_shape_chk",
-      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (unit_price_cents > 0) AND (extended_cents = unit_price_cents))))",
+      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (extended_cents = unit_price_cents) AND\nCASE\n    WHEN (charge_type = 'standing_discount'::text) THEN (unit_price_cents < 0)\n    ELSE (unit_price_cents > 0)\nEND)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6482,7 +6484,8 @@
         "updated_at",
         "prepay_balance_cents",
         "crops",
-        "row_version"
+        "row_version",
+        "standing_discount_pct"
       ]
     },
     "cycle_count_items": {
@@ -6975,6 +6978,15 @@
       "with_default": [
         "id",
         "created_at"
+      ]
+    },
+    "invoice_standing_discount_rates": {
+      "no_default": [
+        "invoice_id",
+        "rate_pct"
+      ],
+      "with_default": [
+        "set_at"
       ]
     },
     "invoices": {
@@ -9334,7 +9346,8 @@
       "finance_charge_grace_days",
       "default_application_service_id",
       "crops",
-      "row_version"
+      "row_version",
+      "standing_discount_pct"
     ],
     "cycle_count_items": [
       "id",
@@ -9906,6 +9919,12 @@
       "created_at",
       "price_per_acre_cents",
       "pricing_note"
+    ],
+    "invoice_standing_discount_rates": [
+      "invoice_id",
+      "rate_pct",
+      "set_by",
+      "set_at"
     ],
     "invoices": [
       "id",

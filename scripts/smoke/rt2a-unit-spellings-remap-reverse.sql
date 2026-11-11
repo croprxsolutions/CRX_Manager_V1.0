@@ -1,5 +1,5 @@
 -- RT-2 step 1 RECOVERY (not a migration): put the 20 products moved by
--- supabase/migrations/20261231230000_unit_spellings_remap.sql back to their old spellings, with the stock
+-- supabase/migrations/20270101010000_unit_spellings_remap.sql back to their old spellings, with the stock
 -- products' inventory snapshots and the Imazuron Herbicide family's rate unit.
 -- Proven by scripts/smoke/prove-unit-spellings-real-schema.mjs. To use it live, copy it into a new
 -- migration and take it through the normal gates. Refuses (and changes nothing) unless every listed product

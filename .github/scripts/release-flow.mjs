@@ -50,7 +50,7 @@ export function botFileProblems(file, expected, actual) {
     const strip = (t) => {
       const j = JSON.parse(t);
       delete j.version;
-      if (j.packages?.['']) delete j.packages[''].version;
+      if (file === 'package-lock.json' && j.packages?.['']) delete j.packages[''].version;
       return JSON.stringify(j);
     };
     try { if (strip(expected) === strip(actual)) return []; } catch { /* unreadable counts as a difference */ }
@@ -412,6 +412,10 @@ const commands = {
     };
     const problems = BOT_FILES.flatMap((f) => botFileProblems(f, show(expected, f), show(head, f)));
     problems.push(...versionProblems(show(head, 'package.json'), show(head, 'package-lock.json'), show(head, 'src/releaseNotes.ts'), show(head, 'CHANGELOG.md') ?? ''));
+    // A release is a new version: the same one as staging + main would re-publish an old tag.
+    try {
+      if (JSON.parse(show(head, 'package.json')).version === JSON.parse(show(expected, 'package.json')).version) problems.push('the version is the same as on staging + main; a release needs a new one');
+    } catch { /* unreadable: versionProblems already reports it */ }
     for (const p of problems) console.log(`::error::release/next: ${p}. Only the release bot writes these files.`);
     return problems.length ? 1 : 0;
   },

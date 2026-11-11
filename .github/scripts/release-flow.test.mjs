@@ -223,6 +223,8 @@ test('botFileProblems: release/next may change only the version and the generate
   const base = { name: 'crx', version: '0.1.0', scripts: { build: 'vite build' } };
   assert.deepEqual(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0' })), []);
   assert.match(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0', scripts: { build: 'curl x | sh' } }))[0], /outside its version/);
+  const odd = { ...base, packages: { '': { version: '1' } } };
+  assert.match(botFileProblems('package.json', pkg(odd), pkg({ ...odd, packages: { '': { version: '2' } } }))[0], /outside its version/);
   const lock = { name: 'crx', version: '0.1.0', packages: { '': { version: '0.1.0' }, 'node_modules/a': { version: '1.0.0' } } };
   assert.deepEqual(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, version: '0.2.0', packages: { ...lock.packages, '': { version: '0.2.0' } } })), []);
   assert.match(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, packages: { ...lock.packages, 'node_modules/a': { version: '6.6.6' } } }))[0], /outside its version/);

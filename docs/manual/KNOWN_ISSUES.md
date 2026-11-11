@@ -436,7 +436,15 @@ can make old splits refuse to save (LOW-MED).
   2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
   to "oz", so a direct table write that skips the triggers would bill it as weight. Also LOW (Taha, PR #1741): a tab
   in a job line's stock Unit is still refused (`CHEM_UNIT_UNSUPPORTED_CHARACTER`, fails closed); folding it would
-  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too.
+  Dry fluid ounce on every other writer (Luna 2026-11-10): job lines, booking lines, a blend line's quantity unit
+  and a dry product's size and stock unit could still name fluid ounces, which holds and deduction size as weight
+  (16 fl oz as 1 lb). FIX PENDING LIVE APPLY (`20270101020000`, contract
+  `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`): each is refused (`CHEM_UNIT_FORM_MISMATCH`), and every
+  product must have a form (Mason 2026-11-10; a saved form cannot change, so no product turns dry under its lines;
+  importing a product with a blank form is now refused). Not covered (existing): gal/pt/qt on a dry product converts
+  to nothing, so billing refuses it and job completion deducts the raw number flagged for office review.
+  Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
   at billing).

@@ -50,7 +50,7 @@ export function productOptionLabel(product: ProductOptionPresentationModel): str
   ].filter(Boolean).join(' · ');
 }
 
-function PolicyBadge({ policy }: { policy: ProductReturnPolicy }) {
+export function PolicyBadge({ policy }: { policy: ProductReturnPolicy }) {
   const className = policy === 'no_return'
     ? 'bg-red-100 text-red-700'
     : policy === 'returnable'

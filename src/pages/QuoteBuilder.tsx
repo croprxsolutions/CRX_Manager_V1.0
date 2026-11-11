@@ -102,14 +102,14 @@ import DatePicker from '../components/ui/DatePicker';
 import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
-import { useIsPhone } from '../hooks/useIsPhone';
+import { useIsBelowLg, useIsBelowXl, useIsPhone } from '../hooks/useIsPhone';
 import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../lib/quoteBuilderView';
 import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
-import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
+import { PolicyBadge, normalizeReturnPolicy, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
 import { useProductParents } from '../lib/productParents';
@@ -222,7 +222,21 @@ const NO_UNIT = '__none__';
 const LINK_BOX = 'min-h-11 md:inline-flex md:min-h-10 md:items-center';
 const LINK_HIT = "relative min-h-11 md:min-h-0 after:absolute after:inset-x-0 after:top-1/2 after:h-10 after:-translate-y-1/2 after:content-['']";
 // Number boxes in the line table and cards: 44 px below 768 px, 40 px above.
-const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+// A number and its unit in one box: the input on the left, the unit on a cream strip on the right.
+// The caller adds the border colour (the input's hand-set states tint the whole box).
+const UNIT_BOX = 'flex w-full min-w-0 h-11 md:h-10 items-stretch overflow-hidden rounded-lg border focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20';
+const UNIT_BOX_INPUT = 'w-full min-w-0 flex-1 bg-transparent px-1.5 text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none';
+const UNIT_STRIP = 'shrink-0 flex items-center border-l border-gray-200 bg-cream px-2 text-sm text-secondary';
+// The unit Dropdown as the box's right end: its trigger loses its own border and fills the strip.
+const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cream [&_button]:h-full [&_button]:rounded-none [&_button]:border-0 [&_button]:bg-transparent [&_button]:gap-0.5 [&_button]:px-1.5 [&_button_svg]:h-3.5 [&_button_svg]:w-3.5';
+
+// One muted line under a quote line's product name: SKU, family and package, the fields
+// ProductOptionDetails shows, without their labels. Missing ones are left out.
+function productMetaLine(p: ProductOptionPresentationModel): string {
+  const pack = p.packaging_variant || p.unit_size || (p.container_size != null && p.container_unit ? `${p.container_size} ${p.container_unit}` : null);
+  return [p.sku, p.product_family?.name, pack].filter(Boolean).join(' · ');
+}
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
 function quoteTotals(sections: LocalSection[]) {
@@ -769,6 +783,10 @@ export default function QuoteBuilder() {
   const [showRolloverModal, setShowRolloverModal] = useState(false);
   const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
   const isPhone = useIsPhone();
+  // The line table needs 1024 px; below that each line is a card.
+  const lineCards = useIsBelowLg();
+  // From 1024 to 1279 px (as narrow as 720 px of card with the sidebar open) cost and margin sit under Total.
+  const costUnderTotal = useIsBelowXl();
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -4752,7 +4770,7 @@ export default function QuoteBuilder() {
         const sectionNoteOpen = !!sec.section_header_notes || openSectionNotes.has(sec._key);
         const openSectionNote = () => setOpenSectionNotes((prev) => (prev.has(sec._key) ? prev : new Set(prev).add(sec._key)));
 
-        // Each line's controls are built once and laid out as a table row (768 px and up) or a card.
+        // Each line's controls are built once and laid out as a table row (1024 px and up) or a card.
         const lineParts = (item: LocalItem, n: number) => {
           const prod =
             item.product ||
@@ -4821,7 +4839,13 @@ export default function QuoteBuilder() {
                   Select product
                 </button>
               )}
-              {prod && <ProductOptionDetails product={prod} />}
+              {prod && (
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary" data-product-id={prod.id}>
+                  {productMetaLine(prod) && <span className="min-w-0 break-words">{productMetaLine(prod)}</span>}
+                  <PolicyBadge policy={normalizeReturnPolicy(prod.return_policy)} />
+                  {prod.is_full_tote_only && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Full tote only</span>}
+                </div>
+              )}
               {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}
               {lastChargeText && <p className="mt-0.5 text-xs text-secondary">{lastChargeText}</p>}
               {noteEditing ? (
@@ -4861,23 +4885,23 @@ export default function QuoteBuilder() {
 
           const rate = (
             <>
-              <input
-                type="number"
-                value={item.actual_rate ?? ''}
-                onChange={(e) =>
-                  updateItem(sec._key, item._key, {
-                    actual_rate: e.target.value
-                      ? parseFloat(e.target.value)
-                      : null,
-                    calc_mode: 'rate_acres',
-                  })
-                }
-                aria-label="Actual rate"
-                className={`${LINE_INPUT} border-gray-300`}
-                step="any"
-                min={0}
-              />
-              <div className="mt-1">
+              <div className={`${UNIT_BOX} border-gray-300 bg-white`}>
+                <input
+                  type="number"
+                  value={item.actual_rate ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      actual_rate: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'rate_acres',
+                    })
+                  }
+                  aria-label="Actual rate"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
                 <Dropdown
                   aria-label="Rate unit"
                   noHelperRow
@@ -4890,6 +4914,7 @@ export default function QuoteBuilder() {
                   options={unitOptions(item.rate_unit, (unit) => unit)}
                   placeholder="--"
                   disabled={formLocked}
+                  className={UNIT_SELECT}
                 />
               </div>
               {item.oz_per_acre != null && (
@@ -4922,7 +4947,11 @@ export default function QuoteBuilder() {
 
           const quantity = (
             <>
-              <div className="flex items-center gap-1.5">
+              <div className={`${UNIT_BOX} ${
+                item.calc_mode === 'units_direct'
+                  ? 'border-crx-green bg-crx-green-tint'
+                  : 'border-gray-300 bg-white'
+              }`}>
                 <input
                   type="number"
                   value={item.total_units_needed ?? ''}
@@ -4935,15 +4964,11 @@ export default function QuoteBuilder() {
                     })
                   }
                   aria-label="Quantity"
-                  className={`${LINE_INPUT} ${
-                    item.calc_mode === 'units_direct'
-                      ? 'border-crx-green bg-crx-green-tint'
-                      : 'border-gray-300'
-                  }`}
+                  className={UNIT_BOX_INPUT}
                   step="any"
                   min={0}
                 />
-                {prod?.inventory_unit && <span className="shrink-0 text-sm text-secondary">{prod.inventory_unit}</span>}
+                {prod?.inventory_unit && <span className={UNIT_STRIP}>{prod.inventory_unit}</span>}
               </div>
               {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
             </>
@@ -4951,34 +4976,34 @@ export default function QuoteBuilder() {
 
           const price = (
             <>
-              <input
-                type="number"
-                value={item.price_per_unit || ''}
-                onChange={(e) => {
-                  const val = e.target.value ? parseFloat(e.target.value) : 0;
-                  // A manual price is one that differs from what the line
-                  // would otherwise take: its saved price on a sent quote,
-                  // else today's tier price.
-                  const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
-                    ?? (prod ? getTierPrice(prod, tier) : 0);
-                  const isOverride = Math.abs(val - basePrice) > 0.001;
-                  updateItem(sec._key, item._key, {
-                    price_override: isOverride ? val : null,
-                    price_per_unit: val,
-                  });
-                }}
-                aria-label="Price per unit"
-                // A stated $0 tier price shows as 0.00, not as a missing price.
-                placeholder={prod ? '0.00' : undefined}
-                className={`${LINE_INPUT} ${
-                  item.price_override != null
-                    ? 'border-amber-400 bg-amber-50'
-                    : 'border-gray-300'
-                }`}
-                step="any"
-                min={0}
-              />
-              <div className="mt-1">
+              <div className={`${UNIT_BOX} ${
+                item.price_override != null
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-gray-300 bg-white'
+              }`}>
+                <input
+                  type="number"
+                  value={item.price_per_unit || ''}
+                  onChange={(e) => {
+                    const val = e.target.value ? parseFloat(e.target.value) : 0;
+                    // A manual price is one that differs from what the line
+                    // would otherwise take: its saved price on a sent quote,
+                    // else today's tier price.
+                    const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
+                      ?? (prod ? getTierPrice(prod, tier) : 0);
+                    const isOverride = Math.abs(val - basePrice) > 0.001;
+                    updateItem(sec._key, item._key, {
+                      price_override: isOverride ? val : null,
+                      price_per_unit: val,
+                    });
+                  }}
+                  aria-label="Price per unit"
+                  // A stated $0 tier price shows as 0.00, not as a missing price.
+                  placeholder={prod ? '0.00' : undefined}
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
                 <Dropdown
                   aria-label="Price unit"
                   noHelperRow
@@ -4988,9 +5013,10 @@ export default function QuoteBuilder() {
                       price_unit: v === NO_UNIT ? null : v || null,
                     })
                   }
-                  options={unitOptions(item.price_unit, (unit) => `per ${unit}`)}
+                  options={unitOptions(item.price_unit, (unit) => `/ ${unit}`)}
                   placeholder="--"
                   disabled={formLocked}
+                  className={UNIT_SELECT}
                 />
               </div>
               {item.price_override != null && (
@@ -5107,7 +5133,9 @@ export default function QuoteBuilder() {
             />
           );
 
-          return { prod, product, rate, acres, quantity, price, cost, menu };
+          const perAcre = `${item.price_per_acre != null ? fmt(item.price_per_acre) : '–'} / acre`;
+
+          return { prod, product, rate, acres, quantity, price, perAcre, cost, menu };
         };
 
         return (
@@ -5176,9 +5204,11 @@ export default function QuoteBuilder() {
                   </span>
                 )}
               </div>
-              <span className="md:ml-auto text-base font-semibold text-nav-dark tabular-nums whitespace-nowrap">
-                {fmt(sectionTotal)}
-              </span>
+              {/* Always shown; on a phone it shares the first row with the name and the caption is read, not shown. */}
+              <div className="ml-auto flex shrink-0 flex-col items-end leading-tight">
+                <span className="text-xs text-secondary max-md:sr-only">Section total</span>
+                <strong className="text-[17px] md:text-lg font-semibold text-nav-dark tabular-nums whitespace-nowrap">{fmt(sectionTotal)}</strong>
+              </div>
               {sections.length > 1 && (
                 <ActionMenu
                   label={`Actions for section ${sec.section_name || 'Untitled section'}`}
@@ -5229,9 +5259,9 @@ export default function QuoteBuilder() {
 
             {!isCollapsed && (
               <>
-              {/* Section note: prints above the section's products on the PDF. */}
-              <div className="px-3 md:px-4 pt-2">
-                {sectionNoteOpen ? (
+              {/* Section note: prints above the section's products on the PDF. Its link sits in the footer. */}
+              {sectionNoteOpen && (
+                <div className="px-3 md:px-4 pt-2">
                   <div className="pb-1">
                     <div className="mb-1 flex items-center gap-1 text-xs text-secondary">
                       <span id={`section-note-${sec._key}`}>Note for this section (prints above its products)</span>
@@ -5248,21 +5278,8 @@ export default function QuoteBuilder() {
                       className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
                     />
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openSectionNote();
-                      // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
-                      requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
-                    }}
-                    className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 px-2 text-left text-sm font-medium text-crx-green hover:underline"
-                  >
-                    <Plus className="w-3.5 h-3.5 shrink-0" />
-                    Add a note for this section (prints above its products)
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
               {sec.items.length === 0 ? (
                 <p className="px-3 md:px-4 pt-2 pb-4 text-sm text-secondary">
                   No products yet.{' '}
@@ -5274,7 +5291,9 @@ export default function QuoteBuilder() {
                     Add one
                   </button>
                 </p>
-              ) : isPhone ? (
+              ) : lineCards ? (
+                // Below 1024 px: one card per line. Fields sit 2 across on a phone and 4 across from 768 px,
+                // once the card has the room (36rem; not with the sidebar open at 768 px).
                 <div className="mt-2 divide-y divide-cream-dark border-t border-cream-dark">
                   {sec.items.map((item, idx) => {
                     const line = lineParts(item, idx + 1);
@@ -5282,46 +5301,58 @@ export default function QuoteBuilder() {
                       <article
                         key={item._key}
                         aria-label={line.prod ? `Line ${idx + 1}, ${line.prod.product_name}` : `Line ${idx + 1}`}
-                        className="px-3 py-4 space-y-3"
+                        className="@container px-3 py-3.5 md:px-4 space-y-3"
                       >
                         <div className="flex items-start gap-2">
+                          <span aria-hidden="true" className="mt-2.5 md:mt-0 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cream-dark text-xs font-semibold text-secondary tabular-nums">{idx + 1}</span>
                           <div className="flex-1 min-w-0">{line.product}</div>
                           {line.menu}
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate</span>{line.rate}</div>
+                        <div className="grid grid-cols-2 md:@min-[36rem]:grid-cols-4 gap-x-2.5 gap-y-3">
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate per acre</span>{line.rate}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Acres</span>{line.acres}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Quantity</span>{line.quantity}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Price</span>{line.price}</div>
                         </div>
                         <div className="flex items-end justify-between gap-3 border-t border-cream-dark pt-2.5">
                           <div className="min-w-0 text-[13px] text-secondary">
-                            <div className="tabular-nums">{item.price_per_acre != null ? `${fmt(item.price_per_acre)}/acre` : '–/acre'}</div>
+                            <div className="tabular-nums">{line.perAcre}</div>
                             {line.cost}
                           </div>
-                          <strong className="shrink-0 text-[17px] font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
+                          <strong className="shrink-0 text-lg font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
                         </div>
                       </article>
                     );
                   })}
                 </div>
               ) : (
-                // 768 px and up: all columns; the table scrolls inside its card with Product pinned when it doesn't fit.
-                // relative: the sr-only header is absolutely positioned and must stay inside this scroller.
-                <div className="relative mt-2 overflow-x-auto">
-                  <table className={`w-full text-sm ${hideCost ? 'min-w-[48.5rem]' : 'min-w-[56.5rem]'}`}>
+                // 1024 px and up: fixed columns that fit the card, Product takes what is left and wraps.
+                // The number columns widen once the card is 72rem. overflow-x-auto only guards a zoomed page.
+                // relative: the sr-only header is absolutely positioned and must stay inside this wrapper.
+                <div className="@container relative mt-2 overflow-x-auto">
+                  <table className="w-full table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-9 @min-[72rem]:w-10" />
+                      <col />
+                      <col className="w-29 @min-[72rem]:w-39" />
+                      <col className="w-17 @min-[72rem]:w-23" />
+                      <col className="w-24 @min-[72rem]:w-33" />
+                      <col className="w-33 @min-[72rem]:w-42" />
+                      <col className="w-24 @min-[72rem]:w-28" />
+                      {!hideCost && !costUnderTotal && <col className="w-32 @min-[72rem]:w-33" />}
+                      <col className="w-12" />
+                    </colgroup>
                     <thead>
-                      <tr className="border-t border-cream-dark text-left text-xs text-secondary">
-                        <th scope="col" className="py-2.5 pl-4 pr-2 w-8 font-medium">#</th>
-                        <th scope="col" className="sticky left-0 z-[1] bg-white py-2.5 px-2 min-w-[10rem] font-medium">Product</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Rate</th>
-                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium">Acres</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Quantity</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Price</th>
-                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium text-right">$/acre</th>
-                        <th scope="col" className="py-2.5 px-2 w-20 font-medium text-right">Total</th>
-                        {!hideCost && <th scope="col" className="py-2.5 px-2 w-32 font-medium text-right">Cost · margin</th>}
-                        <th scope="col" className="py-2.5 px-1 w-12"><span className="sr-only">Line actions</span></th>
+                      <tr className="border-t border-cream-dark bg-cream/60 text-left text-xs text-secondary">
+                        <th scope="col" className="py-2.5 pl-3 pr-1 font-medium md:pl-4">#</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Product</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Rate per acre</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Acres</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Quantity</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Price</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Total</th>
+                        {!hideCost && !costUnderTotal && <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Cost · margin</th>}
+                        <th scope="col" className="py-2.5 px-1"><span className="sr-only">Line actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5329,19 +5360,19 @@ export default function QuoteBuilder() {
                         const line = lineParts(item, idx + 1);
                         return (
                           <tr key={item._key} className="border-t border-cream-dark align-top">
-                            <td className="py-3 pl-4 pr-2 pt-5 text-xs text-secondary tabular-nums">{idx + 1}</td>
-                            <td className="sticky left-0 z-[1] bg-white py-3 px-2">{line.product}</td>
-                            <td className="py-3 px-2">{line.rate}</td>
-                            <td className="py-3 px-2">{line.acres}</td>
-                            <td className="py-3 px-2">{line.quantity}</td>
-                            <td className="py-3 px-2">{line.price}</td>
-                            <td className="py-3 px-2 pt-5 text-right text-secondary tabular-nums">
-                              {item.price_per_acre != null ? fmt(item.price_per_acre) : '–'}
+                            <td className="py-3 pl-3 pr-1 pt-5 text-xs text-secondary tabular-nums md:pl-4">{idx + 1}</td>
+                            <td className="py-3 px-1.5 break-words">{line.product}</td>
+                            <td className="py-3 px-1.5">{line.rate}</td>
+                            <td className="py-3 px-1.5">{line.acres}</td>
+                            <td className="py-3 px-1.5">{line.quantity}</td>
+                            <td className="py-3 px-1.5">{line.price}</td>
+                            <td className="py-3 px-1.5 pt-5 text-right">
+                              <div className="font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</div>
+                              <div className="mt-1 text-xs text-secondary tabular-nums">{line.perAcre}</div>
+                              {/* Fixed columns: the cost's no-wrap parts may wrap rather than run into the next column. */}
+                              {costUnderTotal && line.cost && <div className="mt-1 text-xs [&_*]:whitespace-normal">{line.cost}</div>}
                             </td>
-                            <td className="py-3 px-2 pt-5 text-right font-semibold text-nav-dark tabular-nums">
-                              {fmt(item.total_price)}
-                            </td>
-                            {!hideCost && <td className="py-3 px-2 pt-5 text-right text-xs">{line.cost}</td>}
+                            {!hideCost && !costUnderTotal && <td className="py-3 px-1.5 pt-5 text-right text-xs [&_*]:whitespace-normal">{line.cost}</td>}
                             <td className="py-2 px-1 text-right">{line.menu}</td>
                           </tr>
                         );
@@ -5350,17 +5381,33 @@ export default function QuoteBuilder() {
                   </table>
                 </div>
               )}
-              {sec.items.length > 0 && (
-                <div className="px-3 md:px-4 py-3 border-t border-cream-dark">
-                  <Button
-                    variant="secondary"
-                    icon={<Plus className="w-4 h-4" />}
-                    showChevron={false}
-                    onClick={() => addItem(sec._key)}
-                    className="w-full md:w-auto"
-                  >
-                    Add product
-                  </Button>
+              {(sec.items.length > 0 || !sectionNoteOpen) && (
+                <div className="flex flex-col gap-1 border-t border-cream-dark px-3 py-3 md:flex-row md:items-center md:gap-4 md:px-4">
+                  {sec.items.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      icon={<Plus className="w-4 h-4" />}
+                      showChevron={false}
+                      onClick={() => addItem(sec._key)}
+                      className="min-h-11 w-full md:min-h-10 md:w-auto"
+                    >
+                      Add product
+                    </Button>
+                  )}
+                  {!sectionNoteOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openSectionNote();
+                        // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
+                        requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
+                      }}
+                      className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 self-start px-2 text-left text-sm font-medium text-crx-green hover:underline md:self-auto"
+                    >
+                      <Plus className="w-3.5 h-3.5 shrink-0" />
+                      Add a note for this section
+                    </button>
+                  )}
                 </div>
               )}
               </>
@@ -6071,6 +6118,7 @@ export default function QuoteBuilder() {
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}
                               onChange={(e) => setRow({ qty: e.target.value })}
+                              aria-label={`Quantity to draw for ${row.product_name}`}
                               className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
                             />
                             {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}

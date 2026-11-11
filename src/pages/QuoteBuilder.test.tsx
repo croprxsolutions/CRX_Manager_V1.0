@@ -475,7 +475,7 @@ async function submitOneUnitDraw(quoteId: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
   expect(mockToast).not.toHaveBeenCalledWith('warning', 'Save the quote before drawing down the booking');
   const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
-  const quantity = await within(dialog).findByRole('spinbutton');
+  const quantity = await within(dialog).findByRole('spinbutton', { name: 'Quantity to draw for Product' });
   fireEvent.change(quantity, { target: { value: '1' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
 }
@@ -1899,8 +1899,8 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
 
-    expect(await screen.findByText('Family: Family Alpha')).toBeInTheDocument();
-    expect(screen.getAllByText('SKU: SKU-EXACT')).toHaveLength(1);
+    expect(await screen.findByText('SKU-EXACT · Family Alpha · 2 x 2.5 gal')).toBeInTheDocument();
+    expect(screen.getByText('Return: returnable')).toBeInTheDocument();
     expect(quoteItemSelects).toContain(`${QUOTE_ITEM_COLUMNS}, product:products(${PRODUCT_COLUMNS}, product_family:product_families(name))`);
   });
 
@@ -5452,18 +5452,20 @@ describe('QuoteBuilder', () => {
   });
 
   describe('sections and lines (Quotes UI redesign)', () => {
-    function stubPhone() {
+    // A window this many px wide: every max-width media query answers as a browser would.
+    function stubWidth(px: number) {
       vi.stubGlobal('matchMedia', (query: string) => ({
-        matches: query === '(max-width: 767px)', media: query, onchange: null,
+        matches: px <= Number(/max-width: (\d+)px/.exec(query)?.[1] ?? Infinity), media: query, onchange: null,
         addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
       }));
     }
+    const stubPhone = () => stubWidth(390);
 
     // A draft with two lines of one product: 2 gal ($20.00, cost $6.00, profit $8.00, 40.0%) and 3 gal ($30.00).
-    function serveLines(productName = 'Product') {
+    function serveLines(productName = 'Product', firstPatch: Record<string, unknown> = {}) {
       const fixture = makeQuoteFixture('draft', 7);
       const product = { ...fixture.product, product_name: productName };
-      const first = { ...fixture.item, product };
+      const first = { ...fixture.item, product, ...firstPatch };
       const second = { ...fixture.item, id: 'item-2', sort_order: 1, product, total_units_needed: 3, total_price: 30, profit: 12 };
       mockFrom.mockImplementation((table: string) => buildChain({
         data: table === 'quotes' ? fixture.quote
@@ -5608,6 +5610,95 @@ describe('QuoteBuilder', () => {
       const wrapper = screen.getByRole('columnheader', { name: 'Total' }).closest('table')?.parentElement;
       expect(wrapper).toHaveClass('relative', 'overflow-x-auto');
       expect(within(wrapper as HTMLElement).getByText('Line actions')).toHaveClass('sr-only');
+    });
+
+    // Product table v2 (#6): the table fits its card from 1024 px; below that each line is a card.
+    const firstRow = () => within(screen.getByRole('columnheader', { name: 'Total' }).closest('table') as HTMLElement).getAllByRole('row')[1];
+
+    it('from 1024 px the line table fits its card, with $/acre under each Total', async () => {
+      stubWidth(1024);
+      try {
+        serveLines('Product', { price_per_acre: 2.5 });
+        await loaded();
+        const table = screen.getByRole('columnheader', { name: 'Total' }).closest('table') as HTMLElement;
+        expect(table).toHaveClass('table-fixed', 'w-full');
+        expect(table.className).not.toMatch(/min-w-\[/);
+        expect(screen.getByRole('columnheader', { name: 'Rate per acre' })).toBeInTheDocument();
+        expect(screen.queryByRole('columnheader', { name: '$/acre' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('article')).not.toBeInTheDocument();
+
+        const cells = within(firstRow()).getAllByRole('cell');
+        expect(cells[6].textContent).toMatch(/^\$20\.00\$2\.50 \/ acre/);
+        const second = within(table).getAllByRole('row')[2];
+        expect(within(second).getAllByRole('cell')[6].textContent).toMatch(/^\$30\.00– \/ acre/);
+        // Below 1280 px an admin's cost and margin sit under Total instead of in their own column.
+        expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
+        expect(cells[6].textContent).toMatch(/\$8\.00 · 40\.0%$/);
+        cleanup();
+
+        stubWidth(1280);
+        serveLines('Product', { price_per_acre: 2.5 });
+        await loaded();
+        expect(screen.getByRole('columnheader', { name: 'Cost · margin' })).toBeInTheDocument();
+        expect(within(firstRow()).getAllByRole('cell')[6].textContent).toBe('$20.00$2.50 / acre');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('below 1024 px each line is a card: 4 labelled fields (2 across on a phone), then $/acre and the total', async () => {
+      stubWidth(1023);
+      try {
+        serveLines('Product', { price_per_acre: 2.5 });
+        await loaded();
+        expect(screen.queryByRole('table')).not.toBeInTheDocument();
+        const card = screen.getByRole('article', { name: 'Line 1, Product' });
+        const fields = card.querySelector('.grid') as HTMLElement;
+        expect(fields).toHaveClass('grid-cols-2', 'md:@min-[36rem]:grid-cols-4');
+        expect(Array.from(fields.children, (f) => f.firstElementChild?.textContent)).toEqual(['Rate per acre', 'Acres', 'Quantity', 'Price']);
+        expect(within(card).getByText('$2.50 / acre')).toBeInTheDocument();
+        expect(within(card).getByText('$20.00')).toBeInTheDocument();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('each number and its unit share one box, and every control keeps its label', async () => {
+      serveLines('Product', { price_unit: 'gal', rate_unit: 'gal' });
+      await loaded();
+      const row = firstRow();
+      const boxOf = (name: string) => within(row).getByRole('spinbutton', { name }).parentElement as HTMLElement;
+
+      expect(within(boxOf('Actual rate')).getByRole('button', { name: /Rate unit/ })).toHaveTextContent('gal');
+      expect(within(boxOf('Price per unit')).getByRole('button', { name: /Price unit/ })).toHaveTextContent('/ gal');
+      expect(boxOf('Quantity')).toHaveTextContent('gal');
+      // Entered by hand keeps its green box and caption.
+      expect(boxOf('Quantity')).toHaveClass('border-crx-green');
+      expect(within(row).getByText('Entered by hand')).toBeInTheDocument();
+      expect(within(row).getByRole('spinbutton', { name: 'Acres' })).toHaveClass('text-right', 'tabular-nums');
+      for (const name of ['Actual rate', 'Quantity', 'Price per unit']) {
+        expect(within(boxOf(name)).getByRole('spinbutton', { name })).toHaveClass('text-right', 'tabular-nums');
+      }
+
+      fireEvent.change(within(row).getByRole('spinbutton', { name: 'Price per unit' }), { target: { value: '12' } });
+      expect(boxOf('Price per unit')).toHaveClass('border-amber-400');
+      expect(within(row).getByRole('button', { name: 'Reset the manual price' })).toBeInTheDocument();
+    });
+
+    it('the section header always shows the Section total', async () => {
+      serveLines();
+      await loaded();
+      expect(screen.getByText('Section total').nextElementSibling).toHaveTextContent('$50.00');
+      cleanup();
+
+      stubPhone();
+      try {
+        serveLines();
+        await loaded();
+        expect(screen.getByText('Section total').nextElementSibling).toHaveTextContent('$50.00');
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     // Review Focus 1: a long name wraps on the 360 px card instead of being cut off behind a tooltip.

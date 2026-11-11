@@ -58,6 +58,7 @@ DECLARE
   v_suffix   text := substr(md5(random()::text), 1, 8);
   v_customer uuid;
   v_product  uuid;
+  v_pricing  jsonb;
   v_quote    uuid;
   v_sec      uuid;
   v_res      jsonb;
@@ -85,6 +86,26 @@ BEGIN
   VALUES ('[E2E] B2 Farm ' || v_suffix) RETURNING id INTO v_customer;
   INSERT INTO public.products (product_name, product_form)
   VALUES ('[E2E] B2 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
+  -- Quote lines need a positive cost basis (COST_BASIS_REQUIRED); set it the governed way
+  -- the Products page does ($6 cost, $10 every tier) instead of a priced products INSERT.
+  v_pricing := public.preview_product_pricing_changes(
+    'product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_product,
+      'row_version', (SELECT pricing_version FROM public.products WHERE id = v_product),
+      'pricing_mode', 'price_driven', 'new_cost', '6.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00'
+    )), v_admin, 'smoke-b2-cost-preview-' || v_suffix);
+  IF v_pricing->>'status' IS DISTINCT FROM 'previewed'
+     OR (v_pricing->>'apply_allowed')::boolean IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed cost preview refused: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set(
+    (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin,
+    'smoke-b2-cost-apply-' || v_suffix);
+  IF (SELECT current_cost FROM public.products WHERE id = v_product) IS DISTINCT FROM 6.00::numeric THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed cost fixture was not applied';
+  END IF;
 
   -- Whole booking (not planned): one product, 300 units.
   INSERT INTO public.quotes (quote_number, customer_id, created_by, status, commission_split)
@@ -95,6 +116,10 @@ BEGIN
   INSERT INTO public.quote_items (quote_id, section_id, product_id,
     price_per_unit, current_cost, total_units_needed, unit_size)
   VALUES (v_quote, v_sec, v_product, 10, 6, 300, 'gal');
+  -- A sent quote carries the version the customer was sent (20261105160000); the reopen to sent
+  -- at the end needs it. Record it through the app's send path.
+  PERFORM public.create_quote_version(v_quote, v_admin, 'smoke', 'e2e-b2-sent-version-' || v_suffix,
+    (SELECT (to_jsonb(q)->>'row_version')::bigint FROM public.quotes q WHERE q.id = v_quote));
 
   -- ---- whole conversion -> order created, quote 'accepted', draws = 300 ----
   SELECT pg_temp.convert_quote_to_order_smoke(
@@ -171,9 +196,17 @@ BEGIN
     UPDATE public.deliveries
        SET status = 'in_progress'
      WHERE id = v_delivery;
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern), without
+    -- re-deriving the cancelled order's status (complete_delivery would mark it fulfilled).
+    PERFORM set_config('crx.delivery_completion_evidence', v_delivery::text, true);
     UPDATE public.deliveries
        SET status = 'completed', completed_at = now(), signed_by = 'B2 smoke signer'
      WHERE id = v_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
+    IF (SELECT status FROM public.orders WHERE id = v_order1) IS DISTINCT FROM 'cancelled' THEN
+      RAISE EXCEPTION 'SMOKE_SETUP: the B2 order left cancelled';
+    END IF;
     BEGIN
       PERFORM public.revert_quote_status(v_quote, 'must reject completed delivery', v_admin,
         'e2e-b2-completed-' || v_suffix);
@@ -209,56 +242,65 @@ BEGIN
     'e2e-b2-void-invoice-' || v_suffix
   );
 
-  INSERT INTO public.commissions (
-    order_id, customer_id, recipient, recipient_user_id, split_percentage,
-    commission_amount, order_profit, order_date, status, paid_date
-  ) VALUES (
-    v_order1, v_customer, 'B2 paid history', v_admin, 100,
-    1, 1, CURRENT_DATE, 'paid', CURRENT_DATE
-  ) RETURNING id INTO v_commission;
+  -- Commission history is append-only (earned-state ledger), so roll the fixture back instead of deleting it.
   BEGIN
-    PERFORM public.revert_quote_status(v_quote, 'must reject paid commission', v_admin,
-      'e2e-b2-paid-commission-' || v_suffix);
-    RAISE EXCEPTION 'SMOKE_FAIL: quote reopened despite paid commission history';
+    INSERT INTO public.commissions (
+      order_id, customer_id, recipient, recipient_user_id, split_percentage,
+      commission_amount, order_profit, order_date, status, paid_date
+    ) VALUES (
+      v_order1, v_customer, 'B2 paid history', v_admin, 100,
+      1, 1, CURRENT_DATE, 'paid', CURRENT_DATE
+    ) RETURNING id INTO v_commission;
+    BEGIN
+      PERFORM public.revert_quote_status(v_quote, 'must reject paid commission', v_admin,
+        'e2e-b2-paid-commission-' || v_suffix);
+      RAISE EXCEPTION 'SMOKE_FAIL: quote reopened despite paid commission history';
+    EXCEPTION WHEN OTHERS THEN
+      v_err := SQLERRM;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'QUOTE_REOPEN_HAS_ORDER_HISTORY:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: paid-commission guard raised unexpected error: %', v_err;
+      END IF;
+    END;
+    RAISE EXCEPTION 'B2_PAID_COMMISSION_FIXTURE_ROLLBACK';
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
-    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'QUOTE_REOPEN_HAS_ORDER_HISTORY:%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: paid-commission guard raised unexpected error: %', v_err;
-    END IF;
+    IF v_err IS DISTINCT FROM 'B2_PAID_COMMISSION_FIXTURE_ROLLBACK' THEN RAISE; END IF;
   END;
-  DELETE FROM public.commissions WHERE id = v_commission;
 
-  INSERT INTO public.commissions (
-    order_id, customer_id, recipient, recipient_user_id, split_percentage,
-    commission_amount, order_profit, order_date, status
-  ) VALUES (
-    v_order1, v_customer, 'B2 batched history', v_admin, 100,
-    1, 1, CURRENT_DATE, 'pending'
-  ) RETURNING id INTO v_commission;
-  INSERT INTO public.commission_payments (
-    payment_number, recipient_id, total_amount, status, created_by
-  ) VALUES (
-    'E2E-B2-CP-' || v_suffix, v_admin, 1, 'unposted', v_admin
-  ) RETURNING id INTO v_commission_payment;
-  INSERT INTO public.commission_payment_items (
-    commission_payment_id, commission_id, amount
-  ) VALUES (v_commission_payment, v_commission, 1);
+  -- Commission history is append-only (earned-state ledger), so roll the fixture back instead of deleting it.
   BEGIN
-    PERFORM public.revert_quote_status(v_quote, 'must reject batched commission', v_admin,
-      'e2e-b2-batched-commission-' || v_suffix);
-    RAISE EXCEPTION 'SMOKE_FAIL: quote reopened despite active commission batch';
+    INSERT INTO public.commissions (
+      order_id, customer_id, recipient, recipient_user_id, split_percentage,
+      commission_amount, order_profit, order_date, status
+    ) VALUES (
+      v_order1, v_customer, 'B2 batched history', v_admin, 100,
+      1, 1, CURRENT_DATE, 'pending'
+    ) RETURNING id INTO v_commission;
+    INSERT INTO public.commission_payments (
+      payment_number, recipient_id, total_amount, status, created_by
+    ) VALUES (
+      'E2E-B2-CP-' || v_suffix, v_admin, 1, 'unposted', v_admin
+    ) RETURNING id INTO v_commission_payment;
+    INSERT INTO public.commission_payment_items (
+      commission_payment_id, commission_id, amount
+    ) VALUES (v_commission_payment, v_commission, 1);
+    BEGIN
+      PERFORM public.revert_quote_status(v_quote, 'must reject batched commission', v_admin,
+        'e2e-b2-batched-commission-' || v_suffix);
+      RAISE EXCEPTION 'SMOKE_FAIL: quote reopened despite active commission batch';
+    EXCEPTION WHEN OTHERS THEN
+      v_err := SQLERRM;
+      IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
+      IF v_err NOT LIKE 'QUOTE_REOPEN_HAS_ORDER_HISTORY:%' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL: batched-commission guard raised unexpected error: %', v_err;
+      END IF;
+    END;
+    RAISE EXCEPTION 'B2_BATCHED_COMMISSION_FIXTURE_ROLLBACK';
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
-    IF v_err LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
-    IF v_err NOT LIKE 'QUOTE_REOPEN_HAS_ORDER_HISTORY:%' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: batched-commission guard raised unexpected error: %', v_err;
-    END IF;
+    IF v_err IS DISTINCT FROM 'B2_BATCHED_COMMISSION_FIXTURE_ROLLBACK' THEN RAISE; END IF;
   END;
-  DELETE FROM public.commission_payment_items
-   WHERE commission_payment_id = v_commission_payment;
-  DELETE FROM public.commission_payments WHERE id = v_commission_payment;
-  DELETE FROM public.commissions WHERE id = v_commission;
 
   -- ===== FAIL-FIRST: revert must rescue the stranded quote =====
   BEGIN

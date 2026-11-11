@@ -2,9 +2,9 @@
 // Ask Mason to approve ONE parked migration by chat reply (Mason, 2026-09-29;
 // by reply instead of Windows Hello since 2026-10-09, so he can do it from his phone).
 //
-// A migration that deletes data, overwrites existing rows or changes who can
-// access what is refused by .claude/hooks/migration-apply-lib.mjs until Mason
-// approves it. This script builds the REQUEST he approves — computed here from the
+// A migration that deletes data (or one the safety check could not classify) is
+// refused by .claude/hooks/migration-apply-lib.mjs until Mason approves it. Since
+// 2026-11-11 ("All but deletions") rewrites and access changes need no approval. This script builds the REQUEST he approves — computed here from the
 // file itself, never from text an agent supplies — saves it in this checkout's
 // .claude/session-state/, and prints the plain-English summary, which ends with a
 // 6-digit reference number. Show him the summary and ask him to reply `I approve`
@@ -32,7 +32,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { CRX_PRODUCTION_REF } from "../.claude/hooks/migration-apply-lib.mjs";
+import { CRX_PRODUCTION_REF, ownerApprovalNeeded } from "../.claude/hooks/migration-apply-lib.mjs";
 import { readMigrationHistory } from "../.claude/hooks/migration-access-lib.mjs";
 import {
   OWNER_REQUEST_MAX_AGE_MS,
@@ -116,7 +116,8 @@ const queryHash = createHash("sha256").update(sql).digest("hex");
 let history;
 try { history = readMigrationHistory(path.dirname(realFile), path.basename(realFile)); } catch { history = undefined; }
 const categories = parkedCategories(sql, { history });
-if (!categories.length) {
+// Rewrites and access changes alone no longer need him (Mason, 2026-11-11).
+if (!ownerApprovalNeeded(categories).length) {
   die(1,
     `owner-approve-migration: ${migName} does not need Mason's approval — the safety check does not park it. ` +
     `It applies through the normal proofs; do not ask him to approve it.`);

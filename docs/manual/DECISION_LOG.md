@@ -10,13 +10,13 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
-## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR `claude/reg1-step2-redesign-e66693`)
+## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR #1746)
 
 **Decision (Mason, in session, 2026-11-10: "Yes, Yes at post wins", after Sol round 1 on the redesign):** when an invoice is posted, a line whose saved answer is No or Not reviewed, but whose size, saved number or captured number says restricted use at that moment, is upgraded to Yes and gets a record. Upgrades only, never downgrades; the record keeps the number and signal word saved with the line.
 **Why:** Sol found that a size ticked restricted-use after a line was saved, followed by a quantity or price re-save, posted with no record (the capture is kept on such saves). Posting is the moment the sale becomes final, so it takes any Yes known then.
 **What this forbids/implies:** only the posting transaction upgrades (`posted_at = now()`); a later standalone run on an already-posted invoice changes nothing, and such a line stays on Sales to check (KI-118). Supersedes, for posting only, "later label changes never change what a saved or posted sale records" in the 2026-11-10 capture-at-save entry: a later Yes still never removes or changes a record, but a Yes known at posting adds one.
 
-## 2026-11-10 — Restricted-use records name their invoice line (REG-1 Step 2 redesign, PR `claude/reg1-step2-redesign-e66693`, replaces PR #1688)
+## 2026-11-10 — Restricted-use records name their invoice line (REG-1 Step 2 redesign, PR #1746, replaces PR #1688)
 
 **Decision (Mason, in session, 2026-11-10):** PR #1688 was parked after 13 Sol rounds and is replaced. A restricted-use record now points at the invoice line it records (`rup_sales_records.invoice_item_id`); a sale "has its record" when an active record names its line. Nothing is matched by number, unit, price, signal word, customer or order any more.
 **Why:** every Sol round on #1688 found another way that inferred match went wrong (the root cause in `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md`).

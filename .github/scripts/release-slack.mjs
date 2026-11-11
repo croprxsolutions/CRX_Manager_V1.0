@@ -177,6 +177,8 @@ export async function slack(method, body, env = process.env) {
     method: 'POST',
     headers: { authorization: `Bearer ${env.SLACK_RELEASE_TOKEN}`, 'content-type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ channel: env.SLACK_RELEASE_CHANNEL, ...(method === 'chat.postMessage' ? { unfurl_links: false, unfurl_media: false } : {}), ...body }),
+    // A Slack that never answers can't hold up the release gate: give up after 15 seconds.
+    signal: AbortSignal.timeout(15000),
   });
   const json = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
   if (!json.ok) throw new Error(`Slack ${method}: ${json.error}`);

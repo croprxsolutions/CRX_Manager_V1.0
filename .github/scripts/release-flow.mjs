@@ -626,7 +626,9 @@ const commands = {
       await trySlack(async () => {
         const b = await gh(`/pulls/${bm}`);
         const isNew = process.env.BACK_MERGE_NEW === '1';
-        await gh(`/pulls/${bm}`, { method: 'PATCH', body: { body: K.writeMarker(b.body, { ts: thread, ch, at: (!isNew && K.readMarker(b.body)?.at) || Date.now() }) } });
+        // Carried: keep when it opened and whether it was already warned about.
+        const was = isNew ? {} : K.readMarker(b.body) ?? {};
+        await gh(`/pulls/${bm}`, { method: 'PATCH', body: { body: K.writeMarker(b.body, { at: Date.now(), ...was, ts: thread, ch }) } });
         await slack('chat.postMessage', { thread_ts: thread, text: K.backMergeText(isNew ? 'opened' : 'carried', bm, b.html_url) });
       });
     }

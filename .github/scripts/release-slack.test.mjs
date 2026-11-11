@@ -164,3 +164,16 @@ test('held-off PRs are named with their reason, and a red gate with nothing list
   assert.match(texts(msg), /Held off \(not shipping\)\*\\n<https:\/\/x.example\/7\|#7> flag &lt;tax_v2&gt;/);
   assert.match(texts(cardMessage({ ...state, states: {}, gate: false }, { prs: [] })), /:red_circle: Red/);
 });
+
+test('a Slack call that never answers gives up instead of holding the release job', async () => {
+  const { slack } = await import('./release-slack.mjs');
+  const real = globalThis.fetch;
+  let signal;
+  globalThis.fetch = async (_url, init) => { signal = init.signal; return new Response(JSON.stringify({ ok: true, ts: '1.1' })); };
+  try {
+    await slack('chat.postMessage', { text: 'x' }, on);
+  } finally {
+    globalThis.fetch = real;
+  }
+  assert.ok(signal instanceof AbortSignal, 'every Slack call carries a timeout signal');
+});

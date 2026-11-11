@@ -221,6 +221,12 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An existing return credit is missing its protected cost source. Void or unapply it and contact support before retrying'],
   [/^RETURN_CREDIT_REVERSAL_EXCEEDS_RECOGNIZED\b/i,
    'This return would reverse more product cost than the related sales invoices recorded. No changes were saved; review the source invoices and earlier return credits'],
+  // Sales tax box (billing plan M4a, 20261231120000).
+  [/^SALES_TAX_NOT_ALLOWED\b/i,
+   "Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved"],
+  [/^SALES_TAX_RATE_MISSING\b/i, 'Set the sales tax rate in Settings first. No changes were saved'],
+  [/^SALES_TAX_STALE\b/i, "This draft's sales tax is out of date. Save it again, then post"],
+  [/^SALES_TAX_ORDER_CLOSED\b/i, "This sale is cancelled or voided, so its sales tax can't change"],
   // Split-billed orders (20261021155000): each payer returns only what its own invoices billed.
   [/^RETURN_QUANTITY_EXCEEDS_BILLED_SHARE\b/i,
    'This customer can return only the quantity billed to them on posted invoices (a split share or a discounted sale), less their other open returns. No changes were saved'],

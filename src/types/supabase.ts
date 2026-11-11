@@ -5007,6 +5007,32 @@ export type Database = {
           },
         ]
       }
+      invoice_sales_tax_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_sales_tax_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_standing_discount_rates: {
         Row: {
           invoice_id: string
@@ -7127,6 +7153,7 @@ export type Database = {
           pricing_status: string
           program_notes: string | null
           quote_id: string | null
+          sales_tax: boolean
           salesman_id: string | null
           season: number | null
           status: string
@@ -7155,6 +7182,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -7183,6 +7211,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -15990,6 +16019,14 @@ export type Database = {
           p_idempotency_key: string
           p_invoice_id: string
           p_pct: number | null
+        }
+        Returns: Json
+      }
+      set_order_sales_tax: {
+        Args: {
+          p_idempotency_key: string
+          p_order_id: string
+          p_sales_tax: boolean
         }
         Returns: Json
       }

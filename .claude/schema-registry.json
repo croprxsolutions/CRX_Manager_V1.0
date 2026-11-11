@@ -1592,6 +1592,7 @@
     "invoice_line_rup_captures",
     "invoice_line_share_snapshots",
     "invoice_line_shares",
+    "invoice_sales_tax_rates",
     "invoice_shares",
     "invoice_standing_discount_rates",
     "job_applied_record_crew",
@@ -2410,7 +2411,8 @@
         "application_fee",
         "service",
         "other",
-        "standing_discount"
+        "standing_discount",
+        "sales_tax"
       ],
       "constraints": [
         "invoice_items_charge_type_check"
@@ -6007,6 +6009,12 @@
       "constraint": "write_offs_amount_cents_check",
       "def": "CHECK ((amount_cents > 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "app_settings",
+      "constraint": "app_settings_sales_tax_rate_chk",
+      "def": "CHECK (((setting_key <> 'sales_tax_rate'::text) OR (setting_value ~ '^[0-9]{1,2}(\\.[0-9]{1,3})?$'::text)))",
+      "reason": "regex on one setting key — not an IN-list; hooks do NOT validate this constraint"
     }
   ],
   "not_null_columns": {
@@ -7041,6 +7049,15 @@
         "created_at"
       ]
     },
+    "invoice_sales_tax_rates": {
+      "no_default": [
+        "invoice_id",
+        "rate_pct"
+      ],
+      "with_default": [
+        "set_at"
+      ]
+    },
     "invoice_shares": {
       "no_default": [
         "invoice_id",
@@ -7489,7 +7506,8 @@
         "is_planned",
         "booking_draw",
         "pricing_status",
-        "row_version"
+        "row_version",
+        "sales_tax"
       ]
     },
     "payments": {
@@ -9995,6 +10013,11 @@
       "created_by",
       "created_at"
     ],
+    "invoice_sales_tax_rates": [
+      "invoice_id",
+      "rate_pct",
+      "set_at"
+    ],
     "invoice_shares": [
       "id",
       "invoice_id",
@@ -10537,7 +10560,8 @@
       "pricing_reminder_sent_at",
       "pricing_escalation_sent_at",
       "needs_split_billing",
-      "row_version"
+      "row_version",
+      "sales_tax"
     ],
     "payments": [
       "id",

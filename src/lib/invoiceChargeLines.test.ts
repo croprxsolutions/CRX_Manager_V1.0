@@ -51,8 +51,23 @@ describe('the standing discount line (billing plan M4b)', () => {
   });
 });
 
+describe('the sales tax line (billing plan M4a)', () => {
+  const tax = { product_id: null, charge_type: 'sales_tax' as const, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 281 };
+  const freight = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 4500 };
+
+  it('is the database\'s own line, so the screen does not check it, and still checks the lines beside it', () => {
+    expect(fromScratchLinesProblem([freight, tax])).toBeNull();
+    expect(fromScratchLinesProblem([{ ...freight, description: ' ' }, tax])).toBe('Add a description to every charge.');
+  });
+
+  it('is labelled but never offered as a type to pick', () => {
+    expect(chargeTypeLabel('sales_tax')).toBe('Sales tax');
+    expect(CHARGE_TYPE_OPTIONS.map((option) => option.value)).not.toContain('sales_tax');
+  });
+});
+
 describe('charge types', () => {
-  it('offer staff the four types they can pick (the database also accepts its own standing_discount line)', () => {
+  it('offer staff the four types they can pick (the database also writes its own standing_discount and sales_tax lines)', () => {
     expect(CHARGE_TYPE_OPTIONS.map((o) => o.value)).toEqual(['freight', 'application_fee', 'service', 'other']);
     expect(chargeTypeLabel('application_fee')).toBe('Application fee');
     expect(chargeTypeLabel(null)).toBe('');

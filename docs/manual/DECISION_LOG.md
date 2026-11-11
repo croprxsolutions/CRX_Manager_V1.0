@@ -17,6 +17,29 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **What this forbids/implies:** supersedes "Routine auto, widening waits" (2026-09-26) and "Data rewrites wait" (2026-09-27) for migrations. Enforced by `ownerApprovalNeeded` in `.claude/hooks/migration-apply-lib.mjs`. Logins, secrets, billing and permission changes outside a reviewed migration still need his current yes.
 **Residual risk accepted (Mason, in chat, 2026-11-11: "Land it as is"):** after three review rounds (security review, Luna, Codex P1 on PR #1799) each found a different hiding place for a delete inside a rewrite, all fixed and tested, Luna stopped further rounds. Mason chose to land rather than keep codes for rewrites, accepting that a new, unrecognised way of hiding a delete that the classifier and all reviewers miss would apply without him. Do not re-litigate; a newly found hiding place is fixed in the classifier.
 
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `6b65dddba716`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `6b65dddba716` (base `465e84ae66fe`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `a3b3a249619ae80a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 978bfeba148a)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `f33870f53508`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `f33870f53508` (base `947da5a9b59f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `393fc93953fe9ff4` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 5e28b172441b)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `859b6c2793db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `859b6c2793db` (base `d77d9d5d2deb`) found 1 BLOCKER/HIGH finding(s). Mason judged it a business non-issue, for the reason below.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `4eb8544250ce887b` (the wording stays with the proof, not here)
+  Mason's reason: we post each product's receipts and deliveries before counting it (ref cae57212a6bb)
+
+**What this implies:** the D12 pre-season count follows the procedure in the reason above; a change to that procedure needs a new decision from Mason.
 ## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
 
 **Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.

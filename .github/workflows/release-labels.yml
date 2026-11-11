@@ -63,8 +63,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        # Before the first release puts release-pr.yml on main there is nothing to refresh.
-        run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
+        # release-pr.yml is on main (#1787): a failed refresh fails here, so a stale gate status is seen.
+        run: gh workflow run release-pr.yml --ref main -f create=false
 
   refresh-on-comment:
     # A comment or review that mentions a proof or held-off line (added, edited or deleted) can
@@ -85,4 +85,4 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - run: gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
+      - run: gh workflow run release-pr.yml --ref main -f create=false

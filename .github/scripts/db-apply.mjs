@@ -16,6 +16,8 @@ const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
 // impossible times (20261022086000 = 08:60). New files must also have a real date and time (below).
 const NAME = /^(\d{14})_[a-z0-9_]+$/;
 const REAL_STAMP = /^20[2-9]\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d$/;
+// A real calendar day too: 20260231 (31 February) has the right shape but no such date.
+export const realStamp = (s) => REAL_STAMP.test(s) && new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8))).getUTCDate() === +s.slice(6, 8);
 
 // Same rule as scripts/list-post-baseline-migrations.mjs, against the target's own ledger: files after
 // the baseline high-water whose name the ledger lacks. One-shot data migrations are recorded, never
@@ -134,6 +136,13 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
     if (atomic > 0 && /^\s*END\b/i.test(statement)) { atomic--; continue; }
     if (atomic === 0 && TX_CONTROL.test(statement)) problems.push(`${stem}: has its own transaction control (${statement.trim().split(/\s+/).slice(0, 3).join(' ')}); the job wraps each file in one transaction`);
   }
+  // A no-transaction file runs outside a transaction: a second statement could fail after the first ran.
+  // Only timeouts may be set before it (they change nothing in the database); nothing may follow it.
+  if (isNoTransaction(text)) {
+    const statements = skeleton.split(';').filter((s) => s.trim());
+    const main = statements.findIndex((s) => !/^\s*SET\s+(?:SESSION\s+)?(?:lock_timeout|statement_timeout)\b/i.test(s));
+    if (main < 0 || statements.length > main + 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (only SET lock_timeout / statement_timeout before it)`);
+  }
   // psql runs a backslash command anywhere outside quotes (\! runs a shell command), so none at all.
   if (skeleton.includes('\\')) problems.push(`${stem}: has a psql backslash command outside quotes`);
   return problems;
@@ -148,7 +157,7 @@ export function stampProblems({ added, base, head, changed = [], onMain = [] }) 
   const baseMax = base.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
   const problems = changed.map((f) => `${f}: an existing migration was edited, renamed or deleted; applied migrations never change (add a new one instead)`);
   for (const f of added) {
-    if (!NAME.test(f.replace(/\.sql$/, '')) || !REAL_STAMP.test(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
+    if (!NAME.test(f.replace(/\.sql$/, '')) || !realStamp(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
     if (head.filter((h) => stamp(h) === stamp(f)).length > 1) problems.push(`${f}: shares its stamp with another migration`);
     if (stamp(f) <= baseMax && !onMain.includes(f)) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
   }
@@ -406,14 +415,19 @@ const commands = {
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),
     });
-    problems.push(...added.flatMap((f) => fileProblems(f.replace(/\.sql$/, ''), readFileSync(path.join('supabase/migrations', f)))));
     // The baseline high-water and the one-shot list decide what runs: they move only on purpose.
     const show = (ref, file) => { try { return JSON.parse(execFileSync('git', ['show', `${ref}:${file}`], { encoding: 'utf8' })); } catch { return null; } };
     const [mBase, mHead] = [show(baseRef, 'supabase/baselines/manifest.json'), show('HEAD', 'supabase/baselines/manifest.json')];
     if (!/^\d{14}$/.test(mHead?.migrations_high_water ?? '')) problems.push('supabase/baselines/manifest.json: missing or invalid migrations_high_water');
     if (mBase && mHead && mBase.migrations_high_water !== mHead.migrations_high_water) problems.push(`supabase/baselines/manifest.json: migrations_high_water changed (${mBase.migrations_high_water} -> ${mHead.migrations_high_water}); that skips every file below it, so it needs a new baseline, not a PR`);
     const [oBase, oHead] = [show(baseRef, 'supabase/baselines/one-shot-migrations.json'), show('HEAD', 'supabase/baselines/one-shot-migrations.json')];
-    if (!oHead?.one_shot) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
+    const oneShots = oHead?.one_shot && typeof oHead.one_shot === 'object' && !Array.isArray(oHead.one_shot) ? oHead.one_shot : null;
+    if (!oneShots) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
+    // A one-shot is only recorded, never run, so only its encoding is checked (as apply does).
+    problems.push(...added.flatMap((f) => {
+      const stem = f.replace(/\.sql$/, '');
+      return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !Object.hasOwn(oneShots ?? {}, stem) });
+    }));
     for (const stem of Object.keys(oBase?.one_shot ?? {})) {
       if (!(stem in (oHead?.one_shot ?? {}))) problems.push(`one-shot-migrations.json: ${stem} was removed from the one-shot list; a record-only data migration would then run`);
     }

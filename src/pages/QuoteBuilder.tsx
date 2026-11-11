@@ -4345,7 +4345,9 @@ export default function QuoteBuilder() {
       icon={<Save className="w-4 h-4" />}
       onClick={handleSaveDraft}
       loading={saving}
-      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
+      // Nothing to save until something changes: repeated clicks would only resend the same quote.
+      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving)}
+      title={!isDirty && !saving ? 'No changes to save' : undefined}
       className={`${tall} ${className}`}
     >
       {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}

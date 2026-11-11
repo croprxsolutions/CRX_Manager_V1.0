@@ -340,6 +340,13 @@ function renderQuoteBuilder(id?: string) {
   );
 }
 
+// Save is enabled only while the quote has unsaved changes (repeated clicks on an unchanged
+// quote sent duplicate saves), so a test that saves makes one real edit first. It types into
+// the bottom note, which no test here asserts.
+async function makeAnEdit(text = 'Edited before saving') {
+  fireEvent.change(await screen.findByLabelText('Note at the bottom of the quote'), { target: { value: text } });
+}
+
 /**
  * Jump from one quote to another WITHOUT unmounting QuoteBuilder — the same reused
  * instance production gets, because no `<x>/:id` route in src/App.tsx carries a
@@ -1154,6 +1161,10 @@ describe('QuoteBuilder', () => {
   });
 
   it('waits for server numbering before enabling Save Draft', async () => {
+    mockFrom.mockImplementation((table: string) => buildChain({
+      data: table === 'customers' ? [{ id: 'customer-3', farm_name: 'Far Field Farm', assigned_tier: 3, is_active: true }] : [],
+      error: null,
+    }));
     let resolveNumber!: (result: { data: string; error: null }) => void;
     const number = new Promise<{ data: string; error: null }>((resolve) => { resolveNumber = resolve; });
     mockRpc.mockImplementation((name: string) => name === 'generate_quote_number'
@@ -1163,8 +1174,14 @@ describe('QuoteBuilder', () => {
     expect(save).toBeDisabled();
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('quote number'));
     await act(async () => resolveNumber({ data: 'Q-2026-9876', error: null }));
+    expect(await screen.findByText('Q-2026-9876')).toBeInTheDocument();
+    // The number alone is nothing to save: Save stays disabled until the quote changes.
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute('title', 'No changes to save');
+    const customer = await screen.findByRole('combobox', { name: 'Customer' });
+    fireEvent.change(customer, { target: { value: 'Far' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Far Field Farm/ }));
     await waitFor(() => expect(save).toBeEnabled());
-    expect(screen.getByText('Q-2026-9876')).toBeInTheDocument();
   });
 
   it.each(['error', 'empty', 'blank', 'throw'])('refuses to invent a quote number after a server %s', async (failure) => {
@@ -1937,6 +1954,7 @@ describe('QuoteBuilder', () => {
     await waitFor(() => expect((screen.getByDisplayValue('Newer header') as HTMLTextAreaElement).value).toBe('Newer header'));
     expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument();
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    await makeAnEdit();
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 8, header_notes: 'Newer header' }),
@@ -2087,6 +2105,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
@@ -2097,6 +2116,8 @@ describe('QuoteBuilder', () => {
       'an empty save_quote reply is ambiguous — the key must survive it so a retry can replay',
     ).not.toHaveBeenCalled();
 
+    // The reply was ambiguous, so the quote still has unsaved changes: the retry needs no new edit.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
@@ -2144,6 +2165,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: {}, error: null }));
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
@@ -2155,6 +2177,8 @@ describe('QuoteBuilder', () => {
     ).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('came back without an ID'));
 
+    // The reply was ambiguous, so the quote still has unsaved changes: the retry needs no new edit.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
@@ -2210,6 +2234,7 @@ describe('QuoteBuilder', () => {
 
     renderQuoteBuilder(quote.id);
     await screen.findByText('Save draft');
+    await makeAnEdit();
 
     let clock = 1_800_000_000_000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
@@ -2224,6 +2249,8 @@ describe('QuoteBuilder', () => {
       });
       expect(mockResetIdempotencyKey).not.toHaveBeenCalled();
 
+      // The reply was ambiguous, so the quote still has unsaved changes: the retry needs no new edit.
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled());
       fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(2);
@@ -2276,6 +2303,7 @@ describe('QuoteBuilder', () => {
     const expiryDay = () => ['month', 'day', 'year'].map((t) => within(screen.getByRole('group', { name: 'Expiry date' }))
       .getAllByRole('spinbutton').find((el) => el.getAttribute('data-type') === t)!.textContent).join('/');
     async function saveDraftPayload() {
+      await makeAnEdit();
       fireEvent.click(screen.getByText('Save draft'));
       await waitFor(() => {
         expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote').length).toBe(1);
@@ -2417,6 +2445,7 @@ describe('QuoteBuilder', () => {
     mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
 
     renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_idempotency_key: `test-idem-key-${quoteA.id}-0`,
@@ -2426,6 +2455,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Jump to quote B' }));
     await screen.findByDisplayValue('Quote B header');
 
+    await makeAnEdit();
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => {
       const saves = mockRpc.mock.calls.filter(([name]) => name === 'save_quote');
@@ -2479,6 +2509,7 @@ describe('QuoteBuilder', () => {
     ));
 
     renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
     // A's save is rejected, so A's recovery dialog opens.
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
@@ -2536,6 +2567,7 @@ describe('QuoteBuilder', () => {
     });
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
 
     expect(await screen.findByText('Reload Quote')).toBeInTheDocument();
@@ -2546,6 +2578,7 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByText('Reload Quote'));
     await waitFor(() => expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument());
     expect(mockResetIdempotencyKey).toHaveBeenCalledTimes(1);
+    await makeAnEdit();
     fireEvent.click(screen.getByText('Save draft'));
     // The fresh key's save; a cost refresh may follow it.
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
@@ -2574,6 +2607,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
@@ -2642,10 +2676,13 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_payload: expect.objectContaining({ row_version_expected: 7 }),
     })));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toHaveAttribute('title', 'No changes to save'));
+    await makeAnEdit('Second edit');
     await waitFor(() => expect(screen.getByText('Save draft')).not.toBeDisabled());
 
     fireEvent.click(screen.getByText('Save draft'));
@@ -2681,6 +2718,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
 
     renderQuoteBuilder(quote.id);
+    await makeAnEdit();
     fireEvent.click(await screen.findByText('Save draft'));
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
@@ -3383,6 +3421,7 @@ describe('QuoteBuilder', () => {
     renderQuoteBuilder(quote.id);
     await screen.findByText('$6.00');
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    await makeAnEdit();
     fireEvent.click(screen.getByText('Save draft'));
 
     expect(await screen.findByText('$7.00')).toBeInTheDocument();
@@ -3542,7 +3581,8 @@ describe('QuoteBuilder', () => {
       fireEvent.click(screen.getByRole('checkbox', { name: 'Grower agreed to $11.00 (was $10.00)' }));
       fireEvent.click(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
-      await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ })).toBeEnabled());
+      // The save succeeded, so the quote is clean again and Save waits for the next change.
+      await waitFor(() => expect(screen.getByRole('button', { name: /Save Draft|Save Changes|Save/ })).toHaveAttribute('title', 'No changes to save'));
 
       // Clearing the manual price returns the line to what the database now holds (11), not 10.
       fireEvent.click(screen.getByRole('button', { name: 'Reset the manual price' }));
@@ -3731,6 +3771,7 @@ describe('QuoteBuilder', () => {
       renderDraftAtTier(2);
       expect(await screen.findByText('This customer is assigned Tier 1; this quote uses Tier 2.')).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      await makeAnEdit();
       save();
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('This customer is assigned Tier 1.')));
       expect(saveCalls()).toHaveLength(0);
@@ -3757,6 +3798,7 @@ describe('QuoteBuilder', () => {
     it('checks the tier the customer has now, not the one loaded with the quote (Sol)', async () => {
       renderDraftAtTier(1);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      await makeAnEdit();
       expect(screen.queryByText(/this quote uses Tier/)).not.toBeInTheDocument();
       mockReadAssignedTier.mockResolvedValueOnce(2);
       save();
@@ -3768,6 +3810,7 @@ describe('QuoteBuilder', () => {
     it('a tick for the old assigned tier does not carry over when the assigned tier changes', async () => {
       renderDraftAtTier(2);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      await makeAnEdit();
       fireEvent.click(await screen.findByRole('checkbox', { name: 'Keep Tier 2' }));
       mockReadAssignedTier.mockResolvedValueOnce(3);
       save();
@@ -3779,6 +3822,7 @@ describe('QuoteBuilder', () => {
     it('abandons a save whose tier changed while the assigned tier was being read (Luna, #1605)', async () => {
       renderDraftAtTier(1);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      await makeAnEdit();
       let answer: (tier: number) => void = () => {};
       mockReadAssignedTier.mockImplementationOnce(() => new Promise<number>((resolve) => { answer = resolve; }));
       save();
@@ -3822,6 +3866,7 @@ describe('QuoteBuilder', () => {
     it('refuses Save when the assigned tier cannot be read', async () => {
       renderDraftAtTier(1);
       await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Price per unit' })).toBeEnabled());
+      await makeAnEdit();
       mockReadAssignedTier.mockRejectedValueOnce(new Error('network'));
       save();
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', "The customer's price tier could not be checked. Try again in a moment."));
@@ -4065,7 +4110,8 @@ describe('QuoteBuilder', () => {
     fireEvent.change(units, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Save draft/ })).toBeEnabled());
+    // The save succeeded, so the quote is clean again until the next change below.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save draft/ })).toHaveAttribute('title', 'No changes to save'));
 
     fireEvent.change(units, { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
@@ -4504,6 +4550,7 @@ describe('QuoteBuilder', () => {
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
 
     // Save quote A and lose the version race, which opens the reload dialog.
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await screen.findByRole('button', { name: /Reload Quote/i });
 
@@ -4543,6 +4590,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await screen.findByRole('button', { name: /Reload Quote/i });
 
@@ -4631,6 +4679,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
@@ -4667,6 +4716,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
@@ -4682,6 +4732,7 @@ describe('QuoteBuilder', () => {
 
     // The decisive check. Quote B's own token must still be the one it saves
     // against — proving quote A's reply neither replaced it nor cleared it.
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-b',
@@ -4709,6 +4760,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {});
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
@@ -4763,6 +4815,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(saveCalls).toBe(1));
 
@@ -4783,6 +4836,7 @@ describe('QuoteBuilder', () => {
     // The decisive check. The reopened session loaded at version 3, so version 3
     // is what it must still save against — proving the abandoned save's token
     // was neither installed over it nor cleared.
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
@@ -4809,6 +4863,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {}, { suspendOn: 'quote-b' });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
@@ -4826,6 +4881,7 @@ describe('QuoteBuilder', () => {
     // reply must be installed and confirmed, not discarded.
     expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
     // ...and the authoritative token it carried must be what the next save uses.
+    await makeAnEdit('Second edit');
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
@@ -4856,6 +4912,7 @@ describe('QuoteBuilder', () => {
     });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
 
@@ -4888,6 +4945,7 @@ describe('QuoteBuilder', () => {
 
     // The decisive check: the next save carries a FRESH key, so it is no longer
     // rejected by a key the server bound to an earlier payload.
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
       p_quote_id: 'quote-a',
@@ -4941,6 +4999,7 @@ describe('QuoteBuilder', () => {
     renderQuoteSwitch([quoteA, quoteB], {}, { belowCostApproval: true });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
 
     await approveBelowCost();
@@ -4964,6 +5023,7 @@ describe('QuoteBuilder', () => {
     const router = renderQuoteSwitch([quoteA, quoteB], {}, { belowCostApproval: true });
 
     expect(await screen.findAllByText('Q-AAA-1')).not.toHaveLength(0);
+    await makeAnEdit();
     fireEvent.click(await screen.findByRole('button', { name: /Save draft/ }));
     // Quote A's save is now parked on the dialog rather than on the network.
     await screen.findByLabelText(/Approval reason/i);
@@ -5158,8 +5218,20 @@ describe('QuoteBuilder', () => {
                 dirtyStates.length = 0;
                 renderAtStatus(status, planned);
                 await loaded();
+                // Save is still offered, but only once there is something to save: on a just-loaded
+                // quote it is shown disabled, so it is checked on its own and the first edit enables it.
+                const saveLabel = status === 'draft' ? 'Save draft' : status === 'revised' ? 'Save changes' : null;
                 expect(availableActions(phone), `${status} / ${role} / planned=${planned} / phone=${phone}`)
-                  .toEqual(todaysActions(status, role, planned));
+                  .toEqual(todaysActions(status, role, planned).filter((name) => name !== saveLabel));
+                if (saveLabel) {
+                  const saves = () => screen.getAllByRole('button', { name: saveLabel });
+                  for (const save of saves()) {
+                    expect(save).toBeDisabled();
+                    expect(save).toHaveAttribute('title', 'No changes to save');
+                  }
+                  await makeAnEdit();
+                  await waitFor(() => { for (const save of saves()) expect(save).toBeEnabled(); });
+                }
                 cleanup();
               }
             }
@@ -5647,6 +5719,7 @@ describe('QuoteBuilder', () => {
       serveLines('Product', {}, 'revised');
       await loaded();
       expect(screen.queryByRole('button', { name: /Save draft/ })).not.toBeInTheDocument();
+      await makeAnEdit();
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       const args = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as { p_quote_payload: { status: string } };
@@ -5659,10 +5732,57 @@ describe('QuoteBuilder', () => {
       serveLines();
       await loaded();
       expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+      await makeAnEdit();
       fireEvent.click(screen.getByRole('button', { name: /Save draft/ }));
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
       const draftArgs = mockRpc.mock.calls.find(([name]) => name === 'save_quote')?.[1] as { p_quote_payload: { status: string } };
       expect(draftArgs.p_quote_payload.status).toBe('draft');
+    });
+
+    // Repeated clicks on an unchanged quote sent duplicate saves (Taha): Save waits for a change.
+    it.each([['draft', 'Save draft'], ['revised', 'Save changes']] as const)(
+      'a %s quote enables %s only while it has unsaved changes',
+      async (status, label) => {
+        mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+          ? { data: { quote_id: `quote-${status}-7`, row_version: 8, item_ids: {} }, error: null }
+          : { data: null, error: null }));
+        serveLines('Product', {}, status);
+        await loaded();
+        const save = () => screen.getByRole('button', { name: label });
+        expect(save()).toBeDisabled();
+        expect(save()).toHaveAttribute('title', 'No changes to save');
+
+        // A lower price, so a revised quote needs no "grower agreed" tick.
+        fireEvent.change(priceInputs()[0], { target: { value: '9' } });
+        fireEvent.blur(priceInputs()[0]);
+        await waitFor(() => expect(save()).toBeEnabled());
+        expect(save()).not.toHaveAttribute('title');
+
+        fireEvent.click(save());
+        await waitFor(() => expect(save()).toHaveAttribute('title', 'No changes to save'));
+        expect(save()).toBeDisabled();
+        expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
+      },
+    );
+
+    it('a failed save keeps Save draft enabled, so the user can retry without another edit', async () => {
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+        ? { data: null, error: { message: 'connection reset' } }
+        : { data: null, error: null }));
+      serveLines();
+      await loaded();
+      fireEvent.change(priceInputs()[0], { target: { value: '9' } });
+      fireEvent.blur(priceInputs()[0]);
+      const save = () => screen.getByRole('button', { name: 'Save draft' });
+      await waitFor(() => expect(save()).toBeEnabled());
+
+      fireEvent.click(save());
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.anything()));
+      await waitFor(() => expect(save()).toBeEnabled());
+      expect(save()).not.toHaveAttribute('title');
+
+      fireEvent.click(save());
+      await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(2));
     });
 
     it('Edit note opens the line note, Done shows it, and Save draft sends it', async () => {

@@ -14,6 +14,7 @@ fn AS (SELECT p.*, p.proname || '(' || pg_get_function_identity_arguments(p.oid)
 lines AS (
   SELECT 'relation ' || relname || ' kind=' || relkind::text || ' persistence=' || relpersistence::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
          || coalesce(' partition ' || pg_get_expr(relpartbound, oid), '')
+         || CASE WHEN relkind = 'p' THEN ' key ' || pg_get_partkeydef(oid) ELSE '' END
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
@@ -82,9 +83,15 @@ lines AS (
     LEFT JOIN pg_roles r ON r.oid = x.grantee
     WHERE n.nspname = 'public' AND x.grantee <> n.nspowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
+  -- Role memberships: a role granted to another hands over all its rights, with no table ACL changing.
+  SELECT 'member ' || (SELECT name FROM who WHERE who.oid = m.roleid) || ' to ' || (SELECT name FROM who WHERE who.oid = m.member)
+         || CASE WHEN m.admin_option THEN ' +admin' ELSE '' END
+    FROM pg_auth_members m
+    WHERE (SELECT name FROM who WHERE who.oid = m.member) <> 'admin'
+  UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
   SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')
-         || ' ' || x.privilege_type || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' to ' || coalesce(r.rolname, 'PUBLIC')
+         || ' ' || x.privilege_type || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' to ' || coalesce((SELECT name FROM who WHERE who.oid = x.grantee), 'PUBLIC')
     FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace, aclexplode(d.defaclacl) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
     WHERE n.nspname = 'public' OR d.defaclnamespace = 0

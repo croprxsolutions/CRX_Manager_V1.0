@@ -301,15 +301,15 @@ function seed() {
     INSERT INTO public.vendors (id, name) VALUES ('${VENDOR}', 'KI143 Supply Co'), ('${OTHER_VENDOR}', 'KI143 Other Vendor');
     INSERT INTO public.products (id, product_name, unit_size, inventory_unit, product_form, current_cost, tier1_price, tier1_margin, is_active)
     VALUES ('${PRODUCT}', '[PROVER] KI143 Product', 'Gal', 'Gal', 'liquid', 10.00, 12.80, 21.875, true);
-    INSERT INTO public.purchase_orders (id, po_number, vendor, status, total_cost_cents, created_by) VALUES
-      ('${PO_PART}', 'KI143-PART', 'KI143 Supply Co', 'partially_received', 100000, '${ADMIN}'),
-      ('${PO_NONE}', 'KI143-NONE', 'KI143 Supply Co', 'submitted', 100000, '${ADMIN}'),
-      ('${PO_CANCEL}', 'KI143-CANCEL', 'KI143 Supply Co', 'cancelled', 100000, '${ADMIN}'),
-      ('${PO_ODD}', 'KI143-ODD', '  ki143 SUPPLY co ', 'fully_received', 50000, '${ADMIN}'),
-      ('${PO_BLANK}', 'KI143-BLANK', '  ', 'fully_received', 50000, '${ADMIN}'),
-      ('${PO_FRAC}', 'KI143-FRAC', 'KI143 Supply Co', 'partially_received', 1665, '${ADMIN}'),
-      ('${PO_OVER}', 'KI143-OVER', 'KI143 Supply Co', 'fully_received', 10000, '${ADMIN}'),
-      ('${PO_ZERO}', 'KI143-ZERO', 'KI143 Supply Co', 'partially_received', 100000, '${ADMIN}');
+    INSERT INTO public.purchase_orders (id, po_number, vendor, status, total_cost, created_by) VALUES
+      ('${PO_PART}', 'KI143-PART', 'KI143 Supply Co', 'partially_received', 1000.00, '${ADMIN}'),
+      ('${PO_NONE}', 'KI143-NONE', 'KI143 Supply Co', 'submitted', 1000.00, '${ADMIN}'),
+      ('${PO_CANCEL}', 'KI143-CANCEL', 'KI143 Supply Co', 'cancelled', 1000.00, '${ADMIN}'),
+      ('${PO_ODD}', 'KI143-ODD', '  ki143 SUPPLY co ', 'fully_received', 500.00, '${ADMIN}'),
+      ('${PO_BLANK}', 'KI143-BLANK', '  ', 'fully_received', 500.00, '${ADMIN}'),
+      ('${PO_FRAC}', 'KI143-FRAC', 'KI143 Supply Co', 'partially_received', 16.65, '${ADMIN}'),
+      ('${PO_OVER}', 'KI143-OVER', 'KI143 Supply Co', 'fully_received', 100.00, '${ADMIN}'),
+      ('${PO_ZERO}', 'KI143-ZERO', 'KI143 Supply Co', 'partially_received', 1000.00, '${ADMIN}');
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size) VALUES
       ('${PO_PART}', '${PRODUCT}', 60, 20, 10.00, 'Gal'),
       ('${PO_PART}', '${PRODUCT}', 40, 20, 10.00, 'Gal'),

@@ -1772,7 +1772,7 @@ export default function Reports() {
 
           {/* Inventory cost total */}
           {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
-            const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost })));
+            const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
             const note = inventoryValueNote(valuation);
             return (
             <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">

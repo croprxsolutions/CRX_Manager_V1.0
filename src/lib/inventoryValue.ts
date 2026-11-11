@@ -53,18 +53,29 @@ export function inventoryValueNote({ belowZeroCount, noCostCount }: InventoryVal
 }
 
 export function summarizeInventoryValue(
-  rows: ReadonlyArray<{ quantity: number | string | null; unitCost: number | string | null | undefined }>,
+  rows: ReadonlyArray<{
+    quantity: number | string | null;
+    unitCost: number | string | null | undefined;
+    /** The database's own row value in dollars, when it sends one; used instead of recomputing so the total matches its rows. */
+    rowValue?: number | string | null;
+  }>,
 ): InventoryValueSummary {
   const summary: InventoryValueSummary = { valueCents: 0, belowZeroCount: 0, noCostCount: 0 };
   for (const row of rows) {
     const quantity = Number(row.quantity ?? 0);
+    if (Number.isNaN(quantity)) {
+      summary.valueCents = Number.NaN; // unreadable stock fails the total visibly
+      continue;
+    }
     if (quantity < 0) summary.belowZeroCount += 1;
     if (!(quantity > 0)) continue;
     if (row.unitCost == null || !(Number(row.unitCost) > 0)) {
       summary.noCostCount += 1;
       continue;
     }
-    summary.valueCents += quantityTimesCostCents(row.quantity as number | string, row.unitCost);
+    summary.valueCents += row.rowValue != null
+      ? quantityTimesCostCents(row.rowValue, 1)
+      : quantityTimesCostCents(row.quantity as number | string, row.unitCost);
   }
   return summary;
 }

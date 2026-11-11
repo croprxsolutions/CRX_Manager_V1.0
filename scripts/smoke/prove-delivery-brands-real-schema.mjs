@@ -298,7 +298,7 @@ function refused(uid, sql, pattern) {
 }
 const num = (sql) => Number(scalar(sql));
 const events = (d, type) => num(`SELECT count(*) FROM public.delivery_brand_events WHERE delivery_id = '${d}'${type ? ` AND event_type = '${type}'` : ''};`);
-const maxSeq = (d) => num(`SELECT COALESCE(max(seq), 0) FROM public.delivery_brand_events WHERE delivery_id = '${d}' AND event_type <> 'reviewed';`);
+const maxSeq = (d) => num(`SELECT COALESCE(max(seq), 0) FROM public.delivery_brand_events WHERE delivery_id = '${d}' AND event_type <> 'line_removed';`);
 const picks = (line) => JSON.parse(scalar(`SELECT COALESCE(jsonb_agg(jsonb_build_object('source', source, 'parent_brand_id', parent_brand_id,
   'legacy_brand_id', legacy_brand_id, 'brand_name', brand_name, 'epa', epa_registration, 'quantity', quantity, 'review_state', review_state,
   'review_note', review_note) ORDER BY lower(brand_name), COALESCE(epa_registration, '')), '[]') FROM public.delivery_item_brands
@@ -633,8 +633,9 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   console.log('[prover] case 10: an admin links a typed pick to a brand on its list (snapshot unchanged) or dismisses it, once; others are refused');
 
   // 11. The receipt lines.
-  mkDelivery(7, [[PG, 4], [PL, 2], [PN, 1], [PL2, 3]]);
-  set(REP, D(7), [{ delivery_item_id: DI(7, 0), picks: [pick(PB1, 3), typed('Lima', 1)] }, { delivery_item_id: DI(7, 3), picks: [pick(LB3, 3)] }], 'bb-k11');
+  mkDelivery(7, [[PG, 4], [PL, 2], [PN, 1], [PL2, 3], [PG, 3]]);
+  set(REP, D(7), [{ delivery_item_id: DI(7, 0), picks: [pick(PB1, 3), typed('Lima', 1)] }, { delivery_item_id: DI(7, 3), picks: [pick(LB3, 3)] },
+    { delivery_item_id: DI(7, 4), picks: [pick(PB1, 2), typed('Kilo', 1)] }], 'bb-k11');
   // A receipt is queued only for a completion with proof: left at site, with its photo.
   const photo = `delivery-photos/${D(7)}/drop.jpg`;
   raw(`INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
@@ -642,11 +643,13 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
     INSERT INTO public.delivery_photos (id, delivery_id, storage_path, image_url, caption, uploaded_by)
       VALUES ('${id(77)}', '${D(7)}', '${photo}', '${photo}', 'Left at site — drop location', '${ADMIN}');`);
   ok(ADMIN, `SELECT public.complete_delivery(p_delivery_id => '${D(7)}', p_signed_by => 'No one present — left at site',
-    p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(7, 0)]: 4, [DI(7, 1)]: 2, [DI(7, 2)]: 1, [DI(7, 3)]: 2 })}, p_idempotency_key => 'bb-c7',
+    p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(7, 0)]: 4, [DI(7, 1)]: 2, [DI(7, 2)]: 1, [DI(7, 3)]: 2, [DI(7, 4)]: 2 })}, p_idempotency_key => 'bb-c7',
     p_evidence => 'left_at_site', p_evidence_ref => '${id(77)}', p_email_receipt => true)::text;`);
   const receipt = JSON.parse(scalar(`SELECT receipt::text FROM public.delivery_receipt_queue WHERE delivery_id = '${D(7)}';`));
   const rl = receipt.lines.map((l) => ({ ...l, qty: Number(l.qty) }));
-  assert.deepEqual(rl.find((l) => l.brands?.length === 2)?.brands.map((b) => [b.name, b.epa_registration, Number(b.quantity)]), [['Alpha', '100-1', 3], ['Lima', null, 1]]);
+  assert.deepEqual(rl.find((l) => l.brands?.some((b) => b.name === 'Lima'))?.brands.map((b) => [b.name, b.epa_registration, Number(b.quantity)]), [['Alpha', '100-1', 3], ['Lima', null, 1]]);
+  assert.deepEqual(rl.find((l) => l.brands?.some((b) => b.name === 'Kilo'))?.brands.map((b) => [b.name, b.quantity]), [['Alpha', null], ['Kilo', null]],
+    'a split that does not add up to delivered shows names only, no amounts');
   assert.deepEqual(rl.filter((l) => l.brands?.length === 1).map((l) => Number(l.brands[0].quantity)), [2], 'the receipt shows a pick trimmed to delivered (queued after the brand step)');
   assert.equal(rl.filter((l) => l.brand_recorded === false).length, 1, 'a branded line with no pick says so');
   assert.equal(rl.filter((l) => !l.brands && l.brand_recorded === undefined).length, 1, 'an unbranded line is as before');
@@ -691,17 +694,19 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   assert.ok(oscar, 'the typed pick is listed for review');
   ok(ADMIN, `SELECT public.review_typed_brand('${oscar.pick_id}', 'dismiss', NULL, 'not a real brand', 'bb-r14')::text;`);
   assert.equal(events(D(10), 'reviewed'), 1);
+  assert.ok(maxSeq(D(10)) > seq10, 'a review moves the stale-save base, so a driver save cannot undo a dismissal');
   ok(ADMIN, COMPLETE(D(10), { [DI(10, 0)]: 2.33333, [DI(10, 1)]: 2 }, 'bb-c14', { seq: seq10 }));
-  assert.equal(status(D(10)), 'completed');
+  assert.equal(status(D(10)), 'completed', 'a screen loaded before the review still completes');
+  assert.equal(JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(10)}' AND event_type = 'completed';`)).picks_confirmed, false);
   assert.equal(Number(picks(DI(10, 0))[0].quantity), 6, 'a pick is not trimmed to an amount it cannot hold');
   const miss10 = () => (js(ADMIN, 'SELECT public.get_deliveries_missing_brands(current_date - 2, current_date + 2)::text;')
     .find((x) => x.delivery_item_id === DI(10, 0)) ?? { reasons: [] }).reasons;
   assert.deepEqual(miss10(), ['split_does_not_match_delivered']);
   ok(ADMIN, CORRECT(D(10), [{ delivery_item_id: DI(10, 0), picks: [pick(LB3, 2.3333)] }], 'match delivered', maxSeq(D(10)), 'bb-x14'));
   assert.deepEqual(miss10(), [], 'a correction to the 4-place delivered amount clears the line');
-  console.log('[prover] case 14: an office review leaves a driver\'s loaded picks current; a 5-place delivered amount completes, keeps the pick and lists it; a 4-place correction clears it');
+  console.log('[prover] case 14: a screen loaded before an office review still completes (picks not confirmed); a 5-place delivered amount completes, keeps the pick and lists it; a 4-place correction clears it');
 
-  // 15. A line deleted outside edit_delivery records its picks first and moves the stale-save base.
+  // 15. A line deleted outside edit_delivery records its picks first (history only; no delivery lock, base unchanged).
   mkDelivery(11, [[PL2, 4], [PG, 2]], { st: 'scheduled' });
   set(REP, D(11), [{ delivery_item_id: DI(11, 0), picks: [pick(LB3, 4)] }, { delivery_item_id: DI(11, 1), picks: [pick(PB1, 2)] }], 'bb-k15');
   const seq11 = maxSeq(D(11));
@@ -712,9 +717,10 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   const ev11 = JSON.parse(scalar(`SELECT jsonb_build_object('before', before_rows, 'details', details)::text FROM public.delivery_brand_events
     WHERE delivery_id = '${D(11)}' AND event_type = 'line_removed';`));
   assert.equal(ev11.before.length, 1); assert.equal(ev11.details.delivery_item_id, DI(11, 0));
-  assert.ok(maxSeq(D(11)) > seq11, 'the stale-save base moved');
-  refused(REP, SET(D(11), [{ delivery_item_id: DI(11, 1), picks: [] }], seq11, 'bb-k15b'), /BRAND_PICKS_CHANGED/);
-  console.log('[prover] case 15: a direct delete of a line with picks records them in one line_removed event first and moves the stale-save base');
+  assert.equal(maxSeq(D(11)), seq11, 'the removal is history only and does not move the stale-save base');
+  refused(REP, SET(D(11), [{ delivery_item_id: DI(11, 0), picks: [] }], seq11, 'bb-k15b'), /DELIVERY_ITEM_NOT_ON_DELIVERY/);
+  set(REP, D(11), [{ delivery_item_id: DI(11, 1), picks: [] }], 'bb-k15c', seq11);
+  console.log('[prover] case 15: a direct delete of a line with picks records them in one line_removed event first; a save naming the gone line is refused, the rest still saves');
 
   console.log('DELIVERY_BRANDS_PROOF_PASS');
 }

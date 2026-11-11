@@ -132,7 +132,7 @@ CREATE TABLE public.delivery_brand_events (
 CREATE INDEX delivery_brand_events_delivery_idx ON public.delivery_brand_events (delivery_id, seq);
 
 COMMENT ON TABLE public.delivery_brand_events IS
-  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery is the stale-save base. Written only by the delivery brand functions; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed, lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}; line_removed {delivery_item_id, order_item_id, product_id}.';
+  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery, line_removed aside, is the stale-save base. Written only by the delivery brand functions and the delivery_items delete trigger; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed, lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}; line_removed {delivery_item_id, order_item_id, product_id}.';
 
 CREATE TABLE public.delivery_item_brands (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -273,9 +273,10 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  -- An office review only links or dismisses a typed name; it must not make a driver's loaded picks stale.
+  -- A line_removed event (written by a trigger that takes no delivery lock) is history only: a save naming a deleted
+  -- line is refused as not on the delivery, so the removal need not move the stale-save base.
   SELECT COALESCE(max(e.seq), 0) FROM public.delivery_brand_events e
-   WHERE e.delivery_id = p_delivery_id AND e.event_type <> 'reviewed';
+   WHERE e.delivery_id = p_delivery_id AND e.event_type <> 'line_removed';
 $function$;
 
 -- The current picks of a delivery (or of some of its lines), as stored.
@@ -542,7 +543,8 @@ $helper_grants$;
 
 -- A delivery line deleted outside edit_delivery (a direct delete of a scheduled line, or the order clean-up of a
 -- cancelled or voided delivery) takes its picks with it (the pick key cascades): record them first as one
--- 'line_removed' event, which also moves the stale-save base. edit_delivery's re-create records its own 'edited'
+-- 'line_removed' event. History only: it takes no delivery lock (so it cannot deadlock with a completion that holds
+-- the delivery and waits on the line) and does not move the stale-save base. edit_delivery's re-create records its own 'edited'
 -- event and sets crx.delivery_brand_edit around its body, so it is not recorded twice.
 CREATE FUNCTION public._delivery_brands_on_line_delete()
 RETURNS trigger
@@ -552,8 +554,6 @@ SET search_path = public, pg_temp
 AS $function$
 BEGIN
   IF COALESCE(current_setting('crx.delivery_brand_edit', true), '') = 'on' THEN RETURN OLD; END IF;
-  -- Every brand writer locks the delivery before it writes an event, so seqs commit in order (stale-save base).
-  PERFORM 1 FROM public.deliveries WHERE id = OLD.delivery_id FOR UPDATE;
   IF EXISTS (SELECT 1 FROM public.delivery_item_brands b
                   WHERE b.delivery_item_id = OLD.id AND b.superseded_at IS NULL) THEN
     PERFORM public._delivery_brand_event(OLD.delivery_id, 'line_removed', NULL, NULL,
@@ -1350,8 +1350,14 @@ BEGIN
                               WHEN EXISTS (SELECT 1 FROM public.delivery_item_brands b
                                             WHERE b.delivery_item_id = di.id AND b.superseded_at IS NULL)
                               THEN jsonb_build_object('brands', (
+                                -- Amounts only when the picks add up to what was delivered; otherwise the names alone
+                                -- (the office list shows the mismatch), never amounts that disagree with the line.
                                 SELECT jsonb_agg(jsonb_build_object('name', b.brand_name,
-                                         'epa_registration', b.epa_registration, 'quantity', b.quantity)
+                                         'epa_registration', b.epa_registration,
+                                         'quantity', CASE WHEN (SELECT sum(c.quantity) FROM public.delivery_item_brands c
+                                                                 WHERE c.delivery_item_id = di.id AND c.superseded_at IS NULL)
+                                                               = round(COALESCE(di.quantity_delivered, di.quantity), 4)
+                                                          THEN b.quantity END)
                                          ORDER BY lower(b.brand_name), COALESCE(b.epa_registration, ''), b.id)
                                   FROM public.delivery_item_brands b
                                  WHERE b.delivery_item_id = di.id AND b.superseded_at IS NULL))

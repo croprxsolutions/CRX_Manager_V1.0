@@ -24,6 +24,39 @@ describe('validateBlendMath', () => {
     expect(warnings.some((w) => /rate unit contains only invisible characters/.test(w.message))).toBe(true);
   });
 
+  it('flags an invisible-only line rate unit on a zero-rate or blank-rate line too (KI-16)', () => {
+    for (const rate of [0, null]) {
+      const warnings = validateBlendMath({ total_acres: null } as never, [
+        { product_name: 'Atrazine', quantity: 0, unit: 'oz', rate_per_acre: rate, rate_per_acre_unit: String.fromCharCode(0x200b),
+          product_form: 'liquid', product_rate_unit: 'oz', product_inventory_unit: 'oz' } as never,
+      ]);
+      expect(warnings.some((w) => /rate unit contains only invisible characters/.test(w.message))).toBe(true);
+    }
+    // A tab-only unit is invisible-only too: the database folds tabs as JS .trim() does.
+    const tab = validateBlendMath({ total_acres: null } as never, [
+      { product_name: 'Atrazine', quantity: 0, unit: 'oz', rate_per_acre: 0, rate_per_acre_unit: '\t',
+        product_form: 'liquid', product_rate_unit: 'oz', product_inventory_unit: 'oz' } as never,
+    ]);
+    expect(tab.some((w) => /rate unit contains only invisible characters/.test(w.message))).toBe(true);
+  });
+
+  it('reads a dotted fl. oz and a tab like the server does, so a billable liquid line is not flagged (KI-16)', () => {
+    const ticket = { total_acres: null } as never;
+    for (const unit of ['fl. oz/ac', 'fl.oz', 'fl oz.', 'oz\t', 'fl\toz/ac']) {
+      const warnings = validateBlendMath(ticket, [
+        { product_name: 'Liquid', quantity: 10, unit: 'gal', rate_per_acre: 2, rate_per_acre_unit: unit,
+          product_form: 'liquid', product_rate_unit: null, product_inventory_unit: 'gal' },
+      ]);
+      expect(warnings.filter((w) => /fail when you invoice|invisible/.test(w.message))).toEqual([]);
+    }
+    // A dry product still cannot bill a fluid ounce: the server refuses it, so the screen must say so.
+    const dry = validateBlendMath(ticket, [
+      { product_name: 'Dry', quantity: 10, unit: 'lb', rate_per_acre: 2, rate_per_acre_unit: 'fl. oz/ac',
+        product_form: 'dry', product_rate_unit: null, product_inventory_unit: 'lb' },
+    ]);
+    expect(dry.some((w) => /fail when you invoice/.test(w.message))).toBe(true);
+  });
+
   it('keeps matching seed units but flags seed conversions before billing', () => {
     const ticket = { total_acres: 10, total_volume: null, total_volume_unit: null, application_rate: null };
     const seed = { product_name: 'Seed', quantity: 20, unit: 'Lb', rate_per_acre: 2,

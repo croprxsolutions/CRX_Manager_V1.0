@@ -13,6 +13,7 @@ import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
 import ConfirmModal from '../ui/ConfirmModal';
 import Input from '../ui/Input';
+import { toSentryError } from '../../lib/sentryError';
 
 // Mirrors the bucket limits and supabase/functions/customer-document-files/logic.ts; keep all three in step.
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -125,7 +126,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       if (seq !== requestSeq.current) return;
       setDocuments([]);
       setLoadError(true);
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'CustomerDocuments.load' },
       });
       toast('error', errorMessage(error, 'Failed to load customer documents'));
@@ -230,7 +231,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       if (showRemoved) setShowRemoved(false);
       else await loadDocuments();
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'CustomerDocuments.upload' },
       });
       toast('error', errorMessage(error, 'Failed to upload document'));
@@ -247,7 +248,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
     try {
       await downloadCustomerDocumentFile(document.id, document.filename, document.mime_type);
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'CustomerDocuments.download', documentId: document.id },
       });
       toast('error', errorMessage(error, 'Failed to download document'));
@@ -282,7 +283,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
       setDocuments((current) => current.filter((row) => row.id !== document.id));
       toast('success', 'Document restored');
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'CustomerDocuments.restore', documentId: document.id },
       });
       toast('error', errorMessage(error, 'Failed to restore document'));
@@ -343,7 +344,7 @@ export default function CustomerDocuments({ customerId, userId }: CustomerDocume
         void loadDocuments();
         return;
       }
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'CustomerDocuments.delete', documentId: documentToDelete.id },
       });
       toast('error', errorMessage(error, 'Failed to remove document'));

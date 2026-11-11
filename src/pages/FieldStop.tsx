@@ -40,6 +40,7 @@ import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { toSentryError } from '../lib/sentryError';
 
 interface StopItem {
   id: string;
@@ -452,7 +453,7 @@ export default function FieldStop() {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
         signatureUploadError = sigErr;
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
+        Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }

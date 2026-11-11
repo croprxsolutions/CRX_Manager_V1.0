@@ -108,8 +108,9 @@ CHECK, one re-issued trigger function). PR 2: workbook tabs, merged only after P
 
 1. When an admin approves a draft at its version, then status `approved`, approver = that admin, time set, event `approved`.
 2. When the version is old, then `stale`, nothing saved.
-3. When the row has `basis_confirmed = false`, or label check `above` with no reason, or a unit that no longer fits the
-   parent's form, then approval is refused with that reason.
+3. When the row has label check `above` with no reason, or a unit that no longer fits the parent's form, then approval
+   is refused with that reason. A row with `basis_confirmed = false` that Mason approves as shown is saved first (which
+   confirms its basis and re-runs every check), then approved (case 18); the download shows the doubt beforehand.
 4. When an approved row's value is edited without reopen, then refused; with reopen + reason, then it is a draft with
    the new values and both events exist.
 5. When `postgres` updates or deletes an approved row directly, then refused (trigger), except approved → draft with
@@ -160,8 +161,8 @@ design) · 48 (rates hang on parents, not sizes; every ID is re-read on the serv
 reads them as contiguous) · 57 (a retry with a new key after a lost reply finds its rows moved and is refused as
 stale: nothing applies twice) · 68 (live has 0 rate rows; the RPCs are admin-only and change nothing the app reads)
 · 69, 70 (rollback in the migration header; post-apply checks are ship.md's apply gate and the live read-only check)
-· 33 (RT-1 settled that a save confirms the basis; the workbook shows `basis_confirmed`, and an unchanged row is never
-saved).
+· 33 (RT-1 settled that a save confirms the basis; the workbook shows `basis_confirmed`; approving an unconfirmed row
+as shown saves it, so the approval is the confirmation).
 
 **Deferred by name:** 8, 11, 71 to RT-4 (nothing reads approved rows until RT-4; RT-4 must re-check each promoted
 parent at cut-over, promote only `approved_default` / `no_per_acre_default`, and prove quote, application and
@@ -198,6 +199,13 @@ active parents only); 42, 43 notes optional, blank clears; 44 a zero default is 
 - Luna round 3 (fix commit b24ea58): MED a blank new row with no default key is read as SQL NULL and refused:
   refuted, a missing or null key on a new row is set to false before the blank check; proved (case 9: both rows
   skipped).
+- Sol round 2 (gpt-6-sol high, head 86dc1b5, CLEAN, 0 counted findings) noted three: MED approving an unchanged
+  row whose basis is unconfirmed was refused with no way to confirm it in the workbook: fixed (approve saves it as
+  shown first, which confirms the basis; case 18). MED a parent form change after a decision does not clear the
+  stored outcome: deferred by name, as R4 and Astra 8/11/71 already say: the download flags it (`outcome_problem`,
+  case 15), a resend is refused, and RT-4 must re-check every promoted parent at cut-over and never trust the stored
+  outcome alone; nothing reads outcomes before RT-4. LOW a clear made with no signed-in user names the rate's last
+  editor: accepted (only the owner's reviewed migrations write without a signed-in user; the RLS review's L3).
 
 ## Business decisions (Mason, 2026-11-11, picked in the coordinator session: both recommended options)
 

@@ -356,7 +356,7 @@ function approvalCases() {
   console.log('[case] 2 an old version (also of a row approved since) is refused as stale by name and nothing is saved');
 
   // 3. Basis unconfirmed, above the label max with no reason, a unit that no longer fits: each refused with its reason.
-  const cases3 = [[L[1], R.u2, /PRODUCT_RATE_BASIS_UNCONFIRMED/], [L[4], R.a5, /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED: .*100-1/],
+  const cases3 = [[L[4], R.a5, /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED: .*100-1/],
     [L[5], R.a6, /PRODUCT_RATE_UNIT_NOT_FOR_BASIS: pt is not allowed for per_acre on a dry product/]];
   for (const [pid, rid, pattern] of cases3) {
     const res = js(ADMIN, preview([upId(pid, rid, { decision: 'approve' })])).rates[0];
@@ -372,7 +372,7 @@ function approvalCases() {
   // Fixing the above row with a reason, in the same upload as its approval, works (save runs before approve).
   js(ADMIN, commit([upId(L[4], R.a5, { over_label_reason: 'Mason: label allows 32 oz on heavy ground', decision: 'approve' })]));
   assert.equal(statusOf(R.a5), 'approved');
-  console.log('[case] 3 basis unconfirmed, above-label with no reason and a unit that no longer fits are each refused by name; "not checked" approves; a reason saved in the same upload lets it approve');
+  console.log('[case] 3 above-label with no reason and a unit that no longer fits are each refused by name; "not checked" approves; a reason saved in the same upload lets it approve');
 }
 
 function reopenCases() {
@@ -607,6 +607,15 @@ function downloadCases() {
   assert.equal(d.units.length, 9);
   assert.ok(d.parents.every((p) => Array.isArray(p.sizes) && 'outcome_version' in p));
   console.log(`[case] 13 the download shows only the latest derivation's notes; totals match the table (${JSON.stringify(t)})`);
+
+  // 18. A derived row whose basis was in doubt: approving it as shown saves it (confirming the basis), then approves it.
+  assert.equal(rateOf(L[1], R.u2).basis_confirmed, false);
+  const u = js(ADMIN, preview([upId(L[1], R.u2, { decision: 'approve' })])).rates[0];
+  assert.equal(u.status, 'change', JSON.stringify(u)); assert.deepEqual(u.actions, ['save', 'approve']);
+  js(ADMIN, commit([upId(L[1], R.u2, { decision: 'approve' })]));
+  assert.equal(statusOf(R.u2), 'approved');
+  assert.equal(scalar(`SELECT basis_confirmed FROM public.product_rates WHERE id = '${R.u2}';`), 't');
+  console.log('[case] 18 approving an unconfirmed-basis row as shown confirms its basis and approves it');
 }
 
 function accessCases() {

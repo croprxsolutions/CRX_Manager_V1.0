@@ -559,8 +559,10 @@ BEGIN
           ELSIF v_decision = 'delete' THEN
             v_p := v_p || jsonb_build_object('status', 'change', 'actions', '["delete"]'::jsonb);
           ELSE
+            -- Approving a row whose basis was unconfirmed confirms it: the row is saved as shown (the save re-runs every
+            -- check and sets basis_confirmed), then approved; otherwise an unchanged row could never be confirmed here.
             v_p := v_p || jsonb_build_object('status', 'change', 'actions',
-              CASE WHEN v_changed THEN '["save"]'::jsonb ELSE '[]'::jsonb END
+              CASE WHEN v_changed OR (v_decision = 'approve' AND NOT v_cur.basis_confirmed) THEN '["save"]'::jsonb ELSE '[]'::jsonb END
               || CASE WHEN v_decision = 'approve' THEN '["approve"]'::jsonb ELSE '[]'::jsonb END);
           END IF;
           v_p := v_p || jsonb_build_object('version', v_cur.row_version);

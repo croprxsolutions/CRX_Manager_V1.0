@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md)) | 97 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11) | 98 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
-| Closed as FIXED, with proof (bottom of file and archive) | 20 |
+| Closed as FIXED, with proof (bottom of file and archive) | 22 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -436,7 +436,15 @@ can make old splits refuse to save (LOW-MED).
   2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
   to "oz", so a direct table write that skips the triggers would bill it as weight. Also LOW (Taha, PR #1741): a tab
   in a job line's stock Unit is still refused (`CHEM_UNIT_UNSUPPORTED_CHARACTER`, fails closed); folding it would
-  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too.
+  Dry fluid ounce on every other writer (Luna 2026-11-10): job lines, booking lines, a blend line's quantity unit
+  and a dry product's size and stock unit could still name fluid ounces, which holds and deduction size as weight
+  (16 fl oz as 1 lb). FIX PENDING LIVE APPLY (`20270103140000`, contract
+  `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`): each is refused (`CHEM_UNIT_FORM_MISMATCH`), and every
+  product must have a form (Mason 2026-11-10; a saved form cannot change, so no product turns dry under its lines;
+  importing a product with a blank form is now refused). Not covered (existing): gal/pt/qt on a dry product converts
+  to nothing, so billing refuses it and job completion deducts the raw number flagged for office review.
+  Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
   at billing).
@@ -902,12 +910,10 @@ was created (`CycleCounts.tsx` ~L286; `_complete_cycle_count_impl`). A 10-unit d
 negative rows (KI-29), so this must be fixed before that count. 0 completed counts live. Fix: compare against on-hand
 locked when each line is saved, or have Complete refuse/list products with ledger movement since the count began.
 
-### KI-135 — "Inventory Value" subtracts negative stock and counts no-cost rows as $0
-**MED · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
-The Inventory page card (`InventoryPage.tsx` L1235) and Reports Inventory Cost sum quantity x catalog cost over every
-row, so the 19 negative rows (KI-29) take about 11% off the total; one stocked row has no cost; the card adds unrounded
-floats. Fix: value only rows above zero, show negative quantity separately, list no-cost rows as unknown. D12 item 7
-(relabel as pricing-basis value) is also not built.
+### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
+**LOW · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
+The value bug itself is fixed (closed list, item 21). What remains is D12 item 7: label the Inventory page card and the
+Reports Inventory Cost total as a value at price-list cost, not a book or accounting value.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
 **MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
@@ -958,13 +964,6 @@ receipt 2026-05-06) hold all 14,715 units on order; for 9 products on order is t
 showing short. Fix: a `close_purchase_order_short` function with a `closed` status that drops out of on-order sums;
 then Mason picks which POs to close (To-Do decision 23). Third in the sweep's fix order.
 
-### KI-143 — Vendor bills are checked against ordered value, and accept another vendor's or a cancelled PO
-**MED · OPEN · purchasing/payables · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #2) · unassigned**
-`create_vendor_bill` compares against the PO's ordered total (5% slack), never received value, and does not check PO
-status or vendor; `NewVendorBill.tsx` fills the ordered total and keeps the previous vendor when the PO's vendor text
-matches none. A short shipment can be billed and paid in full. 0 of 6 live bills have a PO, so nothing has gone wrong
-yet. Fix: refuse cancelled POs and mismatched vendors; confirm when billed exceeds received value.
-
 ### KI-144 — A purchase order's vendor is free text, not a link to the vendor list
 **MED-LOW · OPEN · purchasing/vendors · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #3) · unassigned**
 `purchase_orders.vendor` is text with no foreign key; vendor rename updates only products; Bulk PO Import suggests
@@ -1003,6 +1002,17 @@ the guard for every role.
 `CropPrograms.tsx` shows New/Edit/Duplicate to reps but saves to `app_settings`, which only admins may write, so a rep's
 work is lost on Save; `PrintOptionsDialog.tsx` "Save default" has the same mismatch. Two admins editing programs at once
 overwrite each other (one settings record). Fix depends on who owns crop programs (To-Do decision 25).
+
+### KI-150 — Receipt reversal takes the PO locks in the opposite order from vendor bills
+**LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
+Reversing a receipt locks the PO line before the PO; creating or editing a vendor bill locks the vendor, then the PO.
+Two people doing both at once on the same PO could make one of them wait and fail with a retryable error. Fix: take
+the PO lock first in the reversal path, in a new migration.
+
+### KI-151 — Changing PO line costs is still checked against the ordered value
+**LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
+Since KI-143, vendor bills are checked against what arrived (capped at the ordered total). `set_purchase_order_item_costs`
+still compares billed amounts with the ordered value. Fix: decide whether it should follow the same rule.
 
 ## Database and release process
 
@@ -1474,6 +1484,12 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 17. **KI-91, retired product with negative stock was checked by hand only** — closed 2026-11-08 by the same prover: a product at −2.5 on hand is turned off through `set_product_active` (one "stock" warning, no blocker), then stays in the inventory position report at −2.5, not flagged low, and in the admin cost report at −2.50 value; the same balance on an active product is flagged low.
 18. **KI-92, accepted quote with a live order needed proof** — closed 2026-11-10 with no bug found. `scripts/smoke/prove-product-active-guard-real-schema.mjs`, temporarily extended with two cases, printed `PRODUCT_ACTIVE_GUARD_PROOF_PASS`: an accepted quote whose order is confirmed is not in the turn-off warnings, and an accepted quote whose only order is soft-deleted is. The container's `_product_active_review` matches live by md5 (`3c9f0b26…`, read-only live query the same day). The two cases were not committed (verification only). The checked-in prover no longer runs on `main` as is: it refuses because `20261204100000_ki18_batch1_chicago_today` sorts after WP-PM-3 and re-emits the inventory cost function it watches; the run skipped that file, which does not touch the quote warnings. Original text appended to the archive.
 19. **KI-112, a draft return-credit prover failed just after midnight UTC** — closed 2026-11-10 with no bug found. `main`'s `scripts/smoke/verify-return-credit-real-schema.mjs` (live-dump version) passed twice on a fresh read-only dump of the live schema: at 2:15 PM Central, and at 6:05 PM Central (`main` `a1ba9e63d`, 00:05 UTC on 2026-11-11, so the UTC date was a day ahead of Central, the window where the closed PR #1319 version failed). Both printed `RETURN_CREDIT_LIVE_SCHEMA_PASS ... smoke=SMOKE_PASS_ROLLBACK residue=0`, including the fractional COGS proofs (`FRACTIONAL_COGS_DOUBLE_ROUNDING_DETECTED`, `FRACTIONAL_REPORT_HALF_CENT_DETECTED`). The old failure belonged to the abandoned baseline-replay version only. Original text appended to the archive.
+20. **KI-143, vendor bills were checked against the ordered value** — closed 2026-11-11 by PR #1769, migration `20270103110000_ki143_vendor_bill_received_value_checks` (applied live 2026-11-11 8:24 AM Central, ledger `20261111142411`): a bill on a PO now needs a reason once the PO's bills go above 105% of what arrived (never more than the ordered total). Cancelled POs and a different vendor were already refused by the database. Proven by `scripts/smoke/prove-ki143-vendor-bill-received-value-real-schema.mjs`; live functions re-read after the apply.
+21. **KI-135, Inventory Value subtracted negative stock and counted no-cost stock as $0** — closed 2026-11-11 by PR #1792
+   (browser only, no migration): both totals come from `src/lib/inventoryValue.ts` and value only stock above zero with a
+   cost, in exact whole cents; the Reports total adds the database's own rounded row values. Checked live 2026-11-11 as
+   admin: the Inventory card and the Reports Inventory Cost total show the same figure, each with "19 below zero, not
+   counted". The D12 item 7 relabel stays open under KI-135.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

@@ -140,3 +140,12 @@ on-hand for later edits (a typo fix hours later stays right, a genuine recount a
   `cycleCountOnHandAtCount.test.ts`.
 - Left as is (pre-existing, admin-only): admins can write count-line columns directly (RLS); the
   `idempotency-body-check: exempt` marker stays because key handling is byte-identical to the live body.
+
+## Luna round 1 (gpt-6-luna xhigh, head 0609cc609; 0 BLOCKER / 0 HIGH / 2 MED)
+
+- Deferred: on hand with more than two decimals (1 of 117 live rows) leaves Complete less than 0.005 off the count,
+  because `variance` is `numeric(10,2)` and Complete adds it to the unrounded on hand. The residue existed before this
+  fix; removing it means widening the count-line columns, its own change.
+- Refuted: "a late response overwrites a newer save". Writes for one line are chained (`itemWriteQueuesRef`,
+  `previous.catch(() => undefined).then(...)` in `updateCountedQty`), so save B starts only after save A has
+  answered; responses cannot arrive out of order.

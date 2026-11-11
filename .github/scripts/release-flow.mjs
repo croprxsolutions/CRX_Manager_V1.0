@@ -32,6 +32,16 @@ export function versionProblems(pkg, lock, notes) {
 // and a releaseNotes.ts that is exactly the bot's module (no code). CHANGELOG.md is text only.
 export function botFileProblems(file, expected, actual) {
   if (actual === null) return [`${file} is missing (the bot always writes it)`];
+  if (file === 'src/releaseNotes.ts') {
+    // Always the bot's exact module, even when unchanged: this file is app code.
+    try {
+      const notes = JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(actual)[1]);
+      const shape = Object.keys(notes).join() === 'version,date,items' && typeof notes.version === 'string'
+        && typeof notes.date === 'string' && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
+      if (shape && actual === releaseNotesModule(notes)) return [];
+    } catch { /* not the bot's module */ }
+    return [`${file} isn't exactly the module the bot writes (a version, a date and a list of strings)`];
+  }
   if (expected === actual) return [];
   if (file === 'package.json' || file === 'package-lock.json') {
     const strip = (t) => {
@@ -44,20 +54,10 @@ export function botFileProblems(file, expected, actual) {
     return [`${file} differs from staging + main outside its version field`];
   }
   if (file === 'CHANGELOG.md') {
-    // Text only, but it may not disappear or lose an earlier release's section.
-    const releases = (t) => (t ?? '').split('\n').filter((l) => /^## v\d/.test(l));
-    const kept = new Set(releases(actual).map((l) => l.replace(/ \(.*$/, '')));
-    const lost = releases(expected).filter((l) => !kept.has(l.replace(/ \(.*$/, '')));
-    return lost.length ? [`CHANGELOG.md lost earlier release sections (${lost.slice(0, 5).join('; ')})`] : [];
-  }
-  if (file === 'src/releaseNotes.ts') {
-    try {
-      const notes = JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(actual)[1]);
-      const shape = Object.keys(notes).join() === 'version,date,items' && typeof notes.version === 'string'
-        && typeof notes.date === 'string' && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
-      if (shape && actual === releaseNotesModule(notes)) return [];
-    } catch { /* not the bot's module */ }
-    return [`${file} isn't exactly the module the bot writes (a version, a date and a list of strings)`];
+    // Text only, but every earlier release's section stays word for word.
+    const sections = (expected ?? '').split(/\n(?=## v\d)/).slice(1).map((sec) => sec.trimEnd());
+    const lost = sections.filter((sec) => !actual.includes(sec)).map((sec) => sec.split('\n')[0]);
+    return lost.length ? [`CHANGELOG.md changed or lost earlier release sections (${lost.slice(0, 5).join('; ')})`] : [];
   }
   return [];
 }

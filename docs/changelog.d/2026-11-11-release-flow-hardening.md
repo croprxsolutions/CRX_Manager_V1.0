@@ -10,7 +10,8 @@ against the code. This PR fixes the ones that were real:
   by keeping release/next's old copy. It now starts both from staging + main (the guard's expected side),
   then sets only the version.
 - **`CHANGELOG.md` and the other bot files could be deleted or emptied.** All four must exist on
-  release/next, and the changelog must keep every earlier release's section.
+  release/next, and the changelog must keep every earlier release's section word for word.
+  `src/releaseNotes.ts` must always be the bot's exact module, even when it equals staging's copy.
 - **Versions weren't checked.** They must now be one plain `X.Y.Z` (no leading zeros), the same in `package.json`, both
   version fields of the lock, and `src/releaseNotes.ts`. The content check reads big files in full (no
   1 MB cap) and fails on any git error other than "file not in this tree".
@@ -22,7 +23,7 @@ against the code. This PR fixes the ones that were real:
   says how to fix it.
 - **A `-- crx: no-transaction` migration could hold several statements.** It runs outside a transaction,
   so a failure after the first statement leaves half a change. The stamp check now refuses more than one
-  statement; `SET` lines before it (such as `lock_timeout`) are allowed, and nothing may follow it.
+  statement; `SET` lines before it (such as `lock_timeout`) are allowed before it, nothing may follow it, and the file must hold that one statement.
 - **A new one-shot migration was checked as if it would run.** It is only recorded, so only its encoding
   is checked now, as the apply job does.
 - **Stamps could name an impossible date** like 31 February. They must now be a real calendar day.

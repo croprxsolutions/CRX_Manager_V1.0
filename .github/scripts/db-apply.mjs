@@ -141,7 +141,7 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
   if (isNoTransaction(text)) {
     const statements = skeleton.split(';').filter((s) => s.trim());
     const main = statements.findIndex((s) => !/^\s*SET\s/i.test(s));
-    if (main >= 0 && statements.length > main + 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (SET lines only before it)`);
+    if (main < 0 || statements.length > main + 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (SET lines only before it)`);
   }
   // psql runs a backslash command anywhere outside quotes (\! runs a shell command), so none at all.
   if (skeleton.includes('\\')) problems.push(`${stem}: has a psql backslash command outside quotes`);

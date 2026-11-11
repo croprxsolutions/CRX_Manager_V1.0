@@ -208,6 +208,7 @@ test('fileProblems: a no-transaction file holds one statement; a one-shot is onl
   assert.match(fileProblems('x', buf('-- crx: no-transaction\nCREATE INDEX CONCURRENTLY i ON t (a);\nDROP INDEX j;\n'))[0], /one statement/);
   assert.deepEqual(fileProblems('x', buf("-- crx: no-transaction\nSET lock_timeout = '5s';\nCREATE INDEX CONCURRENTLY i ON t (a);\n")), []);
   assert.match(fileProblems('x', buf('-- crx: no-transaction\nCREATE INDEX CONCURRENTLY i ON t (a);\nSET ROLE nobody;\n'))[0], /one statement/);
+  assert.match(fileProblems('x', buf("-- crx: no-transaction\nSET lock_timeout = '5s';\n"))[0], /one statement/);
   assert.match(fileProblems('x', buf('BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;\n'))[0], /transaction control/);
   assert.deepEqual(fileProblems('x', buf('BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;\n'), { forRun: false }), []);
   assert.deepEqual(fileProblems('x', buf('-- crx: no-transaction\nUPDATE t SET a = 1;\nUPDATE t SET b = 2;\n'), { forRun: false }), []);

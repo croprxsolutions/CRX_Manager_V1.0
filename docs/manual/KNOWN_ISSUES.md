@@ -903,11 +903,15 @@ negative rows (KI-29), so this must be fixed before that count. 0 completed coun
 locked when each line is saved, or have Complete refuse/list products with ledger movement since the count began.
 
 ### KI-135 — "Inventory Value" subtracts negative stock and counts no-cost rows as $0
-**MED · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
+**MED · FIXED 2026-11-11 (pending live check) · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
 The Inventory page card (`InventoryPage.tsx` L1235) and Reports Inventory Cost sum quantity x catalog cost over every
 row, so the 19 negative rows (KI-29) take about 11% off the total; one stocked row has no cost; the card adds unrounded
 floats. Fix: value only rows above zero, show negative quantity separately, list no-cost rows as unknown. D12 item 7
 (relabel as pricing-basis value) is also not built.
+**Fix delivered 2026-11-11 (browser only, no migration):** both totals now come from `src/lib/inventoryValue.ts`, which
+values only products above zero with a cost, in exact whole cents, and says under the total how many products are below
+zero (not counted) or have stock but no cost (value unknown). The Inventory Cost table rows and CSV still show each row's
+own value, negative rows included. D12 item 7 (relabel as pricing-basis value) is still not built.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
 **MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**

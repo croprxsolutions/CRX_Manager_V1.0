@@ -546,7 +546,8 @@ const commands = {
     } else {
       pr = await gh('/pulls', { method: 'POST', body: { title, body, head: 'release/next', base: 'main' } });
       card = await S.trySlack(() => syncCard(S, plan, pr.html_url, null));
-      if (card) await gh(`/pulls/${pr.number}`, { method: 'PATCH', body: { body: S.writeMarker(pr.body, card.marker) } });
+      // A failed save only loses the card's place (the next refresh posts a new card); it never fails the release.
+      if (card) await gh(`/pulls/${pr.number}`, { method: 'PATCH', body: { body: S.writeMarker(pr.body, card.marker) } }).catch((e) => console.log(`::warning::Slack card not saved on the PR: ${e.message}`));
     }
     if (card?.replies.length) await S.trySlack(async () => { for (const text of card.replies) await S.slack('chat.postMessage', { thread_ts: card.marker.ts, text }); });
     // The commit this run built and pushed; anything pushed after it has no green status.
@@ -588,42 +589,47 @@ const commands = {
   async 'main-pushed'() {
     const sha = process.env.SHA;
     const hit = (await gh(`/commits/${sha}/pulls`)).find((p) => p.merge_commit_sha === sha && p.base?.ref === 'main' && p.merged_at);
-    if (!hit) return 0;
-    const { backMergeText, cardMessage, esc, hotfixMessage, liveMessage, parseReleaseNotes, readMarker, slack, SQUASHED, trySlack, writeMarker } = await slackKit();
-    await trySlack(async () => {
-      const pr = await gh(`/pulls/${hit.number}`);
-      const by = pr.merged_by?.login ?? 'someone';
-      const ch = process.env.SLACK_RELEASE_CHANNEL;
-      let thread;
-      if (pr.head.ref === 'release/next') {
-        const m = readMarker(pr.body);
-        const card = m?.ts && m.ch === ch ? m : null;
-        const v = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
-        const tagUrl = `${REPO_URL()}/releases/tag/${v}`;
-        const merged = git('rev-list', '--parents', '-n', '1', sha).split(' ').length === 3;
-        if (card) await slack('chat.update', { ts: card.ts, ...cardMessage({ ...card, v }, { phase: merged ? 'merged' : 'squashed', prUrl: pr.html_url, tagUrl, mergedBy: by }) });
-        thread = card?.ts;
-        if (!merged) {
-          await slack('chat.postMessage', { thread_ts: thread, reply_broadcast: Boolean(thread), text: SQUASHED });
-        } else {
-          if (thread) await slack('chat.postMessage', { thread_ts: thread, text: `:twisted_rightwards_arrows: Merged into main by ${esc(by)}. Tag ${v} and its GitHub Release follow.` });
-          const notes = parseReleaseNotes(git('show', `${sha}:src/releaseNotes.ts`));
-          const live = await slack('chat.postMessage', liveMessage({
-            version: v, items: notes?.items ?? [], prCount: card ? Object.keys(card.states ?? {}).length : null, migrations: card?.mig ?? null,
-            mergedBy: by, tagUrl, changelogUrl: `${REPO_URL()}/blob/main/CHANGELOG.md`, prUrl: pr.html_url,
-          }));
-          thread ??= live.ts;
-        }
-      } else if (isReleaseOrHotfixHead(pr.head.ref)) {
-        thread = (await slack('chat.postMessage', hotfixMessage({ number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases` }))).ts;
-      } else return;
-      const bm = Number(process.env.BACK_MERGE_PR);
-      if (bm && thread) {
-        const b = await gh(`/pulls/${bm}`);
-        await slack('chat.postMessage', { thread_ts: thread, text: backMergeText('opened', bm, b.html_url) });
-        await gh(`/pulls/${bm}`, { method: 'PATCH', body: { body: writeMarker(b.body, { ts: thread, ch, at: Date.now() }) } });
+    const K = await slackKit();
+    if (!hit || !K.slackConfigured()) return 0;
+    const { slack, trySlack } = K;
+    const pr = await gh(`/pulls/${hit.number}`);
+    const by = pr.merged_by?.login ?? 'someone';
+    const ch = process.env.SLACK_RELEASE_CHANNEL;
+    // Each post stands alone: one that fails (a deleted card, a Slack hiccup) doesn't skip the rest.
+    let thread = null;
+    if (pr.head.ref === 'release/next') {
+      const m = K.readMarker(pr.body);
+      const card = m?.ts && m.ch === ch ? m : null;
+      const v = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
+      const tagUrl = `${REPO_URL()}/releases/tag/${v}`;
+      const merged = git('rev-list', '--parents', '-n', '1', sha).split(' ').length === 3;
+      // A card that can't be edited (deleted, say) gets no replies; the live post becomes the thread.
+      if (card && (await trySlack(() => slack('chat.update', { ts: card.ts, ...K.cardMessage({ ...card, v }, { phase: merged ? 'merged' : 'squashed', prUrl: pr.html_url, tagUrl, mergedBy: by }) })))) thread = card.ts;
+      if (!merged) {
+        await trySlack(() => slack('chat.postMessage', { thread_ts: thread ?? undefined, reply_broadcast: Boolean(thread), text: K.SQUASHED }));
+      } else {
+        if (thread) await trySlack(() => slack('chat.postMessage', { thread_ts: thread, text: `:twisted_rightwards_arrows: Merged into main by ${K.esc(by)}. Tag ${v} and its GitHub Release follow.` }));
+        const notes = K.parseReleaseNotes(git('show', `${sha}:src/releaseNotes.ts`));
+        const live = await trySlack(() => slack('chat.postMessage', K.liveMessage({
+          version: v, items: notes?.items ?? [], prCount: card ? Object.keys(card.states ?? {}).length : null, migrations: card?.mig ?? null,
+          mergedBy: by, tagUrl, changelogUrl: `${REPO_URL()}/blob/main/CHANGELOG.md`, prUrl: pr.html_url,
+        })));
+        thread ??= live?.ts ?? null;
       }
-    });
+    } else if (isReleaseOrHotfixHead(pr.head.ref)) {
+      thread = (await trySlack(() => slack('chat.postMessage', K.hotfixMessage({ number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases` }))))?.ts ?? null;
+    } else return 0;
+    // The back-merge (new, or already open and now carrying this too) follows the newest thread.
+    // Its marker is saved before the post, so a failed save never repeats one.
+    const bm = Number(process.env.BACK_MERGE_PR);
+    if (bm && thread) {
+      await trySlack(async () => {
+        const b = await gh(`/pulls/${bm}`);
+        const isNew = process.env.BACK_MERGE_NEW === '1';
+        await gh(`/pulls/${bm}`, { method: 'PATCH', body: { body: K.writeMarker(b.body, { ts: thread, ch, at: (!isNew && K.readMarker(b.body)?.at) || Date.now() }) } });
+        await slack('chat.postMessage', { thread_ts: thread, text: K.backMergeText(isNew ? 'opened' : 'carried', bm, b.html_url) });
+      });
+    }
     return 0;
   },
   // Every release-pr run (pushes, labels, nightly): reply when a back-merge lands, warn once if one

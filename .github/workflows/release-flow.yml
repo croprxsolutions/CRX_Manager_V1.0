@@ -196,7 +196,7 @@ jobs:
         run: |
           # Owner-qualified, so a fork's own "main" branch PR doesn't count as the back-merge.
           open=$(gh api "repos/$GH_REPO/pulls?state=open&base=staging&head=$OWNER:main" --jq '.[0].number // empty')
-          if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; exit 0; fi
+          if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; echo "number=$open" >> "$GITHUB_OUTPUT"; exit 0; fi
           url=$(gh pr create --base staging --head main \
             --title "chore(staging): back-merge main after ${SHA:0:9}" \
             --body "$(printf '%s\n' \
@@ -204,8 +204,9 @@ jobs:
               '**Merge with "Create a merge commit", never squash.** Same day, please: the "Main inside staging" check stays red until this lands.' '' \
               'Opened by the release flow workflow.' '' '## Follow-ups' '- None')")
           echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
-      # The release card turns "shipped", "vX.Y.Z is live" (or the hotfix) is posted, and the new
-      # back-merge is threaded under it. Optional: without the Slack secrets nothing is posted.
+          echo "new=1" >> "$GITHUB_OUTPUT"
+      # The release card turns "shipped", "vX.Y.Z is live" (or the hotfix) is posted, and the
+      # back-merge (new, or already open) is threaded under it. Optional: without the Slack secrets nothing is posted.
       - name: Tell Slack
         if: steps.need.outputs.on
         continue-on-error: true
@@ -213,6 +214,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           BACK_MERGE_PR: ${{ steps.bm.outputs.number }}
+          BACK_MERGE_NEW: ${{ steps.bm.outputs.new }}
           SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
           SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
         run: node .github/scripts/release-flow.mjs main-pushed

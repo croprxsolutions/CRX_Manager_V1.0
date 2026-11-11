@@ -148,6 +148,7 @@ export function hotfixMessage(h) {
 export const SQUASHED = ':warning: This release was merged with squash or rebase, so main does not contain release/next and no tag was made. Fix it with a history-only merge of the branch into main (like #1786), then tag it by hand.';
 export const backMergeText = (kind, n, url) => ({
   opened: `:leftwards_arrow_with_hook: Back-merge ${link(url, `#${n}`)} opened. Merge it today with "Create a merge commit".`,
+  carried: `:leftwards_arrow_with_hook: Back-merge ${link(url, `#${n}`)} is still open and now carries this too. Merge it today with "Create a merge commit".`,
   merged: `:white_check_mark: Back-merge ${link(url, `#${n}`)} merged. Staging contains main again.`,
   overdue: `:warning: Back-merge ${link(url, `#${n}`)} is still open, so staging is missing what just shipped. Merge it with "Create a merge commit".`,
 })[kind];

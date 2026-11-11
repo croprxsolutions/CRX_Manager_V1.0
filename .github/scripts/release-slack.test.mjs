@@ -115,6 +115,7 @@ test('the live post lists what users see, escaped and capped', () => {
 test('hotfix and back-merge texts link the PR', () => {
   assert.match(texts(hotfixMessage({ number: 7, title: 'fix: <b>', url: 'https://x.example/7', mergedBy: 'm', releasesUrl: 'https://x.example/r' })), /<https:\/\/x.example\/7\|#7> fix: &lt;b&gt;/);
   assert.match(backMergeText('overdue', 8, 'https://x.example/8'), /<https:\/\/x.example\/8\|#8> is still open/);
+  assert.match(backMergeText('carried', 8, 'https://x.example/8'), /is still open and now carries this too/);
 });
 
 test('release notes are read back from the module the bot writes', () => {

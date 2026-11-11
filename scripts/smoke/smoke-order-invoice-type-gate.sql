@@ -83,6 +83,9 @@ BEGIN
   END IF;
 
   -- The rep's own customer and orders, the way a rep invoices in the app.
+  -- Zero-quantity lines: an order invoice bills only completed deliveries (20261029160000) and
+  -- create_invoice_from_order refuses any order with a delivery, so it can no longer bill a product
+  -- line (the smoke-order-invoice-refuses-field-split.sql pattern). The type gate is unchanged.
   INSERT INTO public.customers (farm_name, assigned_sales_rep)
   VALUES ('[E2E] Order Type Farm ' || v_suffix, v_rep) RETURNING id INTO v_customer;
   INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
@@ -94,7 +97,7 @@ BEGIN
     quantity_delivered, quantity_remaining
   ) VALUES (
     v_order, v_product, '[E2E] order type line', 10, 5,
-    1, 10, 5, 50, 0, 1
+    0, 0, 0, 50, 0, 0
   );
   INSERT INTO public.orders (order_number, customer_id, order_date, status, booking_draw, salesman_id)
   VALUES ('E2E-ORDER-TYPE-MISC-' || v_suffix, v_customer, v_today, 'confirmed', false, v_rep)
@@ -105,7 +108,7 @@ BEGIN
     quantity_delivered, quantity_remaining
   ) VALUES (
     v_misc_order, v_product, '[E2E] order type misc line', 10, 5,
-    1, 10, 5, 50, 0, 1
+    0, 0, 0, 50, 0, 0
   );
 
   PERFORM set_config('request.jwt.claims',

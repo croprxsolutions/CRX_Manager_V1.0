@@ -33,7 +33,7 @@ BEGIN
   -- 1) create with a $15.00 (1500c) price -> persisted
   v_res := save_blend_recipe(NULL, '[SMOKE] Recipe '||v_sfx, 'generic',
     jsonb_build_array(jsonb_build_object('product_id', v_prod, 'product_name','[SMOKE] RecipeProd','quantity',2,'unit','gal','rate_per_acre',1.5,'price_per_unit_cents',1500)),
-    NULL,NULL,NULL,NULL);
+    NULL,NULL,NULL,'smk-recipe-create-'||v_sfx);
   v_recipe := (v_res->>'recipe_id')::uuid;
   SELECT price_per_unit_cents INTO v_price FROM blend_recipe_items WHERE recipe_id=v_recipe;
   IF v_price <> 1500 THEN RAISE EXCEPTION 'SMOKE_FAIL: price not saved (% exp 1500)', v_price; END IF;
@@ -41,7 +41,7 @@ BEGIN
   -- 2) edit (re-save) carrying price -> NOT wiped
   v_res := save_blend_recipe(v_recipe, '[SMOKE] Recipe '||v_sfx, 'generic',
     jsonb_build_array(jsonb_build_object('product_id', v_prod, 'product_name','[SMOKE] RecipeProd','quantity',2,'unit','gal','rate_per_acre',1.5,'price_per_unit_cents',1500)),
-    NULL,NULL,NULL,NULL);
+    NULL,NULL,NULL,'smk-recipe-edit-'||v_sfx);
   SELECT price_per_unit_cents INTO v_price FROM blend_recipe_items WHERE recipe_id=v_recipe;
   IF v_price <> 1500 THEN RAISE EXCEPTION 'SMOKE_FAIL: price wiped on edit (% exp 1500)', v_price; END IF;
 
@@ -50,7 +50,7 @@ BEGIN
   --    must be replaced by 1500 x 2 = 3000.
   INSERT INTO jobs (job_number, customer_id, status, job_date, total_price_cents, created_by)
     VALUES ('[SMOKE] RJOB-'||v_sfx, v_cust, 'scheduled', CURRENT_DATE, 99999, v_admin) RETURNING id INTO v_job;
-  PERFORM load_recipe_into_job(v_job, v_recipe, NULL);
+  PERFORM load_recipe_into_job(v_job, v_recipe, 'smk-recipe-load-'||v_sfx);
   SELECT price_per_unit_cents INTO v_jc_price FROM job_chemicals WHERE job_id=v_job AND product_id=v_prod;
   IF v_jc_price <> 1500 THEN RAISE EXCEPTION 'SMOKE_FAIL: load_recipe did not seed price (% exp 1500)', v_jc_price; END IF;
   SELECT total_price_cents INTO v_job_total FROM jobs WHERE id=v_job;
@@ -59,7 +59,7 @@ BEGIN
   -- 4) negative price rejected
   BEGIN
     PERFORM save_blend_recipe(NULL, '[SMOKE] Neg '||v_sfx, 'generic',
-      jsonb_build_array(jsonb_build_object('product_id', v_prod, 'quantity', 1, 'price_per_unit_cents', -5)), NULL,NULL,NULL,NULL);
+      jsonb_build_array(jsonb_build_object('product_id', v_prod, 'quantity', 1, 'price_per_unit_cents', -5)), NULL,NULL,NULL,'smk-recipe-neg-'||v_sfx);
     RAISE EXCEPTION 'SMOKE_FAIL: negative price was ALLOWED';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;

@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — #1770: Mason owner-accepted 1 Sol finding(s) at `f5fa14d661f0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `f5fa14d661f0` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `94347679d229a520` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref d0900abc16e7)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-10 — #1756: Mason owner-accepted 1 Sol finding(s) at `0fc8d1c59d0e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1756 at `0fc8d1c59d0e` (base `3e72201b4784`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

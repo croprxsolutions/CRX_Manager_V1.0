@@ -509,9 +509,11 @@ BEGIN
       v_p := v_p || jsonb_build_object('vals', v_vals, 'decision', v_decision, 'reason', v_reason);
 
       IF v_rate_id IS NULL THEN
-        -- A new row; a row left blank is skipped.
-        IF v_decision IS NULL AND v_vals->>'basis' IS NULL AND v_vals->>'source' IS NULL AND v_vals->>'unit' IS NULL
-           AND v_vals->'low' = 'null' AND v_vals->'recommended' = 'null' AND v_vals->'high' = 'null' THEN
+        -- A new row; only a wholly blank row is skipped (anything typed in it makes it a row to check).
+        IF v_decision IS NULL AND v_reason IS NULL AND v_vals->>'basis' IS NULL AND v_vals->>'source' IS NULL
+           AND v_vals->>'unit' IS NULL AND v_vals->'low' = 'null' AND v_vals->'recommended' = 'null'
+           AND v_vals->'high' = 'null' AND v_vals->>'over_label_reason' IS NULL
+           AND NOT (v_vals->>'is_quoting_default')::boolean THEN
           v_p := v_p || jsonb_build_object('status', 'skip');
         ELSIF v_decision IN ('reopen', 'delete') THEN
           RAISE EXCEPTION 'PRODUCT_RATE_INVALID: a new rate can only be added, or added and approved';
@@ -705,13 +707,14 @@ BEGIN
               ORDER BY r.source, r.basis, r.id)
               FROM public.product_rates r JOIN public.product_rate_units u ON u.code = r.unit
              WHERE r.parent_id = pp.id), '[]'::jsonb),
-          -- Only the latest derivation's notes (one derivation is one transaction, so one changed_at).
+          -- Only notes of the parent's latest derivation (rows or notes; one derivation is one transaction, so one
+          -- changed_at): a later derivation that wrote rows and no notes hides an older derivation's notes.
           'notes', COALESCE((
             SELECT jsonb_agg(e.after_values ORDER BY e.id)
               FROM public.product_rate_draft_events e
              WHERE e.parent_id = pp.id AND e.event_type = 'derive_note'
                AND e.changed_at = (SELECT max(e2.changed_at) FROM public.product_rate_draft_events e2
-                                    WHERE e2.parent_id = pp.id AND e2.event_type = 'derive_note')), '[]'::jsonb))
+                                    WHERE e2.parent_id = pp.id AND e2.event_type IN ('derived', 'derive_note'))), '[]'::jsonb))
         ORDER BY lower(pp.name), pp.id)
         FROM public.product_parents pp
         LEFT JOIN public.product_parent_rate_outcomes o ON o.parent_id = pp.id

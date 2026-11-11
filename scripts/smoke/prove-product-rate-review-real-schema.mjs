@@ -536,6 +536,9 @@ function batchCases() {
   const qd = js(ADMIN, preview([noDefault, upId(L[8], R.b9, { is_quoting_default: 'yes' })])).rates;
   assert.deepEqual(qd.map((r) => r.status), ['invalid', 'invalid'], JSON.stringify(qd));
   assert.match(qd[0].problem, /is_quoting_default must be true or false/);
+  // A new row with only the default box or a reason filled in is checked (and refused), not skipped as blank.
+  const half = js(ADMIN, preview([{ parent_id: L[7], is_quoting_default: true }, { parent_id: L[7], is_quoting_default: false, reason: 'x' }])).rates;
+  assert.deepEqual(half.map((r) => r.status), ['invalid', 'invalid'], JSON.stringify(half));
   refused(ADMIN, commit([], []), /RATE_REVIEW_ROWS_REQUIRED/);
   console.log('[case] 9 one invalid row in three: the preview shows each row and writes nothing; commit refuses by name and saves nothing; malformed rows are invalid');
 
@@ -578,9 +581,15 @@ function batchCases() {
 
 function downloadCases() {
   // 13. Only the latest derivation's notes; totals match the table.
+  // Liquid 3: an old derivation left a note, a later one derived a row and no notes: the old note is not shown.
+  const ev = pg(`INSERT INTO public.product_rate_draft_events (parent_id, rate_id, event_type, note_code, after_values, changed_by, changed_at) VALUES
+    ('${L[2]}', NULL, 'derive_note', 'no_rate', '{"batch":"older"}', '${ADMIN}', now() - interval '2 days'),
+    ('${L[2]}', '${R.a3}', 'derived', NULL, '{}', '${ADMIN}', now() - interval '1 day');`);
+  assert.equal(ev.status, 0, ev.output);
   const d = dl();
   const p1 = d.parents.find((p) => p.parent_id === L[0]);
   assert.deepEqual(p1.notes, [{ batch: 'new', n: 3 }]);
+  assert.deepEqual(d.parents.find((p) => p.parent_id === L[2]).notes, []);
   assert.equal(d.parents.length, n('SELECT count(*) FROM public.product_parents WHERE is_active;'));
   const t = d.totals;
   assert.equal(t.rates, n('SELECT count(*) FROM public.product_rates;'));

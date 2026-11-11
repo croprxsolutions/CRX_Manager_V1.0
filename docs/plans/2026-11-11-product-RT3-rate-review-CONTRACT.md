@@ -189,6 +189,12 @@ active parents only); 42, 43 notes optional, blank clears; 44 a zero default is 
   leave it out = not the default; case 9). LOW two derivations in one transaction share `changed_at`: refuted, each
   derivation is its own RPC call and so its own transaction, and nothing calls `derive_draft_product_rates` twice in
   one; the notes still belong to that parent's latest derivation.
+- Sol round 1 (gpt-6-sol high, head ba2392f, CLEAN, 0 counted findings) noted three: MED the download showed the
+  latest note, not the latest derivation's (a later derivation with rows and no notes left old notes visible):
+  fixed (case 13). LOW a new row with only the default box or a reason was skipped as blank: fixed (now checked
+  and refused; case 9). MED a row read as unchanged is not re-read under the locks: refuted, an unchanged row asks
+  for no write, so a change another admin makes in that instant is kept, never overwritten, and the next download
+  shows it; every row that writes is re-checked at its version under the locks.
 
 ## Business decisions (Mason, 2026-11-11, picked in the coordinator session: both recommended options)
 

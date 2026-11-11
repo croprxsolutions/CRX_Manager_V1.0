@@ -65,7 +65,7 @@ describe('ConfirmModal', () => {
     expect(confirmButton().className).toContain('bg-red-600');
   });
 
-  it('applies warning variant styles with a red main button until Taha decides', () => {
+  it('applies warning variant styles with a red main button', () => {
     render(<ConfirmModal {...defaultProps} variant="warning" />);
     expect(icon()).toHaveClass('bg-amber-50', 'text-amber-700');
     expect(confirmButton().className).toContain('bg-red-600');

@@ -15,6 +15,6 @@ export const toneIcons: Record<ConfirmTone, LucideIcon> = {
   info: ClipboardCheck,
 };
 
-// Warnings keep a red main button for now: some warning confirms cancel, reject or discard
-// (Cancel Order, Discard edits, Reject). Taha decides whether warnings go green.
+// Warnings keep a red main button (Taha, 2026-11-11): many warning confirms cancel, reject or
+// discard (Cancel Order, Discard edits, Reject). Only info confirms go green.
 export const toneButton = (tone: ConfirmTone): 'danger' | 'primary' => (tone === 'info' ? 'primary' : 'danger');

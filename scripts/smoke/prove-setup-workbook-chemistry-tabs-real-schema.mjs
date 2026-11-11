@@ -415,13 +415,15 @@ function ingredientCases() {
   const dap = js(ADMIN, promote(dp.proposal_id, 1, 'apply_delete'));
   assert.equal(dap.applied_chemistry_version, 2);
   assert.equal(activeRows(HALEX), 2);
+  assert.match(scalar(`SELECT evidence FROM public.product_chemistry_events WHERE parent_id = '${HALEX}' ORDER BY id DESC LIMIT 1;`), /removal: Halex GT label, page 1/, 'the removal keeps its cited document');
   assert.equal(scalar(`SELECT status FROM public.product_parent_ingredients WHERE id = '${meso.row_id}';`), 'retired', 'the deleted row is kept, retired, with its history');
   assert.equal(scalar(`SELECT strength_value::text || ' ' || source_note FROM public.product_parent_ingredients WHERE id = '${smet.row_id}';`), '30.1 Halex GT label 2026, page 1');
   console.log('[case] I4 a __delete row makes a delete proposal that applies only with apply_delete; the row is retired, not erased; a change without a source note or a rename is refused');
 
   // A stale row: the old download (version 1) is refused by name, nothing written.
   const before = proposals();
-  const staleUp = [upRow(dl1, smet, { strength_value: 31, source_note: 'old download' })];
+  // The retired Mesotrione row comes first: it still reads as stale, not as a missing row.
+  const staleUp = [upRow(dl1, meso), upRow(dl1, smet, { strength_value: 31, source_note: 'old download' })];
   assert.equal(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(staleUp)});`).parents[0].status, 'stale');
   refused(ADMIN, `SELECT public.commit_ingredients_tab(${J(staleUp)}, 'dm1b-i-4');`, /WORKBOOK_INGREDIENTS_REFUSED: nothing was saved\. \[PROVER\] Halex GT: its chemistry changed since you downloaded it/);
   assert.equal(proposals(), before);

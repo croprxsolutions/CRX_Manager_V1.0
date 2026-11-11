@@ -371,7 +371,9 @@ GRANT EXECUTE ON FUNCTION public.commit_weights_tab(jsonb, text) TO authenticate
 CREATE FUNCTION public._workbook_apply_items(p_parent_id uuid, p_items jsonb, p_reason text, p_evidence text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
-  v_fix jsonb := (SELECT jsonb_agg(i ORDER BY o) FROM jsonb_array_elements(p_items) WITH ORDINALITY t(i, o) WHERE i->>'action' <> 'add');
+  -- A retirement's source note is kept on the proposal for the evidence; DM-1's retire takes only the row ID.
+  v_fix jsonb := (SELECT jsonb_agg(CASE WHEN i->>'action' = 'retire' THEN i - 'source_note' ELSE i END ORDER BY o)
+                    FROM jsonb_array_elements(p_items) WITH ORDINALITY t(i, o) WHERE i->>'action' <> 'add');
   v_add jsonb := (SELECT jsonb_agg(i ORDER BY o) FROM jsonb_array_elements(p_items) WITH ORDINALITY t(i, o) WHERE i->>'action' = 'add');
   v_res jsonb;
 BEGIN
@@ -420,6 +422,10 @@ BEGIN
       END IF;
       IF v_expected IS NULL THEN
         v_expected := public._workbook_version(v_row, 'expected_chemistry_version');
+        -- Stale first, so a row someone else removed reads as "changed since you downloaded it".
+        IF v_expected <> v_version THEN
+          RETURN v_out || jsonb_build_object('status', 'stale', 'problem', 'its chemistry changed since you downloaded it');
+        END IF;
       ELSIF public._workbook_version(v_row, 'expected_chemistry_version') <> v_expected THEN
         RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: its rows carry different versions; download a fresh workbook';
       END IF;
@@ -449,7 +455,8 @@ BEGIN
          WHERE r.id = v_rid AND r.parent_id = p_parent_id AND r.status = 'active';
         IF NOT FOUND THEN RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: an ingredient row is no longer on this product'; END IF;
         IF v_delete THEN
-          v_items := v_items || jsonb_build_array(jsonb_build_object('kind', 'ingredient', 'action', 'retire', 'row_id', v_rid));
+          v_items := v_items || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('kind', 'ingredient', 'action', 'retire',
+            'row_id', v_rid, 'source_note', v_note)));
         ELSE
           IF v_name IS DISTINCT FROM v_cur.name OR v_cas IS DISTINCT FROM v_cur.cas THEN
             RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: % cannot be renamed here; mark the row __delete and add the new ingredient as a new row', v_cur.name;
@@ -605,7 +612,7 @@ BEGIN
     RAISE EXCEPTION 'CHEMISTRY_PROPOSAL_DECISION_INVALID';
   END IF;
   PERFORM public._lock_parent_chemistry(v_p.parent_id, v_p.base_chemistry_version);
-  SELECT left('Workbook upload ' || v_p.id || '. Sources: ' || string_agg(DISTINCT (i->>'source') || ': ' || (i->>'source_note'), '; '), 1000)
+  SELECT left('Workbook upload ' || v_p.id || '. Sources: ' || string_agg(DISTINCT COALESCE(i->>'source', 'removal') || ': ' || (i->>'source_note'), '; '), 1000)
     INTO v_evidence FROM jsonb_array_elements(v_p.items) i WHERE i ? 'source_note';
   RETURN public._workbook_apply_items(v_p.parent_id, v_p.items, 'Workbook upload reviewed and applied',
     COALESCE(v_evidence, 'Workbook upload ' || v_p.id || ': removal only'));

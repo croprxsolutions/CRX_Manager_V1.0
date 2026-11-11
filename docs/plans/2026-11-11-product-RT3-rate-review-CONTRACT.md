@@ -69,7 +69,8 @@ approver and time from the server, never the file.
   draft, keeping the old approval in the event history.
 - R3 `approved_default` needs: no draft rows on the parent, and exactly one quoting default, approved.
   `no_per_acre_default` needs: no draft rows and no quoting default (zero rows allowed: quotes auto-fill blank).
-  Both re-check every approved row against R1 as the parent is now (form, basis, label maximum).
+  Both re-check every approved row against R1 as the parent is now (form, basis, label maximum), also when the same
+  outcome is sent again; the download flags a recorded one that no longer holds (`outcome_problem`, Luna round 1).
   `needs_label_data`: any rows; held back. Every outcome event lists the exact rows (ID, status, version) it covers.
   Blank outcome = undecided (clears, with who and when in the event); the same outcome and note again = unchanged
   (no version move); a new note = a new decision. Absent outcome row = version 0.

@@ -480,6 +480,10 @@ function contextCases() {
   // 15. The parent becomes dry after approval: setting a promotable outcome re-checks every approved row and refuses;
   // the rows can still be sent back to draft (the unit check no longer traps them) and deleted.
   raw(`UPDATE public.product_parents SET product_form = 'dry' WHERE id = '${L[9]}';`);
+  // The recorded outcome is shown as no longer holding, and re-sending it unchanged is refused, not confirmed.
+  assert.match(par(L[9]).outcome_problem, /pt does not fit a dry product/);
+  assert.equal(dl().totals.outcomes_no_longer_valid, 1);
+  refused(ADMIN, commit([], [outRow(L[9], 'approved_default')]), /PRODUCT_RATE_OUTCOME_ROW_INVALID/);
   js(ADMIN, commit([], [outRow(L[9], null)]));
   refused(ADMIN, commit([], [outRow(L[9], 'approved_default')]), /PRODUCT_RATE_OUTCOME_ROW_INVALID: \[PROVER\] Liquid 10 no longer passes approval \(.*pt does not fit a dry product/);
   const rows10 = par(L[9]).rates;

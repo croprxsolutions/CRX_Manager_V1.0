@@ -2421,6 +2421,8 @@ export interface RateReviewWorkbook {
     /** The decider's full name, not a profile id. */
     outcome_decided_by: string | null;
     outcome_decided_at: string | null;
+    /** Set when a recorded approved_default / no_per_acre_default no longer holds (form or label maximum changed since). */
+    outcome_problem: string | null;
     rates: {
       rate_id: string;
       basis: ProductRateBasis;
@@ -2449,6 +2451,7 @@ export interface RateReviewWorkbook {
   totals: {
     rates: number; drafts: number; approved: number; per_100_gal: number; per_100_gal_approved: number;
     parents: number; parents_undecided: number; approved_default: number; no_per_acre_default: number; needs_label_data: number;
+    outcomes_no_longer_valid: number;
   };
 }
 
@@ -2478,7 +2481,7 @@ export interface RateReviewOutcomeRow {
 }
 
 export type RateReviewRowStatus = 'unchanged' | 'change' | 'stale' | 'invalid' | 'not_found';
-/** preview_rate_review; commit_rate_review returns the 'change' rows plus counts. */
+/** preview_rate_review; commit_rate_review returns the same rows plus counts. */
 export interface RateReviewResult {
   rates: {
     /** rate_id / parent_id are absent when the row could not be read at all. */

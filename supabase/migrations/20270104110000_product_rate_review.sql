@@ -294,6 +294,21 @@ END;
 $function$;
 
 -- Set or clear one parent's outcome (contract R3). Returns {changed: false} when it already holds.
+-- The approved rows of a parent that no longer pass R1 as the parent is now (form, basis, label maximum),
+-- as one readable line, or NULL. Used by the outcome writer and shown on the download.
+CREATE FUNCTION public._product_rate_review_row_problems(p_parent_id uuid, p_form text) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+  SELECT string_agg(r.source || ' ' || r.basis || ': ' || CASE
+           WHEN NOT r.basis_confirmed THEN 'basis not confirmed'
+           WHEN NOT public._product_rate_unit_fits(p_form, r.basis, u.kind) THEN r.unit || ' does not fit a ' || p_form || ' product'
+           ELSE 'above the label maximum with no reason' END, '; ' ORDER BY r.id)
+    FROM public.product_rates r JOIN public.product_rate_units u ON u.code = r.unit
+   WHERE r.parent_id = p_parent_id AND r.status = 'approved'
+     AND (NOT r.basis_confirmed OR NOT public._product_rate_unit_fits(p_form, r.basis, u.kind)
+          OR (r.over_label_reason IS NULL AND public._product_rate_check_values(r.parent_id, r.source, r.basis, r.unit, r.low,
+                r.recommended, r.high, r.basis_confirmed, r.over_label_reason)->>'status' = 'above'));
+$function$;
+
 CREATE FUNCTION public._product_rate_review_outcome(p_parent_id uuid, p_expected_version bigint, p_outcome text,
   p_note text, p_actor uuid)
 RETURNS jsonb
@@ -326,10 +341,6 @@ BEGIN
   IF p_expected_version IS DISTINCT FROM v_version THEN
     RAISE EXCEPTION 'PRODUCT_RATE_OUTCOME_STALE: % changed since you opened it; reload and try again', v_name;
   END IF;
-  IF v_old.outcome IS NOT DISTINCT FROM p_outcome AND v_old.note IS NOT DISTINCT FROM v_note THEN
-    RETURN jsonb_build_object('parent_id', p_parent_id, 'changed', false, 'outcome_version', v_version);
-  END IF;
-
   IF p_outcome IN ('approved_default', 'no_per_acre_default') THEN
     SELECT count(*) INTO v_drafts FROM public.product_rates WHERE parent_id = p_parent_id AND status = 'draft';
     IF v_drafts > 0 THEN
@@ -343,19 +354,14 @@ BEGIN
       RAISE EXCEPTION 'PRODUCT_RATE_OUTCOME_HAS_DEFAULT: % has a quoting default; clear it, or choose approved_default', v_name;
     END IF;
     -- Every approved row must still pass R1 now (the parent's form or label maximum may have changed since).
-    SELECT string_agg(r.source || ' ' || r.basis || ': ' || CASE
-             WHEN NOT r.basis_confirmed THEN 'basis not confirmed'
-             WHEN NOT public._product_rate_unit_fits(v_form, r.basis, u.kind) THEN r.unit || ' does not fit a ' || v_form || ' product'
-             ELSE 'above the label maximum with no reason' END, '; ' ORDER BY r.id)
-      INTO v_bad
-      FROM public.product_rates r JOIN public.product_rate_units u ON u.code = r.unit
-     WHERE r.parent_id = p_parent_id
-       AND (NOT r.basis_confirmed OR NOT public._product_rate_unit_fits(v_form, r.basis, u.kind)
-            OR (r.over_label_reason IS NULL AND public._product_rate_check_values(r.parent_id, r.source, r.basis, r.unit, r.low,
-                  r.recommended, r.high, r.basis_confirmed, r.over_label_reason)->>'status' = 'above'));
+    v_bad := public._product_rate_review_row_problems(p_parent_id, v_form);
     IF v_bad IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_RATE_OUTCOME_ROW_INVALID: % no longer passes approval (%); reopen and fix it first', v_name, v_bad;
     END IF;
+  END IF;
+  -- Unchanged only after the re-check: an outcome that no longer holds is never re-confirmed silently.
+  IF v_old.outcome IS NOT DISTINCT FROM p_outcome AND v_old.note IS NOT DISTINCT FROM v_note THEN
+    RETURN jsonb_build_object('parent_id', p_parent_id, 'changed', false, 'outcome_version', v_version);
   END IF;
 
   INSERT INTO public.product_parent_rate_outcomes AS o (parent_id, outcome, note, decided_by, decided_at)
@@ -674,6 +680,9 @@ BEGIN
           'outcome', o.outcome, 'outcome_note', o.note, 'outcome_version', COALESCE(o.outcome_version, 0),
           'outcome_decided_by', (SELECT pr.full_name FROM public.profiles pr WHERE pr.id = o.decided_by),
           'outcome_decided_at', o.decided_at,
+          -- A recorded promotable outcome whose approved rows no longer pass (form or label maximum changed since).
+          'outcome_problem', CASE WHEN o.outcome IN ('approved_default', 'no_per_acre_default')
+                                  THEN public._product_rate_review_row_problems(pp.id, pp.product_form) END,
           'rates', COALESCE((
             SELECT jsonb_agg(jsonb_build_object('rate_id', r.id, 'basis', r.basis, 'source', r.source,
                 'low', r.low::text, 'recommended', r.recommended::text, 'high', r.high::text, 'unit', r.unit,
@@ -719,7 +728,10 @@ BEGIN
       'no_per_acre_default', (SELECT count(*) FROM public.product_parent_rate_outcomes o JOIN public.product_parents pp ON pp.id = o.parent_id
                                WHERE pp.is_active AND o.outcome = 'no_per_acre_default'),
       'needs_label_data', (SELECT count(*) FROM public.product_parent_rate_outcomes o JOIN public.product_parents pp ON pp.id = o.parent_id
-                            WHERE pp.is_active AND o.outcome = 'needs_label_data')));
+                            WHERE pp.is_active AND o.outcome = 'needs_label_data'),
+      'outcomes_no_longer_valid', (SELECT count(*) FROM public.product_parent_rate_outcomes o JOIN public.product_parents pp ON pp.id = o.parent_id
+                            WHERE pp.is_active AND o.outcome IN ('approved_default', 'no_per_acre_default')
+                              AND public._product_rate_review_row_problems(pp.id, pp.product_form) IS NOT NULL)));
 END;
 $function$;
 
@@ -766,8 +778,7 @@ BEGIN
   v_receipt := jsonb_build_object(
     'rates_changed', (SELECT count(*) FROM jsonb_array_elements(v_result->'rates') r WHERE r->>'status' = 'change'),
     'outcomes_changed', (SELECT count(*) FROM jsonb_array_elements(v_result->'outcomes') r WHERE r->>'status' = 'change'),
-    'rates', (SELECT COALESCE(jsonb_agg(r), '[]'::jsonb) FROM jsonb_array_elements(v_result->'rates') r WHERE r->>'status' = 'change'),
-    'outcomes', (SELECT COALESCE(jsonb_agg(r), '[]'::jsonb) FROM jsonb_array_elements(v_result->'outcomes') r WHERE r->>'status' = 'change'));
+    'rates', v_result->'rates', 'outcomes', v_result->'outcomes');
   PERFORM public.save_idempotency(p_idempotency_key, 'commit_rate_review',
     jsonb_build_object('actor_id', v_actor, 'request_fingerprint', v_fp, 'response', v_receipt));
   RETURN v_receipt;
@@ -785,7 +796,7 @@ SELECT f, f NOT IN ('public.get_rate_review_workbook()', 'public.preview_rate_re
   FROM unnest(ARRAY[
   'public._product_rates_clear_outcome()', 'public._product_rate_review_no_truncate()', 'public._product_rate_review_lock(uuid)',
   'public._product_rate_review_approve(uuid,bigint,uuid)', 'public._product_rate_review_reopen(uuid,bigint,text,uuid)',
-  'public._product_rate_review_outcome(uuid,bigint,text,text,uuid)', 'public._product_rate_review_number(jsonb,text)',
+  'public._product_rate_review_row_problems(uuid,text)', 'public._product_rate_review_outcome(uuid,bigint,text,text,uuid)', 'public._product_rate_review_number(jsonb,text)',
   'public._product_rate_review_text(jsonb,text)', 'public._product_rate_review_version(jsonb,text)',
   'public._product_rate_review_run(jsonb,jsonb,text,uuid)',
   'public.get_rate_review_workbook()', 'public.preview_rate_review(jsonb,jsonb)',

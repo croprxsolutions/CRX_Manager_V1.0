@@ -901,7 +901,7 @@ was created (`CycleCounts.tsx` ~L286; `_complete_cycle_count_impl`). A 10-unit d
 10 short with nothing missing; a receipt inflates it. D12 makes the pre-season count the foundation for fixing the 19
 negative rows (KI-29), so this must be fixed before that count. 0 completed counts live. Fix: compare against on-hand
 locked when each line is saved, or have Complete refuse/list products with ledger movement since the count began.
-- Fix built 2026-11-11 (`20270101134000`, not yet applied; contract `docs/plans/2026-11-10-ki134-cycle-count-drift-CONTRACT.md`):
+- Fix built 2026-11-11 (`20270103130000`, not yet applied; contract `docs/plans/2026-11-10-ki134-cycle-count-drift-CONTRACT.md`):
   each saved count line is compared with on hand read at that save (`FOR SHARE`). Mason accepted the residual window
   (stock posted between looking at a shelf and typing its count); D12 procedure: post a product's receipts and
   deliveries before counting it.

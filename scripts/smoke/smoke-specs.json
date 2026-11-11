@@ -1259,7 +1259,7 @@
     },
     "update_cycle_count_item": {
       "chain": "smoke-cycle-count-onhand-at-count.sql",
-      "description": "KI-134 (20270101134000): a count line is compared with on hand when it is saved. Stock in during a count (created 100, +10, shelf 110) completes at 110, not 120; stock out plus real shrink (created 110, -10, shelf 97) stores expected 100 / variance -3 and completes at 97. Uses one active admin and [SMOKE] fixtures; terminal rollback.",
+      "description": "KI-134 (20270103130000): a count line is compared with on hand when it is saved. Stock in during a count (created 100, +10, shelf 110) completes at 110, not 120; stock out plus real shrink (created 110, -10, shelf 97) stores expected 100 / variance -3 and completes at 97. Uses one active admin and [SMOKE] fixtures; terminal rollback.",
       "covers": [
         "update_cycle_count_item",
         "complete_cycle_count"

@@ -1,4 +1,4 @@
--- Rolled-back chain for KI-134 (20270101134000): a count line is compared with on hand when it is SAVED,
+-- Rolled-back chain for KI-134 (20270103130000): a count line is compared with on hand when it is SAVED,
 -- so stock that moves between creating the count and counting the shelf is not applied twice.
 DO $smoke$
 DECLARE

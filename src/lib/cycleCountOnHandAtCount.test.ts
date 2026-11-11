@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// KI-134 (20270101134000): pins the saved count's comparison with on hand at the moment it is saved.
+// KI-134 (20270103130000): pins the saved count's comparison with on hand at the moment it is saved.
 const migration = readFileSync(
-  join(process.cwd(), 'supabase', 'migrations', '20270101134000_cycle_count_variance_vs_onhand_at_count.sql'),
+  join(process.cwd(), 'supabase', 'migrations', '20270103130000_cycle_count_variance_vs_onhand_at_count.sql'),
   'utf8',
 ).replace(/\r\n/g, '\n');
 const body = migration.slice(migration.indexOf('AS $function$'), migration.indexOf('$function$;'));

@@ -103,6 +103,7 @@ function PreviewBody({ preview, lines, picks, setPick, busy, unsure, onRun }: {
   onRun: () => void;
 }) {
   const disagreeing = preview.registrations.filter((r) => Object.keys(r.disagreements).length > 0);
+  const pickCount = disagreeing.reduce((n, r) => n + Object.keys(r.disagreements).length, 0);
   const picked = allPicked(preview, picks);
   const blocked = preview.invalid_numbers.length > 0 || !picked;
   return (
@@ -128,7 +129,7 @@ function PreviewBody({ preview, lines, picks, setPick, busy, unsure, onRun }: {
       )}
 
       <Card>
-        <h2 className="text-lg font-semibold text-nav-dark mb-2">Disagreements to pick ({disagreeing.length})</h2>
+        <h2 className="text-lg font-semibold text-nav-dark mb-2">Disagreements to pick ({pickCount})</h2>
         {disagreeing.length === 0 ? <p className="text-sm text-secondary">None: every product and brand agrees.</p> : (
           <div className="space-y-4">
             {disagreeing.map((r) => Object.entries(r.disagreements).map(([col, cands]) => (

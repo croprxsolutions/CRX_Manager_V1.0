@@ -1596,7 +1596,7 @@ export default function PurchaseOrderDetail() {
             Create Task
           </Button>
           {canManagePO && po.status === 'partially_received' && (
-            <Button variant="secondary" icon={<PackageX className="w-4 h-4" />} onClick={() => setCloseShortOpen(true)}>
+            <Button variant="secondary" icon={<PackageX className="w-4 h-4" />} onClick={() => { setCloseShortReason(''); setCloseShortOpen(true); }}>
               Close Short
             </Button>
           )}
@@ -2438,6 +2438,7 @@ export default function PurchaseOrderDetail() {
               id="close-short-reason"
               value={closeShortReason}
               onChange={(e) => setCloseShortReason(e.target.value)}
+              disabled={saving}
               placeholder="e.g. Vendor discontinued the product"
             />
           </div>

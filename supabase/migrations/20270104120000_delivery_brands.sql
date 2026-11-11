@@ -118,7 +118,7 @@ ALTER TABLE public.product_parent_brands
 -- ---------------------------------------------------------------------------------------------
 CREATE TABLE public.delivery_brand_events (
   seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  event_type text NOT NULL CHECK (event_type IN ('set', 'edited', 'completed', 'corrected', 'reviewed')),
+  event_type text NOT NULL CHECK (event_type IN ('set', 'edited', 'completed', 'corrected', 'reviewed', 'line_removed')),
   delivery_id uuid NOT NULL REFERENCES public.deliveries(id) ON DELETE RESTRICT,
   reason text CHECK (reason IS NULL OR char_length(reason) <= 1000),
   invoice_ids uuid[] NOT NULL DEFAULT '{}',
@@ -132,7 +132,7 @@ CREATE TABLE public.delivery_brand_events (
 CREATE INDEX delivery_brand_events_delivery_idx ON public.delivery_brand_events (delivery_id, seq);
 
 COMMENT ON TABLE public.delivery_brand_events IS
-  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery is the stale-save base. Written only by the delivery brand functions; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed, lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}.';
+  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery is the stale-save base. Written only by the delivery brand functions; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed, lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}; line_removed {delivery_item_id, order_item_id, product_id}.';
 
 CREATE TABLE public.delivery_item_brands (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -163,8 +163,8 @@ CREATE TABLE public.delivery_item_brands (
   superseded_by uuid REFERENCES public.profiles(id) ON DELETE RESTRICT,
   supersede_reason text CHECK (supersede_reason IS NULL OR char_length(supersede_reason) <= 1000),
   superseded_by_event_seq bigint REFERENCES public.delivery_brand_events(seq) ON DELETE RESTRICT,
-  -- The pick's copies can never disagree with its line. CASCADE: the only line deletes are edit_delivery's
-  -- re-create (its wrapper carries and records the picks) and order-item removal on a cancelled or voided delivery.
+  -- The pick's copies can never disagree with its line. CASCADE: a line delete is recorded first (section 3,
+  -- _delivery_brands_on_line_delete), or by edit_delivery's own 'edited' event when it re-creates lines.
   CONSTRAINT delivery_item_brands_line_fkey FOREIGN KEY (delivery_item_id, delivery_id, product_id)
     REFERENCES public.delivery_items (id, delivery_id, product_id) ON DELETE CASCADE,
   CONSTRAINT delivery_item_brands_parent_brand_fkey FOREIGN KEY (parent_id, parent_brand_id)
@@ -539,6 +539,32 @@ BEGIN
   END LOOP;
 END
 $helper_grants$;
+
+-- A delivery line deleted outside edit_delivery (a direct delete of a scheduled line, or the order clean-up of a
+-- cancelled or voided delivery) takes its picks with it (the pick key cascades): record them first as one
+-- 'line_removed' event, which also moves the stale-save base. edit_delivery's re-create records its own 'edited'
+-- event and sets crx.delivery_brand_edit around its body, so it is not recorded twice.
+CREATE FUNCTION public._delivery_brands_on_line_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF COALESCE(current_setting('crx.delivery_brand_edit', true), '') <> 'on'
+     AND EXISTS (SELECT 1 FROM public.delivery_item_brands b
+                  WHERE b.delivery_item_id = OLD.id AND b.superseded_at IS NULL) THEN
+    PERFORM public._delivery_brand_event(OLD.delivery_id, 'line_removed', NULL, NULL,
+      public._delivery_brand_rows(OLD.delivery_id, ARRAY[OLD.id]), '[]'::jsonb,
+      jsonb_build_object('delivery_item_id', OLD.id, 'order_item_id', OLD.order_item_id, 'product_id', OLD.product_id));
+  END IF;
+  RETURN OLD;
+END;
+$function$;
+ALTER FUNCTION public._delivery_brands_on_line_delete() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._delivery_brands_on_line_delete() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER delivery_items_brand_line_removed BEFORE DELETE ON public.delivery_items
+  FOR EACH ROW EXECUTE FUNCTION public._delivery_brands_on_line_delete();
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. set_delivery_brands: record picks before completion. Order: lock the delivery, authorize, replay, then the
@@ -1204,10 +1230,12 @@ BEGIN
       INTO v_old_lines
       FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id;
   END IF;
+  PERFORM set_config('crx.delivery_brand_edit', 'on', true);  -- 20270104120000: this wrapper records the edit
   v_result := public._edit_delivery_replay_impl_20261015(
     p_delivery_id, p_assigned_driver, p_scheduled_date, p_scheduled_time, p_delivery_window_start,
     p_delivery_window_end, p_delivery_address_id, p_delivery_notes, p_priority, p_items,
     p_performed_by, p_idempotency_key);
+  PERFORM set_config('crx.delivery_brand_edit', '', true);
   -- 20270104120000: a line whose order item, product, quantity and unit size are unchanged keeps its picks (with
   -- their entry and review history) under its new id, when exactly one old line and one new line share those four
   -- values; otherwise its picks are dropped and listed, never guessed. One 'edited' event either way.
@@ -1373,6 +1401,7 @@ BEGIN
      AND p.proname IN ('_delivery_line_brand_list', '_delivery_brand_max_seq', '_delivery_brand_rows',
                        '_delivery_brand_event', '_delivery_brand_resolve_picks', '_delivery_brand_insert',
                        '_delivery_brands_on_complete', '_delivery_brand_may_read', '_delivery_brand_events_append_only',
+                       '_delivery_brands_on_line_delete',
                        '_complete_delivery_evidence_impl_20270104', '_start_and_complete_delivery_impl_20270104',
                        '_complete_delivery_aggregate_impl', '_enqueue_delivery_receipt')
      AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE')

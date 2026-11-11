@@ -578,6 +578,7 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   assert.equal(e2.brand_picks_kept.length, 1); assert.equal(e2.brand_lines_dropped.length, 1);
   assert.equal(scalar(`SELECT count(*) FROM public.delivery_item_brands b JOIN public.delivery_items di ON di.id = b.delivery_item_id WHERE b.delivery_id = '${D(6)}' AND di.product_id = '${PL}';`), '0');
   assert.equal(events(D(6), 'edited'), 2);
+  assert.equal(events(D(6), 'line_removed'), 0, 'edit_delivery records its re-create once, as edited');
   refused(REP, SET(D(6), [{ delivery_item_id: lines6()[0], picks: [] }], maxSeq(D(6)) - 1, 'bb-k10'), /BRAND_PICKS_CHANGED/);
   console.log('[prover] case 8: an edit that keeps a line keeps its picks (with entry and review history) under the new id; a changed quantity drops that line\'s picks; each writes one edited event; a replay answers the same; a save from before the edit is stale');
 
@@ -699,6 +700,21 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   ok(ADMIN, CORRECT(D(10), [{ delivery_item_id: DI(10, 0), picks: [pick(LB3, 2.3333)] }], 'match delivered', maxSeq(D(10)), 'bb-x14'));
   assert.deepEqual(miss10(), [], 'a correction to the 4-place delivered amount clears the line');
   console.log('[prover] case 14: an office review leaves a driver\'s loaded picks current; a 5-place delivered amount completes, keeps the pick and lists it; a 4-place correction clears it');
+
+  // 15. A line deleted outside edit_delivery records its picks first and moves the stale-save base.
+  mkDelivery(11, [[PL2, 4], [PG, 2]], { st: 'scheduled' });
+  set(REP, D(11), [{ delivery_item_id: DI(11, 0), picks: [pick(LB3, 4)] }, { delivery_item_id: DI(11, 1), picks: [pick(PB1, 2)] }], 'bb-k15');
+  const seq11 = maxSeq(D(11));
+  const removedBefore = events(D(11), 'line_removed');
+  ok(REP, `DELETE FROM public.delivery_items WHERE id = '${DI(11, 0)}' RETURNING id;`);
+  assert.equal(num(`SELECT count(*) FROM public.delivery_items WHERE id = '${DI(11, 0)}';`), 0, 'the rep could delete the scheduled line');
+  assert.equal(events(D(11), 'line_removed') - removedBefore, 1, 'one line_removed event');
+  const ev11 = JSON.parse(scalar(`SELECT jsonb_build_object('before', before_rows, 'details', details)::text FROM public.delivery_brand_events
+    WHERE delivery_id = '${D(11)}' AND event_type = 'line_removed';`));
+  assert.equal(ev11.before.length, 1); assert.equal(ev11.details.delivery_item_id, DI(11, 0));
+  assert.ok(maxSeq(D(11)) > seq11, 'the stale-save base moved');
+  refused(REP, SET(D(11), [{ delivery_item_id: DI(11, 1), picks: [] }], seq11, 'bb-k15b'), /BRAND_PICKS_CHANGED/);
+  console.log('[prover] case 15: a direct delete of a line with picks records them in one line_removed event first and moves the stale-save base');
 
   console.log('DELIVERY_BRANDS_PROOF_PASS');
 }

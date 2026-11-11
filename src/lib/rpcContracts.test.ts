@@ -3252,6 +3252,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _delivery_brand_event: 'internal B-1a helper (20270104120000): called only by the keyed delivery brand writers, edit_delivery and the completion step, each after its own replay check; every API-role EXECUTE is revoked',
   _delivery_brand_insert: 'internal B-1a helper (20270104120000): called only by set_delivery_brands and correct_delivery_brands after their own replay check; every API-role EXECUTE is revoked',
   _delivery_brands_on_complete: 'internal B-1a helper (20270104120000): called only by _complete_delivery_aggregate_impl on a fresh completion (a replay returns before it); every API-role EXECUTE is revoked',
+  _delivery_brands_on_line_delete: 'B-1a trigger function (20270104120000): BEFORE DELETE on delivery_items, appends one line_removed brand event for a deleted line\'s current picks; runs only as a trigger, every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

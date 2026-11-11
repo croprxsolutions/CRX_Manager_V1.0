@@ -1970,6 +1970,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ["an UPDATE then a called function that DELETEs", "UPDATE public.invoices SET notes = NULL;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
     ["a called function that UPDATEs and DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
     ["a called UPDATE function, then a called DELETE function", "CREATE FUNCTION public.y() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; END $$;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.y();\nSELECT public.z();\n"],
+    ["a called function that MERGEs (can delete matched rows)", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; MERGE INTO public.customers c USING public.x s ON c.id = s.id WHEN MATCHED THEN DELETE; END $$;\nSELECT public.z();\n"],
     ["a GRANT then dynamic SQL", "GRANT SELECT ON public.customers TO anon;\nDO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
   ]) {
     ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);

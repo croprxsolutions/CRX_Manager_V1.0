@@ -739,9 +739,11 @@ function rowWrite(body) {
   if (/\bdelete\s+from\b/i.test(text)) return "deletes rows (DELETE)";
   if (/\btruncate\b/i.test(text)) return "empties a table (TRUNCATE)";
   if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
+  // Any MERGE can delete matched rows, as destructiveMigrationCheck treats a
+  // top-level one (Codex P1, PR #1799).
+  if (/\bmerge\s+into\b/i.test(text)) return "may overwrite or delete rows (MERGE; deletes rows when matched)";
   if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
   if (/\bon\s+conflict\b[^;]*?\bdo\s+update\b/i.test(text)) return "overwrites existing rows (INSERT ... ON CONFLICT DO UPDATE)";
-  if (/\bmerge\s+into\b/i.test(text)) return "may overwrite existing rows (MERGE)";
   return null;
 }
 

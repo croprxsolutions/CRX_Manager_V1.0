@@ -667,6 +667,17 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   assert.deepEqual(reasons(DI(2, 0)), ['brand_not_recorded'], 'an emptied line goes back on the list');
   assert.deepEqual(reasons(DI(3, 0)), ['brand_no_longer_listed', 'picks_not_confirmed'], 'completed from an out-of-date screen');
   raw(`UPDATE public.product_parent_brands SET status = 'active' WHERE id = '${PB2}';`);
+  // An out-of-date completion with one branded line left empty; a correction that adds its first pick confirms it.
+  mkDelivery(12, [[PG, 2], [PG, 1]]);
+  set(REP, D(12), [{ delivery_item_id: DI(12, 0), picks: [pick(PB1, 2)] }], 'bb-k12b');
+  ok(ADMIN, COMPLETE(D(12), { [DI(12, 0)]: 2, [DI(12, 1)]: 1 }, 'bb-c12', { seq: 0 }));
+  const list12 = () => js(ADMIN, 'SELECT public.get_deliveries_missing_brands(current_date - 2, current_date + 2)::text;');
+  const why12 = (line) => (list12().find((x) => x.delivery_item_id === line) ?? { reasons: [] }).reasons.sort();
+  assert.deepEqual(why12(DI(12, 0)), ['picks_not_confirmed']);
+  assert.deepEqual(why12(DI(12, 1)), ['brand_not_recorded']);
+  ok(ADMIN, CORRECT(D(12), [{ delivery_item_id: DI(12, 1), picks: [pick(PB1, 1)] }], 'read the jug', maxSeq(D(12)), 'bb-x12'));
+  assert.deepEqual(why12(DI(12, 1)), [], 'a correction adding the first pick confirms the line');
+  assert.deepEqual(why12(DI(12, 0)), ['picks_not_confirmed'], 'an uncorrected line stays listed');
   console.log('[prover] case 12: the office list shows what is missing (before capture, not recorded, split mismatch, no EPA number, completed from an out-of-date screen) and never zero-delivered or unbranded lines');
 
   // 13. Picks change no money, quantity, stock or invoice: the same delivery with and without picks.

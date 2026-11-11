@@ -925,8 +925,10 @@ BEGIN
              ev.details AS completed_details,
              -- Completed from a screen whose picks were out of date, and this line not corrected since.
              (ev.details ->> 'picks_confirmed' = 'false'
-              AND NOT EXISTS (SELECT 1 FROM public.delivery_item_brands s
-                               WHERE s.delivery_item_id = di.id AND s.superseded_by_event_seq > ev.seq)) AS unconfirmed,
+              AND NOT EXISTS (SELECT 1 FROM public.delivery_brand_events c
+                               WHERE c.delivery_id = d.id AND c.event_type = 'corrected' AND c.seq > ev.seq
+                                 AND (c.before_rows || c.after_rows) @> jsonb_build_array(jsonb_build_object('delivery_item_id', di.id))))
+               AS unconfirmed,
              (SELECT (l.value ->> 'brand_list_size')::integer FROM jsonb_array_elements(ev.details -> 'lines') l
                WHERE l.value ->> 'delivery_item_id' = di.id::text) AS list_size_at_completion,
              (SELECT count(*) FROM public.delivery_item_brands b

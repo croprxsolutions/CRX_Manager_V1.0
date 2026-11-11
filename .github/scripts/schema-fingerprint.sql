@@ -12,7 +12,7 @@ fn AS (SELECT p.*, p.proname || '(' || pg_get_function_identity_arguments(p.oid)
        FROM pg_proc p WHERE p.pronamespace = (SELECT oid FROM pub)
          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')),
 lines AS (
-  SELECT 'relation ' || relname || ' kind=' || relkind::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
+  SELECT 'relation ' || relname || ' kind=' || relkind::text || ' persistence=' || relpersistence::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
          || coalesce(' partition ' || pg_get_expr(relpartbound, oid), '')
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
@@ -22,7 +22,9 @@ lines AS (
          || coalesce(' default ' || pg_get_expr(d.adbin, d.adrelid), '')
          || CASE WHEN a.attgenerated::text <> '' THEN ' generated ' || a.attgenerated::text ELSE '' END
          || CASE WHEN a.attidentity::text <> '' THEN ' identity ' || a.attidentity::text ELSE '' END
+         || CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN ' collate ' || a.attcollation::regcollation::text ELSE '' END
     FROM pg_attribute a JOIN rel c ON c.oid = a.attrelid
+    JOIN pg_type t ON t.oid = a.atttypid
     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'c') AND a.attnum > 0 AND NOT a.attisdropped
   UNION ALL
@@ -57,9 +59,12 @@ lines AS (
   UNION ALL
   SELECT 'sequence ' || c.relname || ' ' || format_type(q.seqtypid, NULL) || ' start ' || q.seqstart || ' by ' || q.seqincrement
          || ' min ' || q.seqmin || ' max ' || q.seqmax || ' cache ' || q.seqcache || ' cycle=' || q.seqcycle
+         || coalesce((SELECT ' owned by ' || o.relname || '.' || a.attname FROM pg_depend d JOIN pg_class o ON o.oid = d.refobjid
+                      JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+                      WHERE d.objid = q.seqrelid AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')), '')
     FROM pg_sequence q JOIN rel c ON c.oid = q.seqrelid
   UNION ALL
-  SELECT 'enum ' || t.typname || ' ' || string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
+  SELECT 'enum ' || t.typname || ' ' || string_agg(quote_literal(e.enumlabel), ',' ORDER BY e.enumsortorder)
     FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid WHERE t.typnamespace = (SELECT oid FROM pub) GROUP BY t.typname
   UNION ALL
   SELECT 'domain ' || typname || ' ' || format_type(typbasetype, typtypmod) || CASE WHEN typnotnull THEN ' not null' ELSE '' END
@@ -78,11 +83,11 @@ lines AS (
     WHERE n.nspname = 'public' AND x.grantee <> n.nspowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
-  SELECT 'default ' || d.defaclobjtype::text || ' by ' || pg_get_userbyid(d.defaclrole) || ' in ' || coalesce(n.nspname, '*')
+  SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')
          || ' ' || x.privilege_type || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' to ' || coalesce(r.rolname, 'PUBLIC')
     FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace, aclexplode(d.defaclacl) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
-    WHERE (n.nspname = 'public' OR d.defaclnamespace = 0) AND pg_get_userbyid(d.defaclrole) IN ('postgres', 'supabase_admin')
+    WHERE n.nspname = 'public' OR d.defaclnamespace = 0
   UNION ALL
   -- Grants (who may read, write or call what). The owner and the two admin roles are left out: which of
   -- them owns an object can differ between the platform and a restore; the app roles are what matter.

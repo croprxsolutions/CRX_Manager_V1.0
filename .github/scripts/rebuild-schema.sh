@@ -8,7 +8,7 @@ set -euo pipefail
 REPO="$(git rev-parse --show-toplevel)"
 W="$(cd "${1:?usage: rebuild-schema.sh <work dir>}" && pwd)"
 SB=(npx --yes supabase@2.122.0)
-PORT="${REBUILD_PORT_BASE:-54320}"   # local runs pick a free range; CI keeps the defaults
+PORT="${REBUILD_PORT_BASE:-54320}"   # CI uses the defaults; on a laptop with another stack, set a free base
 
 mkdir -p "$W/supabase"
 cat > "$W/supabase/config.toml" <<EOF
@@ -35,6 +35,8 @@ enabled = false
 [edge_runtime]
 enabled = false
 EOF
+# Always a fresh database: stop (and drop) any earlier rebuild in this folder first.
+(cd "$W" && "${SB[@]}" stop --no-backup >/dev/null 2>&1 || true)
 (cd "$W" && "${SB[@]}" start -x imgproxy,postgres-meta,vector,supavisor >/dev/null)
 DB="$(cd "$W" && "${SB[@]}" status -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
 case "$DB" in postgresql://postgres:postgres@127.0.0.1:*) ;; *) echo "::error::rebuild: refusing database URL '$DB'"; exit 1 ;; esac

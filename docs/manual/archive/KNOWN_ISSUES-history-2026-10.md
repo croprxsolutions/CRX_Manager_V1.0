@@ -7212,3 +7212,35 @@ The reopen race through `set_product_active` has no automated real-schema proof.
 ### KI-91 — Retired negative stock needs proof
 **MED · UNVERIFIED · inventory database · LOCAL CANDIDATE — NOT APPLIED**
 A retired product with a negative balance in the position report was checked by hand only.
+
+### Closed 2026-11-10 — KI-92
+
+No bug found. `scripts/smoke/prove-product-active-guard-real-schema.mjs`, temporarily extended with two cases, printed `PRODUCT_ACTIVE_GUARD_PROOF_PASS`: an accepted quote with a confirmed order is not in the turn-off warnings, and an accepted quote whose only order is soft-deleted is. The container's `_product_active_review` matched live by md5 (read-only live query, 2026-11-10).
+
+Original text:
+
+### KI-92 — Accepted quote with live order needs proof
+**LOW · STILL UNVERIFIED (re-checked 2026-11-10) · product database · WP-PM-3 applied live 2026-11-02**
+The "LOCAL CANDIDATE — NOT APPLIED" label was stale. `20261103100000_product_active_guard` is applied live
+(2026-11-02). The review already skips an accepted quote that has an order which is not deleted, cancelled or
+voided (code-read + live read-only). The checked-in prover only plants accepted quotes whose orders are cancelled
+or voided. Still owed, and not run in this check because Docker is not installed: an accepted quote with a
+confirmed order must not appear in the turn-off warnings, and an accepted quote whose order is soft-deleted must
+appear. No fix applied.
+
+### Closed 2026-11-10 — KI-112
+
+No bug found. `main`'s live-dump `scripts/smoke/verify-return-credit-real-schema.mjs` passed at 2:15 PM Central and again at 6:05 PM Central (00:05 UTC, the next UTC day), both `SMOKE_PASS_ROLLBACK residue=0` with the fractional COGS proofs.
+
+Original text:
+
+### KI-112 — A draft return-credit prover failed just after midnight UTC
+**LOW · PARTLY CHECKED (main's version passes in the daytime, 2026-11-10; the after-midnight-UTC run is still owed) · tooling-tests · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+The baseline-replay version of `scripts/smoke/verify-return-credit-real-schema.mjs` (closed PR #1319) failed just
+after midnight UTC with "fractional credit A PNL COGS delta=-1251"; it fits the known pattern of live checks that
+fail between 6 PM and midnight Central. On 2026-11-10 at 2:15 PM Central (8:15 PM UTC, the same date in both
+zones) `main`'s live-dump version PASSED on a fresh read-only dump of the live schema:
+`RETURN_CREDIT_LIVE_SCHEMA_PASS ... smoke=SMOKE_PASS_ROLLBACK residue=0`, including the fractional COGS proofs.
+That does not test the failure window. The script runs psql inside the container, so `PGTZ` set on the host does
+not reach it and the container runs on UTC. Still owed: one run between 6 PM and midnight Central; if it fails,
+the fix is to set the container session time zone to America/Chicago.

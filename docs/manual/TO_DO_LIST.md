@@ -383,7 +383,7 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 
 **From the 2026-11-10 read-only bug sweeps** ([sweep record](sweeps/bug-sweeps-2026-11-10.md); findings are KI-119 to KI-149). No fixes start until the matching answer is in.
 
-15. **P&L commissions (KI-125, fix first).** Should the P&L subtract commissions only on sales billed in CRX, or should CRX revenue also include sales billed in Chem Man? Recommend: only CRX-billed sales until January 1, with the line labelled.
+15. **P&L commissions (KI-125, fix first).** ANSWERED 2026-11-10 (Mason: "Only CRX-billed"): subtract a commission only when its order has a CRX invoice in that period's revenue. Recorded in `DECISION_LOG.md`; the fix is not built yet.
 16. **Settings → Page Access (KI-119).** Is it meant to lock someone out of money and reports, or only tidy their menu? Recommend: decide "security" only if you use it to keep someone away from money today; otherwise rename it "Hide from menu".
 17. **Finance charge rate (KI-127).** Do the two customers set to "1.5" mean 1.5% a month (18% a year) or 1.5% a year?
 18. **Rep credit terms (KI-120).** Should reps be able to change payment terms, finance-charge settings, parent customer or default application service? Recommend: admin-only, matching the 2026-11-01 tier and credit-limit lock.

@@ -11,7 +11,8 @@ from the Supabase platform, none in `public`:
 `.github/scripts/schema-fingerprint.sql` now leaves out only those three memberships, and only with
 the platform's options (no admin, no inherit, set only): a changed option, or `supabase_realtime_admin`
 joining any other role, is still compared. Storage tables are listed when they are `objects` or
-`buckets`, have a policy, or have RLS off, so the platform's own RLS-on tables can come and go; storage
+`buckets`, have a policy, or have RLS off or forced, so the platform's own tables (RLS on, not forced) can come
+and go; storage
 policies are still compared in full.
 
 `SCHEMA_MODE: report` is removed from `.github/workflows/db-apply.yml`, so any remaining difference fails

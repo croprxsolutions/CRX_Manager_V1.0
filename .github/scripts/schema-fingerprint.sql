@@ -23,12 +23,13 @@ lines AS (
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
-  -- Storage tables: objects, buckets, any with a policy (below), and any with RLS off. The platform's other
-  -- storage tables come and go between storage versions with RLS on, so those alone are left out.
+  -- Storage tables: objects, buckets, any with a policy (below), and any with RLS off or forced. The
+  -- platform's other storage tables come and go between storage versions (RLS on, not forced), so those
+  -- alone are left out.
   SELECT 'relation storage.' || c.relname || ' rls=' || c.relrowsecurity || ' force=' || c.relforcerowsecurity
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'storage' AND c.relkind IN ('r', 'p')
-      AND (c.relname IN ('objects', 'buckets') OR NOT c.relrowsecurity
+      AND (c.relname IN ('objects', 'buckets') OR NOT c.relrowsecurity OR c.relforcerowsecurity
            OR EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
   UNION ALL
   -- What the app's roles may do beyond grants (BYPASSRLS ignores every policy).

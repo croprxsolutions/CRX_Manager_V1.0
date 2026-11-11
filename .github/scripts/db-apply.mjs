@@ -137,8 +137,12 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
     if (atomic === 0 && TX_CONTROL.test(statement)) problems.push(`${stem}: has its own transaction control (${statement.trim().split(/\s+/).slice(0, 3).join(' ')}); the job wraps each file in one transaction`);
   }
   // A no-transaction file runs outside a transaction: a second statement could fail after the first ran.
-  // Session settings before it (SET lock_timeout = ...) change nothing in the database, so they don't count.
-  if (isNoTransaction(text) && skeleton.split(';').filter((s) => s.trim() && !/^\s*SET\s/i.test(s)).length > 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (SET lines aside)`);
+  // Session settings before it (SET lock_timeout = ...) change nothing in the database; nothing may follow it.
+  if (isNoTransaction(text)) {
+    const statements = skeleton.split(';').filter((s) => s.trim());
+    const main = statements.findIndex((s) => !/^\s*SET\s/i.test(s));
+    if (main >= 0 && statements.length > main + 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (SET lines only before it)`);
+  }
   // psql runs a backslash command anywhere outside quotes (\! runs a shell command), so none at all.
   if (skeleton.includes('\\')) problems.push(`${stem}: has a psql backslash command outside quotes`);
   return problems;

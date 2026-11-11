@@ -21,7 +21,7 @@ export function versionProblems(pkg, lock, notes) {
   try {
     const versions = [JSON.parse(pkg).version, JSON.parse(lock).version, JSON.parse(lock).packages?.['']?.version,
       JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(notes)[1]).version];
-    if (/^\d+\.\d+\.\d+$/.test(versions[0]) && versions.every((v) => v === versions[0])) return [];
+    if (/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(versions[0]) && versions.every((v) => v === versions[0])) return [];
     return [`the version isn't one X.Y.Z across package.json, package-lock.json and src/releaseNotes.ts (${versions.join(', ')})`];
   } catch {
     return ['package.json, package-lock.json or src/releaseNotes.ts is missing or unreadable'];
@@ -31,6 +31,7 @@ export function versionProblems(pkg, lock, notes) {
 // Inside those files, only what the bot writes may differ: the version in package.json and its lock,
 // and a releaseNotes.ts that is exactly the bot's module (no code). CHANGELOG.md is text only.
 export function botFileProblems(file, expected, actual) {
+  if (actual === null) return [`${file} is missing (the bot always writes it)`];
   if (expected === actual) return [];
   if (file === 'package.json' || file === 'package-lock.json') {
     const strip = (t) => {
@@ -41,6 +42,13 @@ export function botFileProblems(file, expected, actual) {
     };
     try { if (strip(expected) === strip(actual)) return []; } catch { /* unreadable counts as a difference */ }
     return [`${file} differs from staging + main outside its version field`];
+  }
+  if (file === 'CHANGELOG.md') {
+    // Text only, but it may not disappear or lose an earlier release's section.
+    const releases = (t) => (t ?? '').split('\n').filter((l) => /^## v\d/.test(l));
+    const kept = new Set(releases(actual).map((l) => l.replace(/ \(.*$/, '')));
+    const lost = releases(expected).filter((l) => !kept.has(l.replace(/ \(.*$/, '')));
+    return lost.length ? [`CHANGELOG.md lost earlier release sections (${lost.slice(0, 5).join('; ')})`] : [];
   }
   if (file === 'src/releaseNotes.ts') {
     try {

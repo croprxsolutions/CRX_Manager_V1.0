@@ -9,7 +9,9 @@ against the code. This PR fixes the ones that were real:
 - **The bot could lose staging's other edits to `package.json` or its lock** when it resolved a conflict
   by keeping release/next's old copy. It now starts both from staging + main (the guard's expected side),
   then sets only the version.
-- **Versions weren't checked.** They must now be one plain `X.Y.Z`, the same in `package.json`, both
+- **`CHANGELOG.md` and the other bot files could be deleted or emptied.** All four must exist on
+  release/next, and the changelog must keep every earlier release's section.
+- **Versions weren't checked.** They must now be one plain `X.Y.Z` (no leading zeros), the same in `package.json`, both
   version fields of the lock, and `src/releaseNotes.ts`. The content check reads big files in full (no
   1 MB cap) and fails on any git error other than "file not in this tree".
 - **Release-gate refreshes failed silently.** They ignored a failed `gh workflow run` (`|| echo`), so a
@@ -20,13 +22,21 @@ against the code. This PR fixes the ones that were real:
   says how to fix it.
 - **A `-- crx: no-transaction` migration could hold several statements.** It runs outside a transaction,
   so a failure after the first statement leaves half a change. The stamp check now refuses more than one
-  statement; `SET` lines before it (such as `lock_timeout`) don't count.
+  statement; `SET` lines before it (such as `lock_timeout`) are allowed, and nothing may follow it.
 - **A new one-shot migration was checked as if it would run.** It is only recorded, so only its encoding
   is checked now, as the apply job does.
 - **Stamps could name an impossible date** like 31 February. They must now be a real calendar day.
 - **"Held off: flag X" isn't checked against the flag.** That is by design, since a person judges it. The
   release PR checklist now asks for it, along with a fresh gate run right before merging, and a check that
   only the bot pushed to `release/next`. The planned `release-next` ruleset enforces that last point.
+
+**Covered elsewhere:**
+- The version the bot calculated, and the notes' wording, can't be checked by the guard. The guard can't
+  see the plan. The `release-next` ruleset lets only the bot push there, and the checklist asks for it.
+- A gate refresh is asynchronous, so a proof removed seconds before merging can't be caught. The
+  checklist asks for a fresh run right before merging.
+- A squash-merged release is detected (no tag), not prevented. The `protect-main` ruleset, set to merge
+  commits only, prevents it.
 
 **Before `RELEASE_FLOW=on`:** copy `.github/` to `main` again (a `hotfix/` PR, like #1787). The guard
 runs main's copy of the script, and `check-release-content` exists only once main has it. Until then the

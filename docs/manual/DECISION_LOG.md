@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — KI-142: a closed-short PO's line costs can be raised, never lowered (PR #1798)
+
+**Decision (Mason, in session, 2026-11-11: "A: No cost cuts"):** once a purchase order is closed short, no line cost on it can go down; a raise still lands. A price mistake on a closed PO is fixed on the vendor bill or with a vendor credit.
+**Why:** a closed PO's bills must never total more than what arrived. Allowing cost cuts kept reopening that rule (Sol rounds 1-3 on the same mechanism); refusing them removes the whole class.
+**What this forbids/implies:** `_guard_closed_po_item` refuses any unit-cost cut on a closed PO line (`PO_CLOSED_COST_CUT`), received or not, with no override. Migration `20270103180000_po_close_short`.
+
 ## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
 
 **Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.

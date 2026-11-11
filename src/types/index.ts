@@ -1051,6 +1051,8 @@ export interface Order {
    * is queued for a manual "Create Split Invoices" pass. Cleared back to false
    * once create_split_invoices_from_order successfully bills it. */
   needs_split_billing?: boolean | null;
+  /** The sale's sales tax box (billing plan M4a); changed only through set_order_sales_tax. */
+  sales_tax?: boolean;
   created_at: string;
   updated_at: string;
   customer?: Customer;

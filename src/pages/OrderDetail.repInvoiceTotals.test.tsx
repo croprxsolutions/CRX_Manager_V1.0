@@ -4,7 +4,7 @@
  * unpaid" when the office has in fact billed and collected it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const { mockFrom, mockRole, mockToast } = vi.hoisted(() => ({
@@ -51,7 +51,7 @@ vi.mock('../contexts/AuthContext', () => ({
 
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn(), getKeyFor: () => 'test-idem-key', resetKeyFor: vi.fn() }),
 }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyOrderStatusChange: vi.fn() }));
@@ -61,6 +61,7 @@ vi.mock('../components/team/QuickTaskModal', () => ({ default: () => null }));
 vi.mock('../components/team/RelatedNotes', () => ({ default: () => null }));
 
 import OrderDetail from './OrderDetail';
+import { supabase } from '../lib/db';
 
 const orderData = {
   id: 'ord-123', order_number: 'ORD-0099', status: 'fulfilled', customer_id: 'cust-1', row_version: 1,
@@ -114,5 +115,25 @@ describe('OrderDetail AR strip for non-admins', () => {
     expect(await screen.findByText('Total Invoiced')).toBeInTheDocument();
     expect(screen.getByText(/include only the invoices you created or are the salesman on/)).toBeInTheDocument();
     expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
+  });
+});
+
+describe('OrderDetail sales tax box (billing plan M4a)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('an admin ticks it and the sale is taxed through set_order_sales_tax', async () => {
+    renderWith('admin', []);
+    const box = await screen.findByRole('checkbox', { name: /Sales tax/ });
+    expect(box).not.toBeChecked();
+    expect(box).toBeEnabled();
+    fireEvent.click(box);
+    await waitFor(() => expect(vi.mocked(supabase.rpc)).toHaveBeenCalledWith('set_order_sales_tax', {
+      p_order_id: 'ord-123', p_sales_tax: true, p_idempotency_key: 'test-idem-key',
+    }));
+  });
+
+  it('a rep cannot change another rep\'s sale', async () => {
+    renderWith('sales_rep', []);
+    expect(await screen.findByRole('checkbox', { name: /Sales tax/ })).toBeDisabled();
   });
 });

@@ -303,8 +303,8 @@ function seed() {
     INSERT INTO public.vendors (name) VALUES ('${VENDOR}');`);
   for (let i = 1; i <= 9; i += 1) {
     psql(`SET session_replication_role = replica;
-      INSERT INTO public.products (id, product_name, sku, unit_size, current_cost, tier1_price, is_active)
-        VALUES ('${P(i)}', '[PROVER] KI142 product ${i}', 'KI142-${i}', 'GL', 1.00, 2.00, true);
+      INSERT INTO public.products (id, product_name, sku, unit_size, product_form, current_cost, tier1_price, is_active)
+        VALUES ('${P(i)}', '[PROVER] KI142 product ${i}', 'KI142-${i}', 'GL', 'liquid', 1.00, 2.00, true);
       INSERT INTO public.inventory (product_id, location, quantity_available, unit_size)
         VALUES ('${P(i)}', 'Main Warehouse', 0, 'GL');`);
   }
@@ -510,6 +510,9 @@ DELETE FROM public.receiving_records WHERE id = '${D.receipts[0]}'; COMMIT;`, { 
   assert.equal(num(q(`SELECT quantity_received FROM public.purchase_order_items WHERE id = '${D.items[0]}';`).out), 0);
   assert.equal(status(D.po), 'closed');
   assert.equal(onOrder(6), onOrderD);
+  // Nothing received on this line now: its cost still cannot be lowered (Sol MED), and a raise still lands.
+  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 1.00 WHERE id = '${D.items[0]}';`, { allowFailure: true }), /PO_CLOSED_COST_CUT/);
+  ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.30 WHERE id = '${D.items[0]}';`, { allowFailure: true }));
   console.log('[prover] a receipt reversal on a closed PO lowers stock and keeps the PO closed, nothing back on order');
 
   // 9. Cancel on a partly received PO points to Close Short. Save cannot move a PO into closed, nor create one closed.

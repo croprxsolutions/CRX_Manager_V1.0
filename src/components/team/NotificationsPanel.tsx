@@ -8,6 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
 import { useRealtimeNotifications } from '../../hooks/useRealtimeSubscription';
 import { useNavigate } from 'react-router-dom';
+import { toSentryError } from '../../lib/sentryError';
 
 export default function NotificationsPanel() {
   const { profile } = useAuth();
@@ -111,7 +112,7 @@ export default function NotificationsPanel() {
         .select();
       checkMutationResult(result, 'Mark notification as read');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Failed to mark notification as read' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'Failed to mark notification as read' } });
       toast('error', 'Failed to update notification');
     }
     fetchNotifications();
@@ -135,7 +136,7 @@ export default function NotificationsPanel() {
       // Mirrors src/pages/Notifications.tsx markAllRead.
       if (result.error) throw result.error;
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Failed to mark all notifications as read' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'Failed to mark all notifications as read' } });
       toast('error', 'Failed to update notification');
     }
     fetchNotifications();
@@ -150,7 +151,7 @@ export default function NotificationsPanel() {
         .select();
       checkMutationResult(result, 'Delete notification');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Failed to delete notification' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'Failed to delete notification' } });
       toast('error', 'Failed to update notification');
     }
     fetchNotifications();

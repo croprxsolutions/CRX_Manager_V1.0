@@ -26,6 +26,7 @@ import {
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import type { BrandSignalWord, EpaLookupResult, ProductBrand } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 const NAME_MAX_LENGTH = 200;
 
@@ -193,7 +194,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       })
       .catch((err: unknown) => {
         if (!active) return;
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'list_product_brands' } });
         setLoadError(sanitizeError(err));
       })
       .finally(() => { if (active) setLoading(false); });
@@ -253,7 +254,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       else if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
     } catch (err) {
       if (isStale()) return;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'edge_function', action: 'epa_lookup' },
       });
       toast('error', err instanceof Error ? err.message : 'EPA lookup failed. Please try again.');
@@ -309,7 +310,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCreateUncertain(false);
       setDraft(null);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'upsert_product_brand' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'upsert_product_brand' } });
       // An edit needs no lock: a changed resubmit after a lost-but-committed edit fails BRAND_CHANGED.
       if (!draft.brandId && !isClearRefusal(err)) setCreateUncertain(true);
       if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED) || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED)
@@ -348,7 +349,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCopySelected(new Set(rows.filter((brand) => brand.is_currently_sourced).map((brand) => brand.id)));
     } catch (err) {
       if (seq !== copySourceSeq.current) return;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands_copy' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'list_product_brands_copy' } });
       setCopyLoadError(sanitizeError(err));
     } finally {
       if (seq === copySourceSeq.current) setCopyLoading(false);
@@ -400,7 +401,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCopyOpen(false);
     } catch (err) {
       if (attempt) unsettledCopies.current.set(attempt.scope, attempt.name);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'copy_product_brands' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'copy_product_brands' } });
       toast('error', `Copied ${copiedIds.size} of ${chosen.length}. ${productBrandErrorMessage(err)}`);
     } finally {
       if (copiedIds.size > 0) {

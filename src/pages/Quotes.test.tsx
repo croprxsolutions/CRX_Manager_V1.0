@@ -182,7 +182,7 @@ describe('Quotes list', () => {
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Q-TEST-2' }));
       search('Test Farm');
       fireEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Delete quotes' }));
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await screen.findByRole('alertdialog');
       expect(dialog.textContent).toMatch(/\b1 quote\b/);
       expect(dialog.textContent).not.toMatch(/\b2 quotes\b/);
     });
@@ -244,8 +244,8 @@ describe('Quotes list', () => {
     expect(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }).compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Delete quotes' }));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /^Keep / }));
 
     fireEvent.click(within(strip()).getByRole('button', { name: 'Deselect' }));
     expect(strip().textContent).toBe('3 quotesClear filters');
@@ -391,8 +391,8 @@ describe('Quotes list on a phone', () => {
     expect(within(bar).getByRole('button', { name: 'Export CSV' })).toHaveTextContent(/^CSV$/);
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Delete quotes' }));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /^Keep / }));
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Deselect' }));
     expect(screen.queryByRole('region', { name: 'Bulk actions' })).not.toBeInTheDocument();

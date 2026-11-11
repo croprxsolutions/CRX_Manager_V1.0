@@ -10,6 +10,7 @@ import ResetPasswordPage from './components/auth/ResetPasswordPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import RoleLanding from './components/auth/RoleLanding';
 import AppLayout from './components/layout/AppLayout';
+import EnvBanner from './components/ui/EnvBanner';
 import { checkEnvVars, EnvErrorScreen } from './components/EnvCheck';
 import { trackNavigation } from './lib/metrics';
 import UpdatePrompt from './components/UpdatePrompt';
@@ -70,6 +71,7 @@ function RootLayout() {
     <AuthProvider>
       <ToastProvider>
         <BelowCostApprovalProvider>
+          <EnvBanner />
           <UpdatePrompt />
           <ErrorBoundary>
             <NavigationTracker />

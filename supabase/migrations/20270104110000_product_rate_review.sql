@@ -497,8 +497,15 @@ BEGIN
         'low', public._product_rate_review_number(v_row, 'low'),
         'recommended', public._product_rate_review_number(v_row, 'recommended'),
         'high', public._product_rate_review_number(v_row, 'high'), 'unit', public._product_rate_review_text(v_row, 'unit'),
-        'is_quoting_default', COALESCE((v_row->>'is_quoting_default')::boolean, false),
+        -- JSON true/false; left out means "not the default" only on a new row (an existing row must say).
+        'is_quoting_default', COALESCE(v_row->'is_quoting_default', 'null'::jsonb),
         'over_label_reason', public._product_rate_review_text(v_row, 'over_label_reason'));
+      IF v_vals->'is_quoting_default' = 'null'::jsonb THEN
+        IF v_rate_id IS NOT NULL THEN
+          RAISE EXCEPTION 'PRODUCT_RATE_INVALID: is_quoting_default must be true or false';
+        END IF;
+        v_vals := v_vals || jsonb_build_object('is_quoting_default', false);
+      END IF;
       v_p := v_p || jsonb_build_object('vals', v_vals, 'decision', v_decision, 'reason', v_reason);
 
       IF v_rate_id IS NULL THEN
@@ -532,7 +539,9 @@ BEGIN
                         (v_vals->>'high')::numeric, v_vals->>'unit', (v_vals->>'is_quoting_default')::boolean, v_vals->>'over_label_reason')
             IS DISTINCT FROM (v_cur.basis, v_cur.source, v_cur.low, v_cur.recommended, v_cur.high, v_cur.unit,
                               v_cur.is_quoting_default, v_cur.over_label_reason);
-          IF NOT v_changed AND (v_decision IS NULL OR (v_decision = 'approve' AND v_cur.status = 'approved')) THEN
+          -- An approve of a row someone else approved since the download is stale, not unchanged.
+          IF NOT v_changed AND (v_decision IS NULL OR (v_decision = 'approve' AND v_cur.status = 'approved'
+                                                       AND v_expected IS NOT DISTINCT FROM v_cur.row_version)) THEN
             v_p := v_p || jsonb_build_object('status', 'unchanged');
           ELSIF v_expected IS DISTINCT FROM v_cur.row_version THEN
             v_p := v_p || jsonb_build_object('status', 'stale', 'problem', 'changed by someone else since you downloaded it');

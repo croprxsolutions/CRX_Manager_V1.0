@@ -351,7 +351,9 @@ function approvalCases() {
   assert.equal(js(ADMIN, preview([old])).rates[0].status, 'stale');
   refused(ADMIN, commit([old]), /RATE_REVIEW_REFUSED: nothing was saved\. \[PROVER\] Liquid 1: changed by someone else/);
   assert.equal(writes(), w0); assert.equal(statusOf(R.b1), 'draft');
-  console.log('[case] 2 an old version is refused as stale by name and nothing is saved');
+  // Approving a row someone else approved since the download is stale too, not "unchanged".
+  assert.equal(js(ADMIN, preview([up(L[0], after, { expected_row_version: 1, decision: 'approve' })])).rates[0].status, 'stale');
+  console.log('[case] 2 an old version (also of a row approved since) is refused as stale by name and nothing is saved');
 
   // 3. Basis unconfirmed, above the label max with no reason, a unit that no longer fits: each refused with its reason.
   const cases3 = [[L[1], R.u2, /PRODUCT_RATE_BASIS_UNCONFIRMED/], [L[4], R.a5, /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED: .*100-1/],
@@ -529,6 +531,11 @@ function batchCases() {
     upId(L[8], R.a9, { expected_row_version: 'x' }), upId(L[8], R.a9, { decision: 'maybe' })])).rates;
   assert.deepEqual(odd.map((r) => r.status), ['invalid', 'invalid', 'unchanged', 'invalid', 'invalid', 'invalid'], JSON.stringify(odd));
   refused(ADMIN, commit([upId(L[8], R.a9)]), /RATE_REVIEW_NOTHING_TO_SAVE/);
+  // An existing row must state is_quoting_default as true/false; a missing one is not read as "unchecked".
+  const { is_quoting_default: _omit, ...noDefault } = upId(L[8], R.a9);
+  const qd = js(ADMIN, preview([noDefault, upId(L[8], R.b9, { is_quoting_default: 'yes' })])).rates;
+  assert.deepEqual(qd.map((r) => r.status), ['invalid', 'invalid'], JSON.stringify(qd));
+  assert.match(qd[0].problem, /is_quoting_default must be true or false/);
   refused(ADMIN, commit([], []), /RATE_REVIEW_ROWS_REQUIRED/);
   console.log('[case] 9 one invalid row in three: the preview shows each row and writes nothing; commit refuses by name and saves nothing; malformed rows are invalid');
 

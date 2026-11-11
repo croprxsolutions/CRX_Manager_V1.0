@@ -179,6 +179,17 @@ label-maximum change after a reason was saved shows on the row and is re-checked
 above (its own workbook, one confirm). Routine, decided here: 6 inactive parents are out of the review (RT-4 promotes
 active parents only); 42, 43 notes optional, blank clears; 44 a zero default is a real zero (RT-1 allows it).
 
+## Luna rounds (gpt-6-luna, xhigh)
+
+- Round 1 (head 541a611): HIGH an outcome stays "approved" after the parent's form or label maximum changes: fixed (the
+  re-check also runs when the same outcome is resent; the download flags `outcome_problem`; case 15). MED the commit
+  receipt held only changed rows: fixed (it returns every row, as the preview does).
+- Round 2 (head 1ee84b4): MED approving a row someone else approved since the download read as unchanged: fixed (stale;
+  case 2). MED a missing `is_quoting_default` on an existing row read as "unchecked": fixed (refused; a new row may
+  leave it out = not the default; case 9). LOW two derivations in one transaction share `changed_at`: refuted, each
+  derivation is its own RPC call and so its own transaction, and nothing calls `derive_draft_product_rates` twice in
+  one; the notes still belong to that parent's latest derivation.
+
 ## Business decisions (Mason, 2026-11-11, picked in the coordinator session: both recommended options)
 
 1. **Who may approve rates?** DECIDED: any admin. Recommended: any admin, with their name recorded on every decision (same as all

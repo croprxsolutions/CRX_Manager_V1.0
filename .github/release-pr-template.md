@@ -38,6 +38,7 @@ _The bot fills the parts between its markers each time staging or a label change
 
 ### 🧪 Validation & Testing Checklist (before merging)
 - [ ] Staging/Pre-production verification has passed (the `release-gate` check is green: every PR above is verified on staging or held off).
+- [ ] Every PR held off by a flag has that flag off in production, and every one held off by a revert has the revert in this release (the gate checks the note, not the flag).
 - [ ] All automated CI/CD pipeline tests are green.
 - [ ] Database backup plans and rollback procedures are confirmed (today's backup exists).
 - [ ] Monitoring and alerting tools (Sentry, #crx-alerts) are verified active.

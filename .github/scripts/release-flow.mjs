@@ -16,6 +16,32 @@ export function releaseExtraFiles(files) {
   return files.filter((f) => !BOT_FILES.includes(f));
 }
 
+// Inside those files, only what the bot writes may differ: the version in package.json and its lock,
+// and a releaseNotes.ts that is exactly the bot's module (no code). CHANGELOG.md is text only.
+export function botFileProblems(file, expected, actual) {
+  if (expected === actual) return [];
+  if (file === 'package.json' || file === 'package-lock.json') {
+    const strip = (t) => {
+      const j = JSON.parse(t);
+      delete j.version;
+      if (j.packages?.['']) delete j.packages[''].version;
+      return JSON.stringify(j);
+    };
+    try { if (strip(expected) === strip(actual)) return []; } catch { /* unreadable counts as a difference */ }
+    return [`${file} differs from staging + main outside its version field`];
+  }
+  if (file === 'src/releaseNotes.ts') {
+    try {
+      const notes = JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(actual)[1]);
+      const shape = Object.keys(notes).join() === 'version,date,items' && typeof notes.version === 'string'
+        && typeof notes.date === 'string' && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
+      if (shape && actual === releaseNotesModule(notes)) return [];
+    } catch { /* not the bot's module */ }
+    return [`${file} isn't exactly the module the bot writes (a version, a date and a list of strings)`];
+  }
+  return [];
+}
+
 // Every enforcing check stays inert until the repository variable RELEASE_FLOW is "on".
 export function flowEnabled(env) {
   return env.RELEASE_FLOW === 'on';
@@ -351,6 +377,13 @@ function statusMarkdown(prs, orphans) {
 
 const commands = {
   // usage (stdin = changed file names): release-flow.mjs check-release-files
+  // usage: release-flow.mjs check-release-content <expected tree> <release/next sha>
+  async 'check-release-content'([expected, head]) {
+    const show = (ref, f) => { try { return execFileSync('git', ['show', `${ref}:${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+    const problems = BOT_FILES.flatMap((f) => botFileProblems(f, show(expected, f), show(head, f)));
+    for (const p of problems) console.log(`::error::release/next: ${p}. Only the release bot writes these files.`);
+    return problems.length ? 1 : 0;
+  },
   async 'check-release-files'() {
     const extra = releaseExtraFiles(readFileSync(0, 'utf8').split('\n').filter(Boolean));
     if (!extra.length) return 0;

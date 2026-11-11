@@ -140,15 +140,17 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
 }
 
 // PR check: every new migration has a well-formed name, a stamp no other file shares, and a stamp
-// newer than everything already on the base branch (the target applies all of those).
-export function stampProblems({ added, base, head, changed = [] }) {
+// newer than everything already on the base branch (the target applies all of those). onMain: files that
+// are already on main, byte for byte (a back-merge into staging); those may be older, since main's own
+// check passed them and staging applies them out of order on purpose.
+export function stampProblems({ added, base, head, changed = [], onMain = [] }) {
   const stamp = (f) => f.slice(0, 14);
   const baseMax = base.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
   const problems = changed.map((f) => `${f}: an existing migration was edited, renamed or deleted; applied migrations never change (add a new one instead)`);
   for (const f of added) {
     if (!NAME.test(f.replace(/\.sql$/, '')) || !REAL_STAMP.test(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
     if (head.filter((h) => stamp(h) === stamp(f)).length > 1) problems.push(`${f}: shares its stamp with another migration`);
-    if (stamp(f) <= baseMax) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
+    if (stamp(f) <= baseMax && !onMain.includes(f)) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
   }
   return problems;
 }
@@ -172,7 +174,8 @@ export function urlRef(dbUrl) {
   let u;
   try { u = new URL(dbUrl); } catch { return null; }
   const username = decodeURIComponent(u.username);
-  const poolerUser = /^postgres\.([a-z]{20})$/.exec(username)?.[1];
+  // <role>.<project ref>: postgres for the apply job, crx_drift_ro for the read-only drift and schema checks.
+  const poolerUser = /^[a-z_][a-z0-9_]*\.([a-z]{20})$/.exec(username)?.[1];
   if (poolerUser) return /^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(u.hostname) ? poolerUser : null;
   const directHost = /^db\.([a-z]{20})\.supabase\.co$/.exec(u.hostname)?.[1];
   if (directHost) return username === 'postgres' ? directHost : null;
@@ -236,8 +239,15 @@ function runFile(dbUrl, file, { retry = true } = {}) {
   }
 }
 
+// Applies run only as postgres (objects get the owner and default grants every migration expects).
+export function applyUserProblem(dbUrl) {
+  let user;
+  try { user = decodeURIComponent(new URL(dbUrl).username); } catch { return 'the database URL is not a URL'; }
+  return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
+}
+
 function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
-  const refused = refuseTarget(dbUrl, expectedRef);
+  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));
@@ -337,7 +347,38 @@ function drift({ dbUrl, expectedRef, repo, report }) {
   return !report && (noFile.length || changed.length) ? 1 : 0;
 }
 
+// Lines only on one side of two schema fingerprints (.github/scripts/schema-fingerprint.sql).
+export function schemaDiff(target, rebuilt) {
+  const [t, r] = [new Set(target), new Set(rebuilt)];
+  return { onlyTarget: target.filter((l) => !r.has(l)), onlyRebuilt: rebuilt.filter((l) => !t.has(l)) };
+}
+
+// The target's public schema must equal one rebuilt from the repo (baseline + migrations): catches
+// SQL Editor changes that left no ledger row. Read-only on the target; the rebuilt DB must be local.
+function schema({ dbUrl, expectedRef, rebuiltUrl, report }) {
+  const refused = refuseTarget(dbUrl, expectedRef);
+  if (refused) throw new Error(`REFUSED: ${refused}`);
+  if (urlRef(rebuiltUrl ?? '') !== 'local') throw new Error('REBUILT_DB_URL must be the local rebuilt database');
+  const sql = readFileSync(new URL('./schema-fingerprint.sql', import.meta.url), 'utf8');
+  const [target, rebuilt] = [query(dbUrl, sql), query(rebuiltUrl, sql)];
+  if (!rebuilt.length || !target.length) throw new Error('a schema fingerprint came back empty');
+  const { onlyTarget, onlyRebuilt } = schemaDiff(target, rebuilt);
+  const level = report ? 'warning' : 'error';
+  const show = (lines, where) => {
+    for (const l of lines.slice(0, 100)) console.log(`::${level}::${where}: ${l.slice(0, 400)}`);
+    if (lines.length > 100) console.log(`::${level}::...and ${lines.length - 100} more ${where}`);
+  };
+  show(onlyTarget, `on ${expectedRef}, not in the migration files`);
+  show(onlyRebuilt, `in the migration files, not on ${expectedRef}`);
+  console.log(`DB_SCHEMA ${expectedRef}: ${target.length} objects, ${onlyTarget.length} only on ${expectedRef}, ${onlyRebuilt.length} only in the files`);
+  return !report && (onlyTarget.length || onlyRebuilt.length) ? 1 : 0;
+}
+
 const commands = {
+  // env: DB_URL, TARGET_REF, REBUILT_DB_URL (from rebuild-schema.sh); SCHEMA_MODE=report warns only. Read-only.
+  schema() {
+    return schema({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', rebuiltUrl: process.env.REBUILT_DB_URL, report: process.env.SCHEMA_MODE === 'report' });
+  },
   // env: DB_URL, TARGET_REF. Read-only.
   drift() {
     return drift({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', repo: process.cwd(), report: process.env.DRIFT_MODE === 'report' });
@@ -354,8 +395,13 @@ const commands = {
     const names = (lines) => lines.map((l) => path.basename(l)).filter((n) => n.endsWith('.sql'));
     const diff = (filter) => names(git('diff', '--no-renames', '--name-only', `--diff-filter=${filter}`, `${baseRef}...HEAD`, '--', 'supabase/migrations'));
     const added = diff('A');
+    // A back-merge into staging brings main's files as-is: same content as on main = already checked there.
+    const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
+    const mainRef = baseRef.endsWith('/staging') ? baseRef.replace(/\/staging$/, '/main') : null;
+    const onMain = mainRef ? added.filter((f) => { const m = blob(mainRef, f); return m !== null && m === blob('HEAD', f); }) : [];
     const problems = stampProblems({
       added,
+      onMain,
       changed: diff('MDT'),
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),

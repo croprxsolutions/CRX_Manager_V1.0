@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -79,6 +79,11 @@ test('stampProblems: new files need a valid, unique stamp newer than the base br
   assert.match(stampProblems({ added: f(['20261223000000_x']), base, head: [...base, ...f(['20261223000000_x', '20261223000000_y'])] })[0], /shares its stamp/);
   assert.match(stampProblems({ added: ['2026_bad.sql'], base, head: base })[0], /name must be/);
   assert.match(stampProblems({ added: [], changed: ['20261101000000_a.sql'], base, head: base })[0], /edited, renamed or deleted/);
+  // Back-merge of main into staging: a file already on main, unchanged, may be older than staging's newest.
+  const old = f(['20261201000000_from_main']);
+  assert.deepEqual(stampProblems({ added: old, base, head: [...base, ...old], onMain: old }), []);
+  assert.match(stampProblems({ added: old, base, head: [...base, ...old], onMain: [] })[0], /not newer than/);
+  assert.match(stampProblems({ added: f(['20261201000000_x']), base, head: [...base, ...f(['20261201000000_x', '20261201000000_y'])], onMain: f(['20261201000000_x']) })[0], /shares its stamp/);
 });
 
 test('refuseTarget: exactly the expected project read from the URL, never live or MetaHive', () => {
@@ -166,4 +171,25 @@ test('ledgerDrift: rows with no file, rows whose file changed, files never appli
   assert.deepEqual(d.noFile, ['20261105000000_sql_editor_change']);
   assert.deepEqual(d.changed, ['20261102000000_b']);
   assert.deepEqual(d.notApplied, ['20261103000000_pending']);
+});
+
+test('urlRef: the read-only drift login on the pooler counts; any other host or a bad role does not', () => {
+  assert.equal(urlRef('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), 'fsnjredpmakbmhwowjjt');
+  assert.equal(urlRef('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@attacker.example:5432/postgres'), null);
+  assert.equal(urlRef('postgresql://Bad-Role.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), null);
+  assert.match(refuseTarget('postgresql://crx_drift_ro.rhyzpcqhnizqbxphqdkr:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres', 'fsnjredpmakbmhwowjjt'), /live/);
+});
+
+test('schemaDiff: lines only on the target and lines only in the rebuild, in their own order', () => {
+  const target = ['column t.a int', 'function f() md5=1', 'policy t.p'];
+  const rebuilt = ['column t.a int', 'function f() md5=2', 'index i'];
+  assert.deepEqual(schemaDiff(target, rebuilt), { onlyTarget: ['function f() md5=1', 'policy t.p'], onlyRebuilt: ['function f() md5=2', 'index i'] });
+  assert.deepEqual(schemaDiff(target, [...target]), { onlyTarget: [], onlyRebuilt: [] });
+});
+
+test('applyUserProblem: migrations apply only as postgres (pooler or direct), never the read-only or another role', () => {
+  assert.equal(applyUserProblem('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), null);
+  assert.equal(applyUserProblem('postgresql://postgres:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres'), null);
+  assert.match(applyUserProblem('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /only as postgres, not crx_drift_ro/);
+  assert.match(applyUserProblem('postgresql://migration_writer.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /not migration_writer/);
 });

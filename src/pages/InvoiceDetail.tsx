@@ -30,7 +30,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
@@ -48,6 +48,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
+import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -56,6 +57,7 @@ import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import { toSentryError } from '../lib/sentryError';
 
 interface LineItem {
   id?: string;
@@ -481,7 +483,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         }
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'rup_post_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'rup_post_check' } });
       stopUnchecked();
       return;
     }
@@ -1005,7 +1007,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             toast('error', 'The customer changed while the product was being added. Add the product again.');
             return;
           }
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_add_product_customer_tier' } });
+          Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_add_product_customer_tier' } });
           toast('error', "Could not load this customer's price tier. The product was not added; try again.");
           return;
         } finally {
@@ -1186,8 +1188,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           footer_notes: invoice.footer_notes || null,
         };
 
-        // The standing discount line is the database's (rebuilt at commit, dropped if the type changes): never sent back.
-        const itemsPayload = items.filter((it) => it.charge_type !== 'standing_discount').map((it, idx) => ({
+        // The discount and tax lines are the database's (rebuilt at commit, dropped if the type changes): never sent back.
+        const itemsPayload = items.filter((it) => !isComputedChargeLine(it.charge_type)).map((it, idx) => ({
           // Existing generated lines carry their server identity back to the
           // writer so it can preserve immutable order-line and historical-cost
           // lineage while rebuilding a draft invoice. New manual lines omit id.
@@ -1345,7 +1347,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('success', invoice.invoice_group_id ? 'Invoice group posted' : 'Invoice posted');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'post_invoice_group' : 'post_invoice' },
       });
       // This is the single-invoice posting flow, so it must speak the same
@@ -1407,7 +1409,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setShowVoidModal(false);
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: voidedGroup ? 'void_invoice_group' : 'void_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1467,7 +1469,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         delete unpostKeysRef.current[invoice.invoice_group_id ? `grp:${invoice.invoice_group_id}` : id];
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'unpost_invoice_group' : 'unpost_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1506,7 +1508,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         transferToSchedulingIdem.resetKey();
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'transfer_invoice_to_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'transfer_invoice_to_job' } });
       toast('error', sanitizeError(err));
     }
     setTransferringToScheduling(false);
@@ -1559,7 +1561,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     try {
       match = await findDuplicatePayment(payment.customerId, amountCents, payment.reference);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'duplicate_payment_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'duplicate_payment_check' } });
       if (payAttemptRef.current === attempt) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
       setPayingInvoice(false);
       return;
@@ -1612,7 +1614,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setPayNotes('');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'allocate_payment' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'allocate_payment' } });
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH) && payAttemptRef.current === attempt) {
         // The form can be closed during the save, and this refusal has to be seen.
         setPayRetryRefused(true);
@@ -1705,7 +1707,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         applyCreditIdem.resetKey();
         setUnresolvedApplyCreditIntent(null);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'apply_credit_memo_to_invoice' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'apply_credit_memo_to_invoice' } });
       toast('error', sanitizeError(err));
     }
     setApplyingCredit(false);
@@ -1742,7 +1744,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setReverseWoTarget(null);
       if (id) fetchInvoice(id);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_write_off' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_write_off' } });
       toast('error', sanitizeError(err));
     }
     setReversingWo(false);
@@ -1983,8 +1985,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const canEdit = isAdminOrRep;
   const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
-  // The standing discount line is the database's own (billing plan M4b): shown, never edited or removed here.
-  const rowEditable = (item: LineItem) => editable && item.charge_type !== 'standing_discount';
+  // The standing discount (M4b) and sales tax (M4a) lines are the database's own: shown, never edited or removed here.
+  const rowEditable = (item: LineItem) => editable && !isComputedChargeLine(item.charge_type);
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
   // - Split invoice (Codex r5 P2): chemical items store PER-UNIT cost, but the header
@@ -2436,10 +2438,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-secondary">Margin</span>
-                  <span className={totalCents - totalCostCents > 0 ? 'text-crx-green' : 'text-red-600'}>
-                    {fmt(totalCents - totalCostCents)}
+                  <span className={invoiceMarginCents(items, totalCostCents) > 0 ? 'text-crx-green' : 'text-red-600'}>
+                    {fmt(invoiceMarginCents(items, totalCostCents))}
                   </span>
                 </div>
+              </>
+            )}
+            {/* The office's discount on this sale (billing plan M4b): admin, chemical-sale draft. */}
+            {isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' && (
+              <>
+                <hr className="border-gray-100" />
+                <StandingDiscountControl
+                  invoiceId={invoice.id}
+                  disabled={hasUnsavedChanges}
+                  onChanged={() => fetchInvoice(invoice.id as string)}
+                />
               </>
             )}
             {!isNew && (

@@ -7,15 +7,26 @@ import type { InvoiceChargeType, InvoiceType } from '../types';
  * tax. PostgreSQL enforces the same rule (migration 20261021050000); this module only keeps the
  * screen in step with it.
  */
-export const CHARGE_TYPE_OPTIONS: ReadonlyArray<{ value: Exclude<InvoiceChargeType, 'standing_discount'>; label: string }> = [
+export const CHARGE_TYPE_OPTIONS: ReadonlyArray<{ value: Exclude<InvoiceChargeType, 'standing_discount' | 'sales_tax'>; label: string }> = [
   { value: 'freight', label: 'Freight' },
   { value: 'application_fee', label: 'Application fee' },
   { value: 'service', label: 'Service' },
   { value: 'other', label: 'Other' },
 ];
 
+/** The database's own lines (worked out at commit, replaced on every save), never staff input. */
+export function isComputedChargeLine(type: InvoiceChargeType | null | undefined): boolean {
+  return type === 'standing_discount' || type === 'sales_tax';
+}
+
+/** An invoice's margin: its lines less cost, without the sales tax (collected for the state, not earned). */
+export function invoiceMarginCents(lines: ReadonlyArray<{ extended_cents: number; charge_type?: InvoiceChargeType | null }>, costCents: number): number {
+  return lines.reduce((sum, line) => sum + (line.charge_type === 'sales_tax' ? 0 : line.extended_cents), 0) - costCents;
+}
+
 export function chargeTypeLabel(type: InvoiceChargeType | null | undefined): string {
   if (type === 'standing_discount') return 'Standing discount';
+  if (type === 'sales_tax') return 'Sales tax';
   return CHARGE_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? '';
 }
 
@@ -43,8 +54,7 @@ interface ChargeLineCheck {
  * database refusals so staff see a plain message instead of a server error.
  */
 export function fromScratchLinesProblem(allLines: ChargeLineCheck[]): string | null {
-  // The standing discount line is the database's own (worked out at commit, replaced on every save), not staff input.
-  const lines = allLines.filter((line) => line.charge_type !== 'standing_discount');
+  const lines = allLines.filter((line) => !isComputedChargeLine(line.charge_type));
   if (lines.some((line) => line.product_id)) {
     return 'An invoice with no order or delivery cannot carry products. Remove the product lines; sell product through an order or a quick delivery.';
   }

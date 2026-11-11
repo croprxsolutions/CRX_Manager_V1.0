@@ -87,6 +87,8 @@ export default function OrderDetail() {
   // per order.
   const cancelOrderIdem = useIdempotencyKey('cancel_order', profile?.id || '', id ?? '');
   const priceOrderIdem = useIdempotencyKey('price_order', profile?.id || '');
+  // Keyed per order and value: a retry of "on" never replays an "off".
+  const salesTaxIdem = useIdempotencyKey('set_order_sales_tax', profile?.id || '');
   // Keep retries scoped to the order, as for cancellation.
   const splitInvoiceIdem = useIdempotencyKey('create_split_invoices_from_order', profile?.id || '', id ?? '');
   // Latest order id the route is showing — older in-flight fetches bail (M6 stale guard).
@@ -168,6 +170,7 @@ export default function OrderDetail() {
 
   // Planned/Committed toggle
   const [togglingPlanned, setTogglingPlanned] = useState(false);
+  const [savingSalesTax, setSavingSalesTax] = useState(false);
 
   // Print state
   const [printingSummary, setPrintingSummary] = useState(false);
@@ -785,6 +788,31 @@ export default function OrderDetail() {
       toast('error', sanitizeError(err));
     }
     setTogglingPlanned(false);
+  };
+
+  // The sales tax box (billing plan M4a): an admin or the sale's own rep. The database applies it to the
+  // sale's draft invoices; posted ones keep their tax.
+  const handleToggleSalesTax = async () => {
+    if (!order || !profile || order.id !== id) return;
+    const next = !order.sales_tax;
+    const scope = `${order.id}:${next}`;
+    setSavingSalesTax(true);
+    try {
+      const { data, error } = await supabase.rpc('set_order_sales_tax', {
+        p_order_id: order.id, p_sales_tax: next, p_idempotency_key: salesTaxIdem.getKeyFor(scope),
+      });
+      if (error) throw error;
+      const result = assertRpcResult<{ drafts_updated?: number }>(data, 'set_order_sales_tax');
+      salesTaxIdem.resetKeyFor(scope);
+      const drafts = result.drafts_updated ?? 0;
+      if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
+      else toast('info', `Sales tax ${next ? 'on' : 'off'}. This sale has no draft invoices to change; posted invoices keep their tax.`);
+      await fetchOrder();
+    } catch (err: unknown) {
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_order_sales_tax' } });
+      toast('error', sanitizeError(err));
+    }
+    setSavingSalesTax(false);
   };
 
   const executeStatusChange = async () => {
@@ -1605,6 +1633,21 @@ export default function OrderDetail() {
           <div>
             <p className="text-xs text-secondary">Total Price</p>
             <p className="text-sm font-medium text-nav-dark">{fmt(order.total_price)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-secondary" id="order-sales-tax-label">Sales tax</p>
+            <label className="mt-1 inline-flex items-center gap-2 text-sm font-medium text-nav-dark">
+              <input
+                type="checkbox"
+                aria-labelledby="order-sales-tax-label"
+                checked={!!order.sales_tax}
+                disabled={savingSalesTax || !(isAdmin || (role === 'sales_rep' && order.salesman_id === profile?.id))
+                  || order.status === 'cancelled' || order.status === 'voided'}
+                onChange={handleToggleSalesTax}
+                className="h-5 w-5 rounded border-gray-300 text-crx-green focus:ring-crx-green disabled:opacity-50"
+              />
+              {order.sales_tax ? 'Taxed' : 'Not taxed'}
+            </label>
           </div>
           {/* Cost is admin-only (Mason, 2026-10-15): no profit/margin for reps or field staff. */}
           {isAdmin && (<>

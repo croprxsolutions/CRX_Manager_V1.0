@@ -7,6 +7,7 @@ import { supabase, checkMutationResult } from '../../lib/db';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import type { JobTag } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 /** Per-tag bulk intent: leave as-is, add to all selected, or remove from all. */
 type BulkOp = 'none' | 'add' | 'remove';
@@ -112,7 +113,7 @@ export default function JobTagsBulkModal({
       onApplied();
       onClose();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobTagsBulkModal.apply' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'JobTagsBulkModal.apply' } });
       toast('error', sanitizeError(err));
     }
     setApplying(false);

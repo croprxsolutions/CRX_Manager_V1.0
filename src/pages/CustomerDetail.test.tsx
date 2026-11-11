@@ -941,7 +941,7 @@ describe('CustomerDetail stale whole-record save', () => {
       await screen.findByDisplayValue('Original Farm');
       expect(screen.getByLabelText('Pricing Tier')).toBeDisabled();
       expect(screen.getByLabelText('Credit Limit ($)')).toBeDisabled();
-      expect(screen.getByText(/only an admin can change a customer.s price tier and credit limit/i)).toBeInTheDocument();
+      expect(screen.getByText(/only an admin can change a customer.s price tier, credit limit and standing discount/i)).toBeInTheDocument();
       unmount();
     } finally {
       mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
@@ -950,7 +950,7 @@ describe('CustomerDetail stale whole-record save', () => {
     await screen.findByDisplayValue('Original Farm');
     expect(screen.getByLabelText('Pricing Tier')).toBeEnabled();
     expect(screen.getByLabelText('Credit Limit ($)')).toBeEnabled();
-    expect(screen.queryByText(/only an admin can change a customer.s price tier and credit limit/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/only an admin can change a customer.s price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
   });
 
   it('restores the create-form defaults on that jump, not an empty form', async () => {
@@ -1352,5 +1352,85 @@ describe('CustomerDetail save paused on the duplicate check (KI-77)', () => {
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_customer'), 'the abandoned edit must never be written').toEqual([]);
     expect(screen.getByRole('button', { name: 'Save Changes' })).not.toBeDisabled();
+  });
+});
+
+describe('CustomerDetail standing discount (billing plan M4b)', () => {
+  const updates: unknown[] = [];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    customerIdempotencyState.reset();
+    updates.length = 0;
+    let saved = { ...original, standing_discount_pct: 3 };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        const q = customerQuery(() => saved as unknown as typeof original);
+        const update = q.update as (...args: unknown[]) => unknown;
+        q.update = (...args: unknown[]) => {
+          updates.push(args[0]);
+          saved = { ...saved, ...(args[0] as object), row_version: saved.row_version + 1 };
+          return update(...args);
+        };
+        return q;
+      }
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockResolvedValue({ data: null, error: null });
+  });
+  afterEach(() => { mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' }; });
+
+  it('an admin changes the customer\'s rate with its own Save', async () => {
+    renderDetail();
+    const input = await screen.findByLabelText('Standing discount (%)');
+    expect(input).toHaveValue(3);
+    expect(screen.getByRole('button', { name: 'Save discount' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(updates).toEqual([{ standing_discount_pct: 2.5 }]));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_customer', expect.anything());
+  });
+
+  it('refuses more than two decimals or over 100 before writing', async () => {
+    renderDetail();
+    const input = await screen.findByLabelText('Standing discount (%)');
+    fireEvent.change(input, { target: { value: '101' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('0 to 100')));
+    expect(updates).toEqual([]);
+  });
+
+  it('a save that finishes after the page moved to another customer leaves that customer alone', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      let current: unknown = null;
+      const q = customerQuery(() => (current ?? { ...original, standing_discount_pct: 3 }) as unknown as typeof original);
+      const update = q.update as (...args: unknown[]) => unknown;
+      q.update = (...args: unknown[]) => {
+        updates.push(args[0]);
+        current = { ...original, standing_discount_pct: 2.5, row_version: 5 };
+        update(...args);
+        const then = q.then as (...a: unknown[]) => unknown;
+        q.then = (...a: unknown[]) => gate.then(() => then(...a));
+        return q;
+      };
+      return q;
+    });
+    renderDetailWithCustomerSwitch();
+    fireEvent.change(await screen.findByLabelText('Standing discount (%)'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(updates).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to customer 2' }));
+    await act(async () => { release(); await gate; });
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.stringContaining('Standing discount set'));
+  });
+
+  it('a non-admin sees the rate but cannot change it', async () => {
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep' };
+    renderDetail();
+    expect(await screen.findByLabelText('Standing discount (%)')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
   });
 });

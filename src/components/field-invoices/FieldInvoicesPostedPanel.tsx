@@ -46,6 +46,7 @@ import {
   type FieldInvoiceListFilters,
   type PostedScope,
 } from '../../lib/fieldInvoiceList';
+import { toSentryError } from '../../lib/sentryError';
 
 // Field-app parity #23: the dedicated "Posted Field Application Invoices" page
 // (ChemMan's /#/invoices/posted "Posted Invoices"). Lists ONLY invoices already
@@ -139,7 +140,7 @@ export default function FieldInvoicesPostedPanel() {
       .order('id', { referencedTable: 'invoice_items' })
       .range(from, to)))
       // A read that throws fails the same way, never leaving the skeleton up for good.
-      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
+      .catch((err: unknown) => ({ data: null, error: toSentryError(err) }));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {
@@ -167,7 +168,7 @@ export default function FieldInvoicesPostedPanel() {
         .in('invoice_group_id', idChunk)
         .order('id')
         .range(from, to)))
-        .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
+        .catch((err: unknown) => ({ data: null, error: toSentryError(err) }));
       if (seq !== fetchSeq.current) return;
 
       if (groupErr) {

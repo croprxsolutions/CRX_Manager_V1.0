@@ -6,6 +6,7 @@
  * Returns null on any failure — weather prefill is a convenience, never a gate.
  */
 import { Sentry } from './sentry';
+import { toSentryError } from './sentryError';
 
 export interface CapturedWeather {
   temperature_f: number;
@@ -65,7 +66,7 @@ export async function fetchCurrentWeather(lat: number, lng: number): Promise<Cap
       humidity_pct: Math.round(c.relative_humidity_2m),
     };
   } catch (err) {
-    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'weather_capture' } });
+    Sentry.captureException(toSentryError(err), { tags: { source: 'weather_capture' } });
     return null;
   }
 }
@@ -179,7 +180,7 @@ export async function fetchWeatherForDateTime(
     const idx = pickHourlyIndex(hourly.time, timeHHMM);
     return mapHourlyAt(hourly, idx);
   } catch (err) {
-    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'weather_capture_datetime' } });
+    Sentry.captureException(toSentryError(err), { tags: { source: 'weather_capture_datetime' } });
     return null;
   }
 }

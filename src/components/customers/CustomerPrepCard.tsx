@@ -9,6 +9,7 @@ import { useToast } from '../ui/Toast';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
+import { toSentryError } from '../../lib/sentryError';
 
 // One row per (product, unit) — a product invoiced in two units arrives as two
 // rows so a total never mixes units; `unit` is null when the invoice lines
@@ -49,7 +50,7 @@ export default function CustomerPrepCard({ customerId }: { customerId: string })
         if (summaryError) throw summaryError;
         topProducts = assertRpcResult<{ top_products?: TopProductByRevenue[] }>(summaryData, 'get_customer_purchase_summary').top_products;
       } catch (summaryErr: unknown) {
-        Sentry.captureException(summaryErr instanceof Error ? summaryErr : new Error(String(summaryErr)), { extra: { context: 'CustomerPrepCard.loadTopProductsByRevenue' } });
+        Sentry.captureException(toSentryError(summaryErr), { extra: { context: 'CustomerPrepCard.loadTopProductsByRevenue' } });
       }
       if (seq !== requestSeq.current) return;
       setPrep({ ...prepCard, top_products: topProducts });
@@ -57,7 +58,7 @@ export default function CustomerPrepCard({ customerId }: { customerId: string })
       if (seq !== requestSeq.current) return;
       setPrep(null);
       setLoadError(true);
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerPrepCard.load' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerPrepCard.load' } });
       toast('error', errorMessage(error));
     } finally {
       if (seq === requestSeq.current) setLoading(false);

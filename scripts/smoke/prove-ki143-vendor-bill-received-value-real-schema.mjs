@@ -54,7 +54,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(create_vendor_bill|update_vendor_bill|_section9_create_vendor_bill|_section9_update_vendor_bill|purchase_order_items|purchase_orders|vendor_bills)/i;
+const TOUCHED = /(create_vendor_bill|update_vendor_bill|_section9_create_vendor_bill|_section9_update_vendor_bill|purchase_order_items|purchase_orders\b|vendor_bills\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

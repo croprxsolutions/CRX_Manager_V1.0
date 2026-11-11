@@ -161,6 +161,7 @@ export default function NewVendorBill() {
     if (po && !matchedVendor) {
       setPurchaseOrderId('');
       setPurchaseOrderLabel('');
+      setVendorId('');
       toast('warning', `This PO's vendor "${po.vendor}" is not on the vendor list, so it cannot be linked to a bill yet.`);
       return;
     }

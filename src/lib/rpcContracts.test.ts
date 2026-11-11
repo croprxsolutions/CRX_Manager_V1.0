@@ -2872,6 +2872,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261231200000',
   '20261231210000',
   '20261231220000',
+  '20270103160000',
 ]);
 
 /**
@@ -3139,6 +3140,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'delete_draft_product_rate',
   'derive_draft_product_rates',
   'save_draft_product_rate',
+  // 20270103160000 (DM-1b, local candidate): admin-only setup workbook writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'commit_ingredients_tab',
+  'commit_weights_tab',
+  'promote_chemistry_proposal',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3272,6 +3278,18 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'admin read-only preview (DM-1, 20261209100000): runs the real edit inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   preview_parent_chemistry_correction:
     'admin read-only preview (DM-1, 20261209100000): runs the real correction inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20270103160000 (DM-1b, local candidate): private helpers and dry-run previews. Prune once applied
+  // and the registry high-water moves past it.
+  _workbook_weight_row: 'internal DM-1b helper (20270103160000): rehearses one Weights-tab row through the DM-2 draft helper inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_weight_rows: 'internal DM-1b helper (20270103160000): evaluates the Weights-tab rows (each rehearsal rolled back) for the preview and for commit_weights_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_ingredient_parent: 'internal DM-1b helper (20270103160000): rehearses the Ingredients-tab rows of one parent through _apply_parent_chemistry inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_ingredient_rows: 'internal DM-1b helper (20270103160000): groups the Ingredients-tab rows by parent (each rehearsal rolled back) for the preview and for commit_ingredients_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_apply_items: 'internal DM-1b helper (20270103160000): applies a change list through _apply_parent_chemistry, called only inside a rolled-back rehearsal or by promote_chemistry_proposal after its replay check; every API-role EXECUTE is revoked',
+  _apply_chemistry_proposal: 'internal DM-1b helper (20270103160000): applies one locked proposal, called only by promote_chemistry_proposal after its replay check; a decided proposal is refused; every API-role EXECUTE is revoked',
+  preview_weights_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each row inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  preview_ingredients_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each parent inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   // 20261229110000 (RT-1, local candidate): private helpers behind derive_draft_product_rates. Prune once applied
   // and the registry high-water moves past it.
   _product_rate_derive_parent: 'internal RT-1 helper (20261229110000): derives one parent, called only by derive_draft_product_rates after its replay check; every API-role EXECUTE is revoked',

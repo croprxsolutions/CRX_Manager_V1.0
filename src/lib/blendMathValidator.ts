@@ -162,7 +162,7 @@ function rateBaseUnit(unit: string | null | undefined): string {
   let base = raw;
   if (perAcreSlash.test(raw)) base = raw.replace(perAcreSlash, '').trim();
   else if (perAcreSpelled.test(raw)) base = raw.replace(perAcreSpelled, '').trim();
-  // The server maps a dotted fluid ounce to 'fl oz' (20261231110000); the size tables list 'fl oz'.
+  // The server maps a dotted fluid ounce to 'fl oz' (20270101000000); the size tables list 'fl oz'.
   return DOTTED_FLUID_OUNCE.has(base) ? 'fl oz' : base;
 }
 

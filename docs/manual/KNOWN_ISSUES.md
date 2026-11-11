@@ -378,7 +378,7 @@ can make old splits refuse to save (LOW-MED).
   and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its
   TypeScript mirrors now fold zero-width and non-breaking characters, so a pasted unit no longer blocks billing.
   (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.)
-  FIX PENDING LIVE APPLY (`20261231110000`, contract `docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md`):
+  FIX PENDING LIVE APPLY (`20270101000000`, contract `docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md`):
   "fl. oz" with a period now reads as fluid ounces (bills on a liquid product, still refused on a dry one);
   `save_job` folds invisible characters before its own check; tabs, line breaks and every other character
   JavaScript trims count as a space on both sides; soft-deleted tickets no longer block a product unit edit; the

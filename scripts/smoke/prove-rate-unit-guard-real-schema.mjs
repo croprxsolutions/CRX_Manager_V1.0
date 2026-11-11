@@ -22,7 +22,7 @@
  *   P6  the blend invoice's unit check now passes the 'oz'+ZWSP line.
  *   P7  live-shaped existing lines ('32', 'pt/ac', 'oz') take other edits, price changes included.
  *
- * Then the follow-up 20261231110000 (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md):
+ * Then the follow-up 20270101000000 (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md):
  *   R0  real invoices: create_invoice_from_blend_ticket bills a 'pt/ac' and an 'oz'+ZWSP line after the candidate.
  *   FB  BEFORE the follow-up: a liquid 'fl. oz/ac' line saves but its invoice is refused; 'oz'+TAB is refused at
  *       save; save_job refuses a priced 'pt/a'+ZWSP+'c'; a soft-deleted ticket blocks a product rate unit edit.
@@ -52,7 +52,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261231100000_rate_unit_denominator_guard_and_invisible_chars.sql');
 // KI-16 follow-ups (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md), applied after P1-P9.
-const FOLLOW_UP = path.join(MIGRATIONS, '20261231110000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql');
+const FOLLOW_UP = path.join(MIGRATIONS, '20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql');
 const FOLLOW_UPS = [FOLLOW_UP];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -467,7 +467,7 @@ async function main() {
   console.log('RATE_UNIT_GUARD_PROOF_PASS');
 }
 
-// ── Follow-up 20261231110000 ──
+// ── Follow-up 20270101000000 ──
 const DRY = 'a16a1600-0000-4000-8000-0000000000b3';
 const LIQ2 = 'a16a1600-0000-4000-8000-0000000000b4';
 const FIELD = 'a16a1600-0000-4000-8000-0000000000d1';

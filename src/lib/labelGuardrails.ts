@@ -43,7 +43,7 @@ const INVISIBLE_DELETED = new RegExp(
 );
 
 /**
- * Mirror of the SQL `unit_fold_invisible` (migrations 20261231100000, 20261231110000): tabs, line breaks and
+ * Mirror of the SQL `unit_fold_invisible` (migrations 20261231100000, 20270101000000): tabs, line breaks and
  * the Unicode spaces become a space; soft hyphen, zero-width characters, word joiner and BOM are deleted.
  * The SQL `normalize_rate_unit` applies it before trimming, so a pasted unit bills like a typed one.
  */
@@ -62,7 +62,7 @@ export function foldInvisibleUnitChars(text: string): string {
  */
 /**
  * Dotted fluid-ounce spellings. `normalize_rate_unit` maps them to 'fl oz', NOT 'oz': billing then sizes them on a
- * liquid product and still refuses them on a dry one, where 'oz' would mean a weight ounce (KI-16, 20261231110000).
+ * liquid product and still refuses them on a dry one, where 'oz' would mean a weight ounce (KI-16, 20270101000000).
  */
 export const DOTTED_FLUID_OUNCE: ReadonlySet<string> = new Set(['fl. oz', 'fl.oz', 'fl oz.', 'fl. oz.', 'fl.oz.', 'floz.']);
 

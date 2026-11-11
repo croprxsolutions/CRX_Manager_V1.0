@@ -238,6 +238,7 @@ test('botFileProblems: release/next may change only the version and the generate
   assert.match(botFileProblems('CHANGELOG.md', null, null)[0], /missing/);
   assert.match(botFileProblems('CHANGELOG.md', log, log.replace('- A', '- rewritten'))[0], /changed or lost/);
   assert.match(botFileProblems('CHANGELOG.md', log, log.replace('- A', '- A\n- added later'))[0], /changed or lost/);
+  assert.match(botFileProblems('CHANGELOG.md', '## v0.1.0 (2026-11-12)\n\n- A\n', '# Changelog\n')[0], /changed or lost/);
   assert.match(botFileProblems('src/releaseNotes.ts', 'old', releaseNotesModule({ version: '0.2.0', date: 'tomorrow', items: [] }))[0], /module the bot writes/);
   const code = `fetch('/x');\n${notes}`;
   assert.match(botFileProblems('src/releaseNotes.ts', code, code)[0], /module the bot writes/);

@@ -104,10 +104,11 @@ jobs:
           # Normally a no-op; after a hotfix (back-merge still open) it keeps the release containing main.
           merge origin/main
           # A conflict resolved with --ours keeps release/next's whole old copy of a bot file, dropping
-          # staging's other edits in it. Start the two JSON files from staging + main; release-files then
-          # sets only their version, which is all the guard allows to differ.
+          # staging's other edits in it. Start the JSON files and the changelog from staging + main;
+          # release-files then sets only the version and adds this release's section.
           expected=$(git merge-tree --write-tree origin/staging origin/main) || { echo "::error::staging and main don't merge cleanly; merge the back-merge PR first."; exit 1; }
           git checkout "$expected" -- package.json package-lock.json
+          if git cat-file -e "$expected:CHANGELOG.md" 2>/dev/null; then git checkout "$expected" -- CHANGELOG.md; fi
           node "$RUNNER_TEMP/release-flow.mjs" release-files
           git add package.json package-lock.json CHANGELOG.md src/releaseNotes.ts
           git diff --cached --quiet || git commit -m "chore(release): $VERSION"

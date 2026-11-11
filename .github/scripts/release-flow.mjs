@@ -58,7 +58,7 @@ export function botFileProblems(file, expected, actual) {
   }
   if (file === 'CHANGELOG.md') {
     // Text only, but every earlier release's section stays word for word.
-    const sections = (expected ?? '').split(/\n(?=## v\d)/).slice(1).map((sec) => sec.trimEnd());
+    const sections = `\n${expected ?? ''}`.split(/\n(?=## v\d)/).filter((sec) => sec.startsWith('## v')).map((sec) => sec.trimEnd());
     // Each one whole: from its heading line to the next release heading (or the end), nothing added.
     const padded = `\n${actual.trimEnd()}\n\n## v`;
     const lost = sections.filter((sec) => !padded.includes(`\n${sec}\n\n## v`)).map((sec) => sec.split('\n')[0]);

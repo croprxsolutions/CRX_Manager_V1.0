@@ -7,8 +7,8 @@ against the code. This PR fixes the ones that were real:
   fields. `src/releaseNotes.ts` must be exactly the module the bot generates: a version, a date and a
   list of strings, and no code (`check-release-content`, `botFileProblems`).
 - **The bot could lose staging's other edits to `package.json` or its lock** when it resolved a conflict
-  by keeping release/next's old copy. It now starts both from staging + main (the guard's expected side),
-  then sets only the version.
+  by keeping release/next's old copy. It now starts both, and `CHANGELOG.md`, from staging + main (the guard's
+  expected side), then sets only the version and adds the release's section.
 - **`CHANGELOG.md` and the other bot files could be deleted or emptied.** All four must exist on
   release/next, and the changelog must keep every earlier release's section word for word, ending where it did.
   `src/releaseNotes.ts` must always be the bot's exact module (date `YYYY-MM-DD`), even when it equals staging's copy.

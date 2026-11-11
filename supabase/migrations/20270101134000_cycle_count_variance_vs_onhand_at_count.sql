@@ -141,7 +141,8 @@ BEGIN
     END IF;
     v_variance := round(p_counted_qty, 2) - v_expected;
     IF v_expected <> 0 THEN
-      v_variance_pct := round((v_variance / v_expected) * 100, 2);
+      -- abs(): a negative on hand must not flip the percentage's sign (Taha, PR #1775).
+      v_variance_pct := round((v_variance / abs(v_expected)) * 100, 2);
       -- variance_pct is numeric(8,2): a tiny on-hand must not make the count unsavable.
       IF abs(v_variance_pct) >= 1000000 THEN v_variance_pct := NULL; END IF;
     END IF;

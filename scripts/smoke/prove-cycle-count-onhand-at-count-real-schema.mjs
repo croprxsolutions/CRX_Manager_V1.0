@@ -429,6 +429,11 @@ async function main() {
   ok('P9 tiny on hand', saveCount(PRODUCTS.b2, 100000));
   assert.equal(scalar(`SELECT expected_qty::text || ',' || variance::text || ',' || coalesce(variance_pct::text, '-') FROM public.cycle_count_items WHERE id = '${itemOf(PRODUCTS.b2)}';`), '0.01,99999.99,-', 'P9: an out-of-range percentage is left empty');
   console.log('[prover] P9: on hand 9.875 counted 10 -> 9.88 / 0.12 in row and result; on hand 0.01 counted 100000 saves with no percentage');
+  // P9b: a negative on hand keeps the percentage's sign with the variance (Taha, PR #1775).
+  raw(`UPDATE public.inventory SET quantity_available = -3 WHERE product_id = '${PRODUCTS.b2}' AND location = 'Main Warehouse';`);
+  ok('P9b negative on hand', saveCount(PRODUCTS.b2, 0));
+  assert.equal(scalar(`SELECT expected_qty::text || ',' || variance::text || ',' || variance_pct::text FROM public.cycle_count_items WHERE id = '${itemOf(PRODUCTS.b2)}';`), '-3.00,3.00,100.00', 'P9b: on hand -3 counted 0 -> +3 / +100%');
+  console.log('[prover] P9b: on hand -3 counted 0 -> variance +3, percentage +100%');
 
   // P10: a stock change still in flight on the line's inventory row when the count is saved commits first and is in
   // the baseline (the save reads the row FOR SHARE), so Complete does not add it a second time.

@@ -14,6 +14,7 @@ describe('update_cycle_count_item compares with on hand at save (KI-134)', () =>
     expect(body).toMatch(/SELECT i\.quantity_available INTO v_on_hand\s+FROM public\.inventory i\s+WHERE i\.id = v_item\.inventory_id\s+FOR SHARE;/);
     expect(body).toContain('v_expected := round(COALESCE(v_on_hand, 0), 2);');
     expect(body).toContain('v_variance := round(p_counted_qty, 2) - v_expected;');
+    expect(body).toContain('v_variance_pct := round((v_variance / abs(v_expected)) * 100, 2);');
   });
 
   it('stores and returns the on hand it compared with', () => {

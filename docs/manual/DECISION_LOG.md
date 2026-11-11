@@ -10,6 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1751: Mason owner-accepted 2 Sol finding(s) at `d2d1bc8c4461`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d2d1bc8c4461` (base `f52a57230c83`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `c3593fa2f9462217` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref 7e8f8a878f38)
+- Finding 2 (HIGH) at `src/lib/sentryError.ts:30`, text sha256 `61bb6daccd365570` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref 17313d83176e)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `180cc033215d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `180cc033215d` (base `a1ba9e63db65`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

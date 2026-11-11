@@ -892,7 +892,9 @@ export function dataRewriteCheck(sql, { history } = {}) {
   while (calls.length) {
     const { raw, via } = calls.shift();
     const key = objectKey(raw);
-    if (seen.has(key) || via.length > 8) continue;
+    if (seen.has(key)) continue;
+    // Too deep to read: fail closed so the owner-approval rule keeps it (Codex P2).
+    if (via.length > 8) return hit(`it runs ${[...via, `${key}()`].join(" → ")} while applying, deeper than this check reads, so it cannot tell whether that changes existing rows`);
     seen.add(key);
     // Earlier overloads stay in play; a definition here replaces the same arity.
     const earlier = fromHistory(key);

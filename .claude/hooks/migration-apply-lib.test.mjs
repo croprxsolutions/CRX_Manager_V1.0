@@ -1977,6 +1977,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ["a called function that UPDATEs and drops a type with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP TYPE public.customer_kind CASCADE; END $$;\nSELECT public.z();\n"],
     ["a called function that UPDATEs and drops a domain with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP DOMAIN public.money_cents CASCADE; END $$;\nSELECT public.z();\n"],
     ["a GRANT then dynamic SQL", "GRANT SELECT ON public.customers TO anon;\nDO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
+    // Codex P2: a deleting function past the call-depth limit (ten links deep).
+    ["a delete ten calls deep behind an UPDATE", Array.from({ length: 10 }, (_, i) =>
+      `CREATE FUNCTION public.c${i}() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${i === 0 ? "UPDATE public.invoices SET notes = NULL; " : ""}${i < 9 ? `PERFORM public.c${i + 1}();` : "DELETE FROM public.customers;"} END $$;\n`).join("") + "SELECT public.c0();\n"],
   ]) {
     ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);
     denies(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }), "THE ONE WAY THROUGH",

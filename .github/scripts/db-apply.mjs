@@ -153,6 +153,18 @@ export function stampProblems({ added, base, head, changed = [] }) {
   return problems;
 }
 
+// Drift between the ledger and the repo, for rows after the baseline: a row with no migration file
+// (applied some other way, e.g. the SQL Editor or an unmerged branch), a row whose file changed
+// after it ran (stored text's sha256 differs), and a file never applied. stored/files map name ->
+// sha256 ('' when the row holds no text yet).
+export function ledgerDrift({ stored, files, highWater, oneShots }) {
+  const after = (n) => NAME.test(n) && n.slice(0, 14) > highWater;
+  const noFile = [...stored.keys()].filter((n) => after(n) && !files.has(n)).sort();
+  const changed = [...stored].filter(([n, h]) => h && after(n) && files.has(n) && files.get(n) !== h).map(([n]) => n).sort();
+  const notApplied = [...files.keys()].filter((n) => after(n) && !stored.has(n) && !oneShots.has(n)).sort();
+  return { noFile, changed, notApplied };
+}
+
 // The project a Supabase connection string points at: the pooler user postgres.<ref> on a Supabase
 // pooler host, or user postgres on the direct host db.<ref>.supabase.co. Anything else is unknown,
 // except a local host with a plain user, which counts as "local" (tests only).
@@ -160,7 +172,8 @@ export function urlRef(dbUrl) {
   let u;
   try { u = new URL(dbUrl); } catch { return null; }
   const username = decodeURIComponent(u.username);
-  const poolerUser = /^postgres\.([a-z]{20})$/.exec(username)?.[1];
+  // <role>.<project ref>: postgres for the apply job, crx_drift_ro for the read-only drift and schema checks.
+  const poolerUser = /^[a-z_][a-z0-9_]*\.([a-z]{20})$/.exec(username)?.[1];
   if (poolerUser) return /^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(u.hostname) ? poolerUser : null;
   const directHost = /^db\.([a-z]{20})\.supabase\.co$/.exec(u.hostname)?.[1];
   if (directHost) return username === 'postgres' ? directHost : null;
@@ -224,8 +237,15 @@ function runFile(dbUrl, file, { retry = true } = {}) {
   }
 }
 
+// Applies run only as postgres (objects get the owner and default grants every migration expects).
+export function applyUserProblem(dbUrl) {
+  let user;
+  try { user = decodeURIComponent(new URL(dbUrl).username); } catch { return 'the database URL is not a URL'; }
+  return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
+}
+
 function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
-  const refused = refuseTarget(dbUrl, expectedRef);
+  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));
@@ -304,7 +324,63 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
   console.log(`DB_APPLY_DONE ${expectedRef}: ${steps.length} migration(s)`);
 }
 
+// Read-only: compares the target's ledger with the repo's files and fails on any drift.
+// report = true: list drift as warnings and pass (used until the first report has been reviewed).
+function drift({ dbUrl, expectedRef, repo, report }) {
+  const refused = refuseTarget(dbUrl, expectedRef);
+  if (refused) throw new Error(`REFUSED: ${refused}`);
+  const migDir = path.join(repo, 'supabase', 'migrations');
+  const highWater = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8')).migrations_high_water;
+  const oneShots = new Set(Object.keys(JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8')).one_shot ?? {}));
+  const files = new Map(readdirSync(migDir).filter((n) => n.endsWith('.sql') && NAME.test(n.slice(0, -4)))
+    .map((n) => [n.slice(0, -4), sha256(readFileSync(path.join(migDir, n)))]));
+  const stored = new Map(query(dbUrl, "SELECT name || '|' || coalesce(encode(sha256(convert_to(statements[1], 'UTF8')), 'hex'), '') FROM supabase_migrations.schema_migrations")
+    .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
+  const { noFile, changed, notApplied } = ledgerDrift({ stored, files, highWater, oneShots });
+  const level = report ? 'warning' : 'error';
+  for (const n of noFile) console.log(`::${level}::${n} is in the ledger but has no migration file (applied outside the repo, e.g. the SQL Editor, or renamed after it ran)`);
+  for (const n of changed) console.log(`::${level}::${n} was edited after it ran (ledger text and file differ)`);
+  for (const n of notApplied) console.log(`::warning::${n} has a file but isn't applied on ${expectedRef} yet`);
+  console.log(`DB_DRIFT ${expectedRef}: ${noFile.length} without a file, ${changed.length} changed, ${notApplied.length} not applied`);
+  return !report && (noFile.length || changed.length) ? 1 : 0;
+}
+
+// Lines only on one side of two schema fingerprints (.github/scripts/schema-fingerprint.sql).
+export function schemaDiff(target, rebuilt) {
+  const [t, r] = [new Set(target), new Set(rebuilt)];
+  return { onlyTarget: target.filter((l) => !r.has(l)), onlyRebuilt: rebuilt.filter((l) => !t.has(l)) };
+}
+
+// The target's public schema must equal one rebuilt from the repo (baseline + migrations): catches
+// SQL Editor changes that left no ledger row. Read-only on the target; the rebuilt DB must be local.
+function schema({ dbUrl, expectedRef, rebuiltUrl, report }) {
+  const refused = refuseTarget(dbUrl, expectedRef);
+  if (refused) throw new Error(`REFUSED: ${refused}`);
+  if (urlRef(rebuiltUrl ?? '') !== 'local') throw new Error('REBUILT_DB_URL must be the local rebuilt database');
+  const sql = readFileSync(new URL('./schema-fingerprint.sql', import.meta.url), 'utf8');
+  const [target, rebuilt] = [query(dbUrl, sql), query(rebuiltUrl, sql)];
+  if (!rebuilt.length || !target.length) throw new Error('a schema fingerprint came back empty');
+  const { onlyTarget, onlyRebuilt } = schemaDiff(target, rebuilt);
+  const level = report ? 'warning' : 'error';
+  const show = (lines, where) => {
+    for (const l of lines.slice(0, 100)) console.log(`::${level}::${where}: ${l.slice(0, 400)}`);
+    if (lines.length > 100) console.log(`::${level}::...and ${lines.length - 100} more ${where}`);
+  };
+  show(onlyTarget, `on ${expectedRef}, not in the migration files`);
+  show(onlyRebuilt, `in the migration files, not on ${expectedRef}`);
+  console.log(`DB_SCHEMA ${expectedRef}: ${target.length} objects, ${onlyTarget.length} only on ${expectedRef}, ${onlyRebuilt.length} only in the files`);
+  return !report && (onlyTarget.length || onlyRebuilt.length) ? 1 : 0;
+}
+
 const commands = {
+  // env: DB_URL, TARGET_REF, REBUILT_DB_URL (from rebuild-schema.sh); SCHEMA_MODE=report warns only. Read-only.
+  schema() {
+    return schema({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', rebuiltUrl: process.env.REBUILT_DB_URL, report: process.env.SCHEMA_MODE === 'report' });
+  },
+  // env: DB_URL, TARGET_REF. Read-only.
+  drift() {
+    return drift({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', repo: process.cwd(), report: process.env.DRIFT_MODE === 'report' });
+  },
   // env: DB_URL, TARGET_REF; optional BACKFILL=1 and ALLOW_OUT_OF_ORDER=1 (staging only)
   apply() {
     const expectedRef = process.env.TARGET_REF ?? '';

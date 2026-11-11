@@ -63,6 +63,7 @@ import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import DeliveryCalendar from '../components/deliveries/DeliveryCalendar';
 import type { Delivery, DeliveryCompletionEvidence, DeliveryEvidencePhoto, Profile } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 /* ─── Row type ─── */
 interface DeliveryRow extends Delivery {
@@ -760,7 +761,7 @@ export default function Deliveries() {
             await uploadSignatureImage(signaturePath, signatureAtSubmit);
           } catch (sigErr) {
             signatureUploadError = sigErr;
-            Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Deliveries list signature upload before completion failed; sending the completion anyway' } });
+            Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Deliveries list signature upload before completion failed; sending the completion anyway' } });
           }
           if (!stillOpenForTarget()) return 'cancelled';
           if (!inputsUnchanged()) return 'changed';

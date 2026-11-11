@@ -714,7 +714,7 @@ Your REG-1 rule (2026-11-09, kept 2026-11-10) is "the product's own number". Bra
 ### 14.1 The two answers
 
 - **Question 8, "The brands own number":** a brand entry with an EPA number is captured and recorded under **that number**. A line with no brand recorded (`[]`, or a no-brand trip entry) and a brand entry with no number use the product's own number exactly as #1746 does.
-- **Question 9, "One record per brand":** a line with brand entries gets **one record per brand**, all naming the same `invoice_item_id`. Two trips of the same brand on one line merge into that brand's one record. A line with `brand_lines` NULL or `[]` keeps #1746's one record per line. Invoice lines are never split.
+- **Question 9, "One record per brand":** a line with brand entries gets **one record per brand**, all naming the same `invoice_item_id`. Two trips of the same brand (same name and same EPA number) on one line merge into that brand's one record; if the brand's number changed between trips, each number gets its own record, so no record ever carries a number that was not on the jug. A line with `brand_lines` NULL or `[]` keeps #1746's one record per line. Invoice lines are never split.
 
 ### 14.2 Split B-1 into two database PRs, and the order
 
@@ -727,8 +727,8 @@ Engineering choice, to keep each Sol review small. Neither changes an amount.
 
 | Section | Old rule (REG-DB, never built) | Now |
 |---|---|---|
-| 3.1 picks | Sale facts captured on each pick at completion | **Removed.** REG-1 captures at invoice-line save. A pick keeps only its snapshot (name, EPA number, manufacturer, amount). 4.C step 6 is deleted. |
-| 3.1 `brand_lines` entries | carry `rup_status`, `signal_word`, `facts_source` | Carry `brand_name`, `epa_registration`, `manufacturer`, `delivered_quantity`, `typed`, `pick_ids`, `completed_at` only. |
+| 3.1 picks | Sale facts captured on each pick at completion | **Removed.** REG-1 captures at invoice-line save. A pick keeps only its snapshot (name, EPA number, manufacturer, signal word from the brand row, amount). 4.C step 6 is deleted. |
+| 3.1 `brand_lines` entries | carry `rup_status`, `signal_word`, `facts_source` | Carry `brand_name`, `epa_registration`, `manufacturer`, `signal_word`, `delivered_quantity`, `typed`, `pick_ids`, `completed_at` only. |
 | 3.1 `[]` | "keeps no EPA number, never the generic's" | Q8: the line keeps the product's own number and is recorded per line like any REG-1 line. |
 | 3.1 two brands, one number | one record, names joined | One record per brand (Q9); `brand_key` tells them apart (14.4). |
 | 3.1 `brand_lines` grant | revoke the column grant | #1746 already revoked app-role writes on `invoice_items`. `service_role` keeps its writes; the trigger sets `brand_lines` on every insert and update (14.4), so no role can set it by hand. |
@@ -792,3 +792,7 @@ Engineering choice, to keep each Sol review small. Neither changes an amount.
 - HIGH, generator paths could record a problem line or double-record: **fixed**, three branches plus a record guard (14.4).
 - MED: stale brand number on a split (fixed, 14.3); generic's signal word on a brand record (fixed, `_invoice_brand_rup_facts`); brand capture skipped by the early return (fixed); pre-seed path (fixed, seed first); unrecorded-lines list per brand (fixed); leftover rules (struck, 14.7); `service_role` overwrite and `SECURITY DEFINER` trigger (fixed); `save_invoice` re-capture (stated as #1746's accepted rule).
 - LOW: product-change cases unreachable (struck); `get_rup_sales_register` DROP and CREATE (stated); order busy retry (stated); seed and typed numbers (stated); which PR adds the posting lock (moot, removed). `BRAND_PICKS_CHANGED` on completion and an internal error failing a Bill Split completion: **refuted**; Mason's Q5 record keeps `BRAND_PICKS_CHANGED` as data protection, and an internal error is not a brand problem.
+
+**Luna round 2** (head `33d1d6c1a`): no BLOCKER or HIGH; 2 MED.
+- MED, a brand whose number changed between trips gets two keys: **kept by design and stated** (14.1): one record per number, so a record never carries a number that was not delivered.
+- MED, `brand_lines` had no signal word for the brand snapshot fallback: **fixed**, picks and entries carry the brand row's `signal_word` (14.3).

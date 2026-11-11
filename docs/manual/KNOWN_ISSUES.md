@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110164910`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-11 for the live ledger only (latest live row `20261111030853`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -895,12 +895,16 @@ the route wrapper `src/components/ProductDetailRoute.tsx` shows "Product not fou
 `new` nor a uuid, before the page asks the database (`ProductDetailRoute.test.tsx`).
 
 ### KI-134 — A stock count double-counts anything that moved while the count was open
-**HIGH · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #1) · unassigned**
+**HIGH · FIX IN REVIEW · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #1) · Claude**
 Count Complete adds (counted - expected) to today's on-hand, but expected was captured in the browser when the count
 was created (`CycleCounts.tsx` ~L286; `_complete_cycle_count_impl`). A 10-unit delivery during the count makes stock
 10 short with nothing missing; a receipt inflates it. D12 makes the pre-season count the foundation for fixing the 19
 negative rows (KI-29), so this must be fixed before that count. 0 completed counts live. Fix: compare against on-hand
 locked when each line is saved, or have Complete refuse/list products with ledger movement since the count began.
+- Fix built 2026-11-11 (`20270101134000`, not yet applied; contract `docs/plans/2026-11-10-ki134-cycle-count-drift-CONTRACT.md`):
+  each saved count line is compared with on hand read at that save (`FOR SHARE`). Mason accepted the residual window
+  (stock posted between looking at a shelf and typing its count); D12 procedure: post a product's receipts and
+  deliveries before counting it.
 
 ### KI-135 — "Inventory Value" subtracts negative stock and counts no-cost rows as $0
 **MED · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**

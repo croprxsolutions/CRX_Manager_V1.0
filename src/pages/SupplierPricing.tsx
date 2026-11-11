@@ -52,6 +52,7 @@ import {
   MAX_SUPPLIER_QUOTE_BYTES,
   parseSupplierQuoteWorkbook,
 } from '../lib/supplierPricingWorkbook';
+import { toSentryError } from '../lib/sentryError';
 
 const today = () => localToday();
 
@@ -160,7 +161,7 @@ export default function SupplierPricing() {
           refreshedReview = await getSupplierPriceImport(reviewIdToRefresh);
         } catch (reviewError) {
           if (workspaceRequestRef.current !== requestId) return;
-          Sentry.captureException(reviewError instanceof Error ? reviewError : new Error(String(reviewError)), {
+          Sentry.captureException(toSentryError(reviewError), {
             extra: { context: 'refresh_supplier_price_import' },
           });
           toast('error', sanitizeError(reviewError));
@@ -209,7 +210,7 @@ export default function SupplierPricing() {
       basisWorkspaceRequestRef.current += 1;
     } catch (error) {
       if (workspaceRequestRef.current !== requestId) return;
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'load_supplier_pricing_workspace' },
       });
       setWorkspace(null);

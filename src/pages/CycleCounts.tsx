@@ -519,7 +519,7 @@ export default function CycleCounts() {
       if (countedQty !== null && typeof result.variance !== 'number') {
         throw new Error('update_cycle_count_item returned no variance for a saved count');
       }
-      // A receipt stored before 20270103130000 has no expected_qty; derive it from its own variance.
+      // A receipt stored before 20270103170000 has no expected_qty; derive it from its own variance.
       const savedExpected = result.expected_qty ?? (countedQty !== null && typeof result.variance === 'number'
         ? Math.round((countedQty - result.variance) * 100) / 100
         : item.expected_qty);

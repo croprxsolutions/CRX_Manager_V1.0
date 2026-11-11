@@ -29,7 +29,7 @@ Read at `17ba96fbe` (origin/main, 2026-11-10). Live bodies read read-only from `
 **Business rule:** a count line's adjustment is "what was on the shelf when it was counted" minus "what the app said
 was on hand at that same moment". Stock that moves before or after that moment is not counted twice or lost.
 
-1. `update_cycle_count_item` (one re-emit, new migration `20270103130000_...`): when `p_counted_qty` is not null,
+1. `update_cycle_count_item` (one re-emit, new migration `20270103170000_...`): when `p_counted_qty` is not null,
    it first reads the line's `inventory.quantity_available` (row by `inventory_id`) and stores it as the line's
    `expected_qty`, then computes `variance` / `variance_pct` against it as today. If the line has no inventory row
    (`inventory_id` null or row gone) it keeps the stored `expected_qty` (Complete skips such lines anyway). Clearing

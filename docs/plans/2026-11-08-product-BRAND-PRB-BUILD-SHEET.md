@@ -2,7 +2,7 @@
 
 **Status (2026-11-08, reworked 2026-11-09 after an independent review):** this is a plan only. **Question 5 answered (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): a brand problem never stops a delivery or an invoice; it warns and is listed for the office.** Sections 3, 4, 5, 7, 9 and 10 were rewritten to that rule; the brand-required switch is removed. No code and no migration have been written. It was written on 2026-11-08 against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces "PR B" in `docs/plans/2026-10-22-product-brands-step1-PLAN.md` (sections 4, 5, 7 and 8). Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "step 1 §4" means that plan.
 
-**Re-check 2026-11-10 (night): still cannot start. NEEDS MASON - DECISION REQUIRED (section 13, Questions 8 and 9).** The PAR-2 precondition is now met on live. REG-1 step 2 was rebuilt as #1746 with a different design, and two of its settled rules conflict with this sheet's core. Section 13 lists what changed. Sections 3 to 7 below still describe the old REG-DB design and must be rewritten after Mason answers; do not build from them.
+**Re-check 2026-11-10 (night):** the PAR-2 precondition is met on live, and REG-1 step 2 was rebuilt as #1746 with a different design (section 13). Mason answered Questions 8 and 9 the same night. **Section 14 is the current design and wins over sections 3 to 7 wherever they differ**; read section 14 first.
 
 **Cannot start yet (2026-11-08 text, kept for history).** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
 
@@ -703,4 +703,62 @@ Your REG-1 rule (2026-11-09, kept 2026-11-10) is "the product's own number". Bra
 
 **Question 9 answered (Mason, 2026-11-10): "One record per brand".** A line delivered as two brands gets two records, each pointing at that line and naming its brand; #1746's one-active-record-per-line rule becomes one per line per brand. Invoice lines are not split.
 
-Question 8 is still open; both answers are needed before sections 3 to 7 are rewritten. After the rewrite the sheet gets a fresh independent review before B-1 is built.
+**Question 8 answered (Mason, 2026-11-10): "The brands own number".** Section 14 applies both answers. After the rewrite the sheet gets a fresh independent review before B-1 is built.
+
+---
+
+## 14. Design on REG-1 as built (#1746), with Mason's answers to Questions 8 and 9 (2026-11-10)
+
+**This section wins over sections 3 to 7.** Rule: only what #1746 or Questions 8 and 9 changed is rewritten here; every other rule in sections 3 to 7 (picks, stale-save guards, `edit_delivery` carry-over, completion warnings, correction, typed-brand review, payer-group allocation, receipts, screens) stands as written.
+
+### 14.1 The two answers
+
+- **Question 8, "The brands own number":** a brand entry with an EPA number is captured and recorded under **that number**. A line with no brand recorded, and a brand entry with no number, use the product's own number exactly as #1746 does.
+- **Question 9, "One record per brand":** a line with brand entries gets **one record per brand** (brand name and number), all naming the same `invoice_item_id`. Two trips of the same brand on one line merge into that brand's one record. A line with no brand entries keeps #1746's one record per line. Invoice lines are never split.
+
+### 14.2 Split B-1 into two database PRs
+
+Engineering choice, to keep each Sol review small. Neither changes an amount.
+- **B-1a (delivery side):** `delivery_item_brands`, `delivery_brand_events`, `_delivery_line_brand_list`, `set_delivery_brands`, `edit_delivery` carry-over, the completion rule (4.C steps 1 to 5 and the `p_brand_base_seq` check), `review_typed_brand`, `get_delivery_brands`, `get_typed_brands_for_review`, `get_deliveries_missing_brands`, and the receipt snapshot (3.5). It re-issues no invoice or RUP function. `correct_delivery_brands` ships here too, without the invoice re-copy (B-1b adds it).
+- **B-1b (invoice and RUP side, after B-1a is live):** `invoice_items.brand_lines`, the per-brand capture, the per-brand records, the re-copy on pick changes, and the Sales to check reasons below.
+
+### 14.3 What changes from sections 3 to 7
+
+| Section | Old rule (REG-DB, never built) | Now |
+|---|---|---|
+| 3.1 picks | Sale facts (`rup_status`, `signal_word`, `facts_source`, `captured_at`) captured on each pick at completion | **Removed.** REG-1 captures at invoice-line save, not at delivery. A pick keeps only its snapshot (name, EPA number, manufacturer, amount). 4.C step 6 is deleted. |
+| 3.1 `brand_lines` entries | carry `rup_status`, `signal_word`, `facts_source` | Carry `brand_name`, `epa_registration`, `manufacturer`, `delivered_quantity`, `typed`, `pick_ids`, `completed_at` only. The per-brand answer lives in the capture table (14.4). |
+| 3.1 `brand_lines` client grant | revoke the column grant | Already covered: #1746 revoked INSERT, UPDATE, DELETE and TRUNCATE on `invoice_items` from `anon` and `authenticated`. `service_role` keeps its writes there (#1746's choice); the new BEFORE trigger (14.4) overwrites any value a writer sends, so no role can set it by hand. |
+| 3.3 locking | REG-DB order: registration lock first, then invoices, then the delivery | **#1746's order:** invoices (ID order), then the shared registration lock (taken by the capture trigger or the generator), then delivery rows. Delivery-side writers lock invoices `FOR UPDATE` in ID order, then the delivery row `FOR UPDATE`, then write lines (the capture trigger then takes the shared lock). Posting keeps #1746's order and then takes each delivery-made line's delivery row `FOR SHARE`. The one-time seed's exclusive lock keeps #1746's accepted risk (a deadlock there aborts and is retried). |
+| 4.D writing `brand_lines` | through REG-DB's `_capture_invoice_line_sale` helper | **A BEFORE INSERT OR UPDATE trigger on `invoice_items`**, `trg_fill_invoice_line_zbrands` (named to fire after `trg_fill_invoice_line_epa`), computes `brand_lines` from the current picks by 4.D's rules (which picks, same-product rule, `[]` vs NULL from the completion event), on insert and whenever `product_id` changes; a re-copy (completion, `edit_delivery`, correction, `save_invoice`'s delete and re-insert) gets fresh values the same way. One place covers every invoice writer, present and future, so no writer re-issue is needed. Never changes a line on a posted, paid or overdue invoice (the existing posted-child guard). |
+| 4.D the line's own number | sold number = brand's number; NULL for a split | One entry with a number: the trigger sets the line's `epa_registration` to that number (it prints, and #1746's "line number says Yes" counts it). Several entries: the line's number stays as `trg_fill_invoice_line_epa` leaves it (the product's own); the PDF prints the entries' numbers (B-3). |
+| 4.D `save_invoice` quantity change | keep capture copied from the pick | #1746 already keeps a capture on a quantity, price or unit edit; the per-brand capture follows the same rule (14.4). |
+| 4.E which entries get a record | captured `yes` or registration `yes` at posting | **#1746's rule per brand:** a brand captured Yes at save (any Yes: the product's tick, the product's number, the brand's number) records; a Yes always wins; a Yes at posting wins (posting upgrades, never downgrades). |
+| 4.E grouping | `(invoice, product, sold number, signal word)` | One record per line per brand (14.1). |
+| 4.E brand problems | no record, line listed on a separate gaps list | **Two problems still mean no record for the line (Question 6):** brand amounts that do not add up to delivered, and billed above delivered. **No longer problems (Question 8):** "brand not recorded" (`[]`, or a no-brand trip entry) and "EPA number not recorded": that part is recorded under the product's own number like any REG-1 line, and listed for follow-up. |
+| 4.E allocation | as written | **Unchanged** (payer groups, trip order, quantity at the column's scale `numeric(12,4)`, cents round down then largest leftover). Records are per line per brand, so each record holds its brand's share of that line. |
+| 4.H `get_rup_brand_gaps` | a new admin list | **Folded into REG-1's Sales to check** (`get_epa_sales_to_check()`, re-issued) as new reasons: `brand_split_mismatch`, `billed_above_delivered`, `brand_not_recorded`, `brand_no_epa_number`, `payer_split_changed`, `product_changed_after_delivery`, and per-brand `restricted_use_to_record` / `not_reviewed`. One Compliance list, not two. |
+| 4.H "has its record" | — | Per brand: a branded line is recorded when every brand that should have a record has an active one. |
+
+### 14.4 B-1b database pieces
+
+- `invoice_items.brand_lines jsonb` (NULL by default) and the trigger above.
+- **`invoice_line_brand_rup_captures`** (private, like `invoice_line_rup_captures`: owner `postgres`, RLS on, every grant revoked, admin read policy): `invoice_item_id` (FK, `ON DELETE CASCADE`), `brand_key text` (`lower(brand_name) || '|' || coalesce(epa_registration, '')`), `brand_name`, `epa_registration` (the brand's number, or the product's own when the brand has none), `rup_status`, `signal_word`, `source` (`save`, `seed`, `posting`), `captured_at`; primary key `(invoice_item_id, brand_key)`.
+- **`_capture_invoice_line_rup` re-issued:** after its existing line capture, for a line with brand entries it captures one row per brand from `_invoice_line_rup_facts(product, brand number)`, with the brand's number as the captured number (Question 8); same keep rule (kept unless the product, the line's number or the line's brand set changed) and "a Yes always wins". Rows for brands no longer on the line are deleted. Before the seed nothing is captured, as today.
+- **`seed_epa_registrations` re-issued** to capture brand rows for lines that have them. **`generate_rup_sales_records` re-issued:** captures any missing brand rows at posting and applies the Yes-at-posting upgrade per brand; for a line with brand entries and no brand problem, one record per brand captured Yes, with its allocated quantity and cents, the brand's number, its signal word and `brand_name`; otherwise #1746's per-line path unchanged.
+- **`rup_sales_records`:** add `brand_name text` and `brand_key text`; replace `rup_sales_records_one_active_per_line` with a unique index on `(invoice_item_id, coalesce(brand_key, ''))` where active. `trg_rup_sales_record_line` and the void trigger are unchanged (they already allow any number of records per line).
+- `get_rup_sales_register` returns `brand_name`; `get_epa_sales_to_check()` gains the reasons in 14.3.
+
+### 14.5 Prover cases changed (section 7)
+
+- P12, P19, P20: per-brand records follow #1746 (capture at save, any Yes, Yes at posting wins); a split line gives two records on one line; two trips of one brand give one record.
+- P21: amounts not matching and billed above delivered give no record and are on Sales to check; `[]`, a no-brand trip and a no-number brand are recorded under the product's own number and listed.
+- New: before the seed, no brand capture and no per-brand record (#1746's pre-seed path, unchanged); after the seed, a brand number with no registration is captured `unknown` and listed `not_reviewed`, never refused.
+- New: `brand_lines` sent by a `service_role` writer is overwritten by the trigger.
+- Removed: every case about captured facts on picks (P16b's first sentence becomes "Yes at posting"), `INVOICE_LINE_RUP_NO_EPA`, `INVOICE_LINE_NO_REGISTRATION` and `get_rup_brand_gaps`.
+
+### 14.6 Order now
+
+1. **B-1a** (delivery side): build, prover, Luna, `/security-review`, Sol, live apply with Mason's approval.
+2. **B-1b** (invoice and RUP side): same gates. Needs B-1a live; the REG-1 seed is not required (before it, B-1b writes no brand capture).
+3. B-2 screens and B-3 paperwork, as sections 5 and 6, with the Compliance list now being Sales to check.

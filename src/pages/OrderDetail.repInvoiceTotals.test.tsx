@@ -146,11 +146,18 @@ describe('OrderDetail sales tax box (billing plan M4a)', () => {
     }));
   });
 
-  it('says plainly when the sale has no drafts to change', async () => {
+  it('on a sale not yet invoiced, says its new invoices will be taxed', async () => {
     (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null });
     renderWith('admin', []);
     fireEvent.click(await screen.findByRole('checkbox', { name: /Sales tax/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringContaining('posted invoices keep')));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', 'Sales tax on. New invoices for this sale will be taxed.'));
+  });
+
+  it('on a sale already posted, says the posted invoices keep their tax', async () => {
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null });
+    renderWith('admin', [{ ...paidInvoice, status: 'posted' }]);
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Sales tax/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', 'Sales tax on. New invoices for this sale will be taxed; posted invoices keep their tax.'));
   });
 
   it('a rep cannot change another rep\'s sale', async () => {

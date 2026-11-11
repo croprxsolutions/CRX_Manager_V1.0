@@ -479,7 +479,7 @@ async function main() {
   console.log("[prover] P7: lines rated '32', 'pt/ac' and 'oz' take edits, price changes included");
 
   followUps();
-  dryFluidOunce();
+  await dryFluidOunce();
   console.log('RATE_UNIT_GUARD_PROOF_PASS');
 }
 
@@ -664,9 +664,18 @@ function bookingFor(n, pid, priceUnit, rateUnit) {
     jobs: () => scalar(`SELECT count(*) FROM public.jobs WHERE quote_id = '${q}';`) };
 }
 
+// A second session, run in the background: resolves with its output once it exits.
+function background(sql) {
+  const c = spawn('docker', psqlArgs(), { cwd: ROOT });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+  c.stdin.end(sql);
+  return new Promise((resolve) => c.on('close', (code) => resolve({ code, out })));
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const bookingLines = (n) => `FROM public.quotes q WHERE q.id = qi.quote_id AND q.quote_number = 'PROVER-KI16-${n}'`;
 
-function dryFluidOunce() {
+async function dryFluidOunce() {
   raw(`INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form, current_cost, tier1_price, tier1_margin, is_active)
     VALUES ('${LIQ3}', '[PROVER] KI16 Liquid Three', 'Ea', 'Ea', 'oz', 'liquid', 10.00, 12.80, 21.875, true);
     INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
@@ -803,6 +812,20 @@ function dryFluidOunce() {
   refusedWith('G4 new dry product sized 32 fl oz', `INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form)
     VALUES ('a16a1600-0000-4000-8000-0000000000b8', '[PROVER] KI16 Dry Sized', '32 fl oz', 'Lb', 'lb', 'dry');`, 'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
   console.log('[prover] G4: a dry product cannot take a fl oz rate unit; every product needs a form (direct insert, import, clearing it: refused) and a saved form cannot change, so no product can turn dry under a fl oz line');
+
+  // G6: a dry product still being inserted in another session is invisible to the line check; without the NOT FOUND
+  // refusal the foreign key waits for it, then accepts the fl oz line (Sol v2 round 1 HIGH).
+  const DRY6 = 'a16a1600-0000-4000-8000-0000000000b9';
+  const ins = background(`BEGIN; INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form)
+    VALUES ('${DRY6}', '[PROVER] KI16 Dry Six', 'Lb', 'Lb', 'lb', 'dry'); SELECT pg_sleep(4); COMMIT;`);
+  await pause(1500);
+  const g6 = asAdmin(jobLine(job, DRY6, "'fl oz'", "'fl oz/ac'", 70), { asOwner: true, commit: true });
+  const insDone = await ins;
+  assert.equal(insDone.code, 0, `G6: the product session failed: ${insDone.out}`);
+  assert.match(g6, /CHEM_UNIT_FORM_MISMATCH: the product on this line is not saved yet/, `G6: a fl oz line on a product being inserted was accepted: ${g6 || 'success'}`);
+  assert.equal(scalar(`SELECT count(*) FROM public.job_chemicals WHERE product_id = '${DRY6}';`), '0', 'G6: a dry fl oz job line was stored');
+  assert.equal(scalar(`SELECT product_form FROM public.products WHERE id = '${DRY6}';`), 'dry', 'G6: the product session did not commit');
+  console.log('[prover] G6: a fl oz line on a dry product another session is still inserting is refused, not accepted after the foreign key waits');
 
   // G5
   for (const [expr, want] of [["'fl oz'", 't'], ["'FLOZ/acre'", 't'], ["'fl. oz. per acre'", 't'], ["'fluid ounces'", 't'], ["'fl' || chr(8208) || 'oz'", 't'],

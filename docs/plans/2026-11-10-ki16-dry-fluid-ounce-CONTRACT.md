@@ -78,7 +78,8 @@ Who may act is unchanged: no grant, policy or RPC signature changes.
 ## Proof cases (container prover, real migrated schema, extending `scripts/smoke/prove-rate-unit-guard-real-schema.mjs`)
 
 - G-BEFORE: a dry product line `fl oz` reaches a job through `create_job_from_quote_section`; its demand sizes 16 as
-  1 (lb); a blend ticket line `fl oz/ac` on a dry product saves and its invoice bills 16 fl oz/ac × 100 ac as 100 lb.
+  1 (lb); a blend ticket line on a dry product saves a `fl oz` quantity unit. (Its `fl oz/ac` billed rate is already
+  refused by #1741, which the proof asserts; the earlier invoice demonstration moved to #1741.)
 - G0: the migration applies; a second run refuses with nothing changed.
 - G1: scheduling a stored (pre-guard) booking whose dry line is `fl oz` is refused (`CHEM_UNIT_FORM_MISMATCH`), no
   job; save_job still refuses as before; a liquid `fl oz` line schedules; `save_quote` (signed-in admin) refuses a dry
@@ -163,6 +164,14 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
 - #1741's file: the two MEDs from rounds 1-2. LOW (recipes and product parents not guarded at save): named above,
   fails closed.
 - Round 3 was the last round `ship.md` allows; a round-4 Luna run needs Mason's OK before Sol.
+
+## On main after #1741 (branch claude/ki16-dry-fluid-ounce-v2)
+
+- Luna round 1 (head 82e02d57f): 1 LOW (stale "32 fl oz not matched" line), fixed in f7be15c04.
+- Sol round 1 (head f7be15c04): HIGH, fixed: a line saved while its product is still being inserted by another
+  transaction could pass (the check cannot see the product; the foreign key waits and accepts). Each line check now
+  refuses a fluid-ounce line on a product it cannot see. Proof G6: two real sessions. MED, fixed: the migration
+  record claimed an invoice demonstration that #1741 now makes impossible; the record now names what GB proves.
 
 ## Mason's decision (2026-11-10): require a form
 

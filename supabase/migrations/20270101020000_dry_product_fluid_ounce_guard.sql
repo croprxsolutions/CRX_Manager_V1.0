@@ -109,6 +109,11 @@ BEGIN
     RETURN NEW;
   END IF;
   SELECT lower(p.product_form::text), p.product_name INTO v_form, v_name FROM public.products p WHERE p.id = NEW.product_id;
+  -- A product another transaction is still inserting is invisible here, but the foreign key would wait for it and
+  -- accept the line (Sol v2 round 1 HIGH): a fluid-ounce line on a product this check cannot see is refused.
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CHEM_UNIT_FORM_MISMATCH: the product on this line is not saved yet, so a fluid-ounce unit cannot be checked against its form. Save the product first, then this line.';
+  END IF;
   IF v_form = 'dry' THEN
     RAISE EXCEPTION
       'CHEM_UNIT_FORM_MISMATCH: % is a DRY product, so it cannot be measured or priced in fluid ounces -- a fluid ounce measures volume and a dry product is billed by weight, so a rate in "%" with a quantity in "%" cannot be converted. Re-enter the rate and the quantity in a dry unit (oz, lb or ton); if this line came from a booking or a recipe, correct it there.',
@@ -146,6 +151,10 @@ BEGIN
   IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
   SELECT lower(p.product_form::text), p.product_name, p.rate_unit INTO v_form, v_name, v_prod_rate
     FROM public.products p WHERE p.id = NEW.product_id;
+  IF NOT FOUND AND (public.unit_names_fluid_ounce(NEW.unit) OR public.unit_names_fluid_ounce(NEW.rate_per_acre_unit)) THEN
+    -- See guard_job_chemical_dry_fluid_ounce: an invisible (still inserting) product cannot be checked.
+    RAISE EXCEPTION 'CHEM_UNIT_FORM_MISMATCH: the product on this line is not saved yet, so a fluid-ounce unit cannot be checked against its form. Save the product first, then this line.';
+  END IF;
   IF v_form IS DISTINCT FROM 'dry' THEN RETURN NEW; END IF;
   -- The unit billing uses (create_invoice_from_blend_ticket), and the unit stock deduction uses (btp.unit).
   v_rate := COALESCE(NULLIF(btrim(NEW.rate_per_acre_unit), ''), v_prod_rate);
@@ -233,6 +242,11 @@ BEGIN
     RETURN NEW;
   END IF;
   SELECT lower(p.product_form::text), p.product_name INTO v_form, v_name FROM public.products p WHERE p.id = NEW.product_id;
+  -- A product another transaction is still inserting is invisible here, but the foreign key would wait for it and
+  -- accept the line (Sol v2 round 1 HIGH): a fluid-ounce line on a product this check cannot see is refused.
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CHEM_UNIT_FORM_MISMATCH: the product on this line is not saved yet, so a fluid-ounce unit cannot be checked against its form. Save the product first, then this line.';
+  END IF;
   IF v_form = 'dry' THEN
     RAISE EXCEPTION
       'CHEM_UNIT_FORM_MISMATCH: % is a DRY product, so a booking line cannot measure or price it in fluid ounces (rate "%", priced per "%") -- a fluid ounce measures volume and a dry product is billed by weight. Use a dry unit (oz, lb or ton).',

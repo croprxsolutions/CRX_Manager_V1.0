@@ -59,7 +59,7 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
   const shown = phase === 'open' && m.gate ? 'ready' : phase;
   const word = { open: 'candidate', ready: 'ready to merge', merged: 'shipped', squashed: 'merged without a merge commit' }[shown];
   const gate = {
-    open: `:hourglass_flowing_sand: Waiting on ${waiting.length + (m.orph ?? 0)}`,
+    open: waiting.length + (m.orph ?? 0) ? `:hourglass_flowing_sand: Waiting on ${waiting.length + (m.orph ?? 0)}` : ':red_circle: Red',
     ready: ':large_green_circle: Green',
     merged: `:white_check_mark: Merged by ${esc(mergedBy)}`,
     squashed: ':warning: No tag',
@@ -81,6 +81,12 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
     const lines = waiting.slice(0, 8).map((p) => `${link(p.url, `#${p.number}`)} ${clip(p.title ?? '', 80)}`);
     if (waiting.length > 8) lines.push(`…and ${waiting.length - 8} more`);
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Needs proof on staging*\n${lines.join('\n')}` } });
+  }
+  const held = list.filter((p) => p.state === 'held');
+  if (phase === 'open' && held.length) {
+    const lines = held.slice(0, 8).map((p) => `${link(p.url, `#${p.number}`)} ${clip(p.held ?? p.title ?? '', 120)}`);
+    if (held.length > 8) lines.push(`…and ${held.length - 8} more`);
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Held off (not shipping)*\n${lines.join('\n')}` } });
   }
   if (m.orph) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `:x: ${m.orph} commit(s) on staging without a PR` }] });
   const buttons = [prUrl && button('Open release PR', prUrl), phase === 'open' && compareUrl && button('Compare main…release', compareUrl), phase === 'merged' && tagUrl && button('Release notes', tagUrl)].filter(Boolean);
@@ -150,6 +156,7 @@ export const backMergeText = (kind, n, url) => ({
   opened: `:leftwards_arrow_with_hook: Back-merge ${link(url, `#${n}`)} opened. Merge it today with "Create a merge commit".`,
   carried: `:leftwards_arrow_with_hook: Back-merge ${link(url, `#${n}`)} is still open and now carries this too. Merge it today with "Create a merge commit".`,
   merged: `:white_check_mark: Back-merge ${link(url, `#${n}`)} merged. Staging contains main again.`,
+  squashed: `:warning: Back-merge ${link(url, `#${n}`)} was merged by squash or rebase, so staging still lacks main's history. Merge main into staging again with "Create a merge commit".`,
   overdue: `:warning: Back-merge ${link(url, `#${n}`)} is still open, so staging is missing what just shipped. Merge it with "Create a merge commit".`,
 })[kind];
 

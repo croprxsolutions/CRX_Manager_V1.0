@@ -116,6 +116,7 @@ test('hotfix and back-merge texts link the PR', () => {
   assert.match(texts(hotfixMessage({ number: 7, title: 'fix: <b>', url: 'https://x.example/7', mergedBy: 'm', releasesUrl: 'https://x.example/r' })), /<https:\/\/x.example\/7\|#7> fix: &lt;b&gt;/);
   assert.match(backMergeText('overdue', 8, 'https://x.example/8'), /<https:\/\/x.example\/8\|#8> is still open/);
   assert.match(backMergeText('carried', 8, 'https://x.example/8'), /is still open and now carries this too/);
+  assert.match(backMergeText('squashed', 8, 'https://x.example/8'), /merged by squash or rebase, so staging still lacks main's history/);
 });
 
 test('release notes are read back from the module the bot writes', () => {
@@ -155,4 +156,11 @@ test('the biggest posts stay inside Slack\'s block limits', () => {
       for (const f of b.fields ?? []) assert.ok(f.text.length <= 2000, 'field');
     }
   }
+});
+
+test('held-off PRs are named with their reason, and a red gate with nothing listed says red', () => {
+  const held = [{ number: 7, title: 'feat: x', url: 'https://x.example/7', state: 'held', held: 'flag <tax_v2>' }];
+  const msg = cardMessage({ ...state, states: { 7: 'held' } }, { prs: held });
+  assert.match(texts(msg), /Held off \(not shipping\)\*\\n<https:\/\/x.example\/7\|#7> flag &lt;tax_v2&gt;/);
+  assert.match(texts(cardMessage({ ...state, states: {}, gate: false }, { prs: [] })), /:red_circle: Red/);
 });

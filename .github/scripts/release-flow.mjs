@@ -636,24 +636,29 @@ const commands = {
   // has waited over 12 hours. State lives in the back-merge PR's hidden marker.
   async 'back-merge-slack'() {
     const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
-    const { backMergeText, readMarker, slack, trySlack, writeMarker } = await slackKit();
-    await trySlack(async () => {
-      const ch = process.env.SLACK_RELEASE_CHANNEL;
-      for (const p of await gh(`/pulls?state=all&base=staging&head=${owner}:main&sort=updated&direction=desc&per_page=10`)) {
-        const m = readMarker(p.body);
-        if (!m?.ts || m.ch !== ch || m.done) continue;
-        // The marker is saved before posting, so a failed save never repeats a post.
+    const { backMergeText, readMarker, slack, slackConfigured, trySlack, writeMarker } = await slackKit();
+    if (!slackConfigured()) return 0;
+    const ch = process.env.SLACK_RELEASE_CHANNEL;
+    // ponytail: the 10 most recently updated back-merges; only one is ever open at a time.
+    for (const p of await gh(`/pulls?state=all&base=staging&head=${owner}:main&sort=updated&direction=desc&per_page=10`)) {
+      const m = readMarker(p.body);
+      if (!m?.ts || m.ch !== ch || m.done) continue;
+      // Each PR on its own, so one failure doesn't skip the others. The marker is saved before the
+      // post: a Slack failure loses that one post rather than repeating it on every run.
+      await trySlack(async () => {
         let next = null;
         let post = null;
-        if (p.merged_at) [next, post] = [{ ...m, done: true }, { thread_ts: m.ts, text: backMergeText('merged', p.number, p.html_url) }];
-        else if (p.state === 'closed') next = { ...m, done: true };
-        else if (!m.warned && Date.now() - Number(m.at) > 12 * 3600 * 1000) {
+        if (p.merged_at) {
+          // Squash or rebase leaves main's commits out of staging: say so instead of "all good".
+          const merged = (await gh(`/commits/${p.merge_commit_sha}`)).parents.length === 2;
+          [next, post] = [{ ...m, done: true }, { thread_ts: m.ts, reply_broadcast: !merged, text: backMergeText(merged ? 'merged' : 'squashed', p.number, p.html_url) }];
+        } else if (p.state === 'open' && !m.warned && Date.now() - Number(m.at) > 12 * 3600 * 1000) {
           [next, post] = [{ ...m, warned: true }, { thread_ts: m.ts, reply_broadcast: true, text: backMergeText('overdue', p.number, p.html_url) }];
         }
         if (next) await gh(`/pulls/${p.number}`, { method: 'PATCH', body: { body: writeMarker(p.body, next) } });
         if (post) await slack('chat.postMessage', post);
-      }
-    });
+      });
+    }
     return 0;
   },
   // pull_request closed into main: tag the merge commit and publish the GitHub Release.

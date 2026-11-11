@@ -149,3 +149,14 @@ on-hand for later edits (a typo fix hours later stays right, a genuine recount a
 - Refuted: "a late response overwrites a newer save". Writes for one line are chained (`itemWriteQueuesRef`,
   `previous.catch(() => undefined).then(...)` in `updateCountedQty`), so save B starts only after save A has
   answered; responses cannot arrive out of order.
+
+## Sol round 1 (gpt-6-sol high, head a7c941a09; 2 HIGH / 1 MED)
+
+- HIGH 1 fixed: the save now reads the line's inventory row `FOR SHARE` (after the item and parent locks, Complete's
+  order; receipts and stock-outs lock only inventory), so a change still in flight commits first and is in the
+  baseline. Prover P10 holds a stock change open while the count is saved.
+- HIGH 2 (movement posted between looking at the shelf and saving the number is treated as before the count): the
+  residual window named above under "Timing guarantee". No server design can see when the shelf was looked at; this
+  fix shrinks the window from the whole count to the seconds between looking and typing. Raised to Mason as a
+  business acceptance with the D12 procedure (post receipts and deliveries for a product before counting it).
+- MED 3 = Luna round 1 deferral (sub-cent residue when on hand has more than two decimals).

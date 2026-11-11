@@ -11,7 +11,7 @@ const body = migration.slice(migration.indexOf('AS $function$'), migration.index
 
 describe('update_cycle_count_item compares with on hand at save (KI-134)', () => {
   it('reads the line inventory on hand, rounded like the stored columns', () => {
-    expect(body).toMatch(/SELECT i\.quantity_available INTO v_on_hand\s+FROM public\.inventory i\s+WHERE i\.id = v_item\.inventory_id;/);
+    expect(body).toMatch(/SELECT i\.quantity_available INTO v_on_hand\s+FROM public\.inventory i\s+WHERE i\.id = v_item\.inventory_id\s+FOR SHARE;/);
     expect(body).toContain('v_expected := round(COALESCE(v_on_hand, 0), 2);');
     expect(body).toContain('v_variance := round(p_counted_qty, 2) - v_expected;');
   });

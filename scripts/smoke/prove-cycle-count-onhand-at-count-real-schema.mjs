@@ -19,6 +19,8 @@
  *   P5  a same-key retry after stock moved replays the first result and leaves expected_qty alone.
  *   P6  clearing a count keeps expected_qty; a line with no inventory row keeps its stored expected_qty.
  *   P7  a non-admin, a wrong actor and a missing key are refused; reverse undoes P3 exactly.
+ *   P9  on hand with more than two decimals is rounded like the stored columns; a tiny on hand leaves no percentage.
+ *   P10 a stock change still in flight on the row when the count is saved commits first and is in the baseline.
  *
  * Run: node scripts/smoke/prove-cycle-count-onhand-at-count-real-schema.mjs   (needs Docker)
  * Prints CYCLE_COUNT_ONHAND_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -427,6 +429,30 @@ async function main() {
   ok('P9 tiny on hand', saveCount(PRODUCTS.b2, 100000));
   assert.equal(scalar(`SELECT expected_qty::text || ',' || variance::text || ',' || coalesce(variance_pct::text, '-') FROM public.cycle_count_items WHERE id = '${itemOf(PRODUCTS.b2)}';`), '0.01,99999.99,-', 'P9: an out-of-range percentage is left empty');
   console.log('[prover] P9: on hand 9.875 counted 10 -> 9.88 / 0.12 in row and result; on hand 0.01 counted 100000 saves with no percentage');
+
+  // P10: a stock change still in flight on the line's inventory row when the count is saved commits first and is in
+  // the baseline (the save reads the row FOR SHARE), so Complete does not add it a second time.
+  startCount(PRODUCTS.p1);
+  assert.equal(onHand(PRODUCTS.p1), 110, 'P10: starts at 110');
+  const holder = spawn('docker', [...psqlArgs('supabase_admin')], { cwd: ROOT, stdio: ['pipe', 'ignore', 'inherit'] });
+  const holderDone = new Promise((resolve) => holder.on('close', resolve));
+  // Read as supabase_admin: postgres cannot see another role's query text in pg_stat_activity.
+  const holding = () => docker([...psqlArgs('supabase_admin'), '-A', '-t'], { input: `SELECT count(*) FROM pg_stat_activity
+    WHERE query LIKE '%ki134_p10_holder%' AND state = 'active' AND pid <> pg_backend_pid();` }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+  holder.stdin.end(`BEGIN; SET LOCAL session_replication_role = replica;
+    UPDATE public.inventory SET quantity_available = quantity_available + 10
+     WHERE product_id = '${PRODUCTS.p1}' AND location = 'Main Warehouse';
+    SELECT pg_sleep(5) AS ki134_p10_holder; COMMIT;`);
+  for (let i = 0; i < 100 && holding() !== '1'; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100)); // let the holder's stdin flush
+  }
+  assert.equal(holding(), '1', 'P10: the in-flight change holds the row');
+  ok('P10 save during an in-flight change', saveCount(PRODUCTS.p1, 120));
+  assert.equal(await holderDone, 0, 'P10: the in-flight change committed');
+  assert.equal(line(PRODUCTS.p1), '120,120,0', 'P10: the save waited for the in-flight change and compared with 120');
+  complete(PRODUCTS.p1);
+  assert.equal(onHand(PRODUCTS.p1), 120, 'P10: Complete does not add the in-flight change twice');
+  console.log('[prover] P10: a change in flight during the save is in the baseline (120,120,0); Complete leaves 120');
 
   console.log('CYCLE_COUNT_ONHAND_PROOF_PASS');
 }

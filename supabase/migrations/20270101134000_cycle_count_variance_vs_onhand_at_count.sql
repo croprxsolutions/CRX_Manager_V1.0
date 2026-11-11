@@ -10,8 +10,9 @@
 --   computed against it. Complete still adds variance to current on-hand, so movement after the line is counted is
 --   kept, and movement before it is no longer counted twice. A line with no inventory row keeps its stored
 --   expected_qty (Complete skips such lines). Clearing a count leaves expected_qty alone. The result gains
---   expected_qty. Fingerprint, receipt, guards, locks (item -> parent) and grants are unchanged; the inventory read
---   takes no row lock (a delivery committing after it is movement after the count, kept by Complete).
+--   expected_qty. Fingerprint, receipt, guards and grants are unchanged. The inventory row is read FOR SHARE, after
+--   the item and parent locks (the order Complete uses), so a receipt or delivery still in flight on that row commits
+--   first and is in the baseline instead of being counted on the shelf and added again by Complete.
 --
 -- LIVE EVIDENCE (read-only, 2026-11-10): md5(replace(prosrc, chr(13), '')) update_cycle_count_item
 --   c67e98122a5f1d9dc60c205dac969f3f (20260831212415), _complete_cycle_count_impl 394d15947b9a09eab94f7bea1d90242b,
@@ -131,7 +132,8 @@ BEGIN
     IF v_item.inventory_id IS NOT NULL THEN
       SELECT i.quantity_available INTO v_on_hand
         FROM public.inventory i
-       WHERE i.id = v_item.inventory_id;
+       WHERE i.id = v_item.inventory_id
+         FOR SHARE;
       IF FOUND THEN
         -- Two places, like the stored columns, so the saved row, the result and Complete agree.
         v_expected := round(COALESCE(v_on_hand, 0), 2);
@@ -197,6 +199,7 @@ BEGIN
                     AND EXISTS (SELECT 1 FROM unnest(proconfig) c(value)
                                  WHERE replace(c.value, ' ', '') = 'search_path=public,pg_temp')
                     AND prosrc LIKE '%v_expected := round(COALESCE(v_on_hand, 0), 2);%'
+                    AND prosrc ~ 'WHERE i\.id = v_item\.inventory_id\s+FOR SHARE;'
                     AND prosrc LIKE '%''expected_qty'', v_expected%') THEN
     RAISE EXCEPTION 'KI134_POSTFLIGHT: update_cycle_count_item search_path or new body did not land';
   END IF;

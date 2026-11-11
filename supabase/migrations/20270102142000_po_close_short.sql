@@ -12,7 +12,7 @@
 --      partially_received POs, so the unreceived remainder drops out in the same transaction.
 --   3. 'closed' is final (_enforce_po_status_transition, admin override included). A receipt reversal on a closed PO
 --      (reverse_receiving_record sets app.reversal_rpc_active) keeps it closed instead of reopening it.
---   4. A closed PO is frozen: no header edit; no line added, removed, re-pointed, re-quantified or received into (new
+--   4. A closed PO is frozen: no header edit; no line added, removed, edited (cost columns excepted) or received into (new
 --      triggers trigger_0_guard_closed_po[_item]); cost corrections and reverse_receiving_record decreases still work.
 --   5. A closed PO cannot be cancelled or deleted (_guard_po_delete); cancel's refusal for a received PO now says to
 --      close it short instead of naming a workflow that never existed.
@@ -201,15 +201,17 @@ CREATE FUNCTION public._guard_closed_po_item()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
+  -- Cost corrections stay allowed on a closed PO (set_purchase_order_item_costs); unit_cost_cents is generated.
+  c_cost CONSTANT text[] := ARRAY['unit_cost', 'unit_cost_cents', 'cost_needs_review', 'cost_provenance',
+                                  'cost_snapshot_at', 'product_supplier_link_id', 'supplier_price_observation_id'];
   v_same_line boolean := false;
   v_closed text;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
-    v_same_line := NEW.purchase_order_id IS NOT DISTINCT FROM OLD.purchase_order_id
-               AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-               AND NEW.quantity_ordered IS NOT DISTINCT FROM OLD.quantity_ordered;
+    -- Every column but cost and received is frozen on a closed PO's line (fires before the other BEFORE triggers).
+    v_same_line := (to_jsonb(NEW) - c_cost - 'quantity_received') IS NOT DISTINCT FROM (to_jsonb(OLD) - c_cost - 'quantity_received');
     IF v_same_line AND NEW.quantity_received IS NOT DISTINCT FROM OLD.quantity_received THEN
-      RETURN NEW;  -- no guarded column changed
+      RETURN NEW;  -- only cost columns changed
     END IF;
   END IF;
   -- FOR SHARE waits for a close in flight, so a line change never slips in beside it. Both parents of a moved line.
@@ -236,8 +238,7 @@ ALTER FUNCTION public._guard_closed_po_item() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._guard_closed_po_item() FROM PUBLIC, anon, authenticated, service_role;
 -- Named to fire first among the BEFORE triggers on purchase_order_items (they fire in name order).
 CREATE TRIGGER trigger_0_guard_closed_po_item
-  BEFORE INSERT OR DELETE OR UPDATE OF purchase_order_id, product_id, quantity_ordered, quantity_received
-  ON public.purchase_order_items
+  BEFORE INSERT OR DELETE OR UPDATE ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public._guard_closed_po_item();
 
 -- 5. Cancel: a closed PO is refused; a received PO points at Close Short. Otherwise the live body unchanged.

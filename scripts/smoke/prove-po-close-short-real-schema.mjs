@@ -82,8 +82,12 @@ function apply(name) {
 }
 function wait(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 function ready() {
-  for (let i = 0; i < 120; i += 1) {
-    if (docker(['exec', NAME, 'pg_isready', '-U', 'postgres'], { allowFailure: true }).status === 0) return;
+  for (let i = 0; i < 240; i += 1) {
+    // The image runs a bootstrap server, stops it, prints this marker, then starts the real one; a busy
+    // machine can answer pg_isready from the bootstrap server, so wait for the marker first.
+    const logs = docker(['logs', NAME], { allowFailure: true });
+    if (`${logs.stdout}\n${logs.stderr}`.includes('PostgreSQL init process complete; ready for start up.')
+      && docker(['exec', NAME, 'pg_isready', '-U', 'postgres'], { allowFailure: true }).status === 0) return;
     wait(500);
   }
   throw new Error('disposable PostgreSQL did not become ready');
@@ -461,15 +465,22 @@ async function main() {
   assert.equal(avail(6), availD);
   refused(as(ADMIN, `SELECT public.save_purchase_order('${D.po}', jsonb_build_object('vendor', '${VENDOR}', 'notes', 'edit'),
     jsonb_build_array(jsonb_build_object('id', '${D.items[0]}', 'product_id', '${P(6)}', 'product_name', '[PROVER] KI142 product 6',
-      'quantity_ordered', 20, 'unit_cost_cents', 100, 'unit_size', 'GL')), '${ADMIN}', 'k142-save-d')`), /PO_CLOSED/);
+      'quantity_ordered', 20, 'unit_cost_cents', 100, 'unit_size', 'GL')), '${ADMIN}', 'k142-save-d')`), /PO_CLOSED|RECEIVED_PO_LINE_IMMUTABLE/);
   refused(as(ADMIN, `SELECT public.cancel_purchase_order('${D.po}', 'Cancelled', '${ADMIN}', 'k142-cancel-d')`), /PO_CLOSED/);
   refused(as(ADMIN, `SELECT public.delete_purchase_order('${D.po}', '${ADMIN}', 'k142-delete-d')`), /PO_CLOSED|Cannot delete/);
   // A direct receipt removal (no client may do it; postgres here) would lower received without the reversal: refused.
-  refused(q(`DELETE FROM public.receiving_records WHERE id = '${D.receipts[0]}';`, { allowFailure: true }), /PO_CLOSED/);
+  refused(q(`BEGIN; ${claims(ADMIN)}
+DELETE FROM public.receiving_records WHERE id = '${D.receipts[0]}'; COMMIT;`, { allowFailure: true }), /PO_CLOSED/);
   // An admin override does not reopen it.
   refused(q(`BEGIN; SELECT set_config('app.admin_override', 'true', true); UPDATE public.purchase_orders SET status = 'partially_received' WHERE id = '${D.po}'; COMMIT;`, { allowFailure: true }), /PO_CLOSED/);
   assert.equal(status(D.po), 'closed');
-  console.log('[prover] a closed PO refuses receive, edit, cancel, delete, a direct receipt removal and an override reopen');
+  refused(q(`UPDATE public.purchase_orders SET notes = 'rewritten' WHERE id = '${D.po}';`, { allowFailure: true }), /PO_CLOSED/);
+  // Any line column outside cost is frozen; a cost correction still lands.
+  refused(q(`UPDATE public.purchase_order_items SET unit_size = 'OZ' WHERE id = '${D.items[0]}';`, { allowFailure: true }), /PO_CLOSED/);
+  refused(q(`UPDATE public.purchase_order_items SET notes = 'rewritten', product_name = 'other' WHERE id = '${D.items[0]}';`, { allowFailure: true }), /PO_CLOSED/);
+  ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.25 WHERE id = '${D.items[0]}';`, { allowFailure: true }));
+  assert.equal(q(`SELECT unit_size || '|' || unit_cost_cents FROM public.purchase_order_items WHERE id = '${D.items[0]}';`).out, 'GL|125');
+  console.log('[prover] a closed PO refuses receive, edit, line rewrites, cancel, delete, a direct receipt removal and an override reopen; cost corrections land');
 
   // 7. A receipt reversal on a closed PO: stock goes down, the line's received drops, it stays closed, on order unchanged.
   const onOrderD = onOrder(6);
@@ -484,7 +495,7 @@ async function main() {
   refused(as(ADMIN, `SELECT public.cancel_purchase_order('${E.po}', 'Cancelled', '${ADMIN}', 'k142-cancel-e')`), /Use Close Short/);
   refused(as(ADMIN, `SELECT public.save_purchase_order('${E.po}', jsonb_build_object('vendor', '${VENDOR}', 'status', 'closed'),
     jsonb_build_array(jsonb_build_object('id', '${E.items[0]}', 'product_id', '${P(7)}', 'product_name', '[PROVER] KI142 product 7',
-      'quantity_ordered', 10, 'unit_cost_cents', 100, 'unit_size', 'GL')), '${ADMIN}', 'k142-save-e')`), /closed|transition|check constraint/i);
+      'quantity_ordered', 10, 'unit_cost_cents', 100, 'unit_size', 'GL')), '${ADMIN}', 'k142-save-e')`), /PO_STATUS_RPC_REQUIRED|closed|transition|check constraint/i);
   refused(as(ADMIN, `SELECT public.save_purchase_order(NULL, jsonb_build_object('po_number', 'PROVER-KI142-X', 'vendor', '${VENDOR}', 'status', 'closed'),
     jsonb_build_array(jsonb_build_object('product_id', '${P(7)}', 'product_name', '[PROVER] KI142 product 7', 'quantity_ordered', 1,
       'unit_cost_cents', 100, 'unit_size', 'GL')), '${ADMIN}', 'k142-save-x')`), /closed|status|check constraint/i);

@@ -2820,6 +2820,8 @@ function registryMigrationHighWater(): string {
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
 // 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
 // their files reached main just after that refresh had already moved the boundary past them.
+// 20261231200000, 20261231210000 and 20261231220000 (REG-1 Step 2, #1746) were added on 2026-11-10:
+// all three applied live and the registry refresh after it moved the boundary past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2867,6 +2869,9 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261215110000',
   '20261222100000',
   '20261229110000',
+  '20261231200000',
+  '20261231210000',
+  '20261231220000',
 ]);
 
 /**
@@ -3115,8 +3120,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'save_active_ingredient',
   'set_parent_chemistry',
   'set_parent_cost_reference',
-  // 20261231200000 (REG-1 step 2, local candidate): admin-only registration writers; each replays through
-  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): admin-only registration writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   'seed_epa_registrations',
   'set_epa_registration',
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
@@ -3161,7 +3166,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
-  // REG-1 Step 2 (local candidate 20261231210000): trigger function, never called as an RPC.
+  // REG-1 Step 2 (20261231210000, applied live 2026-11-10): trigger functions, never called as RPCs. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   _capture_invoice_line_rup:
     'AFTER INSERT/UPDATE row trigger on invoice_items (after the seed only; re-captures only on a product or saved-number change): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   _void_rup_records_off_posted:
@@ -3227,8 +3232,8 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
-  // 20261231200000 (REG-1 step 2, local candidate): private helpers.
-  // Prune once applied and the registry high-water moves past it.
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): private helpers.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',

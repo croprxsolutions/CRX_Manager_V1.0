@@ -540,8 +540,10 @@ $helper_grants$;
 
 -- A delivery line deleted outside edit_delivery (a direct delete of a scheduled line, or the order clean-up of a
 -- cancelled or voided delivery) takes its picks with it (the pick key cascades): record them first as one
--- 'line_removed' event. History only: it takes no delivery lock (so it cannot deadlock with a completion that holds
--- the delivery and waits on the line) and does not move the stale-save base. edit_delivery's re-create records its own 'edited'
+-- 'line_removed' event. History only: it does not move the stale-save base and takes no FOR UPDATE on the delivery,
+-- but the event's delivery foreign key takes a key-share lock on it. So a completion holding the delivery while it
+-- waits on a line being deleted can still deadlock; Postgres cancels one and it is retried (rare, accepted, 15.10).
+-- edit_delivery's re-create records its own 'edited'
 -- event and sets crx.delivery_brand_edit around its body, so it is not recorded twice.
 CREATE FUNCTION public._delivery_brands_on_line_delete()
 RETURNS trigger
@@ -1113,7 +1115,6 @@ BEGIN
   -- the request fingerprint: the same key is the same completion. A nested call with NULL (start_and_complete's
   -- body calling this) leaves the outer value for that step; every return clears it.
   IF p_brand_base_seq IS NOT NULL THEN
-    IF p_brand_base_seq < 0 THEN RAISE EXCEPTION 'BRAND_BASE_SEQ_INVALID' USING ERRCODE = '22023'; END IF;
     PERFORM set_config('crx.brand_base_seq', p_brand_base_seq::text, true);
   END IF;
   v_result := public._complete_delivery_evidence_impl_20270104(p_delivery_id, p_signed_by, p_performed_by,
@@ -1156,7 +1157,6 @@ DECLARE
   v_result jsonb;
 BEGIN
   IF p_brand_base_seq IS NOT NULL THEN
-    IF p_brand_base_seq < 0 THEN RAISE EXCEPTION 'BRAND_BASE_SEQ_INVALID' USING ERRCODE = '22023'; END IF;
     PERFORM set_config('crx.brand_base_seq', p_brand_base_seq::text, true);
   END IF;
   v_result := public._start_and_complete_delivery_impl_20270104(p_delivery_id, p_signed_by, p_delivered_on,

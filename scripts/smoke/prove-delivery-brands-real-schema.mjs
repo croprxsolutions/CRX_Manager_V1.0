@@ -524,7 +524,10 @@ async function main() {
   const loaded = maxSeq(D(3));
   set(DRV, D(3), [{ delivery_item_id: DI(3, 0), picks: [pick(PB2, 4)] }], 'bb-k6');
   const stock3 = stock(PG);
-  refused(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3b', { seq: -1 }), /BRAND_BASE_SEQ_INVALID/);
+  r = psql(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;
+    ${COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3b', { seq: -1 })} ROLLBACK;`, { allowFailure: true });
+  assert.doesNotMatch(`${r.stdout}
+${r.stderr}`, /ERROR/, 'a negative seq never refuses a completion (reads as not confirmed)');
   r = psql(`BEGIN; SELECT set_config('crx.brand_base_seq', 'not-a-number', true);
     SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;
     ${COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3g')} ROLLBACK;`, { allowFailure: true });
@@ -541,12 +544,11 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   const START = (seq, key) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${D(4)}', p_signed_by => '${NO_PROOF}',
     p_delivered_on => current_date, p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(4, 0)]: 2 })}, p_idempotency_key => '${key}',
     p_evidence => 'no_proof', p_evidence_ref => '[PROVER] no proof on the stop', p_brand_base_seq => ${seq})::text;`;
-  refused(ADMIN, START(-1, 'bb-s4'), /BRAND_BASE_SEQ_INVALID/);
   assert.equal(status(D(4)), 'scheduled');
   ok(ADMIN, START(maxSeq(D(4)), 'bb-s4b'));
   assert.equal(status(D(4)), 'completed');
   assert.equal(JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(4)}' AND event_type = 'completed';`)).picks_confirmed, true);
-  console.log('[prover] case 6: a stale seq still completes, against the current picks, recorded as not confirmed; a malformed seq is refused before anything changes; the current seq (direct and through start_and_complete) completes with picks confirmed');
+  console.log('[prover] case 6: a stale seq still completes, against the current picks, recorded as not confirmed; a malformed or negative seq never errors and reads as not confirmed; the current seq (direct and through start_and_complete) completes with picks confirmed');
 
   // 7. A legacy pick whose size is grouped before completion follows its parent brand; the snapshot stays.
   mkDelivery(5, [[PL3, 3]]);

@@ -48,6 +48,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
+import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -2440,6 +2441,17 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                     {fmt(totalCents - totalCostCents)}
                   </span>
                 </div>
+              </>
+            )}
+            {/* The office's discount on this sale (billing plan M4b): admin, chemical-sale draft. */}
+            {isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' && (
+              <>
+                <hr className="border-gray-100" />
+                <StandingDiscountControl
+                  invoiceId={invoice.id}
+                  disabled={hasUnsavedChanges}
+                  onChanged={() => fetchInvoice(invoice.id as string)}
+                />
               </>
             )}
             {!isNew && (

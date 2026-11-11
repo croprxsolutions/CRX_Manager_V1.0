@@ -83,13 +83,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      {/* Toasts never cover a dialog's buttons or the bottom nav. Phone: top, full width.
-          md+: top right, below the 64px app header. While a dialog is open (any Modal marks its
-          panel data-modal-panel) they move clear of its header X: inset from the right on phone,
-          top centre from md up. Dialog footers are at the bottom, so the top is always clear. */}
+      {/* Where they always were (phone: above the bottom nav; md+: bottom right), so they never cover a
+          page's header buttons. While a dialog is open (any Modal marks its panel data-modal-panel) a
+          dialog's footer buttons sit at the bottom, so toasts move to the top: inset from the right on
+          phone (clear of the X), top centre below the app header from md up. */}
       <div
         data-toast-viewport
-        className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[100] flex flex-col gap-2 md:left-auto md:right-4 md:top-[4.75rem] [body:has([data-modal-panel])_&]:max-md:right-[4.5rem] [body:has([data-modal-panel])_&]:md:right-1/2 [body:has([data-modal-panel])_&]:md:translate-x-1/2"
+        className="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)] z-[100] flex flex-col gap-2 md:inset-x-auto md:bottom-4 md:right-4 [body:has([data-modal-panel])_&]:bottom-auto [body:has([data-modal-panel])_&]:top-[calc(env(safe-area-inset-top)+0.75rem)] [body:has([data-modal-panel])_&]:max-md:right-[4.5rem] [body:has([data-modal-panel])_&]:md:top-[4.75rem] [body:has([data-modal-panel])_&]:md:right-1/2 [body:has([data-modal-panel])_&]:md:translate-x-1/2"
         role="status"
         aria-live="polite"
       >

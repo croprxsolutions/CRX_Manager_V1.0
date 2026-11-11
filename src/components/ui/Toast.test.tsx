@@ -47,14 +47,18 @@ describe('ToastProvider + useToast', () => {
 
     fireEvent.click(screen.getByText('Show Toast'));
 
+    // No dialog: where they always were, so a page's header buttons stay clear. Dialog open: the top.
     expect(document.querySelector('[data-toast-viewport]')).toHaveClass(
-      'top-[calc(env(safe-area-inset-top)+0.75rem)]',
-      'md:top-[4.75rem]',
+      'bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]',
+      'md:bottom-4',
       'md:right-4',
+      '[body:has([data-modal-panel])_&]:bottom-auto',
+      '[body:has([data-modal-panel])_&]:top-[calc(env(safe-area-inset-top)+0.75rem)]',
       '[body:has([data-modal-panel])_&]:max-md:right-[4.5rem]',
+      '[body:has([data-modal-panel])_&]:md:top-[4.75rem]',
       '[body:has([data-modal-panel])_&]:md:right-1/2',
     );
-    expect(document.querySelector('[data-toast-viewport]')?.className).not.toMatch(/bottom-/);
+    expect(document.querySelector('[data-toast-viewport]')?.className).not.toMatch(/(^| )(md:)?top-/);
     expect(screen.getByLabelText('Dismiss notification')).toHaveClass('h-11', 'w-11');
   });
 

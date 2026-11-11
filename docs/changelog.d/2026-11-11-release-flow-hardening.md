@@ -6,6 +6,12 @@ against the code. This PR fixes the ones that were real:
   files. `package.json` and `package-lock.json` may differ from staging + main only in their version
   fields. `src/releaseNotes.ts` must be exactly the module the bot generates: a version, a date and a
   list of strings, and no code (`check-release-content`, `botFileProblems`).
+- **The bot could lose staging's other edits to `package.json` or its lock** when it resolved a conflict
+  by keeping release/next's old copy. It now starts both from staging + main (the guard's expected side),
+  then sets only the version.
+- **Versions weren't checked.** They must now be one plain `X.Y.Z`, the same in `package.json`, both
+  version fields of the lock, and `src/releaseNotes.ts`. The content check reads big files in full (no
+  1 MB cap) and fails on any git error other than "file not in this tree".
 - **Release-gate refreshes failed silently.** They ignored a failed `gh workflow run` (`|| echo`), so a
   stale gate status could stand. That fallback was for before `release-pr.yml` reached main (#1787), and
   it is gone from `release-labels.yml` (two places) and `release-flow.yml`.
@@ -14,12 +20,17 @@ against the code. This PR fixes the ones that were real:
   says how to fix it.
 - **A `-- crx: no-transaction` migration could hold several statements.** It runs outside a transaction,
   so a failure after the first statement leaves half a change. The stamp check now refuses more than one
-  statement.
+  statement; `SET` lines before it (such as `lock_timeout`) don't count.
 - **A new one-shot migration was checked as if it would run.** It is only recorded, so only its encoding
   is checked now, as the apply job does.
 - **Stamps could name an impossible date** like 31 February. They must now be a real calendar day.
 - **"Held off: flag X" isn't checked against the flag.** That is by design, since a person judges it. The
-  release PR checklist now asks for it.
+  release PR checklist now asks for it, along with a fresh gate run right before merging, and a check that
+  only the bot pushed to `release/next`. The planned `release-next` ruleset enforces that last point.
+
+**Before `RELEASE_FLOW=on`:** copy `.github/` to `main` again (a `hotfix/` PR, like #1787). The guard
+runs main's copy of the script, and `check-release-content` exists only once main has it. Until then the
+guard fails closed on a release PR.
 
 Not changed:
 - Comment matching for the gate refresh. GitHub's `contains()` already ignores case.

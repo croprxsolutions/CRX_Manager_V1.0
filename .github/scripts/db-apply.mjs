@@ -137,7 +137,8 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
     if (atomic === 0 && TX_CONTROL.test(statement)) problems.push(`${stem}: has its own transaction control (${statement.trim().split(/\s+/).slice(0, 3).join(' ')}); the job wraps each file in one transaction`);
   }
   // A no-transaction file runs outside a transaction: a second statement could fail after the first ran.
-  if (isNoTransaction(text) && skeleton.split(';').filter((s) => s.trim()).length > 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement`);
+  // Session settings before it (SET lock_timeout = ...) change nothing in the database, so they don't count.
+  if (isNoTransaction(text) && skeleton.split(';').filter((s) => s.trim() && !/^\s*SET\s/i.test(s)).length > 1) problems.push(`${stem}: a "-- crx: no-transaction" file must hold one statement (SET lines aside)`);
   // psql runs a backslash command anywhere outside quotes (\! runs a shell command), so none at all.
   if (skeleton.includes('\\')) problems.push(`${stem}: has a psql backslash command outside quotes`);
   return problems;
@@ -416,11 +417,12 @@ const commands = {
     if (!/^\d{14}$/.test(mHead?.migrations_high_water ?? '')) problems.push('supabase/baselines/manifest.json: missing or invalid migrations_high_water');
     if (mBase && mHead && mBase.migrations_high_water !== mHead.migrations_high_water) problems.push(`supabase/baselines/manifest.json: migrations_high_water changed (${mBase.migrations_high_water} -> ${mHead.migrations_high_water}); that skips every file below it, so it needs a new baseline, not a PR`);
     const [oBase, oHead] = [show(baseRef, 'supabase/baselines/one-shot-migrations.json'), show('HEAD', 'supabase/baselines/one-shot-migrations.json')];
-    if (!oHead?.one_shot) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
+    const oneShots = oHead?.one_shot && typeof oHead.one_shot === 'object' && !Array.isArray(oHead.one_shot) ? oHead.one_shot : null;
+    if (!oneShots) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
     // A one-shot is only recorded, never run, so only its encoding is checked (as apply does).
     problems.push(...added.flatMap((f) => {
       const stem = f.replace(/\.sql$/, '');
-      return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !(stem in (oHead?.one_shot ?? {})) });
+      return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !Object.hasOwn(oneShots ?? {}, stem) });
     }));
     for (const stem of Object.keys(oBase?.one_shot ?? {})) {
       if (!(stem in (oHead?.one_shot ?? {}))) problems.push(`one-shot-migrations.json: ${stem} was removed from the one-shot list; a record-only data migration would then run`);

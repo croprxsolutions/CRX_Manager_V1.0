@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -232,4 +232,14 @@ test('botFileProblems: release/next may change only the version and the generate
   assert.match(botFileProblems('src/releaseNotes.ts', 'old', notes.replace('"items"', '"x": 1, "items"'))[0], /module the bot writes/);
   assert.match(botFileProblems('src/releaseNotes.ts', 'old', null)[0], /module the bot writes/);
   assert.deepEqual(botFileProblems('CHANGELOG.md', 'a', 'b'), []);
+});
+
+test('versionProblems: one plain X.Y.Z across package.json, the lock and the notes', () => {
+  const j = (o) => JSON.stringify(o);
+  const notes = (v) => releaseNotesModule({ version: v, date: '2026-11-19', items: [] });
+  const lock = (a, b) => j({ version: a, packages: { '': { version: b } } });
+  assert.deepEqual(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0')), []);
+  assert.match(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.3.0'), notes('0.2.0'))[0], /isn't one X.Y.Z/);
+  assert.match(versionProblems(j({ version: '0.2.0; rm -rf' }), lock('0.2.0; rm -rf', '0.2.0; rm -rf'), notes('0.2.0; rm -rf'))[0], /isn't one X.Y.Z/);
+  assert.match(versionProblems(null, lock('0.2.0', '0.2.0'), notes('0.2.0'))[0], /missing or unreadable/);
 });

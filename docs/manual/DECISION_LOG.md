@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
+
+**Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.
+**Why:** the point of Brand PR B is a record of the brand actually sold; under REG-1's "the product's own number" the brand would change only the paperwork.
+**What this forbids/implies:** supersedes, for lines with a recorded brand, REG-1's "the product's own number" and #1746's "one active record per line" (it becomes one per line per brand). Invoice lines are not split by brand. Everything else in REG-1 stands per brand: capture at save, any Yes records it, a Yes always wins, a Yes at posting wins, a missing number never blocks. Plan: `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md` section 14.
+
 ## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d922c2698393` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

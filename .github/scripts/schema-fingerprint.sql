@@ -8,16 +8,29 @@ SET search_path = public;
 WITH pub AS (SELECT oid FROM pg_namespace WHERE nspname = 'public'),
 rel AS (SELECT c.* FROM pg_class c WHERE c.relnamespace = (SELECT oid FROM pub)),
 who AS (SELECT oid, CASE WHEN rolname IN ('postgres', 'supabase_admin') THEN 'admin' ELSE rolname END AS name FROM pg_roles),
+-- The app's own roles (anon, authenticated, service_role, authenticator, metabase_ro, ...): not Postgres's
+-- built-in pg_* roles or the platform's supabase_* ones, which can differ between hosted and local.
+-- crx_drift_ro (this check's own login, staging only) is left out too.
+approle AS (SELECT * FROM pg_roles WHERE rolname !~ '^(pg_|supabase_|crx_drift_ro)' AND rolname NOT IN ('postgres', 'supabase_admin')),
 fn AS (SELECT p.*, p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS sig
        FROM pg_proc p WHERE p.pronamespace = (SELECT oid FROM pub)
-         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')),
+         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')),
 lines AS (
-  SELECT 'relation ' || relname || ' kind=' || relkind::text || ' persistence=' || relpersistence::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
+  SELECT 'relation ' || relname || ' kind=' || relkind::text || ' persistence=' || relpersistence::text || ' replica=' || relreplident::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity
          || coalesce(' partition ' || pg_get_expr(relpartbound, oid), '')
          || CASE WHEN relkind = 'p' THEN ' key ' || pg_get_partkeydef(oid) ELSE '' END
          || coalesce(' options ' || array_to_string(reloptions, ','), '')
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
+  UNION ALL
+  -- Storage tables: their policies are below, so whether RLS is on matters too.
+  SELECT 'relation storage.' || c.relname || ' rls=' || c.relrowsecurity || ' force=' || c.relforcerowsecurity
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'storage' AND c.relkind IN ('r', 'p')
+  UNION ALL
+  -- What the app's roles may do beyond grants (BYPASSRLS ignores every policy).
+  SELECT 'role ' || rolname || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' login=' || rolcanlogin
+         || ' inherit=' || rolinherit || ' createrole=' || rolcreaterole || ' createdb=' || rolcreatedb || ' replication=' || rolreplication
+    FROM approle
   UNION ALL
   SELECT 'column ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
          || CASE WHEN a.attnotnull THEN ' not null' ELSE '' END
@@ -85,7 +98,7 @@ lines AS (
     LEFT JOIN pg_roles r ON r.oid = x.grantee
     WHERE n.nspname = 'public' AND x.grantee <> n.nspowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
-  SELECT 'grant USAGE on type ' || t.typname || ' to ' || coalesce(r.rolname, 'PUBLIC')
+  SELECT 'grant USAGE' || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' on type ' || t.typname || ' to ' || coalesce(r.rolname, 'PUBLIC')
     FROM pg_type t, aclexplode(t.typacl) x LEFT JOIN pg_roles r ON r.oid = x.grantee
     WHERE t.typnamespace = (SELECT oid FROM pub) AND t.typacl IS NOT NULL AND x.grantee <> t.typowner
       AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
@@ -95,7 +108,7 @@ lines AS (
          || CASE WHEN m.admin_option THEN ' +admin' ELSE '' END
          || ' inherit=' || m.inherit_option || ' set=' || m.set_option
     FROM pg_auth_members m
-    WHERE (SELECT name FROM who WHERE who.oid = m.member) <> 'admin'
+    WHERE m.member IN (SELECT oid FROM approle) OR m.roleid IN (SELECT oid FROM approle)
   UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
   SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')

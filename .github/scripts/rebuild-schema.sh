@@ -40,7 +40,7 @@ EOF
 (cd "$W" && "${SB[@]}" stop --no-backup >/dev/null 2>&1 || true)
 (cd "$W" && "${SB[@]}" start -x imgproxy,postgres-meta,vector,supavisor >/dev/null)
 DB="$(cd "$W" && "${SB[@]}" status -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
-case "$DB" in postgresql://postgres:postgres@127.0.0.1:*) ;; *) echo "::error::rebuild: refusing database URL '$DB'"; exit 1 ;; esac
+case "$DB" in postgresql://postgres:postgres@127.0.0.1:*) ;; *) echo "::error::rebuild: refusing a database URL that isn't the local postgres:postgres@127.0.0.1 one (not printed)"; exit 1 ;; esac
 psqlq() { psql "$DB" -X -q -v ON_ERROR_STOP=1 "$@"; }
 
 B="$REPO/supabase/baselines"

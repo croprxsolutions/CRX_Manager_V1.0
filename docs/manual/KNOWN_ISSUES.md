@@ -862,29 +862,28 @@ changing it while a quote is open leaves the check comparing against the old tie
 quote changes the tier label without repricing its locked lines.
 
 ### KI-108 — Five products' stored stock did not match their transaction history on 2026-11-01
-**LOW · OPEN (CONFIRMED 2026-11-10; was MED) · inventory · Mason decision (physical count) · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
+**LOW · OPEN (CONFIRMED twice 2026-11-10; was MED) · inventory · Mason decision (physical count) · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
 The monthly integrity report (closed PR #1230) found `inventory.quantity_available` different from the
-`inventory_transactions` ledger for five products. The other nine checks passed. Re-checked 2026-11-10
-(code-read + live read-only): the same checker, including the pre-book-only adjustment list and the 0.01
-tolerance, still matches 112 of 117 inventory rows. The same five are still off, and the gaps are unchanged
-since 2026-11-01. They are old bookkeeping, not a new drift (last transaction 2026-07-17; no holds; all
-gallons). Black Strap Tote is about 1,325 gallons high because an old receipt reversal was clamped
-(`20260610131048` names that 1,325); its bulk twin is low by the same amount, so tote plus bulk equals the
-history. The other four are a March 2026 hand edit, a reversed receipt with no recorded cause, or opening
-stock with no ledger row. Mason chose on 2026-10-07 not to do a physical count. Recommended fix, not applied:
-a counted correction he approves. Nothing was changed.
+`inventory_transactions` ledger for five products. The other nine checks passed. Second re-check 2026-11-10
+(live read-only SQL copying the `/integrity-report` check in `src/lib/reconciliation.ts`, all products): 117
+stock rows, 116 have history, 111 of those match. The same five are off by the same amounts as on 2026-11-01.
+No hidden holds (pre-booked is 0 on all five), all gallons, newest movement 2026-07-17. None of the five gaps
+comes from an `adjusted` row that changed only pre-booked stock, so `PREBOOK_ONLY_ADJUSTMENT_TX_IDS` needs no
+new entry and no code change fixes this. Every gap needs a data correction that Mason approves. Mason chose on
+2026-10-07 not to do a physical count. Nothing was changed.
 
-| Product | Ledger says | Stored | Gap |
-|---|---|---|---|
-| Black Strap Molasses Sugar - Tote | 675 | 2,000 | 1,325 |
-| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | 530 |
-| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | 95 |
-| 2, 4D Amine 4# - Bulk | 0 | 55 | 55 |
-| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | 10 |
+| Product | Ledger says | Stored | Gap | Likely cause (from its ledger) | Recommended fix |
+|---|---|---|---|---|---|
+| Black Strap Molasses Sugar - Tote | 675 | 2,000 | +1,325 | A 1,325 delivery was posted on Bulk by mistake, then hand-adjusted off Tote on 2026-03-21. Two days later a wrong receipt (-2,000) was reversed while Tote held only 675, and the old floor-at-zero rule swallowed 1,325 of it (`20260610131048` names that 1,325). Black Strap Bulk sits at -1,325, matching its own ledger. Tote plus Bulk stored (675) equals Tote's history. | Count Tote and Bulk together. If the count is about 675: one correction moving Bulk back to 0 and Tote down to the count. |
+| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | +530 | Stock 530 above anything recorded, about two totes. The 2026-03-25 receipt reversal (-265) was not clamped; the paper trail for the extra 530 was lost to an old delete (see the 2026-06-10 worksheet). | Count it. A correction to the counted number. |
+| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | +95 | Opening stock (95) was loaded in March with no ledger row; five jobs and one delivery since. | Count it. If the count is 25, add the missing opening-stock row (+95) so the history matches. |
+| 2, 4D Amine 4# - Bulk | 0 | 55 | +55 | Opening stock (55) with no ledger row; nothing has moved since. | Count it. If 55, add the missing opening-stock row (+55). |
+| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | +10 | Two receipts of 180 and one delivery of 80 add to 280; 10 extra with no record, likely a small unledgered opening load. | Count it. A correction to the counted number. |
 
-Next step: re-run the check (the `/integrity-report` admin page shows the same check). For any product still off,
-read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
-(`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
+Every fix is a new, reviewed data-correcting migration that adds ledger rows; none was written. The counting
+sheet that already covers these five is `docs/operations/2026-06-10-negative-inventory-rebase-worksheet.md`.
+Next step (Mason): count these five plus Black Strap Bulk, or say which number to trust; then a session writes
+the correction migration.
 
 ### KI-116 — Product Detail treats a non-product address as a load failure
 **LOW · FIXED in PR (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**

@@ -22,6 +22,18 @@
  *   P6  the blend invoice's unit check now passes the 'oz'+ZWSP line.
  *   P7  live-shaped existing lines ('32', 'pt/ac', 'oz') take other edits, price changes included.
  *
+ * Then the follow-up 20270101000000 (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md):
+ *   R0  real invoices: create_invoice_from_blend_ticket bills a 'pt/ac' and an 'oz'+ZWSP line after the candidate.
+ *   FB  BEFORE the follow-up: a liquid 'fl. oz/ac' line saves but its invoice is refused; 'oz'+TAB is refused at
+ *       save; save_job refuses a priced 'pt/a'+ZWSP+'c'; a soft-deleted ticket blocks a product rate unit edit.
+ *   F0  a changed save_job body refuses the follow-up with nothing changed; it applies; a second run refuses.
+ *   F1  the 'fl. oz/ac' ticket now invoices (200 fl oz = 1.5625 Gal); a dry product's 'fl. oz/ac' is still refused.
+ *   F2  'oz'+TAB and 'fl'+TAB+'oz/ac' save and invoice as ounces; a tab-only unit is refused at save.
+ *   F3  save_job saves a priced 'pt/a'+ZWSP+'c' line (stored 'pt/ac') ; a stock Unit 'Pt'+TAB is refused (not folded); 'oz/'+ZWSP+'cwt' is still refused.
+ *   F4  a soft-deleted ticket no longer blocks the product edit; a live unbilled ticket still does.
+ *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
+ *   F6  a dry product refuses fluid ounces on a blend line in any spelling, through its default, and by turning dry (Sol round 1 HIGH).
+ *
  * Run: node scripts/smoke/prove-rate-unit-guard-real-schema.mjs   (needs Docker)
  * Prints RATE_UNIT_GUARD_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
@@ -39,7 +51,9 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261231100000_rate_unit_denominator_guard_and_invisible_chars.sql');
-const FOLLOW_UPS = [];
+// KI-16 follow-ups (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md), applied after P1-P9.
+const FOLLOW_UP = path.join(MIGRATIONS, '20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql');
+const FOLLOW_UPS = [FOLLOW_UP];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
@@ -325,6 +339,7 @@ const billingUnitRefusal = (ticketId) => scalar(`SELECT count(*) FROM public.ble
            public.normalize_rate_unit(COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)),
            p.product_form) IS NULL;`);
 const T_ZW = 'a16a1600-0000-4000-8000-00000000f001';
+const T_OK = 'a16a1600-0000-4000-8000-00000000f006';
 
 async function main() {
   buildContainer();
@@ -382,7 +397,6 @@ async function main() {
   refusedWith('P3 blend U+2215', ticket('a16a1600-0000-4000-8000-00000000f005', [`'oz' || chr(8725) || 'cwt'`]), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
   const p3b = refusedWith('P3 blank unit, per-cwt product', ticket('a16a1600-0000-4000-8000-00000000f007', [["NULL", CWT]]), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
   assert.match(p3b, /rate unit of "oz per cwt"/);
-  const T_OK = 'a16a1600-0000-4000-8000-00000000f006';
   clean('P3 blend per-acre spellings', ticket(T_OK, ["'pt/ac'", "'gal per acre'", "'oz'", "'fl. oz/acre'", `'pt/a' || ${ZWSP} || 'c'`, 'NULL']), { commit: true });
   assert.equal(scalar(`SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = '${T_OK}';`), '6');
   assert.equal(scalar(`SELECT count(*) FROM public.blend_ticket_products WHERE blend_ticket_id = '${T_OK}' AND rate_per_acre_unit IS NULL;`), '1',
@@ -449,7 +463,161 @@ async function main() {
     WHERE job_id = '${job}' AND sort_order IN (20, 21, 22);`, { asOwner: true });
   console.log("[prover] P7: lines rated '32', 'pt/ac' and 'oz' take edits, price changes included");
 
+  followUps();
   console.log('RATE_UNIT_GUARD_PROOF_PASS');
 }
+
+// ── Follow-up 20270101000000 ──
+const DRY = 'a16a1600-0000-4000-8000-0000000000b3';
+const LIQ2 = 'a16a1600-0000-4000-8000-0000000000b4';
+const FIELD = 'a16a1600-0000-4000-8000-0000000000d1';
+const TAB = 'chr(9)';
+const SAVE_JOB = "'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure";
+// Approve a ticket with one 100-acre field, as the review screen leaves it (seed, triggers off).
+const approve = (t) => raw(`UPDATE public.blend_tickets SET review_status = 'approved', status = 'completed', season = 2027,
+    ticket_date = DATE '2026-11-01' WHERE id = '${t}';
+  INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, planned_acres) VALUES ('${t}', '${FIELD}', '${CUSTOMER}', 100);`);
+const invoice = (t) => `SELECT public.create_invoice_from_blend_ticket('${t}', '${ADMIN}', 'prover-ki16-inv-${t.slice(-4)}');`;
+// The billed chemical quantities of a ticket's invoice, in line order (4 dp).
+const billed = (t) => scalar(`SELECT string_agg(round(ii.quantity, 4)::text, ' | ' ORDER BY ii.sort_order, ii.quantity)
+  FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+ WHERE i.blend_ticket_id = '${t}' AND ii.product_id IS NOT NULL AND NOT coalesce(ii.is_application_fee, false);`);
+const saveJobLine = (unit, stock = "'Pt'") => `SELECT public.save_job(NULL, jsonb_build_object('customer_id', '${CUSTOMER}', 'job_date', to_char(CURRENT_DATE, 'YYYY-MM-DD')),
+  jsonb_build_array(jsonb_build_object('field_id', '${FIELD}', 'acres_to_treat', 10, 'sort_order', 0)),
+  jsonb_build_array(jsonb_build_object('product_id', '${LIQUID}', 'quantity', 10, 'unit', ${stock}, 'rate_per_acre', 1, 'rate_unit', ${unit},
+    'cost_per_unit_cents', 0, 'price_per_unit_cents', 400, 'sort_order', 0)),
+  '${ADMIN}', NULL);`;
+
+function followUps() {
+  raw(`UPDATE public.customers SET assigned_tier = 1 WHERE id = '${CUSTOMER}';
+    INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form, current_cost, tier1_price, tier1_margin, is_active)
+    VALUES ('${DRY}', '[PROVER] KI16 Dry', 'Lb', 'Lb', 'lb', 'dry', 1.00, 2.00, 50, true),
+           ('${LIQ2}', '[PROVER] KI16 Liquid Two', 'Gal', 'Gal', 'oz', 'liquid', 10.00, 12.80, 21.875, true);
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
+    VALUES ('${LIQUID}', 'Main Warehouse', 1000, 0, 0), ('${DRY}', 'Main Warehouse', 1000, 0, 0), ('${LIQ2}', 'Main Warehouse', 1000, 0, 0);
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUSTOMER}', '[PROVER] KI16 Field');`);
+
+  // R0: the candidate's own cases billed through the real RPC (rate 2 x 100 acres = 200, sold per Gal).
+  const R0 = 'a16a1600-0000-4000-8000-00000000f100';
+  clean('R0 ticket pt/ac + oz<ZWSP>', ticket(R0, ["'pt/ac'", `'oz' || ${ZWSP}`]), { commit: true });
+  approve(R0);
+  clean('R0 invoice', invoice(R0), { commit: true });
+  assert.equal(billed(R0), '25.0000 | 1.5625', 'R0: 200 pt and 200 oz bill as 25 and 1.5625 Gal');
+  console.log(`[prover] R0: create_invoice_from_blend_ticket bills a pt/ac and an oz+ZWSP line: ${billed(R0)} Gal`);
+
+  // FB: the follow-up's holes, after the candidate and before the follow-up.
+  const T_FL = 'a16a1600-0000-4000-8000-00000000f101';
+  clean('FB liquid fl. oz/ac saves', ticket(T_FL, ["'fl. oz/ac'"]), { commit: true });
+  approve(T_FL);
+  refusedWith('FB liquid fl. oz/ac invoice', invoice(T_FL), 'BLEND_TICKET_UNIT_UNCONVERTIBLE');
+  const fbTab = refusedWith('FB oz<TAB> at save', ticket('a16a1600-0000-4000-8000-00000000f102', [`'oz' || ${TAB}`]), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
+  refusedWith('FB save_job pt/a<ZWSP>c', saveJobLine(`'pt/a' || ${ZWSP} || 'c'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
+  // Sol round 1 HIGH: a dry product's undotted 'fl oz/ac' saves and bills 200 fl oz as 12.5 lb of weight.
+  const T_DRYB = 'a16a1600-0000-4000-8000-00000000f107';
+  clean('FB dry fl oz/ac saves', ticket(T_DRYB, [["'fl oz/ac'", DRY]]), { commit: true });
+  approve(T_DRYB);
+  clean('FB dry fl oz/ac invoice', invoice(T_DRYB), { commit: true });
+  assert.equal(billed(T_DRYB), '12.5000', 'FB: 200 fl oz on a dry product bills as 12.5 lb');
+  const T_DEL = 'a16a1600-0000-4000-8000-00000000f103';
+  clean('FB blank-unit line on product two', ticket(T_DEL, [['NULL', LIQ2]]), { commit: true });
+  raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_DEL}';`);
+  refusedWith('FB soft-deleted ticket blocks the product edit', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQ2}';`,
+    'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
+  console.log(`[prover] FB: before the follow-up, fl. oz/ac is refused at billing, oz+TAB at save (${fbTab.replace(/^.*ERROR:\s*/, '').slice(0, 60)}), pt/a+ZWSP+c by save_job, a deleted ticket blocks a product edit, and a dry product's fl oz/ac bills ${billed(T_DRYB)} lb`);
+
+  // F0: a drifted save_job body refuses the whole follow-up.
+  const followUp = lf(FOLLOW_UP);
+  const saveJobMd5 = () => scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = ${SAVE_JOB};`);
+  const saveJobBefore = saveJobMd5();
+  stageText('f-drift.sql', `UPDATE pg_catalog.pg_proc SET prosrc = prosrc || ' ' WHERE oid = ${SAVE_JOB};\n${followUp}`);
+  const fDrift = docker([...psqlArgs('supabase_admin'), '-1', '-f', '/tmp/f-drift.sql'], { allowFailure: true });
+  assert.notEqual(fDrift.status, 0);
+  assert.match(`${fDrift.stdout}\n${fDrift.stderr}`, /KI16_FOLLOWUP_PREFLIGHT: .*save_job.* is not the reviewed body/);
+  assert.equal(saveJobMd5(), saveJobBefore, 'F0: the refused follow-up changed save_job');
+  assert.equal(scalar("SELECT coalesce(public.normalize_rate_unit('fl. oz'), '<null>');"), 'fl. oz', 'F0: the refused follow-up changed the normalizer');
+  stageText('follow-up.sql', followUp);
+  const fApplied = apply('follow-up.sql');
+  assert.equal(fApplied.status, 0, fApplied.output);
+  const fAgain = apply('follow-up.sql');
+  assert.notEqual(fAgain.status, 0); assert.match(fAgain.output, /KI16_FOLLOWUP_PREFLIGHT: .* is not the reviewed body/);
+  console.log('[prover] F0: a changed save_job body refuses the follow-up with nothing changed; it applies (postflight passed); a second run refuses');
+
+  // F1
+  clean('F1 liquid fl. oz/ac invoice', invoice(T_FL), { commit: true });
+  assert.equal(billed(T_FL), '1.5625', 'F1: 200 fl oz bills as 1.5625 Gal');
+  const T_DRY = 'a16a1600-0000-4000-8000-00000000f104';
+  refusedWith('F1 dry fl. oz/ac at save', ticket(T_DRY, [["'fl. oz/ac'", DRY]]), 'CHEM_UNIT_FORM_MISMATCH');
+  assert.equal(billingUnitRefusal(T_OK), '0', "F1: P3's saved 'fl. oz/acre' line now passes the invoice unit check");
+  console.log(`[prover] F1: a liquid fl. oz/ac line now bills ${billed(T_FL)} Gal; a dry product's fl. oz/ac is refused at save`);
+
+  // F2
+  const T_TAB = 'a16a1600-0000-4000-8000-00000000f105';
+  clean('F2 tab units save', ticket(T_TAB, [`'oz' || ${TAB}`, `'fl' || ${TAB} || 'oz/ac'`]), { commit: true });
+  approve(T_TAB);
+  clean('F2 tab units invoice', invoice(T_TAB), { commit: true });
+  assert.equal(billed(T_TAB), '1.5625 | 1.5625', 'F2: oz+TAB and fl+TAB+oz/ac bill as ounces');
+  refusedWith('F2 tab-only unit', ticket('a16a1600-0000-4000-8000-00000000f106', [`${TAB} || chr(10)`]), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
+  console.log(`[prover] F2: oz+TAB and fl+TAB+oz/ac save and bill ${billed(T_TAB)} Gal; a tab-only unit is refused at save`);
+
+  // F3
+  const jobs = () => Number(scalar(`SELECT count(*) FROM public.jobs WHERE customer_id = '${CUSTOMER}';`));
+  const jobsBefore = jobs();
+  clean('F3 save_job pt/a<ZWSP>c', saveJobLine(`'pt/a' || ${ZWSP} || 'c'`), { commit: true });
+  assert.equal(jobs(), jobsBefore + 1);
+  assert.equal(scalar(`SELECT jc.rate_unit FROM public.job_chemicals jc JOIN public.jobs j ON j.id = jc.job_id
+    WHERE j.customer_id = '${CUSTOMER}' ORDER BY j.created_at DESC, jc.sort_order LIMIT 1;`), 'pt/ac', 'F3: the stored rate unit is folded');
+  // Sol round 3 MED: the stock Unit is not folded (the non-admin cost lookup matches it as stored); a tab fails closed.
+  refusedWith('F3 save_job stock Unit Pt<TAB>', saveJobLine("'pt/ac'", `'Pt' || ${TAB}`), 'CHEM_UNIT_UNSUPPORTED_CHARACTER');
+  refusedWith('F3 save_job oz/<ZWSP>cwt', saveJobLine(`'oz/' || ${ZWSP} || 'cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
+  refusedWith('F3 save_job oz<TAB>/cwt', saveJobLine(`'oz' || ${TAB} || '/cwt'`), 'CHEM_RATE_DENOMINATOR_NOT_ACRES');
+  console.log("[prover] F3: save_job saves a priced pt/a+ZWSP+c line (stored 'pt/ac'); a stock Unit Pt+TAB is refused; oz/+ZWSP+cwt and oz+TAB+/cwt are still refused");
+
+  // F4
+  clean('F4 soft-deleted ticket no longer blocks', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQ2}';`, { asOwner: true, commit: true });
+  refusedWith('F4 a live unbilled blank-unit line still blocks', `UPDATE public.products SET rate_unit = 'oz/cwt' WHERE id = '${LIQUID}';`,
+    'CHEM_RATE_DENOMINATOR_NOT_ACRES', { asOwner: true });
+  // An admin or sales rep may clear deleted_at directly (live RLS, 2026-11-10); the restored line then fails closed at billing.
+  clean('F4 restore the deleted ticket', `UPDATE public.blend_tickets SET deleted_at = NULL WHERE id = '${T_DEL}';`, { commit: true });
+  approve(T_DEL);
+  refusedWith('F4 restored ticket on a per-cwt product', invoice(T_DEL), 'BLEND_TICKET_UNIT_UNCONVERTIBLE');
+  console.log('[prover] F4: a soft-deleted ticket no longer blocks a product rate unit edit; a live unbilled ticket still does; a restored one is refused at billing');
+
+  // F6: a dry product cannot be measured in fluid ounces on a blend line, in any spelling or through its default.
+  for (const u of ["'fl oz/ac'", `'fl' || ${TAB} || 'oz/ac'`, "'FLUID OUNCES per acre'", `'fl' || ${ZWSP} || 'oz'`, "'floz'"]) {
+    refusedWith(`F6 dry ${u}`, ticket('a16a1600-0000-4000-8000-00000000f108', [[u, DRY]]), 'CHEM_UNIT_FORM_MISMATCH');
+  }
+  clean('F6 dry oz/ac saves', ticket('a16a1600-0000-4000-8000-00000000f108', [["'oz/ac'", DRY]]));
+  const T_DRYN = 'a16a1600-0000-4000-8000-00000000f109';
+  clean('F6 dry blank-unit line', ticket(T_DRYN, [['NULL', DRY]]), { commit: true });
+  refusedWith('F6 dry product default to fl oz/ac', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // Sol round 2 HIGH: a soft-deleted ticket still holds it, since a restore would bill the line.
+  raw(`UPDATE public.blend_tickets SET deleted_at = now() WHERE id = '${T_DRYN}';`);
+  refusedWith('F6 dry default to fl oz/ac under a deleted ticket', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  // Sol round 3 HIGH: a no-charge ticket can return to billing, so it holds it too; no ticket state is exempt.
+  raw(`UPDATE public.blend_tickets SET deleted_at = NULL, payment_status = 'no_charge' WHERE id = '${T_DRYN}';`);
+  refusedWith('F6 dry default to fl oz/ac under a no-charge ticket', `UPDATE public.products SET rate_unit = 'fl oz/ac' WHERE id = '${DRY}';`,
+    'CHEM_UNIT_FORM_MISMATCH', { asOwner: true });
+  const T_LF = 'a16a1600-0000-4000-8000-00000000f10a';
+  clean('F6 liquid fl oz/ac line', ticket(T_LF, ["'fl oz/ac'"]), { commit: true });
+  refusedWith('F6 liquid product turning dry', `UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
+    "can't change on a saved product", { asOwner: true }); // the existing unit lock refuses first; the guard's became-dry check is a backstop
+  // Sol round 3 LOW: with the unit lock set aside (rolled back), the became-dry backstop itself refuses.
+  refusedWith('F6 became-dry backstop', `ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;
+    UPDATE public.products SET product_form = 'dry', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${LIQUID}';`,
+    'CHEM_UNIT_FORM_MISMATCH: .* cannot become a dry product', { asOwner: true });
+  console.log("[prover] F6: a dry product's fl oz in five spellings is refused at save, oz/ac saves; a dry default cannot become fl oz/ac under a blank line, deleted or no-charge ticket or not; a saved product cannot turn dry (unit lock first, then the backstop)");
+
+  // F5
+  for (const [expr, want] of [[`'oz' || ${ZWSP}`, 'oz'], [`chr(65279) || 'Gal' || chr(160)`, 'gal'], [`'fl' || chr(160) || 'oz'`, 'oz'],
+    [`'oz/' || ${ZWSP} || 'cwt'`, 'oz/cwt'], ["'oz/cwt'", 'oz/cwt'], ["'Dry oz'", 'dry oz'], ["'pt/ac'", 'pt'], ["'fl oz'", 'oz'],
+    ["'floz/acre'", 'oz'], [`'oz' || ${TAB}`, 'oz'], [`chr(12288) || 'GAL' || chr(13) || chr(10)`, 'gal'], [TAB, '<null>'],
+    [`'oz/' || ${TAB} || 'cwt'`, 'oz/ cwt'], ["'fl. oz'", 'fl oz'], ["'FL.OZ/ac'", 'fl oz'], ["'fl. oz. per acre'", 'fl oz'], ["'fl. oz/cwt'", 'fl. oz/cwt']]) {
+    assert.equal(scalar(`SELECT coalesce(public.normalize_rate_unit(${expr}), '<null>');`), want, `F5: normalize_rate_unit(${expr})`);
+  }
+  console.log('[prover] F5: normalize_rate_unit keeps every earlier output; whitespace folds and dotted fl. oz maps to fl oz');
+}
+
 try { await main(); }
 finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

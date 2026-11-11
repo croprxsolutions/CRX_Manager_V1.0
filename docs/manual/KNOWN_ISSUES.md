@@ -420,18 +420,26 @@ can make old splits refuse to save (LOW-MED).
   ticket line is written (scheduling from a booking, the recipe RPC, blend ticket create/save), with save_job's rule
   and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its
   TypeScript mirrors now fold zero-width and non-breaking characters, so a pasted unit no longer blocks billing.
-  (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.) Still open,
-  LOW: "fl. oz" with a period is not in `normalize_rate_unit`'s list, so billing refuses it (fails closed).
-  Also open from the 2026-11-10 reviews, each failing closed at save or billing, LOW: (b) `save_job`'s denominator
-  probe does not fold invisible characters, so "pt/a<zero-width>c" passes the screen and the new trigger but
-  `save_job` refuses it (its own copy of the rule needs re-emitting to match); (c) JavaScript trims tabs and SQL
-  `btrim` does not, so "oz<tab>" looks fine on the blend screen and billing refuses it.
+  (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.)
+  APPLIED LIVE 2026-11-10 8:05 PM Central (`20270101000000`, ledger `20261111020528`, PR #1741; contract `docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md`):
+  "fl. oz" with a period now reads as fluid ounces (bills on a liquid product, still refused on a dry one);
+  `save_job` folds invisible characters before its own check; tabs, line breaks and every other character
+  JavaScript trims count as a space on both sides; soft-deleted tickets no longer block a product unit edit; the
+  blend screen's invisible-only unit warning shows on zero-rate lines too; the prover bills real invoices.
   Accepted (Mason, 2026-11-10, Sol round 5 HIGH): the product rate-unit guard skips billed tickets, so if a ticket
   with a blank line unit is billed, its product's unit then changes to a per-X unit, and the invoice is voided,
-  re-billing is refused until someone types the line's unit (may need the order unlinked first). Also LOW: the guard
-  counts soft-deleted tickets, so one can block a product unit edit; the blend screen's invisible-only unit warning
-  skips a zero-rate line (the database still refuses the save); the rate-unit prover checks the invoice unit query,
-  not a full invoice created by the RPC.
+  re-billing is refused until someone types the line's unit (may need the order unlinked first).
+  Dry fluid ounces (Luna 2026-11-10 HIGH, Sol round 1 HIGH; Mason 2026-11-10 "Yes, fix here", PR #1741): a blend
+  line on a dry product whose billed unit names fluid ounces in any spelling ("fl oz/ac", "fl<TAB>oz", "fluid ounces
+  per acre") is refused at save (`CHEM_UNIT_FORM_MISMATCH`), as job lines already were; before, 16 fl oz/ac billed
+  as 1 lb/ac. A dry product's own rate unit can never be fluid ounces, whatever its tickets' state. Live read-only
+  2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
+  to "oz", so a direct table write that skips the triggers would bill it as weight. Also LOW (Taha, PR #1741): a tab
+  in a job line's stock Unit is still refused (`CHEM_UNIT_UNSUPPORTED_CHARACTER`, fails closed); folding it would
+  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
+  so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
+  at billing).
 - A job chemical line's per-unit COST is still rounded to whole cents when it is converted from the product's
   stock unit to the rate's unit (`reconcileChemAutofillUnits`, and `save_job`'s cost fill in `20261019230000`):
   $5/GAL is 3.90625¢/oz, saved as 4¢, so 400 oz shows $16.00 of cost against $15.625 and the job's margin is off

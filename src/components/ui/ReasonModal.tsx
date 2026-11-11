@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { AlertTriangle, Trash2, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { toneButton, toneIconStyles, toneIcons, type ConfirmTone } from './confirmTones';
 import Modal from './Modal';
 import Button from './Button';
 
-type ReasonVariant = 'danger' | 'warning' | 'info';
+type ReasonVariant = ConfirmTone;
 
 interface ReasonModalProps {
   open: boolean;
@@ -28,19 +29,6 @@ interface ReasonModalProps {
    */
   minLength?: number;
 }
-
-// Same tones as ConfirmModal: red is kept for danger.
-const variantStyles: Record<ReasonVariant, string> = {
-  danger:  'bg-red-50 text-red-700',
-  warning: 'bg-amber-50 text-amber-700',
-  info:    'bg-crx-green-light text-crx-green',
-};
-
-const defaultIcons: Record<ReasonVariant, LucideIcon> = {
-  danger:  Trash2,
-  warning: AlertTriangle,
-  info:    ClipboardCheck,
-};
 
 /**
  * Modal that collects a required free-form reason before confirming a
@@ -100,15 +88,15 @@ export default function ReasonModal({
       open={open}
       onClose={onClose}
       title={title}
-      icon={icon || defaultIcons[variant]}
-      iconClassName={variantStyles[variant]}
+      icon={icon || toneIcons[variant]}
+      iconClassName={toneIconStyles[variant]}
       footer={
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
             Go back
           </Button>
           <Button
-            variant={variant === 'danger' ? 'danger' : 'primary'}
+            variant={toneButton(variant)}
             onClick={handleConfirm}
             loading={loading}
             disabled={loading}

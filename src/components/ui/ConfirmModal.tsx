@@ -1,8 +1,9 @@
-import { AlertTriangle, Trash2, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { toneButton, toneIconStyles, toneIcons, type ConfirmTone } from './confirmTones';
 import Modal, { ALERT_BUTTON } from './Modal';
 import Button from './Button';
 
-type ConfirmVariant = 'danger' | 'warning' | 'info';
+type ConfirmVariant = ConfirmTone;
 
 interface ConfirmModalProps {
   open: boolean;
@@ -16,18 +17,6 @@ interface ConfirmModalProps {
   icon?: LucideIcon;
   loading?: boolean;
 }
-
-const variantStyles: Record<ConfirmVariant, string> = {
-  danger: 'bg-red-50 text-red-700',
-  warning: 'bg-amber-50 text-amber-700',
-  info: 'bg-crx-green-light text-crx-green',
-};
-
-const defaultIcons: Record<ConfirmVariant, LucideIcon> = {
-  danger: Trash2,
-  warning: AlertTriangle,
-  info: ClipboardCheck,
-};
 
 export default function ConfirmModal({
   open,
@@ -48,8 +37,8 @@ export default function ConfirmModal({
       closeDisabled={loading}
       title={title}
       size="alert"
-      icon={icon || defaultIcons[variant]}
-      iconClassName={variantStyles[variant]}
+      icon={icon || toneIcons[variant]}
+      iconClassName={toneIconStyles[variant]}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={loading} className={ALERT_BUTTON}>
@@ -57,7 +46,7 @@ export default function ConfirmModal({
           </Button>
           {/* Red is kept for danger. A warning or info confirm is a green go-ahead. */}
           <Button
-            variant={variant === 'danger' ? 'danger' : 'primary'}
+            variant={toneButton(variant)}
             onClick={onConfirm}
             loading={loading}
             className={ALERT_BUTTON}

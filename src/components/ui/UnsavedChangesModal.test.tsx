@@ -38,7 +38,7 @@ describe('UnsavedChangesModal', () => {
     expect(dialog).toHaveAttribute('aria-modal', 'true');
   });
 
-  it('shows Discard changes and Keep editing buttons, the safe one first in the DOM', () => {
+  it('shows Discard changes and Keep editing buttons, Discard changes then Keep editing in the DOM', () => {
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
     );

@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -180,4 +180,11 @@ test('schemaDiff: lines only on the target and lines only in the rebuild, in the
   const rebuilt = ['column t.a int', 'function f() md5=2', 'index i'];
   assert.deepEqual(schemaDiff(target, rebuilt), { onlyTarget: ['function f() md5=1', 'policy t.p'], onlyRebuilt: ['function f() md5=2', 'index i'] });
   assert.deepEqual(schemaDiff(target, [...target]), { onlyTarget: [], onlyRebuilt: [] });
+});
+
+test('applyUserProblem: migrations apply only as postgres (pooler or direct), never the read-only or another role', () => {
+  assert.equal(applyUserProblem('postgresql://postgres.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), null);
+  assert.equal(applyUserProblem('postgresql://postgres:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres'), null);
+  assert.match(applyUserProblem('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /only as postgres, not crx_drift_ro/);
+  assert.match(applyUserProblem('postgresql://migration_writer.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /not migration_writer/);
 });

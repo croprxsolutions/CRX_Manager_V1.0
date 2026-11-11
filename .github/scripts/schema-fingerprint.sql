@@ -11,7 +11,7 @@ who AS (SELECT oid, CASE WHEN rolname IN ('postgres', 'supabase_admin') THEN 'ad
 -- The app's own roles (anon, authenticated, service_role, authenticator, metabase_ro, ...): not Postgres's
 -- built-in pg_* roles or the platform's supabase_* ones, which can differ between hosted and local.
 -- crx_drift_ro (this check's own login, staging only) is left out too.
-approle AS (SELECT * FROM pg_roles WHERE rolname !~ '^(pg_|supabase_|crx_drift_ro)' AND rolname NOT IN ('postgres', 'supabase_admin')),
+approle AS (SELECT * FROM pg_roles WHERE rolname !~ '^(pg_|supabase_)' AND rolname NOT IN ('postgres', 'supabase_admin', 'crx_drift_ro')),
 fn AS (SELECT p.*, p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS sig
        FROM pg_proc p WHERE p.pronamespace = (SELECT oid FROM pub)
          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')),

@@ -237,8 +237,15 @@ function runFile(dbUrl, file, { retry = true } = {}) {
   }
 }
 
+// Applies run only as postgres (objects get the owner and default grants every migration expects).
+export function applyUserProblem(dbUrl) {
+  let user;
+  try { user = decodeURIComponent(new URL(dbUrl).username); } catch { return 'the database URL is not a URL'; }
+  return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
+}
+
 function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
-  const refused = refuseTarget(dbUrl, expectedRef);
+  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));

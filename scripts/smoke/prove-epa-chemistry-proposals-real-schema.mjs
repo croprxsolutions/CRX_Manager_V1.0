@@ -452,6 +452,9 @@ function caseH5() {
   // DM-1 (D-AA) never joins name-only ingredients across parents: the other parent gets its own provisional row.
   assert.equal(n(`SELECT count(DISTINCT ingredient_id) FROM public.product_parent_ingredients WHERE parent_id = '${P5}';`), 1, 'one provisional ingredient on the parent, not two');
   assert.equal(n("SELECT count(*) FROM public.active_ingredients WHERE name_key = 'prover crop oil' AND cas IS NULL;"), 2);
+  // Sol 2026-11-11: a name-only entry and a same-name entry with a CAS number are one ingredient, not two.
+  const merged = JSON.parse(scalar(`SELECT public._epa_lookup_input(${J(found('105-1', [['glyphosate', 41, null], ['Glyphosate', 41]]))}::jsonb)->'ingredients';`));
+  assert.equal(merged.length, 1, 'one ingredient'); assert.equal(merged[0].key, `cas:${CAS.Glyphosate}`); assert.equal(merged[0].cas, CAS.Glyphosate);
   console.log('[case] H5 a name-only ingredient needs a tick; a second lookup of the parent confirms the same row (no duplicate); another parent gets its own provisional row, as DM-1 rules');
 }
 
@@ -489,7 +492,13 @@ function caseH8H19() {
   const f = lookup(P8, '108-1', notFound());
   assert.equal(f.outcome, 'failure');
   assert.equal(proposal(b.proposal_id).status, 'proposed', 'a failure never removes an open proposal');
-  console.log('[case] H8 a new lookup supersedes the open proposal (one open per number and parent); a later failure leaves the open one alone');
+  // Sol 2026-11-11: a transfer does supersede it, so the old number's facts can never be committed.
+  const sT = start(P8, '108-1');
+  assert.equal(record(sT.lookup_id, notFound({ transferredTo: '999-1' })).outcome, 'failure');
+  const pb = proposal(b.proposal_id);
+  assert.equal(pb.status, 'superseded'); assert.equal(pb.superseded_by_lookup_id, sT.lookup_id); assert.equal(openCount(P8), 0);
+  refused(ADMIN, COMMIT(b.proposal_id, pb.proposal_version), /EPA_PROPOSAL_NOT_OPEN: this proposal is superseded/);
+  console.log('[case] H8 a new lookup supersedes the open proposal (one open per number and parent); a later error or not-found leaves the open one alone; a transfer supersedes it and it cannot be committed');
 
   const s = start(P8, '108-1');
   const k = key('r19');

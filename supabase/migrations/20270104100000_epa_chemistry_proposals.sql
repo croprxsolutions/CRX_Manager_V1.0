@@ -405,11 +405,15 @@ BEGIN
            CASE WHEN jsonb_typeof(e->'percent') = 'number' THEN round((e->>'percent')::numeric, 10) END AS strength
       FROM jsonb_array_elements(p_result->'activeIngredients') WITH ORDINALITY AS t(e, o)
   ), keyed AS (
-    SELECT *, CASE WHEN cas IS NOT NULL THEN 'cas:' || cas ELSE 'name:' || lower(name) END AS key FROM raw
+    -- A name-only entry joins a same-name entry that has a CAS number, so one ingredient is never two rows (Sol, 2026-11-11).
+    SELECT r.*, CASE WHEN r.cas IS NOT NULL THEN 'cas:' || r.cas
+                     ELSE COALESCE((SELECT 'cas:' || min(r2.cas) FROM raw r2 WHERE lower(r2.name) = lower(r.name) AND r2.cas IS NOT NULL),
+                                   'name:' || lower(r.name)) END AS key
+      FROM raw r
   ), merged AS (
     SELECT key, min(o) AS first_o,
            (array_agg(name ORDER BY o))[1] AS name,
-           (array_agg(cas ORDER BY o))[1] AS cas,
+           (array_agg(cas ORDER BY o) FILTER (WHERE cas IS NOT NULL))[1] AS cas,
            bool_or(cas IS NULL AND cas_given) AS cas_dropped,
            (array_agg(strength ORDER BY o))[1] AS strength,
            count(DISTINCT COALESCE(strength::text, 'unknown')) > 1 AS conflict
@@ -670,8 +674,10 @@ BEGIN
 
   UPDATE public.epa_lookups SET status = 'abandoned', updated_at = now()
    WHERE parent_id = p_parent_id AND epa_registration = v_n AND status = 'pending';
-  INSERT INTO public.epa_lookups (parent_id, epa_registration, link_kind, link_id, registration_version, chemistry_version, requested_by)
-  VALUES (p_parent_id, v_n, v_link.link_kind, v_link.link_id, v_reg_version, COALESCE(v_chem, 0), v_actor)
+  -- clock_timestamp(), taken under the parent lock, so lookup order always matches lock order (Sol, 2026-11-11).
+  INSERT INTO public.epa_lookups (parent_id, epa_registration, link_kind, link_id, registration_version, chemistry_version,
+    requested_by, requested_at)
+  VALUES (p_parent_id, v_n, v_link.link_kind, v_link.link_id, v_reg_version, COALESCE(v_chem, 0), v_actor, clock_timestamp())
   RETURNING id INTO v_id;
 
   v_result := jsonb_build_object('lookup_id', v_id, 'epa_registration', v_n, 'link_kind', v_link.link_kind,
@@ -756,7 +762,14 @@ BEGIN
   END IF;
 
   IF v_reason IS NOT NULL THEN
-    -- A failure never removes an open proposal.
+    -- An error, a bad shape or a not-found never removes an open proposal. A transfer does: EPA says the number
+    -- moved, so the open proposal's facts are stale and must not be committed (Sol, 2026-11-11).
+    IF v_reason = 'transferred' THEN
+      UPDATE public.epa_chemistry_proposals
+         SET status = 'superseded', superseded_by_lookup_id = v_lookup.id, proposal_version = proposal_version + 1,
+             hold_reason = NULL, updated_at = now()
+       WHERE parent_id = v_lookup.parent_id AND epa_registration = v_lookup.epa_registration AND status IN ('proposed', 'held');
+    END IF;
     INSERT INTO public.epa_lookup_failures (lookup_id, parent_id, epa_registration, link_kind, link_id, registration_version,
       reason, transferred_to, detail, created_by)
     VALUES (v_lookup.id, v_lookup.parent_id, v_lookup.epa_registration, v_lookup.link_kind, v_lookup.link_id,

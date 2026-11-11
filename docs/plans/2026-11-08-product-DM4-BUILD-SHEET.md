@@ -246,7 +246,7 @@ A call without `lookupId` behaves as today and records nothing, so the other scr
    - `found` false without it → failure `not_found`.
    - `found` true → build the items (section 3.4) and the `epa_summary`.
 6. **On a proposal:** mark the existing open proposal for the same number and parent (if any) `superseded`, setting `superseded_by_lookup_id` and `updated_at`. Then insert the new one. If every item is `confirm` (or there are no items), the proposal is still inserted, so "EPA agrees" is visible and the failure gate (4.F) sees a success.
-7. **On a failure:** insert the failure row. Leave any open proposal untouched; an error never removes a good proposal.
+7. **On a failure:** insert the failure row. Leave any open proposal untouched; an error, a bad shape or a not-found never removes a good proposal. A `transferred` result supersedes the open proposal (by this lookup), because EPA says the number moved and its facts are stale (Sol, 2026-11-11).
 8. Mark the lookup `recorded`. Return `{lookup_id, outcome: 'proposal' | 'failure', proposal_id | failure_id, reason?}`.
 
 **Trust note.** EPA's answer travels only from the Edge Function to the database, under the service role. A browser cannot call `record_epa_lookup`, so it cannot submit a made-up result. The shape check still runs, as a guard against a function bug. Every proposal still needs an admin commit (D-I).
@@ -522,4 +522,4 @@ Live facts read for it (read-only, 2026-11-11): every one of the 347 registratio
 
 ### 13.2 Decision sent to Mason (2026-11-11)
 
-RUP from EPA when we stored "no": (a) show it as a difference only, fixed by hand on the registration screen; or (b) let the admin tick it on the proposal (unticked by default) so the commit writes "yes" and lists posted sales to record. Recommendation (b). Building (a) until he answers; (b) changes one item's class.
+RUP from EPA when we stored "no": (a) show it as a difference only, fixed by hand on the registration screen; or (b) let the admin tick it on the proposal (unticked by default) so the commit writes "yes" and lists posted sales to record. Recommendation (b). **Answer (Mason, 2026-11-11): "Yes, tickable" — (b) is built** (item class `rup_upgrade`).

@@ -9,6 +9,7 @@ import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import type { GroundCrew, GroundCrewMember } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 interface GroundCrewsManagerProps {
   open: boolean;
@@ -79,7 +80,7 @@ export default function GroundCrewsManager({ open, onClose, crews, onChanged }: 
       const code = (err as { code?: string })?.code;
       if (code === '23505') toast('error', 'A crew with that name already exists');
       else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'GroundCrewsManager.createCrew' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'GroundCrewsManager.createCrew' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -112,7 +113,7 @@ export default function GroundCrewsManager({ open, onClose, crews, onChanged }: 
       const code = (err as { code?: string })?.code;
       if (code === '23505') toast('error', 'A crew with that name already exists');
       else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'GroundCrewsManager.saveCrew' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'GroundCrewsManager.saveCrew' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -134,7 +135,7 @@ export default function GroundCrewsManager({ open, onClose, crews, onChanged }: 
       setDeleteTarget(null);
       onChanged();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'GroundCrewsManager.confirmDelete' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'GroundCrewsManager.confirmDelete' } });
       toast('error', sanitizeError(err));
     }
     setDeleting(false);
@@ -153,7 +154,7 @@ export default function GroundCrewsManager({ open, onClose, crews, onChanged }: 
       setNewMemberName('');
       loadMembers(expandedCrewId);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'GroundCrewsManager.addMember' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'GroundCrewsManager.addMember' } });
       toast('error', sanitizeError(err));
     }
     setMemberBusy(false);
@@ -170,7 +171,7 @@ export default function GroundCrewsManager({ open, onClose, crews, onChanged }: 
       checkMutationResult(result, 'Remove crew member');
       if (expandedCrewId) loadMembers(expandedCrewId);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'GroundCrewsManager.removeMember' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'GroundCrewsManager.removeMember' } });
       toast('error', sanitizeError(err));
     }
     setMemberBusy(false);

@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -192,4 +192,25 @@ test('applyUserProblem: migrations apply only as postgres (pooler or direct), ne
   assert.equal(applyUserProblem('postgresql://postgres:pw@db.fsnjredpmakbmhwowjjt.supabase.co:5432/postgres'), null);
   assert.match(applyUserProblem('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /only as postgres, not crx_drift_ro/);
   assert.match(applyUserProblem('postgresql://migration_writer.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), /not migration_writer/);
+});
+
+test('realStamp: the right shape and a real calendar day', () => {
+  assert.equal(realStamp('20261231235959'), true);
+  assert.equal(realStamp('20280229120000'), true); // leap year
+  assert.equal(realStamp('20260231010000'), false); // 31 February
+  assert.equal(realStamp('20270229120000'), false); // not a leap year
+  assert.equal(realStamp('20261131000000'), false); // 31 November
+});
+
+test('fileProblems: a no-transaction file holds one statement; a one-shot is only checked for encoding', () => {
+  const buf = (t) => Buffer.from(t);
+  assert.deepEqual(fileProblems('x', buf('-- crx: no-transaction\nCREATE INDEX CONCURRENTLY i ON t (a);\n')), []);
+  assert.match(fileProblems('x', buf('-- crx: no-transaction\nCREATE INDEX CONCURRENTLY i ON t (a);\nDROP INDEX j;\n'))[0], /one statement/);
+  assert.deepEqual(fileProblems('x', buf("-- crx: no-transaction\nSET lock_timeout = '5s';\nCREATE INDEX CONCURRENTLY i ON t (a);\n")), []);
+  assert.match(fileProblems('x', buf('-- crx: no-transaction\nCREATE INDEX CONCURRENTLY i ON t (a);\nSET ROLE nobody;\n'))[0], /one statement/);
+  assert.match(fileProblems('x', buf("-- crx: no-transaction\nSET lock_timeout = '5s';\n"))[0], /one statement/);
+  assert.match(fileProblems('x', buf('-- crx: no-transaction\nSET session_replication_role = replica;\nUPDATE t SET a = 1;\n'))[0], /one statement/);
+  assert.match(fileProblems('x', buf('BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;\n'))[0], /transaction control/);
+  assert.deepEqual(fileProblems('x', buf('BEGIN;\nUPDATE t SET a = 1;\nCOMMIT;\n'), { forRun: false }), []);
+  assert.deepEqual(fileProblems('x', buf('-- crx: no-transaction\nUPDATE t SET a = 1;\nUPDATE t SET b = 2;\n'), { forRun: false }), []);
 });

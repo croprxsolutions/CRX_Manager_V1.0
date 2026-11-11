@@ -172,7 +172,7 @@ const autonomousLandingChecks = [
   ["no review asking for changes", /no review asks for changes/i],
   ["every required check green", /every required check is green/i],
   ["migrations limited to NON-destructive ones", /NON-destructive migration/i],
-  ["access changes limited to routine grants (Mason, 2026-09-26)", /routine grants only/i],
+  ["data rewrites and access changes land on the proofs (Mason, 2026-11-11)", /rewrites and access changes too; Mason, 2026-11-11/i],
   ["the migration-apply-guard proof gate", /migration-apply-guard proof gate/i],
   ["both reviewer proofs and a content-bound Sol proof", /both reviewer proofs and a content-bound Sol proof/i],
   // 24 hours since Mason's 2026-10-29 decision (was 30 minutes); live state is re-checked at apply.

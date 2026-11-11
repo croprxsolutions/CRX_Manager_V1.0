@@ -9006,6 +9006,9 @@ export type Database = {
           cancel_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
+          close_reason: string | null
+          closed_at: string | null
+          closed_by: string | null
           created_at: string
           created_by: string
           expected_delivery_date: string | null
@@ -9023,6 +9026,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by: string
           expected_delivery_date?: string | null
@@ -9040,6 +9046,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by?: string
           expected_delivery_date?: string | null
@@ -9057,6 +9066,13 @@ export type Database = {
           {
             foreignKeyName: "purchase_orders_cancelled_by_fkey"
             columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_closed_by_fkey"
+            columns: ["closed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -13350,6 +13366,14 @@ export type Database = {
           p_idempotency_key?: string
           p_performed_by: string
           p_period_end: string
+        }
+        Returns: Json
+      }
+      close_purchase_order_short: {
+        Args: {
+          p_idempotency_key?: string
+          p_po_id: string
+          p_reason: string
         }
         Returns: Json
       }

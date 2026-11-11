@@ -802,3 +802,76 @@ Engineering choice, to keep each Sol review small. Neither changes an amount.
 - P2, NULL `brand_key` for a no-brand entry: **already fixed** by the `'~none|'` sentinel (14.4).
 - P2, removing posting's delivery lock left a correction able to race a posting: **fixed**, the correction locks the linked invoices and re-reads them (14.3, 4.F row).
 - P2, a no-number brand's signal word skipped the product number's registration: **fixed**, the signal word follows the captured number (14.4).
+
+---
+
+## 15. Behavior contract for B-1a as built (2026-11-11, `plan-contract`)
+
+Read on `main` `eda8b1597` and live (read-only) on 2026-11-11. Section 14 and the rules of sections 3 and 4 that it keeps still hold. This section records only how B-1a meets them against the live code, and where the build departs from the sheet's mechanism (never its behaviour).
+
+### 15.1 Facts (live, 2026-11-11)
+
+- Preconditions met: `_product_parent_grouping_open()` is `SELECT true`; `epa_registration_seed_run` has its row (seeded 2026-11-11 15:14 UTC, 347 registrations); the `invoice_line_rup_captures` foreign key is `ON UPDATE CASCADE` (`20270102160000`, 14.6).
+- Completion chain: `complete_delivery` → `_complete_delivery_replay_impl_20261015` (authorization, replay, period check) → `_complete_delivery_period_preflight_impl` → `_complete_delivery_aggregate_impl` (1,075 characters; the **only** caller of `_complete_delivery_authorized_impl`) → `_complete_delivery_authorized_impl`. `start_and_complete_delivery` and `process_offline_action` both call `complete_delivery(`. A replay returns inside `_complete_delivery_replay_impl_20261015` and never reaches the aggregate step.
+- `edit_delivery` (wrapper with bound receipt) → `_edit_delivery_replay_impl_20261015`, which re-creates lines only when `p_items` is given and the delivery is `scheduled`, and refuses any delivery that is not `scheduled` or `in_progress`.
+- `_enqueue_delivery_receipt` is called only by `complete_delivery`; the receipt body is a snapshot.
+- `delivery_items` has no `(id, delivery_id, product_id)` unique; `product_parent_brands` has no `(parent_id, id)` unique; `product_brands` has `(product_id, id)`. Admins can `UPDATE delivery_items` directly (`del_items_update`).
+- `_product_parent_replay(key, scope, fingerprint)` (PAR-1, reused by REG-1's `set_epa_registration`) serialises a key, refuses a key used by another operation (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`, from `check_idempotency`), and refuses a different actor or payload (`IDEMPOTENCY_PAYLOAD_MISMATCH`).
+
+### 15.2 Mechanism choices (engineering; behaviour unchanged)
+
+1. **Where the completion rule runs:** `_complete_delivery_aggregate_impl` is re-issued with the same signature and grants. It checks the brand base `seq`, calls `_complete_delivery_authorized_impl` unchanged, then runs the completion rule (4.C steps 1, 2 and 5) and writes the `completed` event. The 28,953-character body is **not** re-issued. The rule now runs after the tote copy and invoice drafting rather than before; that order no longer matters, because 14.3 removed capture at completion and B-1b re-copies drafts off the `completed` event. A brand error fails the whole completion, because the rule is outside the Bill Split `EXCEPTION` block (P26).
+2. **`p_brand_base_seq`:** `complete_delivery` and `start_and_complete_delivery` are renamed to `_complete_delivery_evidence_impl_20270104` and `_start_and_complete_delivery_impl_20270104` (EXECUTE revoked from every app role) and replaced by thin wrappers with one trailing `p_brand_base_seq bigint DEFAULT NULL` and the same grants. A non-NULL value travels down in the transaction-local setting `crx.brand_base_seq`. The aggregate step (fresh completions only, delivery row already locked) refuses `BRAND_PICKS_CHANGED` if the delivery's highest event `seq` (0 when none) differs, then clears the setting. NULL completes as today, and the `completed` event records `picks_confirmed: false`. The `seq` is **not** part of the fingerprint: a same-key retry is the same completion, so a committed one replays and an uncommitted one is checked again on retry.
+3. **Retry safety:** the three new writers use `_product_parent_replay` plus `save_idempotency` (the REG-1 pattern) instead of the bound-receipt trigger, so the receipt-binding trigger on `idempotency_keys` is not recreated. The guarantees are the same: key required, cross-operation reuse refused, another actor or payload refused, and authorization before the lookup.
+4. **`edit_delivery`:** only the thin wrapper is re-issued. On a fresh call it copies the current picks before the body runs. When the body reports `items_changed`, it re-inserts the picks of each new line whose `order_item_id`, `product_id`, `quantity` and `unit_size` equal an old line with picks, when exactly one old line and one new line share those four values (otherwise those picks are dropped and listed, never guessed), copying each pick with its entry and review history, writes one `edited` event, and adds `brand_picks_kept` and `brand_lines_dropped` to the result and to the saved receipt, so a replay returns the same answer.
+5. **Integrity by key:** `delivery_item_brands (delivery_item_id, delivery_id, product_id)` references `delivery_items (id, delivery_id, product_id)` `ON DELETE CASCADE` (new unique), so a direct admin update of a picked line's product is refused; parent picks reference `product_parent_brands (parent_id, id)` (new unique); legacy picks reference `product_brands (product_id, id)`.
+6. **No registration lock** on delivery-side writers (14.3: they keep today's order, delivery row then invoices).
+
+### 15.3 Rules that always hold
+
+- Only `SECURITY DEFINER` functions write picks or events. App roles get `SELECT` only, under the delivery read rule (admin, sales rep, or the delivery's assigned driver). Events are append-only (update, delete and truncate refused).
+- Every brand writer holds the delivery row `FOR UPDATE` before reading the highest `seq` and writing its event, so `seq` order is commit order for each delivery.
+- Nothing about brands refuses a completion (Q5); only a non-NULL stale `seq` gives `BRAND_PICKS_CHANGED`.
+- A listed pick's snapshot comes from the brand row; a typed pick's from its typed values. A correction never overwrites a pick: it supersedes it.
+- No amount, quantity, cost, stock or invoice row changes in B-1a. The only invoice reads are the correction's posted check.
+
+### 15.4 Who may act
+
+| Action | Who | Server check |
+|---|---|---|
+| `set_delivery_brands` | active admin, sales rep, or the assigned driver | delivery `scheduled` or `in_progress`, else `DELIVERY_BRANDS_LOCKED`; each line on the delivery; a listed brand on the line's list (3.2) |
+| completion rule | whoever may complete (unchanged) | runs inside completion |
+| `correct_delivery_brands` | active admin | delivery `completed`; reason required; each named line's picks add up to delivered, or are empty (brand unknown: the line goes back on the office list); linked invoices locked `FOR UPDATE` in `id` order after the delivery row, refused `INVOICE_POSTED` if posted, overdue or paid |
+| `review_typed_brand` | active admin | pick is typed and current; `link` needs a brand on the line's current list |
+| `get_delivery_brands` | the delivery read rule (a driver only while active) | |
+| `get_typed_brands_for_review`, `get_deliveries_missing_brands` | active admin | |
+
+### 15.5 Existing rows
+
+The new tables start empty. A delivery completed before the apply has no `completed` event: `get_deliveries_missing_brands` lists such a line "completed before brand capture" only when its product has a brand list today. Deliveries scheduled or in progress at the apply have no picks and complete as today, with a `completed` event. The deployed app never sends `p_brand_base_seq`, so every completion until B-2 records `picks_confirmed: false`. Read-only check after the apply: both new tables exist with RLS on and app roles limited to `SELECT`; each delivery completed after the apply has one `completed` event; a pick count above 0 is fine (the new RPCs are callable as soon as the apply lands), and every pick sits on a delivery that is not cancelled or voided.
+
+### 15.6 Proof cases (local real-schema prover, test data only)
+
+- When a driver not on the delivery, an inactive user or an anonymous caller saves picks, then refused. Same key and same save, then one event and the same answer; different payload, then `IDEMPOTENCY_PAYLOAD_MISMATCH`; another operation's key, then `IDEMPOTENCY_CROSS_OP_KEY_REUSE`; no key, then `IDEMPOTENCY_KEY_REQUIRED`.
+- When a brand from another parent, from another size's legacy list, or a retired parent brand is saved, then `BRAND_NOT_FOR_PRODUCT`. A not-currently-sourced listed brand is accepted. A typed name equal to a listed brand with the same or a blank number is stored as the listed pick; with a different number, as typed and pending review.
+- When picks add up to more than loaded, then `BRAND_SPLIT_OVER_LOADED`. When a save uses an old base `seq` (after another save or an `edit_delivery`), then `BRAND_PICKS_CHANGED`.
+- When a delivery completes through `complete_delivery`, `start_and_complete_delivery` or an offline replay, with a branded line and no pick, a split that does not add up, or zero delivered, then it completes: zero delivered keeps no picks, one pick above delivered is trimmed to delivered, and one `completed` event records each line's delivered amount and brand-list size. A replay writes no second event.
+- When completion is sent with a stale `p_brand_base_seq`, then `BRAND_PICKS_CHANGED` and nothing changes; with the current one or NULL, then it completes (NULL records `picks_confirmed: false`).
+- When a legacy pick's size is grouped before completion, then the pick is re-pointed to its parent brand and its snapshot is unchanged.
+- When `edit_delivery` changes only the date and sends the same items, then the picks are kept under the new line IDs; when one line's quantity changes, then only that line's picks drop. Both write one `edited` event.
+- When an admin corrects a delivery with a linked posted invoice, then `INVOICE_POSTED`; with only drafts, then the old picks are superseded and the new ones current. Two corrections from one base: the second is `BRAND_PICKS_CHANGED`. A non-admin is refused.
+- When the receipt is queued, then each line carries its `brands` (single, split, typed), or `brand_recorded: false` for a branded line with no pick; an unbranded line is as today.
+- When grants are read from the catalog, then app roles have only `SELECT` on the new tables, no helper is executable by an app role, and every new `SECURITY DEFINER` function pins `search_path`.
+- When the same flow runs with and without picks, then no money, quantity, stock or invoice column differs.
+
+### 15.7 Delivery
+
+B-1a ships alone, database only. The deployed app keeps working unchanged: the new parameters default to NULL and the new RPCs are unused until B-2. Recovery is a forward repair in its own reviewed migration: it restores the re-issued functions from their pre-apply bodies (pinned by md5 in the preflight) and the two original signatures, and drops the new functions. The two tables and their rows stay, because every completion after the apply writes a `completed` event and the new RPCs are callable at once; dropping them would need its own explicitly approved migration. B-1b follows as its own PR.
+
+### 15.8 Open business decisions
+
+None. Every behaviour above is one of Mason's earlier answers (Q1 to Q9) or an engineering choice.
+
+### 15.9 Cold challenge (Astra, 2026-11-11) and what changed
+
+Astra's challenge of this contract was triaged against the live code. **Fixed in the migration:** rollback keeps the tables (forward repair, 15.7); an ambiguous edit match drops picks instead of guessing (15.2.4); edit carry keeps review fields; the driver read rule needs an active profile; pick amounts are above zero, not NaN, at most 4 decimals; a typed name shared by two listed brands with no number stays typed for review; a correction may empty a line; the office list adds `brand_no_longer_listed` and flags "completed before brand capture" only for a line with no picks; the delivery row is locked before `edit_delivery` copies picks. **Kept, with reasons:** the base `seq` stays out of the completion fingerprint (15.2.2); lock order (delivery, then invoices by id) matches posting, which never locks a delivery; direct admin edits of `delivery_items` have no app path (the composite key still refuses a product change on a picked line); one statement per read gives one snapshot. **Later parts:** the corrected-receipt resend and invoice and RUP copies are B-1b and B-3; screens are B-2.

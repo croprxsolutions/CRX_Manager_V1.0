@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { preferredQuoteNotes } from './quoteNotes';
+import { preferredQuoteNotes, quoteLineChange } from './quoteNotes';
 import type { Product } from '../types';
 
 /**
@@ -54,5 +54,19 @@ describe('preferredQuoteNotes', () => {
         'grower memo',
       );
     });
+  });
+});
+
+describe('quoteLineChange', () => {
+  it('reports what a new quote line shows before and after', () => {
+    expect(quoteLineChange({ quoting_notes: null, notes: 'desc' }, { quoting_notes: 'note', notes: 'desc' }))
+      .toEqual({ before: 'desc', after: 'note' });
+    expect(quoteLineChange({ quoting_notes: 'note', notes: 'desc' }, { quoting_notes: '', notes: 'desc' }))
+      .toEqual({ before: 'note', after: 'desc' });
+  });
+
+  it('is null when a customer would see no difference', () => {
+    expect(quoteLineChange({ quoting_notes: 'note', notes: 'a' }, { quoting_notes: 'note', notes: 'b' })).toBeNull();
+    expect(quoteLineChange({ quoting_notes: 'note' }, { quoting_notes: ' note ' })).toBeNull();
   });
 });

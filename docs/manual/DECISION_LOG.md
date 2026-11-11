@@ -10,6 +10,32 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.
+**What this forbids/implies:** do not extend the product guard to billed tickets, or re-check units on invoice void, without a new decision. If round 6 finds anything new, stop and bring it to Mason.
+
+## 2026-11-10 — #1733 (KI-16 rate units) gets one more Sol round (round 5) after a merge of main
+
+**Decision (Mason, in chat, 2026-11-10: "Yes, run round 5").** PR #1733 may run Sol round 5. Sol round 4 was clean at `1334014e7`; the only later change is a merge of `main` whose one conflict was the "Last verified" stamp line in `docs/manual/KNOWN_ISSUES.md`, and carry-forward refuses a merge that conflicted. No finding keeps returning: each Sol round found a different issue, all fixed or recorded as follow-ups.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
+## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
+
+**Decision (Mason, 2026-11-09, #1710):** a turned-off crop + timing option is hidden by the pickers, but the database no longer refuses a save that holds it.
+**Why:** Sol's third round on #1710 found the same "save races a turn-off" gap again, plus grouping sizes that hold a turned-off option failing. Mason chose the business trade-off that removes the mechanism: a rare product may keep a just-turned-off timing; it stays visible and an admin can remove it.
+**What this forbids/implies:** do not re-add a database lock or refusal for turned-off timings without a new decision; the screens (USE-1 screens PR) must not offer a turned-off option. One pair twice on one row is still refused.
+
+## 2026-11-09 — #1705 (RT-1 draft rates): counted units are checked against the label maximum; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-09: "yes do it").** Sol round 5 on PR #1705 found that a label maximum written in a counted unit (`each`, `ea`, `unit`, for example "1 each/acre") was reported "not comparable", so a house rate above it needed no reason. The build sheet (section 3.5 step 4) had listed only ounce, pint, quart, gallon, pound, gram and milligram as comparable. Counted units now compare too, with an each-kind row only, and the suggested-rate reader also reads `each`. Sol round 6 may run on the fixed head.
+**What this implies:** this widens the build sheet's comparable-unit list. Mason's rule for this PR: a round-6 finding goes to him before any further fix. (Round 6 was clean at `a3b9b5a8d`.)
+
+## 2026-11-09 — #1705 (RT-1 draft rates) gets one more Sol round (round 5) after the fluid-ounce fix
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1705 may run Sol round 5. Sol round 4 was clean at `6687055b5`; the Codex GitHub App then found that a label maximum written as "fluid ounce" lost its volume kind, fixed at `163e7e33e`. A label maximum whose unit spelling is not one the database recognizes is reported as "not comparable" rather than guessed. No finding keeps returning: each Sol round found a different issue, all fixed.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
+
 ## 2026-11-09 — #1649 gets one more Sol round (round 5) to confirm its fixes
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1649 (KI-25 part B, delivery receipts go through the server sender) may run Sol round 5. No finding keeps returning: Sol's last findings were fixed at `e23e75591`, and the only later change is a changelog wording fix; the merge gate found no saved Sol proof, so this round re-confirms the fixed head.

@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-08",
+    "generated_at": "2026-11-10",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261108043505",
+    "migrations_high_water": "20261110044233",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -553,6 +553,19 @@
       "20261209100000_product_chemistry",
       "20261210100000_epa_registrations",
       "20261211100000_product_chemistry_confirmed_swaps",
+      "20261211110000_loader_weights_getter_job_schedule",
+      "20261214100000_ki30_epa_registration_corrections",
+      "20261215100000_dispatch_sync_on_applicator_qualify",
+      "20261215110000_chem_sale_bill_split_invoices",
+      "20261217100000_job_access_ends_with_the_job",
+      "20261220100000_applicator_keeps_own_record_fields",
+      "20261221100000_close_delivery_receipt",
+      "20261222100000_document_restore_and_photo_uploader",
+      "20261222110000_bill_split_payers_read",
+      "20261229100000_product_grouping_switch_on",
+      "20261229110000_product_rates_draft",
+      "20261229120000_product_crop_use_pairs",
+      "20261229150000_sales_reports_per_payer",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1428,6 +1441,10 @@
       "superseded",
       "closed"
     ],
+    "product_rates.status": [
+      "draft",
+      "approved"
+    ],
     "product_supplier_links.comparison_status": [
       "pending",
       "comparable",
@@ -1539,6 +1556,7 @@
     "credit_memo_applications",
     "customer_addresses",
     "customer_application_rates",
+    "customer_document_restores",
     "cycle_count_items",
     "cycle_counts",
     "delivery_items",
@@ -1580,7 +1598,6 @@
     "order_item_field_allocations",
     "order_items",
     "order_line_allocations",
-    "order_shares",
     "payments",
     "prepay_applications",
     "pricing_change_set_preview_rows",
@@ -1604,11 +1621,12 @@
     "product_parent_density_values",
     "product_parent_events",
     "product_rate_correction_passes",
+    "product_rate_draft_events",
     "product_rate_events",
     "product_rate_lock",
+    "product_rate_units",
     "product_size_net_weight_state",
     "product_size_net_weight_values",
-    "product_use_timing_options",
     "product_weight_events",
     "profile_public_directory",
     "purchase_order_import_intents",
@@ -3096,6 +3114,35 @@
         "product_parents_product_form_check"
       ]
     },
+    "product_rate_draft_events.event_type": {
+      "values": [
+        "derived",
+        "derive_note",
+        "saved",
+        "deleted"
+      ],
+      "constraints": [
+        "product_rate_draft_events_event_type_check"
+      ]
+    },
+    "product_rate_draft_events.note_code": {
+      "values": [
+        "no_rate",
+        "unit_unknown",
+        "unit_not_for_form",
+        "basis_suspect",
+        "basis_from_text",
+        "text_unparsed",
+        "sizes_disagree",
+        "stock_units_differ",
+        "above_label",
+        "value_invalid"
+      ],
+      "constraints": [
+        "product_rate_draft_events_note_code_check"
+      ],
+      "nullable": true
+    },
     "product_rate_events.event_type": {
       "values": [
         "locked",
@@ -3104,6 +3151,56 @@
       ],
       "constraints": [
         "product_rate_events_event_type_check"
+      ]
+    },
+    "product_rate_units.kind": {
+      "values": [
+        "volume",
+        "weight",
+        "each"
+      ],
+      "constraints": [
+        "product_rate_units_kind_check"
+      ]
+    },
+    "product_rates.basis": {
+      "values": [
+        "per_acre",
+        "per_100_gal",
+        "per_unit",
+        "per_cwt_seed",
+        "per_seed_unit"
+      ],
+      "constraints": [
+        "product_rates_basis_check"
+      ]
+    },
+    "product_rates.origin": {
+      "values": [
+        "derived_house",
+        "derived_text",
+        "manual"
+      ],
+      "constraints": [
+        "product_rates_origin_check"
+      ]
+    },
+    "product_rates.source": {
+      "values": [
+        "label",
+        "house_standard"
+      ],
+      "constraints": [
+        "product_rates_source_check"
+      ]
+    },
+    "product_rates.status": {
+      "values": [
+        "draft",
+        "approved"
+      ],
+      "constraints": [
+        "product_rates_status_check"
       ]
     },
     "product_size_net_weight_values.review_state": {
@@ -4573,6 +4670,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "order_item_shares",
+      "constraint": "order_item_shares_split_percentage_check",
+      "def": "CHECK (((split_percentage > (0)::numeric) AND (split_percentage <= (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "order_items",
       "constraint": "chk_oi_qty_delivered",
       "def": "CHECK ((quantity_delivered >= (0)::numeric))",
@@ -4939,6 +5042,18 @@
       "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
+      "table": "product_crop_options",
+      "constraint": "product_crop_options_code_check",
+      "def": "CHECK ((code ~ '^[a-z][a-z0-9_]*$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_crop_options",
+      "constraint": "product_crop_options_label_check",
+      "def": "CHECK (((label = btrim(label)) AND (label <> ''::text) AND (length(label) <= 60)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_families",
       "constraint": "product_families_name_canonical_check",
       "def": "CHECK (((name = btrim(name)) AND (name <> ''::text)))",
@@ -5185,6 +5300,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "product_rate_draft_events",
+      "constraint": "product_rate_draft_events_check",
+      "def": "CHECK (((event_type = 'derive_note'::text) = (note_code IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
       "table": "product_rate_events",
       "constraint": "product_rate_events_check",
       "def": "CHECK (((event_type = 'corrected'::text) = (product_id IS NOT NULL)))",
@@ -5201,6 +5322,96 @@
       "constraint": "product_rate_lock_id_check",
       "def": "CHECK (id)",
       "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rate_units",
+      "constraint": "product_rate_units_factor_check",
+      "def": "CHECK ((factor > (0)::numeric))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_approval_fields",
+      "def": "CHECK ((((status = 'draft'::text) AND (approved_by IS NULL) AND (approved_at IS NULL)) OR ((status = 'approved'::text) AND (approved_by IS NOT NULL) AND (approved_at IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_default_house",
+      "def": "CHECK (((NOT is_quoting_default) OR (source = 'house_standard'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_default_per_acre",
+      "def": "CHECK (((NOT is_quoting_default) OR (basis = 'per_acre'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_default_recommended",
+      "def": "CHECK (((NOT is_quoting_default) OR (recommended IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_high_check",
+      "def": "CHECK (((high IS NULL) OR ((high >= (0)::numeric) AND (high < '1000000000'::numeric) AND (high = round(high, 6)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_low_check",
+      "def": "CHECK (((low IS NULL) OR ((low >= (0)::numeric) AND (low < '1000000000'::numeric) AND (low = round(low, 6)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_low_le_high",
+      "def": "CHECK (((low IS NULL) OR (high IS NULL) OR (low <= high)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_low_le_recommended",
+      "def": "CHECK (((recommended IS NULL) OR (low IS NULL) OR (low <= recommended)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_one_value",
+      "def": "CHECK (((low IS NOT NULL) OR (recommended IS NOT NULL) OR (high IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_over_label_reason_check",
+      "def": "CHECK (((over_label_reason IS NULL) OR ((btrim(over_label_reason, ' \t\r\n '::text) <> ''::text) AND (over_label_reason = btrim(over_label_reason, ' \t\r\n '::text)) AND (length(over_label_reason) <= 500))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_recommended_check",
+      "def": "CHECK (((recommended IS NULL) OR ((recommended >= (0)::numeric) AND (recommended < '1000000000'::numeric) AND (recommended = round(recommended, 6)))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_recommended_le_high",
+      "def": "CHECK (((recommended IS NULL) OR (high IS NULL) OR (recommended <= high)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_row_version_check",
+      "def": "CHECK ((row_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_rates",
+      "constraint": "product_rates_source_text_check",
+      "def": "CHECK (((source_text IS NULL) OR (length(source_text) <= 200)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "product_size_net_weight_values",
@@ -5285,6 +5496,12 @@
       "constraint": "product_use_timing_options_label_check",
       "def": "CHECK (((label = btrim(label)) AND (label <> ''::text) AND (POSITION((';'::text) IN (label)) = 0)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "product_use_timing_options",
+      "constraint": "product_use_timing_options_timing_code_check",
+      "def": "CHECK ((timing_code ~ '^[a-z][a-z0-9_]*$'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "product_weight_events",
@@ -6195,6 +6412,18 @@
         "is_active",
         "created_at",
         "updated_at"
+      ]
+    },
+    "customer_document_restores": {
+      "no_default": [
+        "document_id",
+        "customer_id",
+        "removed_at",
+        "restored_by"
+      ],
+      "with_default": [
+        "id",
+        "restored_at"
       ]
     },
     "customer_documents": {
@@ -7152,7 +7381,8 @@
       ],
       "with_default": [
         "id",
-        "created_at"
+        "created_at",
+        "updated_at"
       ]
     },
     "orders": {
@@ -7393,6 +7623,18 @@
       ],
       "with_default": [
         "created_at"
+      ]
+    },
+    "product_crop_options": {
+      "no_default": [
+        "code",
+        "label",
+        "sort_order"
+      ],
+      "with_default": [
+        "is_active",
+        "created_at",
+        "updated_at"
       ]
     },
     "product_families": {
@@ -7682,6 +7924,17 @@
       ],
       "with_default": []
     },
+    "product_rate_draft_events": {
+      "no_default": [
+        "parent_id",
+        "event_type",
+        "changed_by"
+      ],
+      "with_default": [
+        "id",
+        "changed_at"
+      ]
+    },
     "product_rate_events": {
       "no_default": [
         "event_type",
@@ -7699,6 +7952,36 @@
         "id",
         "is_locked",
         "changed_at"
+      ]
+    },
+    "product_rate_units": {
+      "no_default": [
+        "code",
+        "kind",
+        "factor",
+        "label",
+        "legacy_spellings"
+      ],
+      "with_default": []
+    },
+    "product_rates": {
+      "no_default": [
+        "parent_id",
+        "basis",
+        "source",
+        "unit",
+        "origin",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "is_quoting_default",
+        "status",
+        "basis_confirmed",
+        "row_version",
+        "created_at",
+        "updated_at"
       ]
     },
     "product_size_net_weight_state": {
@@ -7751,7 +8034,9 @@
       ],
       "with_default": [
         "is_active",
-        "created_at"
+        "created_at",
+        "updated_at",
+        "option_version"
       ]
     },
     "product_weight_events": {
@@ -8950,6 +9235,15 @@
       "created_at",
       "updated_at"
     ],
+    "customer_document_restores": [
+      "id",
+      "document_id",
+      "customer_id",
+      "removed_at",
+      "removed_by",
+      "restored_at",
+      "restored_by"
+    ],
     "customer_documents": [
       "id",
       "customer_id",
@@ -9949,7 +10243,8 @@
       "last_printed_by",
       "carrier_rate_gpa",
       "loader_tank_capacity",
-      "commission_split"
+      "commission_split",
+      "completed_at"
     ],
     "label_draft_targets": [
       "draft_id",
@@ -10104,7 +10399,8 @@
       "amount_cents",
       "is_primary",
       "sort_order",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "orders": [
       "id",
@@ -10368,6 +10664,14 @@
       "rollout_scope",
       "created_at"
     ],
+    "product_crop_options": [
+      "code",
+      "label",
+      "sort_order",
+      "is_active",
+      "created_at",
+      "updated_at"
+    ],
     "product_families": [
       "id",
       "name",
@@ -10627,6 +10931,18 @@
       "txid",
       "product_id"
     ],
+    "product_rate_draft_events": [
+      "id",
+      "parent_id",
+      "rate_id",
+      "event_type",
+      "before_values",
+      "after_values",
+      "note_code",
+      "reason",
+      "changed_by",
+      "changed_at"
+    ],
     "product_rate_events": [
       "id",
       "event_type",
@@ -10645,6 +10961,36 @@
       "changed_by_name",
       "changed_at",
       "reason"
+    ],
+    "product_rate_units": [
+      "code",
+      "kind",
+      "factor",
+      "label",
+      "legacy_spellings"
+    ],
+    "product_rates": [
+      "id",
+      "parent_id",
+      "basis",
+      "source",
+      "low",
+      "recommended",
+      "high",
+      "unit",
+      "is_quoting_default",
+      "status",
+      "approved_by",
+      "approved_at",
+      "origin",
+      "basis_confirmed",
+      "source_text",
+      "over_label_reason",
+      "row_version",
+      "created_by",
+      "created_at",
+      "updated_by",
+      "updated_at"
     ],
     "product_size_net_weight_state": [
       "product_id",
@@ -10701,7 +11047,11 @@
       "category",
       "sort_order",
       "is_active",
-      "created_at"
+      "created_at",
+      "created_by",
+      "updated_by",
+      "updated_at",
+      "option_version"
     ],
     "product_weight_events": [
       "id",

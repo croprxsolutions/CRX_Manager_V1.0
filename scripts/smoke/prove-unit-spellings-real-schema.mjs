@@ -410,6 +410,9 @@ async function main() {
   const s0 = { units: units(), money: money(), versions: versions(), fns: fnBodies(), perAcre: perAcre() };
   assert.match(s0.fns, /:14$/, 'the 14 functions that read unit_conversions are present');
   const q0 = quotes(rows);
+  // The fixture quotes carry the old spellings; cancel them so only the open-lines test below sees a live one.
+  const retireQuotes = () => raw("UPDATE public.quotes SET status = 'cancelled' WHERE quote_number LIKE 'RT2A-Q%' AND status <> 'cancelled';");
+  retireQuotes();
   const armezon = rows.find((r) => r.old === 'Oz');
   const imazuron = rows.find((r) => r.old === 'LB');
   const imazFam = families().find((x) => x.product === imazuron.id).parent;
@@ -455,6 +458,18 @@ async function main() {
   refused('cand.sql', /RT2A_INVENTORY_DRIFT: 1 inventory rows/);
   raw(`DELETE FROM public.inventory WHERE product_id = '${armezon.id}';`);
   console.log('[prover] inventory: an unexpected old-spelling inventory snapshot refuses');
+
+  // Sol round 14: a live quote or an open purchase order on an old spelling refuses; a cancelled one does not count.
+  const ozRow = rows.find((r) => r.old === 'Oz');
+  raw("UPDATE public.quotes SET status = 'draft' WHERE quote_number = 'RT2A-Q1';");
+  refused('cand.sql', /RT2A_OPEN_LINES/);
+  retireQuotes();
+  raw(`INSERT INTO public.purchase_orders (id, po_number, status, created_by) VALUES ('${FAM}', 'RT2A-PO', 'submitted', '${ADMIN}');
+    INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, unit_cost, unit_size)
+      VALUES ('${FAM}', '${ozRow.id}', 2, 10, 'Oz');`);
+  refused('cand.sql', new RegExp(`RT2A_OPEN_LINES[^\\n]*${esc(ozRow.name)}`));
+  raw(`UPDATE public.purchase_orders SET status = 'cancelled' WHERE id = '${FAM}';`);
+  console.log('[prover] open lines: a live quote or an open purchase order on an old spelling refuses');
 
   // U9. Families: a listed product moved to another family, a second size in a pinned family, a fill-source link,
   // an unlisted family on a losing spelling, and Imazuron differing from its family each refuse.
@@ -600,6 +615,7 @@ async function main() {
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trigger_zz_guard_product_parent_values';"), 'O');
   assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'LB/3', 'recovery moved the family back');
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after recovery');
+  retireQuotes();
   const again = apply('cand.sql');
   assert.equal(again.status, 0, again.output);
   assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'Lb/4');

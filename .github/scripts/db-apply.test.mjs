@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -146,4 +146,24 @@ test('a file that is only stored (backfill, one-shot) needs clean UTF-8, not the
   assert.match(fileProblems('x', wrapped)[0], /own transaction control/);
   assert.deepEqual(fileProblems('x', wrapped, { forRun: false }), []);
   assert.match(fileProblems('x', Buffer.from([0xff]), { forRun: false })[0], /not valid UTF-8/);
+});
+
+test('ledgerDrift: rows with no file, rows whose file changed, files never applied', () => {
+  const hw = '20260727174805';
+  const files = new Map([
+    ['20261101000000_a', 'h-a'],
+    ['20261102000000_b', 'h-b-new'],
+    ['20261103000000_pending', 'h-p'],
+  ]);
+  const stored = new Map([
+    ['legacy_name', ''], // baseline-era row: ignored
+    ['20260101000000_old', 'x'], // before the baseline: ignored
+    ['20261101000000_a', 'h-a'],
+    ['20261102000000_b', 'h-b-old'],
+    ['20261105000000_sql_editor_change', 'h-z'],
+  ]);
+  const d = ledgerDrift({ stored, files, highWater: hw, oneShots: new Set() });
+  assert.deepEqual(d.noFile, ['20261105000000_sql_editor_change']);
+  assert.deepEqual(d.changed, ['20261102000000_b']);
+  assert.deepEqual(d.notApplied, ['20261103000000_pending']);
 });

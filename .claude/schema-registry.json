@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261111004032",
+    "migrations_high_water": "20261111152650",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -571,6 +571,13 @@
       "20261231200000_epa_registration_tools",
       "20261231210000_rup_records_by_line",
       "20261231220000_epa_registration_seed",
+      "20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold",
+      "20270101010000_unit_spellings_remap",
+      "20270102160000_rup_capture_fk_on_update_cascade",
+      "20270103110000_ki143_vendor_bill_received_value_checks",
+      "20270103140000_dry_product_fluid_ounce_guard",
+      "20270103150000_ki108_stock_matches_history",
+      "20270103160000_setup_workbook_chemistry_tabs",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1286,6 +1293,11 @@
       "failed",
       "needs_review"
     ],
+    "chemistry_change_proposals.status": [
+      "proposed",
+      "applied",
+      "rejected"
+    ],
     "commission_payments.status": [
       "unposted",
       "posted",
@@ -1888,6 +1900,16 @@
       ],
       "constraints": [
         "blend_tickets_status_check"
+      ]
+    },
+    "chemistry_change_proposals.status": {
+      "values": [
+        "proposed",
+        "applied",
+        "rejected"
+      ],
+      "constraints": [
+        "chemistry_change_proposals_status_check"
       ]
     },
     "commission_earned_state_ledger.event_kind": {
@@ -3928,6 +3950,30 @@
       "table": "blend_tickets",
       "constraint": "blend_tickets_ocr_confidence_score_check",
       "def": "CHECK (((ocr_confidence_score >= (0)::numeric) AND (ocr_confidence_score <= (100)::numeric)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_base_chemistry_version_check",
+      "def": "CHECK ((base_chemistry_version >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_decision",
+      "def": "CHECK ((((status = 'proposed'::text) AND (decided_by IS NULL) AND (decided_at IS NULL) AND (applied_chemistry_version IS NULL)) OR ((status = 'rejected'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (applied_chemistry_version IS NULL)) OR ((status = 'applied'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (applied_chemistry_version IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_items_check",
+      "def": "CHECK (((jsonb_typeof(items) = 'array'::text) AND ((jsonb_array_length(items) >= 1) AND (jsonb_array_length(items) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_proposal_version_check",
+      "def": "CHECK ((proposal_version >= 1))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6314,6 +6360,22 @@
         "manually_corrected_fields"
       ]
     },
+    "chemistry_change_proposals": {
+      "no_default": [
+        "parent_id",
+        "items",
+        "has_delete",
+        "base_chemistry_version",
+        "created_by"
+      ],
+      "with_default": [
+        "id",
+        "proposal_version",
+        "status",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "commission_earned_state_ledger": {
       "no_default": [
         "commission_id",
@@ -8126,7 +8188,8 @@
     },
     "products": {
       "no_default": [
-        "product_name"
+        "product_name",
+        "product_form"
       ],
       "with_default": [
         "id",
@@ -9129,6 +9192,21 @@
       "job_id",
       "application_service_id",
       "manually_corrected_fields"
+    ],
+    "chemistry_change_proposals": [
+      "id",
+      "parent_id",
+      "items",
+      "has_delete",
+      "base_chemistry_version",
+      "proposal_version",
+      "status",
+      "applied_chemistry_version",
+      "created_by",
+      "created_at",
+      "decided_by",
+      "decided_at",
+      "updated_at"
     ],
     "commission_earned_state_ledger": [
       "id",

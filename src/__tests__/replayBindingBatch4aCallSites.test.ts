@@ -19,8 +19,8 @@ const INTENT_OR_ACTOR =
 // File -> [number of batch 4a sites, the retire statement each site must contain].
 const SITES: Record<string, [number, string[]]> = {
   'src/pages/MonthEndClose.tsx': [2, ['closePeriodIdem.resetKey();', 'reopenPeriodIdem.resetKeyFor(reopenScope);']],
-  // OrderDetail also has batch 4b's price_order site in the same form.
-  'src/pages/OrderDetail.tsx': [2, ['consolidateIdem.resetKey();', 'priceOrderIdem.resetKey();']],
+  // OrderDetail has batch 4b's price_order site in the same form (its consolidate site was retired 2026-11-11).
+  'src/pages/OrderDetail.tsx': [1, ['priceOrderIdem.resetKey();']],
   'src/pages/Rebates.tsx': [2, ['createClaimKey.resetKey();', 'transitionKeysRef.current.delete(scope);']],
   // InvoiceDetail also has batch 1's write-off site in the same form.
   'src/pages/InvoiceDetail.tsx': [3, ['delete unpostKeysRef.current[', 'transferToSchedulingIdem.resetKey();']],

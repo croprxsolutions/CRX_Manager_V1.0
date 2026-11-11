@@ -8,7 +8,7 @@ Read at `462212c7e` (origin/main) and live read-only on 2026-11-10.
   on 2026-11-10, in chat: trust the transaction history. For 2,4D Amine 4# - 2.5 Gal, whose history adds up to
   −70 because the March opening load was never recorded, keep the stored 25 and add the missing +95
   opening-stock row (Mason, 2026-11-10: "Keep 25, add +95").
-- **Change.** One data-only migration, `supabase/migrations/20270102100000_ki108_stock_matches_history.sql`,
+- **Change.** One data-only migration, `supabase/migrations/20270103150000_ki108_stock_matches_history.sql`,
   plus its changelog record. No function, policy, screen or code change. Files: the migration, its proof
   script, its changelog note, this contract. `docs/manual/KNOWN_ISSUES.md` KI-108 is updated to FIXED after
   the live apply, once docs PR #1760 (which rewrites that entry) has landed, to avoid a conflict.

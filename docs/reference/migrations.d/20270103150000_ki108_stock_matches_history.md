@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20270103150000_ki108_stock_matches_history.sql` (SQL sha256: `5ed8877c0e6882c3ecb77aa42f6c9ba4054f11c1ef0d88c036d027d0a7c6915e`). KI-108, data only: sets four products' stored stock to their transaction history (Black Strap Molasses Tote 2000 → 675, Start Right 2.0 Tote 670.19 → 140.19, 2,4D Amine Bulk 55 → 0, Start Right 2.0 2.5G 290 → 280) and adds one +95 `adjusted` row for 2,4D Amine 2.5 Gal (stored 25 kept), as Mason decided on 2026-11-10. Refuses with `KI108_PREIMAGE_DRIFTED` unless each product's inventory row, ledger total, row count and newest movement still match the 2026-11-10 read; no function, policy or grant change.
+
+**Live capture — 2026-11-11 ~04:20 UTC (10:20 PM Central, 2026-11-10) (read-only):** all five inventory rows, ledger totals, row counts and newest movement times equal the values bound in the migration; one inventory row per product; quantity_prebooked 0.
+
+Contract: `docs/plans/2026-11-10-ki108-stock-matches-history-CONTRACT.md`.

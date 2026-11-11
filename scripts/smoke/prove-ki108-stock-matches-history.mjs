@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Proof for 20270102100000_ki108_stock_matches_history.sql (data-only).
+ * Proof for 20270103150000_ki108_stock_matches_history.sql (data-only).
  *
  * Builds the checked-in production schema baseline in a network-disabled PostgreSQL 17 container,
  * seeds the five inventory rows as bound in the migration plus synthetic ledger rows reproducing its bound
@@ -28,7 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const NAME = `crx-ki108-${process.pid}-${Date.now().toString(36)}`;
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
-const CANDIDATE = path.join(ROOT, 'supabase', 'migrations', '20270102100000_ki108_stock_matches_history.sql');
+const CANDIDATE = path.join(ROOT, 'supabase', 'migrations', '20270103150000_ki108_stock_matches_history.sql');
 const MASON = '22c1fc50-4d2a-4baa-8ff8-341c0c7edd4f';
 
 const BS_TOTE = 'b6e75c1b-f12b-48dd-b946-1fc0298c2ae6';

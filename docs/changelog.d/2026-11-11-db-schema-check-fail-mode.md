@@ -1,0 +1,16 @@
+## 2026-11-11 - Staging schema check: platform lines out, a difference now fails
+
+The first staging report (run 42996813824, after #1773) compared 11,714 objects. It found 7 differences, all
+from the Supabase platform, none in `public`:
+- `supabase_realtime_admin` is a member of `anon`, `authenticated` and `service_role` on staging, not in the
+  rebuild (the local Supabase image decides that). It is a platform role, not a login of the app.
+- Storage tables that come and go between storage versions: `storage.bucket_lifecycle_states` and
+  `storage.lifecycle_abandoned_artifacts` exist on staging, `storage.iceberg_namespaces` and
+  `storage.iceberg_tables` only in the local rebuild.
+
+`.github/scripts/schema-fingerprint.sql` now leaves out memberships held by `supabase_realtime_admin`; every other membership
+of an app role is still compared. It
+checks RLS on only `storage.objects` and `storage.buckets`, the tables the app's storage policies use;
+storage policies are still compared in full. `SCHEMA_MODE: report` is removed from
+`.github/workflows/db-apply.yml`, so any remaining difference fails the "Staging schema matches the
+files" job. That job runs after the apply, and the edge deploy does not wait for it.

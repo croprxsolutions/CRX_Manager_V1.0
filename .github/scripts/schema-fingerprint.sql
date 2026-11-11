@@ -23,9 +23,11 @@ lines AS (
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
-  -- Storage tables: their policies are below, so whether RLS is on matters too.
+  -- Storage tables the app's policies use (below), so whether RLS is on matters too. Only these two: the
+  -- platform adds and drops its other storage tables between storage versions.
   SELECT 'relation storage.' || c.relname || ' rls=' || c.relrowsecurity || ' force=' || c.relforcerowsecurity
-    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'storage' AND c.relkind IN ('r', 'p')
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'storage' AND c.relname IN ('objects', 'buckets') AND c.relkind IN ('r', 'p')
   UNION ALL
   -- What the app's roles may do beyond grants (BYPASSRLS ignores every policy).
   SELECT 'role ' || rolname || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' login=' || rolcanlogin
@@ -108,7 +110,10 @@ lines AS (
          || CASE WHEN m.admin_option THEN ' +admin' ELSE '' END
          || ' inherit=' || m.inherit_option || ' set=' || m.set_option
     FROM pg_auth_members m
-    WHERE m.member IN (SELECT oid FROM approle) OR m.roleid IN (SELECT oid FROM approle)
+    WHERE (m.member IN (SELECT oid FROM approle) OR m.roleid IN (SELECT oid FROM approle))
+      -- The platform makes supabase_realtime_admin a member of anon, authenticated and service_role, with
+      -- options that differ between hosted and local. It is a platform role, not a login of the app.
+      AND m.member <> coalesce((SELECT oid FROM pg_roles WHERE rolname = 'supabase_realtime_admin'), 0)
   UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
   SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')

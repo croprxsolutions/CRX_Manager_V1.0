@@ -137,8 +137,6 @@ jobs:
     env:
       STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
       TARGET_REF: fsnjredpmakbmhwowjjt
-      # ponytail: report-only until the first staging report is reviewed; then remove this line.
-      SCHEMA_MODE: report
     # The read-only URL is given only to the steps that use it, never to checkout or the rebuild.
     steps:
       - id: on

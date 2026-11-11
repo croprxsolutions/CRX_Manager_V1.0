@@ -1,5 +1,5 @@
 -- Written 2026-11-10. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270102150000_po_close_short.md.
+-- docs/reference/migrations.d/20270103120000_po_close_short.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-142, contract docs/plans/2026-11-10-ki142-po-close-short-CONTRACT.md): a partly received purchase order can
@@ -19,7 +19,7 @@
 --   6. A closed PO can still be billed for what arrived: _section9_create_vendor_bill_intent_impl_20260826 (live body
 --      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list. Bills above what
 --      arrived stay governed by KI-143's received-value limit in the public create_vendor_bill / update_vendor_bill
---      (20270102143000, required live by the preflight), which reads quantity_received for every PO status.
+--      (20270103110000, required live by the preflight), which reads quantity_received for every PO status.
 --   7. A cost correction on a closed PO may not lower the received value below its active bills (the close's rule).
 --
 -- idempotency-body-check: exempt -- close_purchase_order_short requires p_idempotency_key, checks it with
@@ -71,13 +71,13 @@ BEGIN
      OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: a function this file relies on is missing';
   END IF;
-  -- KI-143 (20270102143000) must be live: its public bill wrappers hold bills on any PO, closed included, to what arrived.
+  -- KI-143 (20270103110000) must be live: its public bill wrappers hold bills on any PO, closed included, to what arrived.
   IF NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations
-                  WHERE name = '20270102143000_ki143_vendor_bill_received_value_checks')
+                  WHERE name = '20270103110000_ki143_vendor_bill_received_value_checks')
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
           AND proname IN ('create_vendor_bill', 'update_vendor_bill')
           AND position('received_value_cents' IN prosrc) > 0) <> 2 THEN
-    RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: KI-143 (20270102143000, bills held to received value) must be applied first';
+    RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: KI-143 (20270103110000, bills held to received value) must be applied first';
   END IF;
   -- On order must still come only from submitted and partially_received POs, recomputed on every status change.
   IF position('po.status IN (''submitted'', ''partially_received'')' IN

@@ -3127,7 +3127,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
-  // 20270102150000 (KI-142, local candidate): admin/rep close of a partly received PO; requires p_idempotency_key,
+  // 20270103120000 (KI-142, local candidate): admin/rep close of a partly received PO; requires p_idempotency_key,
   // checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_purchase_order_short',
   // 20261229120000 (USE-1, local candidate): admin-only use-timing option writers; each replays through

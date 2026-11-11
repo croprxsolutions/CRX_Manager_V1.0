@@ -37,8 +37,8 @@ BEGIN
   -- Pricing-free shell, then cost/price through the governed preview/apply
   -- path (a priced products INSERT is refused since the Phase 1a cutover; the
   -- order line below needs a cost basis).
-  INSERT INTO products (product_name, category)
-  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide')
+  INSERT INTO products (product_name, category, product_form)
+  VALUES ('[SMOKE] Voided Product ' || v_suffix, 'Herbicide', 'liquid')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1,

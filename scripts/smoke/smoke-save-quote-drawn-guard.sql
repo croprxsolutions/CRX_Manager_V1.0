@@ -78,8 +78,8 @@ BEGIN
 
   -- Establish the cost through the governed pricing path so the real immutable
   -- quote-cost snapshot remains enabled during this rollback-only smoke.
-  INSERT INTO products (product_name, unit_size)
-  VALUES ('[SMOKE] Drawn Guard Product ' || v_suffix, 'gal')
+  INSERT INTO products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] Drawn Guard Product ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product_id;
   v_res := preview_product_pricing_changes(
     'product_page', NULL,

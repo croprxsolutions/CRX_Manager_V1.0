@@ -36,10 +36,10 @@ BEGIN
   END IF;
 
   -- Fixtures, as the owner: a retired product with an open PO line, and a plain active product.
-  INSERT INTO public.products (product_name, is_active)
-  VALUES ('[E2E] smoke retired on-order product', false) RETURNING id INTO v_retired;
-  INSERT INTO public.products (product_name, is_active)
-  VALUES ('[E2E] smoke hold product', true) RETURNING id INTO v_plain;
+  INSERT INTO public.products (product_name, is_active, product_form)
+  VALUES ('[E2E] smoke retired on-order product', false, 'liquid') RETURNING id INTO v_retired;
+  INSERT INTO public.products (product_name, is_active, product_form)
+  VALUES ('[E2E] smoke hold product', true, 'liquid') RETURNING id INTO v_plain;
   INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
   VALUES ('[E2E]-SMOKE-HOLDS-GUARDS', '[E2E] smoke vendor', 'submitted', v_admin) RETURNING id INTO v_po;
   INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received)

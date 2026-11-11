@@ -113,7 +113,7 @@ BEGIN
     VALUES (v_field, v_cust_b, 50, false);
   INSERT INTO fields (field_name, customer_id, total_acres)
     VALUES ('[E2E][SMOKE] PLSB OffJob '||v_sfx, v_cust_a, 40) RETURNING id INTO v_field2;
-  INSERT INTO products (product_name, unit_size) VALUES ('[E2E][SMOKE] PLSB Prod '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form) VALUES ('[E2E][SMOKE] PLSB Prod '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
     NULL,

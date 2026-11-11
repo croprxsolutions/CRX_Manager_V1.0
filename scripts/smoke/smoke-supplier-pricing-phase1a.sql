@@ -77,12 +77,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: ordinary rate edit created core pricing history';
   END IF;
 
-  INSERT INTO public.products(product_name, sku, notes)
-  VALUES ('Phase 1a Shell Product', '004-SHELL', 'pricing intentionally blank');
+  INSERT INTO public.products(product_name, sku, notes, product_form)
+  VALUES ('Phase 1a Shell Product', '004-SHELL', 'pricing intentionally blank', 'liquid');
 
   BEGIN
-    INSERT INTO public.products(product_name, sku, current_cost)
-    VALUES ('Forbidden Priced Product', '005-FORBIDDEN', 10.00);
+    INSERT INTO public.products(product_name, sku, current_cost, product_form)
+    VALUES ('Forbidden Priced Product', '005-FORBIDDEN', 10.00, 'liquid');
     RAISE EXCEPTION 'SMOKE_FAIL: direct priced Product insert unexpectedly succeeded';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;
@@ -129,11 +129,12 @@ SELECT set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111
 -- not a direct constraint insert, proves the export/import ceiling. These rows
 -- carry no pricing and never leave this throwaway proof database.
 RESET ROLE;
-INSERT INTO public.products(id, product_name, sku)
+INSERT INTO public.products(id, product_name, sku, product_form)
 SELECT
   md5('phase1a-workbook-limit-' || series)::uuid,
   'Phase 1a Workbook Limit ' || series,
-  'PHASE1A-LIMIT-' || lpad(series::text, 5, '0')
+  'PHASE1A-LIMIT-' || lpad(series::text, 5, '0'),
+  'liquid'
 FROM generate_series(1, 5001) AS series;
 SET ROLE authenticated;
 

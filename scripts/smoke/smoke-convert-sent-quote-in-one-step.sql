@@ -54,8 +54,8 @@ BEGIN
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] One-step Convert Farm ' || v_suffix)
   RETURNING id INTO v_customer_id;
-  INSERT INTO products (product_name, unit_size)
-  VALUES ('[SMOKE] One-step Convert Product ' || v_suffix, 'gal')
+  INSERT INTO products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] One-step Convert Product ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product_id;
 
   -- --------------------------------------------------------------------

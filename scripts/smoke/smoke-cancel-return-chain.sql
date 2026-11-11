@@ -50,8 +50,8 @@ BEGIN
   VALUES ('[SMOKE] Cancel Return Farm ' || v_suffix)
   RETURNING id INTO v_customer_id;
 
-  INSERT INTO products (product_name)
-  VALUES ('[SMOKE] Cancel Return Product ' || v_suffix)
+  INSERT INTO products (product_name, product_form)
+  VALUES ('[SMOKE] Cancel Return Product ' || v_suffix, 'liquid')
   RETURNING id INTO v_product_id;
 
   INSERT INTO inventory (product_id, location, quantity_available)

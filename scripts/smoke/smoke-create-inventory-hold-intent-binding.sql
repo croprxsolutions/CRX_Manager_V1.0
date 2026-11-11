@@ -92,8 +92,8 @@ BEGIN
 
   INSERT INTO public.customers (id, farm_name) VALUES (v_customer, '[SMOKE] Hold Farm')
   ON CONFLICT (id) DO NOTHING;
-  INSERT INTO public.products (id, product_name, sku, is_active)
-  VALUES (v_product, '[SMOKE] Hold Product', 'SMOKE-HOLD-1', true)
+  INSERT INTO public.products (id, product_name, sku, is_active, product_form)
+  VALUES (v_product, '[SMOKE] Hold Product', 'SMOKE-HOLD-1', true, 'liquid')
   ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
   VALUES (v_product, 'Main Warehouse', 100, 10, 0);

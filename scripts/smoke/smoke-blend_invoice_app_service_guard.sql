@@ -131,8 +131,8 @@ BEGIN
 
   -- Pricing-free shell, then cost/price through the governed preview/apply
   -- path (a priced products INSERT is refused since the Phase 1a cutover).
-  INSERT INTO products (product_name, unit_size, rate_unit, inventory_unit)
-  VALUES ('[SMOKE] AppSvc Guard Product ' || v_suffix, '2.5 GAL', 'oz/ac', 'oz')
+  INSERT INTO products (product_name, unit_size, rate_unit, inventory_unit, product_form)
+  VALUES ('[SMOKE] AppSvc Guard Product ' || v_suffix, '2.5 GAL', 'oz/ac', 'oz', 'liquid')
   RETURNING id INTO v_product_id;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_product_id, 'row_version', 1,

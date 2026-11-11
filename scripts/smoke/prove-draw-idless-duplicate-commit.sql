@@ -48,11 +48,11 @@ BEGIN
   VALUES ('[COMMIT PROOF] Id-less Duplicate ' || v_suffix)
   RETURNING id INTO v_customer;
 
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[COMMIT PROOF] Product ' || v_suffix, 'gal')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[COMMIT PROOF] Product ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[COMMIT PROOF] Product Two ' || v_suffix, 'gal')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[COMMIT PROOF] Product Two ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product_two;
 
   v_result := public.preview_product_pricing_changes(

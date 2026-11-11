@@ -18,7 +18,7 @@ VALUES (
 INSERT INTO public.products(
   id, product_name, sku, current_cost,
   tier1_margin, tier2_margin, tier3_margin
-)
+, product_form)
 VALUES (
   '99999999-9999-4999-8999-999999999991'::uuid,
   'Phase 1a Legacy Compatibility Product',
@@ -27,7 +27,7 @@ VALUES (
   0.20,
   0.25,
   0.30
-);
+, 'liquid');
 
 SELECT set_config(
   'request.jwt.claim.sub',

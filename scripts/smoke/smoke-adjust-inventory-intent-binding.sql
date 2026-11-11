@@ -90,9 +90,9 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   UPDATE public.profiles SET is_active = false WHERE id = v_inactive;
 
-  INSERT INTO public.products (id, product_name, sku, is_active) VALUES
-    (v_product,  '[SMOKE] Adjust Product',     'SMOKE-ADJ-1', true),
-    (v_product2, '[SMOKE] Adjust Product Two', 'SMOKE-ADJ-2', true)
+  INSERT INTO public.products (id, product_name, sku, is_active, product_form) VALUES
+    (v_product,  '[SMOKE] Adjust Product',     'SMOKE-ADJ-1', true, 'liquid'),
+    (v_product2, '[SMOKE] Adjust Product Two', 'SMOKE-ADJ-2', true, 'liquid')
   ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
   VALUES (v_product, 'Main Warehouse', 100, 0, 0)

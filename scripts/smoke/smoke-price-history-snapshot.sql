@@ -68,7 +68,7 @@ BEGIN
   IF v_after <> v_before THEN RAISE EXCEPTION 'SMOKE_FAIL 2: a re-run added % rows', v_after - v_before; END IF;
 
   -- A throwaway product with one snapshot row, for 3 and 4.
-  INSERT INTO public.products (id, product_name, is_active) VALUES (v_product, '[SMOKE] price history', false);
+  INSERT INTO public.products (id, product_name, is_active, product_form) VALUES (v_product, '[SMOKE] price history', false, 'liquid');
   INSERT INTO public.cost_history (product_id, changed_by, change_source, change_reason)
   VALUES (v_product, NULL, 'starting_snapshot', 'smoke');
 

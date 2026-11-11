@@ -91,12 +91,12 @@ BEGIN
 
   -- Three products: fully priced, tier-1 only, and never priced (products are born pricing-free;
   -- the two priced ones go through the governed preview/apply path).
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Full ' || v_suffix, 'GL') RETURNING id INTO v_p_full;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Tier1Only ' || v_suffix, 'GL') RETURNING id INTO v_p_t1only;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Unpriced ' || v_suffix, 'GL') RETURNING id INTO v_p_none;
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] BTP Full ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_p_full;
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] BTP Tier1Only ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_p_t1only;
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] BTP Unpriced ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_p_none;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(

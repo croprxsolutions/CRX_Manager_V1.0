@@ -199,8 +199,8 @@ BEGIN
   -- same governed preview/apply RPC path used by the app. This keeps the smoke
   -- independent of live catalog contents without disabling product triggers or
   -- touching an existing business row. Everything remains rollback-scoped.
-  INSERT INTO products (product_name, unit_size, inventory_unit)
-  VALUES ('[SMOKE] RCC Governed Product ' || v_suffix, 'gal', 'gal')
+  INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
+  VALUES ('[SMOKE] RCC Governed Product ' || v_suffix, 'gal', 'Gal', 'liquid')
   RETURNING id INTO v_product_id;
 
   v_res := public.preview_product_pricing_changes(
@@ -2026,12 +2026,12 @@ BEGIN
   v_same_product_order_item_2 := gen_random_uuid();
   v_same_product_return_id := gen_random_uuid();
   SET LOCAL session_replication_role = replica;
-  INSERT INTO products (id, product_name, unit_size, inventory_unit)
+  INSERT INTO products (id, product_name, unit_size, inventory_unit, product_form)
   VALUES (
     v_same_product_product_id,
     '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    'gal', 'gal'
-  );
+    'gal', 'Gal'
+  , 'liquid');
   INSERT INTO inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
   ) VALUES (

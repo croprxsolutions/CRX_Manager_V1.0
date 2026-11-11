@@ -67,20 +67,20 @@ GRANT EXECUTE ON FUNCTION public.apply_product_pricing_change_set(
 -- its first governed Phase 1a cost update below must create the initial basis.
 INSERT INTO public.products(
   id, product_name, sku, category, container_size, unit_size, inventory_unit
-) VALUES (
+, product_form) VALUES (
   'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1',
-  'Phase 2 Newly Created Product', 'P2-NEW', 'Herbicide', 1, 'gal', 'gal'
-);
+  'Phase 2 Newly Created Product', 'P2-NEW', 'Herbicide', 1, 'gal', 'Gal'
+, 'liquid');
 
 -- Dedicated complete-workbook follow-up fixtures. One Product deliberately has
 -- no cost; the other has an existing cost and will receive a governed change.
 INSERT INTO public.products(
   id, product_name, sku, category, container_size, unit_size, inventory_unit
-) VALUES
+, product_form) VALUES
   ('ffffffff-ffff-4fff-8fff-fffffffffff1',
-   'Phase 2 Null Cost Workbook Product', 'P2-NULL', 'Herbicide', 1, 'gal', 'gal'),
+   'Phase 2 Null Cost Workbook Product', 'P2-NULL', 'Herbicide', 1, 'gal', 'Gal', 'liquid'),
   ('ffffffff-ffff-4fff-8fff-fffffffffff2',
-   'Phase 2 Changed Workbook Product', 'P2-CHANGE', 'Herbicide', 1, 'gal', 'gal');
+   'Phase 2 Changed Workbook Product', 'P2-CHANGE', 'Herbicide', 1, 'gal', 'Gal', 'liquid');
 DO $proof$
 BEGIN
   IF (SELECT current_cost FROM public.products

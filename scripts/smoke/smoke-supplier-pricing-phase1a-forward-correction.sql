@@ -224,11 +224,12 @@ SELECT set_config('crx.pricing_reason', '', true);
 SELECT set_config('crx.pricing_change_set_id', '', true);
 
 RESET ROLE;
-INSERT INTO public.products(id, product_name, sku)
+INSERT INTO public.products(id, product_name, sku, product_form)
 SELECT
   md5('phase1a-forward-limit-' || series)::uuid,
   'Phase 1a Forward Limit ' || series,
-  'PHASE1A-FORWARD-LIMIT-' || lpad(series::text, 5, '0')
+  'PHASE1A-FORWARD-LIMIT-' || lpad(series::text, 5, '0'),
+  'liquid'
 FROM generate_series(1, 5001) AS series;
 SET ROLE authenticated;
 

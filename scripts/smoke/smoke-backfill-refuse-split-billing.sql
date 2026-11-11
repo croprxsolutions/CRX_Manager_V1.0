@@ -131,8 +131,8 @@ BEGIN
   -- [E2E] marker satisfies the live-testdata guard; terminal rollback removes it.
   INSERT INTO public.customers (farm_name)
   VALUES ('[E2E] H5 Farm ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name)
-  VALUES ('[E2E] H5 Herbicide ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form)
+  VALUES ('[E2E] H5 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
   -- Quote and order lines need a positive cost basis (COST_BASIS_REQUIRED), and a
   -- product is born pricing-free, so price the shell through the governed
   -- preview/apply path the app uses (the smoke-return-credit-chain.sql pattern).

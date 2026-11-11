@@ -36,9 +36,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11) | 98 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108 closed 2026-11-11) | 97 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
-| Closed as FIXED, with proof (bottom of file and archive) | 22 |
+| Closed as FIXED, with proof (bottom of file and archive) | 23 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
@@ -869,30 +869,6 @@ also fix Sol's two MED findings on that branch: (1) the customer's assigned tier
 changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
 quote changes the tier label without repricing its locked lines.
 
-### KI-108 — Five products' stored stock did not match their transaction history on 2026-11-01
-**LOW · OPEN (CONFIRMED twice 2026-11-10; was MED) · inventory · Mason decision (physical count) · source: [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md)**
-The monthly integrity report (closed PR #1230) found `inventory.quantity_available` different from the
-`inventory_transactions` ledger for five products. The other nine checks passed. Second re-check 2026-11-10
-(live read-only SQL copying the `/integrity-report` check in `src/lib/reconciliation.ts`, all products): 117
-stock rows, 116 have history, 111 of those match. The same five are off by the same amounts as on 2026-11-01.
-No hidden holds (pre-booked is 0 on all five), all gallons, newest movement 2026-07-17. None of the five gaps
-comes from an `adjusted` row that changed only pre-booked stock, so `PREBOOK_ONLY_ADJUSTMENT_TX_IDS` needs no
-new entry and no code change fixes this. Every gap needs a data correction that Mason approves. Mason chose on
-2026-10-07 not to do a physical count. Nothing was changed.
-
-| Product | Ledger says | Stored | Gap | Likely cause (from its ledger) | Recommended fix |
-|---|---|---|---|---|---|
-| Black Strap Molasses Sugar - Tote | 675 | 2,000 | +1,325 | A 1,325 delivery was posted on Bulk by mistake, then hand-adjusted off Tote on 2026-03-21. Two days later a wrong receipt (-2,000) was reversed while Tote held only 675, and the old floor-at-zero rule swallowed 1,325 of it (`20260610131048` names that 1,325). Black Strap Bulk sits at -1,325, matching its own ledger. Tote plus Bulk stored (675) equals Tote's history. | Count Tote and Bulk together. If the count is about 675: one correction moving Bulk back to 0 and Tote down to the count. |
-| Start Right 2.0 (AgBio) - Tote | 140.19 | 670.19 | +530 | Stock 530 above anything recorded, about two totes. The 2026-03-25 receipt reversal (-265) was not clamped; the paper trail for the extra 530 was lost to an old delete (see the 2026-06-10 worksheet). | Count it. A correction to the counted number. |
-| 2, 4D Amine 4# - 2.5 Gal | -70 | 25 | +95 | Opening stock (95) was loaded in March with no ledger row; five jobs and one delivery since. | Count it. If the count is 25, add the missing opening-stock row (+95) so the history matches. |
-| 2, 4D Amine 4# - Bulk | 0 | 55 | +55 | Opening stock (55) with no ledger row; nothing has moved since. | Count it. If 55, add the missing opening-stock row (+55). |
-| Start Right 2.0 (AgBio) - 2.5G | 280 | 290 | +10 | Two receipts of 180 and one delivery of 80 add to 280; 10 extra with no record, likely a small unledgered opening load. | Count it. A correction to the counted number. |
-
-Every fix is a new, reviewed data-correcting migration that adds ledger rows; none was written. The counting
-sheet that already covers these five is `docs/operations/2026-06-10-negative-inventory-rebase-worksheet.md`.
-Next step (Mason): count these five plus Black Strap Bulk, or say which number to trust; then a session writes
-the correction migration.
-
 ### KI-116 — Product Detail treats a non-product address as a load failure
 **LOW · FIXED in PR (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**
 Opening `/products/group` (no link on `main` points there; most likely typed or an old bookmark for
@@ -1485,6 +1461,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 19. **KI-112, a draft return-credit prover failed just after midnight UTC** — closed 2026-11-10 with no bug found. `main`'s `scripts/smoke/verify-return-credit-real-schema.mjs` (live-dump version) passed twice on a fresh read-only dump of the live schema: at 2:15 PM Central, and at 6:05 PM Central (`main` `a1ba9e63d`, 00:05 UTC on 2026-11-11, so the UTC date was a day ahead of Central, the window where the closed PR #1319 version failed). Both printed `RETURN_CREDIT_LIVE_SCHEMA_PASS ... smoke=SMOKE_PASS_ROLLBACK residue=0`, including the fractional COGS proofs (`FRACTIONAL_COGS_DOUBLE_ROUNDING_DETECTED`, `FRACTIONAL_REPORT_HALF_CENT_DETECTED`). The old failure belonged to the abandoned baseline-replay version only. Original text appended to the archive.
 20. **KI-143, vendor bills were checked against the ordered value** — closed 2026-11-11 by PR #1769, migration `20270103110000_ki143_vendor_bill_received_value_checks` (applied live 2026-11-11 8:24 AM Central, ledger `20261111142411`): a bill on a PO now needs a reason once the PO's bills go above 105% of what arrived (never more than the ordered total). Cancelled POs and a different vendor were already refused by the database. Proven by `scripts/smoke/prove-ki143-vendor-bill-received-value-real-schema.mjs`; live functions re-read after the apply.
 21. **KI-135, Inventory Value subtracted negative stock and counted no-cost stock as $0** — closed 2026-11-11 by PR #1792
+22. **KI-108, five products' stored stock did not match their transaction history** — closed 2026-11-11 by PR #1770, migration `20270103150000_ki108_stock_matches_history` (applied live 2026-11-11 9:17 AM Central, ledger `20261111151710`). Mason chose on 2026-11-10 to trust the history: Black Strap Molasses Tote 2,000 → 675, Start Right 2.0 Tote 670.19 → 140.19, 2,4D Amine Bulk 55 → 0, Start Right 2.0 2.5G 290 → 280; 2,4D Amine 2.5 Gal keeps 25 and got the missing +95 opening-stock row. Black Strap Bulk (−1,325) already matched and was not touched. Proven by `scripts/smoke/prove-ki108-stock-matches-history.mjs`; after the apply a read-only live check found every product's stored stock equal to its history and no open stock count, and the `/integrity-report` Inventory Ledger check passed (117 rows). Stock counts that overlap stock movement stay open as KI-134.
    (browser only, no migration): both totals come from `src/lib/inventoryValue.ts` and value only stock above zero with a
    cost, in exact whole cents; the Reports total adds the database's own rounded row values. Checked live 2026-11-11 as
    admin: the Inventory card and the Reports Inventory Cost total show the same figure, each with "19 below zero, not

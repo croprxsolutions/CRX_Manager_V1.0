@@ -211,6 +211,8 @@ BEGIN
     v_value := (p_row->'value')::numeric;
     v_unit := public._workbook_text(p_row, 'unit');
     IF v_kind = 'net_weight' AND v_unit IS NOT NULL THEN RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: a net weight is always in lb'; END IF;
+    -- The download stores lb/gal, so a density row with the unit left blank means lb/gal.
+    IF v_kind = 'density' THEN v_unit := COALESCE(v_unit, 'lb_per_gal'); END IF;
     v_source := public._workbook_text(p_row, 'source');
     v_note := public._workbook_text(p_row, 'source_note');
     v_reason := public._workbook_text(p_row, 'reason');
@@ -324,18 +326,21 @@ BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'commit_weights_tab', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   v_rows := public._workbook_weight_rows(p_rows);
+  -- Lock every subject on the tab (unchanged rows too), then evaluate again under the lock, so a row that went
+  -- stale after the first look refuses the whole save instead of slipping through.
+  PERFORM 1 FROM public.product_parents WHERE id IN (
+    SELECT (r->>'subject_id')::uuid FROM jsonb_array_elements(v_rows) r WHERE r->>'subject_id' IS NOT NULL AND r->>'kind' = 'density')
+   ORDER BY id FOR NO KEY UPDATE;
+  PERFORM 1 FROM public.products WHERE id IN (
+    SELECT (r->>'subject_id')::uuid FROM jsonb_array_elements(v_rows) r WHERE r->>'subject_id' IS NOT NULL AND r->>'kind' = 'net_weight')
+   ORDER BY id FOR NO KEY UPDATE;
+  v_rows := public._workbook_weight_rows(p_rows);
   SELECT string_agg(COALESCE(r->>'name', r->>'subject_id', 'a row') || ': ' || (r->>'problem'), '; ')
     INTO v_bad FROM jsonb_array_elements(v_rows) r WHERE r->>'status' NOT IN ('unchanged', 'change');
   IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'WORKBOOK_WEIGHTS_REFUSED: nothing was saved. %', v_bad; END IF;
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_rows) r WHERE r->>'status' = 'change') THEN
     RAISE EXCEPTION 'WORKBOOK_NOTHING_TO_SAVE: no weight in this tab differs from the download';
   END IF;
-  PERFORM 1 FROM public.product_parents WHERE id IN (
-    SELECT (r->>'subject_id')::uuid FROM jsonb_array_elements(v_rows) r WHERE r->>'status' = 'change' AND r->>'kind' = 'density')
-   ORDER BY id FOR NO KEY UPDATE;
-  PERFORM 1 FROM public.products WHERE id IN (
-    SELECT (r->>'subject_id')::uuid FROM jsonb_array_elements(v_rows) r WHERE r->>'status' = 'change' AND r->>'kind' = 'net_weight')
-   ORDER BY id FOR NO KEY UPDATE;
   FOR v_r IN SELECT r FROM jsonb_array_elements(v_rows) r WHERE r->>'status' = 'change'
               ORDER BY (r->>'kind' = 'net_weight'), (r->>'subject_id')::uuid LOOP
     v_q := v_r->'request';
@@ -448,6 +453,16 @@ BEGIN
           IF v_name IS DISTINCT FROM v_cur.name OR v_cas IS DISTINCT FROM v_cur.cas THEN
             RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: % cannot be renamed here; mark the row __delete and add the new ingredient as a new row', v_cur.name;
           END IF;
+          -- A row filled by the EPA lookup comes back unchanged on a whole-tab re-upload; it cannot be edited here.
+          IF v_cur.source = 'epa_lookup' THEN
+            IF NOT ((v_row->>'strength_value')::numeric IS NOT DISTINCT FROM v_cur.strength_value
+                    AND public._workbook_text(v_row, 'strength_unit') IS NOT DISTINCT FROM v_cur.strength_unit
+                    AND public._workbook_text(v_row, 'strength_basis') IS NOT DISTINCT FROM v_cur.strength_basis
+                    AND public._workbook_text(v_row, 'source') = 'epa_lookup' AND v_note IS NOT DISTINCT FROM v_cur.source_note) THEN
+              RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: % was filled from the EPA lookup; change it on the product page', v_cur.name;
+            END IF;
+            CONTINUE;
+          END IF;
           v_strength := public._chemistry_strength(v_row, 'correct');
           IF NOT ((v_strength->>'value')::numeric IS NOT DISTINCT FROM v_cur.strength_value
                   AND v_strength->>'unit' = v_cur.strength_unit AND v_strength->>'basis' = v_cur.strength_basis
@@ -544,6 +559,12 @@ DECLARE
 BEGIN
   v_existing := public._product_parent_replay(p_idempotency_key, 'commit_ingredients_tab', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  v_parents := public._workbook_ingredient_rows(p_rows);
+  -- Take the chemistry writers' parent lock (FOR UPDATE, ID order), then evaluate again under it, so no proposal
+  -- is written against a version that moved after the first look.
+  PERFORM 1 FROM public.product_parents WHERE id IN (
+    SELECT (p->>'parent_id')::uuid FROM jsonb_array_elements(v_parents) p WHERE p->>'parent_id' IS NOT NULL)
+   ORDER BY id FOR UPDATE;
   v_parents := public._workbook_ingredient_rows(p_rows);
   SELECT string_agg(COALESCE(p->>'parent_name', p->>'parent_id') || ': ' || (p->>'problem'), '; ')
     INTO v_bad FROM jsonb_array_elements(v_parents) p WHERE p->>'status' NOT IN ('unchanged', 'proposal');
@@ -652,6 +673,7 @@ BEGIN
     'public.commit_weights_tab(jsonb,text)', 'public.preview_ingredients_tab(jsonb)', 'public.commit_ingredients_tab(jsonb,text)',
     'public.promote_chemistry_proposal(uuid,integer,text,text)'] LOOP
     IF NOT has_function_privilege('authenticated', v_fn, 'EXECUTE') OR has_function_privilege('anon', v_fn, 'EXECUTE')
+       OR has_function_privilege('service_role', v_fn, 'EXECUTE') OR has_function_privilege('metabase_ro', v_fn, 'EXECUTE')
        OR (SELECT NOT prosecdef OR proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] OR proowner <> 'postgres'::regrole
              FROM pg_proc WHERE oid = v_fn::regprocedure) THEN
       RAISE EXCEPTION 'POSTFLIGHT_DM1B_PUBLIC_FUNCTION_WRONG: %', v_fn;
@@ -662,14 +684,16 @@ BEGIN
     'public._workbook_ingredient_parent(uuid,jsonb)', 'public._workbook_ingredient_rows(jsonb)',
     'public._apply_chemistry_proposal(uuid,text)'] LOOP
     IF has_function_privilege('authenticated', v_fn, 'EXECUTE') OR has_function_privilege('anon', v_fn, 'EXECUTE')
-       OR has_function_privilege('service_role', v_fn, 'EXECUTE')
+       OR has_function_privilege('service_role', v_fn, 'EXECUTE') OR has_function_privilege('metabase_ro', v_fn, 'EXECUTE')
        OR (SELECT proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp'] OR proowner <> 'postgres'::regrole
              FROM pg_proc WHERE oid = v_fn::regprocedure) THEN
       RAISE EXCEPTION 'POSTFLIGHT_DM1B_PRIVATE_FUNCTION_WRONG: %', v_fn;
     END IF;
   END LOOP;
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.chemistry_change_proposals'::regclass)
-     OR has_table_privilege('anon', 'public.chemistry_change_proposals', 'SELECT')
+     OR has_table_privilege('anon', 'public.chemistry_change_proposals', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+     OR has_table_privilege('service_role', 'public.chemistry_change_proposals', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+     OR has_table_privilege('metabase_ro', 'public.chemistry_change_proposals', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
      OR has_table_privilege('authenticated', 'public.chemistry_change_proposals', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
      OR NOT has_table_privilege('authenticated', 'public.chemistry_change_proposals', 'SELECT') THEN
     RAISE EXCEPTION 'POSTFLIGHT_DM1B_TABLE_GRANTS_WRONG';

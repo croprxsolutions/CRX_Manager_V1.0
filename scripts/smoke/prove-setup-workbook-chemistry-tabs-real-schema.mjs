@@ -348,6 +348,8 @@ function weightsCases() {
   // Duplicates, a net weight with a unit, a non-number value and an unexpected field are invalid.
   const odd = js(ADMIN, `SELECT public.preview_weights_tab(${J([fresh[0], fresh[0], { ...fresh[20], unit: 'lb' }, { ...fresh[2], value: '9' }, { ...fresh[3], extra: 1 }])});`).rows;
   assert.deepEqual(odd.map((r) => r.status), ['unchanged', 'invalid', 'invalid', 'invalid', 'invalid']);
+  // A density row with its unit left blank means lb/gal (the download's unit).
+  assert.equal(js(ADMIN, `SELECT public.preview_weights_tab(${J([{ ...fresh[0], unit: undefined }])});`).rows[0].status, 'unchanged');
   console.log('[case] W4 a stale row refuses the whole save; an unchanged upload saves nothing; duplicate and malformed rows are invalid');
 }
 
@@ -377,6 +379,16 @@ function ingredientCases() {
   assert.equal(activeRows(HALEX), 3); assert.equal(chemVer(HALEX), 1);
   assert.match(scalar(`SELECT evidence FROM public.product_chemistry_events WHERE parent_id = '${HALEX}' ORDER BY id DESC LIMIT 1;`), /label: Halex GT label, page 1/);
   refused(ADMIN, promote(p1.proposal_id, 2, 'reject'), /CHEMISTRY_PROPOSAL_DECIDED/);
+  // A row filled by the EPA lookup comes back unchanged on a whole-tab re-upload, and cannot be edited here.
+  const glyRow = halexDownload().ingredients.find((r) => r.name === 'Glyphosate');
+  raw(`UPDATE public.product_parent_ingredients SET source = 'epa_lookup' WHERE id = '${glyRow.row_id}';`);
+  const dlE = halexDownload();
+  const asIs = dlE.ingredients.map((r) => upRow(dlE, r));
+  assert.equal(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(asIs)});`).parents[0].status, 'unchanged');
+  const editE = asIs.map((r) => (r.row_id === glyRow.row_id ? { ...r, strength_value: 22.5 } : r));
+  assert.match(js(ADMIN, `SELECT public.preview_ingredients_tab(${J(editE)});`).parents[0].problem, /Glyphosate was filled from the EPA lookup/);
+  raw(`UPDATE public.product_parent_ingredients SET source = 'label' WHERE id = '${glyRow.row_id}';`);
+  console.log('[case] I2a an EPA-filled row re-uploads as unchanged and is refused by name if edited');
   console.log('[case] I2 the proposal applies only as "apply" at its own version; Halex GT has 3 rows at version 1 with the label cited; a decided proposal is refused');
 
   // An absent row changes nothing; an unchanged upload is "unchanged".

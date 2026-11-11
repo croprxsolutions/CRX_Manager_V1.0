@@ -44,14 +44,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - run: node --test .github/scripts/db-apply.test.mjs
-      # The rule comes from the base branch's copy of the script, never the PR's own.
+      # The rule comes from the base branch's copy of the script, never the PR's own. It runs before the
+      # PR's own tests, which could otherwise move origin/* refs or the environment first.
       - run: |
           if git show "origin/$BASE_REF:.github/scripts/db-apply.mjs" > "$RUNNER_TEMP/db-apply.mjs" 2>/dev/null; then
             node "$RUNNER_TEMP/db-apply.mjs" stamp-check "origin/$BASE_REF"
           else
             echo "::notice::No stamp check on $BASE_REF yet."
           fi
+      - run: node --test .github/scripts/db-apply.test.mjs
 
   apply-staging:
     name: Apply migrations to staging

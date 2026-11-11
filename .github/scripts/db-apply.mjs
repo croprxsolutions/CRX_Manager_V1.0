@@ -396,8 +396,9 @@ const commands = {
     const diff = (filter) => names(git('diff', '--no-renames', '--name-only', `--diff-filter=${filter}`, `${baseRef}...HEAD`, '--', 'supabase/migrations'));
     const added = diff('A');
     // A back-merge into staging brings main's files as-is: same content as on main = already checked there.
-    const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8' }).trim(); } catch { return null; } };
-    const onMain = baseRef === 'origin/staging' ? added.filter((f) => blob('origin/main', f) && blob('origin/main', f) === blob('HEAD', f)) : [];
+    const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
+    const mainRef = baseRef.endsWith('/staging') ? baseRef.replace(/\/staging$/, '/main') : null;
+    const onMain = mainRef ? added.filter((f) => { const m = blob(mainRef, f); return m !== null && m === blob('HEAD', f); }) : [];
     const problems = stampProblems({
       added,
       onMain,

@@ -20,6 +20,7 @@ import {
 import { getIdempotencyMismatchResult } from '../../lib/idempotency';
 import type { InventoryPositionRow } from '../../types';
 import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
+import { toSentryError } from '../../lib/sentryError';
 
 // F5 — Receiving Hub: "To-Ship for inbound". Search a product and see every open
 // purchase-order line for it across vendors (ordered − received), with a
@@ -185,7 +186,7 @@ export default function ReceivingHubPanel() {
         const list = [...byProduct.values()].sort((a, b) => a.product_name.localeCompare(b.product_name));
         if (!cancelled) setGroups(list);
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', page: 'receiving-hub' } });
+        Sentry.captureException(toSentryError(err), { tags: { source: 'fetch', page: 'receiving-hub' } });
         if (!cancelled) { setGroups([]); setLoadError(true); toast('error', 'Failed to load inbound purchase orders.'); }
       } finally {
         if (!cancelled) setLoading(false);
@@ -232,7 +233,7 @@ export default function ReceivingHubPanel() {
       });
       idemKey = receiveIntent.getIdempotencyKey();
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { tags: { source: 'durable-intent', page: 'receiving-hub' } });
+      Sentry.captureException(toSentryError(error), { tags: { source: 'durable-intent', page: 'receiving-hub' } });
       toast('error', wasLockedReplay
         ? receiveCleanupFailed
           ? 'These goods were already recorded once. This retry could not be prepared, so nothing further was sent. Do not receive these goods again on another device. Reload and check receiving history before retrying unchanged.'

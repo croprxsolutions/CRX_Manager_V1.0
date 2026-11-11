@@ -15417,6 +15417,10 @@ export type Database = {
         }
         Returns: number
       }
+      rate_unit_line_refusal: {
+        Args: { p_check_characters: boolean; p_rate_unit: string }
+        Returns: string
+      }
       reactivate_vendor: {
         Args: { p_idempotency_key?: string; p_vendor_id: string }
         Returns: Json
@@ -16149,6 +16153,8 @@ export type Database = {
         }
         Returns: Json
       }
+      unit_fold_invisible: { Args: { p_text: string }; Returns: string }
+      unit_names_fluid_ounce: { Args: { p_unit: string }; Returns: boolean }
       unlink_blend_ticket_from_order: {
         Args: {
           p_blend_ticket_id: string

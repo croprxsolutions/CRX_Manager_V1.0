@@ -10,7 +10,7 @@
 --      invoices keep the tax they were posted with. Every payer on a split follows the one box (Mason 2026-11-09).
 --   3. invoice_sales_tax_rates: a row means the invoice is taxed, at the rate it records. A chemical-sale invoice
 --      drafted from a taxed sale records the Settings rate at once; a draft keeps it (a later Settings change
---      applies to new drafts, or when the box is ticked again after being unticked).
+--      applies to new drafts, or when the box is ticked again after being unticked). An invoice never changes sale.
 --   4. A taxed chemical-sale draft gets one computed line, charge_type 'sales_tax':
 --      round((product and charge lines - standing discount) x rate / 100) to the cent, half up.
 --      It is written with the standing discount, in the same statement, by the same commit-time recompute
@@ -140,8 +140,9 @@ CREATE POLICY invoice_sales_tax_rates_select ON public.invoice_sales_tax_rates
   FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = invoice_sales_tax_rates.invoice_id));
 
--- Recorded at once (not at commit), from the sale's box: a chemical sale drafted from a taxed sale, or a draft moved
--- to another sale or type, which follows its new sale's box.
+-- Recorded at once (not at commit), from the sale's box: a chemical sale drafted from a taxed sale. An invoice never
+-- changes sale (INVOICE_SOURCE_LINEAGE_IMMUTABLE); a draft switched between chemical sale and misc charge follows its
+-- sale's box again.
 CREATE FUNCTION public._sales_tax_record_rate_20261231()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -150,9 +151,8 @@ CREATE FUNCTION public._sales_tax_record_rate_20261231()
 AS $function$
 BEGIN
   IF TG_OP = 'UPDATE' THEN
-    -- Every save names these columns; only a real move or type switch of a draft counts.
-    IF NEW.status <> 'draft'
-       OR (OLD.order_id IS NOT DISTINCT FROM NEW.order_id AND OLD.invoice_type IS NOT DISTINCT FROM NEW.invoice_type) THEN
+    -- Every save names the type; only a real switch of a draft counts.
+    IF NEW.status <> 'draft' OR OLD.invoice_type IS NOT DISTINCT FROM NEW.invoice_type THEN
       RETURN NULL;
     END IF;
     DELETE FROM invoice_sales_tax_rates WHERE invoice_id = NEW.id;
@@ -169,15 +169,10 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._sales_tax_record_rate_20261231() FROM PUBLIC, anon, authenticated;
 
+-- (The discount's deferred invoice trigger already recomputes a draft whose type switches.)
 CREATE TRIGGER invoices_sales_tax_rate_20261231
-  AFTER INSERT OR UPDATE OF order_id, invoice_type ON public.invoices
+  AFTER INSERT OR UPDATE OF invoice_type ON public.invoices
   FOR EACH ROW EXECUTE FUNCTION public._sales_tax_record_rate_20261231();
-
--- A draft moved to another sale is recomputed at commit (the discount's trigger covers customer, status and type).
-CREATE CONSTRAINT TRIGGER invoices_sales_tax_20261231
-  AFTER UPDATE OF order_id ON public.invoices
-  DEFERRABLE INITIALLY DEFERRED
-  FOR EACH ROW EXECUTE FUNCTION public._standing_discount_after_invoice_change_20261231();
 
 -- 4. The computed line ---------------------------------------------------------------------------------------
 -- (Its shape is the charge-line CHECK as 20261231110000 left it: a description, quantity 1, no cost, positive.)

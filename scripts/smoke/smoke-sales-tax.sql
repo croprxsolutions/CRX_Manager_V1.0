@@ -16,6 +16,7 @@
 --   J  A sales tax line on a misc-charge invoice is refused (only a chemical sale has one)
 --   K  A taxed draft whose tax line is stale can't be posted before its commit point
 --   L  E's posted group, unposted after the box is unticked, keeps its posted tax
+--   T  A taxed draft switched to misc charge loses its tax line and rate; switched back, it is taxed again
 --   R  Returns of a taxed, 3% sale (two lines, one in two parts) credit its posted total, tax included, to the cent
 --
 -- Tax is written at commit (the standing discount's deferred trigger). This file runs as ONE statement, so each
@@ -361,6 +362,27 @@ BEGIN
     IF SQLERRM NOT LIKE 'SALES_TAX_LINE_SCOPE%' THEN
       v_fails := v_fails || ' (J) refused with the wrong error: ' || SQLERRM || ';';
     END IF;
+  END;
+
+  -- T: G's new draft (taxed at 7%, Settings now back at 6.25) switched to misc charge and back, as the editor sends it.
+  BEGIN
+    PERFORM save_invoice(pg_temp.smk_header(v_invoice2) || '{"invoice_type": "misc_charge"}',
+      (SELECT jsonb_agg(x) FROM jsonb_array_elements(pg_temp.smk_lines(v_invoice2)) x WHERE x ->> 'charge_type' IS NULL
+                                                                                     OR x ->> 'charge_type' NOT IN ('sales_tax', 'standing_discount')),
+      'smk-tax-t-misc-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice2 AND charge_type = 'sales_tax')
+       OR EXISTS (SELECT 1 FROM invoice_sales_tax_rates WHERE invoice_id = v_invoice2) THEN
+      v_fails := v_fails || ' (T) a draft switched to misc charge kept its tax;';
+    END IF;
+    PERFORM save_invoice(pg_temp.smk_header(v_invoice2) || '{"invoice_type": "chemical_sale"}', pg_temp.smk_lines(v_invoice2),
+      'smk-tax-t-back-' || v_suffix);
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice2 AND charge_type = 'sales_tax' AND description = 'Sales tax 6.25%') THEN
+      v_fails := v_fails || ' (T) switched back to a chemical sale, the draft was not taxed at the Settings rate;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (T) the type switch failed: ' || SQLERRM || ';';
   END;
 
   -- R: returns of a taxed, 3% sale credit its posted total.

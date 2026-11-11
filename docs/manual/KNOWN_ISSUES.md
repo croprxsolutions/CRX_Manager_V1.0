@@ -378,7 +378,7 @@ can make old splits refuse to save (LOW-MED).
   and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its
   TypeScript mirrors now fold zero-width and non-breaking characters, so a pasted unit no longer blocks billing.
   (KI-16 named `_close_quote_as_applied`; the real booking path was `create_job_from_quote_section`.)
-  FIX PENDING LIVE APPLY (`20270101000000`, contract `docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md`):
+  APPLIED LIVE 2026-11-10 8:05 PM Central (`20270101000000`, ledger `20261111020528`, PR #1741; contract `docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md`):
   "fl. oz" with a period now reads as fluid ounces (bills on a liquid product, still refused on a dry one);
   `save_job` folds invisible characters before its own check; tabs, line breaks and every other character
   JavaScript trims count as a space on both sides; soft-deleted tickets no longer block a product unit edit; the
@@ -391,7 +391,9 @@ can make old splits refuse to save (LOW-MED).
   per acre") is refused at save (`CHEM_UNIT_FORM_MISMATCH`), as job lines already were; before, 16 fl oz/ac billed
   as 1 lb/ac. A dry product's own rate unit can never be fluid ounces, whatever its tickets' state. Live read-only
   2026-11-10: 0 rows affected. Still open, LOW: the normalizer still maps undotted "fl oz"
-  to "oz", so a direct table write that skips the triggers would bill it as weight. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
+  to "oz", so a direct table write that skips the triggers would bill it as weight. Also LOW (Taha, PR #1741): a tab
+  in a job line's stock Unit is still refused (`CHEM_UNIT_UNSUPPORTED_CHARACTER`, fails closed); folding it would
+  make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too. Inherited from `20261231100000`, raised by Astra 2026-11-10, UNVERIFIED: a blend line moved
   to another ticket, or a `no_charge` ticket made billable again, is not re-checked; the guards are invoker triggers,
   so a writer who cannot see a row may get a pass; "pt per ac" passes the guard but not the normalizer (fails closed
   at billing).

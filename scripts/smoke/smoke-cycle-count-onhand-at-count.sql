@@ -20,8 +20,8 @@ BEGIN
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
-  INSERT INTO products (product_name)
-  VALUES ('[SMOKE] Count On Hand ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO products (product_name, product_form)
+  VALUES ('[SMOKE] Count On Hand ' || v_suffix, 'liquid') RETURNING id INTO v_product;
   INSERT INTO inventory (product_id, location, quantity_available)
   VALUES (v_product, 'Main Warehouse', 100) RETURNING id INTO v_inventory;
 

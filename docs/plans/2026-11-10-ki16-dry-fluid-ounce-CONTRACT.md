@@ -131,9 +131,9 @@ None. Refusing a fluid ounce on a dry product is save_job's existing rule (Mason
   Postgres rolls one back; nothing wrong is stored. A refused caller could learn a product is dry from the message;
   every active profile can already read products.
 - Not covered, all fail closed: recipes (`blend_recipe_items`) and product parents (`product_parents.rate_unit`) are
-  refused when copied onto a job or a dry size; restoring an old quote version holding a dry fluid ounce is refused;
-  a size with a number (`32 fl oz`) is not matched but converts to nothing; plain `oz` lines on a product whose form
-  was never set read as fluid ounces and would read as weight ounces after it is set to dry (0 such products live).
+  refused when copied onto a job or a dry size; restoring an old quote version holding a dry fluid ounce is refused.
+  (Superseded: a package count such as `32 fl oz` is now matched, Luna round 1 below; a product with no form can no
+  longer exist, Mason's decision below.)
 - For #1741 (not changed here): `authenticated` holds UPDATE on `blend_tickets.deleted_at` (live, read-only
   2026-11-10), so a soft-deleted ticket can be restored; `20261231110000`'s product rate-unit guard skips deleted
   tickets. Its prover (F4) shows a restored blank-rate line is refused at billing, so it fails closed.

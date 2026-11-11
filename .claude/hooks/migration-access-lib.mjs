@@ -44,7 +44,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { stripCommentsQuoteAware, stripFunctionBodiesOnly } from "./live-testdata-lib.mjs";
+import { destructiveMigrationCheck, stripCommentsQuoteAware, stripFunctionBodiesOnly } from "./live-testdata-lib.mjs";
 
 const IDENT = String.raw`(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`;
 const QNAME = String.raw`${IDENT}(?:\s*\.\s*${IDENT})?`;
@@ -734,19 +734,15 @@ function functionDefinitions(text) {
 // strings, which are deliberately left visible.
 function rowWrite(body) {
   const text = stripCommentsQuoteAware(body).replace(/\s+/g, " ");
-  // Deletes and dynamic SQL first: they stay Mason's (2026-11-11), so a body that
-  // also UPDATEs must still report them (Codex P1, PR #1799).
-  if (/\bdelete\s+from\b/i.test(text)) return "deletes rows (DELETE)";
-  if (/\btruncate\b/i.test(text)) return "empties a table (TRUNCATE)";
-  // Dropping a table, schema or column throws its data away (Codex P1, PR #1799).
-  if (/\bdrop\s+(?:table|schema|column)\b/i.test(text)
-    || /\balter\s+table\b[^;]*?\bdrop\s+(?!constraint\b|default\b|not\s+null\b|identity\b|expression\b)/i.test(text)) {
-    return "deletes rows (DROP of a table, schema or column)";
-  }
+  // Data loss and dynamic SQL first: they stay Mason's (2026-11-11), so a body
+  // that also UPDATEs must still report them (Codex P1 x4, PR #1799). The body
+  // runs through the SAME check a top-level migration gets, so every form it
+  // knows (DELETE, TRUNCATE, MERGE, DROP TABLE/COLUMN/SCHEMA/TYPE/DOMAIN/...)
+  // counts here too. A check that throws counts as data loss (fail closed).
+  let lost;
+  try { lost = destructiveMigrationCheck(body); } catch { lost = { destructive: true, reason: "the body could not be checked" }; }
+  if (lost.destructive) return `deletes rows (${lost.reason})`;
   if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
-  // Any MERGE can delete matched rows, as destructiveMigrationCheck treats a
-  // top-level one (Codex P1, PR #1799).
-  if (/\bmerge\s+into\b/i.test(text)) return "may overwrite or delete rows (MERGE; deletes rows when matched)";
   if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
   if (/\bon\s+conflict\b[^;]*?\bdo\s+update\b/i.test(text)) return "overwrites existing rows (INSERT ... ON CONFLICT DO UPDATE)";
   return null;

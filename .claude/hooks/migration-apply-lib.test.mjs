@@ -1974,6 +1974,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ["a called function that UPDATEs and drops a table", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP TABLE public.customers; END $$;\nSELECT public.z();\n"],
     ["a called function that UPDATEs and drops a column", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; ALTER TABLE public.customers DROP COLUMN email; END $$;\nSELECT public.z();\n"],
     ["a called function that drops a column without the COLUMN word", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; ALTER TABLE public.customers DROP email; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a type with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP TYPE public.customer_kind CASCADE; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a domain with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP DOMAIN public.money_cents CASCADE; END $$;\nSELECT public.z();\n"],
     ["a GRANT then dynamic SQL", "GRANT SELECT ON public.customers TO anon;\nDO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
   ]) {
     ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);

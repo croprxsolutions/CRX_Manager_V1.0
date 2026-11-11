@@ -17,10 +17,10 @@
 --   5. A closed PO cannot be cancelled or deleted (_guard_po_delete); cancel's refusal for a received PO now says to
 --      close it short instead of naming a workflow that never existed.
 --   6. A closed PO can still be billed for what arrived: _section9_create_vendor_bill_intent_impl_20260826 (live body
---      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list. Bills above what
---      arrived stay governed by KI-143's received-value limit in the public create_vendor_bill / update_vendor_bill
---      (20270103110000, required live by the preflight), which reads quantity_received for every PO status.
---   7. A cost correction on a closed PO may not lower the received value below its active bills (the close's rule).
+--      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list.
+--   7. A closed PO's active vendor bills never total more than what arrived (the close's rule), with no override: a
+--      bill write (trigger_0_guard_closed_po_bill on vendor_bills, any path, KI-143's confirmed overage included), a
+--      cost correction and a receipt reversal on a closed PO are each refused if they would break it.
 --
 -- idempotency-body-check: exempt -- close_purchase_order_short requires p_idempotency_key, checks it with
 --   check_idempotency_intent bound to the caller and request (PO and trimmed reason) after authorizing the caller,
@@ -37,7 +37,7 @@
 --   fully_received and is fixed in the screen PR, before any PO is closed).
 --   No existing row changes at apply.
 --
--- ROLLBACK (its own reviewed migration): if no PO is closed, drop close_purchase_order_short, both trigger_0_guard_closed_* triggers
+-- ROLLBACK (its own reviewed migration): if no PO is closed, drop close_purchase_order_short, the three trigger_0_guard_closed_* triggers
 --   and their functions, restore the previous bodies of _enforce_po_status_transition, _guard_po_delete and
 --   _section9_cancel_purchase_order_serialized, restore the old status CHECK and drop the three columns. If a PO is
 --   closed, it must first be decided what it becomes (a business decision), since the old CHECK has no 'closed'.
@@ -48,7 +48,7 @@ DO $preflight$
 BEGIN
   IF to_regprocedure('public.close_purchase_order_short(uuid, text, text)') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
-                 AND proname IN ('close_purchase_order_short', '_guard_closed_po_item', '_guard_closed_po')) THEN
+                 AND proname IN ('close_purchase_order_short', '_guard_closed_po_item', '_guard_closed_po', '_guard_closed_po_bill')) THEN
     RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: close_purchase_order_short or a closed-PO guard already exists';
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'purchase_orders'
@@ -245,8 +245,12 @@ BEGIN
   IF v_closed IS NULL THEN
     RETURN COALESCE(NEW, OLD);
   END IF;
-  IF v_cost_only THEN
-    -- A closed PO's bills stay at or under what arrived (the close's rule), so a cost cut may not push received under them.
+  IF v_cost_only
+     OR (v_same_line
+         AND COALESCE(NEW.quantity_received, 0) < COALESCE(OLD.quantity_received, 0)
+         AND current_setting('app.reversal_rpc_active', true) = 'true') THEN
+    -- A cost correction, or reverse_receiving_record taking a wrong receipt back off a closed PO. Either may lower
+    -- received value; a closed PO's bills stay at or under it (the close's rule).
     SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * COALESCE(poi.unit_cost, 0) * 100)), 0)::bigint
       INTO v_received_cents
       FROM public.purchase_order_items poi
@@ -256,15 +260,10 @@ BEGIN
       FROM public.vendor_bills vb
      WHERE vb.purchase_order_id = NEW.purchase_order_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
     IF v_billed_cents > v_received_cents THEN
-      RAISE EXCEPTION 'PO_CLOSE_BILLED_OVER_RECEIVED: this cost change would put vendor bills on closed PO % above what was received; correct the bill first',
+      RAISE EXCEPTION 'PO_CLOSE_BILLED_OVER_RECEIVED: this change would put vendor bills on closed PO % above what was received; correct the bill first',
         v_closed USING ERRCODE = '55000';
     END IF;
     RETURN NEW;
-  END IF;
-  IF v_same_line
-     AND COALESCE(NEW.quantity_received, 0) < COALESCE(OLD.quantity_received, 0)
-     AND current_setting('app.reversal_rpc_active', true) = 'true' THEN
-    RETURN NEW;  -- reverse_receiving_record taking a wrong receipt back off a closed PO
   END IF;
   RAISE EXCEPTION 'PO_CLOSED: purchase order % was closed short; its lines cannot be added, removed, changed or received into', v_closed;
 END;
@@ -465,6 +464,53 @@ BEGIN
   RETURN v_bill_id;
 END;
 $function$;
+
+-- 5c. A closed PO's active bills never total more than what arrived, on any write path and with no overage override.
+--     The PO row lock matches the close (FOR UPDATE) and KI-143's wrappers (which already hold it), so two bills, or a
+--     bill and the close, cannot both pass on stale totals.
+CREATE FUNCTION public._guard_closed_po_bill()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_po record;
+  v_received_cents bigint;
+  v_billed_cents bigint;
+BEGIN
+  IF NEW.purchase_order_id IS NULL OR NEW.deleted_at IS NOT NULL OR NEW.status = 'voided' THEN
+    RETURN NEW;
+  END IF;
+  -- An already-active bill on the same PO that does not grow (a payment, an edit down) never adds to the total.
+  IF TG_OP = 'UPDATE' AND OLD.purchase_order_id = NEW.purchase_order_id AND OLD.deleted_at IS NULL
+     AND OLD.status <> 'voided' AND NEW.total_cents <= OLD.total_cents THEN
+    RETURN NEW;
+  END IF;
+  SELECT po.po_number, po.status INTO v_po
+    FROM public.purchase_orders po WHERE po.id = NEW.purchase_order_id FOR UPDATE;
+  IF v_po.status IS DISTINCT FROM 'closed' THEN
+    RETURN NEW;
+  END IF;
+  SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * COALESCE(poi.unit_cost, 0) * 100)), 0)::bigint
+    INTO v_received_cents
+    FROM public.purchase_order_items poi WHERE poi.purchase_order_id = NEW.purchase_order_id;
+  SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed_cents
+    FROM public.vendor_bills vb
+   WHERE vb.purchase_order_id = NEW.purchase_order_id AND vb.id <> NEW.id
+     AND vb.deleted_at IS NULL AND vb.status <> 'voided';
+  IF v_billed_cents + COALESCE(NEW.total_cents, 0) > v_received_cents THEN
+    -- No amounts in the message: received value is quantity x cost, and PO cost is admin-only.
+    RAISE EXCEPTION 'PO_CLOSE_BILLED_OVER_RECEIVED: bills on closed PO % would total more than what was received; a closed PO cannot be billed past what arrived',
+      v_po.po_number USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._guard_closed_po_bill() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._guard_closed_po_bill() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trigger_0_guard_closed_po_bill
+  BEFORE INSERT OR UPDATE OF purchase_order_id, total_cents, status, deleted_at ON public.vendor_bills
+  FOR EACH ROW EXECUTE FUNCTION public._guard_closed_po_bill();
 
 -- 6. The office call.
 CREATE FUNCTION public.close_purchase_order_short(

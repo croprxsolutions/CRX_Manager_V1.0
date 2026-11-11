@@ -464,6 +464,18 @@ async function main() {
   ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.10 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }));
   ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.00 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }));
   refused(q(`UPDATE public.purchase_order_items SET unit_cost = 0.99 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
+  // No override past what arrived on a closed PO: KI-143's confirmed overage, a direct bill write, a bill growing past
+  // received, or a receipt reversal under the bills are all refused; a bill shrinking or voided lands.
+  refused(as(ADMIN, `SELECT public.create_vendor_bill(p_vendor_id => '${vid}', p_purchase_order_id => '${A.po}', p_bill_number => 'PROVER-A-3',
+    p_subtotal_cents => 100, p_idempotency_key => 'k142-bill-a3', p_confirm_po_overage => true, p_po_overage_reason => 'vendor says shipped')`), /PO_CLOSE_BILLED_OVER_RECEIVED/);
+  refused(q(`INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents, status)
+    VALUES ('${vid}', '${BILLED.po}', 'PROVER-B-direct', current_date, current_date + 30, 1, 1, 'unpaid');`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
+  const billedBill = `(SELECT id FROM public.vendor_bills WHERE purchase_order_id = '${BILLED.po}' AND status <> 'voided' AND deleted_at IS NULL)`;
+  ok(q(`UPDATE public.vendor_bills SET subtotal_cents = 499, total_cents = 499 WHERE id = ${billedBill};`, { allowFailure: true }));
+  refused(q(`UPDATE public.vendor_bills SET subtotal_cents = 501, total_cents = 501 WHERE id = ${billedBill};`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
+  ok(q(`UPDATE public.vendor_bills SET subtotal_cents = 500, total_cents = 500 WHERE id = ${billedBill};`, { allowFailure: true }));
+  refused(as(ADMIN, `SELECT public.reverse_receiving_record('${BILLED.receipts[0]}', 'wrong receipt', '${ADMIN}', 'k142-rev-billed')`), /RECEIVING_REVERSAL_BLOCKED_BY_VENDOR_BILL|PO_CLOSE_BILLED_OVER_RECEIVED/);
+  console.log('[prover] a closed PO cannot be billed past what arrived: no confirmed overage, no direct write, no reversal under its bills');
   console.log('[prover] bills over received block; voided are ignored; equal is fine; a closed PO can be billed, a cancelled one cannot; KI-143 caps a closed PO\'s bills; a cost cut cannot sink received under them');
 
   // 6-8. A closed PO is frozen.

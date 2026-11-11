@@ -156,6 +156,12 @@ is the screens, merged after PR 1 is live.
   public `create_vendor_bill` / `update_vendor_bill` hold every PO's bills, closed included, to the received value
   (+5% only with an admin's confirmed reason, Mason's KI-143 rule). (2) A cost cut after the close: the line guard
   refuses a cost change on a closed PO that would put its active bills above the received value. Proof: both cases.
+- **Sol round 2 (2026-11-11), same HIGH: KI-143's confirmed overage and a receipt reversal could still leave a closed
+  PO billed above what arrived.** One rule now, no override: a closed PO's active bills never total more than its
+  received value. A new trigger on `vendor_bills` (any write path, under the PO row lock the close and KI-143 take)
+  refuses a bill that would break it; the line guard refuses a cost cut or a reversal that would. The close itself
+  already applied this rule; a vendor's claim above what arrived is settled outside the closed PO (correct the bill,
+  or bill the extra separately). Third round on this mechanism would stop for Mason (AGENTS.md).
 - **Bill value vs merchandise (#29, #30).** Kept as a conservative aggregate ceiling: freight on a PO-linked bill could
   block a close until the bill is corrected; acceptable at today's volume (no PO-linked bills).
 - **Reversal limits (#3, #4, #7, #54).** Existing reversal rules (admin only, no active bill, open period) still apply.

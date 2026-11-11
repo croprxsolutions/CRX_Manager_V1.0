@@ -2058,7 +2058,7 @@ export interface ProductParentIngredient {
   updated_at: string;
 }
 
-/** DM-1b (20270103100000): one Ingredients-tab upload for one parent, waiting for review. Admin read only. */
+/** DM-1b (20270103160000): one Ingredients-tab upload for one parent, waiting for review. Admin read only. */
 export type ChemistryChangeProposalStatus = 'proposed' | 'applied' | 'rejected';
 export type ChemistryProposalDecision = 'apply' | 'apply_delete' | 'reject';
 export interface ChemistryChangeProposal {

@@ -15,7 +15,7 @@ Source: Stage 2 sheet §7.5 (`docs/plans/2026-11-04-product-stage2-BUILD-SHEET.m
 
 DM-4's tables (`epa_lookups`, `epa_lookup_failures`, `epa_chemistry_proposals`) do not exist yet. DM-1b does not depend on them.
 
-## 2. Database PR: `20270103100000_setup_workbook_chemistry_tabs.sql`
+## 2. Database PR: `20270103160000_setup_workbook_chemistry_tabs.sql`
 
 **Table `chemistry_change_proposals`** (RLS on; SELECT for admins only; no write grant). One row per parent per upload: `parent_id`, `items` (the change list, in `_apply_parent_chemistry`'s shape, each with its source and source note), `has_delete`, `base_chemistry_version`, `proposal_version`, `status` (`proposed`, `applied`, `rejected`), `created_by/at`, `decided_by/at`, `applied_chemistry_version`.
 

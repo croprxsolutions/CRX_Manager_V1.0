@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270103100000_setup_workbook_chemistry_tabs (DM-1b; build sheet
+ * Real-schema proof for 20270103160000_setup_workbook_chemistry_tabs (DM-1b; build sheet
  * docs/plans/2026-11-10-product-DM1b-BUILD-SHEET.md section 5).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270103100000_setup_workbook_chemistry_tabs.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270103160000_setup_workbook_chemistry_tabs.sql');
 const FOLLOW_UPS = [];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();

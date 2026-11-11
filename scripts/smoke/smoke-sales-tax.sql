@@ -14,7 +14,7 @@
 --   G  The Settings rate moves from 6.25 to 7: an existing draft keeps 6.25 on a re-save; a new draft takes 7
 --   H  A Settings rate that is not a plain percentage is refused
 --   J  A sales tax line on a misc-charge invoice is refused (only a chemical sale has one)
---   K  A taxed draft whose tax line is stale can't be posted before its commit point
+--   K  A taxed draft whose tax line is stale, or moved above the products, can't be posted before its commit point
 --   L  E's posted group, unposted after the box is unticked, keeps its posted tax
 --   T  A taxed draft switched to misc charge loses its tax line and rate; switched back, it is taxed again
 --   R  Returns of a taxed, 3% sale (two lines, one in two parts) credit its posted total, tax included, to the cent
@@ -193,6 +193,18 @@ BEGIN
     END IF;
   END;
 
+  -- K: the tax line moved above the products and posted before the commit point.
+  BEGIN
+    UPDATE invoice_items SET sort_order = 0 WHERE invoice_id = v_invoice AND charge_type = 'sales_tax';
+    PERFORM post_invoice(v_invoice, _invoice_post_version(v_invoice), 'smk-tax-moved-' || v_suffix);
+    v_fails := v_fails || ' (K) a moved tax line was posted;';
+    RAISE EXCEPTION 'smk_undo';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'SALES_TAX_STALE%' AND SQLERRM <> 'smk_undo' THEN
+      v_fails := v_fails || ' (K) a moved line refused with the wrong error: ' || SQLERRM || ';';
+    END IF;
+  END;
+
   -- B: untaxed by default.
   v_order := pg_temp.smk_sale(v_admin, v_admin, v_product.id, v_product.current_cost, v_payer2, NULL, false,
                               'b-' || v_suffix, '[{"over": 1.37, "q": 10}]');
@@ -282,7 +294,11 @@ BEGIN
     v_fails := v_fails || ' (F) a reused key with the other value was accepted;';
   EXCEPTION WHEN OTHERS THEN NULL;
   END;
-  -- A rep: their own sale yes, another rep's (the admin's) no.
+  -- A rep: their own sale yes, another rep's no (a second rep's sale when there is one, else the admin's).
+  IF v_rep2 IS NOT NULL THEN
+    INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+      VALUES ('SMK-TAX-REP2-' || v_suffix, v_payer2, CURRENT_DATE, 'confirmed', v_rep2) RETURNING id INTO v_order;
+  END IF;
   PERFORM pg_temp.smk_as(v_rep);
   BEGIN
     PERFORM set_order_sales_tax(v_order, false, 'smk-tax-f-rep-' || v_suffix);

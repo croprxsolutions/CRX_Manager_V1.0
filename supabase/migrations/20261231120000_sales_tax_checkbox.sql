@@ -350,9 +350,9 @@ CREATE TRIGGER invoice_items_sales_tax_scope_20261231
   FOR EACH ROW WHEN (NEW.charge_type = 'sales_tax')
   EXECUTE FUNCTION public.guard_sales_tax_line_scope_20261231();
 
--- Posting refuses an invoice whose tax line doesn't match its rate (a chemical sale) or that carries one (any other
--- type). Every writer today commits a draft before anyone posts it, so this catches a future path that changes a
--- draft and posts it in one transaction.
+-- Posting refuses an invoice whose tax line doesn't match its rate or its place (a chemical sale: right after the
+-- discount line, or after the last other line), or that carries one (any other type). Every writer today commits a
+-- draft before anyone posts it, so this catches a future path that changes a draft and posts it in one transaction.
 CREATE FUNCTION public.guard_sales_tax_current_on_post_20261231()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -363,14 +363,23 @@ DECLARE
   v_tax bigint := 0;
   v_label text;
   v_pct numeric;
+  v_after int;
 BEGIN
   IF NEW.invoice_type = 'chemical_sale' THEN
     SELECT e.o_cents INTO v_discount FROM public._standing_discount_expected_20261231(NEW.id) e;
     SELECT e.o_cents, e.o_label, e.o_pct INTO v_tax, v_label, v_pct FROM public._sales_tax_expected_20261231(NEW.id, v_discount) e;
   END IF;
-  IF (SELECT COALESCE(array_agg(extended_cents::text || '|' || description), '{}'::text[]) FROM invoice_items
+  v_after := (SELECT COALESCE(max(sort_order), 0) FROM invoice_items
+               WHERE invoice_id = NEW.id AND charge_type IS DISTINCT FROM 'standing_discount'
+                 AND charge_type IS DISTINCT FROM 'sales_tax');
+  IF (SELECT COALESCE(array_agg(extended_cents::text || '|' || description || '|' || sort_order), '{}'::text[]) FROM invoice_items
        WHERE invoice_id = NEW.id AND charge_type = 'sales_tax')
-     IS DISTINCT FROM (CASE WHEN v_tax > 0 THEN ARRAY[v_tax::text || '|' || v_label] ELSE '{}'::text[] END) THEN
+     IS DISTINCT FROM (CASE WHEN v_tax > 0
+                            THEN ARRAY[v_tax::text || '|' || v_label || '|' || (v_after + CASE WHEN v_discount > 0 THEN 2 ELSE 1 END)]
+                            ELSE '{}'::text[] END)
+     -- The discount line's place too (its cents and label are the discount's own posting check).
+     OR EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = NEW.id AND charge_type = 'standing_discount'
+                  AND sort_order <> v_after + 1) THEN
     RAISE EXCEPTION 'SALES_TAX_STALE: this draft''s sales tax is out of date; save it again, then post'
       USING ERRCODE = '55000';
   END IF;

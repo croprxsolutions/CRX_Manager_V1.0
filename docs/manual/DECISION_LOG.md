@@ -32,6 +32,18 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.
 **What this forbids/implies:** do not send free text other than this scrubbed message, for example `details` or `hint`. Do not blank figures before tokens are removed. A new database message that would quote a customer's name or contact details must not be raised.
+## 2026-11-10 — #1756: Mason owner-accepted 1 Sol finding(s) at `0fc8d1c59d0e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1756 at `0fc8d1c59d0e` (base `3e72201b4784`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:9`, text sha256 `e075ef7905bf21cd` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref cddc292eff89)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets only known-safe fields, built fresh (KI-115, option B)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Safe fields only (B)").** Every Sentry event, error or performance sample, is rebuilt in `src/lib/sentry.ts` from an allow-list: error type and title, stack frames (file, function, line, column), our own tags, the user id, breadcrumb category, level and time, path-only urls and span names, trace ids, and the SDK's own bookkeeping. Dropped: `extra`, every other context, request query, headers and cookies, the serialized copy of a plain error object, breadcrumb messages and data, and span data. The alternative was to keep token-pattern matching across the whole event, which Luna kept finding new shapes for. The title is the only free text. It goes through `toSentryError`: tokens removed whole, then figures blanked (see the same-day entry "Sentry gets a database error's wording, figures blanked").
+**What this forbids/implies:** do not send a new event field without adding it to the allow-list on purpose. Do not add pattern matching back as the main defence. The `extra` data on about 220 capture calls no longer reaches Sentry; put anything Sentry must see in a tag instead.
 
 ## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR `claude/reg1-step2-redesign-e66693`)
 ## 2026-11-10 — #1706 (RT-2 step 1 unit spellings) redone for product families as 20270101010000; new Sol rounds

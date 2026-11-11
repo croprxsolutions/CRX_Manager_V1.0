@@ -10115,6 +10115,7 @@ export type Database = {
           epa_registration: string | null
           id: string
           invoice_id: string | null
+          invoice_item_id: string | null
           order_id: string | null
           product_id: string
           product_name: string
@@ -10142,6 +10143,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id: string
           product_name: string
@@ -10169,6 +10171,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id?: string
           product_name?: string
@@ -10210,6 +10213,13 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rup_sales_records_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
             referencedColumns: ["id"]
           },
           {

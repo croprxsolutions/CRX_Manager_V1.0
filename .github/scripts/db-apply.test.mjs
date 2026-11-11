@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -166,4 +166,18 @@ test('ledgerDrift: rows with no file, rows whose file changed, files never appli
   assert.deepEqual(d.noFile, ['20261105000000_sql_editor_change']);
   assert.deepEqual(d.changed, ['20261102000000_b']);
   assert.deepEqual(d.notApplied, ['20261103000000_pending']);
+});
+
+test('urlRef: the read-only drift login on the pooler counts; any other host or a bad role does not', () => {
+  assert.equal(urlRef('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), 'fsnjredpmakbmhwowjjt');
+  assert.equal(urlRef('postgresql://crx_drift_ro.fsnjredpmakbmhwowjjt:pw@attacker.example:5432/postgres'), null);
+  assert.equal(urlRef('postgresql://Bad-Role.fsnjredpmakbmhwowjjt:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres'), null);
+  assert.match(refuseTarget('postgresql://crx_drift_ro.rhyzpcqhnizqbxphqdkr:pw@aws-0-us-west-1.pooler.supabase.com:5432/postgres', 'fsnjredpmakbmhwowjjt'), /live/);
+});
+
+test('schemaDiff: lines only on the target and lines only in the rebuild, in their own order', () => {
+  const target = ['column t.a int', 'function f() md5=1', 'policy t.p'];
+  const rebuilt = ['column t.a int', 'function f() md5=2', 'index i'];
+  assert.deepEqual(schemaDiff(target, rebuilt), { onlyTarget: ['function f() md5=1', 'policy t.p'], onlyRebuilt: ['function f() md5=2', 'index i'] });
+  assert.deepEqual(schemaDiff(target, [...target]), { onlyTarget: [], onlyRebuilt: [] });
 });

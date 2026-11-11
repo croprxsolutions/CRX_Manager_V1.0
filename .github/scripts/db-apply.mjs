@@ -172,7 +172,8 @@ export function urlRef(dbUrl) {
   let u;
   try { u = new URL(dbUrl); } catch { return null; }
   const username = decodeURIComponent(u.username);
-  const poolerUser = /^postgres\.([a-z]{20})$/.exec(username)?.[1];
+  // <role>.<project ref>: postgres for the apply job, crx_drift_ro for the read-only drift and schema checks.
+  const poolerUser = /^[a-z_][a-z0-9_]*\.([a-z]{20})$/.exec(username)?.[1];
   if (poolerUser) return /^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(u.hostname) ? poolerUser : null;
   const directHost = /^db\.([a-z]{20})\.supabase\.co$/.exec(u.hostname)?.[1];
   if (directHost) return username === 'postgres' ? directHost : null;
@@ -337,7 +338,38 @@ function drift({ dbUrl, expectedRef, repo, report }) {
   return !report && (noFile.length || changed.length) ? 1 : 0;
 }
 
+// Lines only on one side of two schema fingerprints (.github/scripts/schema-fingerprint.sql).
+export function schemaDiff(target, rebuilt) {
+  const [t, r] = [new Set(target), new Set(rebuilt)];
+  return { onlyTarget: target.filter((l) => !r.has(l)), onlyRebuilt: rebuilt.filter((l) => !t.has(l)) };
+}
+
+// The target's public schema must equal one rebuilt from the repo (baseline + migrations): catches
+// SQL Editor changes that left no ledger row. Read-only on the target; the rebuilt DB must be local.
+function schema({ dbUrl, expectedRef, rebuiltUrl, report }) {
+  const refused = refuseTarget(dbUrl, expectedRef);
+  if (refused) throw new Error(`REFUSED: ${refused}`);
+  if (urlRef(rebuiltUrl ?? '') !== 'local') throw new Error('REBUILT_DB_URL must be the local rebuilt database');
+  const sql = readFileSync(new URL('./schema-fingerprint.sql', import.meta.url), 'utf8');
+  const [target, rebuilt] = [query(dbUrl, sql), query(rebuiltUrl, sql)];
+  if (!rebuilt.length || !target.length) throw new Error('a schema fingerprint came back empty');
+  const { onlyTarget, onlyRebuilt } = schemaDiff(target, rebuilt);
+  const level = report ? 'warning' : 'error';
+  const show = (lines, where) => {
+    for (const l of lines.slice(0, 100)) console.log(`::${level}::${where}: ${l.slice(0, 400)}`);
+    if (lines.length > 100) console.log(`::${level}::...and ${lines.length - 100} more ${where}`);
+  };
+  show(onlyTarget, `on ${expectedRef}, not in the migration files`);
+  show(onlyRebuilt, `in the migration files, not on ${expectedRef}`);
+  console.log(`DB_SCHEMA ${expectedRef}: ${target.length} objects, ${onlyTarget.length} only on ${expectedRef}, ${onlyRebuilt.length} only in the files`);
+  return !report && (onlyTarget.length || onlyRebuilt.length) ? 1 : 0;
+}
+
 const commands = {
+  // env: DB_URL, TARGET_REF, REBUILT_DB_URL (from rebuild-schema.sh); SCHEMA_MODE=report warns only. Read-only.
+  schema() {
+    return schema({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', rebuiltUrl: process.env.REBUILT_DB_URL, report: process.env.SCHEMA_MODE === 'report' });
+  },
   // env: DB_URL, TARGET_REF. Read-only.
   drift() {
     return drift({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', repo: process.cwd(), report: process.env.DRIFT_MODE === 'report' });

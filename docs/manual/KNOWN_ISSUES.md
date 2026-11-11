@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110061547`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110164910`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-112 closed 2026-11-10) | 62 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10) | 64 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 20 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -372,7 +372,7 @@ can make old splits refuse to save (LOW-MED).
 
 ### KI-16 — Sub-cent and rounding gaps
 **MED/LOW · mixed · money · unassigned**
-- FIX PENDING LIVE APPLY (`20261231100000`, contract `docs/plans/2026-11-10-ki16-rate-unit-denominator-and-invisible-chars-CONTRACT.md`):
+- APPLIED LIVE 2026-11-10 10:49 AM Central (`20261231100000`, ledger `20261110164910`, PR #1733; contract `docs/plans/2026-11-10-ki16-rate-unit-denominator-and-invisible-chars-CONTRACT.md`):
   a rate unit measured per something other than acres ("oz/cwt", "oz per cwt") is refused when any job line or blend
   ticket line is written (scheduling from a booking, the recipe RPC, blend ticket create/save), with save_job's rule
   and message; `baseUnitOfRate` keeps such a unit whole instead of reading it as "oz". `normalize_rate_unit` and its
@@ -530,7 +530,9 @@ this number is fixed and live (archive, 2026-11-05).
 
 ### KI-114 — Four kinds of old product rate data are wrong or have no rate basis
 **MED · OPEN, planned (RT-2/RT-3) · products/rates · found 2026-11-08 ([RT-1 build sheet](../plans/2026-11-08-product-RT1-BUILD-SHEET.md) section 1)**
-RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
+RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
+(PR #1706, open) has its unit converter live (`20261229160000`, ledger `20261110061547`); its spelling remap
+`20261229170000` is not live (2026-11-10). Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
 - Seed treatments: the 9 liquid seed treatments with `/unit` text store the per-seed-unit number as a per-acre rate
   (Ilevo 2.5 Gal: `1.18 oz` "per acre", text `1.18 oz/unit`), so a quote multiplies it by acres. RT-3.
 - Liquid unit on a dry product: `Autumn Super 51 WDG` and `Cimarron Plus - 10 oz` are dry with `rate_unit = 'oz'`.
@@ -573,15 +575,17 @@ RT-1's draft rates copy these as they are; nothing here is fixed yet. Derive not
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
-**MED · OPEN (sender live; app switch in PR #1649) · UI/database/Edge Function · Claude**
+**MED · OPEN (sender and app switch live; close action live in the database, not on a screen yet) · UI/database/Edge Function · Claude**
 The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
 save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
 2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
-that asks for the server receipt is PR #1649; it must not land before the sender's secrets are stored. Not built:
-provider bounce handling (no email bounces are tracked today on any path) and a "mark handled" action. The office
+that asks for the server receipt (PR #1649) merged 2026-11-09. Not built: provider bounce handling (no email
+bounces are tracked today on any path). The database half of a "mark handled" action is live
+(`20261221100000_close_delivery_receipt`, ledger `20261109152447`, PR #1678), but no screen calls it yet (checked on
+`main` 2026-11-10), so the points below still hold. The office
 card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
 Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
-chose (2026-11-08) to land the app switch first; the close action is a follow-up migration PR.
+chose (2026-11-08) to land the app switch first; the close action's screen is the remaining follow-up.
 
 ### KI-26 — Delivery completion-evidence leftovers
 **LOW · OPEN · UI/database/process**
@@ -750,6 +754,14 @@ a counted correction he approves. Nothing was changed.
 Next step: re-run the check (the `/integrity-report` admin page shows the same check). For any product still off,
 read its ledger: an `adjusted` row that changed only pre-booked stock belongs in `PREBOOK_ONLY_ADJUSTMENT_TX_IDS`
 (`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
+
+### KI-116 — Product Detail treats a non-product address as a load failure
+**LOW · OPEN (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**
+Opening `/products/group` (no link on `main` points there; most likely typed or an old bookmark for
+`/group-products`) sends "group" to the database as a product id. Two reads fail with "invalid input syntax for type
+uuid" and the page shows a load failure, not "product not found". Nothing is saved or changed. Fix when next in
+`src/pages/ProductDetail.tsx` (Sol-listed): check the id is a uuid before loading, or send `/products/group` to
+`/group-products`.
 
 ## Database and release process
 
@@ -963,6 +975,17 @@ pass. Not a customer risk today: live read-only 2026-11-09, the `customer-docume
 `storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
 `customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
 boundary. Fix when next needed: rebuild it on the real-schema harness.
+
+### KI-115 — Many screens send database errors to Sentry as "[object Object]"
+**LOW · PARTLY FIXED · observability · source: 2026-11-10 prod spot-check (Sentry CRX-MANAGER-1W, -1S)**
+About 70 files under `src/` report a caught error as `err instanceof Error ? err : new Error(String(err))`. A
+Supabase error is a plain object, so Sentry receives only "[object Object]" and the real reason is lost (1W was an
+expected "a size changed, build a new proposal" refusal on Group Products; 1S on the Office Cockpit finance card had no
+matching database error, so it was most likely a network blip). The 2026-11-10 fix makes `src/lib/sentry.ts` title
+plain error objects with their own message and drop network blips, and Group Products now sends the error's own
+message. Still open: the other call sites (fix the Group Products way; many of those files are Sol-listed, so batch
+them by area). Also open (Luna, PR #1730): login-token scrubbing covers `event.message` and every error title, but not the
+serialized copy Sentry attaches to a plain object; widen it in its own small PR.
 
 ---
 

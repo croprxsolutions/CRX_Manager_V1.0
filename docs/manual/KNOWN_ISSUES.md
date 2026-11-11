@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2)) | 66 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md)) | 97 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 20 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -118,6 +118,8 @@ the `invoice_shares_insert` policy (checked live 2026-10-13: no ownership test);
 on other reps' invoices, and payments and prepay/credit application stay open to reps. Any rep can
 still change a commission split on a job, quote or order (only the customer default is protected). Any rep can
 also roll over any rep's quote.
+The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirmed the bill-split share gap above as LOW (blocked once an invoice is posted);
+logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
 with a below-cost line always fails, so that job is billed by hand.
@@ -144,6 +146,8 @@ nothing is back-filled or deleted without his approval. A database owner who dis
 
 ### KI-07 — Other small security gaps
 **MED/LOW · mixed · unassigned**
+- Noticed out of scope by the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 2, Couldn't verify): an applicator may be able to change a licensing
+  field on their own profile that job completion reads. Not assessed (field application); detail held privately. LOW, UNVERIFIED.
 - `profiles` grants `TRUNCATE`/`TRIGGER` to signed-in users (confirmed live read-only 2026-10-25 and
   2026-11-05) — revoked by `20261116100000_permission_tightening.sql` (Mason 2026-11-05; APPLIED LIVE 2026-11-06 12:28 AM Central, ledger `20261106062807`), LOW-MED.
 - The same table-maintenance rights (TRUNCATE, TRIGGER, MAINTAIN) on every public table and view, `profiles` MAINTAIN included (462 grants,
@@ -219,6 +223,45 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
   - Both calls returned 200 with no function errors logged.
 
 ---
+
+### KI-119 — Settings → Page Access hides screens but the database does not enforce it
+**MED (HIGH if meant as security) · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2) · unassigned**
+Page Access (`denied_pages`) is checked only by the screen router. A user with money pages hidden (one live rep today)
+keeps the abilities behind those pages. No decision says whether Page Access is a security control or menu tidiness
+(To-Do decision 16). Fix once decided: either rename it "Hide from menu" and record that, or enforce it in the
+database for the money and report functions. Exploit-level detail is held privately until a fix is live.
+
+### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
+**MED · OPEN · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1) · unassigned**
+The 2026-11-01 lock made price tier and credit limit admin-only; payment terms, finance-charge on/off, rate and grace
+days are not covered, so a rep can move a customer to Net 90 or turn off late fees (also parent customer and default
+application service). Fix if Mason agrees (To-Do decision 18): add these fields to `guard_customer_rep_edit_20261013`
+and disable them on the screen for non-admins.
+
+### KI-121 — The last active admin can remove their own admin role
+**LOW · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · unassigned**
+`_guard_last_active_admin` fires only on deactivation, not a role change, so the last admin can demote themselves and
+nobody can reach Settings without database access. 5 active admins today; the screen warns. Fix: extend the guard to
+role changes.
+
+### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
+**LOW · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #11) · unassigned**
+Both reset paths (`create-user` `reset_password` and `reset-user-password`) only set the new password: the account's
+existing sessions stay signed in, and no record says which admin reset whose password. Deactivation, by contrast, ends
+sessions. Fix: end the target's sessions after a reset and write an audit row. Read from code; not tested live. Edge
+Function deploys need Mason's approval.
+
+### KI-123 — The signed-out role keeps read grants it does not need
+**LOW (defence in depth) · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #11) · unassigned**
+Row security blocks every signed-out read today (all public tables have RLS and policies), but table read grants to
+the signed-out role remain, so one future policy mistake would expose data. Fix: one migration revoking those grants on
+tables the login page does not need. Table list held privately.
+
+### KI-124 — The public (anon) key is hard-coded in 5 end-to-end test files
+**LOW (informational) · OPEN · security/tooling · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #12) · unassigned**
+The key is meant to be public, but rotating it would silently break `tests/e2e/golive/utils/supabase-helpers.ts`,
+`tests/e2e/workflow-financial-operations.spec.ts`, `workflow-job-lifecycle.spec.ts`, `workflow-schema-regression.spec.ts`
+and `comprehensive-ui-workflow.spec.ts`. No secret keys were found. Fix: read it from `process.env`.
 
 ## Money
 
@@ -592,6 +635,65 @@ send each kept line's stored number in that function (a large money function re-
 - The seed has no lock timeout of its own and its preview does not run the facts check; run the seed in a quiet
   window. `label_url` accepts any text. The Step 1 assign/preview stubs keep their "not set up" message.
 
+### KI-125 — Bottom Line P&L and Monthly Summary subtract commissions on every booked order but count only CRX-invoiced revenue
+**HIGH · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1) · unassigned**
+Revenue counts posted/overdue/paid invoices by invoice date; commissions count every non-replaced commission by order
+date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
+(only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
+`get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Fix needs To-Do decision 15 first; smallest fix
+counts a commission only when its order has an invoice in the period's revenue set. First in the sweep's fix order.
+
+### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
+**MED (latent) · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2) · unassigned**
+Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
+100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
+today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus a prover with a costed fee line.
+
+### KI-127 — Finance charge rate: the screen says "%" but the system treats it as an annual rate
+**MED · OPEN · money/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #3) · unassigned**
+`CustomerDetail.tsx` labels it "Finance Charge Rate (%)"; the generator and preview compute overdue x rate / 100 / 12.
+Two active customers are set to 1.5; if that means 1.5% a month they would be charged one-twelfth. No finance charges
+have run yet. Fix: label "Annual rate (%)" with helper text, and Mason confirms the two values (To-Do decision 17).
+
+### KI-128 — Voiding or cancelling an order ignores its unposted, overdue and paid invoices
+**MED · OPEN · money/invoicing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #5) · unassigned**
+`_void_order_impl_20260714` handles only draft/posted invoices (an unposted one stays postable); `_cancel_order_impl_20260714`
+skips overdue and paid ones too. Such an invoice stays in AR (aging, reminders, finance charges) with no alert. 0 voided
+orders live. Fix: add `unposted` to void's cancel branch and flag overdue/paid for manual voiding, or refuse the void.
+Related: KI-102 (same function, stock side).
+
+### KI-129 — Monthly Summary and the month-close summary show $0 payments and undercount invoices
+**MED · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6) · unassigned**
+Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
+payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
+Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`. Fix: sum active payment
+`allocation_sets` (UNION the legacy table, as the statement does) and use posted/overdue/paid.
+
+### KI-130 — Monthly Summary's "AR balance" is always today's AR
+**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7) · unassigned**
+`get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
+has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
+
+### KI-131 — Cancelled and voided invoices keep money amounts in the database
+**LOW (latent) · OPEN · money/invoicing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #8) · unassigned**
+Delivery void cancels the draft invoice without zeroing its total (order void and cancel do zero it); invoice void zeroes
+the header but leaves the lines (live: CS-2026-0179, and voided CS-2026-0058, CS-2026-0173, INV-2026-1522, INV-2026-1528).
+Every report checked filters them out by status; a future query that forgets would count them. Fix: zero the total in
+`_void_delivery_replay_impl_20261015`.
+
+### KI-132 — Reminders and finance charges ignore money the customer already has on account
+**LOW · OPEN · money/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #10) · unassigned**
+`get_ar_reminder_candidates` returns but does not subtract unused prepay or credit, and lacks `deleted_at IS NULL` on its
+main invoice filter; the finance charge generator sums balances only. 0 overlap live. Policy is To-Do decision 21; add
+the `deleted_at` filter either way.
+
+### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
+**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 decision conflicts) · unassigned**
+Both sum confirmed and partly fulfilled order lines, so undelivered value counts as revenue and profit and credits are
+not subtracted, while Bottom Line P&L uses posted invoices. The order basis is recorded intent (sales-reports build
+sheet, "roadmap area 2"), but the screens don't say "booked". The two also differ on drafts (Gross Sales includes
+them; none exist today). Fix: label as booked sales and align the draft filter.
+
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
@@ -637,7 +739,8 @@ count; no stock movement since 2026-10-07); six partially fulfilled orders (0161
 hold stock for unfilled lines; the same three deliveries are stuck (DEL-00075/00077/00082) plus nine more past their
 date on confirmed orders; 19 negative inventory rows (not the same 19 as June: two are new, one is deeper) must only be
 fixed from physical counts; PO-2026-0008 is a real fully-received PO with 7 short and 10 over lines, PO-2026-0015's
-receipt gap no longer shows; 10 deliveries have no items (5 completed, 2 voided, 3 cancelled); one cancelled
+receipt gap is still there (corrected 2026-11-10 by the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #10: line `e6559c38` shows 227.5
+received with no receiving record; whether to add one is To-Do decision 23); 10 deliveries have no items (5 completed, 2 voided, 3 cancelled); one cancelled
 zero-item invoice. Not re-measured (sales/billing): whole-order invoicing on 33 orders, eight SEED commission
 batches. Returns/voids on Chem Man-billed deliveries stay allowed. Yes/no sheet in the side-session notes (not in
 this repo).
@@ -782,6 +885,116 @@ Opening `/products/group` (no link on `main` points there; most likely typed or 
 uuid" and the page shows a load failure, not "product not found". Nothing is saved or changed. Fix when next in
 `src/pages/ProductDetail.tsx` (Sol-listed): check the id is a uuid before loading, or send `/products/group` to
 `/group-products`.
+
+### KI-134 — A stock count double-counts anything that moved while the count was open
+**HIGH · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #1) · unassigned**
+Count Complete adds (counted - expected) to today's on-hand, but expected was captured in the browser when the count
+was created (`CycleCounts.tsx` ~L286; `_complete_cycle_count_impl`). A 10-unit delivery during the count makes stock
+10 short with nothing missing; a receipt inflates it. D12 makes the pre-season count the foundation for fixing the 19
+negative rows (KI-29), so this must be fixed before that count. 0 completed counts live. Fix: compare against on-hand
+locked when each line is saved, or have Complete refuse/list products with ledger movement since the count began.
+
+### KI-135 — "Inventory Value" subtracts negative stock and counts no-cost rows as $0
+**MED · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
+The Inventory page card (`InventoryPage.tsx` L1235) and Reports Inventory Cost sum quantity x catalog cost over every
+row, so the 19 negative rows (KI-29) take about 11% off the total; one stocked row has no cost; the card adds unrounded
+floats. Fix: value only rows above zero, show negative quantity separately, list no-cost rows as unknown. D12 item 7
+(relabel as pricing-basis value) is also not built.
+
+### KI-136 — Receiving adds the typed number whatever unit the PO line is in
+**MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
+`receive_po_items` adds quantity straight to stock without checking the line unit against the stock unit, and new PO
+lines take `products.unit_size`, not the stock unit (`PurchaseOrderDetail.tsx` ~L2154). Live: 4 of 102 received lines
+were in a different unit and 44 had a blank unit. D12 moves purchasing back into CRX before the season. Fix: fill a
+blank unit from the stock unit, refuse a mismatch with no conversion, default new lines to `inventory_unit`.
+
+### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
+**MED (data) · OPEN · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · unassigned**
+Products `0b2e713b` and `17ccc5ba` have stock and rate unit Lb and container unit Ea, with cost and Tier 1 equal to a
+jug's money; their purchases were "EA". Selling or receiving by the pound would be wildly wrong. On-hand 0, one order
+line each. May already be on Mason's private unit-mismatch list (KI-30). Fix: Mason confirms the sales unit (To-Do
+decision 24), then a reviewed unit correction.
+
+### KI-138 — Stored tier margins disagree with stored prices on a few products
+**LOW · OPEN · pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #6) · unassigned**
+Product `8b9c7b32`'s stored Tier 1 margin is about 6 points off its price, and a legacy-mode recalculation would
+reprice it; `a21ff506` is a cent off; 8 products have a stale `tier1_gross_margin`. Fix: a reviewed data fix
+recomputing margins from prices; consider failing closed instead of defaulting to `legacy_margin`.
+
+### KI-139 — "Reconcile negative inventory" can overwrite any row, not just negative ones
+**LOW · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #7) · unassigned**
+`_reconcile_negative_inventory_replay_impl_20261015` sets any row to any number of 0 or more with no count behind it,
+against "negatives fixed only from the count". Admin-only and logged. Fix: refuse when on-hand is not below zero, or
+require a completed count line.
+
+### KI-140 — Per-acre price treats unknown units as 1 oz and mixes liquid with dry
+**LOW (latent) · OPEN · pricing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #8) · unassigned**
+`product_price_per_acre` uses factor 1 for a unit not in `unit_conversions` and never checks liquid vs dry, giving a
+confident wrong price. Only the 2 KI-114 products mismatch today. Fix: return NULL when a unit is unknown or the types
+differ.
+
+### KI-141 — Retiring an inventory row ignores open purchase orders
+**LOW · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #9) · unassigned**
+`_retire_inventory_item_replay_impl_20261015` deletes the row without checking `quantity_on_order`; the on-order
+recompute then recreates a zero row and the PO still points at retired stock. Fix: refuse while open PO quantity is
+above 0.
+
+## Customers, purchasing and settings
+
+### KI-142 — A partly received purchase order can never be closed short
+**HIGH · OPEN · purchasing/inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #1) · unassigned**
+Cancel refuses any PO with receipts ("use partial receive workflow", which does not exist) and there is no `closed`
+status or close-short button, so stock that will never arrive keeps counting as on order. That inflates Net Position
+and hides order-time negative-stock warnings and low-stock alerts. Live: 10 open POs (7 partly received, newest
+receipt 2026-05-06) hold all 14,715 units on order; for 9 products on order is the only thing keeping them from
+showing short. Fix: a `close_purchase_order_short` function with a `closed` status that drops out of on-order sums;
+then Mason picks which POs to close (To-Do decision 23). Third in the sweep's fix order.
+
+### KI-143 — Vendor bills are checked against ordered value, and accept another vendor's or a cancelled PO
+**MED · OPEN · purchasing/payables · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #2) · unassigned**
+`create_vendor_bill` compares against the PO's ordered total (5% slack), never received value, and does not check PO
+status or vendor; `NewVendorBill.tsx` fills the ordered total and keeps the previous vendor when the PO's vendor text
+matches none. A short shipment can be billed and paid in full. 0 of 6 live bills have a PO, so nothing has gone wrong
+yet. Fix: refuse cancelled POs and mismatched vendors; confirm when billed exceeds received value.
+
+### KI-144 — A purchase order's vendor is free text, not a link to the vendor list
+**MED-LOW · OPEN · purchasing/vendors · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #3) · unassigned**
+`purchase_orders.vendor` is text with no foreign key; vendor rename updates only products; Bulk PO Import suggests
+names from products. Live: 3 POs match no vendor (PO-2026-0030, PO-2026-0018, PO-2026-0020). Root of part of KI-143.
+Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; backfilling the 3 is To-Do decision 23.
+
+### KI-145 — Bulk Customer Import fails for every rep and misreads some files silently
+**MED · OPEN · customers/imports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #4) · unassigned**
+The button shows for reps, but the direct insert never sets `assigned_sales_rep`, which the insert policy requires of
+reps, so every row fails with a generic error (inferred from live policy; not clicked through). For admins, "1,200"
+acres saves as 1, and rows with a blank first cell vanish uncounted. It also skips `save_customer` (no activity row).
+Duplicate detection is KI-77. Fix: set the rep (or use `save_customer`), strip thousands separators, count blank rows
+as invalid, show each row's error.
+
+### KI-146 — Farm groups (parent customer) can form a loop, and grandchildren are left out
+**LOW-MED · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · unassigned**
+`get_customer_farm_group` recurses with no loop guard and returns only the top parent's direct children; the picker and
+`save_customer` accept any parent. A loop makes the Sales Reports farm-group view time out. Live data is clean. Fix:
+refuse self, descendant or child parents in `save_customer`; use `UNION` with a depth cap.
+
+### KI-147 — Customer payment terms are free text and anything unrecognized becomes Net 30
+**LOW · OPEN · customers/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #6) · unassigned**
+`parse_payment_terms_days` returns 30 for "COD", "due_on_receipt" and similar; the customer screen's field is free
+text while invoices use presets. Every live value parses correctly today. Fix: the same preset list plus "Custom (N
+days)", and have `save_customer` refuse terms the parser would default.
+
+### KI-148 — Deactivating a customer doesn't check open orders, deliveries, holds or quotes
+**LOW · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · unassigned**
+`guard_customer_rep_edit_20261013` checks only posted/overdue invoices, and only for reps (admins skip it: To-Do
+decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inactive customer (deactivated 2026-02-06)
+still has 2 confirmed orders (To-Do decision 23). Fix: add open orders, undelivered deliveries, holds and quotes to
+the guard for every role.
+
+### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
+**LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**
+`CropPrograms.tsx` shows New/Edit/Duplicate to reps but saves to `app_settings`, which only admins may write, so a rep's
+work is lost on Save; `PrintOptionsDialog.tsx` "Save default" has the same mismatch. Two admins editing programs at once
+overwrite each other (one settings record). Fix depends on who owns crop programs (To-Do decision 25).
 
 ## Database and release process
 

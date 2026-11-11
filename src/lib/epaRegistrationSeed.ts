@@ -5,7 +5,7 @@ import { fetchAllRows, pageWithList } from './pagedRead';
 // these RPCs are not in the generated types yet.
 
 /** Mason's Q1 answer (2026-11-06): a number no row ticks restricted-use becomes "No". */
-export const SEED_RUP_DEFAULT = 'no';
+const SEED_RUP_DEFAULT = 'no';
 
 export type SeedFactValue = string | number | { max_label_rate: number; max_label_rate_unit: string };
 

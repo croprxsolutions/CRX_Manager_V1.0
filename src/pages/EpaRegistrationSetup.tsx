@@ -69,6 +69,112 @@ function SalesToCheck() {
   );
 }
 
+/** Shown once the setup has run: it is never offered again. */
+function SwitchedOn() {
+  return (
+    <div className="space-y-6">
+      <SplitHeading title="EPA registration" accent="setup" />
+      <Card>
+        <p className="flex items-center gap-2 text-sm text-nav-dark" role="status">
+          <CheckCircle2 className="h-5 w-5 text-crx-green" aria-hidden />
+          EPA registrations are already switched on. This setup runs only once.
+        </p>
+      </Card>
+      <SalesToCheck />
+    </div>
+  );
+}
+
+/** What the setup will do, the picks it needs, and the Run button. */
+function PreviewBody({ preview, lines, picks, setPick, busy, unsure, onRun }: {
+  preview: SeedPreview;
+  lines: SeedLine[];
+  picks: SeedPicks;
+  setPick: (num: string, col: string, value: SeedFactValue) => void;
+  busy: boolean;
+  unsure: boolean;
+  onRun: () => void;
+}) {
+  const disagreeing = preview.registrations.filter((r) => Object.keys(r.disagreements).length > 0);
+  const picked = allPicked(preview, picks);
+  const blocked = preview.invalid_numbers.length > 0 || !picked;
+  return (
+    <>
+      <Card>
+        <h2 className="text-lg font-semibold text-nav-dark mb-2">What the one-time setup will do</h2>
+        <ul className="list-disc pl-5 text-sm space-y-1">
+          <li>Create <strong>{preview.registration_count}</strong> EPA registrations, one per EPA number in use.</li>
+          <li>Restricted use: a number no product or brand marks restricted use becomes <strong>No</strong> (your answer; update labels before selling).</li>
+          <li>Capture <strong>{lines.length}</strong> invoice lines with the EPA number and restricted-use answer they are sold under.</li>
+          <li>While it runs (a few seconds) product and invoice saves wait. Afterwards, label facts on registered products are edited on the registration.</li>
+          <li>It runs once and cannot be run again.</li>
+        </ul>
+      </Card>
+
+      {preview.invalid_numbers.length > 0 && (
+        <Card>
+          <p className="flex gap-2 text-sm text-red-700" role="alert">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+            These EPA numbers are not valid; fix them on their products first: {preview.invalid_numbers.join(', ')}
+          </p>
+        </Card>
+      )}
+
+      <Card>
+        <h2 className="text-lg font-semibold text-nav-dark mb-2">Disagreements to pick ({disagreeing.length})</h2>
+        {disagreeing.length === 0 ? <p className="text-sm text-secondary">None: every product and brand agrees.</p> : (
+          <div className="space-y-4">
+            {disagreeing.map((r) => Object.entries(r.disagreements).map(([col, cands]) => (
+              <fieldset key={`${r.epa_registration}-${col}`} disabled={busy || unsure} className="text-sm">
+                <legend className="font-medium text-nav-dark">
+                  EPA <span className="font-mono">{r.epa_registration}</span>: {FACT_LABELS[col] ?? col}
+                </legend>
+                {cands.map((c) => (
+                  <label key={factText(c)} className="mr-4 inline-flex items-center gap-1">
+                    <input type="radio" name={`${r.epa_registration}-${col}`}
+                      checked={JSON.stringify(picks[r.epa_registration]?.[col]) === JSON.stringify(c)}
+                      onChange={() => setPick(r.epa_registration, col, c)} />
+                    {factText(c)}
+                  </label>
+                ))}
+              </fieldset>
+            )))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <h2 className="text-lg font-semibold text-nav-dark mb-2">Invoice lines to capture ({lines.length})</h2>
+        {lines.length === 0 ? <p className="text-sm text-secondary">No invoice lines.</p> : (
+          <table className="w-full text-left text-sm">
+            <thead><tr className="text-secondary"><th>Invoice</th><th>Status</th><th>Product</th><th>Captured under</th></tr></thead>
+            <tbody>
+              {lines.map((l) => (
+                <tr key={l.id} className="border-t border-gray-100">
+                  <td>{l.invoices?.invoice_number ?? '—'}</td>
+                  <td>{l.invoices?.status ?? '—'}</td>
+                  <td>{l.products?.product_name ?? '—'}</td>
+                  <td>{lineNumberText(l)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <Card>
+        {unsure && <p className="mb-2 text-sm text-amber-700" role="alert">The last run's answer was lost. Retry sends the same request; it cannot run twice.</p>}
+        <p className="mb-3 text-xs text-secondary">Keep this page open until it finishes.</p>
+        <Button icon={<Power className="h-4 w-4" />} showChevron={false} disabled={blocked || busy}
+          onClick={onRun}>
+          {busy ? 'Running…' : unsure ? 'Not sure this saved: Retry' : 'Run setup'}
+        </Button>
+        {!picked && <p className="mt-2 text-xs text-secondary">Pick one value for each disagreement first.</p>}
+      </Card>
+    </>
+  );
+}
+
 /**
  * EPA registration setup (admins only): preview, then run once, the REG-1 seed that turns on EPA
  * registrations. The database is the guard: it refuses a stale preview, any second run, and non-admins.
@@ -116,6 +222,28 @@ export default function EpaRegistrationSetup() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // A refused or lost run: lost keeps the key for Retry; a definitive answer retires it.
+  const onSeedError = async (e: unknown) => {
+    if (!isDefinitiveRpcRejection(e)) {
+      setUnsure(true);
+      toast('error', 'Could not tell whether the setup ran. Press "Not sure this saved: Retry": it will not run twice.');
+      return;
+    }
+    setUnsure(false);
+    resetKey();
+    if (hasRpcCode(e, RpcErrorCodes.EPA_REGISTRATION_SEED_DONE)) {
+      setDone(true);
+      setPreview(null);
+      toast('info', 'EPA registrations are already switched on.');
+    } else if (hasRpcCode(e, RpcErrorCodes.EPA_REGISTRATION_SEED_STALE)) {
+      toast('error', 'Products, brands or invoice lines changed since this preview. Nothing was saved. The new preview is below; check it and pick again.');
+      await load();
+    } else {
+      Sentry.captureException(e, { tags: { source: 'rpc', action: 'seed_epa_registrations' } });
+      toast('error', sanitizeError(e));
+    }
+  };
+
   const run = async () => {
     if (!preview) return;
     setBusy(true);
@@ -129,24 +257,7 @@ export default function EpaRegistrationSetup() {
       toast('success', `Switched on: ${result.registrations} registrations created, ${result.lines_captured} invoice lines captured.`);
     } catch (e) {
       setConfirming(false);
-      if (!isDefinitiveRpcRejection(e)) {
-        setUnsure(true);
-        toast('error', 'Could not tell whether the setup ran. Press "Not sure this saved: Retry": it will not run twice.');
-        return;
-      }
-      setUnsure(false);
-      resetKey();
-      if (hasRpcCode(e, RpcErrorCodes.EPA_REGISTRATION_SEED_DONE)) {
-        setDone(true);
-        setPreview(null);
-        toast('info', 'EPA registrations are already switched on.');
-      } else if (hasRpcCode(e, RpcErrorCodes.EPA_REGISTRATION_SEED_STALE)) {
-        toast('error', 'Products, brands or invoice lines changed since this preview. Nothing was saved. The new preview is below; check it and pick again.');
-        await load();
-      } else {
-        Sentry.captureException(e, { tags: { source: 'rpc', action: 'seed_epa_registrations' } });
-        toast('error', sanitizeError(e));
-      }
+      await onSeedError(e);
     } finally {
       setBusy(false);
     }
@@ -155,23 +266,7 @@ export default function EpaRegistrationSetup() {
   const setPick = (num: string, col: string, value: SeedFactValue) =>
     setPicks((prev) => ({ ...prev, [num]: { ...prev[num], [col]: value } }));
 
-  if (done) {
-    return (
-      <div className="space-y-6">
-        <SplitHeading title="EPA registration" accent="setup" />
-        <Card>
-          <p className="flex items-center gap-2 text-sm text-nav-dark" role="status">
-            <CheckCircle2 className="h-5 w-5 text-crx-green" aria-hidden />
-            EPA registrations are already switched on. This setup runs only once.
-          </p>
-        </Card>
-        <SalesToCheck />
-      </div>
-    );
-  }
-
-  const disagreeing = preview?.registrations.filter((r) => Object.keys(r.disagreements).length > 0) ?? [];
-  const blocked = !preview || preview.invalid_numbers.length > 0 || !allPicked(preview, picks);
+  if (done) return <SwitchedOn />;
 
   return (
     <div className="space-y-6">
@@ -184,79 +279,8 @@ export default function EpaRegistrationSetup() {
         </Card>
       )}
       {preview && !loading && (
-        <>
-          <Card>
-            <h2 className="text-lg font-semibold text-nav-dark mb-2">What the one-time setup will do</h2>
-            <ul className="list-disc pl-5 text-sm space-y-1">
-              <li>Create <strong>{preview.registration_count}</strong> EPA registrations, one per EPA number in use.</li>
-              <li>Restricted use: a number no product or brand marks restricted use becomes <strong>No</strong> (your answer; update labels before selling).</li>
-              <li>Capture <strong>{lines.length}</strong> invoice lines with the EPA number and restricted-use answer they are sold under.</li>
-              <li>While it runs (a few seconds) product and invoice saves wait. Afterwards, label facts on registered products are edited on the registration.</li>
-              <li>It runs once and cannot be run again.</li>
-            </ul>
-          </Card>
-
-          {preview.invalid_numbers.length > 0 && (
-            <Card>
-              <p className="flex gap-2 text-sm text-red-700" role="alert">
-                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-                These EPA numbers are not valid; fix them on their products first: {preview.invalid_numbers.join(', ')}
-              </p>
-            </Card>
-          )}
-
-          <Card>
-            <h2 className="text-lg font-semibold text-nav-dark mb-2">Disagreements to pick ({disagreeing.length})</h2>
-            {disagreeing.length === 0 ? <p className="text-sm text-secondary">None: every product and brand agrees.</p> : (
-              <div className="space-y-4">
-                {disagreeing.map((r) => Object.entries(r.disagreements).map(([col, cands]) => (
-                  <fieldset key={`${r.epa_registration}-${col}`} disabled={busy || unsure} className="text-sm">
-                    <legend className="font-medium text-nav-dark">
-                      EPA <span className="font-mono">{r.epa_registration}</span>: {FACT_LABELS[col] ?? col}
-                    </legend>
-                    {cands.map((c) => (
-                      <label key={factText(c)} className="mr-4 inline-flex items-center gap-1">
-                        <input type="radio" name={`${r.epa_registration}-${col}`}
-                          checked={JSON.stringify(picks[r.epa_registration]?.[col]) === JSON.stringify(c)}
-                          onChange={() => setPick(r.epa_registration, col, c)} />
-                        {factText(c)}
-                      </label>
-                    ))}
-                  </fieldset>
-                )))}
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <h2 className="text-lg font-semibold text-nav-dark mb-2">Invoice lines to capture ({lines.length})</h2>
-            {lines.length === 0 ? <p className="text-sm text-secondary">No invoice lines.</p> : (
-              <table className="w-full text-left text-sm">
-                <thead><tr className="text-secondary"><th>Invoice</th><th>Status</th><th>Product</th><th>Captured under</th></tr></thead>
-                <tbody>
-                  {lines.map((l) => (
-                    <tr key={l.id} className="border-t border-gray-100">
-                      <td>{l.invoices?.invoice_number ?? '—'}</td>
-                      <td>{l.invoices?.status ?? '—'}</td>
-                      <td>{l.products?.product_name ?? '—'}</td>
-                      <td>{lineNumberText(l)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Card>
-
-          <Card>
-            {unsure && <p className="mb-2 text-sm text-amber-700" role="alert">The last run's answer was lost. Retry sends the same request; it cannot run twice.</p>}
-            <p className="mb-3 text-xs text-secondary">Keep this page open until it finishes.</p>
-            <Button icon={<Power className="h-4 w-4" />} showChevron={false} disabled={blocked || busy}
-              onClick={() => (unsure ? void run() : setConfirming(true))}>
-              {busy ? 'Running…' : unsure ? 'Not sure this saved: Retry' : 'Run setup'}
-            </Button>
-            {!allPicked(preview, picks) && <p className="mt-2 text-xs text-secondary">Pick one value for each disagreement first.</p>}
-          </Card>
-        </>
+        <PreviewBody preview={preview} lines={lines} picks={picks} setPick={setPick} busy={busy} unsure={unsure}
+          onRun={() => (unsure ? void run() : setConfirming(true))} />
       )}
 
       <ConfirmModal

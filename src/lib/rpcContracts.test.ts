@@ -3143,8 +3143,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'commit_ingredients_tab',
   'commit_weights_tab',
   'promote_chemistry_proposal',
-  // 20270104100000 (DM-4, local candidate): EPA auto-fill writers; each replays through _product_parent_replay
-  // and saves its receipt (record_epa_lookup is service role only). Prune once the generated types carry them.
+  // 20270104100000 (DM-4, local candidate): EPA auto-fill writers; start, commit and reject replay through
+  // _product_parent_replay, record_epa_lookup (service role only) through check_idempotency; each saves its
+  // receipt. Prune once the generated types carry them.
   'commit_epa_proposal',
   'record_epa_lookup',
   'reject_epa_proposal',

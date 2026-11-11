@@ -568,7 +568,9 @@ BEGIN
                      WHEN v_class = 'confirm' THEN '{}'::jsonb END));
   END IF;
   -- Status is never written: the lookup has no cancellation date (D-T); shown as matches or differs.
-  v_class := CASE WHEN (v_label->>'is_cancelled')::boolean = (v_reg.registration_status = 'cancelled') THEN 'matches' ELSE 'differs' END;
+  -- An unknown status never "matches" (Luna, 2026-11-11): EPA's answer is shown beside it as a difference.
+  v_class := CASE WHEN v_reg.registration_status = 'unknown' THEN 'differs'
+                  WHEN (v_label->>'is_cancelled')::boolean = (v_reg.registration_status = 'cancelled') THEN 'matches' ELSE 'differs' END;
   v_items := v_items || jsonb_build_array(jsonb_build_object('item_id', 'label:registration_status', 'kind', 'label', 'class', v_class,
     'epa', v_label->'is_cancelled', 'current', to_jsonb(v_reg.registration_status), 'accept_default', false,
     'note', CASE WHEN v_class = 'matches' THEN NULL

@@ -355,7 +355,7 @@ function caseH1H2() {
   const p = proposal(r.proposal_id);
   assert.equal(p.status, 'proposed'); assert.equal(p.proposal_version, 1); assert.equal(p.link_kind, 'parent');
   assert.deepEqual(p.items.map((i) => `${i.item_id}=${i.class}`),
-    ['ing:cas:1071-83-6=add', 'label:signal_word=fill', 'label:rup_status=fill', 'label:registration_status=matches']);
+    ['ing:cas:1071-83-6=add', 'label:signal_word=fill', 'label:rup_status=fill', 'label:registration_status=differs']);
   assert.equal(item(p, 'ing:cas:1071-83-6').change.source, 'epa_lookup');
   assert.equal(chemVer(PA), 0); assert.deepEqual(ingRows(PA), []);
   assert.equal(reg('101-1').registration_version, 1); assert.equal(reg('101-1').signal_word, null);
@@ -680,7 +680,7 @@ function caseH24() {
   const r = lookup(P24, '124-1', found('124-1', [['Dicamba', 35]]));
   const p = proposal(r.proposal_id);
   assert.deepEqual(p.items.map((i) => `${i.item_id}=${i.class}`),
-    ['ing:cas:1918-00-9=differs_typed', 'label:signal_word=fill', 'label:rup_status=fill', 'label:registration_status=matches']);
+    ['ing:cas:1918-00-9=differs_typed', 'label:signal_word=fill', 'label:rup_status=fill', 'label:registration_status=differs']);
   const c = js(ADMIN, COMMIT(p.id, 1, [{ item_id: 'label:signal_word', accept: true }, { item_id: 'label:rup_status', accept: false }]));
   assert.deepEqual(c.commit_result, { 'ing:cas:1918-00-9': 'kept_difference', 'label:signal_word': 'written', 'label:rup_status': 'skipped', 'label:registration_status': 'kept_difference' });
   const after = reg('124-1');

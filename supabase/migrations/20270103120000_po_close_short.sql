@@ -526,7 +526,7 @@ AS $function$
 DECLARE
   v_actor uuid := auth.uid();
   v_role text;
-  v_reason text := btrim(p_reason);
+  v_reason text := btrim(p_reason, E' \t\r\n');  -- tabs and line breaks too
   v_fingerprint text;
   v_replay jsonb;
   v_po public.purchase_orders%ROWTYPE;

@@ -75,8 +75,8 @@ BEGIN
   -- [E2E] marker satisfies the live-testdata guard; terminal rollback removes it.
   INSERT INTO public.customers (farm_name)
   VALUES ('[E2E] H4 Farm ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name)
-  VALUES ('[E2E] H4 Herbicide ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form)
+  VALUES ('[E2E] H4 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
   INSERT INTO public.quotes (quote_number, customer_id, created_by, status, commission_split)
   VALUES ('E2E-H4-Q-' || v_suffix, v_customer, v_admin, 'sent', '{"splits": []}'::jsonb)
   RETURNING id INTO v_quote;

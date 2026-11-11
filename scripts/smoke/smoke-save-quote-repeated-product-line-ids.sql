@@ -63,11 +63,11 @@ BEGIN
   VALUES ('[SMOKE] Repeated Product Farm ' || v_suffix)
   RETURNING id INTO v_customer_id;
 
-  INSERT INTO products (product_name, unit_size)
-  VALUES ('[SMOKE] Repeated Product ' || v_suffix, 'gal')
+  INSERT INTO products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] Repeated Product ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product_id;
-  INSERT INTO products (product_name, unit_size)
-  VALUES ('[SMOKE] Control Product ' || v_suffix, 'gal')
+  INSERT INTO products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] Control Product ' || v_suffix, 'gal', 'liquid')
   RETURNING id INTO v_product_b;
 
   v_price_res := preview_product_pricing_changes(

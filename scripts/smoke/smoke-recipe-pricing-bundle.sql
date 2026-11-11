@@ -27,7 +27,7 @@ BEGIN
   IF v_admin IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: no admin'; END IF;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
 
-  INSERT INTO products (product_name, unit_size) VALUES ('[SMOKE] RecipeProd '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form) VALUES ('[SMOKE] RecipeProd '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] RecipeFarm '||v_sfx) RETURNING id INTO v_cust;
 
   -- 1) create with a $15.00 (1500c) price -> persisted

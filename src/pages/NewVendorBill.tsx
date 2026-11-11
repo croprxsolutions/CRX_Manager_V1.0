@@ -37,7 +37,7 @@ import type { Vendor, PurchaseOrder, POStatus } from '../types';
 import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
 
 // Purchase orders a bill can be linked to (the PO picker's status filter).
-const LINKABLE_PO_STATUSES: readonly POStatus[] = ['submitted', 'partially_received', 'fully_received'];
+const LINKABLE_PO_STATUSES: readonly POStatus[] = ['submitted', 'partially_received', 'fully_received', 'closed'];
 
 export default function NewVendorBill() {
   const navigate = useNavigate();

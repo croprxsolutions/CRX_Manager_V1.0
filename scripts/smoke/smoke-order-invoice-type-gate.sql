@@ -56,8 +56,8 @@ BEGIN
   -- Order lines need a positive cost basis (COST_BASIS_REQUIRED), and a product
   -- is born pricing-free, so price a fresh shell through the governed
   -- preview/apply path the app uses (the smoke-return-credit-chain.sql pattern).
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Order Type Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] Order Type Product ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
     NULL,

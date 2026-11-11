@@ -7,8 +7,10 @@
   matches its history and is not touched. No function, policy or screen change.
 - The migration binds the exact 2026-11-10 state (row ids, stored and pre-booked stock, each product's ledger
   total, row count and newest movement) and refuses with `KI108_PREIMAGE_DRIFTED` if anything moved since.
-  A schema-only database is a no-op.
+  It also refuses if any product has a second inventory row or an in-progress cycle count, and locks the
+  inventory, ledger and cycle-count tables while it runs so a count cannot start mid-correction (Luna round 1).
+  A database without the five products is a no-op.
 - Proof: `node scripts/smoke/prove-ki108-stock-matches-history.mjs` (offline container, live rows copied
-  read-only) — no-op on empty, four drift refusals with nothing changed, exact apply, integrity check passes
+  read-only) — no-op on empty, eight refusals with nothing changed (including a failure after writing), exact apply, integrity check passes
   for every row, second run refused. Not verified: the live apply (pending the gates and Mason's yes).
 - Contract: `docs/plans/2026-11-10-ki108-stock-matches-history-CONTRACT.md`.

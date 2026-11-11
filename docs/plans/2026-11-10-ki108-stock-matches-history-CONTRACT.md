@@ -9,8 +9,9 @@ Read at `462212c7e` (origin/main) and live read-only on 2026-11-10.
   −70 because the March opening load was never recorded, keep the stored 25 and add the missing +95
   opening-stock row (Mason, 2026-11-10: "Keep 25, add +95").
 - **Change.** One data-only migration, `supabase/migrations/20270102100000_ki108_stock_matches_history.sql`,
-  plus its changelog record. No function, policy, screen or code change. Files: the migration, its changelog
-  note, `docs/manual/KNOWN_ISSUES.md` (KI-108), this contract.
+  plus its changelog record. No function, policy, screen or code change. Files: the migration, its proof
+  script, its changelog note, this contract. `docs/manual/KNOWN_ISSUES.md` KI-108 is updated to FIXED after
+  the live apply, once docs PR #1760 (which rewrites that entry) has landed, to avoid a conflict.
 - **Who acts.** Nobody through the app. The migration runs once as the migration owner. The +95 row is recorded
   as performed by Mason's admin profile (`22c1fc50-…`, verified live: role admin, active), who approved it.
 
@@ -34,15 +35,18 @@ Black Strap Molasses Sugar - Bulk stays at −1,325, which already matches its h
   re-run on live read-only and any new mismatch is reported as its own issue.
 - **Existing rows.** The migration binds a signature of the approved state per product: inventory row id,
   stored and pre-booked quantity, ledger total, ledger row count and newest movement time; plus exactly one
-  inventory row per product and no `in_progress` cycle count on it (completing a cycle count writes an
-  absolute count, the one writer that sets stock directly; none is open today, all 17 counts are cancelled).
+  inventory row per product and no `in_progress` cycle count on it (a count snapshots expected stock when it
+  starts, so one opened before the correction would carry a stale difference; completing a count adds that
+  difference with a matching ledger row, live `_complete_cycle_count_impl`; none is open today, all 17 counts
+  are cancelled). The migration also locks `cycle_counts` and `cycle_count_items`, so a count started while
+  it runs waits until it commits (Luna round 1).
   Any difference raises `KI108_PREIMAGE_DRIFTED` and changes nothing. The no-op path is taken only when none of
   the five **products** exist (schema-only rebuild); products present with other inventory rows raise. The
   signature is not a row-by-row copy of the history; on production, where the ledger is append-only, any new
   movement changes the count.
 - **If it is refused.** Re-run the read-only check. If each product's gap is unchanged, refresh the bound
   values in a new reviewed migration (target = stored minus the same gap). If a gap changed, ask Mason again.
-- **Timing.** The migration takes write locks on `inventory` and `inventory_transactions` with a 5-second
+- **Timing.** The migration takes write locks on `inventory`, `inventory_transactions`, `cycle_counts` and `cycle_count_items` with a 5-second
   lock timeout and a 60-second statement timeout, so it fails rather than queue behind a long transaction. A
   lock-order deadlock with a writer makes one side fail and roll back; the migration can simply run again.
   App writers cannot later overwrite the result with a stale absolute number: the inventory screen's bulk edit

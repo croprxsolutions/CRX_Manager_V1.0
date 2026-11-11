@@ -32,7 +32,10 @@
 
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
-LOCK TABLE public.inventory, public.inventory_transactions IN SHARE ROW EXCLUSIVE MODE;
+-- Cycle-count tables too: a count started mid-migration waits, so the
+-- "no in-progress count" check below cannot race a new count's snapshot.
+LOCK TABLE public.inventory, public.inventory_transactions, public.cycle_counts, public.cycle_count_items
+  IN SHARE ROW EXCLUSIVE MODE;
 
 DO $ki108$
 DECLARE

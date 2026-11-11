@@ -3,7 +3,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => {
   function chainable(resolveWith: unknown = { data: [], error: null }) {
@@ -95,9 +97,17 @@ async function importQuoteCsv(container: HTMLElement, csv: string, quoteNumber: 
   Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
   fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
   await screen.findByText(/page\.csv/i);
-  fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+  fireEvent.click(screen.getByRole('button', { name: /check file/i }));
   await screen.findByText(quoteNumber);
   fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+}
+
+async function checkCsv(container: HTMLElement, csv: string) {
+  const file = new File([csv], 'review.csv', { type: 'text/csv' });
+  Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
+  fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: /check file/i }));
+  await screen.findByText(/ready to import/);
 }
 
 import BulkQuoteImport from './BulkQuoteImport';
@@ -119,7 +129,7 @@ describe('BulkQuoteImport', () => {
 
   it('renders when open', () => {
     render(<BulkQuoteImport {...defaultProps} />);
-    expect(screen.getByText(/bulk quote/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Import quotes');
   });
 
   it('imports quoted customer, product and section names with mapped numeric cells intact', async () => {
@@ -136,7 +146,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'quoted.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-QUOTED/);
     expect(screen.getByText(/Wells, "Family" Farms/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -155,7 +165,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'bad.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.stringMatching(/CSV line 2:.*Correct the file/)));
     expect(screen.queryByRole('button', { name: /import \d+ quote/i })).not.toBeInTheDocument();
     expect(mocks.rpc).not.toHaveBeenCalled();
@@ -188,7 +198,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'numeric.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     expect(await screen.findByText(/Invalid numeric fields:/)).toHaveTextContent(field);
     expect(screen.getByText(/Use plain numbers without thousands separators/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
@@ -201,7 +211,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'cents.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     expect(await screen.findByText(/prices must have no more than two decimal places/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
     expect(mocks.rpc).not.toHaveBeenCalled();
@@ -213,7 +223,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'fraction.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-FRACTION/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
     await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
@@ -227,7 +237,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'range.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-RANGE/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
     expect(await screen.findByText(/Imported money exceeds/)).toBeInTheDocument();
@@ -240,7 +250,7 @@ describe('BulkQuoteImport', () => {
     const file = new File([csv], 'group-numeric.csv', { type: 'text/csv' });
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement, { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     expect(await screen.findByText(/has another invalid row/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
     expect(mocks.rpc).not.toHaveBeenCalled();
@@ -248,12 +258,15 @@ describe('BulkQuoteImport', () => {
 
   it('does not render when closed', () => {
     render(<BulkQuoteImport {...defaultProps} open={false} />);
-    expect(screen.queryByText(/bulk quote/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
   });
 
   it('shows file upload instructions', () => {
     render(<BulkQuoteImport {...defaultProps} />);
-    expect(screen.getByText(/csv/i)).toBeInTheDocument();
+    expect(screen.getByText('Drop a file here, or')).toBeInTheDocument();
+    expect(screen.getByText('CSV')).toBeInTheDocument();
+    expect(screen.getByText('What the file needs')).toBeInTheDocument();
+    expect(screen.getByText(/If any row of a quote has a problem, that whole quote is left out/)).toBeInTheDocument();
   });
 
   it('routes uploaded quotes through save_quote instead of direct lifecycle table inserts', async () => {
@@ -270,7 +283,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-100/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -330,12 +343,12 @@ describe('BulkQuoteImport', () => {
       target: { files: [file] },
     });
     await screen.findByText(/ambiguous\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-AMB/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
     await waitFor(() => expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything()));
-    expect(await screen.findByText(/ambiguous/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Product\(s\) ambiguous - Same Name/)).toBeInTheDocument();
   });
 
   it('imports a line for a product past the first 1,000 in the catalog (S12b)', async () => {
@@ -398,7 +411,7 @@ describe('BulkQuoteImport', () => {
       target: { files: [file] },
     });
     await screen.findByText(/cross-field\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-CROSS/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
@@ -429,7 +442,7 @@ describe('BulkQuoteImport', () => {
       target: { files: [file] },
     });
     await screen.findByText(/sku\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-SKU/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
@@ -454,7 +467,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findAllByText(/Q-500/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -501,7 +514,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findAllByText(/Q-525/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -537,7 +550,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-550/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -568,7 +581,7 @@ describe('BulkQuoteImport', () => {
     Object.defineProperty(firstFile, 'text', { value: () => Promise.resolve(firstCsv) });
     fireEvent.change(input as HTMLInputElement, { target: { files: [firstFile] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-800/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
     await screen.findByText(/dropped response/);
@@ -584,7 +597,7 @@ describe('BulkQuoteImport', () => {
     const secondFile = new File([secondCsv], 'quotes.csv', { type: 'text/csv' });
     Object.defineProperty(secondFile, 'text', { value: () => Promise.resolve(secondCsv) });
     fireEvent.change(retryInput as HTMLInputElement, { target: { files: [secondFile] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-800/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
@@ -644,7 +657,7 @@ describe('BulkQuoteImport', () => {
     Object.defineProperty(firstFile, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(input as HTMLInputElement, { target: { files: [firstFile] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-825/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
     await screen.findByText(/dropped response/);
@@ -660,7 +673,7 @@ describe('BulkQuoteImport', () => {
     const secondFile = new File([csv], 'quotes.csv', { type: 'text/csv' });
     Object.defineProperty(secondFile, 'text', { value: () => Promise.resolve(csv) });
     fireEvent.change(retryInput as HTMLInputElement, { target: { files: [secondFile] } });
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
     await screen.findByText(/Q-825/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
@@ -702,7 +715,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-850/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -744,7 +757,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q_8%50/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -768,12 +781,12 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-600/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
 
-    await screen.findByText(/Successfully imported 1 quote/);
+    await screen.findByText(/1 quote imported/);
     expect(screen.getByText(/Quote Q-600: Created with 1 items/)).toBeInTheDocument();
     expect(onSuccess).toHaveBeenCalled();
   });
@@ -793,7 +806,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findAllByText(/Q-300/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -817,7 +830,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-700/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -841,7 +854,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/Q-710/);
     fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
@@ -864,7 +877,7 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/unsupported status/i);
     expect(screen.getByText(/draft quotes/i)).toBeInTheDocument();
@@ -885,11 +898,102 @@ describe('BulkQuoteImport', () => {
     expect(input).toBeTruthy();
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await screen.findByText(/quotes\.csv/i);
-    fireEvent.click(screen.getByRole('button', { name: /parse file/i }));
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
 
     await screen.findByText(/unsupported status/i);
     expect(screen.getByText(/another invalid row/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
     expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+  });
+  describe('three-step layout', () => {
+    it('downloads a sample CSV whose every column parses, failing only on unknown customers', async () => {
+      let sample: Blob | undefined;
+      vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => { sample = blob as Blob; return 'blob:sample'; });
+      const clicked: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.download); });
+      const { container } = render(<BulkQuoteImport {...defaultProps} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Download sample CSV' }));
+      expect(clicked).toEqual(['crx-quote-import-sample.csv']);
+      const csv = await sample!.text();
+      const header = csv.split('\n')[0].split(',');
+      expect(header.slice(0, 3)).toEqual(['quote_number', 'customer_farm_name', 'product_name']);
+      expect([...header].sort()).toEqual([
+        'acres', 'actual_rate', 'customer_farm_name', 'footer_notes', 'header_notes', 'notes', 'oz_per_acre',
+        'price_per_unit', 'product_name', 'quote_number', 'rate_unit', 'section_name', 'status', 'tier', 'valid_days',
+      ]);
+
+      await checkCsv(container, csv);
+      expect(screen.getByText('2 quotes ready to import')).toBeInTheDocument();
+      expect(screen.queryByText(/need fixing/)).not.toBeInTheDocument();
+      expect(mocks.toast).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Import 2 quotes' }));
+      expect(await screen.findAllByText(/Customer\(s\) not found - Sample/)).toHaveLength(2);
+      expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
+    });
+
+    it('groups ready rows into one card per quote', async () => {
+      const { container } = render(<BulkQuoteImport {...defaultProps} />);
+      await checkCsv(container, [
+        'quote_number,customer_farm_name,section_name,product_name,acres,price_per_unit',
+        'Q-1,North Farm,Corn,Sample A,120,12.4',
+        'Q-2,South Farm,,Sample C,80,',
+        'Q-1,North Farm,Corn,Sample B,120,38',
+      ].join('\n'));
+      const first = screen.getByText('Q-1').closest('details') as HTMLElement;
+      const second = screen.getByText('Q-2').closest('details') as HTMLElement;
+      expect(first).toHaveAttribute('open');
+      expect(second).not.toHaveAttribute('open');
+      expect(within(first).getByText('North Farm')).toBeInTheDocument();
+      expect(within(first).getByText('2 products')).toBeInTheDocument();
+      expect(within(first).getByText('Sample A')).toBeInTheDocument();
+      expect(within(first).getByText('Sample B')).toBeInTheDocument();
+      expect(within(second).getByText('1 product')).toBeInTheDocument();
+      expect(within(second).getByText('Sample C')).toBeInTheDocument();
+      expect(within(second).getAllByText(/Price list/).length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: /^Ready/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('lists rows that need fixing by row number with the unchanged error', async () => {
+      const { container } = render(<BulkQuoteImport {...defaultProps} />);
+      await checkCsv(container, [
+        'quote_number,customer_farm_name,product_name,status',
+        'Q-1,North Farm,Roundup,draft',
+        'Q-9,North Farm,Roundup,sent',
+        ',North Farm,Roundup,draft',
+      ].join('\n'));
+      expect(screen.getByText('2 rows need fixing')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^Needs fixing/ }));
+      expect(screen.getByRole('button', { name: /^Needs fixing/ })).toHaveAttribute('aria-pressed', 'true');
+      const rowThree = screen.getByText('Row 3').closest('li') as HTMLElement;
+      expect(within(rowThree).getByText('Q-9')).toBeInTheDocument();
+      expect(within(rowThree).getByText('Unsupported status. Bulk quote imports may only create draft quotes.')).toBeInTheDocument();
+      const rowFour = screen.getByText('Row 4').closest('li') as HTMLElement;
+      expect(within(rowFour).getByText('no quote number')).toBeInTheDocument();
+      expect(within(rowFour).getByText('Missing required fields (quote_number, customer_farm_name, or product_name)')).toBeInTheDocument();
+    });
+
+    it('opens on Needs fixing when every row is invalid', async () => {
+      const { container } = render(<BulkQuoteImport {...defaultProps} />);
+      await checkCsv(container, 'quote_number,customer_farm_name,product_name,status\nQ-9,North Farm,Roundup,sent');
+      expect(screen.getByRole('button', { name: /^Needs fixing/ })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByText('Row 2')).toBeInTheDocument();
+    });
+
+    it('labels the import button with the number of unique valid quotes', async () => {
+      const { container } = render(<BulkQuoteImport {...defaultProps} />);
+      await checkCsv(container, [
+        'quote_number,customer_farm_name,product_name',
+        'Q-1,North Farm,Roundup',
+        'q-1 ,North Farm,Roundup',
+        'Q-2,North Farm,Roundup',
+      ].join('\n'));
+      expect(screen.getByText('2 quotes ready to import')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Import 2 quotes' })).toBeEnabled();
+    });
+
+    it('uses no blue or indigo classes', () => {
+      const source = readFileSync(resolve(process.cwd(), 'src/components/quotes/BulkQuoteImport.tsx'), 'utf8');
+      expect(source).not.toMatch(/\b(?:bg|text|border|ring|from|to|via|fill|stroke)-(?:blue|indigo|sky)-/);
+    });
   });
 });

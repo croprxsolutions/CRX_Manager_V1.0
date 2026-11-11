@@ -365,9 +365,9 @@ function ReviewRows({ validation, quoteCount, leftOutQuotes }: { validation: Val
                       <span className="text-secondary md:hidden">
                         {[item.section_name, acres && `${acres} ac`, price].filter(Boolean).join(' · ')}
                       </span>
-                      <span className="hidden min-w-0 truncate text-secondary md:block">{item.section_name}</span>
-                      <span className="hidden text-right tabular-nums md:block">{acres}</span>
-                      <span className={`hidden text-right tabular-nums md:block ${typeof item.price_per_unit === 'number' ? '' : 'text-secondary'}`}>{price}</span>
+                      <span className="hidden min-w-0 truncate text-secondary md:block"><span className="sr-only">Section </span>{item.section_name}</span>
+                      <span className="hidden text-right tabular-nums md:block"><span className="sr-only">Acres </span>{acres}</span>
+                      <span className={`hidden text-right tabular-nums md:block ${typeof item.price_per_unit === 'number' ? '' : 'text-secondary'}`}><span className="sr-only">Price </span>{price}</span>
                     </li>
                   );
                 })}
@@ -1071,6 +1071,8 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
                 type="file"
                 accept=".csv,.pdf,.jpg,.jpeg,.png,.webp,image/*"
                 onChange={handleFileChange}
+                aria-label="Choose a file"
+                tabIndex={file ? -1 : undefined}
                 className="peer sr-only"
               />
               {file ? (

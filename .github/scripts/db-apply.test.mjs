@@ -134,3 +134,16 @@ test('migration names need a plausible date and time', () => {
   assert.match(stampProblems({ added: head, base: [], head })[0], /name must be/);
   assert.deepEqual(stampProblems({ added: f(['20261231235959_ok']), base: [], head: f(['20261231235959_ok']) }), []);
 });
+
+test('existing files with an impossible time (08:60) still apply; new ones must be real', () => {
+  const p = planMigrations({ files: f(['20261022086000_team_board']), highWater: '20260727174805', ledgerNames: new Set(), oneShots: new Set() });
+  assert.deepEqual(p.steps.map((x) => x.stem), ['20261022086000_team_board']);
+  assert.match(stampProblems({ added: f(['20261231086000_new']), base: [], head: f(['20261231086000_new']) })[0], /real date and time/);
+});
+
+test('a file that is only stored (backfill, one-shot) needs clean UTF-8, not the run rules', () => {
+  const wrapped = Buffer.from('BEGIN;\ncreate table t();\nCOMMIT;\n');
+  assert.match(fileProblems('x', wrapped)[0], /own transaction control/);
+  assert.deepEqual(fileProblems('x', wrapped, { forRun: false }), []);
+  assert.match(fileProblems('x', Buffer.from([0xff]), { forRun: false })[0], /not valid UTF-8/);
+});

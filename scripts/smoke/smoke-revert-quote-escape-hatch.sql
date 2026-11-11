@@ -4,12 +4,12 @@
 -- re-convertible afterwards.
 --
 -- FAIL-FIRST CONTRACT: against the PRE-FIX revert_quote_status this chain raises
--- SMOKE_FAIL â€” the revert is refused ("an order has already been created") so
+-- SMOKE_FAIL — the revert is refused ("an order has already been created") so
 -- the stranded quote can never be reopened. Against the FIXED function the
 -- revert succeeds, the draw ledger is released, and a re-convert produces a NEW
 -- order, so the chain reaches SMOKE_PASS_ROLLBACK.
 --
--- One DO block, terminal exception â†’ nothing commits.
+-- One DO block, terminal exception → nothing commits.
 CREATE OR REPLACE FUNCTION pg_temp.convert_quote_to_order_smoke(
   p_quote_id uuid,
   p_performed_by uuid,
@@ -196,18 +196,17 @@ BEGIN
     UPDATE public.deliveries
        SET status = 'in_progress'
      WHERE id = v_delivery;
-    -- A completion goes through complete_delivery with its proof (Goal 5 evidence rule);
-    -- an admin may record the office no-proof option with a reason.
-    PERFORM public.complete_delivery(v_delivery, 'No proof — recorded by office', v_admin,
-      NULL, NULL, NULL, 'e2e-b2-complete-' || v_suffix, now(), 'no_proof',
-      '[E2E] B2 smoke completed-delivery history fixture');
-    IF (SELECT status FROM public.deliveries WHERE id = v_delivery) IS DISTINCT FROM 'completed' THEN
-      RAISE EXCEPTION 'SMOKE_SETUP: complete_delivery did not complete the B2 delivery';
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern), without
+    -- re-deriving the cancelled order's status (complete_delivery would mark it fulfilled).
+    PERFORM set_config('crx.delivery_completion_evidence', v_delivery::text, true);
+    UPDATE public.deliveries
+       SET status = 'completed', completed_at = now(), signed_by = 'B2 smoke signer'
+     WHERE id = v_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
+    IF (SELECT status FROM public.orders WHERE id = v_order1) IS DISTINCT FROM 'cancelled' THEN
+      RAISE EXCEPTION 'SMOKE_SETUP: the B2 order left cancelled';
     END IF;
-    -- complete_delivery re-derives the order status (fulfilled). In the app a delivery is completed
-    -- before the order is cancelled (cancel_order cancels open deliveries), so restore that order of
-    -- events: the order is cancelled and keeps its completed-delivery history.
-    UPDATE public.orders SET status = 'cancelled' WHERE id = v_order1;
     BEGIN
       PERFORM public.revert_quote_status(v_quote, 'must reject completed delivery', v_admin,
         'e2e-b2-completed-' || v_suffix);

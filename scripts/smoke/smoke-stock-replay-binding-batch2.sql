@@ -146,16 +146,16 @@ BEGIN
   RETURNING id INTO v_cust_b;
 
   -- Pricing-free shell products (catalog pricing is governed and never set here).
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB hold ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_hold;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB retire 1 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_r1;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB retire 2 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_r2;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB reconcile 1 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_c1;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB reconcile 2 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_c2;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB add 1 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_m1;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB add 2 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_m2;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB shell ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_shell;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB count 1 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_cc1;
-  INSERT INTO public.products (product_name, unit_size, is_active, product_form) VALUES ('[SMOKE] SRB count 2 ' || v_suffix, 'gal', true, 'liquid') RETURNING id INTO v_p_cc2;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB hold ' || v_suffix, 'gal', true) RETURNING id INTO v_p_hold;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB retire 1 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_r1;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB retire 2 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_r2;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB reconcile 1 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_c1;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB reconcile 2 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_c2;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB add 1 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_m1;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB add 2 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_m2;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB shell ' || v_suffix, 'gal', true) RETURNING id INTO v_p_shell;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB count 1 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_cc1;
+  INSERT INTO public.products (product_name, unit_size, is_active) VALUES ('[SMOKE] SRB count 2 ' || v_suffix, 'gal', true) RETURNING id INTO v_p_cc2;
 
   -- An order line for a catalog product needs a governed positive cost (the below-cost wall), and
   -- product pricing cannot be set here, so borrow one real priced product WITHOUT changing it, for

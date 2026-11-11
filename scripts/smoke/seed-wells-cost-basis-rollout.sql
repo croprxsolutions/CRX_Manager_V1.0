@@ -3,10 +3,10 @@
 -- Disposable-only live-shape fixture for the exact Wells rollout seed. The
 -- production migration itself still fails closed against real rows.
 INSERT INTO public.products(
-  id, product_name, sku, category, container_size, unit_size, inventory_unit, product_form
+  id, product_name, sku, category, container_size, unit_size, inventory_unit
 )
 SELECT id, 'Wells rollout fixture ' || sequence, 'WELLS-' || sequence,
-       'Herbicide', 1, 'gal', 'Gal', 'liquid'
+       'Herbicide', 1, 'gal', 'gal'
 FROM unnest(ARRAY[
   'ab708913-080e-4894-ba5c-8beb7586d356'::uuid,
   '8db05fc1-c3c9-4049-b284-c02c0a7a3056'::uuid,

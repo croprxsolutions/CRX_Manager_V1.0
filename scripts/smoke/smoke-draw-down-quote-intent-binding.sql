@@ -54,8 +54,8 @@ BEGIN
   VALUES ('[SMOKE] Draw Intent Farm ' || v_suffix)
   RETURNING id INTO v_customer;
 
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Draw Intent Product ' || v_suffix, 'gal', 'liquid')
+  INSERT INTO public.products (product_name, unit_size)
+  VALUES ('[SMOKE] Draw Intent Product ' || v_suffix, 'gal')
   RETURNING id INTO v_product;
 
   -- Establish the current catalog cost through the governed pricing path so

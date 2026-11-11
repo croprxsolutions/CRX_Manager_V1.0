@@ -50,7 +50,7 @@ BEGIN
 
   -- ---- synthetic fixtures ----
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] CDO Cust ' || v_sfx) RETURNING id INTO v_cust;
-  INSERT INTO products  (product_name, product_form) VALUES ('[SMOKE] CDO Prod ' || v_sfx, 'liquid') RETURNING id INTO v_prod;
+  INSERT INTO products  (product_name) VALUES ('[SMOKE] CDO Prod ' || v_sfx) RETURNING id INTO v_prod;
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order, unit_size)
     VALUES (v_prod, 'Main Warehouse', 1000, 0, 0, '2.5 gal');
 

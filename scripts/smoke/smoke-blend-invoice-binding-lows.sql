@@ -63,10 +63,10 @@ BEGIN
 
   -- Two products through the governed pricing path: an expensive one (so a 4th-place quantity
   -- difference is worth cents) and an ordinary one.
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[E2E] BIL Big ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_p_big;
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[E2E] BIL Q ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_p_q;
+  INSERT INTO public.products (product_name, unit_size)
+  VALUES ('[E2E] BIL Big ' || v_suffix, 'GL') RETURNING id INTO v_p_big;
+  INSERT INTO public.products (product_name, unit_size)
+  VALUES ('[E2E] BIL Q ' || v_suffix, 'GL') RETURNING id INTO v_p_q;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(

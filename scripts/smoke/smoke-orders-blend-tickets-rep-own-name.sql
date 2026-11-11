@@ -53,8 +53,8 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   -- A product priced through the governed preview/apply path (products are born pricing-free).
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[E2E] Rep Salesman Product ' || v_suffix, 'GL', 'liquid') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size)
+  VALUES ('[E2E] Rep Salesman Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(jsonb_build_object(

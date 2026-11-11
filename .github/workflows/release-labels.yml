@@ -1,6 +1,7 @@
 # Release labels (Taha, 2026-11-10): on-staging is added when a PR merges into staging;
 # verified-on-staging needs a "Staging proof: <link>" line and held-off a "Held off: <reason>" line,
 # or the bot removes them with a comment. Rules live in .github/scripts/release-flow.mjs.
+# Inert until the repository variable RELEASE_FLOW is "on": no labels, comments or release PR refreshes.
 name: Release labels
 
 on:
@@ -22,6 +23,7 @@ jobs:
     name: Release labels
     # Fork PRs get a read-only token; labels are only managed on this repository's branches.
     if: >-
+      vars.RELEASE_FLOW == 'on' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       ((github.event.action == 'closed' && github.event.pull_request.merged) ||
@@ -69,6 +71,7 @@ jobs:
     # change the release gate: let it re-read. Other comments don't dispatch anything.
     name: Refresh release gate
     if: >-
+      vars.RELEASE_FLOW == 'on' &&
       github.event_name != 'pull_request' &&
       (github.event.issue.pull_request || github.event.pull_request) &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association) &&

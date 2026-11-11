@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270102143000_ki143_vendor_bill_received_value_checks (KI-143;
+ * Real-schema proof for 20270103110000_ki143_vendor_bill_received_value_checks (KI-143;
  * contract docs/plans/2026-11-10-ki143-vendor-bill-received-value-CONTRACT.md).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -31,7 +31,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270102143000_ki143_vendor_bill_received_value_checks.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270103110000_ki143_vendor_bill_received_value_checks.sql');
 const FOLLOW_UPS = [];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();

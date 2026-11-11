@@ -1,6 +1,6 @@
 ## 2026-11-10 — KI-143: PO-linked vendor bills are checked against what arrived (database, not applied)
 
-- Migration `20270102143000_ki143_vendor_bill_received_value_checks.sql` re-creates `create_vendor_bill` and
+- Migration `20270103110000_ki143_vendor_bill_received_value_checks.sql` re-creates `create_vendor_bill` and
   `update_vendor_bill` (same signatures, grants, idempotency and lock order). A bill linked to a purchase order now
   needs the existing confirmation and a reason when the PO's running bill total goes above 105% of the value
   received on it (received quantity x unit cost, whole cents per line), never above the ordered total. Before it was 105% of the ordered total, so a

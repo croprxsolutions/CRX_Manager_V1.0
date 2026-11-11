@@ -2196,7 +2196,7 @@ describe('InvoiceDetail — Email reads the billed customer by id', () => {
   });
 });
 
-describe('InvoiceDetail — standing discount line (billing plan M4b)', () => {
+describe('InvoiceDetail — standing discount and sales tax lines (billing plan M4b, M4a)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     intentKeys.clear();
@@ -2214,6 +2214,8 @@ describe('InvoiceDetail — standing discount line (billing plan M4b)', () => {
         extended_cents: 4500, sort_order: 2, charge_type: 'freight' },
       { id: 'l3', order_item_id: null, product_id: null, description: 'Standing discount 3%', quantity: 1, unit_price_cents: -3000,
         extended_cents: -3000, sort_order: 3, charge_type: 'standing_discount' },
+      { id: 'l4', order_item_id: null, product_id: null, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 6408,
+        extended_cents: 6408, sort_order: 4, charge_type: 'sales_tax' },
     ];
     let invoiceCalls = 0;
     mockFrom.mockImplementation((table: string) => {
@@ -2226,18 +2228,20 @@ describe('InvoiceDetail — standing discount line (billing plan M4b)', () => {
     });
   });
 
-  it('shows the discount line read-only and saves the draft', async () => {
+  it('shows the discount and tax lines read-only and saves the draft', async () => {
     renderInvoiceDetail('inv-disc');
     await waitFor(() => expect(screen.getByText('Standing discount 3%')).toBeInTheDocument());
-    // Price boxes for the product and the freight, none for the discount line.
+    expect(screen.getByText('Sales tax 6.25%')).toBeInTheDocument();
+    // Price boxes for the product and the freight, none for the discount or tax line.
     const prices = screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value);
     expect(prices).toContain('100.00');
     expect(prices).toContain('45.00');
     expect(prices).not.toContain('-30.00');
+    expect(prices).not.toContain('64.08');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('amount above $0.00'));
-    // The database owns that line (and drops it when the type changes): the editor never sends it back.
+    // The database owns those lines (and drops them when the type changes): the editor never sends them back.
     const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
     const sent = (saveCall?.[1].p_items as Array<{ charge_type: string | null }>).map((it) => it.charge_type);
     expect(sent).toEqual([null, 'freight']);

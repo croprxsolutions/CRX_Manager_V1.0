@@ -30,7 +30,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
@@ -1186,8 +1186,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           footer_notes: invoice.footer_notes || null,
         };
 
-        // The standing discount line is the database's (rebuilt at commit, dropped if the type changes): never sent back.
-        const itemsPayload = items.filter((it) => it.charge_type !== 'standing_discount').map((it, idx) => ({
+        // The discount and tax lines are the database's (rebuilt at commit, dropped if the type changes): never sent back.
+        const itemsPayload = items.filter((it) => !isComputedChargeLine(it.charge_type)).map((it, idx) => ({
           // Existing generated lines carry their server identity back to the
           // writer so it can preserve immutable order-line and historical-cost
           // lineage while rebuilding a draft invoice. New manual lines omit id.
@@ -1983,8 +1983,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const canEdit = isAdminOrRep;
   const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
-  // The standing discount line is the database's own (billing plan M4b): shown, never edited or removed here.
-  const rowEditable = (item: LineItem) => editable && item.charge_type !== 'standing_discount';
+  // The standing discount (M4b) and sales tax (M4a) lines are the database's own: shown, never edited or removed here.
+  const rowEditable = (item: LineItem) => editable && !isComputedChargeLine(item.charge_type);
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
   // - Split invoice (Codex r5 P2): chemical items store PER-UNIT cost, but the header

@@ -35,9 +35,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "../.claude/hooks/live-testdata-lib.mjs";
-import { accessChangeCheck, dataRewriteCheck } from "../.claude/hooks/migration-access-lib.mjs";
+import { accessChangeCheck, dataRewriteCheck, readMigrationHistory } from "../.claude/hooks/migration-access-lib.mjs";
 import { ownerApprovalNeeded } from "../.claude/hooks/migration-apply-lib.mjs";
 
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations");
 const ISSUE_TITLE = "Daily landing summary";
 const MASON = "masonwells1";
 const DEFAULT_REPO = "croprxsolutions/CRX_Manager_V1.0";
@@ -114,8 +115,12 @@ export function waitingReasons({ labels = [], files = [] }) {
     // Rewrites and access changes stopped being his on 2026-11-11 ("All but
     // deletions"); a delete hidden in a function or dynamic SQL, or SQL these
     // checks cannot read, still waits for him (the apply gate's same rule).
+    // The checked-out migrations before this one, so triggers on a changed table
+    // can be read (Codex P1, PR #1799); unreadable means unknown, which waits.
+    let history;
+    try { history = readMigrationHistory(MIGRATIONS_DIR, path.basename(name)); } catch { history = undefined; }
     const found = [];
-    try { const r = dataRewriteCheck(added); if (r.rewrites) found.push({ category: "overwrites-data", reason: String(r.reason) }); }
+    try { const r = dataRewriteCheck(added, { history }); if (r.rewrites) found.push({ category: "overwrites-data", reason: String(r.reason) }); }
     catch { found.push({ category: "overwrites-data", reason: "could not be read" }); }
     try { const a = accessChangeCheck(added); if (a.changesAccess) found.push({ category: "changes-access", reason: String(a.reason) }); }
     catch { found.push({ category: "changes-access", reason: "could not be read" }); }

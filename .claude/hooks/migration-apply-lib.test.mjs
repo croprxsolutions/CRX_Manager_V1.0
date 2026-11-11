@@ -1958,8 +1958,29 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "a crashed access check still waits for Mason");
   ok(ownerApprovalNeeded([{ category: "overwrites-data", reason: "data-rewrite check error (boom) — failing closed" }]).length === 1,
     "a crashed rewrite check still waits for Mason");
-  ok(ownerApprovalNeeded(parkedCategories(parkedSql["overwrites-data"] + parkedSql["changes-access"])).length === 0,
+  ok(ownerApprovalNeeded(parkedCategories(parkedSql["overwrites-data"] + parkedSql["changes-access"], { history: [] })).length === 0,
     "a plain rewrite plus a grant needs no approval");
+  // Codex P1, PR #1799: a row change fires the table's triggers.
+  const delTrigger = "CREATE FUNCTION public.t_del() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; RETURN NEW; END $$;\n" +
+    "CREATE TRIGGER t_del AFTER UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.t_del();\n";
+  const touchTrigger = "CREATE FUNCTION public.t_touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := now(); RETURN NEW; END $$;\n" +
+    "CREATE TRIGGER t_touch BEFORE UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.t_touch();\n";
+  const upd = "UPDATE public.invoices SET notes = NULL;\n";
+  ok(ownerApprovalNeeded(parkedCategories(delTrigger + upd, { history: [] })).length >= 1,
+    "an UPDATE that fires a deleting trigger defined in the same migration waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger }] })).length >= 1,
+    "an UPDATE that fires a deleting trigger from an earlier migration waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories("CREATE FUNCTION public.w() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; END $$;\nSELECT public.w();\n",
+    { history: [{ name: "a.sql", text: delTrigger }] })).length >= 1,
+    "an UPDATE inside a called function that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: touchTrigger }] })).length === 0,
+    "an UPDATE that fires only a harmless trigger still needs no approval");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger.replace("AFTER UPDATE", "AFTER DELETE") }] })).length === 0,
+    "a DELETE-only trigger is not fired by an UPDATE");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger.replace("AFTER UPDATE", "AFTER DELETE OR UPDATE OF notes") }] })).length >= 1,
+    "an 'UPDATE OF column' trigger still counts");
+  ok(ownerApprovalNeeded(parkedCategories(upd)).length >= 1,
+    "an UPDATE with no migration history to read triggers from waits for Mason");
   // Security review + Luna, 2026-11-11: a delete the rewrite/access checks find
   // (inside a called function, dynamic SQL, unreadable SQL) is still Mason's.
   for (const [label, sql] of [

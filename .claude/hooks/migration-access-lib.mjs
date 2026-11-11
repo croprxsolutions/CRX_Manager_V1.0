@@ -888,6 +888,50 @@ export function dataRewriteCheck(sql, { history } = {}) {
     if (NO_APPLY_TIME_CALLS_RE.test(statement)) continue;
     for (const raw of callsIn(statement)) calls.push({ raw, via: [] });
   }
+
+  // Triggers (Codex P1, PR #1799): a row write fires every trigger on its table,
+  // so their functions join the walk. Triggers come from this migration and the
+  // history; a later DROP TRIGGER is not tracked, which only over-includes.
+  // Only INSERT/UPDATE triggers: the writes followed here (UPDATE, upsert, MERGE's
+  // update/insert arms) never fire DELETE- or TRUNCATE-only triggers; MERGE's
+  // delete arm is already a delete in rowWrite().
+  const triggerRe = new RegExp(String.raw`\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+${IDENT}\s+((?:before|after|instead\s+of)\b[^;]*?)\bon\s+(${QNAME})[^;]*?\bexecute\s+(?:function|procedure)\s+(${QNAME})\s*\(`, "gi");
+  const triggers = new Map();
+  const addTriggers = (text) => {
+    for (const [, events, ...m] of text.matchAll(triggerRe)) {
+      if (!/\b(?:insert|update)\b/i.test(events)) continue;
+      const table = objectKey(m[0]);
+      if (!triggers.has(table)) triggers.set(table, new Set());
+      triggers.get(table).add(m[1]);
+    }
+  };
+  addTriggers(blankStringLiterals(applyTime));
+  if (Array.isArray(history)) {
+    for (const file of history) {
+      try { addTriggers(blankStringLiterals(stripCommentsQuoteAware(stripFunctionBodiesOnly(String(file.text || "")), { intoDollarBodies: true }))); }
+      catch { return hit("an earlier migration could not be read for triggers, so this check cannot tell what a row change here sets off"); }
+    }
+  }
+  const writeTargets = (text) => [
+    ...text.matchAll(new RegExp(String.raw`\bupdate\s+(?:only\s+)?(${QNAME})(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "gi")),
+    ...text.matchAll(new RegExp(String.raw`\binsert\s+into\s+(${QNAME})[^;]*?\bon\s+conflict\b[^;]*?\bdo\s+update\b`, "gi")),
+    ...text.matchAll(new RegExp(String.raw`\bmerge\s+into\s+(${QNAME})`, "gi")),
+  ].map((m) => objectKey(m[1]));
+  const fired = new Set();
+  // Returns a refusal when an existing table's triggers cannot be known.
+  const fire = (table, via) => {
+    if (fired.has(table)) return null;
+    fired.add(table);
+    if (!Array.isArray(history) && !created.tables.has(table)) {
+      return hit(`it changes rows in ${table}, and without the migration history this check cannot tell whether a trigger on that table deletes data`);
+    }
+    for (const fn of triggers.get(table) || []) calls.push({ raw: fn, via: [...via, `trigger on ${table}`] });
+    return null;
+  };
+  for (const statement of statements) {
+    for (const table of writeTargets(statement)) { const refused = fire(table, []); if (refused) return refused; }
+  }
+
   const seen = new Set();
   while (calls.length) {
     const { raw, via } = calls.shift();
@@ -911,6 +955,8 @@ export function dataRewriteCheck(sql, { history } = {}) {
       const write = rowWrite(body);
       if (write && /deletes rows|empties a table|dynamic SQL/.test(write)) return hit(`it runs ${named} while applying, which ${write}`);
       if (write) note(`it runs ${named} while applying, which ${write}`);
+      const bodyText = blankStringLiterals(stripCommentsQuoteAware(body));
+      for (const table of writeTargets(bodyText)) { const refused = fire(table, [...via, `${key}()`]); if (refused) return refused; }
       // Literals blanked: a name inside a string (an assertion message, a
       // to_regprocedure() argument) is not a call.
       for (const raw of callsIn(blankStringLiterals(stripCommentsQuoteAware(body)))) calls.push({ raw, via: [...via, `${key}()`] });

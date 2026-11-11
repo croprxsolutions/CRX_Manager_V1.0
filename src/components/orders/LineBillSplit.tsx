@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult, sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { sharesLeft, sharesOverHundred } from '../../lib/billSplitLock';
+import { toSentryError } from '../../lib/sentryError';
 
 export interface LineShare {
   id: string;
@@ -42,7 +43,7 @@ export default function LineBillSplit({ items, lineShares, hasCard, mainCustomer
       setCustomer(null);
       setPct('');
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context } });
+      Sentry.captureException(toSentryError(err), { extra: { context } });
       toast('error', sanitizeError(err));
     }
     // Refresh either way: a failed reply may still have committed, and a retry should see it.

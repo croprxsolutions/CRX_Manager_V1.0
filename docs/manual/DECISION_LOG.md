@@ -15,6 +15,174 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
 **Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Do not re-raise this as a regression; changing it needs the order line written (a backfill Mason decides).
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `6b65dddba716`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `6b65dddba716` (base `465e84ae66fe`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `a3b3a249619ae80a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 978bfeba148a)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `f33870f53508`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `f33870f53508` (base `947da5a9b59f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `393fc93953fe9ff4` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 5e28b172441b)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `859b6c2793db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `859b6c2793db` (base `d77d9d5d2deb`) found 1 BLOCKER/HIGH finding(s). Mason judged it a business non-issue, for the reason below.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `4eb8544250ce887b` (the wording stays with the proof, not here)
+  Mason's reason: we post each product's receipts and deliveries before counting it (ref cae57212a6bb)
+
+**What this implies:** the D12 pre-season count follows the procedure in the reason above; a change to that procedure needs a new decision from Mason.
+## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
+
+**Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.
+**Why:** the point of Brand PR B is a record of the brand actually sold; under REG-1's "the product's own number" the brand would change only the paperwork.
+**What this forbids/implies:** supersedes, for lines with a recorded brand, REG-1's "the product's own number" and #1746's "one active record per line" (it becomes one per line per brand). Invoice lines are not split by brand. Everything else in REG-1 stands per brand: capture at save, any Yes records it, a Yes always wins, a Yes at posting wins, a missing number never blocks. Plan: `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md` section 14.
+## 2026-11-11 — #1770: Mason owner-accepted 2 Sol finding(s) at `bf00558ca02b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `bf00558ca02b` (base `d77d9d5d2deb`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `38bc41d4e0c448db` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref b254617911bf)
+- Finding 2 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `35671a6b9e8b1435` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref 114fff30fac0)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1770: Mason owner-accepted 1 Sol finding(s) at `f5fa14d661f0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `f5fa14d661f0` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `94347679d229a520` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref d0900abc16e7)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d922c2698393` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `fee19c69091049d0` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref c3b60308c985)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 2 Sol finding(s) at `d2d1bc8c4461`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d2d1bc8c4461` (base `f52a57230c83`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `c3593fa2f9462217` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref 7e8f8a878f38)
+- Finding 2 (HIGH) at `src/lib/sentryError.ts:30`, text sha256 `61bb6daccd365570` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref 17313d83176e)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `180cc033215d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `180cc033215d` (base `a1ba9e63db65`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:7`, text sha256 `e229b53d6733379a` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref c09bcfbaaa78)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets a database error's wording, figures blanked (KI-115)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.
+**What this forbids/implies:** do not send free text other than this scrubbed message, for example `details` or `hint`. Do not blank figures before tokens are removed. A new database message that would quote a customer's name or contact details must not be raised.
+## 2026-11-10 — #1756: Mason owner-accepted 1 Sol finding(s) at `0fc8d1c59d0e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1756 at `0fc8d1c59d0e` (base `3e72201b4784`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:9`, text sha256 `e075ef7905bf21cd` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref cddc292eff89)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets only known-safe fields, built fresh (KI-115, option B)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Safe fields only (B)").** Every Sentry event, error or performance sample, is rebuilt in `src/lib/sentry.ts` from an allow-list: error type and title, stack frames (file, function, line, column), our own tags, the user id, breadcrumb category, level and time, path-only urls and span names, trace ids, and the SDK's own bookkeeping. Dropped: `extra`, every other context, request query, headers and cookies, the serialized copy of a plain error object, breadcrumb messages and data, and span data. The alternative was to keep token-pattern matching across the whole event, which Luna kept finding new shapes for. The title is the only free text. It goes through `toSentryError`: tokens removed whole, then figures blanked (see the same-day entry "Sentry gets a database error's wording, figures blanked").
+**What this forbids/implies:** do not send a new event field without adding it to the allow-list on purpose. Do not add pattern matching back as the main defence. The `extra` data on about 220 capture calls no longer reaches Sentry; put anything Sentry must see in a tag instead.
+
+## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR `claude/reg1-step2-redesign-e66693`)
+## 2026-11-10 — #1706 (RT-2 step 1 unit spellings) redone for product families as 20270101010000; new Sol rounds
+
+**Decision (Mason, in chat, 2026-11-10: "ok reg 1 is working so continue woek", lifting the same day's "Park it, REG-1 first").** The parked `20261229170000` refused live (`RT2A_UNLISTED_SPELLING`, nothing changed) because 18 of its 20 products joined one-size product families that night. It is renamed to `20270101010000` (never applied, never on main) and redone: a family stores a rate unit but no stock unit, so the 19 stock-unit moves leave their families alone; the Imazuron Herbicide family moves `LB` to `Lb` with its one size. The family copy needs a family event with a named person, which a migration has not, so the migration moves the family row itself and disables `trigger_zz_guard_product_parent_values` for the single Imazuron UPDATE (the same pattern Sol accepted for the setup guard); no `product_parent_events` row is written. Every family is pinned by id, name, rate unit and its exact sizes. This is a new design, reviewed fresh from Sol round 12. The live apply needs Mason's fresh approval.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings): Sol round 10's two findings fixed; one more Sol round
+
+**Decision (Mason, in chat, 2026-11-09: "fix and babysit this pr and merge it").** Sol round 10 on PR #1706 found a HIGH and a MED; both are fixed as planned, and Sol may run once more on the fixed head. HIGH: Autumn Super 51 WDG and Cimarron Plus no longer move from `oz` to `Dry oz` in step 1, because `refresh_watchdog_flags` compares a saved job's rate unit with the product's, so the move would silently drop an over-rate warning; they move in RT-2 step 2 with a watchdog fix. MED: the 19 stock-unit moves (`Oz` to `oz`, `Qt` to `qt`) now move those products' `inventory.unit_size` snapshots in the same transaction, so the product page's "Total on hand" still adds them up; the snapshot count is pinned (0 live) and any other count refuses. If this Sol round is not clean, the finding goes to Mason in plain English instead of another patch.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
+## 2026-11-10 — Vendor bills on a PO are limited by what arrived, except before anything arrives (KI-143, PR #1769)
+
+**Decision (Mason, 2026-11-10, answering two questions relayed by the sweep session):** (1) "No, let early bills through": a bill entered before any goods arrive on its PO needs no reason up to the ordered total (+5%), accepting that a PO later short-shipped could then be billed in full with no warning. (2) first "Yes, allow it", then corrected the same day: "no do not allow to go more than was ordered without a reason". Billing above the ordered total (+5%) needs a reason even when more arrived.
+**Why:** bills were checked only against the ordered total, so a short shipment could be billed and paid in full with no question; early bills are normal for prepaid orders.
+**What this forbids/implies:** once anything has arrived, the limit is the smaller of the received value and the ordered total (+5%); before that, the ordered total (+5%). Above the limit the bill needs the existing confirmation and a reason, logged with the amounts. The check runs when a bill is entered or edited; it does not re-judge saved bills later.
+
+## 2026-11-10 — The P&L subtracts commissions only on sales billed in CRX (To-Do decision 15, KI-125)
+
+**Decision (Mason, in session, 2026-11-10: "Only CRX-billed"):** Bottom Line P&L and Monthly Summary subtract a sales commission only when its order has a CRX invoice counted in that period's revenue (posted, overdue or paid, by invoice date). Chem Man-billed sales are not brought into CRX revenue.
+**Why:** the reports subtracted commissions on every booked order but counted only CRX-invoiced revenue, so most 2026 sales (billed in Chem Man) showed commission cost with no matching revenue and a six-figure loss that is not real ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md), sweep 3 #1).
+**What this forbids/implies:** commissions and revenue in these two reports must be matched through the same invoices; commissions on Chem Man-billed orders stay out of the CRX P&L. From 2027-01-01 all billing is in CRX, so the rule then covers every sale. The fix is a reviewed migration (money report, Sol-listed); KI-125 stays open until it is live.
+
+## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR #1746)
+
+**Decision (Mason, in session, 2026-11-10: "Yes, Yes at post wins", after Sol round 1 on the redesign):** when an invoice is posted, a line whose saved answer is No or Not reviewed, but whose size, saved number or captured number says restricted use at that moment, is upgraded to Yes and gets a record. Upgrades only, never downgrades; the record keeps the number and signal word saved with the line.
+**Why:** Sol found that a size ticked restricted-use after a line was saved, followed by a quantity or price re-save, posted with no record (the capture is kept on such saves). Posting is the moment the sale becomes final, so it takes any Yes known then.
+**What this forbids/implies:** only the posting transaction upgrades (`posted_at = now()`); a later standalone run on an already-posted invoice changes nothing, and such a line stays on Sales to check (KI-118). Supersedes, for posting only, "later label changes never change what a saved or posted sale records" in the 2026-11-10 capture-at-save entry: a later Yes still never removes or changes a record, but a Yes known at posting adds one.
+
+## 2026-11-10 — Restricted-use records name their invoice line (REG-1 Step 2 redesign, PR #1746, replaces PR #1688)
+
+**Decision (Mason, in session, 2026-11-10):** PR #1688 was parked after 13 Sol rounds and is replaced. A restricted-use record now points at the invoice line it records (`rup_sales_records.invoice_item_id`); a sale "has its record" when an active record names its line. Nothing is matched by number, unit, price, signal word, customer or order any more.
+**Why:** every Sol round on #1688 found another way that inferred match went wrong (the root cause in `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md`).
+**Decisions made with it (Mason, 2026-11-10):**
+- *"we will not make sales before it is turned on so it doesnt matter this is not a live active SAAS"*: sales and data from before the switch-on are out of scope. No backfill, no special listing of sales posted before the seed, and the migration refuses if an active record exists (live had 0 records and 6 posted product lines on 3 invoices). **Accepted trade-off:** a sale posted before the seed that was restricted use is listed on Sales to check only if the seed day's facts say Yes.
+- A return credit (credit memo) never creates or needs a restricted-use record and never appears on Sales to check ("Nothing").
+- Voiding an invoice voids its restricted-use records ("Cancel them too"); the database does this for any way an invoice leaves posted, paid or overdue.
+- Field-application invoices get restricted-use records, under the invoice's own customer ("Yes, record them"). They had none before, because the posting rule needed an order.
+**What this forbids/implies:** one record per sale line (two lines of one product are two records); only the posting function writes records (app users lose direct write access; no screen used it); a line with an active record cannot be deleted. Decisions below that stand: capture at save, a Yes always wins, any Yes records it, the product's own number, "Unit not set", the seed refuses while records exist, reason required. Decisions below made moot by the link: every rule about which record "covers" a line, duplicate and conflict handling, the record's customer-and-order match, and `posted_before_seed`. **Deferred, named:** a posted line that turns restricted use later is listed for a person, but recording it from the list is a later step.
+
+## 2026-11-10 — EPA registrations: restricted-use answer captured when a sale is saved (REG-1 Step 2, PR #1688)
+
+**Decision (Mason, in session, 2026-11-10: "Capture it at save", after Sol round 8 on PR #1688 parked it):** once registrations are switched on, the database stores each invoice line's restricted-use answer (any Yes, as decided 2026-11-09), its product's EPA number and signal word when the line is saved, in a private table only the database writes; the seed stores them for every line that exists; posting records exactly what was stored. This replaces the "facts at posting" rule below.
+**Why:** Sol rounds 1 to 8 all traced to one cause: posting judged a sale by facts that could change after it was saved (a label corrected, a number moved). Storing the answer at save removes that cause instead of patching each case. Astra challenged the design first (25 findings, folded in).
+**What this forbids/implies:** later label changes never change what a saved or posted sale records; Sales to check lists a sale captured No or Not reviewed whose number is later reviewed Yes, for a person. **Accepted:** a save that rebuilds an invoice's lines (the invoice editor, field-application saves) captures them again as of that save.
+**Follow-up decision (Mason, in session, 2026-11-10: "Yes, drop it", after Luna round 8):** a sale posted before the switch-on is judged like any other sale. A restricted-use record written before it counts only when it matches the captured number, signal word, unit, price and amounts; otherwise the sale stays on Sales to check for a person. **Why:** the old posting rule records only a product's first line, so trusting old records could hide unrecorded quantity; live had 0 restricted-use records and 1 line on a ticked product.
+**Follow-up decision (Mason, relayed by the captain session, 2026-11-10: "Yes to both", after Sol round 9 on PR #1688):** "a Yes always wins". A line's answer is captured again whenever its saved number changes, a blank number filled in by the app included, and a re-capture on the same product never turns a Yes back to No. Every line already posted when the seed runs, on a product with an EPA number, is listed on Sales to check (`posted_before_seed`) for a person, because the seed can only read that day's facts. **Why:** Sol round 9 found a blank-number line that later got its product's new restricted-use number kept its old No, and a product unticked since a past sale would be seeded No and never listed; live 2026-11-10 had 1 such posted line.
+**Follow-up decision (Mason, relayed by the captain session, 2026-11-10: "Yes, fix both", after Sol round 10):** Sales to check also lists a posted sale captured No or Not reviewed when its product's own restricted-use tick says Yes now (any Yes now, as for a registration), and Edit registration refuses a change with no reason (`EPA_REGISTRATION_REASON_REQUIRED`).
+
+**Follow-up decision (Mason, in the PR #1688 landing session, 2026-11-10: "Yes, fix both", after Sol round 11):** the seed (and its preview) refuses while any active restricted-use record exists (`EPA_REGISTRATION_SEED_RECORDS_EXIST`; live had 0), so no record made under the old rules sits beside the captured ones; and a registration turning restricted use lists a sale even when a record for its key exists but does not cover it.
+
+**Follow-up decision (Mason, in the PR #1688 landing session, 2026-11-10: "Yes, fix all five", after Sol round 12):** every line already posted when the seed runs is listed once on Sales to check (`posted_before_seed`), with or without a number (live: 6 lines on 3 invoices, none with a number on the line). The seed locks the restricted-use records while it runs; a record counts for a sale only under that invoice's customer and order (posting refuses one under another); the registration-edit list follows the Sales to check rule; registration dates refuse `infinity`.
+
+## 2026-11-09 — EPA registrations: no sale capture and no product-master guards (REG-1 Step 2, PR #1688)
+
+**Decision (Mason, in session, 2026-11-09: "epa numbers are not a big deal and do not wan tover complicated system to manage", then "Yes, simplify", then "Drop them"):** REG-1 Step 2 keeps only the registration list, its plain edit tool, the one-time seed, and restricted-use posting by the number each line was sold under. No per-line capture of label facts, no guards on sizes or brands, no copying of facts from a registration to sizes or brands, no registration-driven assign, label drafts or product setup. Posting records a sale when the sold number's registration or the product's own restricted-use tick says Yes.
+**Why:** the capture and the guards drove twelve Luna rounds of new HIGHs on the same mechanism (passes, triggers, wrappers). The SQL fell from about 2,800 lines to about 1,000 with nothing on the posting path depending on what was removed.
+**What this forbids/implies:** sizes and brands keep their own label facts and can differ from their registration; don't add guards, passes or fact-copying to bring them back into line without re-deciding this. Accepted: a label corrected between saving and posting posts by the registration as it is at posting; a registration turned from No to Yes lists its old unrecorded posted sales on Sales to check; a re-saved split-billed field-application invoice takes its product's current number (KI-117).
+**Follow-on (Mason, in session, 2026-11-09: "Yes, always record", after Sol round 2):** every restricted-use sale gets its record. Posting records a line when its number's registration, its product's tick, or its product's own number's registration says Yes, so a number typed on a line cannot avoid a record; a line with no number records with the number blank (as live did before) and stays on Sales to check, even if its product is later unticked. Both restricted-use products on live had no EPA number, so without this none of their sales would have had a record.
+
+**Follow-on (Mason, in session, 2026-11-09: "Yes, product's number", after Sol round 3):** restricted-use records use the product's own EPA number at posting, as live does today, never the number stored on the invoice line. **Why:** the database keeps whatever number arrives with a line, so a wrong number on a line could file the record under it and hide it from Sales to check, and an old record under the product's number could be doubled. **Trade-off accepted:** a product whose number changes between a sale and its posting records under the new number. This supersedes "record under the number each line was sold under" above.
+
+**Follow-on (Mason, in session, 2026-11-09: "Yes, accept it", after Sol round 4 on PR #1688):** Sales to check and a registration's list of posted sales to record judge each sale by its product's number and tick as they are now, the same rule posting uses. **Trade-off accepted:** if a product's number changes after a sale was posted without a record, that sale can drop off the list (live had 6 posted lines in total). Also from round 4: a sale line with no unit now records as "Unit not set" instead of failing posting, and the list's missing paging is deferred (admin-only and read-only; small history).
+
+**Decision (Mason, in session, 2026-11-09: "Yes" to "any Yes records it", after Sol round 5 on PR #1688):** Sol would not pass the accepted gap above (a product moved from a restricted-use number to a non-restricted one before posting got no record and left the list), and Sol has no owner override, so the gap is closed instead. A sale needs a restricted-use record when ANY Yes says so: the product's tick, its number's registration, or the registration of the number saved on the line. The record still goes under the product's number at posting. **Why:** a wrong number saved on a line can only add a record, never lose one, and re-posting clears anything Sales to check lists, because posting and the list use the same rule. This replaces the round 4 trade-off above.
+
+**Follow-on (Sol round 6 on PR #1688, implementing the decision above):** a record counts only the lines that are restricted-use under that rule (a same-price line saved under a No number is not added in), and a sale saved under a Not reviewed number stays on Sales to check even when its product's number now says No.
+
+**Follow-on (Mason, in session, 2026-11-09: "One more round", after Sol round 7 on PR #1688):** the seed refuses while any active restricted-use record does not hold all the lines sharing its product, unit and price (today's posting records only the first line; live had no records at review), and a sale saved under a Not reviewed number stays listed even when its product has no number. The three files were restamped to 20261231200000, 190000 and 200000 to sort after RT-2a. If Sol round 8 is not clean, the PR is parked.
+## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
+
+**Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.
+**What this forbids/implies:** do not extend the product guard to billed tickets, or re-check units on invoice void, without a new decision. If round 6 finds anything new, stop and bring it to Mason.
+
+## 2026-11-10 — #1733 (KI-16 rate units) gets one more Sol round (round 5) after a merge of main
+
+**Decision (Mason, in chat, 2026-11-10: "Yes, run round 5").** PR #1733 may run Sol round 5. Sol round 4 was clean at `1334014e7`; the only later change is a merge of `main` whose one conflict was the "Last verified" stamp line in `docs/manual/KNOWN_ISSUES.md`, and carry-forward refuses a merge that conflicted. No finding keeps returning: each Sol round found a different issue, all fixed or recorded as follow-ups.
+**What this implies:** if this round is not clean, stop and bring the finding to Mason rather than patching on.
 
 ## 2026-11-09 — Turned-off use timings: the screens hide them; the database no longer refuses them (USE-1, #1710)
 

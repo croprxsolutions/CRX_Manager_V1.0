@@ -23,6 +23,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import type { CycleCount, CycleCountItem } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 type CountRow = CycleCount & {
   initiator_name: string;
@@ -477,10 +478,6 @@ export default function CycleCounts() {
       return;
     }
 
-    const variance = countedQty !== null ? countedQty - item.expected_qty : null;
-    const variancePct = countedQty !== null && item.expected_qty !== 0
-      ? Math.round(((variance || 0) / item.expected_qty) * 100 * 100) / 100
-      : null;
     // Retain one key for an uncertain same-value retry, but advance the local
     // sequence whenever the requested value changes. This makes A -> B -> A
     // three distinct intents instead of replaying the first A after B.
@@ -511,7 +508,21 @@ export default function CycleCounts() {
         toast('error', error.message || 'Failed to update count');
         return;
       }
-      const result = assertRpcResult<{ item_revision: number }>(data, 'update_cycle_count_item');
+      const result = assertRpcResult<{
+        item_revision: number;
+        expected_qty?: number | null;
+        variance: number | null;
+        variance_pct: number | null;
+      }>(data, 'update_cycle_count_item');
+      // KI-134: the server compares the count with on-hand at the moment it was saved, so show its numbers.
+      // A saved count with no variance would show as a clean line: treat it as a failed write.
+      if (countedQty !== null && typeof result.variance !== 'number') {
+        throw new Error('update_cycle_count_item returned no variance for a saved count');
+      }
+      // A receipt stored before 20270103170000 has no expected_qty; derive it from its own variance.
+      const savedExpected = result.expected_qty ?? (countedQty !== null && typeof result.variance === 'number'
+        ? Math.round((countedQty - result.variance) * 100) / 100
+        : item.expected_qty);
       updateCycleCountItemIdem.resetKeyFor(intentScope);
       if (itemWriteIntentsRef.current.get(itemId)?.scope === intentScope) {
         itemWriteIntentsRef.current.delete(itemId);
@@ -533,9 +544,10 @@ export default function CycleCounts() {
           i.id === itemId
             ? {
                 ...i,
+                expected_qty: savedExpected,
                 counted_qty: countedQty,
-                variance,
-                variance_pct: variancePct !== null ? Math.round(variancePct * 100) / 100 : null,
+                variance: result.variance ?? null,
+                variance_pct: result.variance_pct ?? null,
                 is_counted: countedQty !== null,
                 counted_by: profile.id,
                 counted_at: new Date().toISOString(),
@@ -967,7 +979,7 @@ export default function CycleCounts() {
       // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
       const bindingRejection = getIdempotencyBindingRejection(err);
       if (bindingRejection === 'intent' || bindingRejection === 'actor') reverseCycleCountIdem.resetKey();
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_cycle_count' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_cycle_count' } });
       // sanitizeError maps the replay-binding refusal codes to plain English.
       toast('error', sanitizeError(err));
     } finally {
@@ -1197,7 +1209,7 @@ export default function CycleCounts() {
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       <th className="text-left py-2 px-3 font-medium text-gray-600">Product</th>
-                      <th className="text-right py-2 px-3 font-medium text-gray-600">Expected</th>
+                      <th className="text-right py-2 px-3 font-medium text-gray-600" title="On hand in the app when the line was counted (when the count was started, for uncounted lines). The variance is against this number.">On hand at count</th>
                       <th className="text-right py-2 px-3 font-medium text-gray-600 w-28">Counted</th>
                       <th className="text-right py-2 px-3 font-medium text-gray-600">Variance</th>
                       <th className="text-center py-2 px-3 font-medium text-gray-600 w-16">Status</th>

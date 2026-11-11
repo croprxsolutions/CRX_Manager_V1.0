@@ -2820,6 +2820,8 @@ function registryMigrationHighWater(): string {
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
 // 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
 // their files reached main just after that refresh had already moved the boundary past them.
+// 20261231200000, 20261231210000 and 20261231220000 (REG-1 Step 2, #1746) were added on 2026-11-10:
+// all three applied live and the registry refresh after it moved the boundary past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2867,6 +2869,10 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261215110000',
   '20261222100000',
   '20261229110000',
+  '20261231200000',
+  '20261231210000',
+  '20261231220000',
+  '20270103160000',
 ]);
 
 /**
@@ -3115,6 +3121,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'save_active_ingredient',
   'set_parent_chemistry',
   'set_parent_cost_reference',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): admin-only registration writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  'seed_epa_registrations',
+  'set_epa_registration',
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
@@ -3127,6 +3137,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'delete_draft_product_rate',
   'derive_draft_product_rates',
   'save_draft_product_rate',
+  // 20270103160000 (DM-1b, local candidate): admin-only setup workbook writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'commit_ingredients_tab',
+  'commit_weights_tab',
+  'promote_chemistry_proposal',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3157,6 +3172,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // REG-1 Step 2 (20261231210000, applied live 2026-11-10): trigger functions, never called as RPCs. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _capture_invoice_line_rup:
+    'AFTER INSERT/UPDATE row trigger on invoice_items (after the seed only; re-captures only on a product or saved-number change): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
+  _void_rup_records_off_posted:
+    'deferred AFTER UPDATE constraint trigger on invoices (status or deleted_at change): voids only still-active restricted-use records of an invoice that is no longer posted, paid or overdue, or is deleted, so a replay finds none and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
   _record_customer_document_restore:
     'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
@@ -3218,6 +3238,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): private helpers.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:
@@ -3250,6 +3275,18 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'admin read-only preview (DM-1, 20261209100000): runs the real edit inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   preview_parent_chemistry_correction:
     'admin read-only preview (DM-1, 20261209100000): runs the real correction inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20270103160000 (DM-1b, local candidate): private helpers and dry-run previews. Prune once applied
+  // and the registry high-water moves past it.
+  _workbook_weight_row: 'internal DM-1b helper (20270103160000): rehearses one Weights-tab row through the DM-2 draft helper inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_weight_rows: 'internal DM-1b helper (20270103160000): evaluates the Weights-tab rows (each rehearsal rolled back) for the preview and for commit_weights_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_ingredient_parent: 'internal DM-1b helper (20270103160000): rehearses the Ingredients-tab rows of one parent through _apply_parent_chemistry inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_ingredient_rows: 'internal DM-1b helper (20270103160000): groups the Ingredients-tab rows by parent (each rehearsal rolled back) for the preview and for commit_ingredients_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_apply_items: 'internal DM-1b helper (20270103160000): applies a change list through _apply_parent_chemistry, called only inside a rolled-back rehearsal or by promote_chemistry_proposal after its replay check; every API-role EXECUTE is revoked',
+  _apply_chemistry_proposal: 'internal DM-1b helper (20270103160000): applies one locked proposal, called only by promote_chemistry_proposal after its replay check; a decided proposal is refused; every API-role EXECUTE is revoked',
+  preview_weights_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each row inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  preview_ingredients_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each parent inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   // 20261229110000 (RT-1, local candidate): private helpers behind derive_draft_product_rates. Prune once applied
   // and the registry high-water moves past it.
   _product_rate_derive_parent: 'internal RT-1 helper (20261229110000): derives one parent, called only by derive_draft_product_rates after its replay check; every API-role EXECUTE is revoked',
@@ -3476,7 +3513,8 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       const current = functions.get(rpc);
       return generatedNames.has(rpc)
         || !/p_idempotency_key\s+text/i.test(current?.definition || '')
-        || !bodyUsesIdempotency(current?.body || '');
+        // A wrapper counts only when it forwards the key to a body that really uses it.
+        || !usesIdempotencyThroughDelegates(current?.body || '');
     });
     expect(stale).toEqual([]);
   });
@@ -3552,7 +3590,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .filter((rpc) => {
         if (rpc in IDEMPOTENCY_BODY_EXEMPT) return false;
         const body = functions.get(rpc)?.body || latestFunctionBody(rpc) || '';
-        return !bodyUsesIdempotency(body);
+        return !usesIdempotencyThroughDelegates(body);
       })
       .sort();
 

@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-10",
+    "generated_at": "2026-11-11",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261110044233",
+    "migrations_high_water": "20261111152650",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -566,6 +566,18 @@
       "20261229110000_product_rates_draft",
       "20261229120000_product_crop_use_pairs",
       "20261229150000_sales_reports_per_payer",
+      "20261229160000_convert_to_gl_lb_dry_oz",
+      "20261231100000_rate_unit_denominator_guard_and_invisible_chars",
+      "20261231200000_epa_registration_tools",
+      "20261231210000_rup_records_by_line",
+      "20261231220000_epa_registration_seed",
+      "20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold",
+      "20270101010000_unit_spellings_remap",
+      "20270102160000_rup_capture_fk_on_update_cascade",
+      "20270103110000_ki143_vendor_bill_received_value_checks",
+      "20270103140000_dry_product_fluid_ounce_guard",
+      "20270103150000_ki108_stock_matches_history",
+      "20270103160000_setup_workbook_chemistry_tabs",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1281,6 +1293,11 @@
       "failed",
       "needs_review"
     ],
+    "chemistry_change_proposals.status": [
+      "proposed",
+      "applied",
+      "rejected"
+    ],
     "commission_payments.status": [
       "unposted",
       "posted",
@@ -1333,6 +1350,11 @@
       "unknown"
     ],
     "epa_registrations.rup_status": [
+      "yes",
+      "no",
+      "unknown"
+    ],
+    "invoice_line_rup_captures.rup_status": [
       "yes",
       "no",
       "unknown"
@@ -1563,6 +1585,7 @@
     "delivery_photos",
     "email_log",
     "epa_registration_events",
+    "epa_registration_seed_run",
     "field_app_billing_lines",
     "field_app_billing_sets",
     "field_app_location_shares",
@@ -1578,6 +1601,7 @@
     "inventory_transactions",
     "invoice_delivery_recovery_capabilities",
     "invoice_line_allocations",
+    "invoice_line_rup_captures",
     "invoice_line_share_snapshots",
     "invoice_line_shares",
     "invoice_shares",
@@ -1878,6 +1902,16 @@
         "blend_tickets_status_check"
       ]
     },
+    "chemistry_change_proposals.status": {
+      "values": [
+        "proposed",
+        "applied",
+        "rejected"
+      ],
+      "constraints": [
+        "chemistry_change_proposals_status_check"
+      ]
+    },
     "commission_earned_state_ledger.event_kind": {
       "values": [
         "baseline",
@@ -2168,6 +2202,15 @@
         "epa_registration_events_event_type_check"
       ]
     },
+    "epa_registration_seed_run.rup_default": {
+      "values": [
+        "unknown",
+        "no"
+      ],
+      "constraints": [
+        "epa_registration_seed_run_rup_default_check"
+      ]
+    },
     "epa_registrations.registration_status": {
       "values": [
         "active",
@@ -2404,6 +2447,26 @@
         "chk_invoice_items_price_source"
       ],
       "nullable": true
+    },
+    "invoice_line_rup_captures.rup_status": {
+      "values": [
+        "yes",
+        "no",
+        "unknown"
+      ],
+      "constraints": [
+        "invoice_line_rup_captures_rup_status_check"
+      ]
+    },
+    "invoice_line_rup_captures.source": {
+      "values": [
+        "save",
+        "seed",
+        "posting"
+      ],
+      "constraints": [
+        "invoice_line_rup_captures_source_check"
+      ]
     },
     "invoice_line_shares.base_price_source": {
       "values": [
@@ -3890,6 +3953,30 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_base_chemistry_version_check",
+      "def": "CHECK ((base_chemistry_version >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_decision",
+      "def": "CHECK ((((status = 'proposed'::text) AND (decided_by IS NULL) AND (decided_at IS NULL) AND (applied_chemistry_version IS NULL)) OR ((status = 'rejected'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (applied_chemistry_version IS NULL)) OR ((status = 'applied'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (applied_chemistry_version IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_items_check",
+      "def": "CHECK (((jsonb_typeof(items) = 'array'::text) AND ((jsonb_array_length(items) >= 1) AND (jsonb_array_length(items) <= 200))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "chemistry_change_proposals",
+      "constraint": "chemistry_change_proposals_proposal_version_check",
+      "def": "CHECK ((proposal_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "commission_earned_state_ledger",
       "constraint": "commission_earned_state_ledger_amount_cents_non_negative_chk",
       "def": "CHECK ((amount_cents >= 0))",
@@ -4206,6 +4293,12 @@
       "constraint": "delivery_remainders_quantity_remaining_check",
       "def": "CHECK ((quantity_remaining > (0)::numeric))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_registration_seed_run",
+      "constraint": "epa_registration_seed_run_id_check",
+      "def": "CHECK (id)",
+      "reason": "unparseable — hooks do NOT validate this constraint"
     },
     {
       "table": "epa_registrations",
@@ -5750,6 +5843,12 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "rup_sales_records",
+      "constraint": "rup_sales_records_active_has_line",
+      "def": "CHECK (((invoice_item_id IS NOT NULL) OR (voided_at IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "split_invoice_provenance",
       "constraint": "split_invoice_provenance_content_claim_check",
       "def": "CHECK ((jsonb_typeof(content_claim) = 'object'::text))",
@@ -6261,6 +6360,22 @@
         "manually_corrected_fields"
       ]
     },
+    "chemistry_change_proposals": {
+      "no_default": [
+        "parent_id",
+        "items",
+        "has_delete",
+        "base_chemistry_version",
+        "created_by"
+      ],
+      "with_default": [
+        "id",
+        "proposal_version",
+        "status",
+        "created_at",
+        "updated_at"
+      ]
+    },
     "commission_earned_state_ledger": {
       "no_default": [
         "commission_id",
@@ -6614,6 +6729,17 @@
         "changed_at"
       ]
     },
+    "epa_registration_seed_run": {
+      "no_default": [
+        "seeded_by",
+        "rup_default",
+        "fingerprint"
+      ],
+      "with_default": [
+        "id",
+        "seeded_at"
+      ]
+    },
     "epa_registrations": {
       "no_default": [
         "epa_registration",
@@ -6926,6 +7052,16 @@
       "with_default": [
         "id",
         "created_at"
+      ]
+    },
+    "invoice_line_rup_captures": {
+      "no_default": [
+        "invoice_item_id",
+        "rup_status",
+        "source"
+      ],
+      "with_default": [
+        "captured_at"
       ]
     },
     "invoice_line_share_snapshots": {
@@ -8052,7 +8188,8 @@
     },
     "products": {
       "no_default": [
-        "product_name"
+        "product_name",
+        "product_form"
       ],
       "with_default": [
         "id",
@@ -9056,6 +9193,21 @@
       "application_service_id",
       "manually_corrected_fields"
     ],
+    "chemistry_change_proposals": [
+      "id",
+      "parent_id",
+      "items",
+      "has_delete",
+      "base_chemistry_version",
+      "proposal_version",
+      "status",
+      "applied_chemistry_version",
+      "created_by",
+      "created_at",
+      "decided_by",
+      "decided_at",
+      "updated_at"
+    ],
     "commission_earned_state_ledger": [
       "id",
       "commission_id",
@@ -9497,6 +9649,13 @@
       "changed_by_name",
       "changed_at"
     ],
+    "epa_registration_seed_run": [
+      "id",
+      "seeded_at",
+      "seeded_by",
+      "rup_default",
+      "fingerprint"
+    ],
     "epa_registrations": [
       "epa_registration",
       "registration_status",
@@ -9845,6 +10004,14 @@
       "split_invoice_id",
       "created_at",
       "invoice_id"
+    ],
+    "invoice_line_rup_captures": [
+      "invoice_item_id",
+      "epa_registration",
+      "rup_status",
+      "signal_word",
+      "source",
+      "captured_at"
     ],
     "invoice_line_share_snapshots": [
       "id",
@@ -11477,7 +11644,8 @@
       "created_by",
       "voided_at",
       "voided_by",
-      "void_reason"
+      "void_reason",
+      "invoice_item_id"
     ],
     "split_invoice_creation_claims": [
       "transaction_id",

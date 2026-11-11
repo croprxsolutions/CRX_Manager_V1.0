@@ -26,7 +26,30 @@
 
 import { todayInBusinessTz } from './dateUtils';
 
-// ── Unit normalization (shared with the SQL-side intent: LOWER(NULLIF(btrim(unit),''))) ──
+// ── Unit normalization (mirrors SQL normalize_rate_unit: unit_fold_invisible, then lower(btrim(unit))) ──
+
+// Every character JS .trim() strips (bar U+FEFF, deleted below) becomes a space, as in the SQL fold, so SQL btrim
+// and JS .trim() remove the same characters and an interior tab reads as a space on both sides (KI-16, 2026-11-10).
+// Built from character codes: eslint's no-irregular-whitespace forbids writing them literally.
+const TRIM_WHITESPACE_CODES = [
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x00a0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+  0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+];
+const INVISIBLE_AS_SPACE = new RegExp(`[${TRIM_WHITESPACE_CODES.map((c) => String.fromCharCode(c)).join('')}]`, 'g');
+const INVISIBLE_DELETED = new RegExp(
+  `[${[0x00ad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff].map((c) => String.fromCharCode(c)).join('')}]`,
+  'g',
+);
+
+/**
+ * Mirror of the SQL `unit_fold_invisible` (migrations 20261231100000, 20270101000000): tabs, line breaks and
+ * the Unicode spaces become a space; soft hyphen, zero-width characters, word joiner and BOM are deleted.
+ * The SQL `normalize_rate_unit` applies it before trimming, so a pasted unit bills like a typed one.
+ */
+export function foldInvisibleUnitChars(text: string): string {
+  return text.replace(INVISIBLE_AS_SPACE, ' ').replace(INVISIBLE_DELETED, '');
+}
 
 /**
  * Normalize a rate/max unit for comparison: trim, lowercase, strip a trailing per-acre
@@ -37,8 +60,14 @@ import { todayInBusinessTz } from './dateUtils';
  * an unknown token is kept as-is (lowercased) so two identical unknown strings still
  * match, but a mismatch is never coerced into a match.
  */
+/**
+ * Dotted fluid-ounce spellings. `normalize_rate_unit` maps them to 'fl oz', NOT 'oz': billing then sizes them on a
+ * liquid product and still refuses them on a dry one, where 'oz' would mean a weight ounce (KI-16, 20270101000000).
+ */
+export const DOTTED_FLUID_OUNCE: ReadonlySet<string> = new Set(['fl. oz', 'fl.oz', 'fl oz.', 'fl. oz.', 'fl.oz.', 'floz.']);
+
 export function normalizeRateUnit(unit: string | null | undefined): string | null {
-  const raw = (unit ?? '').trim().toLowerCase();
+  const raw = foldInvisibleUnitChars(unit ?? '').trim().toLowerCase();
   if (raw === '') return null;
   // Drop ONLY a recognized per-acre denominator ('oz/acre' -> 'oz', 'pt/ac' -> 'pt',
   // 'gal per acre' -> 'gal'). A DIFFERENT denominator (e.g. 'L/ha', 'fl oz/100 gal') is
@@ -56,6 +85,7 @@ export function normalizeRateUnit(unit: string | null | undefined): string | nul
     return base;
   }
   if (base === '') return null;
+  if (DOTTED_FLUID_OUNCE.has(base)) return 'fl oz';
   // Canonicalize common synonyms so equivalent spellings compare equal.
   const SYNONYMS: Record<string, string> = {
     oz: 'oz', ounce: 'oz', ounces: 'oz', 'fl oz': 'oz', floz: 'oz', 'fluid ounce': 'oz',

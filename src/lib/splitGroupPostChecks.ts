@@ -2,6 +2,7 @@ import { supabaseUntyped } from './db';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from './rupCompliance';
 import { CREDIT_LIMIT_UNVERIFIED_MESSAGE, evaluateCreditLimit } from './creditLimitGuard';
 import { Sentry } from './sentry';
+import { toSentryError } from './sentryError';
 
 // The group read (or a check) failed, so neither the RUP nor the credit check ran.
 export const GROUP_CHECKS_FAILED_MESSAGE = 'The license and credit checks could not be run, so nothing was posted. Try again.';
@@ -87,7 +88,7 @@ export async function checkSplitGroupBeforePost(invoiceGroupId: string | null): 
     return { ok: true, warning: groupWarning(rupParts, creditParts) };
   } catch (err) {
     // A check that threw never ran, so it stops rather than opening a clean-looking confirm.
-    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'split_post_guardrails' } });
+    Sentry.captureException(toSentryError(err), { extra: { context: 'split_post_guardrails' } });
     return { ok: false, message: GROUP_CHECKS_FAILED_MESSAGE };
   }
 }

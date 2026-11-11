@@ -61,7 +61,7 @@ vi.mock('../components/products/ProductBrandsSection', () => ({ default: () => n
 import ProductDetailRoute from '../components/ProductDetailRoute';
 
 const product = {
-  id: 'product-1', product_name: 'Atrazine 4L 2.5 Gal', sku: 'ATZ-25', category: 'Herbicide', use_timings: ['pre_emerge_corn'],
+  id: 'aaaaaaaa-0000-4000-8000-000000000001', product_name: 'Atrazine 4L 2.5 Gal', sku: 'ATZ-25', category: 'Herbicide', use_timings: ['pre_emerge_corn'],
   vendor: 'Acme Ag', manufacturer: 'Maker Co', container_size: 2.5, unit_size: 'gal', epa_registration: '100-1',
   is_rup: false, signal_word: null, rei_hours: null, phi_days: null, product_form: 'liquid', inventory_unit: 'gal',
   container_unit: 'jug', container_type: 'Jug', current_cost: 50, cost_updated_date: null,
@@ -77,7 +77,7 @@ const parent: ProductParent = {
   id: 'parent-1', name: 'Atrazine 4L', nickname: null, product_form: 'liquid', formulation_type: null, safener: null,
   generic_epa_registration: '100-1', category: 'Herbicide', use_timings: ['pre_emerge_corn'],
   rate_per_acre: '1.5', rate_unit: 'gal', suggested_rate: null, parent_version: 3, is_active: true,
-  sizes: [{ product_id: 'product-1', product_name: product.product_name, sku: 'ATZ-25', size_role: 'package', fill_source_product_id: null, is_active: true }],
+  sizes: [{ product_id: 'aaaaaaaa-0000-4000-8000-000000000001', product_name: product.product_name, sku: 'ATZ-25', size_role: 'package', fill_source_product_id: null, is_active: true }],
 };
 
 /** A Supabase-like query chain; `update` records its payload. */
@@ -117,12 +117,12 @@ describe('ProductDetail — parents (PAR-1)', () => {
       table === 'products' ? product : null,
     ));
     H.getParent.mockResolvedValue(parent);
-    H.createParent.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'product-2', event_id: 1 });
-    H.addSize.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'product-2', event_id: 1 });
+    H.createParent.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'aaaaaaaa-0000-4000-8000-000000000002', event_id: 1 });
+    H.addSize.mockResolvedValue({ parent_id: 'parent-1', parent_version: 4, product_id: 'aaaaaaaa-0000-4000-8000-000000000002', event_id: 1 });
   });
 
   it('a grouped size reads category, timings, EPA and rates from its parent, and never saves them', async () => {
-    renderAt('/products/product-1');
+    renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     await parentLoaded();
     expect(screen.getByRole('button', { name: 'Edit parent' })).toBeInTheDocument();
     expect(screen.getByLabelText('Category')).toBeDisabled();
@@ -144,7 +144,7 @@ describe('ProductDetail — parents (PAR-1)', () => {
 
   it('a failed parent load shows Retry and keeps those fields read-only until it loads', async () => {
     H.getParent.mockRejectedValueOnce(new Error('boom')).mockResolvedValue(null);
-    renderAt('/products/product-1');
+    renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     const alert = (await screen.findByText(/Couldn.t load this product.s parent/)).closest('[role="alert"]') as HTMLElement;
     expect(alert).toBeInTheDocument();
     expect(screen.getByLabelText('Category')).toBeDisabled();
@@ -158,7 +158,7 @@ describe('ProductDetail — parents (PAR-1)', () => {
   });
 
   it('Add a size carries the parent, and saving calls addProductSize with a size that has no parent-owned fields', async () => {
-    const router = renderAt('/products/product-1');
+    const router = renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     await parentLoaded();
     fireEvent.click(screen.getByRole('button', { name: 'Add a size' }));
 
@@ -177,12 +177,12 @@ describe('ProductDetail — parents (PAR-1)', () => {
     expect(size).toEqual(expect.objectContaining({ product_name: 'Atrazine 4L 30 Gal', size_role: 'bulk', epa_registration: null }));
     for (const key of ['category', 'use_timings', 'rate_per_acre', 'rate_unit', 'suggested_rate']) expect(size).not.toHaveProperty(key);
     expect(H.createParent).not.toHaveBeenCalled();
-    await waitFor(() => expect(router.state.location.pathname).toBe('/products/product-2'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/products/aaaaaaaa-0000-4000-8000-000000000002'));
   });
 
   it('New product creates a parent with the typed name and nickname, the category, and the chosen size role', async () => {
     H.getParent.mockResolvedValue(null);
-    renderAt('/products/product-1');
+    renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     fireEvent.click(await screen.findByRole('button', { name: 'New product' }));
     await screen.findByText('New product started from Atrazine 4L 2.5 Gal. Nothing is saved until you create it.');
 
@@ -205,7 +205,7 @@ describe('ProductDetail — parents (PAR-1)', () => {
   });
 
   it('a new size sends its notes in the same database call as the size, with no second write', async () => {
-    const router = renderAt('/products/product-1');
+    const router = renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     await parentLoaded();
     fireEvent.click(screen.getByRole('button', { name: 'Add a size' }));
     await screen.findByText(/New size of Atrazine 4L/);
@@ -228,7 +228,7 @@ describe('ProductDetail — parents (PAR-1)', () => {
 
   it('Add a size is disabled for a product with no parent, and New product stays available', async () => {
     H.getParent.mockResolvedValue(null);
-    renderAt('/products/product-1');
+    renderAt('/products/aaaaaaaa-0000-4000-8000-000000000001');
     const addSize = await screen.findByRole('button', { name: 'Add a size' });
     await waitFor(() => expect(screen.getByLabelText('Category')).toBeEnabled());
     expect(addSize).toBeDisabled();

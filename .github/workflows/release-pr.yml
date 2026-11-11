@@ -1,0 +1,122 @@
+# Weekly release PR (Taha, 2026-11-10). Thursday 08:00 Dubai: cut or refresh release/next from
+# staging, add the version/CHANGELOG/release-notes commit, open or update "release: vX.Y.Z" into
+# main, and post the release-gate status. Pushes to staging/main and label changes refresh an open
+# one through workflow_dispatch from release-flow.yml / release-labels.yml (which hold no secrets).
+# Hotfix PRs get their release-gate here too. Runs only from main: the release-bot environment,
+# which holds the App key, deploys from main alone. Inert until RELEASE_FLOW is "on".
+name: Release PR
+
+on:
+  schedule:
+    - cron: '0 4 * * 4' # Thursday 04:00 UTC = 08:00 Asia/Dubai
+  workflow_dispatch:
+    inputs:
+      create:
+        description: Open the release PR if none is open (otherwise only refresh an open one)
+        type: boolean
+        default: true
+      hotfix_pr:
+        description: Only post release-gate for this hotfix PR number
+        type: string
+        default: ''
+
+permissions: {}
+
+# ponytail: a queued run replaces an older queued one; a lost Thursday run is redone by hand
+# (Actions → Release PR → Run workflow).
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    name: Release PR
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    permissions:
+      contents: read
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+      CREATE: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.create) }}
+      HOTFIX_PR: ${{ inputs.hotfix_pr }}
+    steps:
+      - name: Switched on?
+        id: on
+        run: |
+          if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no release PR."; exit 0; fi
+          case "$HOTFIX_PR" in ''|*[!0-9]*) [ -z "$HOTFIX_PR" ] || { echo "::error::hotfix_pr must be a PR number"; exit 1; } ;; esac
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      - name: Release bot token
+        if: steps.on.outputs.yes
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-statuses: write
+          permission-workflows: write
+      # main's copy of the script and template decides; the release branch is only written to.
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+      - name: Hotfix release-gate
+        if: steps.on.outputs.yes && env.HOTFIX_PR != ''
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+        run: node .github/scripts/release-flow.mjs hotfix-gate
+      - name: What staging has that main lacks
+        if: steps.on.outputs.yes && env.HOTFIX_PR == ''
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          cp .github/scripts/release-flow.mjs .github/release-pr-template.md "$RUNNER_TEMP/"
+          node "$RUNNER_TEMP/release-flow.mjs" release-plan
+      - name: Cut or refresh release/next
+        id: branch
+        if: steps.plan.outputs.has_work && (steps.plan.outputs.pr_exists || env.CREATE == 'true')
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          git config user.name "crx-release-bot[bot]"
+          git config user.email "crx-release-bot[bot]@users.noreply.github.com"
+          # A conflict only in the bot's own version files (e.g. a hotfix also bumped package.json) is
+          # resolved by keeping ours, since release-files rewrites them next; any other conflict stops here.
+          merge() {
+            git merge --no-edit "$1" && return 0
+            other=$(git diff --name-only --diff-filter=U | grep -vxE 'package\.json|package-lock\.json|CHANGELOG\.md|src/releaseNotes\.ts' || true)
+            if [ -n "$other" ]; then echo "::error::Merging $1 into release/next conflicts in: $other"; exit 1; fi
+            git diff --name-only --diff-filter=U | xargs git checkout --ours --
+            git add -A && git commit --no-edit
+          }
+          if git rev-parse --verify -q origin/release/next >/dev/null; then
+            git switch -c release/next origin/release/next
+            merge origin/staging
+          else
+            git switch -c release/next origin/staging
+          fi
+          # Normally a no-op; after a hotfix (back-merge still open) it keeps the release containing main.
+          merge origin/main
+          # A conflict resolved with --ours keeps release/next's whole old copy of a bot file, dropping
+          # staging's other edits in it. Start the JSON files and the changelog from staging + main;
+          # release-files then sets only the version and adds this release's section.
+          expected=$(git merge-tree --write-tree origin/staging origin/main) || { echo "::error::staging and main don't merge cleanly; merge the back-merge PR first."; exit 1; }
+          git checkout "$expected" -- package.json package-lock.json
+          if git cat-file -e "$expected:CHANGELOG.md" 2>/dev/null; then git checkout "$expected" -- CHANGELOG.md; fi
+          node "$RUNNER_TEMP/release-flow.mjs" release-files
+          git add package.json package-lock.json CHANGELOG.md src/releaseNotes.ts
+          git diff --cached --quiet || git commit -m "chore(release): $VERSION"
+          git push origin release/next
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Open or update the release PR and post release-gate
+        if: steps.branch.outputs.sha
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_SHA: ${{ steps.branch.outputs.sha }}
+        run: node "$RUNNER_TEMP/release-flow.mjs" release-pr

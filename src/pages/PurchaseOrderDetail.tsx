@@ -48,6 +48,7 @@ import { ProductOptionDetails, type ProductOptionPresentationModel } from '../co
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, PURCHASE_ORDER_COLUMNS, PURCHASE_ORDER_ITEM_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
 import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
+import { toSentryError } from '../lib/sentryError';
 
 const COST_CHANGE_SOURCE_LABEL: Record<PurchaseOrderCostChangeSource, string> = {
   entered: 'Entered on the PO',
@@ -643,7 +644,7 @@ export default function PurchaseOrderDetail() {
       }
       idemKey = receiveIntent.getIdempotencyKey();
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { tags: { source: 'durable-intent', page: 'purchase-order-detail' } });
+      Sentry.captureException(toSentryError(error), { tags: { source: 'durable-intent', page: 'purchase-order-detail' } });
       // "Nothing was received" is only true for a FIRST attempt. When a frozen
       // request is already pending, this same catch is reached by a RETRY — and the
       // storage failure that broke the earlier post-commit cleanup is exactly what

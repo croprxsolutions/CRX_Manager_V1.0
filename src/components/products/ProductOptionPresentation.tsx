@@ -29,11 +29,16 @@ export function normalizeReturnPolicy(value: string | null | undefined): Product
     : 'unknown';
 }
 
-function productPackageLabel(product: ProductOptionPresentationModel): string {
+/** The package as recorded (variant, else unit size, else container), or null when none is. */
+export function productPackageText(product: ProductOptionPresentationModel): string | null {
   if (product.packaging_variant) return product.packaging_variant;
   if (product.unit_size) return product.unit_size;
   if (product.container_size != null && product.container_unit) return `${product.container_size} ${product.container_unit}`;
-  return 'Not recorded';
+  return null;
+}
+
+function productPackageLabel(product: ProductOptionPresentationModel): string {
+  return productPackageText(product) ?? 'Not recorded';
 }
 
 /** Stable plain text for native <option>s, which cannot render badges. */
@@ -59,6 +64,10 @@ export function PolicyBadge({ policy }: { policy: ProductReturnPolicy }) {
   return <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${className}`}>Return: {policy.replace(/_/g, ' ')}</span>;
 }
 
+export function FullToteOnlyBadge() {
+  return <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Full tote only</span>;
+}
+
 export function ProductOptionDetails({
   product,
   className = '',
@@ -78,7 +87,7 @@ export function ProductOptionDetails({
       <span>Package: {productPackageLabel(product)}</span>
       <span>Unit: {product.inventory_unit || 'Not recorded'}</span>
       <PolicyBadge policy={policy} />
-      {product.is_full_tote_only && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Full tote only</span>}
+      {product.is_full_tote_only && <FullToteOnlyBadge />}
     </div>
   );
 }

@@ -109,7 +109,7 @@ import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
-import { PolicyBadge, normalizeReturnPolicy, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
+import { FullToteOnlyBadge, PolicyBadge, normalizeReturnPolicy, productPackageText, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
 import { useProductParents } from '../lib/productParents';
@@ -229,13 +229,13 @@ const UNIT_BOX = 'flex w-full min-w-0 h-11 md:h-10 items-stretch overflow-hidden
 const UNIT_BOX_INPUT = 'w-full min-w-0 flex-1 bg-transparent px-1.5 text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none';
 const UNIT_STRIP = 'shrink-0 flex items-center border-l border-gray-200 bg-cream px-2 text-sm text-secondary';
 // The unit Dropdown as the box's right end: its trigger loses its own border and fills the strip.
-const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cream [&_button]:h-full [&_button]:rounded-none [&_button]:border-0 [&_button]:bg-transparent [&_button]:gap-0.5 [&_button]:px-1.5 [&_button_svg]:h-3.5 [&_button_svg]:w-3.5';
+// The box clips the trigger's ring, so keyboard focus (RAC's data-focus-visible) tints it and draws an inset ring.
+const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cream [&_button]:h-full [&_button]:rounded-none [&_button]:border-0 [&_button]:bg-transparent [&_button]:gap-0.5 [&_button]:px-1.5 [&_button_svg]:h-3.5 [&_button_svg]:w-3.5 [&_button[data-focus-visible]]:bg-crx-green-tint [&_button[data-focus-visible]]:ring-2 [&_button[data-focus-visible]]:ring-inset [&_button[data-focus-visible]]:ring-crx-green/40';
 
 // One muted line under a quote line's product name: SKU, family and package, the fields
 // ProductOptionDetails shows, without their labels. Missing ones are left out.
 function productMetaLine(p: ProductOptionPresentationModel): string {
-  const pack = p.packaging_variant || p.unit_size || (p.container_size != null && p.container_unit ? `${p.container_size} ${p.container_unit}` : null);
-  return [p.sku, p.product_family?.name, pack].filter(Boolean).join(' · ');
+  return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
 }
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
@@ -4843,7 +4843,7 @@ export default function QuoteBuilder() {
                 <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary" data-product-id={prod.id}>
                   {productMetaLine(prod) && <span className="min-w-0 break-words">{productMetaLine(prod)}</span>}
                   <PolicyBadge policy={normalizeReturnPolicy(prod.return_policy)} />
-                  {prod.is_full_tote_only && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Full tote only</span>}
+                  {prod.is_full_tote_only && <FullToteOnlyBadge />}
                 </div>
               )}
               {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}

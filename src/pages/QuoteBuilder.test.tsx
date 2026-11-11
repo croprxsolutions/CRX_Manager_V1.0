@@ -5578,6 +5578,32 @@ describe('QuoteBuilder', () => {
       } finally {
         vi.unstubAllGlobals();
       }
+      cleanup();
+
+      // 1024 to 1279 px: an admin's cost sits under Total, not in a column; still never for a rep or Customer view.
+      stubWidth(1024);
+      try {
+        serveLines();
+        await loaded();
+        expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
+        expect(lineTable().textContent).toMatch(costText);
+        cleanup();
+
+        authState.role = 'sales_rep';
+        serveLines();
+        await loaded();
+        expect(lineTable().textContent).not.toMatch(costText);
+        cleanup();
+
+        authState.role = 'admin';
+        serveLines();
+        await loaded();
+        fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
+        expect(lineTable().textContent).not.toMatch(costText);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it('Edit note opens the line note, Done shows it, and Save draft sends it', async () => {
@@ -5680,6 +5706,14 @@ describe('QuoteBuilder', () => {
         expect(within(boxOf(name)).getByRole('spinbutton', { name })).toHaveClass('text-right', 'tabular-nums');
       }
 
+      // The box clips the trigger's own ring, so keyboard focus marks the unit trigger inside it.
+      const priceUnit = within(boxOf('Price per unit')).getByRole('button', { name: /Price unit/ });
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      act(() => priceUnit.focus());
+      expect(priceUnit).toHaveAttribute('data-focus-visible', 'true');
+      expect(priceUnit.closest('.w-auto\\!')?.className).toMatch(/\[&_button\[data-focus-visible\]\]:ring-2/);
+      act(() => priceUnit.blur());
+
       fireEvent.change(within(row).getByRole('spinbutton', { name: 'Price per unit' }), { target: { value: '12' } });
       expect(boxOf('Price per unit')).toHaveClass('border-amber-400');
       expect(within(row).getByRole('button', { name: 'Reset the manual price' })).toBeInTheDocument();
@@ -5688,17 +5722,10 @@ describe('QuoteBuilder', () => {
     it('the section header always shows the Section total', async () => {
       serveLines();
       await loaded();
-      expect(screen.getByText('Section total').nextElementSibling).toHaveTextContent('$50.00');
-      cleanup();
-
-      stubPhone();
-      try {
-        serveLines();
-        await loaded();
-        expect(screen.getByText('Section total').nextElementSibling).toHaveTextContent('$50.00');
-      } finally {
-        vi.unstubAllGlobals();
-      }
+      const caption = screen.getByText('Section total');
+      expect(caption.nextElementSibling).toHaveTextContent('$50.00');
+      // A phone shows the amount only; the caption is still read out.
+      expect(caption).toHaveClass('max-md:sr-only');
     });
 
     // Review Focus 1: a long name wraps on the 360 px card instead of being cut off behind a tooltip.

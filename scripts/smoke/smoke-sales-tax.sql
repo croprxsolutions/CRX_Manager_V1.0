@@ -6,7 +6,7 @@
 --      half up, on its own "Sales tax 6.25%" line; the total is the lines' sum
 --   B  A sale is untaxed by default: no tax line
 --   C  Re-saving the draft as the screen sends it (tax and discount lines included) never taxes twice
---   D  A hand edit of the tax line, and deleting it, are put right at commit
+--   D  A hand edit of the tax line, moving it above the products, and deleting it, are put right at commit
 --   E  Bill Split 50/50, taxed, one payer at 3% and one with none: each payer's tax on its own share; the group posts
 --   F  Unticking the box takes tax off the sale's drafts and leaves posted invoices alone; ticking puts it back;
 --      a rep can tick their own sale, not another rep's; a replay repeats its answer; a reused key with the
@@ -167,6 +167,12 @@ BEGIN
   -- D: a hand edit, then a delete, of the tax line.
   UPDATE invoice_items SET unit_price_cents = 1, extended_cents = 1 WHERE invoice_id = v_invoice AND charge_type = 'sales_tax';
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  UPDATE invoice_items SET sort_order = 0 WHERE invoice_id = v_invoice AND charge_type = 'sales_tax';
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+  IF (SELECT sort_order FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'sales_tax')
+     IS DISTINCT FROM (SELECT max(sort_order) FROM invoice_items WHERE invoice_id = v_invoice) THEN
+    v_fails := v_fails || ' (D) a tax line moved above the products stayed there;';
+  END IF;
   DELETE FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'sales_tax';
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
   IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_p - v_d + 4500 + v_t

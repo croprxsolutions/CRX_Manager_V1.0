@@ -227,6 +227,7 @@ DECLARE
   v_same boolean;
   v_new_total bigint;
   v_old_computed bigint;
+  v_after int;              -- (tax) the computed lines go right after the last other line
 BEGIN
   SELECT i.id, i.customer_id, i.invoice_type, i.status, i.deleted_at, i.total_amount_cents, i.created_by INTO v_inv
     FROM invoices i
@@ -277,13 +278,20 @@ BEGIN
   -- (tax) on what is left after the discount.
   SELECT e.o_cents, e.o_label, e.o_pct INTO v_tax, v_tax_label, v_tax_pct FROM public._sales_tax_expected_20261231(v_inv.id, v_cents) e;
 
-  -- Nothing to change (cents, labels and total): keep the existing lines and their ids, so a plain re-save is quiet.
-  -- Sorted by charge type: 'sales_tax' before 'standing_discount'.
+  -- Nothing to change (cents, labels, places and total): keep the existing lines and their ids, so a plain re-save is
+  -- quiet. Sorted by charge type: 'sales_tax' before 'standing_discount'. The discount sits right after the last other
+  -- line and the tax right after that, so a moved line is put back.
   -- (Worked out first: plpgsql ends an IF condition at its first THEN, a CASE's included.)
-  v_same := (SELECT COALESCE(array_agg(charge_type || '|' || extended_cents || '|' || description ORDER BY charge_type, id), '{}'::text[])
+  v_after := (SELECT COALESCE(max(sort_order), 0) FROM invoice_items
+               WHERE invoice_id = v_inv.id AND charge_type IS DISTINCT FROM 'standing_discount'
+                 AND charge_type IS DISTINCT FROM 'sales_tax');
+  v_same := (SELECT COALESCE(array_agg(charge_type || '|' || extended_cents || '|' || description || '|' || sort_order
+                                       ORDER BY charge_type, id), '{}'::text[])
                FROM invoice_items WHERE invoice_id = v_inv.id AND charge_type IN ('standing_discount', 'sales_tax'))
-            = (CASE WHEN v_tax > 0 THEN ARRAY['sales_tax|' || v_tax || '|' || v_tax_label] ELSE '{}'::text[] END
-               || CASE WHEN v_cents > 0 THEN ARRAY['standing_discount|' || -v_cents || '|' || v_label] ELSE '{}'::text[] END)
+            = (CASE WHEN v_tax > 0
+                    THEN ARRAY['sales_tax|' || v_tax || '|' || v_tax_label || '|' || (v_after + CASE WHEN v_cents > 0 THEN 2 ELSE 1 END)]
+                    ELSE '{}'::text[] END
+               || CASE WHEN v_cents > 0 THEN ARRAY['standing_discount|' || -v_cents || '|' || v_label || '|' || (v_after + 1)] ELSE '{}'::text[] END)
         AND (SELECT total_amount_cents FROM invoices WHERE id = v_inv.id)
             = (SELECT COALESCE(sum(extended_cents), 0) FROM invoice_items WHERE invoice_id = v_inv.id);
   IF v_same THEN
@@ -301,12 +309,9 @@ BEGIN
   ), ins AS (
     INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents,
                                sort_order, charge_type)
-    SELECT v_inv.id, c.label, 1, c.cents, c.cents, 0,
-           (SELECT COALESCE(max(sort_order), 0) FROM invoice_items
-             WHERE invoice_id = v_inv.id AND charge_type IS DISTINCT FROM 'standing_discount'
-               AND charge_type IS DISTINCT FROM 'sales_tax') + c.k,
-           c.charge_type
-      FROM (VALUES (v_label, -v_cents, 1, 'standing_discount'), (v_tax_label, v_tax, 2, 'sales_tax')) AS c(label, cents, k, charge_type)
+    SELECT v_inv.id, c.label, 1, c.cents, c.cents, 0, v_after + c.k, c.charge_type
+      FROM (VALUES (v_label, -v_cents, 1, 'standing_discount'),
+                   (v_tax_label, v_tax, CASE WHEN v_cents > 0 THEN 2 ELSE 1 END, 'sales_tax')) AS c(label, cents, k, charge_type)
      WHERE c.cents <> 0
   )
   UPDATE invoices SET total_amount_cents = v_new_total WHERE id = v_inv.id;

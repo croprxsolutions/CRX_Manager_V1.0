@@ -55,6 +55,7 @@ import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto'
 import { deliveryPhotoPath } from '../lib/privatePhotos';
 import { billSplitCompletion, billSplitFailedMessage, createdInvoicesMessage } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
+import { toSentryError } from '../lib/sentryError';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -1261,7 +1262,7 @@ export default function DeliveryDetail() {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
         signatureUploadError = sigErr;
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Signature upload before delivery completion failed; sending the completion anyway' } });
+        Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Signature upload before delivery completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }
@@ -1480,7 +1481,7 @@ export default function DeliveryDetail() {
       toast('success', createdInvoicesMessage(result));
       await fetchDelivery();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'create_invoice_for_unbilled_delivery', deliveryId: delivery.id },
       });
       toast('error', sanitizeError(err));

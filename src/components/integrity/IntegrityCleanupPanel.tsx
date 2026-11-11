@@ -1,3 +1,4 @@
+import { toSentryError } from '../../lib/sentryError';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { ShieldAlert, RefreshCw, AlertTriangle, FileText, Wrench, PackageCheck, Activity } from 'lucide-react';
 import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, sanitizeError } from '../../lib/db';
@@ -244,7 +245,7 @@ export default function IntegrityCleanupPanel() {
       ].forEach(([label, settled]) => {
         if ((settled as PromiseSettledResult<unknown>).status === 'rejected') {
           const reason = (settled as PromiseRejectedResult).reason;
-          Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)), {
+          Sentry.captureException(toSentryError(reason), {
             tags: { source: 'integrity_cleanup_query', section: label as string },
           });
         }
@@ -431,7 +432,7 @@ export default function IntegrityCleanupPanel() {
         setSplitBillingOrderIds(new Set());
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       if (!isStale()) toast('error', 'Failed to load cleanup data');
     } finally {
       // A superseded load leaves the spinner to the newer one still running.
@@ -516,11 +517,11 @@ export default function IntegrityCleanupPanel() {
       try {
         await fetchAll();
       } catch (refreshErr) {
-        Sentry.captureException(refreshErr instanceof Error ? refreshErr : new Error(String(refreshErr)));
+        Sentry.captureException(toSentryError(refreshErr));
         toast('error', 'Reconciled, but the list could not be refreshed. Reload to see current values.');
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       // Freeze this correction unless the server positively refused it. Anything
       // ambiguous means the absolute write may have landed, and editing the quantity
       // afterwards would mint a fresh key and apply a second absolute write.
@@ -561,7 +562,7 @@ export default function IntegrityCleanupPanel() {
       }
       await fetchAll();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       // Same non-throwing-Supabase shape as handleBackfillInvoice above.
       toast('error', sanitizeError(err));
     } finally {
@@ -587,7 +588,7 @@ export default function IntegrityCleanupPanel() {
       toast('success', `Draft invoice created for ${row.delivery_number}`);
       await fetchAll();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       // H5: a non-throwing `supabase.rpc()` resolves its error as a PLAIN OBJECT,
       // not an Error subclass (postgrest-js only constructs PostgrestError under
       // `.throwOnError()`). `err instanceof Error` was therefore false and every
@@ -616,7 +617,7 @@ export default function IntegrityCleanupPanel() {
       toast('success', 'Alert marked resolved');
       await fetchAll();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       // checkMutationResult re-throws `result.error`, which is the same plain
       // PostgREST object shape as the non-throwing rpc() calls above.
       toast('error', sanitizeError(err));

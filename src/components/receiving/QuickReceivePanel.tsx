@@ -41,6 +41,7 @@ import { ProductSearchResultRow } from '../products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS } from '../../lib/costFields';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
+import { toSentryError } from '../../lib/sentryError';
 
 type PickerProduct = Product & ProductOptionPresentationModel;
 
@@ -284,7 +285,7 @@ export default function QuickReceivePanel() {
       setUnmatchedActions({});
       setStep('review');
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'match_quick_receive_items' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'match_quick_receive_items' } });
       toast('error', sanitizeError(err));
     }
     setMatching(false);
@@ -432,7 +433,7 @@ export default function QuickReceivePanel() {
       try {
         request = await receiveIntent.beginIntent(request);
       } catch (error) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        Sentry.captureException(toSentryError(error), {
           extra: { context: 'coordinate_quick_receive_retry' },
         });
         toast('error', receiptCleanupFailed
@@ -514,7 +515,7 @@ export default function QuickReceivePanel() {
           sourceItems: validItems,
         });
       } catch (error) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        Sentry.captureException(toSentryError(error), {
           extra: { context: 'persist_quick_receive_intent' },
         });
         toast('error', 'Cannot safely save this receipt for exact retry. No inventory was changed.');
@@ -527,7 +528,7 @@ export default function QuickReceivePanel() {
       await submitQuickReceive(request);
     } catch (error: unknown) {
       const disposition = await receiveIntent.classifyFailure(error);
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         extra: { context: 'confirm_quick_receive', disposition },
       });
       if (disposition === 'resolved') {

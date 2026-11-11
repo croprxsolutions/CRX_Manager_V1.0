@@ -2,7 +2,7 @@
  * NewVendorBill.tsx — Create a new vendor bill
  *
  * Manual bill entry: vendor, bill #, date, due date, amount, payment terms.
- * Option to link to existing PO (auto-fill vendor + amount).
+ * Option to link to existing PO (fills in its vendor; the amount is typed from the vendor bill).
  * Uses the create_vendor_bill() RPC. Admin-only.
  */
 import { useEffect, useState, useCallback } from 'react';
@@ -151,24 +151,22 @@ export default function NewVendorBill() {
     }
   }, [vendorId, vendors, createBillIntent.isIntentLocked]);
 
-  // When PO selected, auto-fill vendor + amount
+  // When PO selected, fill in its vendor. The amount is NOT filled from the PO (KI-143): the admin types the vendor
+  // bill's own figure, and the server asks for a reason when it exceeds what was received (plus 5%).
   const handlePOSelect = (po: PurchaseOrder | null) => {
+    // The server refuses a vendor whose name differs from the PO's vendor text (ignoring case and outer spaces;
+    // Postgres trim() strips spaces only), so a PO naming no vendor on the list is not linked at all.
+    const nameKey = (name: string) => name.replace(/^ +| +$/g, '').toLowerCase();
+    const matchedVendor = po ? vendors.find((v) => nameKey(v.name) === nameKey(po.vendor)) : undefined;
+    if (po && !matchedVendor) {
+      setPurchaseOrderId('');
+      setPurchaseOrderLabel('');
+      toast('warning', `This PO's vendor "${po.vendor}" is not on the vendor list, so it cannot be linked to a bill yet.`);
+      return;
+    }
     setPurchaseOrderId(po?.id ?? '');
     setPurchaseOrderLabel(po ? purchaseOrderSearchLabel(po) : '');
-    if (!po) return;
-
-    // Try to match vendor by name
-    const matchedVendor = vendors.find(
-      (v) => v.name.toLowerCase() === po.vendor.toLowerCase()
-    );
-    if (matchedVendor) {
-      setVendorId(matchedVendor.id);
-    }
-
-    // Auto-fill amount from PO total (cost is admin-only; a non-admin's row has none).
-    if (po.total_cost != null && po.total_cost > 0) {
-      setSubtotalDollars(po.total_cost.toFixed(2));
-    }
+    if (matchedVendor) setVendorId(matchedVendor.id);
   };
 
   const resolveConfirmedBillIntent = async () => {
@@ -300,7 +298,7 @@ export default function NewVendorBill() {
           return;
         }
         setOverageMessage(
-          'The exact server total shows this bill would raise active billing above 105% of the purchase order. Enter a reason to confirm the overage.',
+          'The exact server total shows this bill would raise active billing above 105% of what was received on the purchase order (or of the ordered total, if that is lower or nothing has arrived yet). Enter a reason to confirm the overage.',
         );
         return;
       }
@@ -376,7 +374,7 @@ export default function NewVendorBill() {
           ariaLabel="Link to Purchase Order"
         />
         <p className="text-xs text-secondary mt-1">
-          Linking a PO auto-fills vendor and amount. You can still edit them.
+          Linking a PO fills in its vendor. Enter the amount from the vendor&apos;s bill; billing more than was received or ordered on the PO (plus 5%) needs a reason; before anything arrives, the ordered total is the limit.
         </p>
       </Card>
 
@@ -546,7 +544,7 @@ export default function NewVendorBill() {
         confirmLabel="Create Bill"
         variant="warning"
         loading={saving}
-        placeholder="Why should cumulative billing exceed the PO total?"
+        placeholder="Why should billing exceed what was received or ordered on this PO?"
         minLength={5}
       />
     </div>

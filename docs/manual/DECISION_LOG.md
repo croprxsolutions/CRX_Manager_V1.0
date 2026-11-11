@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `180cc033215d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `180cc033215d` (base `a1ba9e63db65`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:7`, text sha256 `e229b53d6733379a` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref c09bcfbaaa78)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-10 — Sentry gets a database error's wording, figures blanked (KI-115)
 
 **Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.

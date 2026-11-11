@@ -10,10 +10,10 @@ name: Database
 on:
   pull_request:
     branches: [staging, main]
-    paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', '.github/workflows/db-apply.yml']
+    paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
   push:
     branches: [staging]
-    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', '.github/workflows/db-apply.yml']
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
   # Nightly drift + schema check on staging, 02:30 Dubai (scheduled runs use main's copy of this file).
   schedule:
     - cron: '30 22 * * *'

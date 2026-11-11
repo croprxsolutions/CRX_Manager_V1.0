@@ -6,7 +6,8 @@
 # Usage: rebuild-schema.sh <work dir>   (prints REBUILT_DB_URL=... last; refuses anything but 127.0.0.1)
 set -euo pipefail
 REPO="$(git rev-parse --show-toplevel)"
-W="$(cd "${1:?usage: rebuild-schema.sh <work dir>}" && pwd)"
+mkdir -p "${1:?usage: rebuild-schema.sh <work dir>}"
+W="$(cd "$1" && pwd)"
 SB=(npx --yes supabase@2.122.0)
 PORT="${REBUILD_PORT_BASE:-54320}"   # CI uses the defaults; on a laptop with another stack, set a free base
 

@@ -1,4 +1,4 @@
-## 2026-11-10 — KI-143: PO-linked vendor bills are checked against what arrived (database, not applied)
+## 2026-11-10 — KI-143: PO-linked vendor bills are checked against what arrived (PR #1769; applied live 2026-11-11 8:24 AM Central, ledger `20261111142411`)
 
 - Migration `20270103110000_ki143_vendor_bill_received_value_checks.sql` re-creates `create_vendor_bill` and
   `update_vendor_bill` (same signatures, grants, idempotency and lock order). A bill linked to a purchase order now

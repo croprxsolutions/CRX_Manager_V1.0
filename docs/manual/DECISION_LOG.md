@@ -71,7 +71,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 ## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
-## 2026-11-10 — Vendor bills on a PO are limited by what arrived, except before anything arrives (KI-143)
+## 2026-11-10 — Vendor bills on a PO are limited by what arrived, except before anything arrives (KI-143, PR #1769)
 
 **Decision (Mason, 2026-11-10, answering two questions relayed by the sweep session):** (1) "No, let early bills through": a bill entered before any goods arrive on its PO needs no reason up to the ordered total (+5%), accepting that a PO later short-shipped could then be billed in full with no warning. (2) first "Yes, allow it", then corrected the same day: "no do not allow to go more than was ordered without a reason". Billing above the ordered total (+5%) needs a reason even when more arrived.
 **Why:** bills were checked only against the ordered total, so a short shipment could be billed and paid in full with no question; early bills are normal for prepaid orders.

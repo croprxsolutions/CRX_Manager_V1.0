@@ -357,7 +357,7 @@ export function chemQuantityExpectedButZero(
 // saved/printed value via the SQL fn `convert_to_gl_lb(total_applied, rate_unit,
 // product_form)` (migration 20260219200000), which chooses gallons-vs-pounds
 // from the PRODUCT FORM, not the unit text:
-//   • product_form = 'dry'  → POUNDS:  oz = 1/16 lb,  lb = 1
+//   • product_form = 'dry'  → POUNDS:  oz or Dry oz = 1/16 lb,  lb = 1
 //   • product_form = liquid → GALLONS: oz = 1/128 gal, pt = 1/8, qt = 1/4, gal = 1
 //   • product_form = seed/each → no weight or volume equivalent
 // So a LIQUID product dosed in bare 'oz' (the field-app default rate_unit) must
@@ -437,6 +437,9 @@ export function toGallonOrLbEquivalent(
   // #25 field-app preview: branch on product_form so screen == saved/PDF.
   if (productForm === 'dry') {
     if (key in DRY_TO_POUNDS) return { value: round4(quantity * DRY_TO_POUNDS[key]), unit: 'lb' };
+    // 'Dry oz' (RT-2, Mason 2026-11-09) matches convert_to_gl_lb's DRY OZ case. Kept out of DRY_TO_POUNDS:
+    // reconcileChemAutofillUnits and the billing-hazard guard size units off that table (parked redesign).
+    if (key === 'dry oz') return { value: round4(quantity / 16), unit: 'lb' };
     return null; // a non-dry unit on a dry product → don't guess
   }
   if (productForm === 'liquid') {

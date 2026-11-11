@@ -3,6 +3,7 @@ import { Search, Filter, X, Tag, User, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import HelpTip from '../ui/HelpTip';
+import { toSentryError } from '../../lib/sentryError';
 
 interface NoteTag {
   id: string;
@@ -45,7 +46,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
       }
       setTags((data || []) as NoteTag[]);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
     }
   };
 
@@ -68,7 +69,7 @@ export default function TeamBoardFilters({ filters, onChange }: TeamBoardFilters
       }
       setProfiles((data || []) as Profile[]);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
     }
   };
 

@@ -5,7 +5,7 @@
 // though no MG size is defined anywhere. Any other factor table used here would let
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
-import { foldInvisibleUnitChars } from './labelGuardrails';
+import { DOTTED_FLUID_OUNCE, foldInvisibleUnitChars } from './labelGuardrails';
 import { asProductForm } from './units';
 import { weightTotalWarnings, type WeightTotalOptions } from './blendWeightTotals';
 
@@ -159,9 +159,11 @@ function rateBaseUnit(unit: string | null | undefined): string {
   if (raw === '') return '';
   const perAcreSlash = /\s*\/\s*(ac|acre|acres|a)\s*$/;
   const perAcreSpelled = /\s+per\s+acre$/;
-  if (perAcreSlash.test(raw)) return raw.replace(perAcreSlash, '').trim();
-  if (perAcreSpelled.test(raw)) return raw.replace(perAcreSpelled, '').trim();
-  return raw;
+  let base = raw;
+  if (perAcreSlash.test(raw)) base = raw.replace(perAcreSlash, '').trim();
+  else if (perAcreSpelled.test(raw)) base = raw.replace(perAcreSpelled, '').trim();
+  // The server maps a dotted fluid ounce to 'fl oz' (20270101000000); the size tables list 'fl oz'.
+  return DOTTED_FLUID_OUNCE.has(base) ? 'fl oz' : base;
 }
 
 /** A run of real whitespace, collapsed to one space. Applied after the invisible-character fold. */
@@ -293,17 +295,17 @@ export function validateBlendMath(
   // not depend on `total_acres` being filled in yet, nor on a quantity having been
   // entered. Leaving it nested meant a half-filled ticket reported nothing and then
   // failed at billing, which is the exact surprise this check exists to prevent.
-  // Still gated on a real rate, so a blank new row stays quiet.
+  // Still gated on a real rate, so a blank new row stays quiet; the save-blocking invisible-only check is not.
   for (const product of products) {
-    if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
     const name = product.product_name || 'Unnamed product';
-    const form = asProductForm(product.product_form) ?? 'liquid';
     const lineRateUnit = foldInvisibleUnitChars(product.rate_per_acre_unit ?? '').trim();
-    // The database refuses an invisible-only line unit (20261231100000): billing would not fall back from it.
+    // The database refuses an invisible-only line unit (20261231100000) whatever the rate, so warn whatever the rate.
     if (lineRateUnit === '' && (product.rate_per_acre_unit ?? '').replace(/^ +| +$/g, '') !== '') {
       mismatch(`${name}: the rate unit contains only invisible characters, so this ticket cannot be saved. Clear the rate unit or re-type it.`);
       continue;
     }
+    if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
+    const form = asProductForm(product.product_form) ?? 'liquid';
     const rateUnit = rateBaseUnit(lineRateUnit !== '' ? lineRateUnit : product.product_rate_unit);
     const soldUnit = rateBaseUnit(product.product_inventory_unit);
     // Deliberately silent when either side is blank, though the SQL would refuse such

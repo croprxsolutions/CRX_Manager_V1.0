@@ -381,6 +381,21 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 12. **True average purchase cost for inventory?** Recommend later. (old `TODO.md`, §3)
 14. **Which customers may a split bill?** (KI-76) Needed before foundation 18.1 is designed.
 
+**From the 2026-11-10 read-only bug sweeps** ([sweep record](sweeps/bug-sweeps-2026-11-10.md); findings are KI-119 to KI-149). No fixes start until the matching answer is in.
+
+15. **P&L commissions (KI-125, fix first).** ANSWERED 2026-11-10 (Mason: "Only CRX-billed"): subtract a commission only when its order has a CRX invoice in that period's revenue. Recorded in `DECISION_LOG.md`; the fix is not built yet.
+16. **Settings → Page Access (KI-119).** Is it meant to lock someone out of money and reports, or only tidy their menu? Recommend: decide "security" only if you use it to keep someone away from money today; otherwise rename it "Hide from menu".
+17. **Finance charge rate (KI-127).** Do the two customers set to "1.5" mean 1.5% a month (18% a year) or 1.5% a year?
+18. **Rep credit terms (KI-120).** Should reps be able to change payment terms, finance-charge settings, parent customer or default application service? Recommend: admin-only, matching the 2026-11-01 tier and credit-limit lock.
+19. **Customer addresses.** Two rules in the app disagree about whether reps may delete a customer's addresses (detail held privately until fixed). Should deleting addresses be admin-only, or open to reps too?
+20. **Customer deactivation (KI-148).** Admins skip the open-invoice check when deactivating a customer. Is that intended as an admin override?
+21. **Credit on account (KI-132).** Should a customer's unused prepayment or credit be subtracted before past-due reminders and finance charges?
+22. **Month close.** Month-close has never been used, so every month back to October 2025 is still open. Start closing months from 2026-07 onward? Recommend yes, once KI-129 is fixed.
+23. **Purchasing and customer data calls (data steps, each needs your yes).** Which of the 10 open POs to close short once KI-142 ships; whether to link the 3 orphan POs to vendors (KI-144); what to do with the inactive customer that still has 2 confirmed orders (KI-148); whether to add the missing receiving record on PO-2026-0015 (KI-29).
+24. **Seed-treatment units (KI-137).** What is the real sales unit (jug/each) of the two seed-treatment products stocked per Lb? Are they already on your private unit-mismatch list?
+25. **Crop Programs (KI-149).** Who owns crop programs: admins only (hide editing for reps), or reps too (needs its own table)?
+26. **Fix order.** The sweep recommends: P&L commissions (KI-125), then the stock-count fix (KI-134) before the pre-season count, then PO close-short (KI-142), then Page Access (KI-119) and rep credit terms (KI-120). Approve that order?
+
 **Actions already decided, still waiting on Mason** (not new decisions):
 - **Live Create User check on the new `create-user` function** (version 25, deployed 2026-10-23, see 11.9). Mason deferred it on 2026-10-23.
 - **Upgrade Supabase to Pro and turn on point-in-time recovery** (decided 2026-10-13). Due this week, because the rewind-to-a-time drill (13.2) can't run without it. The first database-only restore of the existing weekly dump doesn't wait on it and can run now (`docs/plans/2026-10-18-goal-6-safety-net-findings.md`).

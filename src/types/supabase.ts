@@ -10154,6 +10154,7 @@ export type Database = {
           epa_registration: string | null
           id: string
           invoice_id: string | null
+          invoice_item_id: string | null
           order_id: string | null
           product_id: string
           product_name: string
@@ -10181,6 +10182,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id: string
           product_name: string
@@ -10208,6 +10210,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id?: string
           product_name?: string
@@ -10249,6 +10252,13 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rup_sales_records_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
             referencedColumns: ["id"]
           },
           {
@@ -15446,6 +15456,10 @@ export type Database = {
         }
         Returns: number
       }
+      rate_unit_line_refusal: {
+        Args: { p_check_characters: boolean; p_rate_unit: string }
+        Returns: string
+      }
       reactivate_vendor: {
         Args: { p_idempotency_key?: string; p_vendor_id: string }
         Returns: Json
@@ -16186,6 +16200,8 @@ export type Database = {
         }
         Returns: Json
       }
+      unit_fold_invisible: { Args: { p_text: string }; Returns: string }
+      unit_names_fluid_ounce: { Args: { p_unit: string }; Returns: boolean }
       unlink_blend_ticket_from_order: {
         Args: {
           p_blend_ticket_id: string

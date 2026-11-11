@@ -2,7 +2,9 @@
 
 **Status (2026-11-08, reworked 2026-11-09 after an independent review):** this is a plan only. **Question 5 answered (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): a brand problem never stops a delivery or an invoice; it warns and is listed for the office.** Sections 3, 4, 5, 7, 9 and 10 were rewritten to that rule; the brand-required switch is removed. No code and no migration have been written. It was written on 2026-11-08 against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces "PR B" in `docs/plans/2026-10-22-product-brands-step1-PLAN.md` (sections 4, 5, 7 and 8). Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "step 1 §4" means that plan.
 
-**Cannot start yet.** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
+**Re-check 2026-11-10 (night): still cannot start. NEEDS MASON - DECISION REQUIRED (section 13, Questions 8 and 9).** The PAR-2 precondition is now met on live. REG-1 step 2 was rebuilt as #1746 with a different design, and two of its settled rules conflict with this sheet's core. Section 13 lists what changed. Sections 3 to 7 below still describe the old REG-DB design and must be rewritten after Mason answers; do not build from them.
+
+**Cannot start yet (2026-11-08 text, kept for history).** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
 
 **Words used here.**
 - **Brand list:** the brands a size may be filled with. For a grouped size with the grouping switch on, this is its parent's `product_parent_brands` (active rows). Otherwise it is the size's own legacy `product_brands`. This is exactly what `get_product_brands` returns today.
@@ -657,3 +659,46 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 
 **Luna round 26** (head `91cf0b6b4`): no BLOCKER or HIGH; 1 MED, **fixed**.
 - MED, a picked brand with no EPA number appeared on no list until its invoice posted: Deliveries missing brands also lists current picks with no EPA number (4.H).
+
+---
+
+## 13. Re-check against live and `main` (2026-11-10 night, before any code)
+
+Checked read-only on live (counts and function bodies only) and on `main` at `69774ac6e`. No code or migration was written.
+
+### 13.1 Precondition: PAR-1/PAR-2 brand move: **met**
+
+| Fact | Live, 2026-11-10 |
+|---|---|
+| `_product_parent_grouping_open()` body | `SELECT true` (switched on, `20261229100000`, #1712) |
+| `product_parents` / `product_parent_members` | 456 / 593 |
+| `product_parent_brands` | 200 (135 active) |
+| `product_brands` (legacy, ungrouped sizes) | 162 |
+| Grouping batches | recorded on #1708 |
+
+### 13.2 REG-1 step 2 as built (#1746, `20261231200000`/`210000`/`220000`): **differs from what this sheet assumed**
+
+Live has `invoice_line_rup_captures` and the unique index `rup_sales_records_one_active_per_line`; `epa_registrations` has 0 rows (seed not run); `rup_sales_records` has 0 rows. Contract: `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md`.
+
+| This sheet assumed (REG-DB, #1688) | #1746 as built | Kind |
+|---|---|---|
+| A record carries the line's **sold number**; PR B feeds it each brand's number (4.D, 4.E) | **The number is the product's own** (Mason's #1688 decision, kept in #1746; `_invoice_line_rup_facts`: "The number is the product's own") | **Business rule: Question 8** |
+| Records grouped by `(invoice, product, sold number, signal word)`; a split line gives one record per brand (4.E) | **At most one active record per invoice line** (`UNIQUE (invoice_item_id) WHERE voided_at IS NULL`, plus a guard trigger on `rup_sales_records`) | **Business rule: Question 9** |
+| `_capture_invoice_line_sale` helper and capture columns on `invoice_items` (`sale_facts_source` etc.) | Neither exists. Capture is a private table `invoice_line_rup_captures`, written by the AFTER trigger `trg_zz_capture_invoice_line_rup` at every line save | Engineering: 4.D rewritten after the answers |
+| Record when captured `yes` **or** registration `yes` at posting | Captured at save; any Yes (product tick, product's number, line's number) makes it restricted use; a Yes always wins | Engineering: PR B follows #1746 per brand |
+| Posting refusals `INVOICE_LINE_NOT_CAPTURED`, `INVOICE_LINE_RUP_NO_EPA`, `INVOICE_LINE_NO_REGISTRATION` to be replaced for branded lines | None of them exist; a missing number never blocks; gaps go to `get_epa_sales_to_check()` ("Sales to check") | Engineering: simpler; the RUP brand gaps list may fold into Sales to check |
+| Field-application invoices out of scope | Field-application invoices now get records (Mason, 2026-11-10); return credits never do; voiding an invoice voids its records | Engineering: scope note in section 8 |
+
+### 13.3 Questions for Mason (NEEDS MASON - DECISION REQUIRED)
+
+**Question 8. Which EPA number goes on a restricted-use record when the driver recorded the brand?**
+Your REG-1 rule (2026-11-09, kept 2026-11-10) is "the product's own number". Brand PR B exists to record the brand that actually went off the truck, for example a Liberty-brand jug delivered against the generic glufosinate. If the record keeps the generic's number, recording the brand changes the paperwork but not the restricted-use record.
+- **Recommended: the delivered brand's number** when the driver recorded a brand that has a number; the product's own number in every other case, exactly as today.
+- Alternative: always the product's own number, with the brand name added to the record as a note.
+
+**Question 9. One invoice line, two brands delivered (a split): how many restricted-use records?**
+#1746 allows exactly one active record per invoice line (that rule ended eight rounds of Sol findings about matching records to lines).
+- **Recommended: one record per brand on that line** (two brands, two records, each pointing at the same line and naming its brand). The one-record rule becomes "one per line per brand"; a line with no brand recorded keeps one record as today.
+- Alternative: split the invoice line into one line per brand when the invoice is made. Simpler records, but it changes how invoices look and touches invoice amounts.
+
+Both answers are needed before sections 3 to 7 are rewritten. After the rewrite the sheet gets a fresh independent review before B-1 is built.

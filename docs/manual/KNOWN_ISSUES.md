@@ -439,7 +439,7 @@ can make old splits refuse to save (LOW-MED).
   make the non-admin cost lookup miss a stored line (Sol round 3), so it needs the lookup folded too.
   Dry fluid ounce on every other writer (Luna 2026-11-10): job lines, booking lines, a blend line's quantity unit
   and a dry product's size and stock unit could still name fluid ounces, which holds and deduction size as weight
-  (16 fl oz as 1 lb). FIX PENDING LIVE APPLY (`20270101020000`, contract
+  (16 fl oz as 1 lb). FIX PENDING LIVE APPLY (`20270103140000`, contract
   `docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md`): each is refused (`CHEM_UNIT_FORM_MISMATCH`), and every
   product must have a form (Mason 2026-11-10; a saved form cannot change, so no product turns dry under its lines;
   importing a product with a blank form is now refused). Not covered (existing): gal/pt/qt on a dry product converts

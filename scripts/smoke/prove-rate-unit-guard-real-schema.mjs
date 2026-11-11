@@ -34,7 +34,7 @@
  *   F5  normalizer table: earlier outputs unchanged; whitespace and dotted fl. oz as reviewed.
  *   F6  a dry product refuses fluid ounces on a blend line in any spelling, through its default, and by turning dry (Sol round 1 HIGH).
  *
- * Then 20270101020000 (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md):
+ * Then 20270103140000 (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md):
  *   GB  BEFORE: a dry product's job line in 'fl oz' saves and its hold/deduction sizes 16 as 1 (lb); a booking with a
  *       dry fl oz line schedules; a dry blend line rated 'fl oz/ac' saves and its real invoice bills 200 fl oz as 12.5 lb.
  *   G0  the guard applies (postflight passed); a second run refuses.
@@ -67,7 +67,7 @@ const CANDIDATE = path.join(MIGRATIONS, '20261231100000_rate_unit_denominator_gu
 // KI-16 follow-ups (contract docs/plans/2026-11-10-ki16-rate-unit-followups-CONTRACT.md), applied after P1-P9.
 const FOLLOW_UP = path.join(MIGRATIONS, '20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql');
 // KI-16 dry fluid ounce (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md), applied after F0-F5.
-const DRY_FLOZ = path.join(MIGRATIONS, '20270101020000_dry_product_fluid_ounce_guard.sql');
+const DRY_FLOZ = path.join(MIGRATIONS, '20270103140000_dry_product_fluid_ounce_guard.sql');
 const FOLLOW_UPS = [FOLLOW_UP, DRY_FLOZ];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -635,7 +635,7 @@ function followUps() {
   console.log('[prover] F5: normalize_rate_unit keeps every earlier output; whitespace folds and dotted fl. oz maps to fl oz');
 }
 
-// ── 20270101020000: a fluid ounce on a dry product ──
+// ── 20270103140000: a fluid ounce on a dry product ──
 const LIQ3 = 'a16a1600-0000-4000-8000-0000000000b5';
 const jobLine = (job, pid, unit, rateUnit, sort) => `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
     VALUES ('${job}', '${pid}', 16, ${unit}, 16, ${rateUnit}, 0, 0, ${sort});`;

@@ -1,7 +1,7 @@
 # KI-16 last gap: a fluid ounce on a dry product — behavior contract (2026-11-10)
 
 Base: main 17ba96fbe (PR #1741 merged and applied live). Migration
-`20270101020000_dry_product_fluid_ounce_guard.sql`, after #1741's `20270101000000` (merged 17ba96fbe, live; was
+`20270103140000_dry_product_fluid_ounce_guard.sql`, after #1741's `20270101000000` (merged 17ba96fbe, live; was
 `20261231110000` before its restamp); it widens #1741's `unit_names_fluid_ounce` to drop a leading package count
 (md5-pinned before), and otherwise re-emits none of #1741's or
 #1733's functions.

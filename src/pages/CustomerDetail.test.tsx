@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
@@ -1390,6 +1391,14 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
     expect(mockRpc).not.toHaveBeenCalledWith('save_customer', expect.anything());
     // The rate is saved: leaving the page must not warn about unsaved changes (staging walkthrough, 11 Nov).
+    expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
+  });
+
+  it('stays clean after the save under React StrictMode too', async () => {
+    render(<StrictMode><MemoryRouter initialEntries={['/customers/customer-1']}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter></StrictMode>);
+    fireEvent.change(await screen.findByLabelText('Standing discount (%)'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
     expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
   });
 

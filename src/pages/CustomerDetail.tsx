@@ -281,6 +281,8 @@ export default function CustomerDetail() {
   const applyingDefaultTierRef = useRef(false);
   // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
   const loadedCustomerRef = useRef<typeof customer | null>(null);
+  // Set by a standing discount save on a clean form: the next customer change is that save, not an edit.
+  const keepCleanAfterDiscountRef = useRef(false);
   const loadedAddressesRef = useRef<typeof addresses | null>(null);
   const suppressDirtyUntilReloadSettlesRef = useRef(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
@@ -432,6 +434,10 @@ export default function CustomerDetail() {
     }
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    if (keepCleanAfterDiscountRef.current) {
+      keepCleanAfterDiscountRef.current = false;
+      loadedCustomerRef.current = customer;
+    }
     if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
     setIsDirty(true);
   }, [customer, addresses]);
@@ -1276,12 +1282,10 @@ export default function CustomerDetail() {
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
       const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
       customerRowVersionRef.current = rowVersionResult.rowVersion;
-      // Saved: an otherwise untouched form stays clean (no unsaved-changes prompt on leaving).
-      setCustomer((c) => {
-        const next = { ...c, standing_discount_pct: pct };
-        if (c === loadedCustomerRef.current) loadedCustomerRef.current = next;
-        return next;
-      });
+      // Saved: an otherwise untouched form stays clean (no unsaved-changes prompt on leaving). The dirty
+      // check below adopts the committed customer as the loaded copy, after the update (StrictMode-safe).
+      keepCleanAfterDiscountRef.current = !isDirty;
+      setCustomer((c) => ({ ...c, standing_discount_pct: pct }));
       setDiscountDraft(null);
       if (rowVersionResult.kind === 'recovery') {
         // Same as a crop change: committed, but another edit may have landed at the same time.

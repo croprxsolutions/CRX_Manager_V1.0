@@ -23,12 +23,13 @@ lines AS (
          || ' owner=' || (SELECT name FROM who WHERE who.oid = relowner) AS line
     FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
-  -- Storage tables with a policy (below) plus objects and buckets: whether RLS is on matters there. Not the
-  -- platform's other storage tables, which come and go between storage versions.
+  -- Storage tables: objects, buckets, any with a policy (below), and any with RLS off. The platform's other
+  -- storage tables come and go between storage versions with RLS on, so those alone are left out.
   SELECT 'relation storage.' || c.relname || ' rls=' || c.relrowsecurity || ' force=' || c.relforcerowsecurity
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = 'storage' AND c.relkind IN ('r', 'p')
-      AND (c.relname IN ('objects', 'buckets') OR EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
+      AND (c.relname IN ('objects', 'buckets') OR NOT c.relrowsecurity
+           OR EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
   UNION ALL
   -- What the app's roles may do beyond grants (BYPASSRLS ignores every policy).
   SELECT 'role ' || rolname || ' super=' || rolsuper || ' bypassrls=' || rolbypassrls || ' login=' || rolcanlogin
@@ -112,10 +113,12 @@ lines AS (
          || ' inherit=' || m.inherit_option || ' set=' || m.set_option
     FROM pg_auth_members m
     WHERE (m.member IN (SELECT oid FROM approle) OR m.roleid IN (SELECT oid FROM approle))
-      -- Hosted Supabase makes supabase_realtime_admin a member of anon, authenticated and service_role; the
-      -- rebuild runs with realtime off, so it has none. Only those three are left out.
+      -- Hosted Supabase makes supabase_realtime_admin a member of anon, authenticated and service_role (no
+      -- admin, no inherit, set only); the rebuild runs with realtime off, so it has none. Only those three
+      -- rows, with exactly those options, are left out.
       AND NOT (m.member = coalesce((SELECT oid FROM pg_roles WHERE rolname = 'supabase_realtime_admin'), 0)
-               AND m.roleid IN (SELECT oid FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role')))
+               AND m.roleid IN (SELECT oid FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role'))
+               AND NOT m.admin_option AND NOT m.inherit_option AND m.set_option)
   UNION ALL
   -- Default privileges: what every future table, sequence or function in public will grant.
   SELECT 'default ' || d.defaclobjtype::text || ' by ' || (SELECT name FROM who WHERE who.oid = d.defaclrole) || ' in ' || coalesce(n.nspname, '*')

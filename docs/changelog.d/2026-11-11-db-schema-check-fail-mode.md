@@ -8,10 +8,11 @@ from the Supabase platform, none in `public`:
   `storage.lifecycle_abandoned_artifacts` exist on staging, `storage.iceberg_namespaces` and
   `storage.iceberg_tables` only in the local rebuild.
 
-`.github/scripts/schema-fingerprint.sql` now leaves out only those three memberships. Any other
-membership involving an app role is still compared, including `supabase_realtime_admin` joining another
-role. RLS is checked on `storage.objects`, `storage.buckets` and any storage table that has a policy, not
-on the platform's other storage tables; storage policies are still compared in full.
+`.github/scripts/schema-fingerprint.sql` now leaves out only those three memberships, and only with
+the platform's options (no admin, no inherit, set only): a changed option, or `supabase_realtime_admin`
+joining any other role, is still compared. Storage tables are listed when they are `objects` or
+`buckets`, have a policy, or have RLS off, so the platform's own RLS-on tables can come and go; storage
+policies are still compared in full.
 
 `SCHEMA_MODE: report` is removed from `.github/workflows/db-apply.yml`, so any remaining difference fails
 the "Staging schema matches the files" job. As since #1773, that job runs after the apply and the edge

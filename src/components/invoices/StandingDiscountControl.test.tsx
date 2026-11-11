@@ -88,3 +88,19 @@ describe('StandingDiscountControl: a late reply for another invoice (review roun
     expect(await screen.findByLabelText('Standing discount for this sale (%)')).toHaveAttribute('step', '0.01');
   });
 });
+
+describe('StandingDiscountControl: a save that finishes on another invoice (review round 2)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('leaves the next invoice\'s control usable', async () => {
+    let releaseSave: (v: unknown) => void = () => {};
+    mockFrom.mockImplementation(() => rateRead({ rate_pct: 3, set_by: null }));
+    mockRpc.mockImplementation(() => new Promise((resolve) => { releaseSave = resolve; }));
+    const { rerender } = render(<StandingDiscountControl invoiceId="inv-a" disabled={false} onChanged={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText('Standing discount for this sale (%)'), { target: { value: '1.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    rerender(<StandingDiscountControl invoiceId="inv-b" disabled={false} onChanged={vi.fn()} />);
+    releaseSave({ data: { invoice_id: 'inv-a', rate_pct: 1.5 }, error: null });
+    await waitFor(() => expect(screen.getByLabelText('Standing discount for this sale (%)')).toBeEnabled());
+  });
+});

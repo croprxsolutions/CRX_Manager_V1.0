@@ -64,8 +64,10 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_invoice_standing_discount' } });
       toast('error', sanitizeError(err));
+    } finally {
+      // Also when the page moved to another invoice meanwhile: that invoice's control must not stay locked.
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   if (!rate) return null;

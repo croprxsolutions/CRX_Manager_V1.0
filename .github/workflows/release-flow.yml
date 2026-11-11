@@ -142,6 +142,7 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}
+          permission-contents: read # was the back-merge a merge commit?
           permission-pull-requests: write
       - if: steps.on.outputs.yes
         continue-on-error: true

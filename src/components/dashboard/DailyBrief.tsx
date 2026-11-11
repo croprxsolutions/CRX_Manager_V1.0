@@ -14,6 +14,7 @@ import Card from '../ui/Card';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { formatUSD } from '../../lib/money';
+import { toSentryError } from '../../lib/sentryError';
 
 interface DailyBriefProps {
   deliveriesToday: number;
@@ -55,7 +56,7 @@ export default function DailyBrief({ deliveriesToday, deliveryUnassigned, active
         const d = assertRpcResult<BriefFinancials>(data, 'financial_dashboard_summary');
         if (!cancelled) setFin(d);
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'dashboard', card: 'daily_brief' } });
+        Sentry.captureException(toSentryError(err), { tags: { source: 'dashboard', card: 'daily_brief' } });
       }
     })();
     return () => { cancelled = true; };

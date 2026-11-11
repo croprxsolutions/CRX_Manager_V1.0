@@ -19,6 +19,7 @@ import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import type { Field, FieldObstacle } from '../../types';
 import { getJobFieldRouteNumbers } from './jobFieldRouteOrder';
+import { toSentryError } from '../../lib/sentryError';
 
 // Exactly the columns get_job_fields_with_geojson returns.
 interface JobMapFieldRow {
@@ -109,7 +110,7 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
             if (obstacleResult.error) throw obstacleResult.error;
             nextObstacles = (obstacleResult.data ?? []) as unknown as FieldObstacle[];
           } catch (obstacleError: unknown) {
-            Sentry.captureException(obstacleError instanceof Error ? obstacleError : new Error(String(obstacleError)), {
+            Sentry.captureException(toSentryError(obstacleError), {
               tags: { source: 'fetch', action: 'job_field_obstacles' },
             });
             if (!cancelled) toast('error', 'Could not load field obstacles.');
@@ -120,7 +121,7 @@ export default function JobFieldMap({ jobId, refreshKey }: JobFieldMapProps) {
           setObstacles(nextObstacles);
         }
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+        Sentry.captureException(toSentryError(err), {
           tags: { source: 'fetch', action: 'job_field_map' },
         });
         if (!cancelled) {

@@ -9,6 +9,7 @@ import { useToast } from '../components/ui/Toast';
 import { supabase, assertRpcResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import { computeSeason } from '../utils/season';
+import { toSentryError } from '../lib/sentryError';
 
 // Money safety: invoiced_amount_cents is bigint cents, display / 100
 const fmtDollars = (cents: number) =>
@@ -58,7 +59,7 @@ export default function ProgramTracker() {
       setPrograms(result);
       setLoadError(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)));
+      Sentry.captureException(toSentryError(err));
       if (seq !== loadSeqRef.current) return;
       toast('error', 'Failed to load program data');
       setPrograms([]);

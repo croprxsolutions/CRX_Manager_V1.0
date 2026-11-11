@@ -218,8 +218,14 @@ ALTER TABLE public.delivery_brand_events OWNER TO postgres;
 ALTER TABLE public.delivery_item_brands OWNER TO postgres;
 ALTER TABLE public.delivery_brand_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delivery_item_brands ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.delivery_brand_events FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON TABLE public.delivery_item_brands FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON TABLE public.delivery_brand_events FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+REVOKE ALL ON TABLE public.delivery_item_brands FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
+DO $seq$
+BEGIN
+  EXECUTE format('REVOKE ALL ON SEQUENCE %s FROM PUBLIC, anon, authenticated, service_role, metabase_ro',
+    pg_get_serial_sequence('public.delivery_brand_events', 'seq'));
+END
+$seq$;
 GRANT SELECT ON TABLE public.delivery_brand_events TO authenticated;
 GRANT SELECT ON TABLE public.delivery_item_brands TO authenticated;
 CREATE POLICY delivery_brand_events_select ON public.delivery_brand_events FOR SELECT TO authenticated
@@ -1390,7 +1396,11 @@ BEGIN
      OR has_table_privilege('authenticated', 'public.delivery_item_brands', 'INSERT,UPDATE,DELETE,TRUNCATE')
      OR has_table_privilege('authenticated', 'public.delivery_brand_events', 'INSERT,UPDATE,DELETE,TRUNCATE')
      OR has_table_privilege('service_role', 'public.delivery_item_brands', 'INSERT,UPDATE,DELETE,TRUNCATE')
-     OR has_table_privilege('service_role', 'public.delivery_brand_events', 'INSERT,UPDATE,DELETE,TRUNCATE') THEN
+     OR has_table_privilege('service_role', 'public.delivery_brand_events', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     OR has_table_privilege('metabase_ro', 'public.delivery_item_brands', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
+     OR has_table_privilege('metabase_ro', 'public.delivery_brand_events', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
+     OR has_sequence_privilege('authenticated', pg_get_serial_sequence('public.delivery_brand_events', 'seq'), 'USAGE,SELECT,UPDATE')
+     OR has_sequence_privilege('metabase_ro', pg_get_serial_sequence('public.delivery_brand_events', 'seq'), 'USAGE,SELECT,UPDATE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_BRANDS: an app role can write a brand table';
   END IF;
 END

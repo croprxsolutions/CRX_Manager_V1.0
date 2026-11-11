@@ -12,8 +12,10 @@ import { pathToFileURL } from 'node:url';
 
 const LIVE_REF = 'rhyzpcqhnizqbxphqdkr';
 const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
-// <YYYYMMDDHHMMSS>_<lower_snake>, with a plausible date and time.
-const NAME = /^(20[2-9]\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d)_[a-z0-9_]+$/;
+// <14-digit stamp>_<lower_snake>. Existing files only need this shape: three applied ones carry
+// impossible times (20261022086000 = 08:60). New files must also have a real date and time (below).
+const NAME = /^(\d{14})_[a-z0-9_]+$/;
+const REAL_STAMP = /^20[2-9]\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d$/;
 
 // Same rule as scripts/list-post-baseline-migrations.mjs, against the target's own ledger: files after
 // the baseline high-water whose name the ledger lacks. One-shot data migrations are recorded, never
@@ -118,11 +120,13 @@ export function sqlSkeleton(text) {
 
 const TX_CONTROL = /^\s*(BEGIN|COMMIT|ROLLBACK|ABORT|END|START\s+TRANSACTION|SAVEPOINT|RELEASE|PREPARE\s+TRANSACTION)\b/i;
 
-export function fileProblems(stem, buf) {
+// forRun = false: the file is only stored (backfill, one-shot record), so only the encoding matters.
+export function fileProblems(stem, buf, { forRun = true } = {}) {
   const problems = [];
   if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) problems.push(`${stem}: starts with a byte-order mark`);
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return [...problems, `${stem}: is not valid UTF-8`]; }
+  if (!forRun) return problems;
   const skeleton = sqlSkeleton(text);
   let atomic = 0; // SQL-standard function bodies: BEGIN ATOMIC ...; END
   for (const statement of skeleton.split(';')) {
@@ -142,7 +146,7 @@ export function stampProblems({ added, base, head, changed = [] }) {
   const baseMax = base.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
   const problems = changed.map((f) => `${f}: an existing migration was edited, renamed or deleted; applied migrations never change (add a new one instead)`);
   for (const f of added) {
-    if (!NAME.test(f.replace(/\.sql$/, ''))) { problems.push(`${f}: name must be <14-digit stamp>_<lower_snake>.sql`); continue; }
+    if (!NAME.test(f.replace(/\.sql$/, '')) || !REAL_STAMP.test(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
     if (head.filter((h) => stamp(h) === stamp(f)).length > 1) problems.push(`${f}: shares its stamp with another migration`);
     if (stamp(f) <= baseMax) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
   }
@@ -253,7 +257,10 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
   // Staging rows written by catchup-staging.sh carry no statements; give rows after the baseline the
   // file text once (baseline rows came from the restored dump, not these files). Never on live.
   const bare = backfill ? [...stored].filter(([n, h]) => !h && postBaseline(n)).map(([n]) => n) : [];
-  const problems = [...steps.map((x) => x.stem), ...bare].flatMap((stem) => fileProblems(stem, fileBytes(stem)));
+  const problems = [
+    ...steps.flatMap(({ stem, run }) => fileProblems(stem, fileBytes(stem), { forRun: run })),
+    ...bare.flatMap((stem) => fileProblems(stem, fileBytes(stem), { forRun: false })),
+  ];
   if (problems.length) throw new Error(`STOPPED before applying anything: ${problems.join('; ')}`);
 
   for (const stem of bare) {

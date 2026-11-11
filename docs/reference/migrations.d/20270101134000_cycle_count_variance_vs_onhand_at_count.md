@@ -1,0 +1,13 @@
+**LOCAL CANDIDATE — NOT APPLIED.** `20270101134000_cycle_count_variance_vs_onhand_at_count.sql` (SQL sha256: `83b887c327462482f1aab4f9f4b0e98f381082182bbcedf9b0b1498f88dcadba`). KI-134: saving a stock count number now compares it with the on hand the app holds at that moment (and stores that as the line's expected quantity), so stock received or delivered while a count is open is no longer applied twice when the count is completed.
+
+**What changes.** `update_cycle_count_item` only (one `CREATE OR REPLACE`, same signature). When `p_counted_qty` is not null it reads `inventory.quantity_available` of the line's inventory row and uses it, rounded to two places like the stored columns, as `expected_qty` for `variance` / `variance_pct` (a percentage too large for its column is left empty); a line with no inventory row keeps its stored `expected_qty`; clearing a count leaves `expected_qty` alone. The result gains `expected_qty`. Idempotency (key required, actor + fingerprint bound), admin check, item -> parent locks and the `item_revision` bump are unchanged. Complete, reverse, cancel and creation are unchanged.
+
+**Who may call.** No grant changes; restated: SECURITY DEFINER, `search_path = public, pg_temp`, EXECUTE authenticated and service_role, none for PUBLIC or anon.
+
+**Preflight.** One transaction, `lock_timeout` 5s; refuses unless exactly one `update_cycle_count_item` signature exists with the live body md5 read 2026-11-10 (`c67e98122a5f1d9dc60c205dac969f3f`), `_complete_cycle_count_impl` has md5 `394d15947b9a09eab94f7bea1d90242b` and `complete_cycle_count` md5 `ad7249f15027bd75084cb0cfbf8b6bab`, and no in-progress count holds a line counted under the old rule (count saves are held off by a table lock until commit). Postflight checks the signature, SECURITY DEFINER, search_path, the new body, grants and that `_complete_cycle_count_impl` is unchanged.
+
+**Proof.** `scripts/smoke/prove-cycle-count-onhand-at-count-real-schema.mjs` (real migrated schema, real `receive_po_items` receipt and `adjust_inventory` stock-out during an open count, before and after; prints `CYCLE_COUNT_ONHAND_PROOF_PASS`). Live rolled-back chain: `scripts/smoke/smoke-cycle-count-onhand-at-count.sql` (spec `update_cycle_count_item`).
+
+**Rollback** (its own reviewed migration): re-create the `20260831212415` body. No data changes; lines saved meanwhile keep the on hand they recorded.
+
+Contract: `docs/plans/2026-11-10-ki134-cycle-count-drift-CONTRACT.md`.

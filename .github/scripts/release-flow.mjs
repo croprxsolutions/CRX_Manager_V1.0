@@ -210,11 +210,10 @@ export function changelogSection(markdown, version) {
 
 const INLINE_BLOCKS = new Set(['version', 'date']);
 
-// Removes comment markers until none are left: one pass over "<<!--!--" would leave a new "<!--".
-function stripCommentMarkers(text) {
-  let s = String(text);
-  while (/<!--|--!?>/.test(s)) s = s.replace(/<!--|--!?>/g, '');
-  return s;
+// Turns comment markers into visible text (one pass, nothing removed, so nothing can be rebuilt):
+// PR text can't open or close a comment or a bot block, and "A --> B" still reads as an arrow.
+export function neutralizeCommentMarkers(text) {
+  return String(text).replace(/<!--/g, '&lt;!--').replace(/--(!?)>/g, '--$1&gt;');
 }
 // A markdown table cell: one line, backslashes escaped first, then pipes.
 export const cell = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
@@ -225,7 +224,7 @@ export function renderReleaseBody(template, data, previousBody) {
   return (previousBody || template).replace(/<!-- bot:(\w+) -->[\s\S]*?<!-- \/bot:\1 -->/g, (block, key) => {
     if (!(key in data)) return block;
     // PR text can't close or open a bot block.
-    const clean = stripCommentMarkers(data[key]);
+    const clean = neutralizeCommentMarkers(data[key]);
     const value = INLINE_BLOCKS.has(key) ? clean : `\n${clean}\n`;
     return `<!-- bot:${key} -->${value}<!-- /bot:${key} -->`;
   });
@@ -304,8 +303,8 @@ function dubaiDate(now = new Date()) {
 
 // The first real paragraph of a PR description: no headings, comments or badges, one line.
 export function firstParagraph(body, max = 200) {
-  // Comments go whole (an unclosed one to the end), then any marker left over.
-  for (const para of stripCommentMarkers((body ?? '').replace(/<!--[\s\S]*?(?:--!?>|$)/g, '')).split(/\n\s*\n/)) {
+  // Closed comments go whole; a stray marker (an unclosed comment, "<!--" in code) stays as text.
+  for (const para of neutralizeCommentMarkers((body ?? '').replace(/<!--[\s\S]*?--!?>/g, '')).split(/\n\s*\n/)) {
     const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l) && !/^\s*(what users see|staging proof|held off):/i.test(l)).join(' ').replace(/\s+/g, ' ').trim();
     if (text) return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
   }

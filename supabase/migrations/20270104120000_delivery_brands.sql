@@ -1019,8 +1019,9 @@ BEGIN
   -- brand seq it loaded confirms the picks only if they have not changed since; otherwise the completion still
   -- goes through and the 'completed' event records picks_confirmed false for the office.
   PERFORM set_config('crx.brand_base_seq', '', true);
-  v_picks_confirmed := v_base_seq IS NOT NULL
-    AND v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id);
+  -- Only the wrappers set the value; anything that is not a plain number reads as not confirmed, never an error.
+  v_picks_confirmed := CASE WHEN v_base_seq ~ '^[0-9]{1,18}$'
+    THEN v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id) ELSE false END;
 
   v_result := public._complete_delivery_authorized_impl(
     p_delivery_id,

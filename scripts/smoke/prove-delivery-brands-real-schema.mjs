@@ -525,6 +525,11 @@ async function main() {
   set(DRV, D(3), [{ delivery_item_id: DI(3, 0), picks: [pick(PB2, 4)] }], 'bb-k6');
   const stock3 = stock(PG);
   refused(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3b', { seq: -1 }), /BRAND_BASE_SEQ_INVALID/);
+  r = psql(`BEGIN; SELECT set_config('crx.brand_base_seq', 'not-a-number', true);
+    SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;
+    ${COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3g')} ROLLBACK;`, { allowFailure: true });
+  assert.doesNotMatch(`${r.stdout}
+${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   assert.equal(status(D(3)), 'in_progress'); assert.equal(stock(PG), stock3); assert.equal(events(D(3), 'completed'), 0);
   ok(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3', { seq: loaded }));
   assert.equal(status(D(3)), 'completed', 'a stale brand seq never refuses the completion');
@@ -627,8 +632,8 @@ async function main() {
   console.log('[prover] case 10: an admin links a typed pick to a brand on its list (snapshot unchanged) or dismisses it, once; others are refused');
 
   // 11. The receipt lines.
-  mkDelivery(7, [[PG, 4], [PL, 2], [PN, 1]]);
-  set(REP, D(7), [{ delivery_item_id: DI(7, 0), picks: [pick(PB1, 3), typed('Lima', 1)] }], 'bb-k11');
+  mkDelivery(7, [[PG, 4], [PL, 2], [PN, 1], [PL2, 3]]);
+  set(REP, D(7), [{ delivery_item_id: DI(7, 0), picks: [pick(PB1, 3), typed('Lima', 1)] }, { delivery_item_id: DI(7, 3), picks: [pick(LB3, 3)] }], 'bb-k11');
   // A receipt is queued only for a completion with proof: left at site, with its photo.
   const photo = `delivery-photos/${D(7)}/drop.jpg`;
   raw(`INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
@@ -636,11 +641,12 @@ async function main() {
     INSERT INTO public.delivery_photos (id, delivery_id, storage_path, image_url, caption, uploaded_by)
       VALUES ('${id(77)}', '${D(7)}', '${photo}', '${photo}', 'Left at site — drop location', '${ADMIN}');`);
   ok(ADMIN, `SELECT public.complete_delivery(p_delivery_id => '${D(7)}', p_signed_by => 'No one present — left at site',
-    p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(7, 0)]: 4, [DI(7, 1)]: 2, [DI(7, 2)]: 1 })}, p_idempotency_key => 'bb-c7',
+    p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(7, 0)]: 4, [DI(7, 1)]: 2, [DI(7, 2)]: 1, [DI(7, 3)]: 2 })}, p_idempotency_key => 'bb-c7',
     p_evidence => 'left_at_site', p_evidence_ref => '${id(77)}', p_email_receipt => true)::text;`);
   const receipt = JSON.parse(scalar(`SELECT receipt::text FROM public.delivery_receipt_queue WHERE delivery_id = '${D(7)}';`));
   const rl = receipt.lines.map((l) => ({ ...l, qty: Number(l.qty) }));
-  assert.deepEqual(rl.find((l) => l.brands)?.brands.map((b) => [b.name, b.epa_registration, Number(b.quantity)]), [['Alpha', '100-1', 3], ['Lima', null, 1]]);
+  assert.deepEqual(rl.find((l) => l.brands?.length === 2)?.brands.map((b) => [b.name, b.epa_registration, Number(b.quantity)]), [['Alpha', '100-1', 3], ['Lima', null, 1]]);
+  assert.deepEqual(rl.filter((l) => l.brands?.length === 1).map((l) => Number(l.brands[0].quantity)), [2], 'the receipt shows a pick trimmed to delivered (queued after the brand step)');
   assert.equal(rl.filter((l) => l.brand_recorded === false).length, 1, 'a branded line with no pick says so');
   assert.equal(rl.filter((l) => !l.brands && l.brand_recorded === undefined).length, 1, 'an unbranded line is as before');
   console.log('[prover] case 11: the receipt lists each line\'s brands, says when none was recorded on a branded line, and leaves an unbranded line as before');

@@ -209,6 +209,7 @@ BEGIN
     v_expected := public._workbook_version(p_row, 'expected_version');
     IF jsonb_typeof(p_row->'value') IS DISTINCT FROM 'number' THEN RAISE EXCEPTION 'PRODUCT_WEIGHT_BAD_VALUE: enter a number'; END IF;
     v_value := (p_row->'value')::numeric;
+    IF abs(v_value) > 1000000 THEN RAISE EXCEPTION 'PRODUCT_WEIGHT_BAD_VALUE: the value is out of range'; END IF;
     v_unit := public._workbook_text(p_row, 'unit');
     IF v_kind = 'net_weight' AND v_unit IS NOT NULL THEN RAISE EXCEPTION 'WORKBOOK_ROW_INVALID: a net weight is always in lb'; END IF;
     -- The download stores lb/gal, so a density row with the unit left blank means lb/gal.

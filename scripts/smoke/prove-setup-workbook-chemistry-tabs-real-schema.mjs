@@ -19,12 +19,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// CRX_DM1B_REUSE=<container> reruns the cases in a kept container (CRX_PROVER_KEEP_CONTAINER=1) from a fresh copy of its
-// seeded, pre-candidate database, for iterating on this proof only; a full run builds everything from scratch.
-const REUSE = process.env.CRX_DM1B_REUSE || '';
-const NAME = REUSE || `crx-dm1b-${process.pid}-${Date.now().toString(36)}`;
-let DB = 'postgres';
-const KEEP = REUSE !== '' || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+const NAME = `crx-dm1b-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
+const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -350,6 +347,9 @@ function weightsCases() {
   assert.deepEqual(odd.map((r) => r.status), ['unchanged', 'invalid', 'invalid', 'invalid', 'invalid']);
   // A density row with its unit left blank means lb/gal (the download's unit).
   assert.equal(js(ADMIN, `SELECT public.preview_weights_tab(${J([{ ...fresh[0], unit: undefined }])});`).rows[0].status, 'unchanged');
+  // A huge number is one invalid row, not a failed preview.
+  const huge = js(ADMIN, `SELECT public.preview_weights_tab('[${JSON.stringify({ ...fresh[0], unit: 'specific_gravity' }).replace('"value":8', '"value":1e131000')}, ${JSON.stringify(fresh[1])}]'::jsonb);`).rows;
+  assert.deepEqual(huge.map((r) => r.status), ['invalid', 'unchanged']); assert.match(huge[0].problem, /out of range/);
   console.log('[case] W4 a stale row refuses the whole save; an unchanged upload saves nothing; duplicate and malformed rows are invalid');
 }
 
@@ -474,24 +474,8 @@ function accessCases() {
 }
 
 async function main() {
-  if (REUSE) {
-    // Only this proof's own scratch copy is replaced; the kept snapshot is never touched.
-    DB = 'postgres';
-    psql('DROP DATABASE IF EXISTS dm1b_run WITH (FORCE);', { user: 'supabase_admin' });
-    psql('CREATE DATABASE dm1b_run TEMPLATE dm1b_snap OWNER postgres;', { user: 'supabase_admin' });
-    DB = 'dm1b_run';
-  } else {
-    buildContainer();
-    seed();
-    // A copy of the seeded, pre-candidate database for CRX_DM1B_REUSE reruns.
-    // pg_net and pg_cron keep sessions open on postgres; end them so it can be copied (they reconnect).
-    if (KEEP) {
-      psql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'postgres' AND pid <> pg_backend_pid();`, { user: 'supabase_admin' });
-      DB = 'template1';
-      psql('CREATE DATABASE dm1b_snap TEMPLATE postgres OWNER postgres;', { user: 'supabase_admin' });
-      DB = 'postgres';
-    }
-  }
+  buildContainer();
+  seed();
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);

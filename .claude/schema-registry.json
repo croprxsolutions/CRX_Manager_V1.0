@@ -1470,7 +1470,8 @@
       "submitted",
       "partially_received",
       "fully_received",
-      "cancelled"
+      "cancelled",
+      "closed"
     ],
     "quotes.status": [
       "draft",
@@ -3414,7 +3415,8 @@
         "submitted",
         "partially_received",
         "fully_received",
-        "cancelled"
+        "cancelled",
+        "closed"
       ],
       "constraints": [
         "purchase_orders_status_check"

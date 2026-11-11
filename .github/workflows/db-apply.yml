@@ -10,10 +10,13 @@ name: Database
 on:
   pull_request:
     branches: [staging, main]
-    paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/workflows/db-apply.yml']
+    paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
   push:
     branches: [staging]
-    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/workflows/db-apply.yml']
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
+  # Nightly drift + schema check on staging, 02:30 Dubai (scheduled runs use main's copy of this file).
+  schedule:
+    - cron: '30 22 * * *'
   workflow_dispatch:
 
 permissions: {}
@@ -21,8 +24,10 @@ permissions: {}
 # One staging run at a time, start to finish (migrations, then functions), so an older run can never
 # deploy after a newer one. PR runs don't wait on each other. A failed run: re-run it, or run the
 # workflow by hand (Actions -> Database -> Run workflow on staging).
+# Nightly and main-dispatched runs only read, so they queue in their own group: a waiting staging push
+# is never replaced by one (GitHub keeps one pending run per group).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('db-pr-{0}', github.run_id) || 'db-staging' }}
+  group: ${{ github.event_name == 'pull_request' && format('db-pr-{0}', github.run_id) || (github.ref == 'refs/heads/staging' && 'db-staging' || 'db-check') }}
   cancel-in-progress: false
 
 jobs:
@@ -117,3 +122,51 @@ jobs:
             echo "Deploying $fn to $PROJECT_REF $flags"
             npx --yes supabase@2.122.0 functions deploy "$fn" --project-ref "$PROJECT_REF" --use-api $flags
           done
+
+  # Read-only, with its own login (crx_drift_ro, catalog + ledger only): staging's public schema must
+  # equal one rebuilt from the files, so a change made in the SQL Editor shows even with no ledger row.
+  # After every staging apply, nightly, and on "Run workflow". Inert until STAGING_DB_JOB is "on".
+  schema-staging:
+    name: Staging schema matches the files
+    needs: apply-staging
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.apply-staging.result != 'failure' }}
+    runs-on: ubuntu-latest
+    environment: staging-db-readonly
+    permissions:
+      contents: read
+    env:
+      STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
+      TARGET_REF: fsnjredpmakbmhwowjjt
+      # ponytail: report-only until the first staging report is reviewed; then remove this line.
+      SCHEMA_MODE: report
+    # The read-only URL is given only to the steps that use it, never to checkout or the rebuild.
+    steps:
+      - id: on
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: |
+          if [ "$STAGING_DB_JOB" != "on" ]; then echo "::notice::Staging DB job not switched on yet (STAGING_DB_JOB)."; exit 0; fi
+          if [ -z "$DB_URL" ]; then echo "::error::STAGING_DB_READONLY_URL is missing from the staging-db-readonly environment."; exit 1; fi
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      # The commit this run applied (push or Run workflow on staging); the staging branch for nightly runs.
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref == 'refs/heads/staging' && github.sha || 'staging' }}
+          persist-credentials: false
+      - name: Ledger drift check
+        if: steps.on.outputs.yes && github.ref != 'refs/heads/staging'
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: node .github/scripts/db-apply.mjs drift
+      - name: Rebuild the schema from the files
+        if: steps.on.outputs.yes
+        shell: bash
+        run: |
+          .github/scripts/rebuild-schema.sh "$RUNNER_TEMP/rebuild" | tee "$RUNNER_TEMP/rebuild.log"
+          grep '^REBUILT_DB_URL=' "$RUNNER_TEMP/rebuild.log" >> "$GITHUB_ENV"
+      - name: Compare staging with the rebuild
+        if: steps.on.outputs.yes
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: node .github/scripts/db-apply.mjs schema

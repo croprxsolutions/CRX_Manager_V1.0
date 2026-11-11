@@ -75,6 +75,14 @@ jobs:
           persist-credentials: false
       - if: steps.on.outputs.yes
         run: node .github/scripts/db-apply.mjs apply
+      # Read-only: the ledger must match the repo (no row without a file, no file edited after it ran).
+      - name: Ledger drift check
+        if: steps.on.outputs.yes
+        env:
+          # ponytail: report-only until the first staging report is reviewed (older rows may carry names
+          # renamed on main after they ran); then remove this line so drift fails the job.
+          DRIFT_MODE: report
+        run: node .github/scripts/db-apply.mjs drift
 
   edge-functions-staging:
     name: Deploy edge functions to staging

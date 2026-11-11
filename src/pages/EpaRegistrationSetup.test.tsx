@@ -78,6 +78,16 @@ describe('EpaRegistrationSetup', () => {
     expect(screen.queryByText(/already switched on/i)).toBeNull();
   });
 
+  it('a failed re-read after a stale refusal removes the old preview and its Run button', async () => {
+    m.seed.mockRejectedValue(pgError('EPA_REGISTRATION_SEED_STALE: products changed; preview again'));
+    render(<EpaRegistrationSetup />);
+    await screen.findByLabelText('WARNING');
+    m.preview.mockRejectedValueOnce(new Error('network down'));
+    await pickAndRun();
+    expect(await screen.findByText(/could not load the preview/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /run setup/i })).toBeNull();
+  });
+
   it('a lost reply offers Retry with the same key', async () => {
     m.seed.mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockResolvedValueOnce({ registrations: 2, lines_captured: 2, rup_default: 'no', fingerprint: 'fp-1' });

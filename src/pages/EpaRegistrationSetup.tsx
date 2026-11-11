@@ -208,9 +208,9 @@ export default function EpaRegistrationSetup() {
       setPicks({});
     } catch (e) {
       if (req !== reqRef.current) return;
+      setPreview(null); // never leave an old preview (and its Run button) up after a failed read
       if (hasRpcCode(e, RpcErrorCodes.EPA_REGISTRATION_SEED_DONE)) {
         setDone(true);
-        setPreview(null);
       } else {
         Sentry.captureException(e, { tags: { source: 'rpc', action: 'preview_epa_registration_seed' } });
         setLoadError(sanitizeError(e));

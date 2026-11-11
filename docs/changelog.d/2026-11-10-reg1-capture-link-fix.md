@@ -1,4 +1,4 @@
-## 2026-11-10 — REG-1: re-saving an order-linked invoice keeps working after the switch-on (database, not applied)
+## 2026-11-10 — REG-1: re-saving an order-linked invoice keeps working after the switch-on (database, applied live 2026-11-11)
 
 - `20270102160000_rup_capture_fk_on_update_cascade`: the link from a line's restricted-use capture to its invoice
   line now follows the line when a save moves it back to its original id. Without it, once the EPA registration seed

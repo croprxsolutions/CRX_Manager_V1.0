@@ -4270,6 +4270,11 @@ export default function QuoteBuilder() {
   // The quote cannot be edited while a save or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
   const formLocked = saving || converting || drawing;
+  // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
+  // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
+  // the job link and Schedule job still work.
+  const readOnly = isEditing && !canEdit;
+  const editLocked = formLocked || readOnly;
 
   // Header actions (spec "Actions by state"). Each action keeps today's show and enable
   // conditions and handler; only where it sits changes.
@@ -4605,7 +4610,7 @@ export default function QuoteBuilder() {
           />
         </Card>
       )}
-      <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
+      <fieldset disabled={editLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
       {!id && quoteTemplates.length > 0 && (
         <div className="max-w-sm">
           <Dropdown
@@ -4620,7 +4625,7 @@ export default function QuoteBuilder() {
         </div>
       )}
 
-      {/* RAC controls ignore the disabled fieldset, so each one also takes formLocked. */}
+      {/* RAC controls ignore the disabled fieldset, so each one also takes editLocked. */}
       <Card>
         <h2 className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
         <div className="grid grid-cols-1 gap-x-5 gap-y-1 md:grid-cols-2 lg:grid-cols-4">
@@ -4637,6 +4642,7 @@ export default function QuoteBuilder() {
               select={QUOTE_CUSTOMER_SELECT}
               placeholder="Select a customer..."
               ariaLabel="Customer"
+              disabled={editLocked}
             />
             <div className="min-h-5">
               {customerLoadError && (
@@ -4657,7 +4663,7 @@ export default function QuoteBuilder() {
               value={String(tier)}
               onChange={(v) => applyTier(parseInt(v))}
               options={[1, 2, 3].map((n) => ({ value: String(n), label: `Tier ${n}` }))}
-              disabled={formLocked}
+              disabled={editLocked}
             />
             {/* The note takes the Dropdown's empty helper line (mt-1 + min-h-5). */}
             {!customerView && tierMismatch && (
@@ -4686,7 +4692,7 @@ export default function QuoteBuilder() {
                 { value: 'date', label: 'Pick a date' },
               ]}
               helper={!chosenExpiryDate && status !== 'draft' && 'A change applies when the quote is sent again.'}
-              disabled={formLocked}
+              disabled={editLocked}
             />
             {chosenExpiryDate && (
               <DatePicker
@@ -4695,7 +4701,7 @@ export default function QuoteBuilder() {
                 minValue={todayInBusinessTz()}
                 onChange={(v) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(v || seasonEnd); }}
                 helper={status !== 'draft' && 'A change applies when the quote is sent again.'}
-                disabled={formLocked}
+                disabled={editLocked}
               />
             )}
           </div>
@@ -4708,7 +4714,7 @@ export default function QuoteBuilder() {
               commissionSplitTouchedRef.current = true;
               setCommissionSplit(val);
             }}
-            disabled={formLocked}
+            disabled={editLocked}
           />
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch
@@ -4914,7 +4920,7 @@ export default function QuoteBuilder() {
                   }
                   options={unitOptions(item.rate_unit, (unit) => unit)}
                   placeholder="--"
-                  disabled={formLocked}
+                  disabled={editLocked}
                   className={UNIT_SELECT}
                 />
               </div>
@@ -5016,7 +5022,7 @@ export default function QuoteBuilder() {
                   }
                   options={unitOptions(item.price_unit, (unit) => `/ ${unit}`)}
                   placeholder="--"
-                  disabled={formLocked}
+                  disabled={editLocked}
                   className={UNIT_SELECT}
                 />
               </div>
@@ -5055,7 +5061,7 @@ export default function QuoteBuilder() {
                     <input
                       type="checkbox"
                       checked={item.grower_confirmed_cents === raise.toCents}
-                      disabled={formLocked}
+                      disabled={editLocked}
                       onChange={(e) => updateItem(sec._key, item._key, {
                         grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
                       })}
@@ -5086,7 +5092,7 @@ export default function QuoteBuilder() {
                             use_todays_price: true,
                           });
                         }}
-                        disabled={formLocked}
+                        disabled={editLocked}
                         className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
                       >
                         Use today {fmt(todayPriceOffer)}
@@ -5119,7 +5125,7 @@ export default function QuoteBuilder() {
           const menu = (
             <ActionMenu
               label={`Actions for line ${n} in ${sec.section_name || 'Untitled section'}`}
-              disabled={formLocked}
+              disabled={editLocked}
               items={[
                 ...(prod ? [{ id: 'change', label: 'Change product', onAction: openPicker }] : []),
                 { id: 'note', label: item.notes ? 'Edit note' : 'Add note', onAction: () => setEditingLineNote(item._key) },
@@ -5159,6 +5165,7 @@ export default function QuoteBuilder() {
                 value={sec.section_name}
                 onChange={(e) => updateSectionName(sec._key, e.target.value)}
                 aria-label="Section name"
+                disabled={readOnly}
                 className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-10 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
                 placeholder="Section name"
               />
@@ -5174,6 +5181,7 @@ export default function QuoteBuilder() {
                     customerId={customerId || null}
                     placeholder="Search fields..."
                     ariaLabel={`Field for ${sec.section_name || 'section'}`}
+                    disabled={readOnly}
                     className="min-w-0 flex-1 sm:flex-none sm:w-56"
                   />
                 </div>
@@ -5213,7 +5221,7 @@ export default function QuoteBuilder() {
               {sections.length > 1 && (
                 <ActionMenu
                   label={`Actions for section ${sec.section_name || 'Untitled section'}`}
-                  disabled={formLocked}
+                  disabled={editLocked}
                   items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
                 />
               )}
@@ -5228,7 +5236,7 @@ export default function QuoteBuilder() {
                       aria-label="Needed by"
                       value={sec.needed_by_date || null}
                       onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={formLocked}
+                      disabled={editLocked}
                     />
                   </div>
                   {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
@@ -5259,7 +5267,7 @@ export default function QuoteBuilder() {
             </div>
 
             {!isCollapsed && (
-              <>
+              <fieldset disabled={readOnly} className="min-w-0">
               {/* Section note: prints above the section's products on the PDF. Its link sits in the footer. */}
               {sectionNoteOpen && (
                 <div className="px-3 md:px-4 pt-2">
@@ -5283,14 +5291,14 @@ export default function QuoteBuilder() {
               )}
               {sec.items.length === 0 ? (
                 <p className="px-3 md:px-4 pt-2 pb-4 text-sm text-secondary">
-                  No products yet.{' '}
-                  <button
+                  No products yet.{readOnly ? null : ' '}
+                  {!readOnly && <button
                     type="button"
                     onClick={() => addItem(sec._key)}
                     className={`${LINK_HIT} text-crx-green hover:underline font-medium`}
                   >
                     Add one
-                  </button>
+                  </button>}
                 </p>
               ) : lineCards ? (
                 // Below 1024 px: one card per line. Fields sit 2 across on a phone and 4 across from 768 px,
@@ -5381,7 +5389,7 @@ export default function QuoteBuilder() {
                   </table>
                 </div>
               )}
-              {(sec.items.length > 0 || !sectionNoteOpen) && (
+              {!readOnly && (sec.items.length > 0 || !sectionNoteOpen) && (
                 <div className="flex flex-col gap-1 border-t border-cream-dark px-3 py-3 md:flex-row md:items-center md:gap-4 md:px-4">
                   {sec.items.length > 0 && (
                     <Button
@@ -5410,13 +5418,13 @@ export default function QuoteBuilder() {
                   )}
                 </div>
               )}
-              </>
+              </fieldset>
             )}
           </Card>
         );
       })}
 
-      <button
+      {!readOnly && <button
         type="button"
         onClick={addSection}
         className="w-full flex items-center md:justify-center gap-3 rounded-xl border-[1.5px] border-dashed border-gray-300 px-4 py-4 text-left text-nav-dark transition-colors hover:border-crx-green hover:bg-crx-green-tint disabled:opacity-50"
@@ -5428,7 +5436,7 @@ export default function QuoteBuilder() {
           <span className="font-semibold">Add a section</span>
           <span className="text-[13px] text-secondary">Group products by field or timing, like &quot;Spring pre-emerge&quot;. Each section gets its own total on the PDF.</span>
         </span>
-      </button>
+      </button>}
               </fieldset>
             ),
           },

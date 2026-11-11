@@ -5463,7 +5463,7 @@ describe('QuoteBuilder', () => {
     const stubPhone = () => stubWidth(390);
 
     // A draft with two lines of one product: 2 gal ($20.00, cost $6.00, profit $8.00, 40.0%) and 3 gal ($30.00).
-    function serveLines(productName = 'Product', firstPatch: Record<string, unknown> = {}, status: 'draft' | 'revised' = 'draft') {
+    function serveLines(productName = 'Product', firstPatch: Record<string, unknown> = {}, status: 'draft' | 'sent' | 'revised' | 'accepted' = 'draft') {
       const fixture = makeQuoteFixture(status, 7);
       const product = { ...fixture.product, product_name: productName };
       const first = { ...fixture.item, product, ...firstPatch };
@@ -5605,6 +5605,38 @@ describe('QuoteBuilder', () => {
       } finally {
         vi.unstubAllGlobals();
       }
+    });
+
+    // A quote that can't be edited takes no edits at all, so it never shows "Unsaved changes" it can't save.
+    it.each(['accepted', 'sent'] as const)('a %s quote shows its fields disabled and no add actions; collapse and tabs still work', async (status) => {
+      serveLines('Product', {}, status);
+      await screen.findAllByRole('spinbutton', { name: 'Price per unit' });
+      for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled();
+      expect(screen.getByRole('textbox', { name: 'Section name' })).toBeDisabled();
+      expect(screen.getByRole('textbox', { name: /Note at the top/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Pricing tier/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Actions for line 1 in Products' })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: /Add product/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Add a section/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Add a note for this section/ })).not.toBeInTheDocument();
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+
+      const collapse = screen.getByRole('button', { name: 'Collapse section' });
+      expect(collapse).toBeEnabled();
+      fireEvent.click(collapse);
+      expect(screen.getByRole('button', { name: 'Expand section' })).toBeEnabled();
+      const tabs = screen.getAllByRole('tab');
+      expect(tabs.length).toBeGreaterThan(1);
+      for (const tab of tabs) expect(tab).toBeEnabled();
+    });
+
+    it('a draft keeps every field editable', async () => {
+      serveLines();
+      await loaded();
+      for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeEnabled();
+      expect(screen.getByRole('textbox', { name: 'Section name' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /Add product/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /Add a section/ })).toBeEnabled();
     });
 
     // A revised quote is a live booking: the server refuses revised -> draft, so its save keeps it revised.

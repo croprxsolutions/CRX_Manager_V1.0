@@ -12,23 +12,35 @@ export interface InventoryValueSummary {
   noCostCount: number;
 }
 
-const PLAIN_DECIMAL = /^(\d+)(?:\.(\d+))?$/;
+const DECIMAL = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i;
+
+/** A positive decimal as integer digits and a power of ten (exact; JavaScript prints 1e-7 or 1e21 for some numbers). */
+function parseDecimal(value: number | string): { digits: bigint; exponent: number } | null {
+  const m = DECIMAL.exec(String(value).trim());
+  if (!m) return null;
+  const frac = m[2] ?? '';
+  return { digits: BigInt(m[1] + frac), exponent: Number(m[3] ?? 0) - frac.length };
+}
 
 /**
  * quantity x unit cost in whole cents, exact (BigInt, no binary float) and rounded half away from
- * zero like PostgreSQL ROUND(numeric). Both inputs are positive here. NaN when a value is not a plain
- * decimal (for example exponent notation), so a bad row fails the total visibly instead of shifting it.
+ * zero like PostgreSQL ROUND(numeric). Both inputs are positive here. NaN when a value is not a
+ * decimal number, so a bad row fails the total visibly instead of shifting it.
  */
 export function quantityTimesCostCents(quantity: number | string, unitCost: number | string): number {
-  const q = PLAIN_DECIMAL.exec(String(quantity).trim());
-  const c = PLAIN_DECIMAL.exec(String(unitCost).trim());
+  const q = parseDecimal(quantity);
+  const c = parseDecimal(unitCost);
   if (!q || !c) return Number.NaN;
-  const qFrac = q[2] ?? '';
-  const cFrac = c[2] ?? '';
-  const numerator = BigInt(q[1] + qFrac) * BigInt(c[1] + cFrac) * 100n;
-  const denominator = 10n ** BigInt(qFrac.length + cFrac.length);
-  const quotient = numerator / denominator;
-  const cents = (numerator % denominator) * 2n >= denominator ? quotient + 1n : quotient;
+  const product = q.digits * c.digits * 100n;
+  const scale = q.exponent + c.exponent;
+  let cents: bigint;
+  if (scale >= 0) {
+    cents = product * 10n ** BigInt(scale);
+  } else {
+    const denominator = 10n ** BigInt(-scale);
+    const quotient = product / denominator;
+    cents = (product % denominator) * 2n >= denominator ? quotient + 1n : quotient;
+  }
   return cents > BigInt(Number.MAX_SAFE_INTEGER) ? Number.NaN : Number(cents);
 }
 

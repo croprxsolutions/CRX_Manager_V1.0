@@ -42,6 +42,7 @@ import {
   Warehouse,
   Wrench,
   X,
+  Power,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasPageAccess, getPageKeyFromPath } from '../../lib/pagePermissions';
@@ -175,6 +176,7 @@ const officeNavigation: NavEntry[] = [
         { path: '/offline-work-review', label: 'Offline Work Review', icon: <CloudOff className="w-4 h-4" /> },
         { path: '/label-review', label: 'Label Review', icon: <FlaskConical className="w-4 h-4" /> },
         { path: '/label-data-quality', label: 'Label Data Quality', icon: <DatabaseZap className="w-4 h-4" /> },
+        { path: '/epa-registration-setup', label: 'EPA Registration Setup', icon: <Power className="w-4 h-4" /> },
         { path: '/blend-tickets', label: 'Blend Tickets (OCR)', icon: <Image className="w-4 h-4" /> },
       ],
     },

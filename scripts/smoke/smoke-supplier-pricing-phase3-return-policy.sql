@@ -111,7 +111,7 @@ BEGIN
   EXECUTE $sql$
     CREATE FUNCTION pg_temp.smk_p3_delivered(p_item uuid,p_key text) RETURNS void
     LANGUAGE plpgsql AS $fn$
-    DECLARE v_oi record; v_delivery uuid;
+    DECLARE v_oi record; v_delivery uuid; v_photo uuid;
     BEGIN
       SELECT oi.*,o.customer_id INTO v_oi FROM public.order_items oi JOIN public.orders o ON o.id=oi.order_id WHERE oi.id=p_item;
       INSERT INTO public.deliveries(delivery_number,order_id,customer_id,scheduled_date,status,created_by)
@@ -119,7 +119,13 @@ BEGIN
       INSERT INTO public.delivery_items(delivery_id,order_item_id,product_id,quantity,quantity_delivered,unit_size)
       VALUES(v_delivery,p_item,v_oi.product_id,v_oi.total_units_needed,v_oi.total_units_needed,v_oi.unit_size);
       UPDATE public.deliveries SET status='in_progress' WHERE id=v_delivery;
-      PERFORM public.complete_delivery(v_delivery,'[SMOKE] Phase3 receiver',auth.uid(),NULL,NULL,NULL,'smk-p3-complete-'||p_key,now());
+      -- Completion names its proof (Goal 5 evidence rule): a signed paper ticket photo of this delivery.
+      INSERT INTO storage.objects(bucket_id,name,owner_id,metadata)
+      VALUES('delivery-photos','delivery-photos/'||v_delivery||'/ticket.jpg',auth.uid()::text,'{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
+      INSERT INTO public.delivery_photos(delivery_id,storage_path,image_url,uploaded_by,caption,sort_order)
+      VALUES(v_delivery,'delivery-photos/'||v_delivery||'/ticket.jpg','x',auth.uid(),'Signed paper delivery ticket',1)
+      RETURNING id INTO v_photo;
+      PERFORM public.complete_delivery(v_delivery,'[SMOKE] Phase3 receiver',auth.uid(),NULL,NULL,NULL,'smk-p3-complete-'||p_key,now(),'paper_ticket',v_photo::text);
       IF (SELECT status FROM public.deliveries WHERE id=v_delivery) IS DISTINCT FROM 'completed'
          OR NOT EXISTS (SELECT 1 FROM public.order_items WHERE id=p_item AND quantity_delivered=v_oi.total_units_needed AND quantity_remaining=0) THEN
         RAISE EXCEPTION 'SMOKE_SETUP: canonical complete_delivery did not complete %',p_key;

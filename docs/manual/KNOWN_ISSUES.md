@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11) | 95 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805) | 97 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -710,6 +710,13 @@ not subtracted, while Bottom Line P&L uses posted invoices. The order basis is r
 sheet, "roadmap area 2"), but the screens don't say "booked". The two also differ on drafts (Gross Sales includes
 them; none exist today). Fix: label as booked sales and align the draft filter.
 
+### KI-153 — `create_invoice_from_order` can no longer bill a product line
+**LOW · OPEN · invoicing · found 2026-11-11 (PR #1805, live smoke fixes) · unassigned**
+Since `20261029160000_cap_order_invoices_at_delivered`, order invoices may bill only delivered goods, and
+`create_invoice_from_order` refuses any order with an active delivery. Together these leave it unable to bill any
+product line (delivery-first billing, by design). Fix: retire the function or document that it bills non-product
+charges only.
+
 ## Inventory and deliveries
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
@@ -919,6 +926,12 @@ differ.
 `_retire_inventory_item_replay_impl_20261015` deletes the row without checking `quantity_on_order`; the on-order
 recompute then recreates a zero row and the PO still points at retired stock. Fix: refuse while open PO quantity is
 above 0.
+
+### KI-152 — Completing a delivery re-derives the status of an already-cancelled order
+**LOW · OPEN · deliveries · found 2026-11-11 (PR #1805, live smoke fixes) · unassigned**
+`complete_delivery` always recomputes the order status (fulfilled / partially fulfilled), even when the order is
+cancelled. The app cannot reach this today, because `cancel_order` cancels open deliveries first, but no database
+rule stops it. Fix: in a new migration, leave a cancelled order's status alone (or refuse the completion).
 
 ## Customers, purchasing and settings
 

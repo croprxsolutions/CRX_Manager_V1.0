@@ -38,7 +38,7 @@ fallback on demand and job deduction).
 1. `unit_names_fluid_ounce(text) → boolean`, IMMUTABLE: save_job's concept test, verbatim, after
    `unit_fold_invisible`: fold separators, drop everything from the first `/`, drop a `per …` tail, delete every
    non-alphanumeric, match `^(fl|fluid)(oz|ozs|ounce|ounces)$`. It also drops a leading package count first
-   (`32 fl oz`, `2.5 fl oz`), which save_job does not (Luna round 2). Catches `fl oz`, `FLOZ/acre`, `fl. oz`,
+   (`32 fl oz`, `2.5 fl oz`, `1/2 fl oz`, `1 1/2 fl oz`), which save_job does not (Luna round 2; fractions, Sol v2 round 3). Catches `fl oz`, `FLOZ/acre`, `fl. oz`,
    `fluid ounces per acre`, `fl<NBSP>oz`; passes `oz`, `dry oz`, `lb`, `flour oz`.
 2. Four BEFORE row triggers, each a new SECURITY DEFINER function (reads only; EXECUTE revoked from everyone; definer
    so RLS never hides a row from the check), raising `CHEM_UNIT_FORM_MISMATCH` with save_job's wording:
@@ -180,3 +180,11 @@ path): keep patching that path, or require every product to have a form. Mason: 
 deletes the becoming-dry check, `unit_reads_as_ounce`, the advisory locks and the two-session race proofs; it adds
 `product_form NOT NULL`, a preflight that refuses while any product has no form, and a plain refusal for a blank form
 (direct insert or import). The next Luna run reviews this simpler design from round 1.
+
+## Sol v2 round 3 (2026-11-11)
+
+- Fixed (HIGH): a fractional package count (`1/2 fl oz`) passed the concept test, because the count strip stopped at
+  the `/` and the first-`/` cut then left nothing. The strip now takes `1/2` and `1 1/2`; G5 proves both match and
+  `1/2 oz` and `1/ac` do not.
+- Fixed (LOW): G6 waits until the other session is holding its uncommitted insert instead of a fixed 1.5 s pause.
+- Fixed (LOW): the proof summary's GB line now matches what it runs (a dry `fl oz/ac` rate was already refused).

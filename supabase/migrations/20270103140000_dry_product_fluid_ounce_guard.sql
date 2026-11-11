@@ -73,12 +73,12 @@ CREATE OR REPLACE FUNCTION public.unit_names_fluid_ounce(p_unit text)
 AS $function$
   -- save_job's rule (20260904185900): reduce the unit to what it names (fold separators keeping '/', drop from the
   -- first '/', drop a 'per ...' tail, delete every non-alphanumeric), then match the concept, not a spelling list.
-  -- Also drops a leading package count ('32 fl oz', '2.5 fl oz'), which save_job's rule does not.
+  -- Also drops a leading package count ('32 fl oz', '2.5 fl oz', '1/2 fl oz', '1 1/2 fl oz'), which save_job's rule does not.
   SELECT regexp_replace(
            regexp_replace(
              split_part(
                regexp_replace(btrim(regexp_replace(lower(public.unit_fold_invisible(COALESCE(p_unit, ''))), '[^a-z0-9/]+', ' ', 'g')),
-                              '^[0-9]+( [0-9]+)* ?', ''),
+                              '^[0-9]+([ /][0-9]+)* ?', ''),
                '/', 1),
              '\s+per\s+.*$', ''),
            '[^a-z0-9]', '', 'g')

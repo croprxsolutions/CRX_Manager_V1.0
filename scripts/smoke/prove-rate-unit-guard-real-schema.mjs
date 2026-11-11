@@ -36,7 +36,8 @@
  *
  * Then 20270103140000 (contract docs/plans/2026-11-10-ki16-dry-fluid-ounce-CONTRACT.md):
  *   GB  BEFORE: a dry product's job line in 'fl oz' saves and its hold/deduction sizes 16 as 1 (lb); a booking with a
- *       dry fl oz line schedules; a dry blend line rated 'fl oz/ac' saves and its real invoice bills 200 fl oz as 12.5 lb.
+ *       dry fl oz line schedules; a dry blend line rated 'fl oz/ac' is already refused (#1741), but one whose quantity
+ *       unit is 'fl oz' (blend stock deduction) saves.
  *   G0  the guard applies (postflight passed); a second run refuses.
  *   G1  scheduling a booking whose dry line is in fl oz is refused, no job; save_job still refuses; liquid schedules.
  *   G2  dry blend lines in fl oz (rate, quantity unit, edits, moves, a direct table edit) are refused; dry oz/lb and a
@@ -818,7 +819,9 @@ async function dryFluidOunce() {
   const DRY6 = 'a16a1600-0000-4000-8000-0000000000b9';
   const ins = background(`BEGIN; INSERT INTO public.products (id, product_name, unit_size, inventory_unit, rate_unit, product_form)
     VALUES ('${DRY6}', '[PROVER] KI16 Dry Six', 'Lb', 'Lb', 'lb', 'dry'); SELECT pg_sleep(4); COMMIT;`);
-  await pause(1500);
+  // Wait until the other session has inserted the product and is holding it uncommitted (Sol v2 round 3 LOW).
+  for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();`) !== '1'; i += 1) await pause(100);
+  assert.equal(scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();`), '1', 'G6: the product session never reached its uncommitted insert');
   const g6 = asAdmin(jobLine(job, DRY6, "'fl oz'", "'fl oz/ac'", 70), { asOwner: true, commit: true });
   const insDone = await ins;
   assert.equal(insDone.code, 0, `G6: the product session failed: ${insDone.out}`);
@@ -829,7 +832,7 @@ async function dryFluidOunce() {
 
   // G5
   for (const [expr, want] of [["'fl oz'", 't'], ["'FLOZ/acre'", 't'], ["'fl. oz. per acre'", 't'], ["'fluid ounces'", 't'], ["'fl' || chr(8208) || 'oz'", 't'],
-    ["'fl' || chr(8203) || 'oz/ac'", 't'], ["'32 fl oz'", 't'], ["'2.5 FLOZ/ac'", 't'], ["'32 oz'", 'f'], ["'32'", 'f'], ["'oz'", 'f'], ["'Dry oz'", 'f'], ["'lb/ac'", 'f'], ["'flour oz'", 'f'], ['NULL', 'f'], ["''", 'f']]) {
+    ["'fl' || chr(8203) || 'oz/ac'", 't'], ["'32 fl oz'", 't'], ["'2.5 FLOZ/ac'", 't'], ["'1/2 fl oz'", 't'], ["'1 1/2 fl oz/ac'", 't'], ["'1/2 oz'", 'f'], ["'1/ac'", 'f'], ["'32 oz'", 'f'], ["'32'", 'f'], ["'oz'", 'f'], ["'Dry oz'", 'f'], ["'lb/ac'", 'f'], ["'flour oz'", 'f'], ['NULL', 'f'], ["''", 'f']]) {
     assert.equal(scalar(`SELECT public.unit_names_fluid_ounce(${expr});`), want, `G5: unit_names_fluid_ounce(${expr})`);
   }
   console.log('[prover] G5: unit_names_fluid_ounce matches every fluid-ounce spelling and no dry unit');

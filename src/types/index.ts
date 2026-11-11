@@ -2058,6 +2058,26 @@ export interface ProductParentIngredient {
   updated_at: string;
 }
 
+/** DM-1b (20270103100000): one Ingredients-tab upload for one parent, waiting for review. Admin read only. */
+export type ChemistryChangeProposalStatus = 'proposed' | 'applied' | 'rejected';
+export type ChemistryProposalDecision = 'apply' | 'apply_delete' | 'reject';
+export interface ChemistryChangeProposal {
+  id: string;
+  parent_id: string;
+  /** The change list in _apply_parent_chemistry's shape (ingredient add / change / retire). */
+  items: Array<Record<string, unknown>>;
+  has_delete: boolean;
+  base_chemistry_version: number;
+  proposal_version: number;
+  status: ChemistryChangeProposalStatus;
+  applied_chemistry_version: number | null;
+  created_by: string;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  updated_at: string;
+}
+
 export interface ProductParentModeOfAction {
   id: string;
   parent_id: string;

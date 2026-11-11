@@ -195,6 +195,9 @@ active parents only); 42, 43 notes optional, blank clears; 44 a zero default is 
   and refused; case 9). MED a row read as unchanged is not re-read under the locks: refuted, an unchanged row asks
   for no write, so a change another admin makes in that instant is kept, never overwritten, and the next download
   shows it; every row that writes is re-checked at its version under the locks.
+- Luna round 3 (fix commit b24ea58): MED a blank new row with no default key is read as SQL NULL and refused:
+  refuted, a missing or null key on a new row is set to false before the blank check; proved (case 9: both rows
+  skipped).
 
 ## Business decisions (Mason, 2026-11-11, picked in the coordinator session: both recommended options)
 

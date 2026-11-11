@@ -539,6 +539,9 @@ function batchCases() {
   // A new row with only the default box or a reason filled in is checked (and refused), not skipped as blank.
   const half = js(ADMIN, preview([{ parent_id: L[7], is_quoting_default: true }, { parent_id: L[7], is_quoting_default: false, reason: 'x' }])).rates;
   assert.deepEqual(half.map((r) => r.status), ['invalid', 'invalid'], JSON.stringify(half));
+  // A wholly blank new row with no default key at all is skipped, not invalid (Luna r3 MED, refuted).
+  const blank = js(ADMIN, preview([{ parent_id: L[7] }, { parent_id: L[7], is_quoting_default: null }])).rates;
+  assert.deepEqual(blank, [], 'blank new rows are skipped (left out of the preview), not invalid');
   refused(ADMIN, commit([], []), /RATE_REVIEW_ROWS_REQUIRED/);
   console.log('[case] 9 one invalid row in three: the preview shows each row and writes nothing; commit refuses by name and saves nothing; malformed rows are invalid');
 

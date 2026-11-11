@@ -260,7 +260,7 @@ BEGIN
     WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN raise_exception OR check_violation OR unique_violation OR foreign_key_violation OR not_null_violation
          OR invalid_text_representation OR numeric_value_out_of_range OR data_exception THEN
-      IF SQLERRM LIKE 'PRODUCT_WEIGHT_STALE:%' THEN
+      IF starts_with(SQLERRM, 'PRODUCT_WEIGHT_STALE:') THEN
         RETURN v_out || jsonb_build_object('status', 'stale', 'problem', 'changed by someone else since you downloaded it');
       END IF;
       RETURN v_out || jsonb_build_object('status', 'invalid', 'problem', SQLERRM);
@@ -512,7 +512,7 @@ BEGIN
     WHEN SQLSTATE 'P0099' THEN NULL;
     WHEN raise_exception OR check_violation OR unique_violation OR foreign_key_violation OR not_null_violation
          OR invalid_text_representation OR numeric_value_out_of_range OR data_exception THEN
-      IF SQLERRM LIKE 'CHEMISTRY_STALE:%' THEN
+      IF starts_with(SQLERRM, 'CHEMISTRY_STALE:') THEN
         RETURN v_out || jsonb_build_object('status', 'stale', 'problem', 'its chemistry changed since you downloaded it');
       END IF;
       RETURN v_out || jsonb_build_object('status', 'invalid', 'problem', SQLERRM, 'items', v_items);

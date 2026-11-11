@@ -701,4 +701,6 @@ Your REG-1 rule (2026-11-09, kept 2026-11-10) is "the product's own number". Bra
 - **Recommended: one record per brand on that line** (two brands, two records, each pointing at the same line and naming its brand). The one-record rule becomes "one per line per brand"; a line with no brand recorded keeps one record as today.
 - Alternative: split the invoice line into one line per brand when the invoice is made. Simpler records, but it changes how invoices look and touches invoice amounts.
 
-Both answers are needed before sections 3 to 7 are rewritten. After the rewrite the sheet gets a fresh independent review before B-1 is built.
+**Question 9 answered (Mason, 2026-11-10): "One record per brand".** A line delivered as two brands gets two records, each pointing at that line and naming its brand; #1746's one-active-record-per-line rule becomes one per line per brand. Invoice lines are not split.
+
+Question 8 is still open; both answers are needed before sections 3 to 7 are rewritten. After the rewrite the sheet gets a fresh independent review before B-1 is built.

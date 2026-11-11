@@ -1,3 +1,4 @@
+import { toSentryError } from './sentryError';
 import { assertRpcResult, supabaseUntyped } from './db';
 import { BUSINESS_TIMEZONE } from './dateUtils';
 import { Sentry } from './sentry';
@@ -179,7 +180,7 @@ export async function warnWeightsChangedWhileSaving(ticketId: string, lines: rea
     const names = await weightsChangedWhileSaving(ticketId, lines, preview.lines);
     names.forEach((name) => warn(`${name}'s weight changed while saving; the ticket keeps the saved weight`));
   } catch (error: unknown) {
-    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { level: 'warning', extra: { context } });
+    Sentry.captureException(toSentryError(error), { level: 'warning', extra: { context } });
     warn('The ticket saved, but its weights could not be checked. Reopen the ticket to see them.');
   }
 }

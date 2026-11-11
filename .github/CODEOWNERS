@@ -1,0 +1,3 @@
+# Changes to CI, the release flow and these rules need a code owner's review once
+# "Require review from Code Owners" is on for main and staging (Mason's point 5, 2026-11-03).
+/.github/ @masonwells1 @TahaKhanAbdalli

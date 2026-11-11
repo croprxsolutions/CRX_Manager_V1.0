@@ -89,11 +89,6 @@ export default function OrderDetail() {
   const priceOrderIdem = useIdempotencyKey('price_order', profile?.id || '');
   // Keyed per order and value: a retry of "on" never replays an "off".
   const salesTaxIdem = useIdempotencyKey('set_order_sales_tax', profile?.id || '');
-  // F1 (CodeRabbit): consolidate_draft_invoices sends only (p_order_id, p_performed_by,
-  // p_idempotency_key), so the route id is the WHOLE of what a retry can vary. The key is
-  // retained across an ambiguous reply, and this page does not remount between orders, so
-  // without this scope order A's cached receipt could replay against order B.
-  const consolidateIdem = useIdempotencyKey('consolidate_draft_invoices', profile?.id || '', id ?? '');
   // Keep retries scoped to the order, as for cancellation.
   const splitInvoiceIdem = useIdempotencyKey('create_split_invoices_from_order', profile?.id || '', id ?? '');
   // Latest order id the route is showing — older in-flight fetches bail (M6 stale guard).
@@ -184,9 +179,8 @@ export default function OrderDetail() {
   // Ship-now/price-later (#2): per-line price inputs for a needs_pricing order.
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [pricingOrder, setPricingOrder] = useState(false);
-  // #4 billing cockpit: post-all-drafts / consolidate-drafts actions.
+  // #4 billing cockpit: post-all-drafts action.
   const [postingAll, setPostingAll] = useState(false);
-  const [consolidating, setConsolidating] = useState(false);
   // An admin whose line costs failed to load must not edit lines: the edit would start from
   // cost-less rows (Luna round 2). Cleared by the next successful load.
   const [itemCostsFailed, setItemCostsFailed] = useState(false);
@@ -1230,41 +1224,8 @@ export default function OrderDetail() {
     setPostingAll(false);
   };
 
-  // #4 billing cockpit: merge this order's draft invoices into one (Agvance pattern).
-  const handleConsolidateDrafts = async () => {
-    if (!order || !profile) return;
-    // F1 (CodeRabbit round 2): on A -> B navigation the route id is already B while
-    // `order` still holds A — the id effect refetches but never clears `order`, and
-    // `loading` is never reset to true, so this button stays live in that window.
-    // Acting there would send A's id under a key scoped to B, and B's own retry would
-    // then replay A's receipt. Refusing until the loaded order IS the route order makes
-    // the key's scope and the request's p_order_id provably one value.
-    if (order.id !== id) return;
-    setConsolidating(true);
-    try {
-      const idem = consolidateIdem.getKey();
-      const { data, error } = await supabase.rpc('consolidate_draft_invoices', { p_order_id: order.id, p_performed_by: profile.id, p_idempotency_key: idem });
-      if (error) throw error;
-      const result = assertRpcResult<{ success: boolean; consolidated: boolean; merged_count?: number }>(data, 'consolidate_draft_invoices');
-      consolidateIdem.resetKey();
-      if (result.consolidated) toast('success', `Consolidated ${(result.merged_count ?? 0) + 1} draft invoices into one.`);
-      else toast('info', 'Nothing to consolidate — fewer than 2 draft invoices.');
-      await fetchOrder();
-    } catch (err) {
-      // A key used for another request or person retires; a repeat is harmless (fewer than 2 drafts
-      // is a no-op), so reload to show a merge an earlier attempt made.
-      const bindingRejection = getIdempotencyBindingRejection(err);
-      if (bindingRejection === 'intent' || bindingRejection === 'actor') {
-        consolidateIdem.resetKey();
-        await fetchOrder();
-      }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'consolidate_draft_invoices' } });
-      if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) toast('error', 'Only admin or sales can consolidate invoices.');
-      else toast('error', sanitizeError(err));
-    } finally {
-      setConsolidating(false);
-    }
-  };
+  // (Consolidate drafts removed 2026-11-11: each delivery bills on its own invoice, capped at what it
+  // delivered, and invoice lines can't move between invoices (20260721), so the merge could only fail.)
 
   // (booking-prepay "Apply booking prepay" action removed 2026-06-14 — the earmark
   // engine is shelved for a reserved-pool redesign: docs/roadmap/shelved-earmark-engine/)
@@ -1832,11 +1793,6 @@ export default function OrderDetail() {
             </div>
             {(role === 'admin' || role === 'sales_rep') && (
               <div className="flex items-center gap-2">
-                {invoices.filter((i) => i.status === 'draft').length >= 2 && (
-                  <Button variant="secondary" size="sm" showChevron={false} onClick={handleConsolidateDrafts} loading={consolidating}>
-                    Consolidate drafts
-                  </Button>
-                )}
                 {invoices.some((i) => i.status === 'draft' || i.status === 'unposted') && (
                   <Button variant="secondary" size="sm" showChevron={false} onClick={handlePostAllDrafts} loading={postingAll}>
                     Post all drafts

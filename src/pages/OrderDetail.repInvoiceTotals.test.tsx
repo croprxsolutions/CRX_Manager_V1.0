@@ -118,6 +118,20 @@ describe('OrderDetail AR strip for non-admins', () => {
   });
 });
 
+describe('OrderDetail draft invoice actions', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Consolidate drafts is retired (Taha 2026-11-11): each delivery bills on its own invoice, capped at what
+  // it delivered, and invoice lines can't move between invoices (20260721), so the merge could only fail.
+  it('offers Post all drafts but no Consolidate drafts on an order with two drafts', async () => {
+    const draft = (n: number) => ({ ...paidInvoice, id: `inv-d${n}`, invoice_number: `CS-000${n}`, status: 'draft',
+      paid_amount_cents: 0, balance_cents: 50000 });
+    renderWith('admin', [draft(1), draft(2)]);
+    expect(await screen.findByRole('button', { name: /Post all drafts/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Consolidate drafts/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('OrderDetail sales tax box (billing plan M4a)', () => {
   beforeEach(() => vi.clearAllMocks());
 

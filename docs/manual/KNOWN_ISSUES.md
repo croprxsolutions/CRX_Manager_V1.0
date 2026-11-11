@@ -879,12 +879,12 @@ read its ledger: an `adjusted` row that changed only pre-booked stock belongs in
 (`src/lib/reconciliation.ts`); anything else is fixed with a reviewed migration.
 
 ### KI-116 — Product Detail treats a non-product address as a load failure
-**LOW · OPEN (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**
+**LOW · FIXED in PR (seen live 2026-11-07, Sentry CRX-MANAGER-1T and -1J) · products-ui · source: 2026-11-10 prod spot-check**
 Opening `/products/group` (no link on `main` points there; most likely typed or an old bookmark for
 `/group-products`) sends "group" to the database as a product id. Two reads fail with "invalid input syntax for type
-uuid" and the page shows a load failure, not "product not found". Nothing is saved or changed. Fix when next in
-`src/pages/ProductDetail.tsx` (Sol-listed): check the id is a uuid before loading, or send `/products/group` to
-`/group-products`.
+uuid" and the page shows a load failure, not "product not found". Nothing is saved or changed. Fix (2026-11-10):
+the route wrapper `src/components/ProductDetailRoute.tsx` shows "Product not found" for any id that is neither
+`new` nor a uuid, before the page asks the database (`ProductDetailRoute.test.tsx`).
 
 ### KI-134 — A stock count double-counts anything that moved while the count was open
 **HIGH · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #1) · unassigned**

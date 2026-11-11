@@ -129,3 +129,32 @@ describe('SettingsPage — Edit User', () => {
     })));
   });
 });
+
+describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFrom.mockImplementation((table: string) => chain(
+      table === 'profiles' ? USERS : table === 'app_settings' ? [{ setting_key: 'sales_tax_rate', setting_value: '6.25' }] : [],
+    ));
+    mockRpc.mockResolvedValue({ data: {}, error: null });
+  });
+
+  it('shows the saved rate and saves a new one', async () => {
+    await renderPage();
+    const input = screen.getByLabelText('Sales tax rate');
+    expect(input).toHaveValue('6.25');
+    expect(saveButton('Save sales tax')).toBeDisabled();
+    fireEvent.change(input, { target: { value: '7.5' } });
+    fireEvent.click(saveButton('Save sales tax'));
+    await waitFor(() => expect(saveButton('Save sales tax')).toBeDisabled());
+    expect(mockUpsert).toHaveBeenCalledWith(expect.objectContaining({ setting_key: 'sales_tax_rate', setting_value: '7.5' }));
+  });
+
+  it('refuses a rate that is not a plain percentage before saving', async () => {
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Sales tax rate'), { target: { value: '6.25%' } });
+    fireEvent.click(saveButton('Save sales tax'));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('0 to 99.999')));
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+});

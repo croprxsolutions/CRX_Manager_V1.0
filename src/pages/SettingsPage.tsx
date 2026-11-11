@@ -187,6 +187,7 @@ interface SettingsForm {
   defaultValidDays: string;
   arReminderDays: string;
   defaultTier: string;
+  salesTaxRate: string;
   fuelSurcharge: FuelSurchargeConfig;
   autoDraftEnabled: boolean;
   guardrailMode: GuardrailMode;
@@ -205,6 +206,7 @@ function toSettingValues(f: SettingsForm): Record<string, string> {
     default_quote_valid_days: f.defaultValidDays,
     ar_reminder_days: f.arReminderDays,
     default_tier: f.defaultTier,
+    sales_tax_rate: f.salesTaxRate,
     fuel_surcharge: serializeFuelSurchargeConfig(f.fuelSurcharge),
     [AUTO_DRAFT_SETTING_KEY]: serializeAutoDraftEnabled(f.autoDraftEnabled),
     [LABEL_RATE_GUARDRAIL_MODE_KEY]: serializeGuardrailMode(f.guardrailMode),
@@ -219,6 +221,7 @@ const GROUP_KEYS = {
   fuel: ['fuel_surcharge'],
   autoDraft: [AUTO_DRAFT_SETTING_KEY],
   defaults: ['default_quote_valid_days', 'ar_reminder_days', 'default_tier'],
+  salesTax: ['sales_tax_rate'],
   guardrail: [LABEL_RATE_GUARDRAIL_MODE_KEY],
   sheet: ['applicator_sheet_custom'],
   notices: ['pre_application_notice_template', 'post_application_notice_template'],
@@ -335,6 +338,8 @@ export default function SettingsPage() {
   const [defaultValidDays, setDefaultValidDays] = useState('30');
   const [arReminderDays, setArReminderDays] = useState('30');
   const [defaultTier, setDefaultTier] = useState('1');
+  const [salesTaxRate, setSalesTaxRate] = useState('6.25');
+  const [savingSalesTax, setSavingSalesTax] = useState(false);
   // #32: Fuel Surcharge — OFF by default, rate blank. The owner sets the rule.
   const [fuelSurcharge, setFuelSurcharge] = useState<FuelSurchargeConfig>(DEFAULT_FUEL_SURCHARGE);
   const [savingFuel, setSavingFuel] = useState(false);
@@ -392,7 +397,7 @@ export default function SettingsPage() {
   const [savedValues, setSavedValues] = useState<Record<string, string> | null>(null);
 
   const values = toSettingValues({
-    companyName, companyPhone, companyEmail, companyAddress, defaultValidDays, arReminderDays, defaultTier,
+    companyName, companyPhone, companyEmail, companyAddress, defaultValidDays, arReminderDays, defaultTier, salesTaxRate,
     fuelSurcharge, autoDraftEnabled, guardrailMode, sheetConfig, preNoticeTemplate, postNoticeTemplate,
   });
   const changedKeys = (group: SettingsGroup) =>
@@ -424,6 +429,7 @@ export default function SettingsPage() {
       defaultValidDays: map['default_quote_valid_days'] || '30',
       arReminderDays: map['ar_reminder_days'] || '30',
       defaultTier: map['default_tier'] || '1',
+      salesTaxRate: map['sales_tax_rate'] || '6.25',
       // #32: blank/absent => the inert OFF default (never invents a rate).
       fuelSurcharge: parseFuelSurchargeConfig(map['fuel_surcharge']),
       // §4: blank/absent/anything-but-'true' => OFF (the safe default).
@@ -443,6 +449,7 @@ export default function SettingsPage() {
     setDefaultValidDays(loaded.defaultValidDays);
     setArReminderDays(loaded.arReminderDays);
     setDefaultTier(loaded.defaultTier);
+    setSalesTaxRate(loaded.salesTaxRate);
     setFuelSurcharge(loaded.fuelSurcharge);
     setAutoDraftEnabled(loaded.autoDraftEnabled);
     setGuardrailMode(loaded.guardrailMode);
@@ -535,6 +542,26 @@ export default function SettingsPage() {
       toast('error', sanitizeError(err));
     }
     setSavingDefaults(false);
+  };
+
+  // The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20261231120000).
+  const saveSalesTax = async () => {
+    const rate = salesTaxRate.trim();
+    if (!/^[0-9]{1,2}(\.[0-9]{1,3})?$/.test(rate)) {
+      toast('error', 'Enter the sales tax rate as a percentage from 0 to 99.999, for example 6.25.');
+      return;
+    }
+    setSavingSalesTax(true);
+    try {
+      await saveSetting('sales_tax_rate', rate);
+      setSalesTaxRate(rate);
+      markSaved(GROUP_KEYS.salesTax, { ...values, sales_tax_rate: rate });
+      toast('success', 'Sales tax rate saved');
+      if (profile) logActivity({ event: 'settings_updated', description: `Sales tax rate set to ${rate}%`, performedBy: profile.id });
+    } catch (err: unknown) {
+      toast('error', sanitizeError(err));
+    }
+    setSavingSalesTax(false);
   };
 
   const saveFuelSurcharge = async () => {
@@ -1195,6 +1222,25 @@ export default function SettingsPage() {
               <option value="2">Tier 2</option>
               <option value="3">Tier 3</option>
             </select>
+          </Row>
+        </SubPart>
+
+        <SubPart
+          title="Sales tax"
+          help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
+          dirty={isDirty('salesTax')}
+          saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
+        >
+          <Row label="Sales tax rate" htmlFor="sales-tax-rate">
+            <input
+              id="sales-tax-rate"
+              type="text"
+              inputMode="decimal"
+              value={salesTaxRate}
+              onChange={(e) => setSalesTaxRate(e.target.value)}
+              className={`${FIELD_CLASS} w-24`}
+            />
+            <span className="text-[13px] text-secondary">%</span>
           </Row>
         </SubPart>
       </SettingsSection>

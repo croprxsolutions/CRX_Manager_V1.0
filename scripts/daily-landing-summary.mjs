@@ -110,23 +110,12 @@ export function waitingReasons({ labels = [], files = [] }) {
       reasons.push(`its database change ${migrationName(path.basename(name))} deletes data (${plainText(verdict.reason, 100)}), which stays yours to approve`);
       continue;
     }
-    // Overwriting existing rows is his too (2026-09-27, "Data rewrites wait").
-    // Without history, a call to an earlier public function counts as unknown.
-    let rewrite;
-    try { rewrite = dataRewriteCheck(added); } catch { rewrite = { rewrites: true, reason: "could not be classified" }; }
-    if (rewrite.rewrites) {
-      reasons.push(`its database change ${migrationName(path.basename(name))} changes existing data (${plainText(rewrite.reason, 120)}), which stays yours to approve`);
-      continue;
-    }
-    // Permission changes are his too (2026-09-26). The patch shows only this
-    // PR's added lines, so for an EDITED file the check may miss objects the
-    // file created earlier — that errs toward listing it, never toward hiding it.
-    // No migration history is passed either, so a grant on a REPLACED object
-    // counts as unknown and is listed (Sol HIGH #2, round 10).
-    let access;
-    try { access = accessChangeCheck(added); } catch { access = { changesAccess: true, reason: "could not be classified" }; }
-    if (access.changesAccess) {
-      reasons.push(`its database change ${migrationName(path.basename(name))} changes who can access what (${plainText(access.reason, 120)}), which stays yours to approve`);
+    // Rewrites and access changes stopped being his on 2026-11-11 ("All but
+    // deletions"); only a check that cannot classify the SQL still lists it.
+    let unknown = false;
+    try { dataRewriteCheck(added); accessChangeCheck(added); } catch { unknown = true; }
+    if (unknown) {
+      reasons.push(`its database change ${migrationName(path.basename(name))} could not be classified, so it waits for you — have an agent check it`);
     }
   }
   return reasons;

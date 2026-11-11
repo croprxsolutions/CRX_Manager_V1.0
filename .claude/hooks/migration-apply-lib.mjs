@@ -315,6 +315,13 @@ export function resolveMigrationSource({
   };
 }
 
+// Mason, 2026-11-11 ("All but deletions"): a migration that overwrites rows or
+// changes access no longer waits for his code; it lands on the same reviewer,
+// Sol and landing proofs as any other. Deleting data still needs his reply, and
+// so does a rewrite or access check that crashed (unknown is not safe).
+export const ownerApprovalNeeded = (parked) =>
+  parked.filter((c) => c.category === "deletes-data" || /failing closed$/.test(String(c.reason)));
+
 export function evaluateMigrationApply({
   name,
   query,
@@ -948,8 +955,9 @@ export function evaluateMigrationApply({
         `a SECURITY DEFINER body that reaches them, dynamic SQL) is his. PARK it with a plain-English explanation of what access changes, and hand it ` +
         `to Mason. Do NOT split or rewrite the SQL to route around this.`,
     };
-    if (parked.length) {
-      const refusal = refusals[parked[0].category](parked[0]) + OWNER_ROUTE;
+    const needsOwner = ownerApprovalNeeded(parked);
+    if (needsOwner.length) {
+      const refusal = refusals[needsOwner[0].category](needsOwner[0]) + OWNER_ROUTE;
       if (!ownerApprovalDoor) return block(refusal);
       ownerApprovalCandidates = findOwnerApprovals(proofDirs, safeName);
       if (!ownerApprovalCandidates.length) {

@@ -51,10 +51,13 @@ eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/2026092
 eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_keep.sql",
   patch: "@@ -1,2 +1,1 @@\n-DROP TABLE public.gone;\n+SELECT 1;" }] }), [],
   "a REMOVED destructive line is not a destructive change");
-// Permission changes are Mason's too (2026-09-26 decision).
-ok(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_open_up.sql",
-  patch: "@@ -0,0 +1 @@\n+GRANT SELECT ON public.customers TO anon;" }] })[0].includes("changes who can access what"),
-  "a migration that widens access is his");
+// Permission changes and rewrites are no longer his (Mason, 2026-11-11, "All but deletions").
+eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_open_up.sql",
+  patch: "@@ -0,0 +1 @@\n+GRANT SELECT ON public.customers TO anon;" }] }), [],
+  "a migration that widens access no longer waits for him");
+eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_fix_rows.sql",
+  patch: "@@ -0,0 +1 @@\n+UPDATE public.invoices SET total_amount_cents = 0;" }] }), [],
+  "a migration that rewrites rows no longer waits for him");
 eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_new_fn.sql",
   patch: "@@ -0,0 +3 @@\n+CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n+REVOKE ALL ON FUNCTION public.f(uuid) FROM PUBLIC, anon;\n+GRANT EXECUTE ON FUNCTION public.f(uuid) TO authenticated;" }] }), [],
   "routine lock-down on a new function is not his");

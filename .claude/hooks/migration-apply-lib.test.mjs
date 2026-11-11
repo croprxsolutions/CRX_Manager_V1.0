@@ -19,7 +19,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { evaluateMigrationApply, normalizeMigName, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
+import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
@@ -514,9 +514,9 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
   denies(evaluate(destructiveFixture(autopilot), { query: DESTRUCTIVE, masonApprovedDestructive: true }),
     "destructive statement", `${label}: a self-asserted approval input is ignored — destructive SQL stays refused`);
 }
-// PERMISSIONS are Mason's too (Sol HIGH, round 9; his 2026-09-26 choice "Routine
-// auto, widening waits"): a migration that widens or changes existing access is
-// refused for agents in every session, whatever its proofs.
+// PERMISSIONS used to be Mason's (his 2026-09-26 "widening waits"). Since his
+// 2026-11-11 "All but deletions" an access change lands on the normal proofs and
+// a ready PR, armed or not, with no approval.
 {
   const WIDENING = "GRANT SELECT ON public.customers TO anon;\n";
   const wideningHash = createHash("sha256").update(WIDENING).digest("hex");
@@ -527,8 +527,10 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
     codexProof: { ...goodCodex, queryHash: wideningHash },
   });
   for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
-    denies(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: true }) }),
-      "changes who can access what", `${label}: a GRANT to anon is refused even with perfect proofs and a ready PR`);
+    allows(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: true }) }),
+      `${label}: a GRANT to anon applies with perfect proofs and a ready PR (no approval since 2026-11-11)`);
+    denies(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: false, reason: "MIGRATION LANDING GATE: not merge-ready" }) }),
+      "not merge-ready", `${label}: a GRANT to anon still waits for a merge-ready PR`);
   }
   // The routine lock-down on a function the same migration creates passes this
   // check and reaches the next one.
@@ -542,16 +544,16 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
   }), { query: ROUTINE_SQL, landingGate: () => ({ ok: true }) }),
     "routine lock-down on a new function applies with perfect proofs and a ready PR");
 
-  // Sol round 11 (Mason 2026-09-27, "Data rewrites wait"): overwriting existing
-  // rows is refused like deleting them, whatever the proofs.
+  // Overwriting existing rows waited for Mason from 2026-09-27 ("Data rewrites
+  // wait") until his 2026-11-11 "All but deletions": it now lands on the proofs.
   const REWRITE = "UPDATE public.invoices SET total_amount_cents = 0;\n";
   const rewriteHash = createHash("sha256").update(REWRITE).digest("hex");
-  denies(evaluate(fixture({
+  allows(evaluate(fixture({
     migrationFile: REWRITE,
     proof: { migration: MIG, timestamp: iso(0), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: rewriteHash },
     codexProof: { ...goodCodex, queryHash: rewriteHash },
   }), { query: REWRITE, landingGate: () => ({ ok: true }) }),
-    "changes existing data", "an UPDATE of existing rows is refused even with perfect proofs and a ready PR");
+    "an UPDATE of existing rows applies with perfect proofs and a ready PR (no approval since 2026-11-11)");
 
   // Sol round 10: the gate reads the migration HISTORY beside the file. An
   // earlier (already applied) migration locked f away from authenticated, so
@@ -570,9 +572,9 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
     if (earlier) writeFileSync(path.join(root, "supabase", "migrations", "20260101000000_baseline.sql"), earlier, "utf8");
     return root;
   };
-  denies(evaluate(replaceFixture("CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n" +
+  allows(evaluate(replaceFixture("CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n" +
     "REVOKE ALL ON FUNCTION public.f(uuid) FROM PUBLIC, anon, authenticated;\n"), { query: REPLACE_SQL, landingGate: () => ({ ok: true }) }),
-    "did not have before", "replacing a locked-down function and granting it to authenticated is refused (history read from disk)");
+    "replacing a locked-down function and granting it to authenticated now lands on the proofs (2026-11-11)");
   allows(evaluate(replaceFixture(null), { query: REPLACE_SQL, landingGate: () => ({ ok: true }) }),
     "the same replace with no earlier definition is a new function's routine lock-down");
 }
@@ -1940,7 +1942,26 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     query: sql, ownerApprovalDoor: true, ownerSessionId: "sess-mason-chat-0001", ownerTrustCheck: () => {}, landingGate: readyLanding, ...over,
   });
 
-  for (const [category, sql] of Object.entries(parkedSql)) {
+  // Mason, 2026-11-11 ("All but deletions"): overwriting rows or changing access
+  // lands on the normal proofs through either door, with no approval at all.
+  for (const category of ["overwrites-data", "changes-access"]) {
+    const sql = parkedSql[category];
+    allows(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }),
+      `${category}: lands on the normal proofs through the MCP door with no approval`);
+    allows(scriptDoor(ownerFixture(sql), sql, { ownerTrustCheck: () => { throw new Error("must not be run"); } }),
+      `${category}: the apply script's door never asks for an approval`);
+    denies(evaluate(ownerFixture(sql, { proofs: false }), { query: sql, landingGate: readyLanding }),
+      "without subagent review proof", `${category}: still needs the reviewer proof`);
+  }
+  // A crashed rewrite/access check is unknown, not safe: it still needs Mason.
+  ok(ownerApprovalNeeded([{ category: "changes-access", reason: "access-check error (boom) — failing closed" }]).length === 1,
+    "a crashed access check still waits for Mason");
+  ok(ownerApprovalNeeded([{ category: "overwrites-data", reason: "data-rewrite check error (boom) — failing closed" }]).length === 1,
+    "a crashed rewrite check still waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(parkedSql["overwrites-data"] + parkedSql["changes-access"])).length === 0,
+    "a plain rewrite plus a grant needs no approval");
+  // Deleting data stays Mason's; a file that deletes AND changes access does too.
+  for (const [category, sql] of Object.entries({ "deletes-data": parkedSql["deletes-data"], "deletes-and-grants": `${parkedSql["deletes-data"]}${parkedSql["changes-access"]}` })) {
     const approval = approvalFor(sql);
     const v = scriptDoor(ownerFixture(sql, { approval }), sql);
     allows(v, `${category}: Mason's valid chat-reply approval lets it through the apply script's door`);
@@ -1951,7 +1972,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       "THE ONE WAY THROUGH", `${category}: the MCP door (no ownerApprovalDoor) refuses even with a valid approval`);
   }
 
-  const ACCESS = parkedSql["changes-access"];
+  const ACCESS = parkedSql["deletes-data"];
   denies(scriptDoor(ownerFixture(ACCESS), ACCESS), "No approval from Mason was found",
     "the apply script's door without an approval refuses");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS), proofs: false }), ACCESS),
@@ -1974,7 +1995,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "applying session is unknown", "an apply with no session id fails closed");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
     "not the pull request's current head", "an approval for another head is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "changes-access", reason: "adds a comment" }] }) }), ACCESS),
+  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "deletes-data", reason: "adds a comment" }] }) }), ACCESS),
     "in the words the safety check uses", "an approval that softened what Mason was told is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS,
     { landingGate: () => ({ ok: true }) }), "head is unknown", "a landing verdict without a head fails closed");
@@ -1986,7 +2007,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     // An approval of one parked file cannot carry a different parked file.
     const approval = approvalFor(ACCESS);
-    const DROP = parkedSql["deletes-data"];
+    const DROP = "DROP TABLE public.vendors;\n";
     denies(scriptDoor(ownerFixture(DROP, { approval }), DROP), "file changed",
       "an approval of different SQL under the same name is refused");
   }

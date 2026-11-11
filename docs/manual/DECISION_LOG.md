@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
+
+**Decision (Mason, in chat, 2026-11-11: "I should be able to pre authorize migration … I rely on testing and verification", then "All but deletions").** A migration that overwrites existing rows or changes who can access what no longer needs his `I approve` reply; it applies on the same two reviewer proofs, Sol proof and landing gate as any non-destructive migration. A migration that deletes data still needs his reply for that exact file, and so does one whose rewrite or access check crashed.
+**Why:** he cannot read SQL, so his reply added a manual step without adding review; the reviewers and Sol are what judge the change. Deletions stay his because deleted data has no point-in-time recovery on this plan.
+**What this forbids/implies:** supersedes "Routine auto, widening waits" (2026-09-26) and "Data rewrites wait" (2026-09-27) for migrations. Enforced by `ownerApprovalNeeded` in `.claude/hooks/migration-apply-lib.mjs`. Logins, secrets, billing and permission changes outside a reviewed migration still need his current yes.
+
 ## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
 
 **Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.

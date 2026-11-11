@@ -23,6 +23,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import HelpTip from '../components/ui/HelpTip';
 import type { CycleCount, CycleCountItem } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 type CountRow = CycleCount & {
   initiator_name: string;
@@ -967,7 +968,7 @@ export default function CycleCounts() {
       // Only 'intent' and 'actor' prove nothing committed under this key; a 'receipt' refusal keeps it.
       const bindingRejection = getIdempotencyBindingRejection(err);
       if (bindingRejection === 'intent' || bindingRejection === 'actor') reverseCycleCountIdem.resetKey();
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_cycle_count' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_cycle_count' } });
       // sanitizeError maps the replay-binding refusal codes to plain English.
       toast('error', sanitizeError(err));
     } finally {

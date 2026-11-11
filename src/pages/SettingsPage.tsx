@@ -1,3 +1,4 @@
+import { toSentryError } from '../lib/sentryError';
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2 } from 'lucide-react';
@@ -768,7 +769,7 @@ export default function SettingsPage() {
         fetchUsers();
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'create_user' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'create_user' } });
       toast('error', err instanceof Error ? err.message : 'Failed to create user');
     }
     setCreatingUser(false);
@@ -929,7 +930,7 @@ export default function SettingsPage() {
         setAdminConfirmPassword('');
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'admin_reset_password' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'admin_reset_password' } });
       toast('error', err instanceof Error ? err.message : 'Failed to set password');
     }
     setSettingPassword(false);

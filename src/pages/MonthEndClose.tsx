@@ -27,6 +27,7 @@ import YearEndSummaryDialog from '../components/reports/YearEndSummaryDialog';
 import type { DetailedStatementData, StatementOptions, YearEndSummaryData } from '../types';
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
 import { getRecognizedInvoiceCustomerIds } from '../lib/recognizedInvoiceCustomers';
+import { toSentryError } from '../lib/sentryError';
 
 interface PeriodInfo {
   id?: string;
@@ -307,7 +308,7 @@ export default function MonthEndClose() {
         closePeriodIdem.resetKey();
         fetchData();
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
       toast('error', sanitizeError(err));
     }
     setClosing(false);
@@ -347,7 +348,7 @@ export default function MonthEndClose() {
         reopenPeriodIdem.resetKeyFor(reopenScope);
         fetchData();
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'reopen_accounting_period' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'reopen_accounting_period' } });
       toast('error', sanitizeError(err));
     }
     setReopening(false);
@@ -395,7 +396,7 @@ export default function MonthEndClose() {
       await downloadBatchStatements(statements, options);
       toast('success', `Generated ${statements.length} customer statement(s)`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'generate_batch_statements' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'generate_batch_statements' } });
       toast('error', sanitizeError(err));
     }
     setGenerating(false);
@@ -430,7 +431,7 @@ export default function MonthEndClose() {
       toast('success', `Generated ${summaries.length} year-end summary PDF(s)`);
       setShowYeDialog(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'get_batch_year_end_summaries' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'get_batch_year_end_summaries' } });
       toast('error', sanitizeError(err));
     }
     setYeLoading(false);

@@ -27,6 +27,7 @@ jobs:
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
       GITHUB_TOKEN: ${{ github.token }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,4 +36,10 @@ jobs:
           # Kept so the script can re-fetch tags if the repository is private (it runs main's code only).
       - run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no tag."; exit 0; fi
+          # A squash or rebase leaves staging's commits outside main, so the next release would count them
+          # again: no tag until it is fixed (a history-only merge of the branch into main, like #1786).
+          if [ "$(git rev-list --parents -n 1 "$MERGE_SHA" | wc -w)" -ne 3 ]; then
+            echo "::error::This PR was not merged with a merge commit, so main doesn't contain its branch. No tag. Record the branch as merged with a merge commit, then tag by hand."
+            exit 1
+          fi
           node .github/scripts/release-flow.mjs tag-release

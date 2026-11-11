@@ -4,9 +4,6 @@
 --  operation, actor or payload, then save their receipt with save_idempotency (REG-1's pattern). edit_delivery keeps
 --  its live check_idempotency_intent + bound-receipt pair; its body writes the receipt. The hook only recognises
 --  check_idempotency.)
--- actor-binding-check: exempt
--- (_enqueue_delivery_receipt's p_actor: an internal helper with EXECUTE revoked from every app role, called only by
---  the complete_delivery body, which passes auth.uid(); this file changes only its receipt lines.)
 --
 -- Written 2026-11-11. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
 -- docs/reference/migrations.d/20270104120000_delivery_brands.md. Re-read the live ledger before applying.
@@ -34,12 +31,13 @@
 --      transaction-local setting crx.brand_base_seq.
 --   5. edit_delivery's wrapper carries picks across the body's delete-and-recreate of lines (a line whose order item,
 --      product, quantity and unit size are unchanged, and unambiguous, keeps its picks) and writes one 'edited' event.
---   6. _enqueue_delivery_receipt adds each line's brands (or brand_recorded false) to the receipt snapshot.
+--   6. The receipt snapshot is NOT changed here: brands on the customer receipt ship with B-3, together with the
+--      sender that prints them and the resend after a correction (Sol round 2).
 --
--- NOT CHANGED: _complete_delivery_authorized_impl, _edit_delivery_replay_impl_20261015, every invoice, RUP, stock and
+-- NOT CHANGED: _complete_delivery_authorized_impl, _edit_delivery_replay_impl_20261015, _enqueue_delivery_receipt, every invoice, RUP, stock and
 --   money function and column. No existing row is written.
 --
--- ROLLBACK (its own reviewed migration, a forward repair): restore the five re-issued function bodies (md5-pinned
+-- ROLLBACK (its own reviewed migration, a forward repair): restore the four re-issued function bodies (md5-pinned
 --   below) and the two original signatures, and drop the new functions. The two tables and their rows STAY: every
 --   completion after this apply writes a 'completed' event, and any picks saved are history; they are dropped only
 --   by a separate, explicitly approved migration.
@@ -64,7 +62,6 @@ DECLARE
     ['complete_delivery', 'eed8da07fedbec14a198ca4f6e26c213'],
     ['start_and_complete_delivery', '640603e6dce34abc1fe18d4dad6adc56'],
     ['edit_delivery', '99d606e01caacc135c9469eedba11491'],
-    ['_enqueue_delivery_receipt', 'edd5ddb32392517994c6587654c9cbc7'],
     ['_edit_delivery_replay_impl_20261015', '942011a2bf15b83269e74830fa057377']];
   v_i integer;
 BEGIN
@@ -132,7 +129,7 @@ CREATE TABLE public.delivery_brand_events (
 CREATE INDEX delivery_brand_events_delivery_idx ON public.delivery_brand_events (delivery_id, seq);
 
 COMMENT ON TABLE public.delivery_brand_events IS
-  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery, line_removed aside, is the stale-save base. Written only by the delivery brand functions and the delivery_items delete trigger; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed, lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}; line_removed {delivery_item_id, order_item_id, product_id}.';
+  'Brand PR B (20270104120000): append-only history of every change to a delivery''s brand picks. The highest seq per delivery, line_removed aside, is the stale-save base. Written only by the delivery brand functions and the delivery_items delete trigger; B-1b re-copies invoice drafts off its inserts. details: completed {picks_confirmed (true, false = completed from an out-of-date screen, or null = no seq sent), lines[{delivery_item_id, product_id, quantity_delivered, brand_list_size, pick_count, picked_quantity}]}; edited {kept[{old_delivery_item_id, delivery_item_id}], dropped[{old_delivery_item_id, order_item_id, product_id}]}; reviewed {action, brand_id}; line_removed {delivery_item_id, order_item_id, product_id}.';
 
 CREATE TABLE public.delivery_item_brands (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -926,6 +923,10 @@ BEGIN
              di.id AS delivery_item_id, di.product_id, p.product_name,
              COALESCE(di.quantity_delivered, di.quantity) AS delivered,
              ev.details AS completed_details,
+             -- Completed from a screen whose picks were out of date, and this line not corrected since.
+             (ev.details ->> 'picks_confirmed' = 'false'
+              AND NOT EXISTS (SELECT 1 FROM public.delivery_item_brands s
+                               WHERE s.delivery_item_id = di.id AND s.superseded_by_event_seq > ev.seq)) AS unconfirmed,
              (SELECT (l.value ->> 'brand_list_size')::integer FROM jsonb_array_elements(ev.details -> 'lines') l
                WHERE l.value ->> 'delivery_item_id' = di.id::text) AS list_size_at_completion,
              (SELECT count(*) FROM public.delivery_item_brands b
@@ -941,7 +942,7 @@ BEGIN
         FROM public.deliveries d
         JOIN public.delivery_items di ON di.delivery_id = d.id
         LEFT JOIN public.products p ON p.id = di.product_id
-        LEFT JOIN LATERAL (SELECT e.details FROM public.delivery_brand_events e
+        LEFT JOIN LATERAL (SELECT e.seq, e.details FROM public.delivery_brand_events e
                             WHERE e.delivery_id = d.id AND e.event_type = 'completed'
                             ORDER BY e.seq DESC LIMIT 1) ev ON true
        WHERE d.status = 'completed' AND d.deleted_at IS NULL
@@ -956,7 +957,8 @@ BEGIN
                THEN 'brand_not_recorded' END,
           CASE WHEN l.pick_count > 0 AND l.picked <> round(l.delivered, 4) THEN 'split_does_not_match_delivered' END,
           CASE WHEN l.any_no_epa THEN 'epa_number_not_recorded' END,
-          CASE WHEN l.any_unlisted THEN 'brand_no_longer_listed' END], NULL) AS reasons
+          CASE WHEN l.any_unlisted THEN 'brand_no_longer_listed' END,
+          CASE WHEN l.pick_count > 0 AND l.unconfirmed THEN 'picks_not_confirmed' END], NULL) AS reasons
         FROM lines l
     )
     SELECT jsonb_agg(jsonb_build_object(
@@ -1045,11 +1047,13 @@ BEGIN
 
   -- 20270104120000 (Brand PR B): brands never refuse a completion (Mason 2026-11-09). A screen that sent the
   -- brand seq it loaded confirms the picks only if they have not changed since; otherwise the completion still
-  -- goes through and the 'completed' event records picks_confirmed false for the office.
+  -- goes through and the 'completed' event records picks_confirmed false, which puts its picked lines on the
+  -- office list. A caller that sent no seq (the app before B-2) records NULL: not stated, not flagged.
   PERFORM set_config('crx.brand_base_seq', '', true);
   -- Only the wrappers set the value; anything that is not a plain number reads as not confirmed, never an error.
-  v_picks_confirmed := CASE WHEN v_base_seq ~ '^[0-9]{1,18}$'
-    THEN v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id) ELSE false END;
+  v_picks_confirmed := CASE WHEN v_base_seq IS NULL THEN NULL
+    WHEN v_base_seq ~ '^[0-9]{1,18}$' THEN v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id)
+    ELSE false END;
 
   v_result := public._complete_delivery_authorized_impl(
     p_delivery_id,
@@ -1300,89 +1304,7 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
--- 11. The receipt snapshot carries each line's brands (the 20261113140000 body, one marked change).
--- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public._enqueue_delivery_receipt(p_delivery_id uuid, p_actor uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $function$
-DECLARE
-  v_delivery record;
-  v_worker_on boolean;
-BEGIN
-  SELECT d.id, d.delivery_number, d.customer_id, d.signed_by, d.completed_at, c.contact_name,
-         NULLIF(btrim(COALESCE(c.email, '')), '') AS email
-    INTO v_delivery
-    FROM public.deliveries d JOIN public.customers c ON c.id = d.customer_id
-   WHERE d.id = p_delivery_id AND d.status = 'completed' AND d.deleted_at IS NULL;
-  IF v_delivery.id IS NULL THEN
-    RETURN;
-  END IF;
-  -- No customer email on file now (removed after the screen checked), or the sender is not switched on yet (its two
-  -- Vault secrets, as the timer reads them): the office follows up instead of a row waiting with nobody to send it.
-  v_worker_on := EXISTS (SELECT 1 FROM vault.decrypted_secrets s WHERE s.name = 'delivery_receipt_worker_url')
-             AND EXISTS (SELECT 1 FROM vault.decrypted_secrets s WHERE s.name = 'delivery_receipt_worker_secret');
-  INSERT INTO public.delivery_receipt_queue (delivery_id, customer_id, requested_by, status, last_error, receipt)
-  VALUES (
-    p_delivery_id,
-    v_delivery.customer_id,
-    p_actor,
-    CASE WHEN v_delivery.email IS NULL OR NOT v_worker_on THEN 'needs_check' ELSE 'pending' END,
-    CASE WHEN v_delivery.email IS NULL THEN 'The customer has no email on file; the receipt was not sent.'
-         WHEN NOT v_worker_on THEN 'The receipt sender is not switched on; the receipt was not sent.' END,
-    jsonb_build_object(
-      'delivery_number', COALESCE(v_delivery.delivery_number, ''),
-      'delivered_on', to_char((v_delivery.completed_at AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD'),
-      'signed_by', v_delivery.signed_by,
-      'contact_name', v_delivery.contact_name,
-      'is_partial', EXISTS (SELECT 1 FROM public.delivery_items di
-                             WHERE di.delivery_id = p_delivery_id
-                               AND COALESCE(di.quantity_delivered, di.quantity) < di.quantity)
-                    OR EXISTS (SELECT 1 FROM public.delivery_remainders r WHERE r.original_delivery_id = p_delivery_id),
-      'lines', COALESCE((
-        SELECT jsonb_agg(jsonb_build_object('name', COALESCE(p.product_name, 'Product'),
-                                            'qty', COALESCE(di.quantity_delivered, di.quantity))
-                         -- 20270104120000 (Brand PR B): the brands that went off the truck, or that none was
-                         -- recorded on a line whose product has a brand list; an unbranded line is as before.
-                         || CASE
-                              WHEN EXISTS (SELECT 1 FROM public.delivery_item_brands b
-                                            WHERE b.delivery_item_id = di.id AND b.superseded_at IS NULL)
-                              THEN jsonb_build_object('brands', (
-                                -- Amounts only when the picks add up to what was delivered; otherwise the names alone
-                                -- (the office list shows the mismatch), never amounts that disagree with the line.
-                                SELECT jsonb_agg(jsonb_build_object('name', b.brand_name,
-                                         'epa_registration', b.epa_registration,
-                                         'quantity', CASE WHEN (SELECT sum(c.quantity) FROM public.delivery_item_brands c
-                                                                 WHERE c.delivery_item_id = di.id AND c.superseded_at IS NULL)
-                                                               = round(COALESCE(di.quantity_delivered, di.quantity), 4)
-                                                          THEN b.quantity END)
-                                         ORDER BY lower(b.brand_name), COALESCE(b.epa_registration, ''), b.id)
-                                  FROM public.delivery_item_brands b
-                                 WHERE b.delivery_item_id = di.id AND b.superseded_at IS NULL))
-                              WHEN EXISTS (SELECT 1 FROM public._delivery_line_brand_list(di.product_id))
-                              THEN jsonb_build_object('brand_recorded', false)
-                              ELSE '{}'::jsonb
-                            END
-                         ORDER BY p.product_name, di.id)
-          FROM public.delivery_items di LEFT JOIN public.products p ON p.id = di.product_id
-         WHERE di.delivery_id = p_delivery_id AND COALESCE(di.quantity_delivered, di.quantity) > 0
-      ), '[]'::jsonb)
-    )
-  )
-  -- A delivery completed again after its receipt was cancelled (nothing was ever sent) owes a fresh one; any
-  -- other existing row (owed, sent or on the office list) stands.
-  ON CONFLICT (delivery_id) DO UPDATE
-     SET customer_id = EXCLUDED.customer_id, requested_by = EXCLUDED.requested_by, status = EXCLUDED.status,
-         last_error = EXCLUDED.last_error, receipt = EXCLUDED.receipt, attempts = 0, next_attempt_at = now(),
-         attempt_to = NULL, send_authorized_at = NULL, send_confirmed_token = NULL, created_at = now()
-   WHERE delivery_receipt_queue.status = 'cancelled' AND delivery_receipt_queue.send_authorized_at IS NULL;
-END;
-$function$;
-
--- ---------------------------------------------------------------------------------------------
--- 12. Postflight.
+-- 11. Postflight.
 -- ---------------------------------------------------------------------------------------------
 DO $postflight$
 DECLARE
@@ -1411,7 +1333,7 @@ BEGIN
                        '_delivery_brands_on_complete', '_delivery_brand_may_read', '_delivery_brand_events_append_only',
                        '_delivery_brands_on_line_delete',
                        '_complete_delivery_evidence_impl_20270104', '_start_and_complete_delivery_impl_20270104',
-                       '_complete_delivery_aggregate_impl', '_enqueue_delivery_receipt')
+                       '_complete_delivery_aggregate_impl')
      AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
           OR has_function_privilege('service_role', p.oid, 'EXECUTE')
           OR EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
@@ -1424,8 +1346,7 @@ BEGIN
      AND (p.proname LIKE '\_delivery\_brand%' OR p.proname LIKE '\_delivery\_line\_brand%'
           OR p.proname IN ('set_delivery_brands', 'correct_delivery_brands', 'review_typed_brand', 'get_delivery_brands',
                            'get_typed_brands_for_review', 'get_deliveries_missing_brands', 'complete_delivery',
-                           'start_and_complete_delivery', 'edit_delivery', '_enqueue_delivery_receipt',
-                           '_complete_delivery_aggregate_impl'))
+                           'start_and_complete_delivery', 'edit_delivery', '_complete_delivery_aggregate_impl'))
      AND NOT (COALESCE(p.proconfig, '{}') @> ARRAY['search_path=public, pg_temp']);
   IF v_bad IS NOT NULL THEN RAISE EXCEPTION 'POSTFLIGHT_DELIVERY_BRANDS: search_path not pinned on %', v_bad; END IF;
   -- App roles only read the new tables (effective privileges, including through PUBLIC).

@@ -404,7 +404,7 @@ async function main() {
     if (KEEP) copyDatabase('postgres', 'bb_snap');
   }
 
-  // 0. The replay reproduces the six live bodies the candidate pins (so the preflight is tested against live).
+  // 0. The replay reproduces the five live bodies the candidate pins (so the preflight is tested against live), and the receipt helper it must leave alone.
   for (const [fn, md5] of Object.entries(LIVE_MD5)) {
     assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = '${fn}';`), md5, `${fn} replay differs from live`);
   }
@@ -509,7 +509,7 @@ async function main() {
   assert.deepEqual(picks(DI(1, 1)), [], 'zero delivered keeps no picks');
   assert.deepEqual(picks(DI(2, 0)).map((p) => p.quantity), [6], 'one pick above delivered is trimmed');
   const done1 = JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(1)}' AND event_type = 'completed';`));
-  assert.equal(done1.picks_confirmed, false);
+  assert.equal(done1.picks_confirmed, null, 'no seq sent (the app before B-2) records not stated');
   assert.deepEqual(done1.lines.map((l) => [l.delivery_item_id, Number(l.quantity_delivered), Number(l.brand_list_size)]).sort(),
     [[DI(1, 0), 8, 2], [DI(1, 1), 0, 2], [DI(1, 2), 4, 0]].sort());
   assert.ok(maxSeq(D(1)) > before1);
@@ -646,14 +646,10 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
     p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(7, 0)]: 4, [DI(7, 1)]: 2, [DI(7, 2)]: 1, [DI(7, 3)]: 2, [DI(7, 4)]: 2 })}, p_idempotency_key => 'bb-c7',
     p_evidence => 'left_at_site', p_evidence_ref => '${id(77)}', p_email_receipt => true)::text;`);
   const receipt = JSON.parse(scalar(`SELECT receipt::text FROM public.delivery_receipt_queue WHERE delivery_id = '${D(7)}';`));
-  const rl = receipt.lines.map((l) => ({ ...l, qty: Number(l.qty) }));
-  assert.deepEqual(rl.find((l) => l.brands?.some((b) => b.name === 'Lima'))?.brands.map((b) => [b.name, b.epa_registration, Number(b.quantity)]), [['Alpha', '100-1', 3], ['Lima', null, 1]]);
-  assert.deepEqual(rl.find((l) => l.brands?.some((b) => b.name === 'Kilo'))?.brands.map((b) => [b.name, b.quantity]), [['Alpha', null], ['Kilo', null]],
-    'a split that does not add up to delivered shows names only, no amounts');
-  assert.deepEqual(rl.filter((l) => l.brands?.length === 1).map((l) => Number(l.brands[0].quantity)), [2], 'the receipt shows a pick trimmed to delivered (queued after the brand step)');
-  assert.equal(rl.filter((l) => l.brand_recorded === false).length, 1, 'a branded line with no pick says so');
-  assert.equal(rl.filter((l) => !l.brands && l.brand_recorded === undefined).length, 1, 'an unbranded line is as before');
-  console.log('[prover] case 11: the receipt lists each line\'s brands, says when none was recorded on a branded line, and leaves an unbranded line as before');
+  assert.equal(receipt.lines.length, 5);
+  assert.ok(receipt.lines.every((l) => Object.keys(l).sort().join() === 'name,qty'), 'receipt lines are exactly as before B-1a (brands ship with B-3)');
+  assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._enqueue_delivery_receipt(uuid,uuid)'::regprocedure;`), LIVE_MD5._enqueue_delivery_receipt, 'the receipt helper is unchanged');
+  console.log('[prover] case 11: a completion with picks queues the same receipt as before B-1a; the receipt helper is unchanged');
 
   // 12. The office list.
   refused(REP, `SELECT public.get_deliveries_missing_brands(current_date - 1, current_date + 1)::text;`, /ADMIN_REQUIRED/);
@@ -662,16 +658,16 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   const list = js(ADMIN, `SELECT public.get_deliveries_missing_brands(current_date - 2, current_date + 2)::text;`);
   const reasons = (line) => (list.find((x) => x.delivery_item_id === line) ?? { reasons: [] }).reasons.sort();
   assert.deepEqual(reasons(DI(0, 0)), ['completed_before_brand_capture']);
-  assert.deepEqual(reasons(DI(1, 0)), ['brand_no_longer_listed', 'epa_number_not_recorded', 'split_does_not_match_delivered']);
+  assert.deepEqual(reasons(DI(1, 0)), ['brand_no_longer_listed', 'epa_number_not_recorded', 'split_does_not_match_delivered'], 'no seq sent is not flagged');
   assert.deepEqual(reasons(DI(1, 1)), [], 'zero delivered is not listed');
   assert.deepEqual(reasons(DI(1, 2)), [], 'an unbranded line is not listed');
   assert.deepEqual(reasons(DI(2, 1)), ['brand_not_recorded']);
   assert.deepEqual(reasons(DI(7, 1)), ['brand_not_recorded']);
   assert.deepEqual(reasons(DI(7, 0)), ['epa_number_not_recorded']);
   assert.deepEqual(reasons(DI(2, 0)), ['brand_not_recorded'], 'an emptied line goes back on the list');
-  assert.deepEqual(reasons(DI(3, 0)), ['brand_no_longer_listed']);
+  assert.deepEqual(reasons(DI(3, 0)), ['brand_no_longer_listed', 'picks_not_confirmed'], 'completed from an out-of-date screen');
   raw(`UPDATE public.product_parent_brands SET status = 'active' WHERE id = '${PB2}';`);
-  console.log('[prover] case 12: the office list shows what is missing (before capture, not recorded, split mismatch, no EPA number) and never zero-delivered or unbranded lines');
+  console.log('[prover] case 12: the office list shows what is missing (before capture, not recorded, split mismatch, no EPA number, completed from an out-of-date screen) and never zero-delivered or unbranded lines');
 
   // 13. Picks change no money, quantity, stock or invoice: the same delivery with and without picks.
   mkDelivery(8, [[PL2, 6], [PG, 2]]); mkDelivery(9, [[PL2, 6], [PG, 2]]);
@@ -701,9 +697,9 @@ ${r.stderr}`, /ERROR/, 'a garbage setting never errors a completion');
   assert.equal(Number(picks(DI(10, 0))[0].quantity), 6, 'a pick is not trimmed to an amount it cannot hold');
   const miss10 = () => (js(ADMIN, 'SELECT public.get_deliveries_missing_brands(current_date - 2, current_date + 2)::text;')
     .find((x) => x.delivery_item_id === DI(10, 0)) ?? { reasons: [] }).reasons;
-  assert.deepEqual(miss10(), ['split_does_not_match_delivered']);
+  assert.deepEqual(miss10().sort(), ['picks_not_confirmed', 'split_does_not_match_delivered']);
   ok(ADMIN, CORRECT(D(10), [{ delivery_item_id: DI(10, 0), picks: [pick(LB3, 2.3333)] }], 'match delivered', maxSeq(D(10)), 'bb-x14'));
-  assert.deepEqual(miss10(), [], 'a correction to the 4-place delivered amount clears the line');
+  assert.deepEqual(miss10(), [], 'a correction to the 4-place delivered amount clears the line, and confirms it');
   console.log('[prover] case 14: a screen loaded before an office review still completes (picks not confirmed); a 5-place delivered amount completes, keeps the pick and lists it; a 4-place correction clears it');
 
   // 15. A line deleted outside edit_delivery records its picks first (history only; no delivery lock, base unchanged).

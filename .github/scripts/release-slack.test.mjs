@@ -23,8 +23,18 @@ test('the hidden marker round-trips, is replaced in place and ignores junk', () 
   assert.equal(again.match(/crx-slack/g).length, 1);
   assert.equal(readMarker(again).ts, '9.9');
   for (const junk of [null, '', 'no marker', '<!-- crx-slack {bad json} -->', '<!-- crx-slack [1] -->']) assert.equal(readMarker(junk), null, String(junk));
-  // A value can never close the comment early.
-  assert.equal(readMarker(writeMarker('', { ts: '-->x<!--' })).ts, '--x!--');
+  // A value can never close the comment early, and a malformed one is dropped on read.
+  const odd = writeMarker('', { ts: '-->x<!--', ch: 'C1' });
+  assert.equal(odd.match(/-->/g).length, 1);
+  assert.deepEqual(readMarker(odd), { ch: 'C1' });
+});
+
+test('an edited marker cannot put text into Slack: only fields of the expected shape survive', () => {
+  const body = '<!-- crx-slack {"ts":"1.2","ch":"C1","v":"v0.2.0","date":"2026-11-19","mig":"\\u003c!channel\\u003e","orph":-1,"at":5,"gate":"yes","done":true,"states":{"1":"verified","2":"\\u003c!here\\u003e","x":"held"},"extra":"y"} -->';
+  assert.deepEqual(readMarker(body), { ts: '1.2', ch: 'C1', v: 'v0.2.0', date: '2026-11-19', states: { 1: 'verified' }, done: true, at: 5 });
+  for (const bad of [{ ts: '1.2; x' }, { ch: 'c1' }, { v: '0.2.0' }, { date: '19 Nov' }]) {
+    assert.deepEqual(readMarker(`<!-- crx-slack ${JSON.stringify(bad)} -->`), {}, JSON.stringify(bad));
+  }
 });
 
 const state = { v: 'v0.2.0', date: '2026-11-19', states: { 1: 'verified', 2: 'unverified', 3: 'held', 4: 'missing' }, gate: false, mig: 3, orph: 0 };
@@ -133,7 +143,7 @@ test('Slack is optional and its failures only warn', async () => {
 });
 
 test('the biggest posts stay inside Slack\'s block limits', () => {
-  const long = 'x'.repeat(5000);
+  const long = '&<>'.repeat(2000); // escaping makes each of these 4-5 characters
   const live = liveMessage({ version: 'v1.0.0', items: Array(40).fill(long), prCount: 1, migrations: 0, mergedBy: long, tagUrl: 'https://x.example/t', changelogUrl: 'https://x.example/c', prUrl: 'https://x.example/p' });
   const many = Array.from({ length: 60 }, (_, i) => ({ number: 100000 + i, title: long, url: `https://github.com/o/r/pull/${100000 + i}`, state: 'unverified' }));
   const card = cardMessage({ ...state, v: `v${'9'.repeat(200)}` }, { prs: many, prUrl: 'https://x.example/p', compareUrl: 'https://x.example/c' });

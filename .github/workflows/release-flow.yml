@@ -102,9 +102,8 @@ jobs:
 
   refresh-release-pr:
     # Holds no secrets: it only asks main's Release PR workflow to refresh an open release PR.
-    # Nightly too, so a back-merge left open gets its Slack reminder.
     name: Refresh release PR
-    if: github.event_name == 'push' || github.event_name == 'schedule'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -116,6 +115,41 @@ jobs:
       - run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet."; exit 0; fi
           gh workflow run release-pr.yml --ref main -f create=false
+
+  back-merge-reminder:
+    # Nightly, Slack only: a back-merge still open 12 hours after a release or hotfix gets one
+    # broadcast warning in its thread. Touches no branch, PR content or status.
+    name: Back-merge reminder
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    permissions:
+      contents: read
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+    steps:
+      - name: Switched on?
+        id: on
+        run: if [ "$RELEASE_FLOW" = "on" ]; then echo "yes=1" >> "$GITHUB_OUTPUT"; else echo "::notice::Release flow not switched on yet."; fi
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Release bot token
+        if: steps.on.outputs.yes
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+          permission-pull-requests: write
+      - if: steps.on.outputs.yes
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+        run: node .github/scripts/release-flow.mjs back-merge-slack
 
   back-merge:
     name: Back-merge main into staging

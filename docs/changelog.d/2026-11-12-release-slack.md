@@ -13,11 +13,13 @@ and a Slack failure only shows as a warning. It never fails a release, a gate or
   with links to the GitHub Release, the changelog and the release PR. A release merged by squash or rebase
   turns the card red and broadcasts the fix. A hotfix gets its own post.
 - **Back-merge follow-up:** the new back-merge PR is threaded under the release (or hotfix); a thread reply
-  when it lands; one broadcast warning if it is still open after 12 hours (checked on every refresh,
-  including a new nightly one).
+  when it lands; one broadcast warning if it is still open after 12 hours (checked on every release PR refresh and
+  by a nightly Slack-only job, which touches no branch, PR content or status).
 
 How it works: `.github/scripts/release-slack.mjs` builds the messages (tested in `release-slack.test.mjs`).
 The card's place is a hidden `<!-- crx-slack {...} -->` comment in the release PR body; the back-merge PR
-keeps its own. Only the bot writes them, and they hold ids, PR numbers and states, never PR text. PR text in
+keeps its own. Only the bot writes them; they hold ids, PR numbers and states, never PR text, and on read only fields
+of the expected shape are kept. A marker is saved before its thread replies are posted, so a failed save
+can't repeat a post. The release PR job runs main's copy of the scripts, never release/next's. PR text in
 Slack is escaped, so a title can't ping the channel or forge a link. The Slack app has one permission,
 `chat:write`.

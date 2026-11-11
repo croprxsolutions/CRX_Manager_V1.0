@@ -423,16 +423,16 @@ function slackPrs(plan) {
   });
 }
 
-// Posts the release card, or edits it and threads what changed. Returns the marker to save.
+// Posts the release card, or edits it in place. Returns the marker to save and the thread replies
+// for what changed, which are posted only once that marker is saved (a failed save can't repeat them).
 async function syncCard({ cardMessage, slack, threadUpdates }, plan, prUrl, prev) {
   const now = cardState(plan);
   const prs = slackPrs(plan);
   const msg = cardMessage(now, { prs, prUrl, compareUrl: `${REPO_URL()}/compare/main...release/next` });
   const ch = process.env.SLACK_RELEASE_CHANNEL;
-  if (!prev?.ts || prev.ch !== ch) return { ts: (await slack('chat.postMessage', msg)).ts, ch, ...now };
+  if (!prev?.ts || prev.ch !== ch) return { marker: { ts: (await slack('chat.postMessage', msg)).ts, ch, ...now }, replies: [] };
   await slack('chat.update', { ts: prev.ts, ...msg });
-  for (const text of threadUpdates(prev, { prs, gateOk: plan.gate.ok })) await slack('chat.postMessage', { thread_ts: prev.ts, text });
-  return { ...prev, ...now };
+  return { marker: { ...prev, ...now }, replies: threadUpdates(prev, { prs, gateOk: plan.gate.ok }) };
 }
 
 const commands = {
@@ -539,14 +539,16 @@ const commands = {
     }
     // The Slack card goes up before the PR is written, so its place is saved in the same edit.
     let pr;
+    let card;
     if (plan.existing) {
-      const marker = await S.trySlack(() => syncCard(S, plan, `${REPO_URL()}/pull/${plan.existing.number}`, S.readMarker(plan.existing.body)));
-      pr = await gh(`/pulls/${plan.existing.number}`, { method: 'PATCH', body: { title, body: marker ? S.writeMarker(body, marker) : body } });
+      card = await S.trySlack(() => syncCard(S, plan, `${REPO_URL()}/pull/${plan.existing.number}`, S.readMarker(plan.existing.body)));
+      pr = await gh(`/pulls/${plan.existing.number}`, { method: 'PATCH', body: { title, body: card ? S.writeMarker(body, card.marker) : body } });
     } else {
       pr = await gh('/pulls', { method: 'POST', body: { title, body, head: 'release/next', base: 'main' } });
-      const marker = await S.trySlack(() => syncCard(S, plan, pr.html_url, null));
-      if (marker) await gh(`/pulls/${pr.number}`, { method: 'PATCH', body: { body: S.writeMarker(pr.body, marker) } });
+      card = await S.trySlack(() => syncCard(S, plan, pr.html_url, null));
+      if (card) await gh(`/pulls/${pr.number}`, { method: 'PATCH', body: { body: S.writeMarker(pr.body, card.marker) } });
     }
+    if (card?.replies.length) await S.trySlack(async () => { for (const text of card.replies) await S.slack('chat.postMessage', { thread_ts: card.marker.ts, text }); });
     // The commit this run built and pushed; anything pushed after it has no green status.
     const sha = process.env.RELEASE_SHA;
     if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error('RELEASE_SHA is not set');
@@ -634,17 +636,16 @@ const commands = {
       for (const p of await gh(`/pulls?state=all&base=staging&head=${owner}:main&sort=updated&direction=desc&per_page=10`)) {
         const m = readMarker(p.body);
         if (!m?.ts || m.ch !== ch || m.done) continue;
+        // The marker is saved before posting, so a failed save never repeats a post.
         let next = null;
-        if (p.merged_at) {
-          await slack('chat.postMessage', { thread_ts: m.ts, text: backMergeText('merged', p.number, p.html_url) });
-          next = { ...m, done: true };
-        } else if (p.state === 'closed') {
-          next = { ...m, done: true };
-        } else if (!m.warned && Date.now() - Number(m.at) > 12 * 3600 * 1000) {
-          await slack('chat.postMessage', { thread_ts: m.ts, reply_broadcast: true, text: backMergeText('overdue', p.number, p.html_url) });
-          next = { ...m, warned: true };
+        let post = null;
+        if (p.merged_at) [next, post] = [{ ...m, done: true }, { thread_ts: m.ts, text: backMergeText('merged', p.number, p.html_url) }];
+        else if (p.state === 'closed') next = { ...m, done: true };
+        else if (!m.warned && Date.now() - Number(m.at) > 12 * 3600 * 1000) {
+          [next, post] = [{ ...m, warned: true }, { thread_ts: m.ts, reply_broadcast: true, text: backMergeText('overdue', p.number, p.html_url) }];
         }
         if (next) await gh(`/pulls/${p.number}`, { method: 'PATCH', body: { body: writeMarker(p.body, next) } });
+        if (post) await slack('chat.postMessage', post);
       }
     });
     return 0;

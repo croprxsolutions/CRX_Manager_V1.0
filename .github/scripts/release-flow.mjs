@@ -407,6 +407,34 @@ function statusMarkdown(prs, orphans) {
   return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${cell(s)} | ❌ commit without a PR | |`)].join('\n');
 }
 
+// Loaded only by the commands that post to Slack, so the guard and label jobs need just this file.
+const slackKit = () => import('./release-slack.mjs');
+
+const REPO_URL = () => `https://github.com/${process.env.GITHUB_REPOSITORY}`;
+
+// What the Slack card shows for a release plan (also what its hidden marker remembers).
+function cardState(plan) {
+  return { v: plan.version, date: plan.date, states: Object.fromEntries(plan.prs.map((p) => [p.number, prState(p)])), gate: plan.gate.ok, mig: plan.migrations.length, orph: plan.orphans.length };
+}
+function slackPrs(plan) {
+  return plan.prs.map((p) => {
+    const texts = [p.body, ...(p.comments ?? [])];
+    return { number: p.number, title: p.title, url: `${REPO_URL()}/pull/${p.number}`, state: prState(p), proof: proofLink(texts), held: heldOffNote(texts) };
+  });
+}
+
+// Posts the release card, or edits it and threads what changed. Returns the marker to save.
+async function syncCard({ cardMessage, slack, threadUpdates }, plan, prUrl, prev) {
+  const now = cardState(plan);
+  const prs = slackPrs(plan);
+  const msg = cardMessage(now, { prs, prUrl, compareUrl: `${REPO_URL()}/compare/main...release/next` });
+  const ch = process.env.SLACK_RELEASE_CHANNEL;
+  if (!prev?.ts || prev.ch !== ch) return { ts: (await slack('chat.postMessage', msg)).ts, ch, ...now };
+  await slack('chat.update', { ts: prev.ts, ...msg });
+  for (const text of threadUpdates(prev, { prs, gateOk: plan.gate.ok })) await slack('chat.postMessage', { thread_ts: prev.ts, text });
+  return { ...prev, ...now };
+}
+
 const commands = {
   // usage (stdin = changed file names): release-flow.mjs check-release-files
   // usage: release-flow.mjs check-release-content <expected tree> <release/next sha>
@@ -503,13 +531,22 @@ const commands = {
       migrations: plan.migrations.length ? plan.migrations.map((m) => `\`${m}\``).join(', ') : 'None',
     }, plan.existing?.body);
     const title = `release: ${plan.version}`;
+    const S = await slackKit();
     if (process.env.DRY_RUN) {
       console.log(`DRY RUN: would ${plan.existing ? `update #${plan.existing.number}` : 'open'} "${title}", release-gate ${plan.gate.ok ? 'success' : 'failure'}\n\n${body}`);
+      console.log(`Slack card: ${JSON.stringify(S.cardMessage(cardState(plan), { prs: slackPrs(plan), prUrl: 'https://github.com/x/y/pull/0' }))}`);
       return 0;
     }
-    const pr = plan.existing
-      ? await gh(`/pulls/${plan.existing.number}`, { method: 'PATCH', body: { title, body } })
-      : await gh('/pulls', { method: 'POST', body: { title, body, head: 'release/next', base: 'main' } });
+    // The Slack card goes up before the PR is written, so its place is saved in the same edit.
+    let pr;
+    if (plan.existing) {
+      const marker = await S.trySlack(() => syncCard(S, plan, `${REPO_URL()}/pull/${plan.existing.number}`, S.readMarker(plan.existing.body)));
+      pr = await gh(`/pulls/${plan.existing.number}`, { method: 'PATCH', body: { title, body: marker ? S.writeMarker(body, marker) : body } });
+    } else {
+      pr = await gh('/pulls', { method: 'POST', body: { title, body, head: 'release/next', base: 'main' } });
+      const marker = await S.trySlack(() => syncCard(S, plan, pr.html_url, null));
+      if (marker) await gh(`/pulls/${pr.number}`, { method: 'PATCH', body: { body: S.writeMarker(pr.body, marker) } });
+    }
     // The commit this run built and pushed; anything pushed after it has no green status.
     const sha = process.env.RELEASE_SHA;
     if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error('RELEASE_SHA is not set');
@@ -543,6 +580,73 @@ const commands = {
       body: { state: problem ? 'failure' : 'success', context: 'release-gate', description: problem ? `Hotfix refused: ${problem}` : 'Hotfix: no weekly release gate', target_url: pr.html_url },
     });
     console.log(`#${pr.number} hotfix gate: ${problem ?? 'ok'}`);
+    return 0;
+  },
+  // push to main (back-merge job): tell Slack what landed. BACK_MERGE_PR is set when this push opened one.
+  async 'main-pushed'() {
+    const sha = process.env.SHA;
+    const hit = (await gh(`/commits/${sha}/pulls`)).find((p) => p.merge_commit_sha === sha && p.base?.ref === 'main' && p.merged_at);
+    if (!hit) return 0;
+    const { backMergeText, cardMessage, esc, hotfixMessage, liveMessage, parseReleaseNotes, readMarker, slack, SQUASHED, trySlack, writeMarker } = await slackKit();
+    await trySlack(async () => {
+      const pr = await gh(`/pulls/${hit.number}`);
+      const by = pr.merged_by?.login ?? 'someone';
+      const ch = process.env.SLACK_RELEASE_CHANNEL;
+      let thread;
+      if (pr.head.ref === 'release/next') {
+        const m = readMarker(pr.body);
+        const card = m?.ts && m.ch === ch ? m : null;
+        const v = `v${JSON.parse(git('show', `${sha}:package.json`)).version}`;
+        const tagUrl = `${REPO_URL()}/releases/tag/${v}`;
+        const merged = git('rev-list', '--parents', '-n', '1', sha).split(' ').length === 3;
+        if (card) await slack('chat.update', { ts: card.ts, ...cardMessage({ ...card, v }, { phase: merged ? 'merged' : 'squashed', prUrl: pr.html_url, tagUrl, mergedBy: by }) });
+        thread = card?.ts;
+        if (!merged) {
+          await slack('chat.postMessage', { thread_ts: thread, reply_broadcast: Boolean(thread), text: SQUASHED });
+        } else {
+          if (thread) await slack('chat.postMessage', { thread_ts: thread, text: `:twisted_rightwards_arrows: Merged into main by ${esc(by)}. Tag ${v} and its GitHub Release follow.` });
+          const notes = parseReleaseNotes(git('show', `${sha}:src/releaseNotes.ts`));
+          const live = await slack('chat.postMessage', liveMessage({
+            version: v, items: notes?.items ?? [], prCount: card ? Object.keys(card.states ?? {}).length : null, migrations: card?.mig ?? null,
+            mergedBy: by, tagUrl, changelogUrl: `${REPO_URL()}/blob/main/CHANGELOG.md`, prUrl: pr.html_url,
+          }));
+          thread ??= live.ts;
+        }
+      } else if (isReleaseOrHotfixHead(pr.head.ref)) {
+        thread = (await slack('chat.postMessage', hotfixMessage({ number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases` }))).ts;
+      } else return;
+      const bm = Number(process.env.BACK_MERGE_PR);
+      if (bm && thread) {
+        const b = await gh(`/pulls/${bm}`);
+        await slack('chat.postMessage', { thread_ts: thread, text: backMergeText('opened', bm, b.html_url) });
+        await gh(`/pulls/${bm}`, { method: 'PATCH', body: { body: writeMarker(b.body, { ts: thread, ch, at: Date.now() }) } });
+      }
+    });
+    return 0;
+  },
+  // Every release-pr run (pushes, labels, nightly): reply when a back-merge lands, warn once if one
+  // has waited over 12 hours. State lives in the back-merge PR's hidden marker.
+  async 'back-merge-slack'() {
+    const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
+    const { backMergeText, readMarker, slack, trySlack, writeMarker } = await slackKit();
+    await trySlack(async () => {
+      const ch = process.env.SLACK_RELEASE_CHANNEL;
+      for (const p of await gh(`/pulls?state=all&base=staging&head=${owner}:main&sort=updated&direction=desc&per_page=10`)) {
+        const m = readMarker(p.body);
+        if (!m?.ts || m.ch !== ch || m.done) continue;
+        let next = null;
+        if (p.merged_at) {
+          await slack('chat.postMessage', { thread_ts: m.ts, text: backMergeText('merged', p.number, p.html_url) });
+          next = { ...m, done: true };
+        } else if (p.state === 'closed') {
+          next = { ...m, done: true };
+        } else if (!m.warned && Date.now() - Number(m.at) > 12 * 3600 * 1000) {
+          await slack('chat.postMessage', { thread_ts: m.ts, reply_broadcast: true, text: backMergeText('overdue', p.number, p.html_url) });
+          next = { ...m, warned: true };
+        }
+        if (next) await gh(`/pulls/${p.number}`, { method: 'PATCH', body: { body: writeMarker(p.body, next) } });
+      }
+    });
     return 0;
   },
   // pull_request closed into main: tag the merge commit and publish the GitHub Release.

@@ -76,7 +76,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
         run: |
-          cp .github/scripts/release-flow.mjs .github/release-pr-template.md "$RUNNER_TEMP/"
+          cp .github/scripts/release-flow.mjs .github/scripts/release-slack.mjs .github/release-pr-template.md "$RUNNER_TEMP/"
           node "$RUNNER_TEMP/release-flow.mjs" release-plan
       - name: Cut or refresh release/next
         id: branch
@@ -119,4 +119,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
           RELEASE_SHA: ${{ steps.branch.outputs.sha }}
+          # The release card in Slack (optional: without these two secrets nothing is posted).
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
         run: node "$RUNNER_TEMP/release-flow.mjs" release-pr
+      # Thread "back-merge merged" under the release, or warn once when one has waited 12 hours.
+      # Runs on every refresh, including the nightly one from release-flow.yml.
+      - name: Back-merge follow-up in Slack
+        if: steps.on.outputs.yes && env.HOTFIX_PR == ''
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+        run: node .github/scripts/release-flow.mjs back-merge-slack

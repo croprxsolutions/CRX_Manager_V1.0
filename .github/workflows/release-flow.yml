@@ -66,6 +66,8 @@ jobs:
             # Its files must equal staging merged with main, apart from the bot's version files.
             expected=$(git merge-tree --write-tree origin/staging origin/main) || { echo "::error::staging and main don't merge cleanly; merge the back-merge PR first."; exit 1; }
             git diff --name-only "$expected" "$HEAD_SHA" | node "$RUNNER_TEMP/release-flow.mjs" check-release-files
+            # Inside the bot's files, only the version and the generated notes may differ.
+            node "$RUNNER_TEMP/release-flow.mjs" check-release-content "$expected" "$HEAD_SHA"
           fi
           if [ "${HEAD_REF#hotfix/}" != "$HEAD_REF" ]; then
             # A hotfix may carry nothing from staging that main hasn't released.
@@ -112,7 +114,7 @@ jobs:
     steps:
       - run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet."; exit 0; fi
-          gh workflow run release-pr.yml --ref main -f create=false || echo "::notice::No release PR workflow on main yet."
+          gh workflow run release-pr.yml --ref main -f create=false
 
   back-merge:
     name: Back-merge main into staging

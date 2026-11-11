@@ -1548,7 +1548,7 @@ export default function PurchaseOrderDetail() {
           >
             Create Task
           </Button>
-          {canManagePO && po.status !== 'cancelled' && po.status !== 'fully_received' && (
+          {canManagePO && po.status !== 'cancelled' && po.status !== 'fully_received' && po.status !== 'closed' && (
             <>
               <Button variant="secondary" icon={<Pencil className="w-4 h-4" />} onClick={openEditModal}>
                 Edit

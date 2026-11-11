@@ -83,8 +83,8 @@ BEGIN
   -- [E2E] marker keeps the live-testdata guard satisfied; terminal rollback removes it.
   INSERT INTO public.customers (farm_name)
   VALUES ('[E2E] B2 Farm ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name)
-  VALUES ('[E2E] B2 Herbicide ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form)
+  VALUES ('[E2E] B2 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
 
   -- Whole booking (not planned): one product, 300 units.
   INSERT INTO public.quotes (quote_number, customer_id, created_by, status, commission_split)

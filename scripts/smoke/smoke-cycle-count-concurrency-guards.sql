@@ -16,8 +16,8 @@ BEGIN
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
 
-  INSERT INTO products (product_name)
-  VALUES ('[SMOKE] Cycle Guard ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO products (product_name, product_form)
+  VALUES ('[SMOKE] Cycle Guard ' || v_suffix, 'liquid') RETURNING id INTO v_product;
   INSERT INTO inventory (product_id, location, quantity_available)
   VALUES (v_product, 'Main Warehouse', 100) RETURNING id INTO v_inventory;
   INSERT INTO cycle_counts (count_number, warehouse, initiated_by)

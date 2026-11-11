@@ -117,11 +117,11 @@ BEGIN
   VALUES ('[E2E] Other Lifecycle Farm ' || v_suffix)
   RETURNING id INTO v_other_customer;
 
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'GL')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'GL', 'liquid')
   RETURNING id INTO v_product;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'GL')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'GL', 'liquid')
   RETURNING id INTO v_other_product;
   -- Order lines need a positive cost basis (COST_BASIS_REQUIRED), and a product
   -- is born pricing-free, so price both shells through the governed

@@ -47,8 +47,8 @@ BEGIN
   IF v_vendor_b IS NULL OR v_admin IS NULL OR v_rep IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL: need two active vendors, an active admin and an active sales rep';
   END IF;
-  INSERT INTO public.products (product_name, sku, vendor, inventory_unit, is_active)
-  VALUES ('[SMOKE] preferred vendor', 'SMOKE-PVE-' || md5(clock_timestamp()::text), NULL, 'gal', true)
+  INSERT INTO public.products (product_name, sku, vendor, inventory_unit, is_active, product_form)
+  VALUES ('[SMOKE] preferred vendor', 'SMOKE-PVE-' || md5(clock_timestamp()::text), NULL, 'Gal', true, 'liquid')
   RETURNING id INTO v_product;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);

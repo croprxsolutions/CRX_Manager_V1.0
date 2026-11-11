@@ -40,7 +40,7 @@ export function botFileProblems(file, expected, actual) {
     try {
       const notes = JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(actual)[1]);
       const shape = Object.keys(notes).join() === 'version,date,items' && typeof notes.version === 'string'
-        && typeof notes.date === 'string' && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
+        && /^\d{4}-\d{2}-\d{2}$/.test(notes.date) && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
       if (shape && actual === releaseNotesModule(notes)) return [];
     } catch { /* not the bot's module */ }
     return [`${file} isn't exactly the module the bot writes (a version, a date and a list of strings)`];
@@ -59,7 +59,9 @@ export function botFileProblems(file, expected, actual) {
   if (file === 'CHANGELOG.md') {
     // Text only, but every earlier release's section stays word for word.
     const sections = (expected ?? '').split(/\n(?=## v\d)/).slice(1).map((sec) => sec.trimEnd());
-    const lost = sections.filter((sec) => !actual.includes(sec)).map((sec) => sec.split('\n')[0]);
+    // Each one whole: from its heading line to the next release heading (or the end), nothing added.
+    const padded = `\n${actual.trimEnd()}\n\n## v`;
+    const lost = sections.filter((sec) => !padded.includes(`\n${sec}\n\n## v`)).map((sec) => sec.split('\n')[0]);
     return lost.length ? [`CHANGELOG.md changed or lost earlier release sections (${lost.slice(0, 5).join('; ')})`] : [];
   }
   return [];

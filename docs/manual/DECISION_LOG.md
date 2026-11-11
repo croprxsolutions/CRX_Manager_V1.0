@@ -16,6 +16,36 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** the point of Brand PR B is a record of the brand actually sold; under REG-1's "the product's own number" the brand would change only the paperwork.
 **What this forbids/implies:** supersedes, for lines with a recorded brand, REG-1's "the product's own number" and #1746's "one active record per line" (it becomes one per line per brand). Invoice lines are not split by brand. Everything else in REG-1 stands per brand: capture at save, any Yes records it, a Yes always wins, a Yes at posting wins, a missing number never blocks. Plan: `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md` section 14.
 
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d922c2698393` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `fee19c69091049d0` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref c3b60308c985)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 2 Sol finding(s) at `d2d1bc8c4461`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d2d1bc8c4461` (base `f52a57230c83`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `c3593fa2f9462217` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref 7e8f8a878f38)
+- Finding 2 (HIGH) at `src/lib/sentryError.ts:30`, text sha256 `61bb6daccd365570` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref 17313d83176e)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `180cc033215d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `180cc033215d` (base `a1ba9e63db65`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:7`, text sha256 `e229b53d6733379a` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref c09bcfbaaa78)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets a database error's wording, figures blanked (KI-115)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.
+**What this forbids/implies:** do not send free text other than this scrubbed message, for example `details` or `hint`. Do not blank figures before tokens are removed. A new database message that would quote a customer's name or contact details must not be raised.
 ## 2026-11-10 — #1756: Mason owner-accepted 1 Sol finding(s) at `0fc8d1c59d0e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1756 at `0fc8d1c59d0e` (base `3e72201b4784`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

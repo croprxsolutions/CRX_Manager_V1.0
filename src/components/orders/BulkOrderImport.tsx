@@ -18,6 +18,7 @@ import { useBelowCostApproval } from '../../contexts/BelowCostApprovalContext';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../../lib/belowCostApproval';
 import { resolveExactProductIdentity } from '../../lib/productIdentityResolver';
 import { purchaseOrderLineTotalCents } from '../../lib/purchaseOrderMoney';
+import { toSentryError } from '../../lib/sentryError';
 
 interface BulkOrderImportProps {
   open: boolean;
@@ -377,7 +378,7 @@ export default function BulkOrderImport({
       setValidation({ valid: parsedOrders, invalid });
     } catch (error) {
       if (!(error instanceof QuoteOrderCsvError)) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error parsing file' } });
+        Sentry.captureException(toSentryError(error), { extra: { context: 'Error parsing file' } });
       }
       toast('error', error instanceof QuoteOrderCsvError ? error.message : 'Error parsing file');
     } finally {
@@ -430,7 +431,7 @@ export default function BulkOrderImport({
           .limit(2);
 
         if (custError) {
-          Sentry.captureException(new Error(String(custError.message)), { extra: { context: 'Failed to look up customer' } });
+          Sentry.captureException(toSentryError(custError), { extra: { context: 'Failed to look up customer' } });
           failedCount++;
           failures.push({
             orderNumber: order.order_number,
@@ -557,7 +558,7 @@ export default function BulkOrderImport({
         successCount++;
       } catch (error) {
         if (!isBelowCostApprovalHandledError(error) && !(error instanceof QuoteOrderCsvError)) {
-          Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error importing order' } });
+          Sentry.captureException(toSentryError(error), { extra: { context: 'Error importing order' } });
         }
         failedCount++;
         failures.push({

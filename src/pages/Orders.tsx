@@ -34,6 +34,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import type { Order } from '../types';
 import { getSeasonDates } from '../utils/season';
+import { toSentryError } from '../lib/sentryError';
 
 type OrderWithFulfillment = OrderListRow;
 
@@ -331,7 +332,7 @@ export default function Orders() {
       await downloadBatchOrderSummaryPdf(dataList);
       toast('success', `Downloaded ${dataList.length} order summary PDF(s)`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'bulk_print_summaries' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'bulk_print_summaries' } });
       toast('error', sanitizeError(err));
     }
     setPrintingSummary(false);
@@ -448,7 +449,7 @@ export default function Orders() {
       await downloadBatchPickListPdf(dataList);
       toast('success', `Downloaded ${dataList.length} pick list PDF(s)`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'bulk_print_pick_lists' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'bulk_print_pick_lists' } });
       toast('error', sanitizeError(err));
     }
     setPrintingPickList(false);

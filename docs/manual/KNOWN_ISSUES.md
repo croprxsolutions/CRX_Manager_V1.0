@@ -640,8 +640,8 @@ send each kept line's stored number in that function (a large money function re-
 Revenue counts posted/overdue/paid invoices by invoice date; commissions count every non-replaced commission by order
 date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
 (only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
-`get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Fix needs To-Do decision 15 first; smallest fix
-counts a commission only when its order has an invoice in the period's revenue set. First in the sweep's fix order.
+`get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Mason decided 2026-11-10 (To-Do decision 15,
+DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Not built yet. First in the sweep's fix order.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
 **MED (latent) · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2) · unassigned**

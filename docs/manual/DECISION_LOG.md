@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — The P&L subtracts commissions only on sales billed in CRX (To-Do decision 15, KI-125)
+
+**Decision (Mason, in session, 2026-11-10: "Only CRX-billed"):** Bottom Line P&L and Monthly Summary subtract a sales commission only when its order has a CRX invoice counted in that period's revenue (posted, overdue or paid, by invoice date). Chem Man-billed sales are not brought into CRX revenue.
+**Why:** the reports subtracted commissions on every booked order but counted only CRX-invoiced revenue, so most 2026 sales (billed in Chem Man) showed commission cost with no matching revenue and a six-figure loss that is not real ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md), sweep 3 #1).
+**What this forbids/implies:** commissions and revenue in these two reports must be matched through the same invoices; commissions on Chem Man-billed orders stay out of the CRX P&L. From 2027-01-01 all billing is in CRX, so the rule then covers every sale. The fix is a reviewed migration (money report, Sol-listed); KI-125 stays open until it is live.
+
 ## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR #1746)
 
 **Decision (Mason, in session, 2026-11-10: "Yes, Yes at post wins", after Sol round 1 on the redesign):** when an invoice is posted, a line whose saved answer is No or Not reviewed, but whose size, saved number or captured number says restricted use at that moment, is upgraded to Yes and gets a record. Upgrades only, never downgrades; the record keeps the number and signal word saved with the line.

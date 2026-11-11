@@ -269,11 +269,11 @@ function unitRows() {
   assert.equal(rows.length, 14, 'the candidate must pin 14 unit rows');
   return rows.map(([, id, unit, f, t, n]) => `('${id}'::uuid, ${q(unit)}, ${f}, '${t}', ${q(n)})`);
 }
-// The pinned family of each listed product (Milestone and Prevent Foam have none).
+// The pinned family of each listed product (Milestone has none); other is the family's one other size, if any.
 function families() {
-  const rows = [...lf(CANDIDATE).matchAll(/\('([0-9a-f-]{36})'::uuid, '([0-9a-f-]{36})'::uuid, '([^']*)', '([^']*)'\)/g)]
-    .map(([, product, parent, name, unit]) => ({ product, parent, name, unit }));
-  assert.equal(rows.length, 18, 'the candidate must pin 18 families');
+  const rows = [...lf(CANDIDATE).matchAll(/\('([0-9a-f-]{36})'::uuid, '([0-9a-f-]{36})'::uuid, '([^']*)', '([^']*)', (?:NULL|'([0-9a-f-]{36})'::uuid)\)/g)]
+    .map(([, product, parent, name, unit, other]) => ({ product, parent, name, unit, other }));
+  assert.equal(rows.length, 19, 'the candidate must pin 19 families');
   return rows;
 }
 const parents = () => scalar(`SELECT md5(string_agg(to_jsonb(pp)::text, ',' ORDER BY pp.id)) FROM public.product_parents pp;`);
@@ -284,9 +284,13 @@ const CONTROLS = [
   // Sol round 10 HIGH: the two dry products on a liquid "oz" rate stay as they are until step 2's watchdog fix.
   { id: '61ac0e28-bdbe-4197-a764-93aa33bf036a', name: 'Autumn Super 51 WDG', form: 'dry', inv: 'Dry oz', rate: 'oz', per: 0.5 },
   { id: '1ec38578-6eaa-4cff-acd5-0ee0ec8dceda', name: 'Cimarron Plus - 10 oz', form: 'dry', inv: 'Dry oz', rate: 'oz', per: 0.25 },
+  // Prevent Foam's other size (not listed, never changed); its rate is set to the 1 Qt size's, as a family copy leaves it.
+  { id: '9c6d6b1e-b514-48e6-9b24-254eae46a7c0', name: 'Prevent Foam - 1 Gal', form: 'liquid', inv: 'Gal', rate: 'oz', per: null },
 ];
 
 function seed(rows) {
+  const pf = rows.findIndex((r) => r.id === 'e453fc17-c8b9-4e6c-89c1-7468b7875184');
+  CONTROLS.find((c) => c.per === null).per = [0.3, 1.25, 10, 6.4, 13.7][pf % 5];
   const products = rows.map((r, i) => {
     const inv = r.kind === 'stock' ? r.old : (r.old === 'LB' ? 'Lb' : 'Dry oz');
     const rate = r.kind === 'rate' ? r.old : 'oz';
@@ -328,10 +332,11 @@ function seed(rows) {
         JOIN public.products p ON p.id = f.product;
     INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by)
       SELECT f.product, f.parent, 'package', '${ADMIN}'
-        FROM (VALUES ${fams.map((x) => `('${x.product}'::uuid, '${x.parent}'::uuid)`).join(', ')}) f(product, parent);`);
-  assert.equal(scalar('SELECT count(*) FROM public.product_parent_members;'), '18');
+        FROM (VALUES ${fams.flatMap((x) => [x.product, ...(x.other ? [x.other] : [])].map((id) => `('${id}'::uuid, '${x.parent}'::uuid)`)).join(', ')}) f(product, parent);`);
+  assert.equal(scalar('SELECT count(*) FROM public.product_parent_members;'), '20');
   assert.equal(scalar(`SELECT count(*) FROM public.product_parents pp JOIN public.product_parent_members m ON m.parent_id = pp.id
-      JOIN public.products p ON p.id = m.product_id WHERE pp.rate_unit IS NOT DISTINCT FROM p.rate_unit;`), '18', 'each family matches its size');
+      JOIN public.products p ON p.id = m.product_id
+     WHERE (pp.rate_unit, pp.rate_per_acre) IS NOT DISTINCT FROM (p.rate_unit, p.rate_per_acre);`), '20', 'each family matches its sizes');
   console.log(`[prover] seeded live's 14 unit rows, the ${rows.length} listed products and ${CONTROLS.length} controls`);
 }
 
@@ -463,6 +468,14 @@ async function main() {
   raw(`DELETE FROM public.product_parent_members WHERE product_id = '${CONTROLS[1].id}';`);
   raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role, fill_source_product_id) VALUES ('${CONTROLS[0].id}', '${FAM}', '${ADMIN}', 'fixed_tote', '${armezon.id}');`);
   refused('cand.sql', new RegExp(`RT2A_FAMILY_OR_WEIGHT[^\\n]*${esc(armezon.name)}`));
+  // Prevent Foam's family: a third size refuses, and so does losing its pinned 1 Gal size.
+  const pfFam = families().find((x) => x.other);
+  raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role) VALUES ('${CONTROLS[1].id}', '${pfFam.parent}', '${ADMIN}', 'package');`);
+  refused('cand.sql', /RT2A_FAMILY_OR_WEIGHT[^\n]*Prevent Foam/);
+  raw(`DELETE FROM public.product_parent_members WHERE product_id = '${CONTROLS[1].id}';`);
+  raw(`DELETE FROM public.product_parent_members WHERE product_id = '${pfFam.other}';`);
+  refused('cand.sql', /RT2A_FAMILY_OR_WEIGHT[^\n]*Prevent Foam/);
+  raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role) VALUES ('${pfFam.other}', '${pfFam.parent}', '${ADMIN}', 'package');`);
   raw(`DELETE FROM public.product_parent_members WHERE parent_id = '${FAM}'; UPDATE public.product_parents SET rate_unit = 'Qt' WHERE id = '${FAM}';`);
   refused('cand.sql', /RT2A_UNLISTED_SPELLING[^\n]*RT2A family/);
   raw(`DELETE FROM public.product_parents WHERE id = '${FAM}';`);
@@ -556,7 +569,7 @@ async function main() {
       ('[PROVER] New oz', 'liquid', 'oz', 'oz', 'oz', 2, 'Herbicide', true), ('[PROVER] New qt', 'liquid', 'qt', 'qt', 'qt', 1, 'Herbicide', true),
       ('[PROVER] New Lb', 'dry', 'Lb', 'Lb', 'Lb', 1, 'Herbicide', true);`);
   raw("DELETE FROM public.products WHERE product_name LIKE '[PROVER] New %';");
-  console.log('[prover] U2: an ordinary edit of all 25 fixture products saves; new oz, qt and Lb products save');
+  console.log('[prover] U2: an ordinary edit of all 26 fixture products saves; new oz, qt and Lb products save');
 
   // U15. A second run is refused; the recovery script restores every unit column; re-apply works.
   refused('cand.sql', /RT2A_ROW_MOVED/);

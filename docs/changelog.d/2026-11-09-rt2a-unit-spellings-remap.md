@@ -27,3 +27,4 @@
   their `oz` rate unit, except the Imazuron Herbicide family, which moves from `LB` to `Lb` together with its product.
   The migration checks every family is exactly as read live on 2026-11-10, or changes nothing.
 - **2026-11-10, renumbered to `20261231230000`:** the KI-16 unit guard (`20261231100000`) went live first, so the spelling move now runs after it. Nothing else changed.
+- **2026-11-10, Prevent Foam family:** the first live run refused (`RT2A_FAMILY_OR_WEIGHT`, nothing changed) because Prevent Foam - 1 Qt joined a two-size Prevent Foam family (with 1 Gal) that morning. The migration now pins that family and its 1 Gal size, which it does not touch.

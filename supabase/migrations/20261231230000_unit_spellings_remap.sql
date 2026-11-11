@@ -35,7 +35,8 @@
 --
 -- REFUSES (and changes nothing) if: the rate lock is on; unit_conversions is not exactly its 14 reviewed rows;
 -- any listed product moved (id, name, form or current spelling); any other product or family uses Oz, Qt or LB;
--- a listed product is not in exactly its pinned family (or none), a pinned family has another size, a listed
+-- a listed product is not in exactly its pinned family (or none), a pinned family has a size other than its pinned
+-- ones (Prevent Foam's family also holds its 1 Gal size, which this migration does not touch), a listed
 -- product is a tote's fill source, or Imazuron differs from its family on anything but the rate unit's spelling;
 -- a listed product has a net weight; the stock rows' old-spelling inventory snapshots are not the pinned count.
 --
@@ -86,28 +87,30 @@ BEGIN
     ('28087f6b-e3f4-4caa-8d0f-3c25ea2cf8e5'::uuid, 'Tordon RTU - 1 Qt', 'liquid', 'stock', 'Qt', 'qt'),
     ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, 'Imazuron Herbicide', 'dry', 'rate', 'LB', 'Lb');
 
-  -- The family of each listed product (read live 2026-11-10); Milestone and Prevent Foam are in none.
+  -- The family of each listed product (read live 2026-11-10); Milestone is in none. other_size is the family's one
+  -- other size, never changed here (Prevent Foam - 1 Gal, stock Gal, joined the family at 12:43 UTC 2026-11-10).
   CREATE TEMP TABLE rt2a_family (product_id uuid PRIMARY KEY, parent_id uuid NOT NULL UNIQUE,
-    parent_name text NOT NULL, parent_rate_unit text NOT NULL) ON COMMIT DROP;
-  INSERT INTO rt2a_family (product_id, parent_id, parent_name, parent_rate_unit) VALUES
-    ('2317db27-438a-4821-8946-d24a3313bd56'::uuid, 'aa7de39b-dc12-4649-8146-0b93852bdc02'::uuid, 'Armezon', 'oz'),
-    ('7d172b07-2974-4474-a5d5-7b36521fa6d0'::uuid, '6f4448f1-5c9c-4a42-9e10-3eeecabcc119'::uuid, 'Drive XLR8', 'oz'),
-    ('76cc1352-4de1-4d81-abaf-b712c8cf96d7'::uuid, 'bfc6141c-a072-45cc-b8d6-3ea548c392c8'::uuid, 'Endura', 'oz'),
-    ('b5d42717-1626-4962-bd74-f69e671cc615'::uuid, '08c93d53-cc2c-4212-aff0-f4bd10279db1'::uuid, 'Evito', 'oz'),
-    ('98602d58-b6a2-4666-abe1-fd124e427e09'::uuid, '18b544b4-a671-4177-86c3-f740bfe9d073'::uuid, 'Impact', 'oz'),
-    ('43b22e56-3c51-4d4e-a5e4-0dea1f68c8f8'::uuid, 'e23ef720-5832-4917-8675-66eab7349075'::uuid, 'Nurizma', 'oz'),
-    ('2078bc12-86b9-4b83-aa8f-6eeae1997bf2'::uuid, 'fa011ba6-5a78-4662-a786-3e9cb5d04995'::uuid, 'Panoflex', 'oz'),
-    ('02a8036b-ff8d-4eca-a71c-7db0081bf16a'::uuid, '4b3092ce-a632-4a59-9afc-87cec2f18a92'::uuid, 'Sefina', 'oz'),
-    ('3a81a72a-4a9c-4a7f-ad51-84587f8d7d8b'::uuid, 'd911f06c-35e7-4cc9-ae3c-574281bbca37'::uuid, 'Status', 'oz'),
-    ('567986e5-a8f4-4124-8750-64fd63ba94bd'::uuid, 'c1fa323d-7faf-4418-a328-c3114ab34ce7'::uuid, 'Steadfast Q', 'oz'),
-    ('eaf74d51-1714-49e7-9c50-7129e07c3a4f'::uuid, 'e7ce7259-b4f1-4f3f-9714-956638d72bae'::uuid, 'Trivence', 'oz'),
-    ('a9de3015-425a-4e43-a669-2be592cf7935'::uuid, '28f1b040-1f36-4ebe-a6fd-fff22306da51'::uuid, 'AIM 2EC', 'oz'),
-    ('322ca15d-1273-4cbf-8ea2-76125df2c2a0'::uuid, '1fcea2c2-a7e3-43e1-a1b6-40d4a9a6608e'::uuid, 'Cadet', 'oz'),
-    ('05b9f5d8-3305-4234-afaa-e7a63c3b46f9'::uuid, '4f892ce0-8838-48ba-b3fb-01756479e3dc'::uuid, 'Effect-GC', 'oz'),
-    ('e87cdf63-6e9b-4d3b-884d-6410fcca4723'::uuid, '9812ce44-f2c4-4a11-bafd-5fc13d54793b'::uuid, 'Elevore', 'oz'),
-    ('3e0c3fc3-aff4-4fdc-ba7b-353b2093d44d'::uuid, '819108b5-c7e9-4f1e-b1c1-93e0ffb443ce'::uuid, 'Make Foam', 'oz'),
-    ('28087f6b-e3f4-4caa-8d0f-3c25ea2cf8e5'::uuid, 'ba0437ad-d815-4d64-993a-08cf988aab73'::uuid, 'Tordon RTU', 'oz'),
-    ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, '6981391c-72a1-4107-9a2e-3def38dbf821'::uuid, 'Imazuron Herbicide', 'LB');
+    parent_name text NOT NULL, parent_rate_unit text NOT NULL, other_size uuid) ON COMMIT DROP;
+  INSERT INTO rt2a_family (product_id, parent_id, parent_name, parent_rate_unit, other_size) VALUES
+    ('2317db27-438a-4821-8946-d24a3313bd56'::uuid, 'aa7de39b-dc12-4649-8146-0b93852bdc02'::uuid, 'Armezon', 'oz', NULL),
+    ('7d172b07-2974-4474-a5d5-7b36521fa6d0'::uuid, '6f4448f1-5c9c-4a42-9e10-3eeecabcc119'::uuid, 'Drive XLR8', 'oz', NULL),
+    ('76cc1352-4de1-4d81-abaf-b712c8cf96d7'::uuid, 'bfc6141c-a072-45cc-b8d6-3ea548c392c8'::uuid, 'Endura', 'oz', NULL),
+    ('b5d42717-1626-4962-bd74-f69e671cc615'::uuid, '08c93d53-cc2c-4212-aff0-f4bd10279db1'::uuid, 'Evito', 'oz', NULL),
+    ('98602d58-b6a2-4666-abe1-fd124e427e09'::uuid, '18b544b4-a671-4177-86c3-f740bfe9d073'::uuid, 'Impact', 'oz', NULL),
+    ('43b22e56-3c51-4d4e-a5e4-0dea1f68c8f8'::uuid, 'e23ef720-5832-4917-8675-66eab7349075'::uuid, 'Nurizma', 'oz', NULL),
+    ('2078bc12-86b9-4b83-aa8f-6eeae1997bf2'::uuid, 'fa011ba6-5a78-4662-a786-3e9cb5d04995'::uuid, 'Panoflex', 'oz', NULL),
+    ('02a8036b-ff8d-4eca-a71c-7db0081bf16a'::uuid, '4b3092ce-a632-4a59-9afc-87cec2f18a92'::uuid, 'Sefina', 'oz', NULL),
+    ('3a81a72a-4a9c-4a7f-ad51-84587f8d7d8b'::uuid, 'd911f06c-35e7-4cc9-ae3c-574281bbca37'::uuid, 'Status', 'oz', NULL),
+    ('567986e5-a8f4-4124-8750-64fd63ba94bd'::uuid, 'c1fa323d-7faf-4418-a328-c3114ab34ce7'::uuid, 'Steadfast Q', 'oz', NULL),
+    ('eaf74d51-1714-49e7-9c50-7129e07c3a4f'::uuid, 'e7ce7259-b4f1-4f3f-9714-956638d72bae'::uuid, 'Trivence', 'oz', NULL),
+    ('a9de3015-425a-4e43-a669-2be592cf7935'::uuid, '28f1b040-1f36-4ebe-a6fd-fff22306da51'::uuid, 'AIM 2EC', 'oz', NULL),
+    ('322ca15d-1273-4cbf-8ea2-76125df2c2a0'::uuid, '1fcea2c2-a7e3-43e1-a1b6-40d4a9a6608e'::uuid, 'Cadet', 'oz', NULL),
+    ('05b9f5d8-3305-4234-afaa-e7a63c3b46f9'::uuid, '4f892ce0-8838-48ba-b3fb-01756479e3dc'::uuid, 'Effect-GC', 'oz', NULL),
+    ('e87cdf63-6e9b-4d3b-884d-6410fcca4723'::uuid, '9812ce44-f2c4-4a11-bafd-5fc13d54793b'::uuid, 'Elevore', 'oz', NULL),
+    ('3e0c3fc3-aff4-4fdc-ba7b-353b2093d44d'::uuid, '819108b5-c7e9-4f1e-b1c1-93e0ffb443ce'::uuid, 'Make Foam', 'oz', NULL),
+    ('28087f6b-e3f4-4caa-8d0f-3c25ea2cf8e5'::uuid, 'ba0437ad-d815-4d64-993a-08cf988aab73'::uuid, 'Tordon RTU', 'oz', NULL),
+    ('0294faa8-ab0b-488e-9efe-868071738625'::uuid, '6981391c-72a1-4107-9a2e-3def38dbf821'::uuid, 'Imazuron Herbicide', 'LB', NULL),
+    ('e453fc17-c8b9-4e6c-89c1-7468b7875184'::uuid, '43234e2a-564f-44c1-83f1-ae4023b1ff40'::uuid, 'Prevent Foam', 'oz', '9c6d6b1e-b514-48e6-9b24-254eae46a7c0'::uuid);
 
   -- The rate lock must be off: the rate change and the stock-unit changes of rated products pass
   -- guard_product_rate_lock only while it is.
@@ -183,8 +186,8 @@ BEGIN
     RAISE EXCEPTION 'RT2A_LABEL_RATE: these products have a label maximum, nothing was changed: %', v_bad;
   END IF;
 
-  -- Each listed product is in exactly its pinned family (or, for Milestone and Prevent Foam, none), and each
-  -- pinned family is the reviewed one: same name, rate unit, active, and that product its only size. A listed
+  -- Each listed product is in exactly its pinned family (or, for Milestone, none), and each
+  -- pinned family is the reviewed one: same name, rate unit, active, and its sizes exactly that product and other_size. A listed
   -- product is no tote's fill source. No listed product carries a net weight (a stock-unit change would send it
   -- back to draft).
   SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad
@@ -193,7 +196,9 @@ BEGIN
       OR (f.parent_id IS NOT NULL AND (
             NOT EXISTS (SELECT 1 FROM public.product_parents pp WHERE pp.id = f.parent_id AND pp.is_active
                           AND pp.name = f.parent_name AND pp.rate_unit IS NOT DISTINCT FROM f.parent_rate_unit)
-         OR (SELECT count(*) FROM public.product_parent_members pm WHERE pm.parent_id = f.parent_id) <> 1))
+         OR (SELECT array_agg(pm.product_id ORDER BY pm.product_id) FROM public.product_parent_members pm
+              WHERE pm.parent_id = f.parent_id AND pm.product_id <> f.product_id)
+            IS DISTINCT FROM (CASE WHEN f.other_size IS NOT NULL THEN ARRAY[f.other_size] END)))
       OR EXISTS (SELECT 1 FROM public.product_parent_members pm WHERE pm.fill_source_product_id = m.id
                     OR (pm.product_id = m.id AND pm.fill_source_product_id IS NOT NULL))
       OR EXISTS (SELECT 1 FROM public.product_size_net_weight_values w WHERE w.product_id = m.id);

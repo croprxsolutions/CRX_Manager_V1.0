@@ -638,7 +638,7 @@ test.describe('Quote Builder Interactions', () => {
       } catch {
         // If Leave button not found, try closing differently
         try {
-          await page.locator('button:has-text("Stay"), button:has-text("Cancel")').first().click({ timeout: 2000 });
+          await page.locator('button:has-text("Keep editing"), button:has-text("Cancel")').first().click({ timeout: 2000 });
         } catch {
           // Modal may have auto-dismissed
         }

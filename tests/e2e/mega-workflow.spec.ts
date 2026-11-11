@@ -56,7 +56,7 @@ async function getUserId(page: Page): Promise<string> {
 }
 
 async function dismissLeaveDialog(page: Page) {
-  const leaveBtn = page.getByRole('button', { name: 'Leave' });
+  const leaveBtn = page.getByRole('button', { name: 'Discard changes' });
   if (await leaveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await leaveBtn.click();
     await waitForPageStable(page, 1000);

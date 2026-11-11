@@ -426,7 +426,7 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
       await waitStable(page, 1000);
 
       // Handle "Unsaved Changes" modal if it appears (ConfirmModal, not browser dialog)
-      const leaveBtn = page.getByRole('button', { name: 'Leave' });
+      const leaveBtn = page.getByRole('button', { name: 'Discard changes' });
       if (await leaveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
         await leaveBtn.click();
         await waitStable(page, 3000);
@@ -455,7 +455,7 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
 
       // Navigate back (dismiss unsaved changes if any)
       page.once('dialog', (d) => d.accept());
-      const leaveBtn2 = page.getByRole('button', { name: 'Leave' });
+      const leaveBtn2 = page.getByRole('button', { name: 'Discard changes' });
       await nav(page, `/customers/${S.customerId}`);
       if (await leaveBtn2.isVisible({ timeout: 2000 }).catch(() => false)) {
         await leaveBtn2.click();
@@ -479,7 +479,7 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
     // Navigate away — handle ConfirmModal or browser dialog
     page.once('dialog', (d) => d.accept());
     await page.goto('/');
-    const leaveBtn = page.getByRole('button', { name: 'Leave' });
+    const leaveBtn = page.getByRole('button', { name: 'Discard changes' });
     if (await leaveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await leaveBtn.click();
     }

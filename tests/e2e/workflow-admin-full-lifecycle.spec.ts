@@ -299,7 +299,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await page.waitForURL(/\/orders\/[0-9a-f]{8}-/, { timeout: 15000 });
     } catch {
       // If URL didn't change, check for UnsavedChangesModal "Leave" button
-      const leaveBtn = page.locator('button:has-text("Leave")');
+      const leaveBtn = page.locator('button:has-text("Discard changes")');
       if (await leaveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
         await leaveBtn.click();
         await page.waitForURL(/\/orders\/[0-9a-f]{8}-/, { timeout: 15000 });
@@ -488,7 +488,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
     await submitBtn.click();
 
     // Handle UnsavedChanges dialog (setIsDirty/navigate race condition)
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try {
       await leaveBtn.click({ timeout: 5000 });
     } catch {
@@ -652,7 +652,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await submitBtn.click();
 
       // Handle UnsavedChanges dialog
-      const leaveBtn = page.locator('button:has-text("Leave")');
+      const leaveBtn = page.locator('button:has-text("Discard changes")');
       try {
         await leaveBtn.click({ timeout: 5000 });
       } catch {

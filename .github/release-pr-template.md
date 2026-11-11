@@ -38,6 +38,9 @@ _The bot fills the parts between its markers each time staging or a label change
 
 ### 🧪 Validation & Testing Checklist (before merging)
 - [ ] Staging/Pre-production verification has passed (the `release-gate` check is green: every PR above is verified on staging or held off).
+- [ ] Every PR held off by a flag has that flag off in production, and every one held off by a revert has the revert in this release (the gate checks the note, not the flag).
+- [ ] Right before merging: Actions → Release PR → Run workflow (create = false), **wait for that run to finish green**, then check `release-gate` on the latest commit shows that run's time. A failed refresh shows as a red run, not on this PR.
+- [ ] Every commit on `release/next` is the release bot's (only the bot may push there); the version and What's new are the bot's.
 - [ ] All automated CI/CD pipeline tests are green.
 - [ ] Database backup plans and rollback procedures are confirmed (today's backup exists).
 - [ ] Monitoring and alerting tools (Sentry, #crx-alerts) are verified active.

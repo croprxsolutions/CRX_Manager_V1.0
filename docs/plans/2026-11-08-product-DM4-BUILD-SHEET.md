@@ -470,3 +470,56 @@ The grand plan's "Done when" maps to H1–H4 and H6. After the DB PR is live, a 
 - `_product_parent_replay` compares the saved actor with `auth.uid()`, which is empty under the service role, so a retry would refuse. **Fixed:** `record_epa_lookup` does the same replay steps by hand and checks against `p_actor` (4.B step 1).
 - The Edge Function took `regNumber` separately from `lookupId`, so a failure could be recorded against the wrong number. **Fixed:** with `lookupId` the function reads the number from the lookup row and checks the requester first.
 - Date and URL could be accepted separately. **Fixed:** they are now one `label_document` item with one tick box.
+
+---
+
+## 13. Behavior contract for the build (2026-11-11)
+
+This sheet is the settled contract; it went through three Luna rounds and four Codex App passes. The build starts from `main` `822d783de` and the live database read on 2026-11-11 (read-only). Only what changed since 2026-11-08 is listed here.
+
+**Facts now (live, read-only, 2026-11-11):**
+- REG-1 step 2 and its seed are live: `epa_registrations` has 347 rows; `epa_registration_seed_run` has its row; the seed migration `20261231220000` is applied.
+- REG-1 step 2 was cut down on 2026-11-09 (Mason: "Drop them"): a registration's facts are **not** copied to sizes or brands. The registration writer is `_epa_registration_facts` (checks keys and types), `_epa_registration_update` (writes the keys given, version +1, `updated_by = auth.uid()`) and `_epa_registration_event(…, 'updated', …)`, called under the exclusive REG-1 lock with the row `FOR UPDATE`, exactly as `set_epa_registration` does.
+- DM-1 is live. DM-1b is live (`20270103160000_setup_workbook_chemistry_tabs`, PR #1776) and calls `_parent_chemistry_epa_refusal` for its workbook chemistry gate.
+- `_parent_chemistry_epa_refusal` live body equals `20261209100000`'s: `md5(replace(prosrc, chr(13), ''))` is still `c64e2bee1c7499cf6ff509168885a0f9`, which the preflight pins.
+- 456 product parents; 0 parent ingredient rows; 0 active ingredients. No typed chemistry exists yet.
+- `epa-lookup` is live at version 9, which includes #1648 (`transferredTo`).
+
+**Changes to the sheet, all from those facts:**
+1. **Commit step 8** writes label facts with the three REG-1 helpers above (no copy pass). H4 checks the registration row and one `updated` event; it no longer checks sizes or brands.
+2. **Re-issued gate (4.F)** also governs DM-1b's workbook, since DM-1b calls it. That is intended: the grand plan lets a number that EPA does not know be entered through the reviewed manual path.
+3. **Order (section 9):** steps 1–4 are done. The DATA-2 review gates the **first live lookup**, not the build.
+4. **Questions (section 11):** the build uses both recommendations (name-only ingredients unticked; typing allowed only after "not found"). Posted to Mason as the plan; he can redirect.
+5. **Commit can still raise** when DM-1's own checks refuse the result (for example, ingredients that outweigh a liquid's approved weight per gallon). That rolls the whole commit back; the screen keeps the ticks.
+
+**Delivery:** DB PR first (`20270104100000_epa_chemistry_proposals.sql`), compatible with the deployed app (it adds tables and functions and re-issues the gate; nothing calls the new functions until the screens PR). Then the screens PR plus the `epa-lookup` record step, whose deploy needs Mason's typed approval.
+
+### 13.1 Cold challenge (Astra `gpt-6-astra` high, 2026-11-11): 19 findings, how each is settled
+
+Live facts read for it (read-only, 2026-11-11): every one of the 347 registrations has `rup_status` `no` (322) or `yes` (25), never `unknown`; 205 have a signal word; none has a label date or link; all are `registration_status = 'unknown'`. 347 distinct numbers are linked to products, every one has a registration, none is malformed. `main` now contains DM-1b (#1776, `eda8b1597`).
+
+| # | Label | Settled by |
+|---|---|---|
+| 1 | DEFECT | **Fixed.** When a commit turns `rup_status` to `yes`, the result carries `posted_sales_to_record` from `_epa_registration_unrecorded_posted_lines`, exactly as `set_epa_registration` does; it sits in the saved receipt, so a replay returns it. Proof case H20. |
+| 2 | DECISION | Already decided: REG-1 simplification (DECISION_LOG, Mason 2026-11-09, "Drop them"): sizes and brands keep their own facts, posting reads registrations. DM-4's screens say "registration updated", never "product updated". |
+| 3 | MISSING-EVIDENCE | Disproved: DM-4 changes no ordinary-user surface. Its three tables are admin-read only; no existing policy, grant or read path changes (postflight checks). |
+| 4 | DEFECT | Corrected: a number without a registration is refused at start with `EPA_REGISTRATION_MISSING` ("add it on the registration screen"). The existing `set_epa_registration` create mode (expected version NULL) is the recovery, then look up again. Today all 347 linked numbers have one. Proof case H21. |
+| 5 | DEFECT | Corrected: REG-1's assign tools were dropped. Recovery for `transferred` is: change the number on the size, brand or parent in the existing product edit (no guards since 2026-11-09), create the new number's registration if missing, look up the new number. The failure row shows the new number. |
+| 6 | MISSING-EVIDENCE | Answered by the live facts above: RUP is never `unknown`, so EPA "yes" against a stored "no" is a **difference** under the current rule. Sent to Mason as a decision (13.2). Label date and link are always a fill today. |
+| 7 | MISSING-EVIDENCE | Disproved: DM-1b's apply path (`promote_chemistry_proposal` → `_apply_chemistry_proposal` → `_lock_parent_chemistry` → `_workbook_apply_items` → `_apply_parent_chemistry`) re-runs the gate under the parent lock (`20261211100000` line 247). Proof case H22 (excuse lost between workbook upload and apply → apply refused). |
+| 8 | MISSING-EVIDENCE | Disproved: the gate is one SQL statement (one snapshot). `start_epa_lookup` and `record_epa_lookup` take the parent `FOR UPDATE`, and every chemistry writer takes the same parent lock before calling the gate, so a lookup or proposal and a chemistry save are serialized. A concurrent registration or brand edit lands entirely before or after the save's snapshot; a save that read the earlier state is ordered before that edit. No REG-1 lock is added to the gate (keeps DM-4's REG-first order). |
+| 9 | DECISION | Already decided: sheet 4.F (reviewed). A not-found excuse makes the parent behave like a product without an EPA number in DM-1, which is all typed chemistry operations. Other numbers on the same parent still refuse. |
+| 10 | DEFECT | Corrected: repair for `differs_typed` is retire the typed row (a DM-1 correction; retire is allowed under the gate, `20261211100000` line 287), then a new lookup proposes `add`. Proof case H23. |
+| 11 | DECISION → technical | Re-labelled: the commit fails as a whole with DM-1's own message (for example the ingredients-outweigh-the-liquid check); the screen shows it and keeps the ticks; recovery is untick the item or reject the proposal. Nothing to decide. |
+| 12 | MISSING-EVIDENCE | Proof case H24: a mixed proposal (one fill accepted, one fill unticked, one difference, a null EPA link) changes only the accepted key; the others are byte-for-byte unchanged. |
+| 13 | MISSING-EVIDENCE | Proof case H25: a commit refused by DM-1's checks leaves no ingredient, chemistry change, registration version, event, proposal decision or receipt; the corrected retry succeeds; a replay of the success returns the same result; the event's before, after and `changed_by` are checked. |
+| 14 | MISSING-EVIDENCE | Not changed by DM-4: `commit_ingredients_tab` is all-or-nothing (`WORKBOOK_INGREDIENTS_REFUSED`), apply is per parent (DM-1b migration). DM-4 changes only whether the gate refuses. |
+| 15 | MISSING-EVIDENCE | Preflight pins the gate body md5, owner `postgres`, `SECURITY DEFINER`, and that no app role can execute it; the live read on 2026-11-11 matched. |
+| 16 | DECISION → process | Corrected: the enablement point is the `epa-lookup` record-mode deploy, which needs Mason's typed yes anyway. Before asking, the agent confirms the DATA-2 review is done. |
+| 17 | DECISION → technical | Corrected: order is DB live → `epa-lookup` record mode deployed and checked → screens merged. The screen shows a lookup as done only after `record_epa_lookup` returns. |
+| 18 | DECISION → technical | Corrected: rollback = re-issue the DM-1 gate first, then revoke the four RPCs; tables are kept unreadable as history (as DM-1b does). Committed chemistry is undone by a DM-1 correction; a committed label fact by `set_epa_registration`. |
+| 19 | SUGGESTION | Declined: calling `set_epa_registration` would nest a second receipt and fingerprint inside the commit; the helpers are exactly what it composes, and #1 restores its one missing output. |
+
+### 13.2 Decision sent to Mason (2026-11-11)
+
+RUP from EPA when we stored "no": (a) show it as a difference only, fixed by hand on the registration screen; or (b) let the admin tick it on the proposal (unticked by default) so the commit writes "yes" and lists posted sales to record. Recommendation (b). Building (a) until he answers; (b) changes one item's class.

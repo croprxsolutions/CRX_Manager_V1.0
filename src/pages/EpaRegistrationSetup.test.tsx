@@ -53,7 +53,7 @@ describe('EpaRegistrationSetup', () => {
   it('shows each line with the number it is captured under and requires the pick', async () => {
     render(<EpaRegistrationSetup />);
     expect(await screen.findByText('100-1 (assumed from the product)')).toBeInTheDocument();
-    expect(screen.getByText('No EPA number on the product (restricted use: No)')).toBeInTheDocument();
+    expect(screen.getByText('No EPA number on the product')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run setup/i })).toBeDisabled();
     fireEvent.click(screen.getByLabelText('WARNING'));
     expect(screen.getByRole('button', { name: /run setup/i })).toBeEnabled();
@@ -96,6 +96,14 @@ describe('EpaRegistrationSetup', () => {
     fireEvent.click(await screen.findByRole('button', { name: /not sure this saved: retry/i }));
     await screen.findByText(/already switched on/i);
     expect(m.seed.mock.calls[1][2]).toBe(m.seed.mock.calls[0][2]);
+  });
+
+  it('Sales to check never shows a saved number as the captured one', async () => {
+    m.preview.mockRejectedValue(pgError('EPA_REGISTRATION_SEED_DONE: EPA registrations are already set up'));
+    m.sales.mockResolvedValue([{ line_id: 's1', invoice_id: 'i1', invoice_number: 'INV-9', invoice_date: '2026-11-11',
+      product_name: 'Prod C', epa_registration: null, saved_number: '200-2', quantity: 1, captured_rup_status: 'yes', reason: 'no_epa_number' }]);
+    render(<EpaRegistrationSetup />);
+    expect(await screen.findByText('None captured (line saved 200-2)')).toBeInTheDocument();
   });
 
   it('a later visit after the run never offers Run again', async () => {

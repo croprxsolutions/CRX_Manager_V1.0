@@ -27,9 +27,16 @@ const REASON_TEXT: Record<SaleToCheck['reason'], string> = {
 function lineNumberText(line: SeedLine): string {
   const productNumber = line.products?.epa_registration?.trim();
   const own = line.epa_registration?.trim();
-  if (!productNumber) return `No EPA number on the product (restricted use: ${line.products?.is_rup ? 'Yes' : 'No'})`;
+  // Restricted use is decided by the seed from the product's tick and any registration, so it is not guessed here.
+  if (!productNumber) return own ? `No EPA number on the product (line says ${own})` : 'No EPA number on the product';
   if (!own) return `${productNumber} (assumed from the product)`;
   return own === productNumber ? productNumber : `${productNumber} (line says ${own})`;
+}
+
+/** The captured number, never replaced by the line's saved one: a missing capture must look missing. */
+function capturedNumberText(r: SaleToCheck): string {
+  const captured = r.epa_registration ?? 'None captured';
+  return r.saved_number && r.saved_number !== r.epa_registration ? `${captured} (line saved ${r.saved_number})` : captured;
 }
 
 function SalesToCheck() {
@@ -57,7 +64,7 @@ function SalesToCheck() {
                   <td>{r.invoice_number ?? '—'}</td>
                   <td>{r.invoice_date ?? '—'}</td>
                   <td>{r.product_name}</td>
-                  <td className="font-mono">{r.epa_registration ?? r.saved_number ?? 'Not recorded'}</td>
+                  <td>{capturedNumberText(r)}</td>
                   <td>{r.quantity}</td>
                   <td>{REASON_TEXT[r.reason] ?? r.reason}</td>
                 </tr>
@@ -115,7 +122,7 @@ function PreviewBody({ preview, lines, picks, setPick, busy, unsure, onRun }: {
         <Card>
           <p className="flex gap-2 text-sm text-red-700" role="alert">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-            These EPA numbers are not valid; fix them on their products first: {preview.invalid_numbers.join(', ')}
+            These EPA numbers are not valid, so the setup cannot run until each is corrected where it is stored (a product, brand, parent group, invoice line or job line): {preview.invalid_numbers.join(', ')}
           </p>
         </Card>
       )}

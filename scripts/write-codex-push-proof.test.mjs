@@ -2311,4 +2311,113 @@ not json
   assert.equal("applied_history" in buildCodexPushProof({ headSha: "a", baseSha: "b", verdict: "clean" }), false, "applied history: unchanged proof shape otherwise");
 }
 
+// ── owner-accepted Sol findings (Mason, 2026-11-10), end to end on a throwaway repository ──
+{
+  const { OWNER_TRUST_FILES, OWNER_TRUST_ROOT, recordReplyApproval, writeApprovalRequest } = await import("../.claude/hooks/owner-approval-lib.mjs");
+  const { blockersRecordName, buildBlockersRecord, buildSolAcceptPayload, parseSolFindings } = await import("../.claude/hooks/sol-accept-lib.mjs");
+  const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
+  const logScript = fileURLToPath(new URL("./owner-accept-sol-finding.mjs", import.meta.url));
+  const repo = tempDir("crx-carry-owner-accepted-");
+  const transcripts = tempDir("crx-carry-owner-accepted-t-");
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Accept Test", "-c", "user.email=accept@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const run = (script, ...args) => spawnSync(process.execPath, [script, ...args], { cwd: repo, encoding: "utf8" });
+  const file = (rel) => path.join(repo, ...rel.split("/"));
+  const write = (rel, text) => { mkdirSync(path.dirname(file(rel)), { recursive: true }); writeFileSync(file(rel), text); };
+  const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+  const stateDir = path.join(repo, ".claude", "session-state");
+  const LOG = "docs/manual/DECISION_LOG.md";
+  const SESSION = "accept-e2e-session";
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    write(".gitignore", ".claude/session-state/\n");
+    write(LOG, "# Decision Log\n\nNewest first.\n\n## 2026-11-09 — an older decision\n\nbody\n");
+    // The proof writer checks the files that build and check Mason's acceptance are the committed bytes.
+    for (const rel of [...OWNER_TRUST_FILES, "scripts/write-codex-push-proof.mjs"]) write(rel, readFileSync(path.join(OWNER_TRUST_ROOT, ...rel.split("/")), "utf8"));
+    const base = commitAll("base");
+    git("update-ref", "refs/remotes/origin/main", base);
+    git("switch", "-q", "-c", "feature");
+    write("src/sale.ts", "export const sell = () => 1;\n");
+    const reviewed = commitAll("pr change");
+
+    // What a BLOCKERS run leaves, and Mason's two accept replies.
+    const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
+    const accept = (n, code, reason) => {
+      const now = Date.now();
+      writeApprovalRequest(stateDir, buildSolAcceptPayload({
+        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242,
+        issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `n${code}`, code, sessionId: SESSION,
+      }));
+      const text = `accept ${code} ${reason}`;
+      const transcript = path.join(transcripts, `t${code}.jsonl`);
+      writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`);
+      const res = recordReplyApproval({
+        code, dirs: [stateDir], reply: text, sessionId: SESSION, form: "accept", reason,
+        readMark: () => ({ transcript, from: 0, written: true, words: text }),
+      });
+      assert.equal(res.ok, true, `owner-accepted e2e: accept ${n} recorded (${res.reason})`);
+    };
+    accept(1, "111111", "we never sell before switch-on");
+
+    const early = run(logScript, "--log");
+    assert.equal(early.status, 1, "owner-accepted e2e: --log refuses while a finding is unaccepted");
+    assert.match(early.stderr, /finding 2: Mason has not accepted it/);
+    accept(2, "222222", "not a live SaaS yet");
+
+    const logged = run(logScript, "--log");
+    assert.equal(logged.status, 0, `owner-accepted e2e: --log writes the entry (${logged.stderr})`);
+    assert.match(readFileSync(file(LOG), "utf8"), /#4242: Mason owner-accepted 2 Sol finding\(s\)[\s\S]*Mason's reason: not a live SaaS yet[\s\S]*## 2026-11-09/, "owner-accepted e2e: entry above the older one");
+    const logHead = commitAll("docs: Mason owner-accepted Sol findings");
+
+    const ok = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(ok.status, 0, `owner-accepted e2e: the proof is written (${ok.stderr})`);
+    const minted = JSON.parse(readFileSync(codexPushProofPath(repo, logHead), "utf8"));
+    assert.equal(minted.carry.mode, "owner_accepted");
+    assert.equal(minted.codex_ran, false, "owner-accepted e2e: never claims a clean review ran");
+    assert.deepEqual(minted.owner_accepted.map((a) => [a.n, a.reason]), [[1, "we never sell before switch-on"], [2, "not a live SaaS yet"]]);
+    assert.equal(proofValid(minted, logHead, Date.now(), base), true, "owner-accepted e2e: the gates accept it for the logged head");
+    assert.equal(proofValid(minted, reviewed, Date.now(), base), false, "owner-accepted e2e: and for no other head");
+
+    const refused = (label, mutate, why) => {
+      git("reset", "-q", "--hard", logHead);
+      mutate();
+      // The log entry plus the mutation, as ONE commit on top of the reviewed head.
+      git("reset", "-q", "--soft", reviewed);
+      const squashed = commitAll(`refused: ${label}`);
+      const result = run(scriptPath, "--carry-owner-accepted");
+      assert.equal(result.status, 1, `owner-accepted e2e: ${label} is refused`);
+      assert.match(result.stderr, why, `owner-accepted e2e: ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, squashed)), false, `owner-accepted e2e: nothing written for ${label}`);
+    };
+    refused("a code change beside the log", () => write("src/sale.ts", "export const sell = () => 2;\n"), /must change only docs\/manual\/DECISION_LOG\.md/);
+    refused("an edited entry", () => write(LOG, readFileSync(file(LOG), "utf8").replace("not a live SaaS yet", "approved by everyone")), /must gain exactly the entry/);
+    assert.equal(readFileSync(file(LOG), "utf8").includes("a sale before switch-on is not checked"), false, "owner-accepted e2e: the finding's wording is never published");
+    // A PR that changes gate code cannot vouch for it with a not-clean review.
+    git("reset", "-q", "--hard", logHead);
+    git("switch", "-q", "-c", "gate-pr", base);
+    write(".claude/hooks/sol-accept-lib.mjs", `${readFileSync(file(".claude/hooks/sol-accept-lib.mjs"), "utf8")}// changed\n`);
+    const gateHead = commitAll("pr changes a gate");
+    writeFileSync(path.join(stateDir, blockersRecordName(gateHead)), JSON.stringify(buildBlockersRecord({ headSha: gateHead, baseSha: base, findings })));
+    write(LOG, `${readFileSync(file(LOG), "utf8")}x\n`);
+    commitAll("log");
+    const gate = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(gate.status, 1, "owner-accepted e2e: a PR that changes gate files is refused");
+    assert.match(gate.stderr, /changes gate or approval files \(\.claude\/hooks\/sol-accept-lib\.mjs\)/);
+    git("switch", "-q", "feature");
+    // A fresh Sol run on the same head voids every acceptance of the earlier run.
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
+    git("reset", "-q", "--hard", logHead);
+    const stale = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(stale.status, 1, "owner-accepted e2e: acceptances of an earlier Sol run are refused");
+    assert.match(stale.stderr, /earlier Sol run/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
+    rmSync(transcripts, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
 console.log("OK - write-codex-push-proof helpers passed.");

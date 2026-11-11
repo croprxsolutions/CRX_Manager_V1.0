@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildSetupPreview,
   rebaseRateRowsAfterSetup,
@@ -15,6 +15,9 @@ import {
 import { loadExcelJs } from './productPricingWorkbook';
 import type { ProductParent } from './productParents';
 import type { UseTimingOption } from '../types';
+
+// Each test builds and re-reads real ExcelJS workbooks: ~0.5-2.5s locally under coverage, past 5s on loaded CI shards.
+vi.setConfig({ testTimeout: 30_000 });
 
 const NONE = new Map<string, string>();
 
@@ -82,6 +85,29 @@ describe('setup workbook', () => {
     expect(preview.changes[0].changes).toEqual({ sku: 'ATZ-2', is_rup: false, rei_hours: 24, use_timings: ['pre_emerge', 'post_emergence'] });
     expect(preview.changes[0].display).toContainEqual({ field: 'is_rup', before: 'yes', after: 'no' });
   });
+
+  it('marks only the rows that change what a new quote line shows', async () => {
+    const id = (n: number) => `${n}${n}${n}${n}${n}${n}${n}${n}-${n}${n}${n}${n}-4${n}${n}${n}-8${n}${n}${n}-${String(n).repeat(12)}`;
+    const exp = exported([
+      product({ product_id: id(1), product_name: 'Adds note', notes: 'Grower text' }),
+      product({ product_id: id(2), product_name: 'Has note', notes: 'Old text', quoting_notes: 'Customer note' }),
+      product({ product_id: id(3), product_name: 'No note', notes: 'Old text' }),
+    ]);
+    const parsed = await roundTrip(exp, (wb) => {
+      const ws = wb.getWorksheet('Setup')!;
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      ws.getCell(2, headers.indexOf('quoting_notes') + 1).value = 'Apply pre-emerge';
+      ws.getCell(3, headers.indexOf('notes') + 1).value = 'New text';
+      ws.getCell(4, headers.indexOf('notes') + 1).value = 'New text';
+    });
+    const preview = buildSetupPreview(parsed.setupRows, exp, OPTIONS, CATEGORIES, NONE);
+    const lines = Object.fromEntries(preview.changes.map((row) => [row.product_name, row.quote_line ?? null]));
+    expect(lines).toEqual({
+      'Adds note': { before: 'Grower text', after: 'Apply pre-emerge' },
+      'Has note': null, // the quoting note still wins, so customers see no difference
+      'No note': { before: 'Old text', after: 'New text' },
+    });
+  }, 15000);
 
   it('names a row changed since the download as stale, and bad values as invalid', async () => {
     const exp = exported([product(), product({ product_id: '22222222-2222-4222-8222-222222222222', product_name: 'Other' })]);

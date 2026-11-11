@@ -9,3 +9,7 @@
   lookup).
 - Screens come in a follow-up PR once the database part is live.
 - Proof: `node scripts/smoke/prove-setup-workbook-chemistry-tabs-real-schema.mjs`.
+- Doc freshness (2026-11-11 America/Chicago): read-only `list_migrations` shows 1,192 live rows, newest
+  `20261111030853` (`20270101010000_unit_spellings_remap`). The five rows after the old stamp (`20261231200000`,
+  `20261231210000`, `20261231220000`, `20270101000000`, `20270101010000`) each have a `migrations.d` record marked
+  applied live, so `CURRENT_STATE.md` and `KNOWN_ISSUES.md` move their ledger stamp to that row; nothing else changed.

@@ -734,12 +734,14 @@ function functionDefinitions(text) {
 // strings, which are deliberately left visible.
 function rowWrite(body) {
   const text = stripCommentsQuoteAware(body).replace(/\s+/g, " ");
-  if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
+  // Deletes and dynamic SQL first: they stay Mason's (2026-11-11), so a body that
+  // also UPDATEs must still report them (Codex P1, PR #1799).
   if (/\bdelete\s+from\b/i.test(text)) return "deletes rows (DELETE)";
   if (/\btruncate\b/i.test(text)) return "empties a table (TRUNCATE)";
+  if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
+  if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
   if (/\bon\s+conflict\b[^;]*?\bdo\s+update\b/i.test(text)) return "overwrites existing rows (INSERT ... ON CONFLICT DO UPDATE)";
   if (/\bmerge\s+into\b/i.test(text)) return "may overwrite existing rows (MERGE)";
-  if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
   return null;
 }
 
@@ -826,19 +828,23 @@ export function dataRewriteCheck(sql, { history } = {}) {
   const created = createdObjects(statements);
   const hit = (reason) => ({ rewrites: true, reason });
   const existing = (raw) => !created.tables.has(objectKey(raw));
+  // A plain rewrite no longer ends the scan (Codex P1, PR #1799): a delete in a
+  // function called later must still be what this reports.
+  let first = null;
+  const note = (reason) => { if (!first) first = hit(reason); };
 
   for (const statement of statements) {
     const update = new RegExp(String.raw`\bupdate\s+(?:only\s+)?(${QNAME})(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").exec(statement);
-    if (update && existing(update[1])) return hit(`it changes existing rows in ${objectKey(update[1])} (UPDATE)`);
+    if (update && existing(update[1])) note(`it changes existing rows in ${objectKey(update[1])} (UPDATE)`);
     if (/\bon\s+conflict\b.*\bdo\s+update\b/i.test(statement)) {
       const into = new RegExp(String.raw`\binsert\s+into\s+(${QNAME})`, "i").exec(statement);
-      if (!into || existing(into[1])) return hit(`it overwrites existing rows in ${into ? objectKey(into[1]) : "a table"} (INSERT ... ON CONFLICT DO UPDATE)`);
+      if (!into || existing(into[1])) note(`it overwrites existing rows in ${into ? objectKey(into[1]) : "a table"} (INSERT ... ON CONFLICT DO UPDATE)`);
     }
     const merge = new RegExp(String.raw`\bmerge\s+into\s+(${QNAME})`, "i").exec(statement);
-    if (merge && existing(merge[1])) return hit(`it may overwrite existing rows in ${objectKey(merge[1])} (MERGE)`);
+    if (merge && existing(merge[1])) note(`it may overwrite existing rows in ${objectKey(merge[1])} (MERGE)`);
     const alter = new RegExp(String.raw`^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(${QNAME})(.*)$`, "i").exec(statement);
     if (alter && existing(alter[1]) && new RegExp(String.raw`\balter\s+(?:column\s+)?${IDENT}\s+(?:set\s+data\s+)?type\b`, "i").test(alter[2])) {
-      return hit(`it converts the existing values of a column in ${objectKey(alter[1])} (ALTER COLUMN ... TYPE)`);
+      note(`it converts the existing values of a column in ${objectKey(alter[1])} (ALTER COLUMN ... TYPE)`);
     }
   }
 
@@ -898,13 +904,14 @@ export function dataRewriteCheck(sql, { history } = {}) {
     for (const body of bodies.values()) {
       if (body === null) return hit(`it runs ${named} while applying, and that function's body cannot be read`);
       const write = rowWrite(body);
-      if (write) return hit(`it runs ${named} while applying, which ${write}`);
+      if (write && /deletes rows|empties a table|dynamic SQL/.test(write)) return hit(`it runs ${named} while applying, which ${write}`);
+      if (write) note(`it runs ${named} while applying, which ${write}`);
       // Literals blanked: a name inside a string (an assertion message, a
       // to_regprocedure() argument) is not a call.
       for (const raw of callsIn(blankStringLiterals(stripCommentsQuoteAware(body)))) calls.push({ raw, via: [...via, `${key}()`] });
     }
   }
-  return { rewrites: false };
+  return first || { rewrites: false };
 }
 
 // `history`: the earlier migration files from readMigrationHistory(). Leave it
@@ -921,14 +928,16 @@ export function accessChangeCheck(sql, { history } = {}) {
   const created = createdObjects(statements);
   const hit = (reason) => ({ changesAccess: true, reason });
 
+  // Dynamic SQL run at apply time (EXECUTE inside a DO block) can do anything,
+  // including grants or deletes this reader cannot see in a string or variable.
+  // Checked across every statement first, so an earlier plain GRANT cannot hide
+  // it (Codex P1, PR #1799). Not the privilege name (`GRANT EXECUTE ON`) or
+  // trigger syntax (`EXECUTE FUNCTION`).
+  if (statements.some((statement) => /\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i.test(statement)
+    && !/^(?:grant|revoke)\b/i.test(statement))) {
+    return hit("it runs dynamic SQL at apply time, which could change access in ways this check cannot read");
+  }
   for (const statement of statements) {
-    // Dynamic SQL run at apply time (EXECUTE inside a DO block) can do anything,
-    // including grants this reader cannot see in a string or variable. Not the
-    // privilege name (`GRANT EXECUTE ON`) or trigger syntax (`EXECUTE FUNCTION`).
-    if (/\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i.test(statement)
-      && !/^(?:grant|revoke)\b/i.test(statement)) {
-      return hit("it runs dynamic SQL at apply time, which could change access in ways this check cannot read");
-    }
     const schema = protectedSchemaReference(statement);
     if (schema) return hit(`it touches ${schema[1].toLowerCase()}.${schema[2].replace(/"/g, "")} (logins, file access or secrets)`);
 

@@ -1966,6 +1966,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     ["a called function that DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
     ["a called function that TRUNCATEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN TRUNCATE public.customers; END $$;\nSELECT public.z();\n"],
     ["dynamic SQL in a DO block", "DO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
+    // Codex P1, PR #1799: an earlier plain rewrite or grant must not hide a later delete.
+    ["an UPDATE then a called function that DELETEs", "UPDATE public.invoices SET notes = NULL;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called UPDATE function, then a called DELETE function", "CREATE FUNCTION public.y() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; END $$;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.y();\nSELECT public.z();\n"],
+    ["a GRANT then dynamic SQL", "GRANT SELECT ON public.customers TO anon;\nDO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
   ]) {
     ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);
     denies(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }), "THE ONE WAY THROUGH",

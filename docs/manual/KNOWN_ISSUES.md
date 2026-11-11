@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-10 for the live ledger only (latest live row `20261110164910`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-11 for the live ledger only (latest live row `20261111030853`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -1232,9 +1232,14 @@ Supabase error is a plain object, so Sentry receives only "[object Object]" and 
 expected "a size changed, build a new proposal" refusal on Group Products; 1S on the Office Cockpit finance card had no
 matching database error, so it was most likely a network blip). The 2026-11-10 fix makes `src/lib/sentry.ts` title
 plain error objects with their own message and drop network blips, and Group Products now sends the error's own
-message. Still open: the other call sites (fix the Group Products way; many of those files are Sol-listed, so batch
-them by area). Also open (Luna, PR #1730): login-token scrubbing covers `event.message` and every error title, but not the
-serialized copy Sentry attaches to a plain object; widen it in its own small PR.
+message. The other call sites now use the shared `toSentryError` (batch 1 #1748, billing #1751, orders, deliveries,
+inventory, receiving and POs #1771, jobs, blend tickets, products and settings S3). Still open: 34 call sites in the
+quote screens (QuoteBuilder, Quotes, `components/quotes`), which wait for Taha's quote UI work, and OrderDetail, which
+waits for #1764. Login-token scrubbing (Luna, PR #1730) is replaced by a safe-fields-only
+event (Mason, 2026-11-10, DECISION_LOG): Sentry gets the error type and title, stack file, function and line, our tags,
+the user id, breadcrumb categories and path-only urls. The title is the only free text, and tokens are removed whole
+before figures are blanked. Extra, other contexts, request query, headers and cookies, the serialized copy and breadcrumb
+messages and data are never sent, for errors and performance samples alike (checked against a local Sentry stand-in).
 
 ---
 

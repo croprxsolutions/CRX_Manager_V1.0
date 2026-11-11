@@ -40,6 +40,7 @@ import {
   type FieldInvoiceListFilters,
 } from '../../lib/fieldInvoiceList';
 import { requirePostVersion } from '../../lib/invoicePostVersion';
+import { toSentryError } from '../../lib/sentryError';
 
 // Field-app parity #22: the dedicated "Unposted Field Application Invoices"
 // working tray (ChemMan's /#/invoices/unposted). Lists ONLY not-yet-posted
@@ -141,7 +142,7 @@ export default function FieldInvoicesUnpostedPanel() {
       .order('id', { referencedTable: 'invoice_items' })
       .range(from, to)))
       // A read that throws fails the same way, never leaving the skeleton up for good.
-      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
+      .catch((err: unknown) => ({ data: null, error: toSentryError(err) }));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {
@@ -171,7 +172,7 @@ export default function FieldInvoicesUnpostedPanel() {
         .in('invoice_group_id', idChunk)
         .order('id')
         .range(from, to)))
-        .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
+        .catch((err: unknown) => ({ data: null, error: toSentryError(err) }));
       if (seq !== fetchSeq.current) return;
 
       if (groupErr) {

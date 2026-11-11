@@ -97,6 +97,7 @@ import type {
   JobStatus,
   Profile,
 } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 // Joined applicator/vehicle/weather/crew record is read with the same shape
 // AppliedRecordsManager uses, so the carry-over panel and the job's Applied Info
@@ -1604,7 +1605,7 @@ export default function FieldApplicationInvoice() {
       setJobNotificationsLoaded(true);
     } catch (err) {
       if (jobNotifLoadReqRef.current !== reqId) return; // stale — don't clobber current state
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_load_job_notifications', jobId: reqId } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_load_job_notifications', jobId: reqId } });
       setJobNotifications([]);
       setJobNotificationsLoaded(false);
       setJobNotificationsError(true);
@@ -2732,7 +2733,7 @@ export default function FieldApplicationInvoice() {
         ? 'Only admin or sales can preview the proof.'
         : err instanceof Error ? err.message : 'Could not build the proof preview.';
       toast('error', msg);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_proof_preview', jobId } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_proof_preview', jobId } });
     } finally {
       setLoadingProof(false);
     }
@@ -2870,7 +2871,7 @@ export default function FieldApplicationInvoice() {
           emailedOk += 1;
         } catch (sendErr) {
           emailErr += 1;
-          Sentry.captureException(sendErr instanceof Error ? sendErr : new Error(String(sendErr)), { extra: { context: 'invoice_send_post_notification_email', jobId, customerId: r.customer_id } });
+          Sentry.captureException(toSentryError(sendErr), { extra: { context: 'invoice_send_post_notification_email', jobId, customerId: r.customer_id } });
         }
       }
 
@@ -2898,7 +2899,7 @@ export default function FieldApplicationInvoice() {
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) msg = 'Only admin or sales can send notifications.';
       else if (hasRpcCode(err, RpcErrorCodes.JOB_NOT_POST_NOTIFIABLE)) msg = 'A post-notification can only be sent on a completed or invoiced job.';
       toast('error', msg);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_send_post_notification', jobId } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_send_post_notification', jobId } });
     } finally {
       setSendingPostNotice(false);
     }

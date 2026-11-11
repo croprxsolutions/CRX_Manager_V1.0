@@ -462,6 +462,22 @@
         "driver, dispatch denied": "/ shows / (index)"
       }
     },
+    "/epa-registration-setup": {
+      "url": "/epa-registration-setup",
+      "pageKey": "epa-registration-setup",
+      "page": {
+        "type": "lazy pages/EpaRegistrationSetup"
+      },
+      "access": {
+        "admin": "/epa-registration-setup shows /epa-registration-setup",
+        "sales_rep": "/ shows / (index)",
+        "sales_rep, epa-registration-setup denied": "/ shows / (index)",
+        "applicator": "/ shows / (index)",
+        "applicator, epa-registration-setup denied": "/ shows / (index)",
+        "driver": "/ shows / (index)",
+        "driver, epa-registration-setup denied": "/ shows / (index)"
+      }
+    },
     "/field": {
       "url": "/field",
       "pageKey": "field",
@@ -1674,6 +1690,7 @@
       "Offline Work Review -> /offline-work-review",
       "Label Review -> /label-review",
       "Label Data Quality -> /label-data-quality",
+      "EPA Registration Setup -> /epa-registration-setup",
       "Blend Tickets (OCR) -> /blend-tickets",
       "Insights -> /dashboard",
       "[Setup & Admin]",
@@ -1743,6 +1760,7 @@
       "Offline Work Review -> /offline-work-review",
       "Label Review -> /label-review",
       "Label Data Quality -> /label-data-quality",
+      "EPA Registration Setup -> /epa-registration-setup",
       "Blend Tickets (OCR) -> /blend-tickets",
       "Insights -> /dashboard",
       "[Setup & Admin]",
@@ -4130,6 +4148,15 @@
         ]
       },
       {
+        "key": "epa-registration-setup",
+        "path": "/epa-registration-setup",
+        "label": "EPA Registration Setup",
+        "category": "Compliance & Records",
+        "roles": [
+          "admin"
+        ]
+      },
+      {
         "key": "blend-tickets",
         "path": "/blend-tickets",
         "label": "Blend Tickets (OCR)",
@@ -4293,6 +4320,7 @@
           "offline-work-review",
           "label-review",
           "label-data-quality",
+          "epa-registration-setup",
           "blend-tickets",
           "dashboard",
           "office-cockpit",

@@ -10,6 +10,61 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d922c2698393` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `fee19c69091049d0` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref c3b60308c985)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 2 Sol finding(s) at `d2d1bc8c4461`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d2d1bc8c4461` (base `f52a57230c83`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `c3593fa2f9462217` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref 7e8f8a878f38)
+- Finding 2 (HIGH) at `src/lib/sentryError.ts:30`, text sha256 `61bb6daccd365570` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref 17313d83176e)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `180cc033215d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `180cc033215d` (base `a1ba9e63db65`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:7`, text sha256 `e229b53d6733379a` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref c09bcfbaaa78)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets a database error's wording, figures blanked (KI-115)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Send wording (B)").** Sentry error titles carry the database message's own wording, so an error reads as its reason instead of "[object Object]". Login tokens are removed whole first, then every run of digits becomes "#" (`src/lib/sentryError.ts`). The other choice was to send only a reason label or error code. Mason accepts that the wording may name a product or other record (Sol, KI-115 billing batch, round 3). Reviewed: the database messages carry product names, ids and amounts, and none were found with customer names or emails. That acceptance is his own `owner-accept-sol-finding` record, not this entry.
+**What this forbids/implies:** do not send free text other than this scrubbed message, for example `details` or `hint`. Do not blank figures before tokens are removed. A new database message that would quote a customer's name or contact details must not be raised.
+## 2026-11-10 — #1756: Mason owner-accepted 1 Sol finding(s) at `0fc8d1c59d0e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1756 at `0fc8d1c59d0e` (base `3e72201b4784`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `src/lib/sentryError.ts:9`, text sha256 `e075ef7905bf21cd` (the wording stays with the proof, not here)
+  Mason's reason: our database never sees login tokens (ref cddc292eff89)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-10 — Sentry gets only known-safe fields, built fresh (KI-115, option B)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Safe fields only (B)").** Every Sentry event, error or performance sample, is rebuilt in `src/lib/sentry.ts` from an allow-list: error type and title, stack frames (file, function, line, column), our own tags, the user id, breadcrumb category, level and time, path-only urls and span names, trace ids, and the SDK's own bookkeeping. Dropped: `extra`, every other context, request query, headers and cookies, the serialized copy of a plain error object, breadcrumb messages and data, and span data. The alternative was to keep token-pattern matching across the whole event, which Luna kept finding new shapes for. The title is the only free text. It goes through `toSentryError`: tokens removed whole, then figures blanked (see the same-day entry "Sentry gets a database error's wording, figures blanked").
+**What this forbids/implies:** do not send a new event field without adding it to the allow-list on purpose. Do not add pattern matching back as the main defence. The `extra` data on about 220 capture calls no longer reaches Sentry; put anything Sentry must see in a tag instead.
+
+## 2026-11-10 — A restricted-use "Yes" at posting also creates the record (REG-1 Step 2, PR `claude/reg1-step2-redesign-e66693`)
+## 2026-11-10 — #1706 (RT-2 step 1 unit spellings) redone for product families as 20270101010000; new Sol rounds
+
+**Decision (Mason, in chat, 2026-11-10: "ok reg 1 is working so continue woek", lifting the same day's "Park it, REG-1 first").** The parked `20261229170000` refused live (`RT2A_UNLISTED_SPELLING`, nothing changed) because 18 of its 20 products joined one-size product families that night. It is renamed to `20270101010000` (never applied, never on main) and redone: a family stores a rate unit but no stock unit, so the 19 stock-unit moves leave their families alone; the Imazuron Herbicide family moves `LB` to `Lb` with its one size. The family copy needs a family event with a named person, which a migration has not, so the migration moves the family row itself and disables `trigger_zz_guard_product_parent_values` for the single Imazuron UPDATE (the same pattern Sol accepted for the setup guard); no `product_parent_events` row is written. Every family is pinned by id, name, rate unit and its exact sizes. This is a new design, reviewed fresh from Sol round 12. The live apply needs Mason's fresh approval.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings): Sol round 10's two findings fixed; one more Sol round
+
+**Decision (Mason, in chat, 2026-11-09: "fix and babysit this pr and merge it").** Sol round 10 on PR #1706 found a HIGH and a MED; both are fixed as planned, and Sol may run once more on the fixed head. HIGH: Autumn Super 51 WDG and Cimarron Plus no longer move from `oz` to `Dry oz` in step 1, because `refresh_watchdog_flags` compares a saved job's rate unit with the product's, so the move would silently drop an over-rate warning; they move in RT-2 step 2 with a watchdog fix. MED: the 19 stock-unit moves (`Oz` to `oz`, `Qt` to `qt`) now move those products' `inventory.unit_size` snapshots in the same transaction, so the product page's "Total on hand" still adds them up; the snapshot count is pinned (0 live) and any other count refuses. If this Sol round is not clean, the finding goes to Mason in plain English instead of another patch.
+
+## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
+
+**Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
 ## 2026-11-10 — The P&L subtracts commissions only on sales billed in CRX (To-Do decision 15, KI-125)
 
 **Decision (Mason, in session, 2026-11-10: "Only CRX-billed"):** Bottom Line P&L and Monthly Summary subtract a sales commission only when its order has a CRX invoice counted in that period's revenue (posted, overdue or paid, by invoice date). Chem Man-billed sales are not brought into CRX revenue.

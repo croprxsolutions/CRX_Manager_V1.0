@@ -191,8 +191,8 @@ function editHeaderNotes(value: string) {
 async function createWithPartialFailureAndStay() {
   editHeaderNotes('Spray north field');
   fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
-  await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+  fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+  await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
 }
 
 describe('FieldApplicationInvoice — first Save of a new invoice', () => {
@@ -222,7 +222,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
     expect(await screen.findByText(`Saved invoice page ${CREATED_ID}`)).toBeInTheDocument();
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
     expect(mockToast).toHaveBeenCalledWith('success', 'Invoice created');
     expect(saveCalls()).toHaveLength(1);
   });
@@ -293,8 +293,8 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(billingKeys()).toHaveLength(2));
     expect(billingKeys()[1]).toBe(billingKeys()[0]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
-    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
 
     // Changed values: the unanswered key first (only one write per key can commit, so an older
     // write still running cannot land after this one), then the current values under a new key.
@@ -406,7 +406,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     editHeaderNotes('Spray south field instead');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
     await waitFor(() => expect(billingCalls()).toHaveLength(2));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Save$/i })).not.toBeDisabled());
 
@@ -534,8 +534,8 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('billing details (PO / terms / due date / notes / discount) did NOT persist')));
     expect(mockRpc.mock.calls.some(([n]) => n === 'update_field_app_invoice_billing')).toBe(false);
     // The form is still unsaved, so leaving asks first.
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(router.state.location.pathname).toBe(NEW_PATH);
     expect(addressParam(router, 'created')).toBe(CREATED_ID);
   });
@@ -555,7 +555,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     await waitFor(() => expect(headerNotes().value).toBe(''));
     await createWithPartialFailureAndStay();
 
@@ -607,7 +607,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Start a new invoice instead' }));
     await waitFor(() => expect(router.state.location.search).toBe(''));
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
     expect(headerNotes().value).toBe('Spray north field');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(saveCalls()).toHaveLength(1));
@@ -653,8 +653,8 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
 
     editHeaderNotes('Re-entered notes');
     await act(async () => { releaseInvoiceCheck(); });
-    fireEvent.click(await screen.findByRole('button', { name: 'Stay' }));
-    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe(NEW_PATH);
     expect(headerNotes().value).toBe('Re-entered notes');
     expect(screen.getByRole('link', { name: 'FA-2001' })).toHaveAttribute('href', `/invoices/field-app/${CREATED_ID}`);
@@ -673,7 +673,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     editHeaderNotes('My own new invoice');
     await act(async () => { releaseInvoiceCheck(); });
     expect(await screen.findByRole('button', { name: 'Start a new invoice instead' })).toBeInTheDocument();
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
     expect(headerNotes().value).toBe('My own new invoice');
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     expect(saveCalls()).toHaveLength(0);
@@ -738,7 +738,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     await waitFor(() => expect(headerNotes().value).toBe(''));
     await act(async () => {
       finishCreate({ data: { invoice_ids: [CREATED_ID], invoice_group_id: null }, error: null });
@@ -772,7 +772,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     await waitFor(() => expect(router.state.location.search).toBe(''));
     await act(async () => {
       finishBilling({ data: { success: true }, error: null });
@@ -807,7 +807,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     await waitFor(() => expect(headerNotes().value).toBe(''));
     await createWithPartialFailureAndStay();
     expect(addressParam(router, 'created')).toBe(SECOND_ID);
@@ -816,7 +816,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(-1);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
     expect(saveCalls()).toHaveLength(2);
@@ -832,7 +832,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     await act(async () => {
       await router.navigate(NEW_PATH);
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
     await waitFor(() => expect(router.state.location.search).toBe(''));
 
     // A fresh page: nothing typed carried over, and Save creates a new invoice.

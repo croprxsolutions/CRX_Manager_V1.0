@@ -1,5 +1,5 @@
 import { AlertTriangle, Trash2, ClipboardCheck, type LucideIcon } from 'lucide-react';
-import Modal from './Modal';
+import Modal, { ALERT_BUTTON } from './Modal';
 import Button from './Button';
 
 type ConfirmVariant = 'danger' | 'warning' | 'info';
@@ -41,38 +41,33 @@ export default function ConfirmModal({
   icon,
   loading = false,
 }: ConfirmModalProps) {
-  const styles = variantStyles[variant];
-  const Icon = icon || defaultIcons[variant];
-
   return (
     <Modal
       open={open}
       onClose={onClose}
       closeDisabled={loading}
       title={title}
+      size="alert"
+      icon={icon || defaultIcons[variant]}
+      iconClassName={variantStyles[variant]}
       footer={
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button variant="secondary" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={loading} className={ALERT_BUTTON}>
             {cancelLabel}
           </Button>
+          {/* Red is kept for danger. A warning or info confirm is a green go-ahead. */}
           <Button
-            variant={variant === 'info' ? 'primary' : 'danger'}
-            icon={<Icon className="w-4 h-4" />}
+            variant={variant === 'danger' ? 'danger' : 'primary'}
             onClick={onConfirm}
             loading={loading}
-            className="min-h-11 w-full sm:w-auto"
+            className={ALERT_BUTTON}
           >
             {confirmLabel}
           </Button>
-        </div>
+        </>
       }
     >
-      <div className="flex items-start gap-3">
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${styles}`} aria-hidden="true">
-          <Icon className="w-5 h-5" />
-        </span>
-        <p className="pt-2 text-sm text-secondary">{message}</p>
-      </div>
+      {message}
     </Modal>
   );
 }

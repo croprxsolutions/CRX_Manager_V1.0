@@ -151,7 +151,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
     expect(mockToast).toHaveBeenCalledWith('success', 'Quote saved as draft');
     expect(mockToast).not.toHaveBeenCalledWith('warning', expect.anything());
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(1);
@@ -179,7 +179,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 
   it('still opens the saved planned quote when its hold creation cannot be confirmed', async () => {
@@ -212,7 +212,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     fireEvent.click(screen.getByRole('switch', { name: /^Planned program/ }));
     fireEvent.click(screen.getByText('Quotes list'));
 
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/quotes/new');
   });
 
@@ -222,9 +222,9 @@ describe('QuoteBuilder — leaving a new quote', () => {
 
     fireEvent.click(screen.getByText('Quotes list'));
 
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
-    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe('/quotes/new');
     expect(mockRpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import UnsavedChangesModal from './UnsavedChangesModal';
 
 describe('UnsavedChangesModal', () => {
@@ -14,8 +14,8 @@ describe('UnsavedChangesModal', () => {
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
     );
-    expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
-    expect(screen.getByText(/unsaved changes that will be lost/i)).toBeInTheDocument();
+    const dialog = screen.getByRole('alertdialog', { name: 'Leave without saving?' });
+    expect(dialog).toHaveAccessibleDescription('The changes you made on this page will be lost.');
   });
 
   it('renders through a hidden wrapper directly under document.body', () => {
@@ -38,22 +38,30 @@ describe('UnsavedChangesModal', () => {
     expect(dialog).toHaveAttribute('aria-modal', 'true');
   });
 
-  it('shows Leave and Stay buttons', () => {
+  it('shows Discard changes and Keep editing buttons, the safe one first in the DOM', () => {
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
     );
-    expect(screen.getByText('Leave')).toBeInTheDocument();
-    expect(screen.getByText('Stay')).toBeInTheDocument();
+    const buttons = Array.from(document.querySelectorAll('[data-modal-footer] button')).map((b) => b.textContent);
+    expect(buttons).toEqual(['Discard changes', 'Keep editing']);
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+  });
+
+  it('focuses Keep editing first', async () => {
+    render(
+      <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
+    );
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep editing' })));
   });
 
   it('disables Leave while a save is in progress', () => {
     render(
       <UnsavedChangesModal open={true} disableLeave onStay={() => {}} onLeave={() => {}} />
     );
-    expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Discard changes' })).toBeDisabled();
   });
 
-  it('uses a full-height mobile panel with a separate action bar', () => {
+  it('is a bottom sheet on phone with the main action stacked on top', () => {
     window.innerWidth = 375;
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={() => {}} />
@@ -61,27 +69,27 @@ describe('UnsavedChangesModal', () => {
 
     const dialog = screen.getByRole('alertdialog');
     const panel = dialog.querySelector('[data-modal-panel]');
-    const actionBar = screen.getByRole('button', { name: 'Stay' }).parentElement;
+    const actionBar = screen.getByRole('button', { name: 'Keep editing' }).parentElement;
 
-    expect(panel).toHaveClass('h-[100dvh]', 'max-w-full', 'md:h-auto');
-    expect(actionBar).toHaveClass('sticky', 'shrink-0', 'pb-[calc(1rem+env(safe-area-inset-bottom))]');
+    expect(panel).toHaveClass('rounded-t-2xl', 'max-w-full', 'md:max-w-md');
+    expect(actionBar).toHaveClass('flex-col-reverse', 'shrink-0', 'pb-[calc(1.25rem+env(safe-area-inset-bottom))]');
   });
 
-  it('calls onLeave when Leave button is clicked', () => {
+  it('calls onLeave when Discard changes is clicked', () => {
     const onLeave = vi.fn();
     render(
       <UnsavedChangesModal open={true} onStay={() => {}} onLeave={onLeave} />
     );
-    fireEvent.click(screen.getByText('Leave'));
+    fireEvent.click(screen.getByText('Discard changes'));
     expect(onLeave).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onStay when Stay button is clicked', () => {
+  it('calls onStay when Keep editing is clicked', () => {
     const onStay = vi.fn();
     render(
       <UnsavedChangesModal open={true} onStay={onStay} onLeave={() => {}} />
     );
-    fireEvent.click(screen.getByText('Stay'));
+    fireEvent.click(screen.getByText('Keep editing'));
     expect(onStay).toHaveBeenCalledTimes(1);
   });
 

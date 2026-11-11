@@ -37,7 +37,7 @@ describe('ToastProvider + useToast', () => {
     expect(screen.getByText('Saved!')).toBeInTheDocument();
   });
 
-  it('keeps the toast viewport above the mobile bottom navigation and safe area', () => {
+  it('keeps toasts at the top, clear of the bottom nav and every dialog footer', () => {
     window.innerWidth = 375;
     render(
       <ToastProvider>
@@ -48,9 +48,14 @@ describe('ToastProvider + useToast', () => {
     fireEvent.click(screen.getByText('Show Toast'));
 
     expect(document.querySelector('[data-toast-viewport]')).toHaveClass(
-      'bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]',
-      'md:bottom-4'
+      'top-[calc(env(safe-area-inset-top)+0.75rem)]',
+      'md:top-[4.75rem]',
+      'md:right-4',
+      '[body:has([data-modal-panel])_&]:max-md:right-[4.5rem]',
+      '[body:has([data-modal-panel])_&]:md:right-1/2',
     );
+    expect(document.querySelector('[data-toast-viewport]')?.className).not.toMatch(/bottom-/);
+    expect(screen.getByLabelText('Dismiss notification')).toHaveClass('h-11', 'w-11');
   });
 
   it('shows an error toast with alert role', () => {

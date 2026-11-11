@@ -118,7 +118,7 @@ describe('SettingsPage — Edit User', () => {
 
     fireEvent.change(within(dialog).getByLabelText('Role'), { target: { value: 'driver' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
-    const confirm = await screen.findByRole('dialog', { name: /Confirm User Changes/ });
+    const confirm = await screen.findByRole('alertdialog', { name: /Confirm User Changes/ });
     expect(confirm).toHaveTextContent('from Sales rep to Driver');
     expect(mockRpc).not.toHaveBeenCalled();
 

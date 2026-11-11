@@ -38,8 +38,13 @@ Black Strap Molasses Sugar - Bulk stays at −1,325, which already matches its h
   inventory row per product and no `in_progress` cycle count on it (a count snapshots expected stock when it
   starts, so one opened before the correction would carry a stale difference; completing a count adds that
   difference with a matching ledger row, live `_complete_cycle_count_impl`; none is open today, all 17 counts
-  are cancelled). The migration also locks `cycle_counts` and `cycle_count_items`, so a count started while
-  it runs waits until it commits (Luna round 1).
+  are cancelled). The migration also locks `cycle_counts` and `cycle_count_items`, so a count whose rows are
+  written while it runs waits until it commits (Luna round 1). The lock cannot cover a count screen that read
+  stock in the browser before the apply and saves after it (`CycleCounts.tsx` ~L286): that is the existing
+  KI-134 (any stock movement during an open count), not new here (Luna round 2, refuted as pre-existing). The
+  post-apply check (case 5) therefore also lists any `in_progress` count holding one of the five products with an
+  `expected_qty` other than the new stored value; if one exists, it is cancelled and restarted before it is
+  completed.
   Any difference raises `KI108_PREIMAGE_DRIFTED` and changes nothing. The no-op path is taken only when none of
   the five **products** exist (schema-only rebuild); products present with other inventory rows raise. The
   signature is not a row-by-row copy of the history; on production, where the ledger is append-only, any new
@@ -85,7 +90,8 @@ columns, types, nullability and unique key asserted equal to live. Run 2026-11-1
 3. When none of the five products exists, then it does nothing and raises nothing.
 4. When it has run, Black Strap Bulk and an unrelated product are unchanged, and a second run is refused.
 5. After the live apply: the read-only all-products check, and the `/integrity-report` page's Inventory Ledger
-   check passes or lists only products other than these five.
+   check passes or lists only products other than these five; and no `in_progress` cycle count holds one of
+   the five products with a stale `expected_qty` (KI-134).
 
 ## Cold challenge (gpt-6-astra, high, 2026-11-10): 30 findings, all settled
 

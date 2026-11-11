@@ -54,7 +54,7 @@ export interface InvoicePrintOptions {
 export const INVOICE_PDF_ITEM_COLUMNS =
   'order_item_id, product_id, return_credit_source_item_id, description, quantity, unit_size, unit_price_cents, ' +
   'extended_cents, rate_per_acre, rate_unit, acres, total_applied, total_applied_unit, total_applied_gl_lb, ' +
-  'gl_lb_unit, epa_registration, is_application_fee, product_form, product:products(product_name, epa_registration, product_form)';
+  'gl_lb_unit, epa_registration, is_application_fee, product_form, charge_type, product:products(product_name, epa_registration, product_form)';
 
 
 // ── PDF Data Interfaces ─────────────────────────────────────────────────
@@ -81,7 +81,12 @@ export interface InvoicePdfItem {
   epa_registration?: string | null;
   is_application_fee?: boolean;
   product_form?: string | null;
+  /** invoice_items.charge_type: 'standing_discount' and 'sales_tax' are the database's computed lines (M4b, M4a). */
+  charge_type?: string | null;
 }
+
+/** The database's own lines: printed by name and amount only. */
+const isComputedLine = (item: InvoicePdfItem) => item.charge_type === 'standing_discount' || item.charge_type === 'sales_tax';
 
 /** Convert a database invoice-item row into the one PDF shape every caller uses. */
 export function mapInvoicePdfItem(item: unknown): InvoicePdfItem {
@@ -110,6 +115,7 @@ export function mapInvoicePdfItem(item: unknown): InvoicePdfItem {
     epa_registration: (row.epa_registration as string) || row.product?.epa_registration || null,
     is_application_fee: Boolean(row.is_application_fee),
     product_form: (row.product_form as string) || row.product?.product_form || null,
+    charge_type: (row.charge_type as string) || null,
   };
 }
 
@@ -1262,6 +1268,10 @@ function drawChemicalSaleLayout(
     : [['Date', 'Chemical', 'Quantity', 'Cost', 'Total']];
 
   const rows = data.items.map((item) => {
+    if (isComputedLine(item)) {
+      const name = item.product_name || item.description;
+      return showEpa ? ['', name, '', '', '', fmt(item.extended_cents)] : ['', name, '', '', fmt(item.extended_cents)];
+    }
     const qtyStr = `${fmtNum(item.quantity, 2)} ${item.unit_size || item.rate_unit || ''}`;
     const costStr = `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
 

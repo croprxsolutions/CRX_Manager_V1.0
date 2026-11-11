@@ -2232,6 +2232,8 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
     renderInvoiceDetail('inv-disc');
     await waitFor(() => expect(screen.getByText('Standing discount 3%')).toBeInTheDocument());
     expect(screen.getByText('Sales tax 6.25%')).toBeInTheDocument();
+    // An admin on a chemical-sale draft can change this sale's discount (billing plan M4b).
+    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toBeInTheDocument();
     // Price boxes for the product and the freight, none for the discount or tax line.
     const prices = screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value);
     expect(prices).toContain('100.00');

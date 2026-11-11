@@ -658,6 +658,8 @@ export interface CommissionSplit {
 }
 
 export interface Customer {
+  /** Standing grower discount, % off product lines on chemical sales (billing plan M4b). Admin only. */
+  standing_discount_pct?: number;
   id: string;
   farm_name: string;
   /** Controlled list, enforced by customers_crops_allowed_check (see src/lib/crops.ts). */
@@ -1051,6 +1053,8 @@ export interface Order {
    * is queued for a manual "Create Split Invoices" pass. Cleared back to false
    * once create_split_invoices_from_order successfully bills it. */
   needs_split_billing?: boolean | null;
+  /** The sale's sales tax box (billing plan M4a); changed only through set_order_sales_tax. */
+  sales_tax?: boolean;
   created_at: string;
   updated_at: string;
   customer?: Customer;

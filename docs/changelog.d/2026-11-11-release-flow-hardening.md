@@ -36,6 +36,10 @@ against the code. This PR fixes the ones that were real:
   see the plan. The `release-next` ruleset lets only the bot push there, and the checklist asks for it.
 - A gate refresh is asynchronous, so a proof removed seconds before merging can't be caught. The
   checklist asks for a fresh run right before merging.
+- A `DO` block that commits inside a no-transaction file. That predates this PR; the rule counts
+  statements, it doesn't parse procedural code.
+- A hand-made changelog that keeps old sections but adds a contradicting copy, or mismatched dates. These
+  need a push to `release/next`, which only the bot may make.
 - A squash-merged release is detected (no tag), not prevented. The `protect-main` ruleset, set to merge
   commits only, prevents it.
 

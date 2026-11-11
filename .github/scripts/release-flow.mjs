@@ -404,7 +404,8 @@ const commands = {
   // usage (stdin = changed file names): release-flow.mjs check-release-files
   // usage: release-flow.mjs check-release-content <expected tree> <release/next sha>
   async 'check-release-content'([expected, head]) {
-    // null only when the path isn't in that tree; any other git error (a huge file, a bad ref) throws.
+    // null when `git cat-file -e` can't find the path (missing, or the ref itself is unreadable: the head
+    // side then reports "missing"); reading a file that exists has no size cap and throws on any error.
     const show = (ref, f) => {
       try { execFileSync('git', ['cat-file', '-e', `${ref}:${f}`], { stdio: 'ignore' }); } catch { return null; }
       return execFileSync('git', ['show', `${ref}:${f}`], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });

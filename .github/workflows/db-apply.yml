@@ -24,8 +24,10 @@ permissions: {}
 # One staging run at a time, start to finish (migrations, then functions), so an older run can never
 # deploy after a newer one. PR runs don't wait on each other. A failed run: re-run it, or run the
 # workflow by hand (Actions -> Database -> Run workflow on staging).
+# Nightly and main-dispatched runs only read, so they queue in their own group: a waiting staging push
+# is never replaced by one (GitHub keeps one pending run per group).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('db-pr-{0}', github.run_id) || 'db-staging' }}
+  group: ${{ github.event_name == 'pull_request' && format('db-pr-{0}', github.run_id) || (github.ref == 'refs/heads/staging' && 'db-staging' || 'db-check') }}
   cancel-in-progress: false
 
 jobs:
@@ -134,30 +136,37 @@ jobs:
       contents: read
     env:
       STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
-      DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
       TARGET_REF: fsnjredpmakbmhwowjjt
       # ponytail: report-only until the first staging report is reviewed; then remove this line.
       SCHEMA_MODE: report
+    # The read-only URL is given only to the steps that use it, never to checkout or the rebuild.
     steps:
       - id: on
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
         run: |
           if [ "$STAGING_DB_JOB" != "on" ]; then echo "::notice::Staging DB job not switched on yet (STAGING_DB_JOB)."; exit 0; fi
           if [ -z "$DB_URL" ]; then echo "::error::STAGING_DB_READONLY_URL is missing from the staging-db-readonly environment."; exit 1; fi
           echo "yes=1" >> "$GITHUB_OUTPUT"
-      # The commit just applied on a push; the staging branch for nightly and manual runs.
+      # The commit this run applied (push or Run workflow on staging); the staging branch for nightly runs.
       - if: steps.on.outputs.yes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'push' && github.sha || 'staging' }}
+          ref: ${{ github.ref == 'refs/heads/staging' && github.sha || 'staging' }}
           persist-credentials: false
       - name: Ledger drift check
-        if: steps.on.outputs.yes && github.event_name != 'push'
+        if: steps.on.outputs.yes && github.ref != 'refs/heads/staging'
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
         run: node .github/scripts/db-apply.mjs drift
       - name: Rebuild the schema from the files
         if: steps.on.outputs.yes
+        shell: bash
         run: |
           .github/scripts/rebuild-schema.sh "$RUNNER_TEMP/rebuild" | tee "$RUNNER_TEMP/rebuild.log"
           grep '^REBUILT_DB_URL=' "$RUNNER_TEMP/rebuild.log" >> "$GITHUB_ENV"
       - name: Compare staging with the rebuild
         if: steps.on.outputs.yes
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
         run: node .github/scripts/db-apply.mjs schema

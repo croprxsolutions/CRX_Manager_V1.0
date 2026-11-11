@@ -11,15 +11,16 @@ fn AS (SELECT p.*, p.proname || '(' || pg_get_function_identity_arguments(p.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')),
 lines AS (
   SELECT 'relation ' || relname || ' kind=' || relkind::text || ' rls=' || relrowsecurity || ' force=' || relforcerowsecurity AS line
-    FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+    FROM rel WHERE relkind IN ('r', 'p', 'v', 'm', 'f', 'S', 'c')
   UNION ALL
   SELECT 'column ' || c.relname || '.' || a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
          || CASE WHEN a.attnotnull THEN ' not null' ELSE '' END
          || coalesce(' default ' || pg_get_expr(d.adbin, d.adrelid), '')
          || CASE WHEN a.attgenerated::text <> '' THEN ' generated ' || a.attgenerated::text ELSE '' END
+         || CASE WHEN a.attidentity::text <> '' THEN ' identity ' || a.attidentity::text ELSE '' END
     FROM pg_attribute a JOIN rel c ON c.oid = a.attrelid
     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.attnum > 0 AND NOT a.attisdropped
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'c') AND a.attnum > 0 AND NOT a.attisdropped
   UNION ALL
   SELECT 'constraint ' || c.relname || '.' || k.conname || ' ' || pg_get_constraintdef(k.oid)
     FROM pg_constraint k JOIN rel c ON c.oid = k.conrelid
@@ -28,9 +29,16 @@ lines AS (
   UNION ALL
   SELECT 'trigger ' || pg_get_triggerdef(t.oid) FROM pg_trigger t JOIN rel c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal
   UNION ALL
-  SELECT 'policy ' || tablename || '.' || policyname || ' ' || permissive || ' ' || cmd || ' to ' || array_to_string(roles, ',')
+  -- Triggers elsewhere (e.g. auth.users) that call a function in public.
+  SELECT 'trigger ' || pg_get_triggerdef(t.oid) FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE NOT t.tgisinternal AND p.pronamespace = (SELECT oid FROM pub)
+      AND t.tgrelid NOT IN (SELECT oid FROM rel)
+  UNION ALL
+  SELECT 'publication ' || pubname || ' ' || schemaname || '.' || tablename FROM pg_publication_tables WHERE schemaname = 'public'
+  UNION ALL
+  SELECT 'policy ' || schemaname || '.' || tablename || '.' || policyname || ' ' || permissive || ' ' || cmd || ' to ' || array_to_string(roles, ',')
          || ' using ' || coalesce(qual, '-') || ' check ' || coalesce(with_check, '-')
-    FROM pg_policies WHERE schemaname = 'public'
+    FROM pg_policies WHERE schemaname IN ('public', 'storage')
   UNION ALL
   SELECT 'view ' || relname || ' md5=' || md5(pg_get_viewdef(oid)) FROM rel WHERE relkind IN ('v', 'm')
   UNION ALL
@@ -44,20 +52,21 @@ lines AS (
   SELECT 'domain ' || typname || ' ' || format_type(typbasetype, typtypmod) || CASE WHEN typnotnull THEN ' not null' ELSE '' END
     FROM pg_type WHERE typnamespace = (SELECT oid FROM pub) AND typtype = 'd'
   UNION ALL
-  -- Grants (who may read, write or call what), without the owner's own implicit rights.
-  SELECT 'grant ' || x.privilege_type || ' on ' || c.relname || ' to ' || coalesce(r.rolname, 'PUBLIC')
+  -- Grants (who may read, write or call what). The owner and the two admin roles are left out: which of
+  -- them owns an object can differ between the platform and a restore; the app roles are what matter.
+  SELECT 'grant ' || x.privilege_type || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' on ' || c.relname || ' to ' || coalesce(r.rolname, 'PUBLIC')
     FROM rel c, aclexplode(coalesce(c.relacl, acldefault((CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END)::"char", c.relowner))) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
-    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND x.grantee <> c.relowner
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND x.grantee <> c.relowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
-  SELECT 'grant ' || x.privilege_type || ' (' || a.attname || ') on ' || c.relname || ' to ' || coalesce(r.rolname, 'PUBLIC')
+  SELECT 'grant ' || x.privilege_type || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' (' || a.attname || ') on ' || c.relname || ' to ' || coalesce(r.rolname, 'PUBLIC')
     FROM pg_attribute a JOIN rel c ON c.oid = a.attrelid, aclexplode(a.attacl) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
-    WHERE a.attacl IS NOT NULL AND x.grantee <> c.relowner
+    WHERE a.attacl IS NOT NULL AND x.grantee <> c.relowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
   UNION ALL
-  SELECT 'grant EXECUTE on ' || f.sig || ' to ' || coalesce(r.rolname, 'PUBLIC')
+  SELECT 'grant EXECUTE' || CASE WHEN x.is_grantable THEN '+grant' ELSE '' END || ' on ' || f.sig || ' to ' || coalesce(r.rolname, 'PUBLIC')
     FROM fn f, aclexplode(coalesce(f.proacl, acldefault('f'::"char", f.proowner))) x
     LEFT JOIN pg_roles r ON r.oid = x.grantee
-    WHERE x.grantee <> f.proowner
+    WHERE x.grantee <> f.proowner AND coalesce(r.rolname, '') NOT IN ('postgres', 'supabase_admin')
 )
 SELECT regexp_replace(line, '\s*\n\s*', ' ', 'g') FROM lines ORDER BY 1;

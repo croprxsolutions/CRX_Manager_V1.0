@@ -49,15 +49,15 @@ psqlq -f "$B/${HW}_platform_overlay.sql"
 psqlq -f "$B/${HW}_cron_jobs.sql" >/dev/null
 psqlq -c "CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text NOT NULL PRIMARY KEY, statements text[], name text);"
 psqlq -f "$B/${HW}_migration_history.sql"
-python3 -I "$REPO/.github/scripts/rebuild/reference-data.py" "$REPO" "$W/reference-data.sql" >/dev/null
+python3 -I "$REPO/.github/scripts/rebuild/reference-data.py" "$REPO" "$W/reference-data.sql" "$HW" >/dev/null
 psqlq -f "$W/reference-data.sql"
 
 ONESHOTS=" $(node -p "Object.keys(require('$B/one-shot-migrations.json').one_shot).join(' ')") "
 n=0
-for f in $(ls "$REPO"/supabase/migrations/*.sql | sort); do
+for f in "$REPO"/supabase/migrations/*.sql; do   # glob order = stamp order
   b="$(basename "$f" .sql)"; v="${b%%_*}"
-  [[ "$b" =~ ^[0-9]{14}_[a-z0-9_]+$ ]] || continue
   [[ "$v" > "$HW" ]] || continue
+  [[ "$b" =~ ^[0-9]{14}_[a-z0-9_]+$ ]] || { echo "::error::rebuild: unexpected migration name $b"; exit 1; }
   if [[ "$ONESHOTS" == *" $b "* ]]; then   # data migration bound to live rows: record only, at its place
     psqlq -c "INSERT INTO supabase_migrations.schema_migrations(version,name) VALUES ('$v','$b');"; continue
   fi
@@ -70,9 +70,11 @@ for f in $(ls "$REPO"/supabase/migrations/*.sql | sort); do
     # Live stores validate_product_units() with CRLF too (its preflight pins it); the baseline dump is LF.
     psqlq -c "DO \$\$ BEGIN EXECUTE replace(pg_get_functiondef('public.validate_product_units()'::regprocedure), E'\n', E'\r\n'); END \$\$;"
   fi
+  tx=(--single-transaction)   # a first line "-- crx: no-transaction" runs outside one, as db-apply does
+  head -n 1 "$f" | tr -d '\r' | grep -Eiq '^--[[:space:]]*crx:[[:space:]]*no-transaction[[:space:]]*$' && tx=()
   ok=0
   for try in 1 2 3 4 5; do   # DRAW_DOWN_CUTOVER_NOT_QUIET: wait out background service transactions
-    if psql "$DB" -X -q --single-transaction -v ON_ERROR_STOP=1 -f "$f" >"$W/last.log" 2>&1; then ok=1; break; fi
+    if psql "$DB" -X -q "${tx[@]}" -v ON_ERROR_STOP=1 -f "$f" >"$W/last.log" 2>&1; then ok=1; break; fi
     grep -q NOT_QUIET "$W/last.log" || break; sleep 2
   done
   [ $ok = 1 ] || { echo "::error::rebuild failed at $b"; grep -E 'ERROR|CONTEXT' "$W/last.log" | head -20; exit 1; }

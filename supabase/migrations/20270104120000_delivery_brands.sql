@@ -214,6 +214,8 @@ CREATE TRIGGER delivery_brand_events_no_truncate BEFORE TRUNCATE ON public.deliv
 
 -- Grants and read rule (del_items_select's rule, with the driver also active). Supabase's default privileges give
 -- new tables write and TRUNCATE to app roles; RLS does not cover TRUNCATE, so everything is revoked first.
+ALTER TABLE public.delivery_brand_events OWNER TO postgres;
+ALTER TABLE public.delivery_item_brands OWNER TO postgres;
 ALTER TABLE public.delivery_brand_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delivery_item_brands ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.delivery_brand_events FROM PUBLIC, anon, authenticated, service_role;
@@ -265,7 +267,9 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(max(e.seq), 0) FROM public.delivery_brand_events e WHERE e.delivery_id = p_delivery_id;
+  -- An office review only links or dismisses a typed name; it must not make a driver's loaded picks stale.
+  SELECT COALESCE(max(e.seq), 0) FROM public.delivery_brand_events e
+   WHERE e.delivery_id = p_delivery_id AND e.event_type <> 'reviewed';
 $function$;
 
 -- The current picks of a delivery (or of some of its lines), as stored.
@@ -316,7 +320,7 @@ $function$;
 CREATE FUNCTION public._delivery_brand_resolve_picks(p_product_id uuid, p_picks jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
@@ -479,8 +483,11 @@ BEGIN
         END LOOP;
       END IF;
       -- Step 2: one pick covering at least the delivered amount is that amount (same brand, nothing guessed).
+      -- A delivered amount finer than a pick may hold (4 places) is left alone and listed as a mismatch:
+      -- the trim must never fail the pick CHECK and so block the completion.
       UPDATE public.delivery_item_brands b SET quantity = v_line.delivered
        WHERE b.delivery_item_id = v_line.id AND b.superseded_at IS NULL AND b.quantity > v_line.delivered
+         AND v_line.delivered = round(v_line.delivered, 4)
          AND (SELECT count(*) FROM public.delivery_item_brands c
                WHERE c.delivery_item_id = v_line.id AND c.superseded_at IS NULL) = 1;
     END IF;
@@ -507,7 +514,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
   SELECT EXISTS (
-    SELECT 1 FROM public.profiles p JOIN public.deliveries d ON d.id = p_delivery_id
+    SELECT 1 FROM public.profiles p JOIN public.deliveries d ON d.id = p_delivery_id AND d.deleted_at IS NULL
      WHERE p.id = auth.uid() AND p.is_active = true
        AND (p.role IN ('admin', 'sales_rep') OR (p.role = 'driver' AND d.assigned_driver = p.id)));
 $function$;
@@ -684,7 +691,7 @@ BEGIN
     IF v_item.order_item_id IS NOT NULL THEN v_order_items := v_order_items || v_item.order_item_id; END IF;
     v_rows := public._delivery_brand_resolve_picks(v_item.product_id, v_line -> 'picks');
     IF jsonb_array_length(v_rows) > 0
-       AND (SELECT sum((r ->> 'quantity')::numeric) FROM jsonb_array_elements(v_rows) r) IS DISTINCT FROM v_item.delivered THEN
+       AND (SELECT sum((r ->> 'quantity')::numeric) FROM jsonb_array_elements(v_rows) r) IS DISTINCT FROM round(v_item.delivered, 4) THEN
       RAISE EXCEPTION 'BRAND_SPLIT_NOT_DELIVERED: the corrected brand amounts must add up to the % delivered', v_item.delivered
         USING ERRCODE = '22023';
     END IF;
@@ -761,7 +768,8 @@ BEGIN
   END IF;
   SELECT delivery_id INTO v_delivery_id FROM public.delivery_item_brands WHERE id = p_pick_id;
   IF v_delivery_id IS NULL THEN RAISE EXCEPTION 'BRAND_PICK_NOT_FOUND' USING ERRCODE = 'P0002'; END IF;
-  PERFORM 1 FROM public.deliveries WHERE id = v_delivery_id FOR UPDATE;
+  PERFORM 1 FROM public.deliveries WHERE id = v_delivery_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'BRAND_PICK_NOT_FOUND' USING ERRCODE = 'P0002'; END IF;
   v_fp := md5(jsonb_build_array(p_pick_id, p_action, p_brand_id, p_reason)::text);
   v_existing := public._product_parent_replay(p_idempotency_key, 'review_typed_brand', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
@@ -912,7 +920,7 @@ BEGIN
                THEN 'completed_before_brand_capture' END,
           CASE WHEN l.completed_details IS NOT NULL AND COALESCE(l.list_size_at_completion, 0) > 0 AND l.pick_count = 0
                THEN 'brand_not_recorded' END,
-          CASE WHEN l.pick_count > 0 AND l.picked <> l.delivered THEN 'split_does_not_match_delivered' END,
+          CASE WHEN l.pick_count > 0 AND l.picked <> round(l.delivered, 4) THEN 'split_does_not_match_delivered' END,
           CASE WHEN l.any_no_epa THEN 'epa_number_not_recorded' END,
           CASE WHEN l.any_unlisted THEN 'brand_no_longer_listed' END], NULL) AS reasons
         FROM lines l
@@ -966,6 +974,7 @@ DECLARE
   v_actor_role text;
   v_delivery record;
   v_base_seq text := NULLIF(current_setting('crx.brand_base_seq', true), '');  -- 20270104120000
+  v_picks_confirmed boolean;  -- 20270104120000
   v_result jsonb;  -- 20270104120000
 BEGIN
   v_actor := auth.uid();
@@ -1000,11 +1009,12 @@ BEGIN
     RAISE EXCEPTION 'Not authorized to complete this delivery';
   END IF;
 
-  -- 20270104120000 (Brand PR B): a screen that sent the brand seq it loaded completes only against those picks.
+  -- 20270104120000 (Brand PR B): brands never refuse a completion (Mason 2026-11-09). A screen that sent the
+  -- brand seq it loaded confirms the picks only if they have not changed since; otherwise the completion still
+  -- goes through and the 'completed' event records picks_confirmed false for the office.
   PERFORM set_config('crx.brand_base_seq', '', true);
-  IF v_base_seq IS NOT NULL AND v_base_seq::bigint IS DISTINCT FROM public._delivery_brand_max_seq(p_delivery_id) THEN
-    RAISE EXCEPTION 'BRAND_PICKS_CHANGED: someone else changed this delivery''s brands; reload and try again';
-  END IF;
+  v_picks_confirmed := v_base_seq IS NOT NULL
+    AND v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id);
 
   v_result := public._complete_delivery_authorized_impl(
     p_delivery_id,
@@ -1021,7 +1031,7 @@ BEGIN
   -- Split fallback, so an error here fails the completion instead of changing the billing.
   IF v_delivery.status = 'in_progress'
      AND (SELECT d.status FROM public.deliveries d WHERE d.id = p_delivery_id) = 'completed' THEN
-    PERFORM public._delivery_brands_on_complete(p_delivery_id, v_base_seq IS NOT NULL);
+    PERFORM public._delivery_brands_on_complete(p_delivery_id, v_picks_confirmed);
   END IF;
   RETURN v_result;
 END;
@@ -1076,7 +1086,7 @@ ALTER FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, tex
 REVOKE ALL ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint) TO authenticated, service_role;
 COMMENT ON FUNCTION public.complete_delivery(uuid, text, uuid, jsonb, text, text, text, timestamptz, text, text, boolean, bigint) IS
-  'Completes a delivery (body: _complete_delivery_evidence_impl_20270104). p_brand_base_seq (20270104120000, Brand PR B): when given, the completion is refused with BRAND_PICKS_CHANGED if the delivery''s brand picks changed after the screen loaded them; NULL completes against the current picks and records that they were not confirmed.';
+  'Completes a delivery (body: _complete_delivery_evidence_impl_20270104). p_brand_base_seq (20270104120000, Brand PR B): when given and still current, the completion records the picks as confirmed; stale or NULL still completes against the current picks and records that they were not confirmed. Brands never refuse a completion.';
 
 ALTER FUNCTION public.start_and_complete_delivery(uuid, text, date, uuid, jsonb, text, text, text, text, text)
   RENAME TO _start_and_complete_delivery_impl_20270104;
@@ -1356,7 +1366,8 @@ BEGIN
      AND p.proname IN ('_delivery_line_brand_list', '_delivery_brand_max_seq', '_delivery_brand_rows',
                        '_delivery_brand_event', '_delivery_brand_resolve_picks', '_delivery_brand_insert',
                        '_delivery_brands_on_complete', '_delivery_brand_may_read', '_delivery_brand_events_append_only',
-                       '_complete_delivery_evidence_impl_20270104', '_start_and_complete_delivery_impl_20270104')
+                       '_complete_delivery_evidence_impl_20270104', '_start_and_complete_delivery_impl_20270104',
+                       '_complete_delivery_aggregate_impl', '_enqueue_delivery_receipt')
      AND (has_function_privilege('anon', p.oid, 'EXECUTE') OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
           OR has_function_privilege('service_role', p.oid, 'EXECUTE')
           OR EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a

@@ -298,7 +298,7 @@ function refused(uid, sql, pattern) {
 }
 const num = (sql) => Number(scalar(sql));
 const events = (d, type) => num(`SELECT count(*) FROM public.delivery_brand_events WHERE delivery_id = '${d}'${type ? ` AND event_type = '${type}'` : ''};`);
-const maxSeq = (d) => num(`SELECT COALESCE(max(seq), 0) FROM public.delivery_brand_events WHERE delivery_id = '${d}';`);
+const maxSeq = (d) => num(`SELECT COALESCE(max(seq), 0) FROM public.delivery_brand_events WHERE delivery_id = '${d}' AND event_type <> 'reviewed';`);
 const picks = (line) => JSON.parse(scalar(`SELECT COALESCE(jsonb_agg(jsonb_build_object('source', source, 'parent_brand_id', parent_brand_id,
   'legacy_brand_id', legacy_brand_id, 'brand_name', brand_name, 'epa', epa_registration, 'quantity', quantity, 'review_state', review_state,
   'review_note', review_note) ORDER BY lower(brand_name), COALESCE(epa_registration, '')), '[]') FROM public.delivery_item_brands
@@ -524,23 +524,24 @@ async function main() {
   const loaded = maxSeq(D(3));
   set(DRV, D(3), [{ delivery_item_id: DI(3, 0), picks: [pick(PB2, 4)] }], 'bb-k6');
   const stock3 = stock(PG);
-  refused(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3', { seq: loaded }), /BRAND_PICKS_CHANGED/);
-  assert.equal(status(D(3)), 'in_progress'); assert.equal(stock(PG), stock3); assert.equal(events(D(3), 'completed'), 0);
   refused(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3b', { seq: -1 }), /BRAND_BASE_SEQ_INVALID/);
-  ok(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3', { seq: maxSeq(D(3)) }));
-  assert.equal(JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(3)}' AND event_type = 'completed';`)).picks_confirmed, true);
+  assert.equal(status(D(3)), 'in_progress'); assert.equal(stock(PG), stock3); assert.equal(events(D(3), 'completed'), 0);
+  ok(ADMIN, COMPLETE(D(3), { [DI(3, 0)]: 4 }, 'bb-c3', { seq: loaded }));
+  assert.equal(status(D(3)), 'completed', 'a stale brand seq never refuses the completion');
+  assert.equal(JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(3)}' AND event_type = 'completed';`)).picks_confirmed, false);
+  assert.equal(picks(DI(3, 0))[0].parent_brand_id, PB2, 'it completes against the current picks');
   assert.equal(scalar(`SELECT current_setting('crx.brand_base_seq', true);`), '', 'the setting never outlives a call');
   mkDelivery(4, [[PG, 2]], { st: 'scheduled' });
   set(REP, D(4), [{ delivery_item_id: DI(4, 0), picks: [pick(PB1, 2)] }], 'bb-k7');
   const START = (seq, key) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${D(4)}', p_signed_by => '${NO_PROOF}',
     p_delivered_on => current_date, p_performed_by => '${ADMIN}', p_quantities => ${J({ [DI(4, 0)]: 2 })}, p_idempotency_key => '${key}',
     p_evidence => 'no_proof', p_evidence_ref => '[PROVER] no proof on the stop', p_brand_base_seq => ${seq})::text;`;
-  refused(ADMIN, START(maxSeq(D(4)) - 1, 'bb-s4'), /BRAND_PICKS_CHANGED/);
+  refused(ADMIN, START(-1, 'bb-s4'), /BRAND_BASE_SEQ_INVALID/);
   assert.equal(status(D(4)), 'scheduled');
   ok(ADMIN, START(maxSeq(D(4)), 'bb-s4b'));
   assert.equal(status(D(4)), 'completed');
   assert.equal(JSON.parse(scalar(`SELECT details::text FROM public.delivery_brand_events WHERE delivery_id = '${D(4)}' AND event_type = 'completed';`)).picks_confirmed, true);
-  console.log('[prover] case 6: a stale seq refuses the completion and changes nothing (direct and through start_and_complete); the current seq completes with picks confirmed');
+  console.log('[prover] case 6: a stale seq still completes, against the current picks, recorded as not confirmed; a malformed seq is refused before anything changes; the current seq (direct and through start_and_complete) completes with picks confirmed');
 
   // 7. A legacy pick whose size is grouped before completion follows its parent brand; the snapshot stays.
   mkDelivery(5, [[PL3, 3]]);
@@ -674,6 +675,24 @@ async function main() {
   const delta = (a, b) => a.split('/').map((x, i) => Number(x) - Number(b.split('/')[i])).join('/');
   assert.equal(delta(s2, s1), delta(s1, s0));
   console.log('[prover] case 13: a completion with picks and one without leave identical delivery, order, invoice and stock numbers');
+
+  // 14. An office review does not make a driver's picks stale; a delivered amount finer than 4 places never blocks completion.
+  mkDelivery(10, [[PL2, 6], [PG, 2]]);
+  set(REP, D(10), [{ delivery_item_id: DI(10, 0), picks: [pick(LB3, 6)] }, { delivery_item_id: DI(10, 1), picks: [typed('Oscar', 2)] }], 'bb-k14');
+  const seq10 = maxSeq(D(10));
+  const oscar = js(ADMIN, 'SELECT public.get_typed_brands_for_review()::text;').find((x) => x.brand_name === 'Oscar' && x.delivery_id === D(10));
+  assert.ok(oscar, 'the typed pick is listed for review');
+  ok(ADMIN, `SELECT public.review_typed_brand('${oscar.pick_id}', 'dismiss', NULL, 'not a real brand', 'bb-r14')::text;`);
+  assert.equal(events(D(10), 'reviewed'), 1);
+  ok(ADMIN, COMPLETE(D(10), { [DI(10, 0)]: 2.33333, [DI(10, 1)]: 2 }, 'bb-c14', { seq: seq10 }));
+  assert.equal(status(D(10)), 'completed');
+  assert.equal(Number(picks(DI(10, 0))[0].quantity), 6, 'a pick is not trimmed to an amount it cannot hold');
+  const miss10 = () => (js(ADMIN, 'SELECT public.get_deliveries_missing_brands(current_date - 2, current_date + 2)::text;')
+    .find((x) => x.delivery_item_id === DI(10, 0)) ?? { reasons: [] }).reasons;
+  assert.deepEqual(miss10(), ['split_does_not_match_delivered']);
+  ok(ADMIN, CORRECT(D(10), [{ delivery_item_id: DI(10, 0), picks: [pick(LB3, 2.3333)] }], 'match delivered', maxSeq(D(10)), 'bb-x14'));
+  assert.deepEqual(miss10(), [], 'a correction to the 4-place delivered amount clears the line');
+  console.log('[prover] case 14: an office review leaves a driver\'s loaded picks current; a 5-place delivered amount completes, keeps the pick and lists it; a 4-place correction clears it');
 
   console.log('DELIVERY_BRANDS_PROOF_PASS');
 }

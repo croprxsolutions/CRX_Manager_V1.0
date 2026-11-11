@@ -5,7 +5,7 @@
 - A delivery line can record which brand went off the truck: one listed brand, a split across several, or a brand
   typed from the jug (typed ones wait for an admin to link or dismiss). Every change is kept in a history that
   cannot be edited.
-- Nothing about brands ever stops a delivery from completing (Mason, 2026-11-09). Gaps go on an office list
+- Nothing about brands ever stops a delivery from completing (Mason, 2026-11-09), not even an out-of-date screen: the completion goes through and is marked "picks not confirmed". Gaps go on an office list
   (`get_deliveries_missing_brands`).
 - After completion only an admin can correct brands, with a reason; a posted invoice must be voided first.
 - The customer receipt lists the brands on each line.

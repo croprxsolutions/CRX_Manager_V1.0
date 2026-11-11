@@ -459,11 +459,6 @@ async function main() {
   // KI-143 (applied before the candidate) holds a closed PO's bills to what arrived: 400 + 100 > 400 x 1.05 needs a reason.
   refused(as(ADMIN, `SELECT public.create_vendor_bill(p_vendor_id => '${vid}', p_purchase_order_id => '${A.po}', p_bill_number => 'PROVER-A-2',
     p_subtotal_cents => 100, p_idempotency_key => 'k142-bill-a2')`), /PO_CUMULATIVE_BILLING_CONFIRMATION_REQUIRED/);
-  // A cost cut may not push a closed PO's received value under its bills (BILLED: 500 billed = 5 x 100 received).
-  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 0.99 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
-  ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.10 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }));
-  ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.00 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }));
-  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 0.99 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
   // No override past what arrived on a closed PO: KI-143's confirmed overage, a direct bill write, a bill growing past
   // received, or a receipt reversal under the bills are all refused; a bill shrinking or voided lands.
   refused(as(ADMIN, `SELECT public.create_vendor_bill(p_vendor_id => '${vid}', p_purchase_order_id => '${A.po}', p_bill_number => 'PROVER-A-3',
@@ -475,8 +470,12 @@ async function main() {
   refused(q(`UPDATE public.vendor_bills SET subtotal_cents = 501, total_cents = 501 WHERE id = ${billedBill};`, { allowFailure: true }), /PO_CLOSE_BILLED_OVER_RECEIVED/);
   ok(q(`UPDATE public.vendor_bills SET subtotal_cents = 500, total_cents = 500 WHERE id = ${billedBill};`, { allowFailure: true }));
   refused(as(ADMIN, `SELECT public.reverse_receiving_record('${BILLED.receipts[0]}', 'wrong receipt', '${ADMIN}', 'k142-rev-billed')`), /RECEIVING_REVERSAL_BLOCKED_BY_VENDOR_BILL|PO_CLOSE_BILLED_OVER_RECEIVED/);
+  // A closed PO's costs never go down (Mason, 2026-11-11), bills or not; a raise lands. Last, so the 500 checks above hold.
+  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 0.99 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }), /PO_CLOSED_COST_CUT/);
+  ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.10 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }));
+  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 1.00 WHERE id = '${BILLED.items[0]}';`, { allowFailure: true }), /PO_CLOSED_COST_CUT/);
   console.log('[prover] a closed PO cannot be billed past what arrived: no confirmed overage, no direct write, no reversal under its bills');
-  console.log('[prover] bills over received block; voided are ignored; equal is fine; a closed PO can be billed, a cancelled one cannot; KI-143 caps a closed PO\'s bills; a cost cut cannot sink received under them');
+  console.log('[prover] bills over received block; voided are ignored; equal is fine; a closed PO can be billed, a cancelled one cannot; KI-143 caps a closed PO\'s bills; its costs never go down');
 
   // 6-8. A closed PO is frozen.
   assert.equal(closed(ADMIN, D.po, 'vendor discontinued', 'k-D').status, 'closed');
@@ -500,7 +499,9 @@ DELETE FROM public.receiving_records WHERE id = '${D.receipts[0]}'; COMMIT;`, { 
   refused(q(`UPDATE public.purchase_order_items SET notes = 'rewritten', product_name = 'other' WHERE id = '${D.items[0]}';`, { allowFailure: true }), /PO_CLOSED/);
   ok(q(`UPDATE public.purchase_order_items SET unit_cost = 1.25 WHERE id = '${D.items[0]}';`, { allowFailure: true }));
   assert.equal(q(`SELECT unit_size || '|' || unit_cost_cents FROM public.purchase_order_items WHERE id = '${D.items[0]}';`).out, 'GL|125');
-  console.log('[prover] a closed PO refuses receive, edit, line rewrites, cancel, delete, a direct receipt removal and an override reopen; cost corrections land');
+  // No bills on D at all: a cost cut is still refused on a closed PO.
+  refused(q(`UPDATE public.purchase_order_items SET unit_cost = 1.20 WHERE id = '${D.items[0]}';`, { allowFailure: true }), /PO_CLOSED_COST_CUT/);
+  console.log('[prover] a closed PO refuses receive, edit, line rewrites, cancel, delete, a direct receipt removal and an override reopen; cost raises land, cuts are refused');
 
   // 7. A receipt reversal on a closed PO: stock goes down, the line's received drops, it stays closed, on order unchanged.
   const onOrderD = onOrder(6);

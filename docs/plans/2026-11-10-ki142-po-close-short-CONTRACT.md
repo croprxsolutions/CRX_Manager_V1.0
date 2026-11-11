@@ -59,8 +59,8 @@ Read at `origin/main` 17ba96fbe and live (read-only) on 2026-11-10.
    a closed PO (admin-only `reverse_receiving_record`, which sets `app.reversal_rpc_active`) keeps the PO `closed`
    instead of reopening it, so a wrong receipt can still be fixed without bringing the remainder back on order.
 5. On a closed PO's lines: no new lines, no deleted lines, no change of product, PO or ordered quantity, and no
-   increase of received quantity (`PO_CLOSED`). A decrease of received quantity (reversal) and cost corrections are
-   allowed. So receiving into a closed PO is refused, and editing it is refused.
+   increase of received quantity (`PO_CLOSED`). A decrease of received quantity (reversal) and a cost raise are
+   allowed; a cost cut is refused (`PO_CLOSED_COST_CUT`, Mason 2026-11-11). So receiving into a closed PO is refused, and editing it is refused.
 6. A closed PO cannot be cancelled (`already closed short`) or deleted (`_guard_po_delete`).
 7. Cancel's message for a received PO now says "close it short instead".
 
@@ -161,7 +161,12 @@ is the screens, merged after PR 1 is live.
   received value. A new trigger on `vendor_bills` (any write path, under the PO row lock the close and KI-143 take)
   refuses a bill that would break it; the line guard refuses a cost cut or a reversal that would. The close itself
   already applied this rule; a vendor's claim above what arrived is settled outside the closed PO (correct the bill,
-  or bill the extra separately). Third round on this mechanism would stop for Mason (AGENTS.md).
+  or bill the extra separately).
+- **Sol round 3 (2026-11-11): two cost cuts at once on different lines could each pass the check.** Mason decided
+  (option A): a closed PO's line costs never go down; a price mistake is fixed on the bill or with a vendor credit.
+  The line guard refuses any cost cut on a closed PO outright (`PO_CLOSED_COST_CUT`), so no race is left. A raise only
+  adds received value, so it cannot break the bill rule. Deferred (Sol MED): a direct line edit racing a close can end
+  in a deadlock abort; one of the two fails cleanly and nothing is half-saved.
 - **Bill value vs merchandise (#29, #30).** Kept as a conservative aggregate ceiling: freight on a PO-linked bill could
   block a close until the bill is corrected; acceptable at today's volume (no PO-linked bills).
 - **Reversal limits (#3, #4, #7, #54).** Existing reversal rules (admin only, no active bill, open period) still apply.

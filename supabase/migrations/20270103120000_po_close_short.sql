@@ -13,14 +13,15 @@
 --   3. 'closed' is final (_enforce_po_status_transition, admin override included). A receipt reversal on a closed PO
 --      (reverse_receiving_record sets app.reversal_rpc_active) keeps it closed instead of reopening it.
 --   4. A closed PO is frozen: no header edit; no line added, removed, edited (cost columns excepted) or received into (new
---      triggers trigger_0_guard_closed_po[_item]); cost corrections and reverse_receiving_record decreases still work.
+--      triggers trigger_0_guard_closed_po[_item]); cost raises and reverse_receiving_record decreases still work. A
+--      line's received value never goes down by a cost change (Mason, 2026-11-11): no cost cuts on a closed PO.
 --   5. A closed PO cannot be cancelled or deleted (_guard_po_delete); cancel's refusal for a received PO now says to
 --      close it short instead of naming a workflow that never existed.
 --   6. A closed PO can still be billed for what arrived: _section9_create_vendor_bill_intent_impl_20260826 (live body
 --      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list.
 --   7. A closed PO's active vendor bills never total more than what arrived (the close's rule), with no override: a
---      bill write (trigger_0_guard_closed_po_bill on vendor_bills, any path, KI-143's confirmed overage included), a
---      cost correction and a receipt reversal on a closed PO are each refused if they would break it.
+--      bill write (trigger_0_guard_closed_po_bill on vendor_bills, any path, KI-143's confirmed overage included) or a
+--      receipt reversal on a closed PO is refused if it would break it; a cost cut is refused outright (item 4).
 --
 -- idempotency-body-check: exempt -- close_purchase_order_short requires p_idempotency_key, checks it with
 --   check_idempotency_intent bound to the caller and request (PO and trimmed reason) after authorizing the caller,
@@ -212,7 +213,7 @@ CREATE FUNCTION public._guard_closed_po_item()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  -- Cost corrections stay allowed on a closed PO (set_purchase_order_item_costs); unit_cost_cents is generated.
+  -- Cost raises stay allowed on a closed PO (set_purchase_order_item_costs); unit_cost_cents is generated.
   c_cost CONSTANT text[] := ARRAY['unit_cost', 'unit_cost_cents', 'cost_needs_review', 'cost_provenance',
                                   'cost_snapshot_at', 'product_supplier_link_id', 'supplier_price_observation_id'];
   v_same_line boolean := false;
@@ -225,7 +226,7 @@ BEGIN
     -- Every column but cost and received is frozen on a closed PO's line (fires before the other BEFORE triggers).
     v_same_line := (to_jsonb(NEW) - c_cost - 'quantity_received') IS NOT DISTINCT FROM (to_jsonb(OLD) - c_cost - 'quantity_received');
     IF v_same_line AND NEW.quantity_received IS NOT DISTINCT FROM OLD.quantity_received THEN
-      -- Only cost columns changed. A cost cut can lower the received value under the bills, so check that one.
+      -- Only cost columns changed. A raise is fine; a cut is refused below if the PO is closed.
       IF round(COALESCE(NEW.quantity_received, 0) * COALESCE(NEW.unit_cost, 0) * 100)
          >= round(COALESCE(OLD.quantity_received, 0) * COALESCE(OLD.unit_cost, 0) * 100) THEN
         RETURN NEW;
@@ -245,12 +246,16 @@ BEGIN
   IF v_closed IS NULL THEN
     RETURN COALESCE(NEW, OLD);
   END IF;
-  IF v_cost_only
-     OR (v_same_line
-         AND COALESCE(NEW.quantity_received, 0) < COALESCE(OLD.quantity_received, 0)
-         AND current_setting('app.reversal_rpc_active', true) = 'true') THEN
-    -- A cost correction, or reverse_receiving_record taking a wrong receipt back off a closed PO. Either may lower
-    -- received value; a closed PO's bills stay at or under it (the close's rule).
+  IF v_cost_only THEN
+    -- Mason 2026-11-11: a closed PO's costs never go down; a price mistake is fixed on the bill or by a vendor credit.
+    RAISE EXCEPTION 'PO_CLOSED_COST_CUT: purchase order % was closed short; its line costs cannot be lowered (correct the vendor bill or take a vendor credit)',
+      v_closed USING ERRCODE = '55000';
+  END IF;
+  IF v_same_line
+     AND COALESCE(NEW.quantity_received, 0) < COALESCE(OLD.quantity_received, 0)
+     AND current_setting('app.reversal_rpc_active', true) = 'true' THEN
+    -- reverse_receiving_record taking a wrong receipt back off a closed PO lowers received value; a closed PO's bills
+    -- stay at or under it (the close's rule).
     SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * COALESCE(poi.unit_cost, 0) * 100)), 0)::bigint
       INTO v_received_cents
       FROM public.purchase_order_items poi

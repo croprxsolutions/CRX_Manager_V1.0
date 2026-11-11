@@ -30,6 +30,23 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.
 **Why:** the point of Brand PR B is a record of the brand actually sold; under REG-1's "the product's own number" the brand would change only the paperwork.
 **What this forbids/implies:** supersedes, for lines with a recorded brand, REG-1's "the product's own number" and #1746's "one active record per line" (it becomes one per line per brand). Invoice lines are not split by brand. Everything else in REG-1 stands per brand: capture at save, any Yes records it, a Yes always wins, a Yes at posting wins, a missing number never blocks. Plan: `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md` section 14.
+## 2026-11-11 — #1770: Mason owner-accepted 2 Sol finding(s) at `bf00558ca02b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `bf00558ca02b` (base `d77d9d5d2deb`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `38bc41d4e0c448db` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref b254617911bf)
+- Finding 2 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `35671a6b9e8b1435` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref 114fff30fac0)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1770: Mason owner-accepted 1 Sol finding(s) at `f5fa14d661f0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `f5fa14d661f0` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `94347679d229a520` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref d0900abc16e7)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
 
 ## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
 

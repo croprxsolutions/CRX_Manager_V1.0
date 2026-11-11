@@ -10,6 +10,52 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `6b65dddba716`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `6b65dddba716` (base `465e84ae66fe`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `a3b3a249619ae80a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 978bfeba148a)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `f33870f53508`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `f33870f53508` (base `947da5a9b59f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `393fc93953fe9ff4` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref 5e28b172441b)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `859b6c2793db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `859b6c2793db` (base `d77d9d5d2deb`) found 1 BLOCKER/HIGH finding(s). Mason judged it a business non-issue, for the reason below.
+- Finding 1 (HIGH) at `supabase/migrations/20270103170000_cycle_count_variance_vs_onhand_at_count.sql:133`, text sha256 `4eb8544250ce887b` (the wording stays with the proof, not here)
+  Mason's reason: we post each product's receipts and deliveries before counting it (ref cae57212a6bb)
+
+**What this implies:** the D12 pre-season count follows the procedure in the reason above; a change to that procedure needs a new decision from Mason.
+## 2026-11-10 — Brand PR B: a delivered brand's restricted-use record carries the brand's own EPA number, one record per brand (PR #1765)
+
+**Decision (Mason, in session, 2026-11-10: "One record per brand"; "The brands own number"):** when the driver recorded the brand that went off the truck, its restricted-use record carries **that brand's EPA number**. A line delivered as two brands gets **one record per brand**, each naming the same invoice line and its brand. A line with no brand recorded, or a brand with no number, keeps the product's own number, as REG-1 does today.
+**Why:** the point of Brand PR B is a record of the brand actually sold; under REG-1's "the product's own number" the brand would change only the paperwork.
+**What this forbids/implies:** supersedes, for lines with a recorded brand, REG-1's "the product's own number" and #1746's "one active record per line" (it becomes one per line per brand). Invoice lines are not split by brand. Everything else in REG-1 stands per brand: capture at save, any Yes records it, a Yes always wins, a Yes at posting wins, a missing number never blocks. Plan: `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md` section 14.
+## 2026-11-11 — #1770: Mason owner-accepted 2 Sol finding(s) at `bf00558ca02b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `bf00558ca02b` (base `d77d9d5d2deb`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:15`, text sha256 `38bc41d4e0c448db` (the wording stays with the proof, not here)
+  Mason's reason: that entry is my own acceptance (ref b254617911bf)
+- Finding 2 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `35671a6b9e8b1435` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref 114fff30fac0)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1770: Mason owner-accepted 1 Sol finding(s) at `f5fa14d661f0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1770 at `f5fa14d661f0` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270102100000_ki108_stock_matches_history.sql:99`, text sha256 `94347679d229a520` (the wording stays with the proof, not here)
+  Mason's reason: stock counts are not in use; KI-134 will fix count timing (ref d0900abc16e7)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-10 — #1751: Mason owner-accepted 1 Sol finding(s) at `d922c2698393`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-10).** Sol's review of PR #1751 at `d922c2698393` (base `69774ac6e326`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
@@ -65,6 +111,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 ## 2026-11-09 — #1706 (RT-2 step 1 unit spellings) gets Sol round 5 after its restamp
 
 **Decision (Mason, in chat, 2026-11-09: "Yes, run Sol").** PR #1706 may run Sol round 5. Sol round 4 was clean at `857dba741`; RT-1 (20261229110000) then went live first, so both migrations were restamped to 20261229130000 and 20261229140000 at `f55497896` with byte-identical SQL. The restamp carry handles one migration per commit, so this round re-confirms the restamped head. No finding keeps returning.
+## 2026-11-10 — Vendor bills on a PO are limited by what arrived, except before anything arrives (KI-143, PR #1769)
+
+**Decision (Mason, 2026-11-10, answering two questions relayed by the sweep session):** (1) "No, let early bills through": a bill entered before any goods arrive on its PO needs no reason up to the ordered total (+5%), accepting that a PO later short-shipped could then be billed in full with no warning. (2) first "Yes, allow it", then corrected the same day: "no do not allow to go more than was ordered without a reason". Billing above the ordered total (+5%) needs a reason even when more arrived.
+**Why:** bills were checked only against the ordered total, so a short shipment could be billed and paid in full with no question; early bills are normal for prepaid orders.
+**What this forbids/implies:** once anything has arrived, the limit is the smaller of the received value and the ordered total (+5%); before that, the ordered total (+5%). Above the limit the bill needs the existing confirmation and a reason, logged with the amounts. The check runs when a bill is entered or edited; it does not re-judge saved bills later.
+
 ## 2026-11-10 — The P&L subtracts commissions only on sales billed in CRX (To-Do decision 15, KI-125)
 
 **Decision (Mason, in session, 2026-11-10: "Only CRX-billed"):** Bottom Line P&L and Monthly Summary subtract a sales commission only when its order has a CRX invoice counted in that period's revenue (posted, overdue or paid, by invoice date). Chem Man-billed sales are not brought into CRX revenue.

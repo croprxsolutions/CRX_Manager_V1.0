@@ -609,7 +609,7 @@ export default function VendorBillDetail() {
       }
       if (hasRpcCode(err, RpcErrorCodes.PO_CUMULATIVE_BILLING_CONFIRMATION_REQUIRED)) {
         setEditOverageMessage(
-          'The exact server total shows this edit would raise active billing above 105% of the purchase order. Enter a reason to confirm the overage.',
+          'The exact server total shows this edit would raise active billing above 105% of what was received on the purchase order (or of the ordered total, if that is lower or nothing has arrived yet). Enter a reason to confirm the overage.',
         );
       } else if (getIdempotencyBindingRejection(err)) {
         // A binding rejection can still carry the receipt of an edit that
@@ -1137,7 +1137,7 @@ export default function VendorBillDetail() {
         confirmLabel="Save Changes"
         variant="warning"
         loading={editing}
-        placeholder="Why should cumulative billing exceed the PO total?"
+        placeholder="Why should billing exceed what was received or ordered on this PO?"
         minLength={5}
       />
 

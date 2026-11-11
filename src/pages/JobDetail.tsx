@@ -1,3 +1,4 @@
+import { toSentryError } from '../lib/sentryError';
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send, Paperclip, StickyNote } from 'lucide-react';
@@ -424,7 +425,7 @@ export default function JobDetail() {
         if (error) Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
         else tier = data?.assigned_tier ?? null;
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
+        Sentry.captureException(toSentryError(err), { tags: { source: 'fetch', action: 'load_job_customer_tier' } });
       }
       if (!cancelled) setUnlistedCustomerTier({ customerId, tier });
     })();
@@ -574,7 +575,7 @@ export default function JobDetail() {
       setNotificationsLoaded(true); // ONLY a clean read makes the sent-count safe to send off
     } catch (err) {
       if (notifLoadReqRef.current !== reqId) return; // stale — don't clobber the current job's state
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'load_job_notifications', jobId: reqId } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'load_job_notifications', jobId: reqId } });
       setJobNotifications([]);
       setNotificationsLoaded(false); // failed load: count is NOT trustworthy → keep the send disabled
       setNotificationsLoadError(true); // ...but make it VISIBLE + retryable (don't strand the user)
@@ -714,7 +715,7 @@ export default function JobDetail() {
         } catch (sendErr) {
           // Row stays 'failed' — honest. Keep the action key so a retry de-dupes.
           emailErr += 1;
-          Sentry.captureException(sendErr instanceof Error ? sendErr : new Error(String(sendErr)), { extra: { context: 'send_pre_notification_email', jobId: id, customerId: r.customer_id } });
+          Sentry.captureException(toSentryError(sendErr), { extra: { context: 'send_pre_notification_email', jobId: id, customerId: r.customer_id } });
         }
       }
 
@@ -761,7 +762,7 @@ export default function JobDetail() {
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) msg = 'Only admin or sales can send notifications.';
       else if (hasRpcCode(err, RpcErrorCodes.JOB_NOT_PRE_NOTIFIABLE)) msg = 'A pre-notification can only be sent on a scheduled or in-progress job.';
       toast('error', msg);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'send_pre_notification', jobId: id } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'send_pre_notification', jobId: id } });
     } finally {
       setSendingPreNotice(false);
     }
@@ -888,7 +889,7 @@ export default function JobDetail() {
         } catch (sendErr) {
           // Row stays 'failed' — honest. Keep the action key so a retry de-dupes.
           emailErr += 1;
-          Sentry.captureException(sendErr instanceof Error ? sendErr : new Error(String(sendErr)), { extra: { context: 'send_post_notification_email', jobId: id, customerId: r.customer_id } });
+          Sentry.captureException(toSentryError(sendErr), { extra: { context: 'send_post_notification_email', jobId: id, customerId: r.customer_id } });
         }
       }
 
@@ -926,7 +927,7 @@ export default function JobDetail() {
       if (hasRpcCode(err, RpcErrorCodes.INSUFFICIENT_ROLE)) msg = 'Only admin or sales can send notifications.';
       else if (hasRpcCode(err, RpcErrorCodes.JOB_NOT_POST_NOTIFIABLE)) msg = 'A post-notification can only be sent on a completed or invoiced job.';
       toast('error', msg);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'send_post_notification', jobId: id } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'send_post_notification', jobId: id } });
     } finally {
       setSendingPostNotice(false);
     }
@@ -1009,7 +1010,7 @@ export default function JobDetail() {
       }
       if (profile) logActivity({ event: 'wps_notice_printed', description: `WPS pre-application notice generated for job ${jobNumber}`, performedBy: profile.id, entityType: 'job', entityId: id });
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'wps_notice_pdf' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'wps_notice_pdf' } });
       toast('error', 'Failed to generate WPS notice');
     }
     setPrintingWps(false);
@@ -1202,7 +1203,7 @@ export default function JobDetail() {
       if (profile) logActivity({ event: 'applicator_sheet_printed', description: `${SHEET_FORMAT_LABELS[format]} generated for job ${jobNumber}`, performedBy: profile.id, entityType: 'job', entityId: id });
       setPrintOptionsOpen(false);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'applicator_sheet_pdf' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'applicator_sheet_pdf' } });
       toast('error', 'Failed to generate field sheet');
     }
     setGeneratingSheet(null);
@@ -1236,7 +1237,7 @@ export default function JobDetail() {
       }
       if (profile) logActivity({ event: 'chemical_application_report_printed', description: `Chemical Application Report generated for job ${jobNumber}`, performedBy: profile.id, entityType: 'job', entityId: id });
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'chemical_application_report_pdf' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'chemical_application_report_pdf' } });
       toast('error', 'Failed to generate chemical report');
     }
     setGeneratingChemReport(false);
@@ -1306,7 +1307,7 @@ export default function JobDetail() {
       }
       if (profile) logActivity({ event: 'loader_worksheet_printed', description: `Loader worksheet generated for job ${jobNumber}`, performedBy: profile.id, entityType: 'job', entityId: id });
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'loader_worksheet_pdf' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'loader_worksheet_pdf' } });
       toast('error', 'Failed to generate loader worksheet');
     }
     setPrintingLoader(false);
@@ -2262,17 +2263,9 @@ export default function JobDetail() {
           const previewedJobNumber = assertRpcResult<string>(data, 'next_job_number');
           if (isCurrentLoad()) setJobNumber(previewedJobNumber);
         } catch (err: unknown) {
-          // Supabase errors are PLAIN OBJECTS, not Error instances, so
-          // `new Error(String(err))` yields "[object Object]" and throws away the
-          // only useful part of the report — the message and code. Carry the
-          // message across so Sentry records INSUFFICIENT_ROLE rather than nothing.
-          const reportedMessage = err instanceof Error
-            ? err.message
-            : (typeof err === 'object' && err !== null && 'message' in err
-              ? String((err as { message: unknown }).message)
-              : String(err));
+          // Supabase errors are plain objects; keep their message (e.g. INSUFFICIENT_ROLE).
           Sentry.captureException(
-            err instanceof Error ? err : new Error(reportedMessage),
+            toSentryError(err),
             { tags: { source: 'rpc', action: 'next_job_number' } },
           );
           if (isCurrentLoad()) {
@@ -2785,7 +2778,7 @@ export default function JobDetail() {
       setDispatchWizardLocations(locs);
       setDispatchWizardOpen(true);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'open_job_dispatch_wizard', jobId: id } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'open_job_dispatch_wizard', jobId: id } });
       toast('error', 'Could not load this job’s locations for dispatch — try again.');
     }
     setDispatchWizardLoading(false);
@@ -2887,7 +2880,7 @@ export default function JobDetail() {
               .filter((aid): aid is string => !!aid),
           )];
         } catch (snapshotErr) {
-          Sentry.captureException(snapshotErr instanceof Error ? snapshotErr : new Error(String(snapshotErr)), { extra: { context: 'snapshot_displaced_dispatchees' } });
+          Sentry.captureException(toSentryError(snapshotErr), { extra: { context: 'snapshot_displaced_dispatchees' } });
         }
       }
 
@@ -2994,7 +2987,7 @@ export default function JobDetail() {
             .select('id');
           checkMutationResult(crewResult, 'Assign ground crew / loader worksheet');
         } catch (crewErr) {
-          Sentry.captureException(crewErr instanceof Error ? crewErr : new Error(String(crewErr)), { extra: { context: 'job_crew_loader_after_save' } });
+          Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
           toast('error', 'Job created, but the crew/loader settings did not save — adjust them on this page.');
           // §5: the job + over-label mix DID commit (only the crew/loader sub-write failed),
           // so still record the override audit linked to the saved job before bailing.
@@ -3023,7 +3016,7 @@ export default function JobDetail() {
             notifyDisplacedApplicators(savedJobIdForNotify);
           }
         } catch (assignErr) {
-          Sentry.captureException(assignErr instanceof Error ? assignErr : new Error(String(assignErr)), { extra: { context: 'assign_job_applicator_after_save' } });
+          Sentry.captureException(toSentryError(assignErr), { extra: { context: 'assign_job_applicator_after_save' } });
           toast('error', isNew
             ? 'Job created, but the override applicator assignment failed — assign the applicator from this page.'
             : 'Job saved, but the override applicator change failed — retry the applicator assignment.');
@@ -3099,7 +3092,7 @@ export default function JobDetail() {
               void notifyApplicatorRescheduled(r.applicator_id, jobNumber || '', custNameForNotify, jobDate, savedJobIdForNotify);
             }
           } catch (notifyErr) {
-            Sentry.captureException(notifyErr instanceof Error ? notifyErr : new Error(String(notifyErr)), { extra: { context: 'notify_dispatchees_rescheduled' } });
+            Sentry.captureException(toSentryError(notifyErr), { extra: { context: 'notify_dispatchees_rescheduled' } });
           }
         })();
       }
@@ -3191,7 +3184,7 @@ export default function JobDetail() {
           navigate(`/jobs/${getIdempotencyMismatchResult(err, 'save_job')!.job_id as string}`);
         }
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_job' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'save_job' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -3229,7 +3222,7 @@ export default function JobDetail() {
         await fetchJob();
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'start_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'start_job' } });
       toast('error', sanitizeError(err));
     }
     setStarting(false);
@@ -3288,7 +3281,7 @@ export default function JobDetail() {
           fetchJob();
         }
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'complete_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'complete_job' } });
       // U12 Codex R5 #2: same translation as FieldView — a dispatch-only
       // applicator on a SPLIT job gets the RPC's raw authorization rejection;
       // explain the business reason instead. sanitizeError reads PostgREST's plain error
@@ -3325,7 +3318,7 @@ export default function JobDetail() {
         await fetchJob();
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'cancel_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
       toast('error', sanitizeError(err));
     }
     setCancelling(false);
@@ -3359,7 +3352,7 @@ export default function JobDetail() {
         navigate(`/field-invoices/${result.invoice_id}`);
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'transfer_job_to_invoice' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'transfer_job_to_invoice' } });
       const resultInvalid = isTransferInvoiceResultInvalid(err);
       const intentRecovery = transferInvoiceErrorMessage(err);
       if (resultInvalid) {
@@ -3462,7 +3455,7 @@ export default function JobDetail() {
       toast('success', `${verb} ${items.length} product${items.length === 1 ? '' : 's'} from recipe — review and Save.`);
       setShowRecipeModal(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'load_recipe_into_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'load_recipe_into_job' } });
       toast('error', sanitizeError(err));
     }
     setLoadingRecipe(false);
@@ -3574,7 +3567,7 @@ export default function JobDetail() {
       setShowSaveRecipeModal(false);
       setNewRecipeName('');
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_blend_recipe' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_blend_recipe' } });
       toast('error', sanitizeError(err));
     }
     setSavingRecipe(false);

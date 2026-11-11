@@ -83,6 +83,7 @@ const AccountsReceivable = lazy(() => import('./pages/AccountsReceivable'));
 const Compliance = lazy(() => import('./pages/Compliance'));
 const LabelReview = lazy(() => import('./pages/LabelReview'));
 const LabelDataQuality = lazy(() => import('./pages/LabelDataQuality'));
+const EpaRegistrationSetup = lazy(() => import('./pages/EpaRegistrationSetup'));
 const WatchdogExceptions = lazy(() => import('./pages/WatchdogExceptions'));
 const OfflineWorkReview = lazy(() => import('./pages/OfflineWorkReview'));
 const OfficeCockpit = lazy(() => import('./pages/OfficeCockpit'));
@@ -410,6 +411,10 @@ export const APP_PAGES = [
   {
     key: 'label-data-quality', label: 'Label Data Quality', category: 'Compliance & Records', roles: ['admin'],
     routes: [{ path: 'label-data-quality', element: <LabelDataQuality /> }],
+  },
+  {
+    key: 'epa-registration-setup', label: 'EPA Registration Setup', category: 'Compliance & Records', roles: ['admin'],
+    routes: [{ path: 'epa-registration-setup', element: <EpaRegistrationSetup /> }],
   },
   {
     key: 'blend-tickets', label: 'Blend Tickets (OCR)', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],

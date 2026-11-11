@@ -14,7 +14,8 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/i
 import { logActivity } from '../lib/activityLogger';
 import { unavailableReasonText } from '../lib/historicalBalanceReasons';
 import { exportToCSV, fmtCSV, fmtDateCSV, formatProductMoneyCSV } from '../lib/csvExport';
-import { formatExactUSD, formatUSD } from '../lib/money';
+import { formatCents, formatExactUSD, formatUSD } from '../lib/money';
+import { inventoryValueNote, summarizeInventoryValue } from '../lib/inventoryValue';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
@@ -1770,11 +1771,15 @@ export default function Reports() {
           )}
 
           {/* Inventory cost total */}
-          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (
-            <div className="flex items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+            const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
+            const note = inventoryValueNote(valuation);
+            return (
+            <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Total Inventory Value:</span>{' '}
-                {fmt(inventoryCostData.reduce((sum, r) => sum + r.total_cost_value, 0))}
+                {formatCents(valuation.valueCents)}
+                {note && <span className="ml-2 text-xs">({note})</span>}
               </span>
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Products:</span> {inventoryCostData.length}
@@ -1783,7 +1788,8 @@ export default function Reports() {
                 <span className="font-semibold">Below Reorder:</span> {inventoryCostData.filter((r) => r.below_reorder).length}
               </span>
             </div>
-          )}
+            );
+          })()}
 
           {isAdmin && operationalTab === 'stale_costs' && !reportFailed && !loading && (
             <div className="flex flex-wrap items-center gap-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-900">

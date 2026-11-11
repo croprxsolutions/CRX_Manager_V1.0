@@ -84,7 +84,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 <div id="header">
   <h1>⬡ CRX Manager — Architecture Map</h1>
   <!-- __STATS_START__ -->
-  <span id="stat-line" style="color:var(--muted);font-size:.8rem">99 routes · 334 RPC calls · 5 issues · Updated Nov 11, 2026</span>
+  <span id="stat-line" style="color:var(--muted);font-size:.8rem">100 routes · 337 RPC calls · 5 issues · Updated Nov 12, 2026</span>
   <!-- __STATS_END__ -->
   <div id="tabs">
     <button class="tab active" onclick="showTab('graph')">Graph</button>
@@ -1020,6 +1020,14 @@ const NODES = [
       "type": "page-admin",
       "group": "Core",
       "path": "/label-data-quality",
+      "problem": false
+    },
+    {
+      "id": "epa-registration-setup",
+      "label": "EpaRegistrationSetup",
+      "type": "page-admin",
+      "group": "Core",
+      "path": "/epa-registration-setup",
       "problem": false
     },
     {

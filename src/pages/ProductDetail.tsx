@@ -1,3 +1,4 @@
+import { toSentryError } from '../lib/sentryError';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Plus, Search, Save } from 'lucide-react';
@@ -877,7 +878,7 @@ export default function ProductDetail() {
       toast('success', 'Product updated');
       logActivity({ event: 'product_updated', description: `Product ${product.product_name} updated`, performedBy: profile!.id, entityType: 'product', entityId: id });
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
       if (addSizeTo && hasRpcCode(err, RpcErrorCodes.PRODUCT_PARENT_STALE) && addSizeTo.sizes[0]) {
         // The parent changed since "Add a size" opened: show its current values; the next save uses them.
@@ -1062,7 +1063,7 @@ export default function ProductDetail() {
         toast('warning', `EPA did not find registration ${regNumber}.`);
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'edge_function', action: 'epa_lookup' },
       });
       toast('error', err instanceof Error ? err.message : 'EPA lookup failed. Please try again.');

@@ -1,4 +1,4 @@
-## 2026-11-10 — DM-1b: Weights and Ingredients tabs on the setup workbook (database, not applied)
+## 2026-11-10 — DM-1b: Weights and Ingredients tabs on the setup workbook (database, applied live 2026-11-11)
 
 - Migration `20270103160000_setup_workbook_chemistry_tabs.sql`; build sheet `docs/plans/2026-11-10-product-DM1b-BUILD-SHEET.md`.
 - Weights tab: weight per gallon for liquid products and net weight for dry bags save as drafts (they still need

@@ -79,6 +79,8 @@ export default function NewVendorBill() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   // Label of the linked PO; the PO picker searches the database, so no PO list is loaded.
   const [purchaseOrderLabel, setPurchaseOrderLabel] = useState('');
+  // A closed-short PO can never be billed past what arrived, overage reason or not (KI-142).
+  const [purchaseOrderClosed, setPurchaseOrderClosed] = useState(false);
 
   // Form
   const [vendorId, setVendorId] = useState('');
@@ -131,12 +133,13 @@ export default function NewVendorBill() {
     (async () => {
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select('po_number, vendor')
+        .select('po_number, vendor, status')
         .eq('id', purchaseOrderId)
         .maybeSingle();
       if (cancelled) return;
       if (error) Sentry.captureException(error, { tags: { source: 'fetch', page: 'new-vendor-bill', action: 'load_linked_po' } });
       setPurchaseOrderLabel(data ? purchaseOrderSearchLabel(data) : 'Linked purchase order (name could not be loaded)');
+      setPurchaseOrderClosed(data?.status === 'closed');
     })();
     return () => { cancelled = true; };
   }, [purchaseOrderId, purchaseOrderLabel]);
@@ -167,6 +170,7 @@ export default function NewVendorBill() {
     }
     setPurchaseOrderId(po?.id ?? '');
     setPurchaseOrderLabel(po ? purchaseOrderSearchLabel(po) : '');
+    setPurchaseOrderClosed(po?.status === 'closed');
     if (matchedVendor) setVendorId(matchedVendor.id);
   };
 
@@ -296,6 +300,11 @@ export default function NewVendorBill() {
             + 'cannot be attached yet. If this bill is open in another tab, finish or close it; '
             + 'otherwise reload this page and try again.',
           );
+          return;
+        }
+        if (purchaseOrderClosed) {
+          // A reason cannot help: the closed-PO guard refuses any bill past the received value.
+          toast('error', 'This purchase order was closed short, so its bills cannot total more than what was received. Lower the bill amount, or record the extra without linking this PO.');
           return;
         }
         setOverageMessage(

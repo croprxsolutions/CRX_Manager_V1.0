@@ -1,5 +1,5 @@
 -- Written 2026-11-10. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270102142000_po_close_short.md.
+-- docs/reference/migrations.d/20270102150000_po_close_short.md.
 -- Re-read the live ledger before applying.
 --
 -- WHAT (KI-142, contract docs/plans/2026-11-10-ki142-po-close-short-CONTRACT.md): a partly received purchase order can
@@ -17,7 +17,10 @@
 --   5. A closed PO cannot be cancelled or deleted (_guard_po_delete); cancel's refusal for a received PO now says to
 --      close it short instead of naming a workflow that never existed.
 --   6. A closed PO can still be billed for what arrived: _section9_create_vendor_bill_intent_impl_20260826 (live body
---      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list.
+--      re-emitted) accepts 'closed' like 'fully_received'. Its only change is that status list. Bills above what
+--      arrived stay governed by KI-143's received-value limit in the public create_vendor_bill / update_vendor_bill
+--      (20270102143000, required live by the preflight), which reads quantity_received for every PO status.
+--   7. A cost correction on a closed PO may not lower the received value below its active bills (the close's rule).
 --
 -- idempotency-body-check: exempt -- close_purchase_order_short requires p_idempotency_key, checks it with
 --   check_idempotency_intent bound to the caller and request (PO and trimmed reason) after authorizing the caller,
@@ -67,6 +70,14 @@ BEGIN
      OR to_regprocedure('public._bind_replay_receipt_20261015(text, text, text)') IS NULL
      OR to_regprocedure('public._replay_fingerprint_20261015(jsonb)') IS NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: a function this file relies on is missing';
+  END IF;
+  -- KI-143 (20270102143000) must be live: its public bill wrappers hold bills on any PO, closed included, to what arrived.
+  IF NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations
+                  WHERE name = '20270102143000_ki143_vendor_bill_received_value_checks')
+     OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+          AND proname IN ('create_vendor_bill', 'update_vendor_bill')
+          AND position('received_value_cents' IN prosrc) > 0) <> 2 THEN
+    RAISE EXCEPTION 'PREFLIGHT_PO_CLOSE_SHORT_DRIFT: KI-143 (20270102143000, bills held to received value) must be applied first';
   END IF;
   -- On order must still come only from submitted and partially_received POs, recomputed on every status change.
   IF position('po.status IN (''submitted'', ''partially_received'')' IN
@@ -205,13 +216,21 @@ DECLARE
   c_cost CONSTANT text[] := ARRAY['unit_cost', 'unit_cost_cents', 'cost_needs_review', 'cost_provenance',
                                   'cost_snapshot_at', 'product_supplier_link_id', 'supplier_price_observation_id'];
   v_same_line boolean := false;
+  v_cost_only boolean := false;
   v_closed text;
+  v_received_cents bigint;
+  v_billed_cents bigint;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     -- Every column but cost and received is frozen on a closed PO's line (fires before the other BEFORE triggers).
     v_same_line := (to_jsonb(NEW) - c_cost - 'quantity_received') IS NOT DISTINCT FROM (to_jsonb(OLD) - c_cost - 'quantity_received');
     IF v_same_line AND NEW.quantity_received IS NOT DISTINCT FROM OLD.quantity_received THEN
-      RETURN NEW;  -- only cost columns changed
+      -- Only cost columns changed. A cost cut can lower the received value under the bills, so check that one.
+      IF round(COALESCE(NEW.quantity_received, 0) * COALESCE(NEW.unit_cost, 0) * 100)
+         >= round(COALESCE(OLD.quantity_received, 0) * COALESCE(OLD.unit_cost, 0) * 100) THEN
+        RETURN NEW;
+      END IF;
+      v_cost_only := true;
     END IF;
   END IF;
   -- FOR SHARE waits for a close in flight, so a line change never slips in beside it. Both parents of a moved line.
@@ -225,6 +244,22 @@ BEGIN
    WHERE po.status = 'closed';
   IF v_closed IS NULL THEN
     RETURN COALESCE(NEW, OLD);
+  END IF;
+  IF v_cost_only THEN
+    -- A closed PO's bills stay at or under what arrived (the close's rule), so a cost cut may not push received under them.
+    SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * COALESCE(poi.unit_cost, 0) * 100)), 0)::bigint
+      INTO v_received_cents
+      FROM public.purchase_order_items poi
+     WHERE poi.purchase_order_id = NEW.purchase_order_id AND poi.id <> NEW.id;
+    v_received_cents := v_received_cents + round(COALESCE(NEW.quantity_received, 0) * COALESCE(NEW.unit_cost, 0) * 100)::bigint;
+    SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed_cents
+      FROM public.vendor_bills vb
+     WHERE vb.purchase_order_id = NEW.purchase_order_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
+    IF v_billed_cents > v_received_cents THEN
+      RAISE EXCEPTION 'PO_CLOSE_BILLED_OVER_RECEIVED: this cost change would put vendor bills on closed PO % above what was received; correct the bill first',
+        v_closed USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
   END IF;
   IF v_same_line
      AND COALESCE(NEW.quantity_received, 0) < COALESCE(OLD.quantity_received, 0)

@@ -330,7 +330,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _start_job_replay_impl_20261015: ['start_job'],
   // Direct EXECUTE is revoked (postgres-only; service_role on the cancel layer, pinned by batch 4c). Both were renamed
   // from the public cancel_purchase_order and create_vendor_bill bodies (ALTER FUNCTION ... RENAME TO), so they kept the
-  // public literal their wrapper binds. 20270102142000 (KI-142) re-emits them only to refuse a closed PO and to bill one;
+  // public literal their wrapper binds. 20270102150000 (KI-142) re-emits them only to refuse a closed PO and to bill one;
   // changing the literal would orphan existing receipts.
   _section9_cancel_purchase_order_serialized: ['cancel_purchase_order'],
   _section9_create_vendor_bill_intent_impl_20260826: ['create_vendor_bill'],

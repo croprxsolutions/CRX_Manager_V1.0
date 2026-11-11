@@ -151,6 +151,11 @@ is the screens, merged after PR 1 is live.
   `closed` to the private billable-status list (`_section9_create_vendor_bill_intent_impl_20260826`, live body re-emitted
   with that one change, md5-pinned). Received value uses KI-143's formula, Σ round(quantity_received × unit_cost × 100).
   Proof: a closed PO can be billed; a cancelled one still cannot.
+- **Sol round 1 (2026-11-10), two HIGHs on bills after a close.** (1) New or edited bills above what arrived: this
+  migration now sorts after KI-143 (`20270102143000`) and its preflight refuses unless KI-143 is applied; KI-143's
+  public `create_vendor_bill` / `update_vendor_bill` hold every PO's bills, closed included, to the received value
+  (+5% only with an admin's confirmed reason, Mason's KI-143 rule). (2) A cost cut after the close: the line guard
+  refuses a cost change on a closed PO that would put its active bills above the received value. Proof: both cases.
 - **Bill value vs merchandise (#29, #30).** Kept as a conservative aggregate ceiling: freight on a PO-linked bill could
   block a close until the bill is corrected; acceptable at today's volume (no PO-linked bills).
 - **Reversal limits (#3, #4, #7, #54).** Existing reversal rules (admin only, no active bill, open period) still apply.

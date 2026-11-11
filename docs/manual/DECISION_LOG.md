@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-10 — Sentry gets only known-safe fields, built fresh (KI-115, option B)
+
+**Decision (Mason, 2026-11-10, relayed from his session: "Safe fields only (B)").** Every Sentry event, error or performance sample, is rebuilt in `src/lib/sentry.ts` from an allow-list: error type and title, stack frames (file, function, line, column), our own tags, the user id, breadcrumb category, level and time, path-only urls and span names, trace ids, and the SDK's own bookkeeping. Dropped: `extra`, every other context, request query, headers and cookies, the serialized copy of a plain error object, breadcrumb messages and data, and span data. The alternative was to keep token-pattern matching across the whole event, which Luna kept finding new shapes for. The title is the only free text. It goes through `toSentryError`: tokens removed whole, then figures blanked (see the same-day entry "Sentry gets a database error's wording, figures blanked").
+**What this forbids/implies:** do not send a new event field without adding it to the allow-list on purpose. Do not add pattern matching back as the main defence. The `extra` data on about 220 capture calls no longer reaches Sentry; put anything Sentry must see in a tag instead.
+
 ## 2026-11-10 — #1733 (KI-16 rate units): a voided invoice may bring back an unbillable blank-unit line; Sol round 6
 
 **Decision (Mason, in chat, 2026-11-10: "Accept it").** Sol round 5 on PR #1733 rated HIGH the gap rounds 3 and 4 rated MED: the product rate-unit guard skips billed tickets, so a blank-unit blend line on a billed ticket whose product unit then changes to a per-X unit ("oz/cwt") is refused at re-billing after its invoice is voided. Mason accepts it: it is rare (four steps in that order), never bills a wrong amount, and the office fixes it by typing the line's unit. Blocking it instead would let old billed tickets block a legitimate product unit change. Recorded in KI-16. Sol round 6 may run on the head that records this, with no code change.

@@ -79,7 +79,7 @@ beforehand. If the PR then changes or fails to merge, the follow-up is a new mig
 ## Proof cases
 
 `node scripts/smoke/prove-ki108-stock-matches-history.mjs`: an offline, disposable PostgreSQL 17 container
-from the checked-in baseline, live rows copied read-only, with `inventory` and `inventory_transactions`
+from the checked-in baseline, seeded with the bound inventory rows and synthetic ledger rows matching the bound totals, counts and newest times (public repo: no live movement history; Sol round 1 MED), with `inventory` and `inventory_transactions`
 columns, types, nullability and unique key asserted equal to live. Run 2026-11-10: PASS.
 
 1. When the migration runs on today's five rows and histories, then the four stored values change as in the

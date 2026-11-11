@@ -15,3 +15,4 @@ A simple implementation mistake against a settled rule is not a late design find
 
 | Date | PRs | Contract | Mason questions | Challenge findings settled / declined | Extra planning effort (approx.) | Luna rounds | Sol rounds | Late design findings | Escaped defects | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-10 | #1746 (replaced parked #1688) | `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md` | 5 (4 in the contract; "Yes at post wins" after Sol r1) | 40 settled / 0 declined (Astra, high) | one contract and one Astra run (not timed) | 4 | 3 (r1 HIGH, r2 clean, r3 clean after a main merge) | 1 (Sol r1: a Yes known at posting must create the record; a missing business rule) | 0 so far (applied live 2026-11-10; seed not yet run) | Linking each record to its invoice line removed every "which record covers this sale" rule that kept #1688 failing over 13 Sol rounds. Leftovers: #1754, KI-117, KI-118. |

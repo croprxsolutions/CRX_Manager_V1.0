@@ -19,6 +19,11 @@ export function isComputedChargeLine(type: InvoiceChargeType | null | undefined)
   return type === 'standing_discount' || type === 'sales_tax';
 }
 
+/** An invoice's margin: its lines less cost, without the sales tax (collected for the state, not earned). */
+export function invoiceMarginCents(lines: ReadonlyArray<{ extended_cents: number; charge_type?: InvoiceChargeType | null }>, costCents: number): number {
+  return lines.reduce((sum, line) => sum + (line.charge_type === 'sales_tax' ? 0 : line.extended_cents), 0) - costCents;
+}
+
 export function chargeTypeLabel(type: InvoiceChargeType | null | undefined): string {
   if (type === 'standing_discount') return 'Standing discount';
   if (type === 'sales_tax') return 'Sales tax';

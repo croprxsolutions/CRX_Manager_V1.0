@@ -30,7 +30,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
@@ -2437,8 +2437,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-secondary">Margin</span>
-                  <span className={totalCents - totalCostCents > 0 ? 'text-crx-green' : 'text-red-600'}>
-                    {fmt(totalCents - totalCostCents)}
+                  <span className={invoiceMarginCents(items, totalCostCents) > 0 ? 'text-crx-green' : 'text-red-600'}>
+                    {fmt(invoiceMarginCents(items, totalCostCents))}
                   </span>
                 </div>
               </>

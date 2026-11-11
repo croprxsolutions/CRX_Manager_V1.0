@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from './invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isFromScratchInvoice } from './invoiceChargeLines';
 
 describe('isFromScratchInvoice', () => {
   it('is a misc_charge or chemical_sale with no order and no delivery', () => {
@@ -71,5 +71,17 @@ describe('charge types', () => {
     expect(CHARGE_TYPE_OPTIONS.map((o) => o.value)).toEqual(['freight', 'application_fee', 'service', 'other']);
     expect(chargeTypeLabel('application_fee')).toBe('Application fee');
     expect(chargeTypeLabel(null)).toBe('');
+  });
+});
+
+describe('invoiceMarginCents (billing plan M4a)', () => {
+  it('leaves the sales tax out: tax is collected for the state, not earned', () => {
+    const lines = [
+      { extended_cents: 100000, charge_type: null },
+      { extended_cents: 4500, charge_type: 'freight' as const },
+      { extended_cents: -3000, charge_type: 'standing_discount' as const },
+      { extended_cents: 6408, charge_type: 'sales_tax' as const },
+    ];
+    expect(invoiceMarginCents(lines, 90000)).toBe(100000 + 4500 - 3000 - 90000);
   });
 });

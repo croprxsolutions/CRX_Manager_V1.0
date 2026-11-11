@@ -16,6 +16,64 @@ export function releaseExtraFiles(files) {
   return files.filter((f) => !BOT_FILES.includes(f));
 }
 
+// X.Y.Z compared as numbers.
+export function versionIsNewer(now, was) {
+  const [a, b] = [now, was].map((v) => String(v).split('.').map(Number));
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+
+// The version the bot sets must be one plain X.Y.Z, the same in package.json, its lock and the notes,
+// with its own section in CHANGELOG.md.
+export function versionProblems(pkg, lock, notes, changelog = null) {
+  try {
+    const versions = [JSON.parse(pkg).version, JSON.parse(lock).version, JSON.parse(lock).packages?.['']?.version,
+      JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(notes)[1]).version];
+    if (/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(versions[0]) && versions.every((v) => v === versions[0])) {
+      return changelog === null || changelog.includes(`\n## v${versions[0]} (`) ? [] : [`CHANGELOG.md has no section for v${versions[0]}`];
+    }
+    return [`the version isn't one X.Y.Z across package.json, package-lock.json and src/releaseNotes.ts (${versions.join(', ')})`];
+  } catch {
+    return ['package.json, package-lock.json or src/releaseNotes.ts is missing or unreadable'];
+  }
+}
+
+// Inside those files, only what the bot writes may differ: the version in package.json and its lock,
+// and a releaseNotes.ts that is exactly the bot's module (no code). CHANGELOG.md is text only.
+export function botFileProblems(file, expected, actual) {
+  if (actual === null) return [`${file} is missing (the bot always writes it)`];
+  if (file === 'src/releaseNotes.ts') {
+    // Always the bot's exact module, even when unchanged: this file is app code.
+    try {
+      const notes = JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(actual)[1]);
+      const shape = Object.keys(notes).join() === 'version,date,items' && typeof notes.version === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(notes.date) && Array.isArray(notes.items) && notes.items.every((i) => typeof i === 'string');
+      if (shape && actual === releaseNotesModule(notes)) return [];
+    } catch { /* not the bot's module */ }
+    return [`${file} isn't exactly the module the bot writes (a version, a date and a list of strings)`];
+  }
+  if (expected === actual) return [];
+  if (file === 'package.json' || file === 'package-lock.json') {
+    const strip = (t) => {
+      const j = JSON.parse(t);
+      delete j.version;
+      if (file === 'package-lock.json' && j.packages?.['']) delete j.packages[''].version;
+      return JSON.stringify(j);
+    };
+    try { if (strip(expected) === strip(actual)) return []; } catch { /* unreadable counts as a difference */ }
+    return [`${file} differs from staging + main outside its version field`];
+  }
+  if (file === 'CHANGELOG.md') {
+    // Text only, but every earlier release's section stays word for word.
+    const sections = `\n${expected ?? ''}`.split(/\n(?=## v\d)/).filter((sec) => sec.startsWith('## v')).map((sec) => sec.trimEnd());
+    // Each one whole: from its heading line to the next release heading (or the end), nothing added.
+    const padded = `\n${actual.trimEnd()}\n\n## v`;
+    const lost = sections.filter((sec) => !padded.includes(`\n${sec}\n\n## v`)).map((sec) => sec.split('\n')[0]);
+    return lost.length ? [`CHANGELOG.md changed or lost earlier release sections (${lost.slice(0, 5).join('; ')})`] : [];
+  }
+  return [];
+}
+
 // Every enforcing check stays inert until the repository variable RELEASE_FLOW is "on".
 export function flowEnabled(env) {
   return env.RELEASE_FLOW === 'on';
@@ -351,6 +409,24 @@ function statusMarkdown(prs, orphans) {
 
 const commands = {
   // usage (stdin = changed file names): release-flow.mjs check-release-files
+  // usage: release-flow.mjs check-release-content <expected tree> <release/next sha>
+  async 'check-release-content'([expected, head]) {
+    // null when `git cat-file -e` can't find the path (missing, or the ref itself is unreadable: the head
+    // side then reports "missing"); reading a file that exists has no size cap and throws on any error.
+    const show = (ref, f) => {
+      try { execFileSync('git', ['cat-file', '-e', `${ref}:${f}`], { stdio: 'ignore' }); } catch { return null; }
+      return execFileSync('git', ['show', `${ref}:${f}`], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+    };
+    const problems = BOT_FILES.flatMap((f) => botFileProblems(f, show(expected, f), show(head, f)));
+    problems.push(...versionProblems(show(head, 'package.json'), show(head, 'package-lock.json'), show(head, 'src/releaseNotes.ts'), show(head, 'CHANGELOG.md') ?? ''));
+    // A release is a newer version than staging + main's (an equal or older one re-publishes history).
+    try {
+      const [now, was] = [head, expected].map((ref) => JSON.parse(show(ref, 'package.json')).version);
+      if (!versionIsNewer(now, was)) problems.push(`the version ${now} isn't newer than staging + main's ${was}`);
+    } catch { /* unreadable: versionProblems already reports it */ }
+    for (const p of problems) console.log(`::error::release/next: ${p}. Only the release bot writes these files.`);
+    return problems.length ? 1 : 0;
+  },
   async 'check-release-files'() {
     const extra = releaseExtraFiles(readFileSync(0, 'utf8').split('\n').filter(Boolean));
     if (!extra.length) return 0;

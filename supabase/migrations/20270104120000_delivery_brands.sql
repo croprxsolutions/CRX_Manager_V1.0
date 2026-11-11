@@ -551,8 +551,10 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  IF COALESCE(current_setting('crx.delivery_brand_edit', true), '') <> 'on'
-     AND EXISTS (SELECT 1 FROM public.delivery_item_brands b
+  IF COALESCE(current_setting('crx.delivery_brand_edit', true), '') = 'on' THEN RETURN OLD; END IF;
+  -- Every brand writer locks the delivery before it writes an event, so seqs commit in order (stale-save base).
+  PERFORM 1 FROM public.deliveries WHERE id = OLD.delivery_id FOR UPDATE;
+  IF EXISTS (SELECT 1 FROM public.delivery_item_brands b
                   WHERE b.delivery_item_id = OLD.id AND b.superseded_at IS NULL) THEN
     PERFORM public._delivery_brand_event(OLD.delivery_id, 'line_removed', NULL, NULL,
       public._delivery_brand_rows(OLD.delivery_id, ARRAY[OLD.id]), '[]'::jsonb,

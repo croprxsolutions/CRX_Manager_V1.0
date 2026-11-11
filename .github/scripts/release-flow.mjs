@@ -210,13 +210,22 @@ export function changelogSection(markdown, version) {
 
 const INLINE_BLOCKS = new Set(['version', 'date']);
 
+// Removes comment markers until none are left: one pass over "<<!--!--" would leave a new "<!--".
+function stripCommentMarkers(text) {
+  let s = String(text);
+  while (/<!--|--!?>/.test(s)) s = s.replace(/<!--|--!?>/g, '');
+  return s;
+}
+// A markdown table cell: escape backslashes first, then pipes.
+export const cell = (text) => String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
 // Fill the <!-- bot:NAME --> … <!-- /bot:NAME --> blocks; everything else (ticked boxes,
 // deployment notes) is kept from the current PR body.
 export function renderReleaseBody(template, data, previousBody) {
   return (previousBody || template).replace(/<!-- bot:(\w+) -->[\s\S]*?<!-- \/bot:\1 -->/g, (block, key) => {
     if (!(key in data)) return block;
     // PR text can't close or open a bot block.
-    const clean = String(data[key]).replace(/<!--|-->/g, '');
+    const clean = stripCommentMarkers(data[key]);
     const value = INLINE_BLOCKS.has(key) ? clean : `\n${clean}\n`;
     return `<!-- bot:${key} -->${value}<!-- /bot:${key} -->`;
   });
@@ -295,7 +304,8 @@ function dubaiDate(now = new Date()) {
 
 // The first real paragraph of a PR description: no headings, comments or badges, one line.
 export function firstParagraph(body, max = 200) {
-  for (const para of (body ?? '').replace(/<!--[\s\S]*?-->/g, '').split(/\n\s*\n/)) {
+  // Comments go whole (an unclosed one to the end), then any marker left over.
+  for (const para of stripCommentMarkers((body ?? '').replace(/<!--[\s\S]*?(?:--!?>|$)/g, '')).split(/\n\s*\n/)) {
     const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l) && !/^\s*(what users see|staging proof|held off):/i.test(l)).join(' ').replace(/\s+/g, ' ').trim();
     if (text) return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
   }
@@ -318,9 +328,9 @@ function statusMarkdown(prs, orphans) {
   const row = (p) => {
     const state = { verified: '✅ verified', held: '⏸️ held off', missing: '❌ label without proof or reason', unverified: '❌ not verified' }[prState(p)];
     const proof = proofLink([p.body, ...(p.comments ?? [])]);
-    return `| #${p.number} | ${p.title.replace(/\|/g, '\\|')} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
+    return `| #${p.number} | ${cell(p.title)} | ${state} | ${proof ? `[proof](${proof})` : ''} |`;
   };
-  return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${s.replace(/\|/g, '\\|')} | ❌ commit without a PR | |`)].join('\n');
+  return ['| PR | Title | Staging | Proof |', '|---|---|---|---|', ...prs.map(row), ...orphans.map((s) => `| — | ${cell(s)} | ❌ commit without a PR | |`)].join('\n');
 }
 
 const commands = {

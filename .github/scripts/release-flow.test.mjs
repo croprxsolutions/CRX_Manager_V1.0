@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -146,12 +146,19 @@ test('renderReleaseBody fills bot blocks and keeps what people wrote', () => {
   assert.equal(renderReleaseBody(template, { version: 'v1' }, null).includes('<!-- bot:changelog --><!-- /bot:changelog -->'), true);
   const sneaky = renderReleaseBody(template, { version: 'v1', changelog: 'x <!-- /bot:changelog --> stuck' });
   assert.match(sneaky, /<!-- bot:changelog -->\nx  \/bot:changelog  stuck\n<!-- \/bot:changelog -->/);
+  // One removal pass would rebuild a marker from its pieces; --!> also ends a comment.
+  const rebuilt = renderReleaseBody(template, { version: 'v1', changelog: 'a <<!--!-- /bot:changelog --!> b' });
+  assert.equal(rebuilt.match(/<!--/g).length, 4);
+  assert.match(rebuilt, /<!-- bot:changelog -->\na  \/bot:changelog  b\n<!-- \/bot:changelog -->/);
 });
 
 test('firstParagraph skips headings and comments and trims long text', () => {
   assert.equal(firstParagraph('## What changes (plain English)\n\nThe wrapper now stops.\nOn round 3.'), 'The wrapper now stops. On round 3.');
   assert.equal(firstParagraph('<!-- note -->\n## What\nFixes the red check.'), 'Fixes the red check.');
   assert.equal(firstParagraph('x'.repeat(250)).length, 201);
+  assert.equal(firstParagraph('Shown. <!-- never closed\n\nhidden'), 'Shown.');
+  assert.equal(firstParagraph('<<!-- a -->!-- b'), 'b');
+  assert.equal(firstParagraph('a --!> b'), 'a b');
   assert.equal(firstParagraph(null), '');
   assert.equal(firstParagraph('What users see: <one plain sentence>\n\nReal summary.'), 'Real summary.');
 });
@@ -191,4 +198,10 @@ test('prState: held-off needs its reason even when also verified', () => {
   assert.equal(prState({ labels: ['held-off'], body: 'Held off: #12' }), 'held');
   assert.equal(prState({ labels: ['verified-on-staging'], body: '' }), 'missing');
   assert.equal(prState({ labels: ['on-staging'], body: '' }), 'unverified');
+});
+
+test('cell escapes backslashes before pipes, so a title cannot break the status table', () => {
+  assert.equal(cell('a|b'), 'a\\|b');
+  assert.equal(cell('a\\|b'), 'a\\\\\\|b');
+  assert.equal(cell('plain'), 'plain');
 });

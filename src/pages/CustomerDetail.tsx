@@ -62,6 +62,7 @@ import { downloadYearEndSummaryPdf } from '../lib/yearEndSummaryPdf';
 import { ORDER_COLUMNS, QUOTE_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { YearEndSummaryOptions } from '../lib/yearEndSummaryPdf';
 import type { YearEndSummaryData } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 // P3 perf: lazy-load the heavy Mapbox map components so CustomerDetail (a
 // high-traffic page) doesn't pull the ~1.68 MB vendor-mapbox chunk on initial
@@ -793,7 +794,7 @@ export default function CustomerDetail() {
         financialsFetched.current = true;
       } catch (err: unknown) {
         if (isStale()) return;
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_financials_tab' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'customer_financials_tab' } });
         toast('error', 'Failed to load financials');
         if (!agingRead) setFinancialsFailed(true);
       } finally {
@@ -1029,7 +1030,7 @@ export default function CustomerDetail() {
         ]);
       } catch (err) {
         // Warn-only: a failed duplicate check must never stop the save.
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'customer_duplicate_check' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'customer_duplicate_check' } });
       }
       if (visitRef.current !== visitAtClick) { setSaving(false); return; }
       if (matches.length > 0) {
@@ -1187,7 +1188,7 @@ export default function CustomerDetail() {
         }
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_customer' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_customer' } });
       toast('error', err instanceof Error ? err.message : 'Failed to save customer');
     }
     setSaving(false);
@@ -1240,7 +1241,7 @@ export default function CustomerDetail() {
       }
     } catch (error: unknown) {
       setCrops(previousCrops);
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerDetail.toggleCrop' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerDetail.toggleCrop' } });
       toast('error', sanitizeError(error));
     } finally {
       setCropSaving(null);
@@ -1273,7 +1274,7 @@ export default function CustomerDetail() {
       toast('success', `Season ${season} summary generated`);
       setShowSummaryDialog(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'generate_customer_year_end_summary' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'generate_customer_year_end_summary' } });
       toast('error', sanitizeError(err));
     }
     setSummaryLoading(false);

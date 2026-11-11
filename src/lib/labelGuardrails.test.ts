@@ -9,6 +9,18 @@ import {
 } from './labelGuardrails';
 
 describe('normalizeRateUnit', () => {
+  it('folds invisible characters as the SQL normalize_rate_unit does (KI-16)', () => {
+    const c = (n: number) => String.fromCharCode(n);
+    expect(normalizeRateUnit(`oz${c(0x200b)}`)).toBe('oz');
+    expect(normalizeRateUnit(`${c(0xfeff)}Gal${c(0x00a0)}`)).toBe('gal');
+    expect(normalizeRateUnit(`fl${c(0x00a0)}oz`)).toBe('oz');
+    expect(normalizeRateUnit(`l${c(0x00ad)}b${c(0x2060)}/ac`)).toBe('lb');
+    expect(normalizeRateUnit(`fl${c(0x202f)}oz`)).toBe('oz');
+    expect(normalizeRateUnit(c(0x200c) + c(0x200d))).toBeNull();
+    // A non-acre denominator is still kept whole.
+    expect(normalizeRateUnit(`oz/${c(0x200b)}cwt`)).toBe('oz/cwt');
+  });
+
   it('lowercases, trims, and strips a per-acre suffix', () => {
     expect(normalizeRateUnit('OZ/acre')).toBe('oz');
     expect(normalizeRateUnit('  pt/ac ')).toBe('pt');

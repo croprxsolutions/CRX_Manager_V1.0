@@ -74,8 +74,11 @@ import {
   duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
-import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
-import type { ProductCategory, UseTimingOption } from '../types';
+import { listProductCropOptions, listProductUseTimingOptions } from '../lib/productUseTimings';
+import UseTimingPicker from '../components/products/UseTimingPicker';
+import UseTimingChoicesModal from '../components/products/UseTimingChoicesModal';
+import { quoteLineChange } from '../lib/quoteNotes';
+import type { CropOption, ProductCategory, UseTimingOption } from '../types';
 
 const PRODUCT_NONPRICING_FIELDS = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer',
@@ -336,6 +339,8 @@ export default function ProductDetail() {
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
   const [timingOptions, setTimingOptions] = useState<UseTimingOption[]>([]);
+  const [cropOptions, setCropOptions] = useState<CropOption[]>([]);
+  const [timingChoicesOpen, setTimingChoicesOpen] = useState(false);
   const [timingLoadFailed, setTimingLoadFailed] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
   const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
@@ -538,6 +543,8 @@ export default function ProductDetail() {
       setTimingLoadFailed(true);
       toast('error', 'Could not load use timings. Refresh before changing them.');
     });
+    // Crop names only label the picker's groups; without them each group shows its crop code.
+    listProductCropOptions().then(setCropOptions).catch(() => undefined);
     // Vendor and manufacturer remain free-text choices.
     // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
     void fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to))).then(({ data, error }) => {
@@ -1181,10 +1188,6 @@ export default function ProductDetail() {
     update('category', next);
   };
 
-  const toggleUseTiming = (code: string, checked: boolean) => {
-    const selected = product.use_timings ?? [];
-    update('use_timings', checked ? [...selected, code] : selected.filter((item) => item !== code));
-  };
 
   const updatePricingMargin = (field: ProductPricingMarginField, text: string) => {
     if (pricingReloadRequired) return;
@@ -1256,6 +1259,8 @@ export default function ProductDetail() {
     : null;
 
   const missingSetup = missingProductSetup(product);
+  // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
+  const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
   return (
     <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
@@ -1343,6 +1348,7 @@ export default function ProductDetail() {
               ratesLocked={rateLock ? rateLock.is_locked : null}
               categoryOptions={categoryOptions}
               timingOptions={timingOptions}
+              cropOptions={cropOptions}
               rateUnitOptions={rateUnitOptionsForProduct(unitConversions, parent.product_form, product.inventory_unit).map((uc) => uc.unit)}
               busy={isDirty || pricingReloadRequired || saving}
               onChanged={() => {
@@ -1454,20 +1460,25 @@ export default function ProductDetail() {
                         <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
                         <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
                       </>
-                    ) : visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
-                      <label key={option.code} className={`flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark ${isAdmin && !pricingReloadRequired && !(isNew && saving) ? 'hover:bg-gray-50' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={(product.use_timings ?? []).includes(option.code)}
-                          onChange={(event) => toggleUseTiming(option.code, event.target.checked)}
-                          disabled={!isAdmin || timingLoadFailed || parentOwned}
-                          className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                        />
-                        {option.label}{option.is_active ? '' : ' (retired)'}
-                      </label>
-                    ))}
+                    ) : (
+                      <UseTimingPicker
+                        options={timingOptions}
+                        crops={cropOptions}
+                        category={product.category}
+                        selected={product.use_timings ?? []}
+                        held={persistedProduct?.use_timings ?? []}
+                        disabled={!isAdmin || parentOwned}
+                        onChange={(next) => update('use_timings', next)}
+                      />
+                    )}
                     {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
                   </div>
+                  {isAdmin && !timingLoadFailed && (
+                    <button type="button" onClick={() => setTimingChoicesOpen(true)}
+                      className="mt-1 min-h-8 text-sm font-medium text-crx-green hover:underline focus-visible:ring-2 focus-visible:ring-crx-green">
+                      Manage crop and timing choices
+                    </button>
+                  )}
                 </fieldset>
               )}
               <div>
@@ -1956,6 +1967,11 @@ export default function ProductDetail() {
                 rows={3}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
               />
+              {quoteLine && (
+                <p className="mt-1 text-xs text-amber-800" role="status">
+                  New quote lines will show: {quoteLine.after ? `"${quoteLine.after}"` : '(blank)'}. Existing quotes keep their notes.
+                </p>
+              )}
             </div>
           </Card>
           </PhoneSection>
@@ -2406,6 +2422,20 @@ export default function ProductDetail() {
           setPendingCategory(undefined);
         }}
       />
+      {timingChoicesOpen && profile && (
+        <UseTimingChoicesModal
+          options={timingOptions}
+          crops={cropOptions}
+          defaultCategory={product.category}
+          profileId={profile.id}
+          onReload={async () => {
+            const fresh = await listProductUseTimingOptions();
+            setTimingOptions(fresh);
+            return fresh;
+          }}
+          onClose={() => setTimingChoicesOpen(false)}
+        />
+      )}
     </div>
   );
 }

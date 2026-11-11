@@ -1,4 +1,4 @@
-## 2026-11-11 — RT-3: Mason's rate review (database, local candidate)
+## 2026-11-11 — RT-3: Mason's rate review (database, applied live 2026-11-11 5:55 PM Central)
 
 - Migration `20270104110000_product_rate_review.sql`; contract `docs/plans/2026-11-11-product-RT3-rate-review-CONTRACT.md`.
 - Every draft rate row gets a decision (approve, or reopen to correct, with who and when; suggested value and source

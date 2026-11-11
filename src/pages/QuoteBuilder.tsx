@@ -102,7 +102,7 @@ import DatePicker from '../components/ui/DatePicker';
 import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
-import { useIsBelowLg, useIsBelowXl, useIsPhone } from '../hooks/useIsPhone';
+import { useIsBelowXl, useIsPhone } from '../hooks/useIsPhone';
 import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../lib/quoteBuilderView';
 import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
@@ -783,10 +783,8 @@ export default function QuoteBuilder() {
   const [showRolloverModal, setShowRolloverModal] = useState(false);
   const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
   const isPhone = useIsPhone();
-  // The line table needs 1024 px; below that each line is a card.
-  const lineCards = useIsBelowLg();
-  // From 1024 to 1279 px (as narrow as 720 px of card with the sidebar open) cost and margin sit under Total.
-  const costUnderTotal = useIsBelowXl();
+  // The line table needs 1280 px (at 1024 with the sidebar open its number boxes cut values off); below that each line is a card.
+  const lineCards = useIsBelowXl();
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -5339,7 +5337,7 @@ export default function QuoteBuilder() {
                       <col className="w-24 @min-[72rem]:w-33" />
                       <col className="w-33 @min-[72rem]:w-42" />
                       <col className="w-24 @min-[72rem]:w-28" />
-                      {!hideCost && !costUnderTotal && <col className="w-32 @min-[72rem]:w-33" />}
+                      {!hideCost && <col className="w-32 @min-[72rem]:w-33" />}
                       <col className="w-12" />
                     </colgroup>
                     <thead>
@@ -5351,7 +5349,7 @@ export default function QuoteBuilder() {
                         <th scope="col" className="py-2.5 px-1.5 font-medium">Quantity</th>
                         <th scope="col" className="py-2.5 px-1.5 font-medium">Price</th>
                         <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Total</th>
-                        {!hideCost && !costUnderTotal && <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Cost · margin</th>}
+                        {!hideCost && <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Cost · margin</th>}
                         <th scope="col" className="py-2.5 px-1"><span className="sr-only">Line actions</span></th>
                       </tr>
                     </thead>
@@ -5369,10 +5367,9 @@ export default function QuoteBuilder() {
                             <td className="py-3 px-1.5 pt-5 text-right">
                               <div className="font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</div>
                               <div className="mt-1 text-xs text-secondary tabular-nums">{line.perAcre}</div>
-                              {/* Fixed columns: the cost's no-wrap parts may wrap rather than run into the next column. */}
-                              {costUnderTotal && line.cost && <div className="mt-1 text-xs [&_*]:whitespace-normal">{line.cost}</div>}
                             </td>
-                            {!hideCost && !costUnderTotal && <td className="py-3 px-1.5 pt-5 text-right text-xs [&_*]:whitespace-normal">{line.cost}</td>}
+                            {/* Fixed columns: the cost's no-wrap parts may wrap rather than run into the next column. */}
+                            {!hideCost && <td className="py-3 px-1.5 pt-5 text-right text-xs [&_*]:whitespace-normal">{line.cost}</td>}
                             <td className="py-2 px-1 text-right">{line.menu}</td>
                           </tr>
                         );

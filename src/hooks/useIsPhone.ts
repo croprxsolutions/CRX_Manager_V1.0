@@ -22,8 +22,5 @@ function mediaQueryHook(query: string) {
 /** True below 768 px, for layouts that render one variant at a time instead of hiding the other with CSS. */
 export const useIsPhone = mediaQueryHook('(max-width: 767px)');
 
-/** True below 1024 px (Tailwind's lg), the same way: the quote line table becomes cards there. */
-export const useIsBelowLg = mediaQueryHook('(max-width: 1023px)');
-
-/** True below 1280 px (Tailwind's xl): the quote line table folds cost and margin under Total there. */
+/** True below 1280 px (Tailwind's xl), the same way: the quote line table becomes cards there. */
 export const useIsBelowXl = mediaQueryHook('(max-width: 1279px)');

@@ -5580,19 +5580,19 @@ describe('QuoteBuilder', () => {
       }
       cleanup();
 
-      // 1024 to 1279 px: an admin's cost sits under Total, not in a column; still never for a rep or Customer view.
+      // 1024 to 1279 px: cards too; an admin's cost shows, still never for a rep or in Customer view.
       stubWidth(1024);
       try {
         serveLines();
         await loaded();
-        expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
-        expect(lineTable().textContent).toMatch(costText);
+        expect(screen.queryByRole('table')).not.toBeInTheDocument();
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).toMatch(costText);
         cleanup();
 
         authState.role = 'sales_rep';
         serveLines();
         await loaded();
-        expect(lineTable().textContent).not.toMatch(costText);
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).not.toMatch(costText);
         cleanup();
 
         authState.role = 'admin';
@@ -5600,7 +5600,7 @@ describe('QuoteBuilder', () => {
         await loaded();
         fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
         fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
-        expect(lineTable().textContent).not.toMatch(costText);
+        expect(screen.getByRole('article', { name: 'Line 1, Product' }).textContent).not.toMatch(costText);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -5638,11 +5638,11 @@ describe('QuoteBuilder', () => {
       expect(within(wrapper as HTMLElement).getByText('Line actions')).toHaveClass('sr-only');
     });
 
-    // Product table v2 (#6): the table fits its card from 1024 px; below that each line is a card.
+    // Product table v2 (#6): the table fits its card from 1280 px; below that each line is a card.
     const firstRow = () => within(screen.getByRole('columnheader', { name: 'Total' }).closest('table') as HTMLElement).getAllByRole('row')[1];
 
-    it('from 1024 px the line table fits its card, with $/acre under each Total', async () => {
-      stubWidth(1024);
+    it('from 1280 px the line table fits its card, with $/acre under each Total and cost in its own column', async () => {
+      stubWidth(1280);
       try {
         serveLines('Product', { price_per_acre: 2.5 });
         await loaded();
@@ -5657,23 +5657,16 @@ describe('QuoteBuilder', () => {
         expect(cells[6].textContent).toMatch(/^\$20\.00\$2\.50 \/ acre/);
         const second = within(table).getAllByRole('row')[2];
         expect(within(second).getAllByRole('cell')[6].textContent).toMatch(/^\$30\.00– \/ acre/);
-        // Below 1280 px an admin's cost and margin sit under Total instead of in their own column.
-        expect(screen.queryByRole('columnheader', { name: 'Cost · margin' })).not.toBeInTheDocument();
-        expect(cells[6].textContent).toMatch(/\$8\.00 · 40\.0%$/);
-        cleanup();
-
-        stubWidth(1280);
-        serveLines('Product', { price_per_acre: 2.5 });
-        await loaded();
         expect(screen.getByRole('columnheader', { name: 'Cost · margin' })).toBeInTheDocument();
-        expect(within(firstRow()).getAllByRole('cell')[6].textContent).toBe('$20.00$2.50 / acre');
+        expect(cells[6].textContent).toBe('$20.00$2.50 / acre');
+        expect(cells[7].textContent).toMatch(/\$8\.00 · 40\.0%$/);
       } finally {
         vi.unstubAllGlobals();
       }
     });
 
-    it('below 1024 px each line is a card: 4 labelled fields (2 across on a phone), then $/acre and the total', async () => {
-      stubWidth(1023);
+    it('below 1280 px each line is a card: 4 labelled fields (2 across on a phone), then $/acre and the total', async () => {
+      stubWidth(1279);
       try {
         serveLines('Product', { price_per_acre: 2.5 });
         await loaded();

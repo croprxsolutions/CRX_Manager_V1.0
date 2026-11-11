@@ -410,8 +410,11 @@ async function main() {
   const s0 = { units: units(), money: money(), versions: versions(), fns: fnBodies(), perAcre: perAcre() };
   assert.match(s0.fns, /:14$/, 'the 14 functions that read unit_conversions are present');
   const q0 = quotes(rows);
-  // The fixture quotes carry the old spellings; cancel them so only the open-lines test below sees a live one.
-  const retireQuotes = () => raw("UPDATE public.quotes SET status = 'cancelled' WHERE quote_number LIKE 'RT2A-Q%' AND status <> 'cancelled';");
+  // The fixture quotes name the listed products; remove them so only the open-lines tests below see one.
+  const retireQuotes = () => raw(`DELETE FROM public.quote_versions WHERE quote_id IN (SELECT id FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%');
+    DELETE FROM public.quote_items WHERE quote_id IN (SELECT id FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%');
+    DELETE FROM public.quote_sections WHERE quote_id IN (SELECT id FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%');
+    DELETE FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%';`);
   retireQuotes();
   const armezon = rows.find((r) => r.old === 'Oz');
   const imazuron = rows.find((r) => r.old === 'LB');
@@ -459,17 +462,24 @@ async function main() {
   raw(`DELETE FROM public.inventory WHERE product_id = '${armezon.id}';`);
   console.log('[prover] inventory: an unexpected old-spelling inventory snapshot refuses');
 
-  // Sol round 14: a live quote or an open purchase order on an old spelling refuses; a cancelled one does not count.
+  // Sol rounds 14-15: a quote of any status, a saved quote version naming a listed product, or a purchase order
+  // that is not cancelled (fully received included) on an old spelling refuses; a cancelled order does not count.
   const ozRow = rows.find((r) => r.old === 'Oz');
-  raw("UPDATE public.quotes SET status = 'draft' WHERE quote_number = 'RT2A-Q1';");
+  quotes(rows);
+  raw("UPDATE public.quotes SET status = 'declined' WHERE quote_number LIKE 'RT2A-Q%';");
   refused('cand.sql', /RT2A_OPEN_LINES/);
+  raw(`DELETE FROM public.quote_items WHERE quote_id IN (SELECT id FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%');
+    INSERT INTO public.quote_versions (quote_id, version_number, sent_by, snapshot_data)
+      SELECT id, 1, '${ADMIN}', jsonb_build_object('items', jsonb_build_array(jsonb_build_object('product_id', '${ozRow.id}', 'unit_size', 'Oz')))
+        FROM public.quotes WHERE quote_number LIKE 'RT2A-Q%' ORDER BY quote_number LIMIT 1;`);
+  refused('cand.sql', new RegExp(`RT2A_OPEN_LINES[^\\n]*${esc(ozRow.name)}`));
   retireQuotes();
-  raw(`INSERT INTO public.purchase_orders (id, po_number, status, created_by) VALUES ('${FAM}', 'RT2A-PO', 'submitted', '${ADMIN}');
+  raw(`INSERT INTO public.purchase_orders (id, po_number, status, created_by) VALUES ('${FAM}', 'RT2A-PO', 'fully_received', '${ADMIN}');
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, unit_cost, unit_size)
       VALUES ('${FAM}', '${ozRow.id}', 2, 10, 'Oz');`);
   refused('cand.sql', new RegExp(`RT2A_OPEN_LINES[^\\n]*${esc(ozRow.name)}`));
   raw(`UPDATE public.purchase_orders SET status = 'cancelled' WHERE id = '${FAM}';`);
-  console.log('[prover] open lines: a live quote or an open purchase order on an old spelling refuses');
+  console.log('[prover] open lines: a declined quote, a quote version, or a fully received purchase order on an old spelling refuses');
 
   // U9. Families: a listed product moved to another family, a second size in a pinned family, a fill-source link,
   // an unlisted family on a losing spelling, and Imazuron differing from its family each refuse.
@@ -576,6 +586,7 @@ async function main() {
 
   // U1 at S1: the same quotes price to the cent.
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after the apply');
+  retireQuotes();
   console.log('[prover] U1: three quotes (every fixture product, current and old spellings) equal S0 to the cent');
 
   // U2. Ordinary edits of every fixture product save; new products in the winning spellings save.
@@ -598,6 +609,11 @@ async function main() {
   raw(`UPDATE public.products SET max_label_rate = 2, max_label_rate_unit = 'Lb' WHERE id = '${imazuron.id}';`);
   refused('reverse.sql', /RT2A_REVERSE_LABEL_RATE[^\n]*Imazuron/);
   raw(`UPDATE public.products SET max_label_rate = NULL, max_label_rate_unit = NULL WHERE id = '${imazuron.id}';`);
+  // Recovery refuses while a purchase order that is not cancelled holds a stock product's new spelling.
+  raw(`UPDATE public.purchase_order_items SET unit_size = 'oz' WHERE purchase_order_id = '${FAM}';
+    UPDATE public.purchase_orders SET status = 'submitted' WHERE id = '${FAM}';`);
+  refused('reverse.sql', new RegExp(`RT2A_REVERSE_OPEN_LINES[^\n]*${esc(rows.find((r) => r.old === 'Oz').name)}`));
+  raw(`UPDATE public.purchase_orders SET status = 'cancelled' WHERE id = '${FAM}';`);
   // Recovery refuses while Imazuron's family has another size.
   raw(`INSERT INTO public.product_parent_members (product_id, parent_id, added_by, size_role) VALUES ('${CONTROLS[1].id}', '${imazFam}', '${ADMIN}', 'package');`);
   refused('reverse.sql', /RT2A_REVERSE_ROW_MOVED[^\n]*Imazuron/);
@@ -621,6 +637,7 @@ async function main() {
   assert.equal(scalar(`SELECT rate_unit || '/' || parent_version FROM public.product_parents WHERE id = '${imazFam}';`), 'Lb/4');
   assert.equal(money(), s0.money);
   assert.equal(quotes(rows), q0, 'U1: quote lines differ after re-apply');
+  retireQuotes();
   console.log('[prover] U15: a second run refuses; recovery restores every unit column exactly; re-apply works; quotes equal throughout');
 
   // Sol round 10 MED: inventory snapshots move with their product, so the stock card's exact-match total still shows.

@@ -4,7 +4,9 @@
 -- Proven by scripts/smoke/prove-unit-spellings-real-schema.mjs. To use it live, copy it into a new
 -- migration and take it through the normal gates. Refuses (and changes nothing) unless every listed product
 -- still holds its new spelling, the rate lock is off, no step-2 change has removed the old spellings, no listed
--- product has a net weight, and Imazuron is still the only size of its family, which still holds "Lb".
+-- product has a net weight, Imazuron is still the only size of its family, which still holds "Lb", and no
+-- purchase order (unless cancelled), quote line, quote version, order line or delivery remainder carries a
+-- stock product's new spelling (it would then disagree with its product after recovery).
 -- A family stores no stock unit, so the stock products' families are not touched.
 DO $rt2a_reverse$
 DECLARE
@@ -14,7 +16,9 @@ BEGIN
   PERFORM set_config('lock_timeout', '10s', true);
   LOCK TABLE public.products, public.product_parents, public.product_parent_members,
              public.product_size_net_weight_values, public.product_form_units,
-             public.inventory IN SHARE ROW EXCLUSIVE MODE;
+             public.inventory, public.purchase_orders, public.purchase_order_items, public.quotes,
+             public.quote_items, public.quote_versions, public.order_items, public.delivery_remainders
+             IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.unit_conversions IN SHARE MODE;
   CREATE TEMP TABLE rt2a_rev (id uuid PRIMARY KEY, product_name text NOT NULL, kind text NOT NULL,
     old_unit text NOT NULL, new_unit text NOT NULL) ON COMMIT DROP;
@@ -88,6 +92,19 @@ BEGIN
    WHERE r.kind = 'rate' AND (p.max_label_rate IS NOT NULL OR NULLIF(btrim(p.max_label_rate_unit), '') IS NOT NULL);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RT2A_REVERSE_LABEL_RATE: these products have a label maximum, nothing was changed: %', v_bad;
+  END IF;
+  -- Mirror of the forward open-lines check: no document may hold a stock product's new spelling.
+  SELECT string_agg(r.product_name, ', ' ORDER BY r.product_name) INTO v_bad
+    FROM rt2a_rev r
+   WHERE r.kind = 'stock' AND (
+         EXISTS (SELECT 1 FROM public.purchase_order_items x JOIN public.purchase_orders po ON po.id = x.purchase_order_id
+                  WHERE x.product_id = r.id AND x.unit_size = r.new_unit AND po.status <> 'cancelled')
+      OR EXISTS (SELECT 1 FROM public.quote_items x WHERE x.product_id = r.id AND x.unit_size = r.new_unit)
+      OR EXISTS (SELECT 1 FROM public.quote_versions v WHERE strpos(v.snapshot_data::text, r.id::text) > 0)
+      OR EXISTS (SELECT 1 FROM public.order_items x WHERE x.product_id = r.id AND x.unit_size = r.new_unit)
+      OR EXISTS (SELECT 1 FROM public.delivery_remainders x WHERE x.product_id = r.id AND x.unit_size = r.new_unit));
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'RT2A_REVERSE_OPEN_LINES: a purchase order, quote, quote version, order or delivery remainder uses the new spelling of: %. Nothing was changed.', v_bad;
   END IF;
   CREATE TEMP TABLE rt2a_rev_before ON COMMIT DROP AS
     SELECT id, rate_per_acre, tier1_price, tier2_price, tier3_price,

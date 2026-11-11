@@ -39,7 +39,8 @@
 -- ones (Prevent Foam's family also holds its 1 Gal size, which this migration does not touch), a listed
 -- product is a tote's fill source, or Imazuron differs from its family on anything but the rate unit's spelling;
 -- a listed product has a net weight; the stock rows' old-spelling inventory snapshots are not the pinned count;
--- an open purchase order, a live quote, an order line or a delivery remainder carries a stock row's old spelling.
+-- a purchase order (unless cancelled), quote line, saved quote version, order line or delivery remainder carries a
+-- stock row's old spelling (a quote version: names the product at all).
 --
 -- ROLLBACK: scripts/smoke/rt2a-unit-spellings-remap-reverse.sql puts each listed product back to its old
 -- spelling with the same trigger handling (proven by scripts/smoke/prove-unit-spellings-real-schema.mjs).
@@ -59,11 +60,12 @@ BEGIN
   -- Product tables first, then the units table (the same order as step 2, so the two never deadlock). This
   -- waits for any product save in flight and holds new ones until commit, so no save can add an Oz, Qt or LB
   -- product, join a family, gain a net weight or add an inventory snapshot between the checks below and the update.
-  -- The purchase order, quote, order and remainder tables are held the same way for the open-lines check.
+  -- The purchase order, quote, quote version, order and remainder tables are held the same way for that check.
   LOCK TABLE public.products, public.product_parents, public.product_parent_members,
              public.product_size_net_weight_values, public.product_form_units,
              public.inventory, public.purchase_orders, public.purchase_order_items, public.quotes,
-             public.quote_items, public.order_items, public.delivery_remainders IN SHARE ROW EXCLUSIVE MODE;
+             public.quote_items, public.quote_versions, public.order_items, public.delivery_remainders
+             IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE public.unit_conversions IN SHARE MODE;
 
   CREATE TEMP TABLE rt2a_map (id uuid PRIMARY KEY, product_name text NOT NULL, product_form text NOT NULL,
@@ -228,20 +230,22 @@ BEGIN
     RAISE EXCEPTION 'RT2A_INVENTORY_DRIFT: % inventory rows of the listed products are on the old spelling, % reviewed. Nothing was changed.', v_done, v_inv_expected;
   END IF;
 
-  -- No open purchase order, live quote, order line or delivery remainder may carry a stock row's old spelling:
-  -- receiving or delivering it later would write that spelling back into stock (Sol round 14 HIGH). Live
-  -- 2026-11-10: none (4 old-spelling purchase order lines, all on cancelled or fully received orders).
+  -- No purchase order (unless cancelled), quote line, saved quote version, order line or delivery remainder may
+  -- carry a stock row's old spelling: receiving, reopening, duplicating or restoring it later would write that
+  -- spelling back into stock (Sol rounds 14-15). Live 2026-11-10: no quote line or quote version mentions any of
+  -- the 19 stock products; their only old-spelling purchase order lines are 3 on cancelled orders. Quote
+  -- versions are matched on the product id alone, any spelling.
   SELECT string_agg(m.product_name, ', ' ORDER BY m.product_name) INTO v_bad
     FROM rt2a_map m
    WHERE m.kind = 'stock' AND (
          EXISTS (SELECT 1 FROM public.purchase_order_items x JOIN public.purchase_orders po ON po.id = x.purchase_order_id
-                  WHERE x.product_id = m.id AND x.unit_size = m.old_unit AND po.status NOT IN ('fully_received', 'cancelled'))
-      OR EXISTS (SELECT 1 FROM public.quote_items x JOIN public.quotes q ON q.id = x.quote_id
-                  WHERE x.product_id = m.id AND x.unit_size = m.old_unit AND q.status IN ('draft', 'sent', 'revised', 'accepted'))
+                  WHERE x.product_id = m.id AND x.unit_size = m.old_unit AND po.status <> 'cancelled')
+      OR EXISTS (SELECT 1 FROM public.quote_items x WHERE x.product_id = m.id AND x.unit_size = m.old_unit)
+      OR EXISTS (SELECT 1 FROM public.quote_versions v WHERE strpos(v.snapshot_data::text, m.id::text) > 0)
       OR EXISTS (SELECT 1 FROM public.order_items x WHERE x.product_id = m.id AND x.unit_size = m.old_unit)
       OR EXISTS (SELECT 1 FROM public.delivery_remainders x WHERE x.product_id = m.id AND x.unit_size = m.old_unit));
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'RT2A_OPEN_LINES: an open purchase order, quote, order or delivery remainder still uses the old spelling of: %. Nothing was changed.', v_bad;
+    RAISE EXCEPTION 'RT2A_OPEN_LINES: a purchase order, quote, quote version, order or delivery remainder still uses the old spelling of: %. Nothing was changed.', v_bad;
   END IF;
 
   -- Before-images: money fields of every product (no unit column, so an approved unit change cannot fail it),

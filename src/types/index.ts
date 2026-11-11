@@ -658,6 +658,8 @@ export interface CommissionSplit {
 }
 
 export interface Customer {
+  /** Standing grower discount, % off product lines on chemical sales (billing plan M4b). Admin only. */
+  standing_discount_pct?: number;
   id: string;
   farm_name: string;
   /** Controlled list, enforced by customers_crops_allowed_check (see src/lib/crops.ts). */

@@ -61,8 +61,8 @@ BEGIN
     VALUES (v_field, v_cust, 100, true);
   -- Pricing-free shell, then cost/price through the governed preview/apply
   -- path (a priced products INSERT is refused since the Phase 1a cutover).
-  INSERT INTO products (product_name, unit_size)
-    VALUES ('[SMOKE] Fuel Prod '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form)
+    VALUES ('[SMOKE] Fuel Prod '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
       'pricing_mode', 'price_driven', 'new_cost', '1.00',
@@ -229,8 +229,8 @@ BEGIN
     VALUES ('[SMOKE] FuelFix Field '||v_sfx, v_cust, v_acres) RETURNING id INTO v_field;
   INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary)
     VALUES (v_field, v_cust, 100, true);
-  INSERT INTO products (product_name, unit_size)
-    VALUES ('[SMOKE] FuelFix Prod '||v_sfx, 'gal') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form)
+    VALUES ('[SMOKE] FuelFix Prod '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_prod, 'row_version', 1,
       'pricing_mode', 'price_driven', 'new_cost', '1.00',

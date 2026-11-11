@@ -15,6 +15,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
 **Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Do not re-raise this as a regression; changing it needs the order line written (a backfill Mason decides).
+## 2026-11-11 — KI-142: a closed-short PO's line costs can be raised, never lowered (PR #1798)
+
+**Decision (Mason, in session, 2026-11-11: "A: No cost cuts"):** once a purchase order is closed short, no line cost on it can go down; a raise still lands. A price mistake on a closed PO is fixed on the vendor bill or with a vendor credit.
+**Why:** a closed PO's bills must never total more than what arrived. Allowing cost cuts kept reopening that rule (Sol rounds 1-3 on the same mechanism); refusing them removes the whole class.
+**What this forbids/implies:** `_guard_closed_po_item` refuses any unit-cost cut on a closed PO line (`PO_CLOSED_COST_CUT`), received or not, with no override. Migration `20270103180000_po_close_short`.
+
 ## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `6b65dddba716`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `6b65dddba716` (base `465e84ae66fe`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

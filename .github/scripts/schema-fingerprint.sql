@@ -93,6 +93,7 @@ lines AS (
   -- Role memberships: a role granted to another hands over all its rights, with no table ACL changing.
   SELECT 'member ' || (SELECT name FROM who WHERE who.oid = m.roleid) || ' to ' || (SELECT name FROM who WHERE who.oid = m.member)
          || CASE WHEN m.admin_option THEN ' +admin' ELSE '' END
+         || ' inherit=' || m.inherit_option || ' set=' || m.set_option
     FROM pg_auth_members m
     WHERE (SELECT name FROM who WHERE who.oid = m.member) <> 'admin'
   UNION ALL

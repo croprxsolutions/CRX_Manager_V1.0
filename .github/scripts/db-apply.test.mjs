@@ -79,6 +79,11 @@ test('stampProblems: new files need a valid, unique stamp newer than the base br
   assert.match(stampProblems({ added: f(['20261223000000_x']), base, head: [...base, ...f(['20261223000000_x', '20261223000000_y'])] })[0], /shares its stamp/);
   assert.match(stampProblems({ added: ['2026_bad.sql'], base, head: base })[0], /name must be/);
   assert.match(stampProblems({ added: [], changed: ['20261101000000_a.sql'], base, head: base })[0], /edited, renamed or deleted/);
+  // Back-merge of main into staging: a file already on main, unchanged, may be older than staging's newest.
+  const old = f(['20261201000000_from_main']);
+  assert.deepEqual(stampProblems({ added: old, base, head: [...base, ...old], onMain: old }), []);
+  assert.match(stampProblems({ added: old, base, head: [...base, ...old], onMain: [] })[0], /not newer than/);
+  assert.match(stampProblems({ added: f(['20261201000000_x']), base, head: [...base, ...f(['20261201000000_x', '20261201000000_y'])], onMain: f(['20261201000000_x']) })[0], /shares its stamp/);
 });
 
 test('refuseTarget: exactly the expected project read from the URL, never live or MetaHive', () => {

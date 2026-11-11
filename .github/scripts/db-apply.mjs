@@ -140,15 +140,17 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
 }
 
 // PR check: every new migration has a well-formed name, a stamp no other file shares, and a stamp
-// newer than everything already on the base branch (the target applies all of those).
-export function stampProblems({ added, base, head, changed = [] }) {
+// newer than everything already on the base branch (the target applies all of those). onMain: files that
+// are already on main, byte for byte (a back-merge into staging); those may be older, since main's own
+// check passed them and staging applies them out of order on purpose.
+export function stampProblems({ added, base, head, changed = [], onMain = [] }) {
   const stamp = (f) => f.slice(0, 14);
   const baseMax = base.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
   const problems = changed.map((f) => `${f}: an existing migration was edited, renamed or deleted; applied migrations never change (add a new one instead)`);
   for (const f of added) {
     if (!NAME.test(f.replace(/\.sql$/, '')) || !REAL_STAMP.test(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
     if (head.filter((h) => stamp(h) === stamp(f)).length > 1) problems.push(`${f}: shares its stamp with another migration`);
-    if (stamp(f) <= baseMax) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
+    if (stamp(f) <= baseMax && !onMain.includes(f)) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
   }
   return problems;
 }
@@ -393,8 +395,13 @@ const commands = {
     const names = (lines) => lines.map((l) => path.basename(l)).filter((n) => n.endsWith('.sql'));
     const diff = (filter) => names(git('diff', '--no-renames', '--name-only', `--diff-filter=${filter}`, `${baseRef}...HEAD`, '--', 'supabase/migrations'));
     const added = diff('A');
+    // A back-merge into staging brings main's files as-is: same content as on main = already checked there.
+    const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
+    const mainRef = baseRef.endsWith('/staging') ? baseRef.replace(/\/staging$/, '/main') : null;
+    const onMain = mainRef ? added.filter((f) => { const m = blob(mainRef, f); return m !== null && m === blob('HEAD', f); }) : [];
     const problems = stampProblems({
       added,
+      onMain,
       changed: diff('MDT'),
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),

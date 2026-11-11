@@ -46,17 +46,17 @@ BEGIN
 
   INSERT INTO public.customers(farm_name) VALUES ('[SMOKE] Phase3 policy '||v_suffix) RETURNING id INTO v_customer;
   -- Default Product INSERT is a compatibility control: all metadata is dormant.
-  INSERT INTO public.products(product_name) VALUES ('[SMOKE] unknown '||v_suffix) RETURNING id INTO v_unknown;
+  INSERT INTO public.products(product_name, product_form) VALUES ('[SMOKE] unknown '||v_suffix, 'liquid') RETURNING id INTO v_unknown;
   SELECT count(*) INTO v_n FROM public.products WHERE id=v_unknown AND product_family_id IS NULL AND return_policy='unknown' AND packaging_variant IS NULL AND is_full_tote_only=false;
   IF v_n<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: default Product INSERT did not retain Phase3 defaults'; END IF;
   -- Owner-only transaction context is the Stage C path; it creates no durable classification here.
   PERFORM set_config('app.phase3_metadata_authorized','true',true);
-  INSERT INTO public.products(product_name,return_policy) VALUES ('[SMOKE] returnable '||v_suffix,'returnable') RETURNING id INTO v_returnable;
-  INSERT INTO public.products(product_name,return_policy) VALUES ('[SMOKE] blocked '||v_suffix,'no_return') RETURNING id INTO v_blocked;
-  INSERT INTO public.products(product_name) VALUES ('[SMOKE] other '||v_suffix) RETURNING id INTO v_other;
+  INSERT INTO public.products(product_name,return_policy, product_form) VALUES ('[SMOKE] returnable '||v_suffix,'returnable', 'liquid') RETURNING id INTO v_returnable;
+  INSERT INTO public.products(product_name,return_policy, product_form) VALUES ('[SMOKE] blocked '||v_suffix,'no_return', 'liquid') RETURNING id INTO v_blocked;
+  INSERT INTO public.products(product_name, product_form) VALUES ('[SMOKE] other '||v_suffix, 'liquid') RETURNING id INTO v_other;
   PERFORM set_config('app.phase3_metadata_authorized','false',true);
   BEGIN
-    INSERT INTO public.products(product_name,return_policy) VALUES ('[SMOKE] forbidden metadata '||v_suffix,'no_return');
+    INSERT INTO public.products(product_name,return_policy, product_form) VALUES ('[SMOKE] forbidden metadata '||v_suffix,'no_return', 'liquid');
     RAISE EXCEPTION 'SMOKE_FAIL: direct nondefault Product INSERT was allowed';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;

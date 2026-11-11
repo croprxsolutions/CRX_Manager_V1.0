@@ -1485,7 +1485,7 @@ export interface ResolveOfflineActionResult {
   updated_at: string;
 }
 
-export type POStatus = 'draft' | 'submitted' | 'partially_received' | 'fully_received' | 'cancelled';
+export type POStatus = 'draft' | 'submitted' | 'partially_received' | 'fully_received' | 'cancelled' | 'closed';
 
 export interface PurchaseOrder {
   id: string;
@@ -1503,6 +1503,9 @@ export interface PurchaseOrder {
   cancelled_at?: string | null;
   cancelled_by?: string | null;
   cancel_reason?: string | null;
+  closed_at?: string | null;
+  closed_by?: string | null;
+  close_reason?: string | null;
 }
 
 export interface PurchaseOrderItem {

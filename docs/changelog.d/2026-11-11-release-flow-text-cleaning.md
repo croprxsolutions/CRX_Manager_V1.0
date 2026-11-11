@@ -7,6 +7,7 @@ ran it. All are in text the bot writes into the release PR body and CHANGELOG:
 - `firstParagraph` removed only closed comments, so an unclosed `<!--` in a PR description reached the
   changelog and hid what followed. An unclosed comment now goes to its end, and leftover markers too.
 - The release status table escaped `|` but not `\` in PR titles and orphan commit lines, so a title
-  ending in `\` broke its row. The new `cell()` escapes backslashes first.
+  ending in `\` broke its row. The new `cell()` puts the text on one line, then escapes backslashes,
+  then pipes, so no text can start a row of its own.
 
 Tests: `.github/scripts/release-flow.test.mjs`.

@@ -216,8 +216,8 @@ function stripCommentMarkers(text) {
   while (/<!--|--!?>/.test(s)) s = s.replace(/<!--|--!?>/g, '');
   return s;
 }
-// A markdown table cell: escape backslashes first, then pipes.
-export const cell = (text) => String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+// A markdown table cell: one line, backslashes escaped first, then pipes.
+export const cell = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
 // Fill the <!-- bot:NAME --> … <!-- /bot:NAME --> blocks; everything else (ticked boxes,
 // deployment notes) is kept from the current PR body.

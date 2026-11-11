@@ -204,4 +204,5 @@ test('cell escapes backslashes before pipes, so a title cannot break the status 
   assert.equal(cell('a|b'), 'a\\|b');
   assert.equal(cell('a\\|b'), 'a\\\\\\|b');
   assert.equal(cell('plain'), 'plain');
+  assert.equal(cell('Fix\n| #999 | ✅ verified |'), 'Fix \\| #999 \\| ✅ verified \\|');
 });

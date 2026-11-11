@@ -2,6 +2,7 @@ import { supabase } from './db';
 import { sendEmail, buildEmailHtml } from './emailService';
 import { Sentry } from './sentry';
 import { escapeHtml } from './proofNotification';
+import { toSentryError } from './sentryError';
 
 const fmt = (n: number | null | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n ?? 0);
@@ -130,7 +131,7 @@ export async function sendOrderConfirmedEmail(orderId: string): Promise<void> {
       idempotency_key: `order-confirmed-${order.id}`,
     });
   } catch (err) {
-    Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+    Sentry.captureException(toSentryError(err), {
       level: 'warning',
       extra: { context: 'order_confirmed_email_send', orderId },
     });

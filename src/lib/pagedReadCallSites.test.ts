@@ -32,6 +32,7 @@ type CallSite = { file: string; line: number; callback: string };
 const SHARED_FILES = [
   'lib/customerDuplicates.ts',
   'lib/customerStatement.ts',
+  'lib/epaRegistrationSeed.ts',
   'lib/fieldsGeojsonCache.ts',
   'lib/marginFloors.ts',
   'lib/ordersPage.ts',

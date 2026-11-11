@@ -7244,3 +7244,16 @@ zones) `main`'s live-dump version PASSED on a fresh read-only dump of the live s
 That does not test the failure window. The script runs psql inside the container, so `PGTZ` set on the host does
 not reach it and the container runs on UTC. Still owed: one run between 6 PM and midnight Central; if it fails,
 the fix is to set the container session time zone to America/Chicago.
+
+### Closed 2026-11-11 — KI-143
+
+Fixed by PR #1769, migration `20270103110000_ki143_vendor_bill_received_value_checks` (applied live 2026-11-11 8:24 AM Central, ledger `20261111142411`). The cancelled-PO and vendor parts were already refused by the database (`PO_NOT_BILLABLE`, `VENDOR_PO_MISMATCH`); the screen now clears the vendor when the PO's vendor matches none.
+
+Original text:
+
+### KI-143 — Vendor bills are checked against ordered value, and accept another vendor's or a cancelled PO
+**MED · OPEN · purchasing/payables · found 2026-11-10 ([2026-11-10 sweeps](../sweeps/bug-sweeps-2026-11-10.md) sweep 2 #2) · unassigned**
+`create_vendor_bill` compares against the PO's ordered total (5% slack), never received value, and does not check PO
+status or vendor; `NewVendorBill.tsx` fills the ordered total and keeps the previous vendor when the PO's vendor text
+matches none. A short shipment can be billed and paid in full. 0 of 6 live bills have a PO, so nothing has gone wrong
+yet. Fix: refuse cancelled POs and mismatched vendors; confirm when billed exceeds received value.

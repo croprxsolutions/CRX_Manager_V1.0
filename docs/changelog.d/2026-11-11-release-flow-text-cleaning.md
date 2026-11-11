@@ -7,10 +7,11 @@ ran it. All are in text the bot writes into the release PR body and CHANGELOG:
   (`&lt;!--`, `--&gt;`) in one pass: nothing is removed, so nothing can be rebuilt, and it stays linear
   on crafted input.
 - `firstParagraph` removed only closed comments, so an unclosed `<!--` in a PR description reached the
-  changelog and hid what followed. Closed comments still go whole; a stray marker is turned into text
-  the same way, so an arrow (`A --> B`) or `<!--` in code stays readable.
+  changelog and hid what followed. Closed comments are dropped in one left-to-right scan (linear); a stray
+  marker is turned into text the same way, so an arrow (`A --> B`) or `<!--` in code stays readable.
+  Known limit: it isn't Markdown-aware, so a `<!--` inside inline code still pairs with a later `-->`.
 - The release status table escaped `|` but not `\` in PR titles and orphan commit lines, so a title
   ending in `\` broke its row. The new `cell()` puts the text on one line, then escapes backslashes,
-  then pipes, so no text can start a row of its own.
+  then pipes, and turns `<` into `&lt;`, so no text can start a row or a cell of its own.
 
 Tests: `.github/scripts/release-flow.test.mjs`.

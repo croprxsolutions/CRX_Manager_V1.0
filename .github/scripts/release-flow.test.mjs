@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -163,6 +163,12 @@ test('firstParagraph skips headings and comments and trims long text', () => {
   assert.equal(firstParagraph('<<!-- a -->!-- b'), '&lt;!-- b');
   assert.equal(firstParagraph('Deploy A --> B'), 'Deploy A --&gt; B');
   assert.equal(firstParagraph('Docs: `<!--` is shown.\n\nMore.'), 'Docs: `&lt;!--` is shown.');
+  assert.equal(dropComments('a <!-- x --> b <!-- y --!> c <!-- open'), 'a  b  c <!-- open');
+  // Linear: many unclosed openers.
+  const many = '<!--'.repeat(50000);
+  const t = Date.now(); assert.equal(dropComments(many), many); assert.ok(Date.now() - t < 1000);
+  const closed = '<!---->x'.repeat(50000);
+  const t2 = Date.now(); assert.equal(dropComments(closed), 'x'.repeat(50000)); assert.ok(Date.now() - t2 < 1000);
   assert.equal(firstParagraph(null), '');
   assert.equal(firstParagraph('What users see: <one plain sentence>\n\nReal summary.'), 'Real summary.');
 });
@@ -209,4 +215,5 @@ test('cell escapes backslashes before pipes, so a title cannot break the status 
   assert.equal(cell('a\\|b'), 'a\\\\\\|b');
   assert.equal(cell('plain'), 'plain');
   assert.equal(cell('Fix\n| #999 | ✅ verified |'), 'Fix \\| #999 \\| ✅ verified \\|');
+  assert.equal(cell('</td><td>✅ verified'), '&lt;/td>&lt;td>✅ verified');
 });

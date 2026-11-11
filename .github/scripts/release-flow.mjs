@@ -215,8 +215,25 @@ const INLINE_BLOCKS = new Set(['version', 'date']);
 export function neutralizeCommentMarkers(text) {
   return String(text).replace(/<!--/g, '&lt;!--').replace(/--(!?)>/g, '--$1&gt;');
 }
-// A markdown table cell: one line, backslashes escaped first, then pipes.
-export const cell = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+// A markdown table cell: one line, no HTML tags, backslashes escaped first, then pipes.
+export const cell = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/</g, '&lt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+// Drops closed <!-- … --> (or --!>) comments in one left-to-right scan; an unclosed one stays as text.
+// ponytail: not Markdown-aware, so a "<!--" inside inline code still pairs with a later "-->".
+export function dropComments(text) {
+  const close = /--!?>/g;
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', i);
+    if (open < 0) return out + text.slice(i);
+    close.lastIndex = open + 4;
+    const end = close.exec(text); // the first closer after the opener; each scan starts past the last
+    if (!end) return out + text.slice(i);
+    out += text.slice(i, open);
+    i = end.index + end[0].length;
+  }
+}
 
 // Fill the <!-- bot:NAME --> … <!-- /bot:NAME --> blocks; everything else (ticked boxes,
 // deployment notes) is kept from the current PR body.
@@ -304,7 +321,7 @@ function dubaiDate(now = new Date()) {
 // The first real paragraph of a PR description: no headings, comments or badges, one line.
 export function firstParagraph(body, max = 200) {
   // Closed comments go whole; a stray marker (an unclosed comment, "<!--" in code) stays as text.
-  for (const para of neutralizeCommentMarkers((body ?? '').replace(/<!--[\s\S]*?--!?>/g, '')).split(/\n\s*\n/)) {
+  for (const para of neutralizeCommentMarkers(dropComments(body ?? '')).split(/\n\s*\n/)) {
     const text = para.split('\n').filter((l) => !/^\s*(#|>|\||!\[)/.test(l) && !/^\s*(what users see|staging proof|held off):/i.test(l)).join(' ').replace(/\s+/g, ' ').trim();
     if (text) return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
   }

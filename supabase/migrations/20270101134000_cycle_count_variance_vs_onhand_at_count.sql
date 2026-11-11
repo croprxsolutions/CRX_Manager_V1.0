@@ -164,7 +164,7 @@ BEGIN
 
   v_result := jsonb_build_object(
     'item_id', p_item_id,
-    'counted_qty', p_counted_qty,
+    'counted_qty', round(p_counted_qty, 2),
     'expected_qty', v_expected,
     'variance', v_variance,
     'variance_pct', v_variance_pct,

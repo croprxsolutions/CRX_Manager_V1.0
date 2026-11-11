@@ -160,3 +160,11 @@ on-hand for later edits (a typo fix hours later stays right, a genuine recount a
   fix shrinks the window from the whole count to the seconds between looking and typing. Raised to Mason as a
   business acceptance with the D12 procedure (post receipts and deliveries for a product before counting it).
 - MED 3 = Luna round 1 deferral (sub-cent residue when on hand has more than two decimals).
+
+## Luna round 2 (gpt-6-luna xhigh, head 6cf0867eb; 0 BLOCKER / 0 HIGH / 3 MED)
+
+- Fixed: the result's `counted_qty` is rounded to two places, as stored and as the variance uses (the fingerprint
+  keeps the raw value, as before). The input box keeps what the person typed.
+- Deferred (pre-existing, #6/#11/#12 above): a late response for a line another admin saved meanwhile can show the
+  older value until refresh; the database holds the last save.
+- Business decision (= Sol round 1 HIGH 2): movement posted between looking at the shelf and saving.

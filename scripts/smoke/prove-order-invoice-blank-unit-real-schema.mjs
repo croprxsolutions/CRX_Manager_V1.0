@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261230100000 (KI-76: invoice lines with no unit). Builds the checked-in schema
+ * Real-schema proof for 20270105100000 (KI-76: invoice lines with no unit). Builds the checked-in schema
  * baseline in a network-disabled PostgreSQL container and replays every migration before the candidate.
  * With invented rows (an admin, a rep, a customer, a product sold in gal and one with no unit), every flow
  * runs through the real RPCs as the signed-in user (the API role), rolled back.
@@ -34,7 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(_create_invoice_from_order_impl_20260718|FUNCTION public\.create_invoice_from_order\(|_fill_order_line_unit|_fill_invoice_line_unit|_refuse_post_blank_unit_line)/i;
+const TOUCHED = /(_create_invoice_from_order_impl_20260718|FUNCTION public\.create_invoice_from_order\(|_fill_order_line_unit|_fill_invoice_line_unit|_refuse_post_blank_unit_line|_save_invoice_scoped_impl|_lock_quick_delivery_line_unit)/i;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = process.env.CRX_PROVER_REUSE_CONTAINER || `crx-order-unit-${process.pid}-${Date.now().toString(36)}`;
 const REUSE = Boolean(process.env.CRX_PROVER_REUSE_CONTAINER);
@@ -50,7 +50,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20261230100000_blank_unit_fill_and_post_refusal.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270105100000_blank_unit_fill_and_post_refusal.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -421,8 +421,25 @@ $p$;
 RESET ROLE;
 ${fix ? `-- An admin sets the product unit (the Products page).
 UPDATE public.products SET unit_size = 'gal' WHERE id = '${prod}';
--- Saving the draft writes its lines again (save_invoice sends each line's unit).
-UPDATE public.invoice_items SET unit_size = NULL WHERE invoice_id = (SELECT id FROM v);
+-- Save the draft through the real save_invoice as the signed-in admin, sending each line as the invoice
+-- screen does (its own unit, here none); the save deletes and rewrites the lines, then restores their lineage.
+SET LOCAL ROLE authenticated;
+DO $s$
+DECLARE v_inv record; v_items jsonb;
+BEGIN
+  SELECT id, customer_id, invoice_type, season, salesman_id, invoice_date INTO v_inv FROM public.invoices WHERE id = (SELECT id FROM v);
+  SELECT jsonb_agg(jsonb_build_object('id', ii.id, 'order_item_id', ii.order_item_id, 'product_id', ii.product_id, 'vendor', ii.vendor,
+           'description', ii.description, 'quantity', ii.quantity, 'unit_price_cents', ii.unit_price_cents,
+           'extended_cents', ii.extended_cents, 'sort_order', ii.sort_order, 'unit_size', ii.unit_size, 'notes', ii.notes) ORDER BY ii.sort_order)
+    INTO v_items FROM public.invoice_items ii WHERE ii.invoice_id = v_inv.id;
+  PERFORM public.save_invoice(jsonb_build_object('id', v_inv.id, 'customer_id', v_inv.customer_id, 'invoice_type', v_inv.invoice_type,
+    'status', 'draft', 'season', v_inv.season, 'salesman_id', v_inv.salesman_id, 'invoice_date', v_inv.invoice_date), v_items, gen_random_uuid()::text);
+  RAISE NOTICE 'FIXSAVE=[saved]';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'FIXSAVE=[%]', SQLERRM;
+END;
+$s$;
+RESET ROLE;
 UPDATE v SET ver = public._invoice_post_version(id);
 SELECT 'FIXUNIT=' || coalesce('[' || ii.unit_size || ']', '<null>') FROM public.invoice_items ii WHERE ii.invoice_id = (SELECT id FROM v);
 SET LOCAL ROLE authenticated;
@@ -457,7 +474,7 @@ ROLLBACK;` });
   const out = `${r.stdout}\n${r.stderr}`;
   const get = (k) => new RegExp(`\\b${k}=\\[(.*)\\]\\s*$`, 'm').exec(out)?.[1] ?? new RegExp(`\\b${k}=(<null>)`).exec(out)?.[1];
   const res = { order: get('ORDER'), done: `${/DONE=(\S+)/.exec(out)?.[1]} ${/STATUS=(\S+)/.exec(out)?.[1]}`, unit: get('UNIT'), post: get('POST') };
-  if (fix) res.fixed = { unit: get('FIXUNIT'), post: get('FIXPOST') };
+  if (fix) res.fixed = { save: get('FIXSAVE'), unit: get('FIXUNIT'), post: get('FIXPOST') };
   res.credit = get('CREDIT');
   if (res.post === undefined || res.credit === undefined) res.raw = /ERROR:.*/.exec(out)?.[0] ?? out.trim().slice(0, 800);
   return res;
@@ -475,9 +492,23 @@ RESET ROLE;
 SELECT 'QUICK=[' || (SELECT coalesce(di.unit_size, '<null>') FROM public.delivery_items di WHERE di.delivery_id = (q.res->>'delivery_id')::uuid)
   || ',' || (SELECT coalesce(oi.unit_size, '<null>') FROM public.order_items oi WHERE oi.order_id = (q.res->>'order_id')::uuid)
   || ',' || (SELECT coalesce(ii.unit_size, '<null>') FROM public.invoice_items ii WHERE ii.invoice_id = (q.res->>'invoice_id')::uuid) || ']' FROM q;
+-- Then a direct edit of the delivery line's unit as a signed-in admin (the update policy is admin-only), counting rows hit.
+${claims(ADMIN)}
+SET LOCAL ROLE authenticated;
+DO $e$
+DECLARE n int;
+BEGIN
+  UPDATE public.delivery_items SET unit_size = 'case' WHERE delivery_id = (SELECT (res->>'delivery_id')::uuid FROM q);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RAISE NOTICE 'EDITROWS=[%]', n;
+END;
+$e$;
+RESET ROLE;
+SELECT 'EDITED=[' || (SELECT coalesce(di.unit_size, '<null>') FROM public.delivery_items di WHERE di.delivery_id = (q.res->>'delivery_id')::uuid) || ']' FROM q;
 ROLLBACK;` });
   const out = `${r.stdout}\n${r.stderr}`;
-  return /QUICK=\[(.*)\]\s*$/m.exec(out)?.[1] ?? (/ERROR:.*/.exec(out)?.[0] ?? out.trim().slice(0, 800));
+  const units = /QUICK=\[(.*)\]\s*$/m.exec(out)?.[1] ?? (/ERROR:.*/.exec(out)?.[0] ?? out.trim().slice(0, 800));
+  return { units, edit: `${/EDITROWS=\[(\d+)\]/.exec(out)?.[1]} rows -> ${/EDITED=\[(.*)\]\s*$/m.exec(out)?.[1]}` };
 }
 const FN = 'public._create_invoice_from_order_impl_20260718(uuid,uuid,text,text)';
 const md5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${FN}'::regprocedure;`);
@@ -515,8 +546,9 @@ function main() {
     'BEFORE: a hand-replaced draft line with no order link and no unit posts blank');
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
   const quickBefore = quick();
-  console.log(`[prover] BEFORE quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickBefore}`);
-  assert.equal(quickBefore, 'case,<null>,<null>', 'BEFORE: the delivery records the named unit; the order and invoice lines have none');
+  console.log(`[prover] BEFORE quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickBefore.units}; then a direct edit to 'case': ${quickBefore.edit}`);
+  assert.equal(quickBefore.units, 'case,<null>,<null>', 'BEFORE: the delivery records the named unit; the order and invoice lines have none');
+  assert.equal(quickBefore.edit, '1 rows -> case', 'BEFORE: a signed-in admin can edit the delivery line unit directly');
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
   assert.deepEqual(before, { null: { unit: '<null>' }, empty: { unit: ' \t' }, gal: { unit: 'gal' } }, 'BEFORE: each line is billed with its unit as is, blank included');
@@ -545,7 +577,7 @@ function main() {
   assert.equal(n.unit, '<null>', 'AFTER: its draft line keeps no unit');
   assert.match(n.post ?? '', /^INVOICE_LINE_UNIT_MISSING: invoice \S+ has a line with no unit \(\[PROVER\] DU nounit\)\. Set the unit on the product, save the draft invoice, then post it again$/,
     'AFTER: posting it is refused with a message staff can act on');
-  assert.deepEqual(n.fixed, { unit: 'gal', post: 'posted' }, 'AFTER: once the product has a unit and the draft is saved, it posts');
+  assert.deepEqual(n.fixed, { save: 'saved', unit: 'gal', post: 'posted' }, 'AFTER: once the product has a unit and the draft is saved through save_invoice, it posts');
   assert.equal(n.credit, 'RETURN_CREDIT_UNIT_MISMATCH', 'AFTER: its return stays refused (the order line has no unit), as today');
   assert.deepEqual(dAfter.legacy, { order: '<null>', done: 'true completed', unit: 'gal', post: 'posted', credit: 'RETURN_CREDIT_UNIT_MISMATCH' },
     'AFTER: an existing order line with no unit invoices with the product unit and posts; its return stays refused, as today');
@@ -557,8 +589,9 @@ function main() {
   assert.match(dAfter.handno.post ?? '', /^INVOICE_LINE_UNIT_MISSING: invoice \S+ has a line with no unit \(\[PROVER\] DU handno\)/,'AFTER: posting it is refused');
 
   const quickAfter = quick();
-  console.log(`[prover] AFTER quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickAfter}`);
-  assert.equal(quickAfter, 'gal,gal,gal', "AFTER (Mason 2026-11-10): a quick delivery records the product's own unit on every line");
+  console.log(`[prover] AFTER quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickAfter.units}; then a direct edit to 'case': ${quickAfter.edit}`);
+  assert.equal(quickAfter.edit, '1 rows -> gal', "AFTER: a direct edit of a quick-delivery line's unit keeps the product's unit");
+  assert.equal(quickAfter.units, 'gal,gal,gal', "AFTER (Mason 2026-11-10): a quick delivery records the product's own unit on every line");
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);
   assert.deepEqual(after.null, { error: 'ORDER_LINE_UNIT_MISSING' }, 'AFTER: a line with no unit is refused');

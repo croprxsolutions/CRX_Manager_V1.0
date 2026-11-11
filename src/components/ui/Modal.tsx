@@ -144,7 +144,7 @@ export default function Modal({
   if (size === 'alert') {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-end justify-center md:items-center"
+        className="fixed inset-0 z-50 m-0! flex items-end justify-center md:items-center"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -200,7 +200,8 @@ export default function Modal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    // m-0!: callers render dialogs inside space-y stacks, whose child margin pushed the whole overlay down (a gap at the top on phone).
+    <div className="fixed inset-0 z-50 m-0! flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div
         className="fixed inset-0 bg-black/50"
         onClick={closeDisabled ? undefined : onClose}

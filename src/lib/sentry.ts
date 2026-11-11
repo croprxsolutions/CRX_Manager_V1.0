@@ -28,7 +28,6 @@ function safeFrame(frame: StackFrame): StackFrame {
     filename: pathOnly(frame.filename),
     abs_path: pathOnly(frame.abs_path),
     function: frame.function,
-    module: frame.module,
     lineno: frame.lineno,
     colno: frame.colno,
     in_app: frame.in_app,
@@ -54,7 +53,6 @@ function safeEvent<T extends Event>(event: T): T {
     dist: event.dist,
     environment: event.environment,
     sdk: event.sdk,
-    fingerprint: event.fingerprint,
     tags: event.tags,
     user: event.user?.id === undefined ? undefined : { id: event.user.id },
     transaction: pathOnly(event.transaction),
@@ -105,7 +103,11 @@ function safeEvent<T extends Event>(event: T): T {
     })),
     measurements: event.measurements,
     // Source-map ids only: lets Sentry show the real file and line.
-    debug_meta: event.debug_meta,
+    debug_meta: event.debug_meta && {
+      images: event.debug_meta.images?.flatMap((image) => (image.type === 'sourcemap'
+        ? [{ type: 'sourcemap' as const, code_file: pathOnly(image.code_file) ?? '', debug_id: image.debug_id }]
+        : [])),
+    },
     request: event.request?.url ? { url: pathOnly(event.request.url) } : undefined,
     // Never sent (the SDK deletes it); it carries the trace header and live SDK objects.
     sdkProcessingMetadata: meta && {

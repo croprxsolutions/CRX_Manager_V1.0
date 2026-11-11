@@ -120,10 +120,10 @@ describe('initSentry', () => {
       initSentry();
       return mockInit.mock.calls[0][0];
     }
-    const frame = { filename: 'https://croprxsolutions.app/assets/index-abc.js?v=pkce_123', function: 'pay', lineno: 10, colno: 4, in_app: true, vars: { t: JWT }, context_line: 'xtra' };
+    const frame = { filename: 'https://croprxsolutions.app/assets/index-abc.js?v=pkce_123', module: 'xtra', function: 'pay', lineno: 10, colno: 4, in_app: true, vars: { t: JWT }, context_line: 'xtra' };
     const loaded = () => ({
       event_id: 'e1', timestamp: 1, platform: 'javascript', level: 'error', release: 'r1', environment: 'production',
-      sdk: { name: 'sentry.javascript.react', version: '10' }, fingerprint: ['f'], tags: { mechanism: 'unhandledrejection' },
+      sdk: { name: 'sentry.javascript.react', version: '10' }, fingerprint: ['refresh_token=r3fr35h'], tags: { mechanism: 'unhandledrejection' },
       user: { id: 'u1', email: 'h3ader@example.com', ip_address: '1.2.3.4' },
       transaction: '/reset-password#access_token=' + JWT,
       message: `Allocation of 1,250.75 failed, refresh_token=r3fr35h ${JWT}`,
@@ -135,6 +135,7 @@ describe('initSentry', () => {
         { category: 'supabase', timestamp: 3, message: 'crumbmsg', data: { q: 'crumbdata' } },
       ],
       request: { url: 'https://croprxsolutions.app/auth/confirm?token_hash=pkce_123', headers: { Cookie: 'c00kie', Referer: 'h3ader' }, cookies: { sb: 'c00kie' }, query_string: 'pkce_123' },
+      debug_meta: { images: [{ type: 'sourcemap', code_file: 'https://croprxsolutions.app/assets/index-abc.js?token=pkce_123', debug_id: 'd1' }, { type: 'macho', code_file: 'xtra', debug_id: 'd2', image_addr: '0' }] },
       spans: [{ span_id: 's2', trace_id: 't1', start_timestamp: 1, op: 'http.client', description: 'GET https://x.supabase.co/rest/v1/payments?amount=eq.1,250.75&token=pkce_123', data: { 'http.url': JWT } }],
     });
 
@@ -159,6 +160,8 @@ describe('initSentry', () => {
       expect(result.request).toEqual({ url: 'https://croprxsolutions.app/auth/confirm' });
       expect(result.transaction).toBe('/reset-password');
       expect(result.spans[0].description).toBe('GET https://x.supabase.co/rest/v1/payments');
+      expect(result.debug_meta).toEqual({ images: [{ type: 'sourcemap', code_file: 'https://croprxsolutions.app/assets/index-abc.js', debug_id: 'd1' }] });
+      expect(result.fingerprint).toBeUndefined();
       expect(result.extra).toBeUndefined();
     });
 

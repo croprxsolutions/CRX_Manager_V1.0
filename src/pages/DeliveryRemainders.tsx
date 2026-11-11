@@ -17,6 +17,7 @@ import { Sentry } from '../lib/sentry';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
+import { toSentryError } from '../lib/sentryError';
 
 interface RemainderRow {
   id: string;
@@ -128,7 +129,7 @@ export default function DeliveryRemainders() {
       toast('success', `Follow-up delivery ${followupResult.delivery_number} created with ${followupResult.item_count} item(s)`);
       navigate(`/deliveries/${followupResult.delivery_id}`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'create_followup_delivery' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'create_followup_delivery' } });
       toast('error', sanitizeError(err));
     }
     setCreating(null);

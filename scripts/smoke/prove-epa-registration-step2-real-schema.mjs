@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for REG-1 Step 2 (20261231200000, 20261231210000, 20261231220000), redesigned 2026-11-10
+ * Real-schema proof for REG-1 Step 2 (20261231200000, 20261231210000, 20261231220000; case 16 adds the capture-link
+ * fix 20270102160000), redesigned 2026-11-10
  * (docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md): the registration edit tool, the capture at save,
  * restricted-use records that name their invoice line (posting, void, unpost, re-post, return credit, field
  * application), Sales to check, the seed preview and the one-time seed, and the grant checks.
@@ -29,7 +30,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261231200000_epa_registration_tools.sql');
-const FOLLOW_UPS = ['20261231210000_rup_records_by_line.sql', '20261231220000_epa_registration_seed.sql']
+const FOLLOW_UPS = ['20261231210000_rup_records_by_line.sql', '20261231220000_epa_registration_seed.sql',
+  '20270102160000_rup_capture_fk_on_update_cascade.sql']
   .map((f) => path.join(MIGRATIONS, f));
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
@@ -330,6 +332,7 @@ function seed() {
 const SIG = {
   A: '20261231200000_epa_registration_tools.sql',
   C: '20261231210000_rup_records_by_line.sql', D: '20261231220000_epa_registration_seed.sql',
+  E: '20270102160000_rup_capture_fk_on_update_cascade.sql',
 };
 const PUBLIC_FNS = [
   'public.set_epa_registration(text,bigint,jsonb,text,uuid,text)',
@@ -840,6 +843,42 @@ async function main() {
   assert.equal(numD('[PROVER] blank'), N3);
   raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${P2}'; UPDATE public.products SET epa_registration = '${N2}' WHERE id = '${P4}';`);
   console.log('[prover] case 14: a re-saved line keeps the number it was sold under (save_invoice, a delete-and-rebuild writer, a quantity change) and is captured again as of that save; a numberless draft line takes its size\'s number');
+
+  // 16. An order-linked line survives a re-save after the seed (Brand PR B, #1765 section 14.6). save_invoice rebuilds
+  // the lines, then moves each order-linked line back to its old id; the line's capture must follow it (20270102160000).
+  const INV16 = id('e5'), L16 = id('e6'), L16B = id('e7');
+  raw(`INSERT INTO public.invoices (id, customer_id, order_id, invoice_number, status, invoice_date, created_by)
+      VALUES ('${INV16}', '${CUST}', '${ORD}', 'E2-I16', 'draft', current_date, '${ADMIN}');`);
+  // Two order-linked lines, restored in one statement.
+  const orderLine = (lid, pid, d) => `INSERT INTO public.invoice_items (id, invoice_id, product_id, order_item_id, description, quantity, unit_size, unit_price_cents, extended_cents)
+    SELECT '${lid}', '${INV16}', '${pid}', oi.id, '${d}', 1, 'Gal', 1500, 1500
+      FROM public.order_items oi WHERE oi.order_id = '${ORD}' AND oi.product_id = '${pid}';`;
+  ownerOk(orderLine(L16, P1, '[PROVER] order line'));
+  ownerOk(orderLine(L16B, P4, '[PROVER] order line b'));
+  const captured16 = cap(L16), captured16b = cap(L16B);
+  assert.notEqual(captured16, '-', 'the order-linked line is captured when saved');
+  assert.notEqual(captured16b, '-');
+  const items16 = JSON.parse(scalar(`SELECT jsonb_agg(jsonb_build_object('id', id, 'order_item_id', order_item_id, 'product_id', product_id, 'description', description, 'quantity', quantity, 'unit_size', unit_size, 'unit_price_cents', unit_price_cents, 'epa_registration', epa_registration) ORDER BY description) FROM public.invoice_items WHERE invoice_id = '${INV16}';`));
+  const HDR16 = J({ id: INV16, customer_id: CUST, order_id: ORD, status: 'draft', invoice_date: scalar('SELECT current_date::text;') });
+  // Before the fix the id move is refused by the capture's link.
+  refused(ADMIN, `SELECT public.save_invoice(${HDR16}, ${J(items16)}, 'k-save16a');`, /invoice_line_rup_captures_invoice_item_id_fkey/);
+  r = docker([...psqlArgs(), '-f', '/tmp/E.sql'], { allowFailure: true });
+  assert.match(`${r.stdout}\n${r.stderr}`, /RUP_CAPTURE_FK_NOT_IN_TRANSACTION/);
+  r = apply('E.sql'); assert.equal(r.status, 0, `E: ${r.output}`);
+  r = apply('E.sql'); assert.notEqual(r.status, 0); assert.match(r.output, /PREFLIGHT_RUP_CAPTURE_FK_DRIFT/);
+  ok(ADMIN, `SELECT public.save_invoice(${HDR16}, ${J(items16)}, 'k-save16b');`);
+  assert.equal(scalar(`SELECT string_agg(id::text, ',' ORDER BY description) FROM public.invoice_items WHERE invoice_id = '${INV16}';`), `${L16},${L16B}`, 'both lines keep their ids');
+  assert.equal(cap(L16), captured16, 'each line keeps a capture with the same facts');
+  assert.equal(cap(L16B), captured16b);
+  // A changed saved number re-captures on the restored line (the capture moves first, then the trigger updates it).
+  ok(ADMIN, `SELECT public.save_invoice(${HDR16}, ${J(items16.map((x) => (x.id === L16 ? { ...x, epa_registration: N2 } : x)))}, 'k-save16c');`);
+  assert.equal(scalar(`SELECT epa_registration FROM public.invoice_items WHERE id = '${L16}';`), N2);
+  assert.equal(cap(L16), scalar(`SELECT rup_status || '|' || COALESCE(epa_registration, '') || '|' || COALESCE(signal_word, '') || '|save' FROM public._invoice_line_rup_facts('${P1}', '${N2}');`));
+  assert.equal(cap(L16B), captured16b);
+  assert.equal(scalar('SELECT count(*) FROM public.invoice_line_rup_captures c WHERE NOT EXISTS (SELECT 1 FROM public.invoice_items ii WHERE ii.id = c.invoice_item_id);'), '0');
+  ownerOk(`DELETE FROM public.invoice_items WHERE id = '${L16}';`);
+  assert.equal(cap(L16), '-', 'deleting a line still deletes its capture');
+  console.log('[prover] case 16: after the seed, re-saving an order-linked invoice is refused by the old capture link; with 20270102160000 (one transaction, once) two order-linked lines re-save in one statement, keep their ids and captures, a changed saved number re-captures on the restored line, and deleting a line still deletes its capture');
   console.log('EPA_REGISTRATION_STEP2_PROOF_PASS');
 }
 try { await main(); }

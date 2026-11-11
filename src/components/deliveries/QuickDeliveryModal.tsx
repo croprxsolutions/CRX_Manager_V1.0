@@ -25,6 +25,7 @@ import { ProductOptionDetails } from '../products/ProductOptionPresentation';
 import { fetchAllRows } from '../../lib/pagedRead';
 import { ilikeOrPattern } from '../../lib/recordSearch';
 import type { Product, Profile, InventoryPositionRow } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 const PRODUCTS_FAILED_MESSAGE = 'Products could not be loaded, so items cannot be added or priced. Close and reopen to try again.';
 
@@ -147,7 +148,7 @@ export default function QuickDeliveryModal({
         setProductsFailed(true);
         setProductsLoading(false);
         toast('error', 'Failed to load products or drivers. Please close and try again.');
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickDeliveryModal.fetchData' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'QuickDeliveryModal.fetchData' } });
       }
     };
     fetchData();
@@ -175,7 +176,7 @@ export default function QuickDeliveryModal({
         setInventoryByProduct(inventoryPositionByProduct(positionRows, { location: 'Main Warehouse' }));
       } catch (err) {
         if (!cancelled) {
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickDeliveryModal.stockLookup' } });
+          Sentry.captureException(toSentryError(err), { extra: { context: 'QuickDeliveryModal.stockLookup' } });
           setStockLookupFailed(true);
         }
       }
@@ -214,7 +215,7 @@ export default function QuickDeliveryModal({
         }
       } catch (err) {
         if (cancelled) return;
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickDeliveryModal.customerSearch' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'QuickDeliveryModal.customerSearch' } });
         toast('error', 'Customer search failed. Please try again.');
         setCustomerResults([]);
         setShowCustomerDropdown(false);
@@ -294,7 +295,7 @@ export default function QuickDeliveryModal({
           selectCustomerRef.current(customer);
         }
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickDeliveryModal.fetchInitialCustomer' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'QuickDeliveryModal.fetchInitialCustomer' } });
       }
     };
 
@@ -476,7 +477,7 @@ export default function QuickDeliveryModal({
       onCreated?.();
       navigate(`/deliveries/${result.delivery_id}`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickDeliveryModal.handleSubmit' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'QuickDeliveryModal.handleSubmit' } });
       const msg = err instanceof Error ? err.message : 'Failed to create quick delivery';
       toast('error', msg);
     } finally {

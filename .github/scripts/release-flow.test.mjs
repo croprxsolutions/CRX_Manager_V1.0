@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
-  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems,
+  pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -257,4 +257,11 @@ test('versionProblems: one plain X.Y.Z across package.json, the lock and the not
   assert.match(versionProblems(j({ version: '01.2.3' }), lock('01.2.3', '01.2.3'), notes('01.2.3'))[0], /isn't one X.Y.Z/);
   assert.deepEqual(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.2.0 (2026-11-19)\n'), []);
   assert.match(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.1.0 (2026-11-12)\n')[0], /no section for v0.2.0/);
+});
+
+test('versionIsNewer compares X.Y.Z as numbers', () => {
+  assert.equal(versionIsNewer('0.2.0', '0.1.9'), true);
+  assert.equal(versionIsNewer('0.10.0', '0.9.0'), true);
+  assert.equal(versionIsNewer('1.3.9', '1.4.0'), false);
+  assert.equal(versionIsNewer('1.4.0', '1.4.0'), false);
 });

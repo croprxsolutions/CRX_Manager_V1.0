@@ -16,6 +16,13 @@ export function releaseExtraFiles(files) {
   return files.filter((f) => !BOT_FILES.includes(f));
 }
 
+// X.Y.Z compared as numbers.
+export function versionIsNewer(now, was) {
+  const [a, b] = [now, was].map((v) => String(v).split('.').map(Number));
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+}
+
 // The version the bot sets must be one plain X.Y.Z, the same in package.json, its lock and the notes,
 // with its own section in CHANGELOG.md.
 export function versionProblems(pkg, lock, notes, changelog = null) {
@@ -412,9 +419,10 @@ const commands = {
     };
     const problems = BOT_FILES.flatMap((f) => botFileProblems(f, show(expected, f), show(head, f)));
     problems.push(...versionProblems(show(head, 'package.json'), show(head, 'package-lock.json'), show(head, 'src/releaseNotes.ts'), show(head, 'CHANGELOG.md') ?? ''));
-    // A release is a new version: the same one as staging + main would re-publish an old tag.
+    // A release is a newer version than staging + main's (an equal or older one re-publishes history).
     try {
-      if (JSON.parse(show(head, 'package.json')).version === JSON.parse(show(expected, 'package.json')).version) problems.push('the version is the same as on staging + main; a release needs a new one');
+      const [now, was] = [head, expected].map((ref) => JSON.parse(show(ref, 'package.json')).version);
+      if (!versionIsNewer(now, was)) problems.push(`the version ${now} isn't newer than staging + main's ${was}`);
     } catch { /* unreadable: versionProblems already reports it */ }
     for (const p of problems) console.log(`::error::release/next: ${p}. Only the release bot writes these files.`);
     return problems.length ? 1 : 0;

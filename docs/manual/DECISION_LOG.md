@@ -10,6 +10,18 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
+
+**Decision (Mason, in chat, 2026-11-11: "I should be able to pre authorize migration … I rely on testing and verification", then "All but deletions").** A migration that overwrites existing rows or changes who can access what no longer needs his `I approve` reply; it applies on the same two reviewer proofs, Sol proof and landing gate as any non-destructive migration. A migration that deletes data still needs his reply for that exact file, and so does one whose rewrite or access check crashed.
+**Why:** he cannot read SQL, so his reply added a manual step without adding review; the reviewers and Sol are what judge the change. Deletions stay his because deleted data has no point-in-time recovery on this plan.
+**What this forbids/implies:** supersedes "Routine auto, widening waits" (2026-09-26) and "Data rewrites wait" (2026-09-27) for migrations. Enforced by `ownerApprovalNeeded` in `.claude/hooks/migration-apply-lib.mjs`. Logins, secrets, billing and permission changes outside a reviewed migration still need his current yes.
+**Residual risk accepted (Mason, in chat, 2026-11-11: "Land it as is"):** after three review rounds (security review, Luna, Codex P1 on PR #1799) each found a different hiding place for a delete inside a rewrite, all fixed and tested, Luna stopped further rounds. Mason chose to land rather than keep codes for rewrites, accepting that a new, unrecognised way of hiding a delete that the classifier and all reviewers miss would apply without him. Do not re-litigate; a newly found hiding place is fixed in the classifier.
+## 2026-11-11 — KI-142: a closed-short PO's line costs can be raised, never lowered (PR #1798)
+
+**Decision (Mason, in session, 2026-11-11: "A: No cost cuts"):** once a purchase order is closed short, no line cost on it can go down; a raise still lands. A price mistake on a closed PO is fixed on the vendor bill or with a vendor credit.
+**Why:** a closed PO's bills must never total more than what arrived. Allowing cost cuts kept reopening that rule (Sol rounds 1-3 on the same mechanism); refusing them removes the whole class.
+**What this forbids/implies:** `_guard_closed_po_item` refuses any unit-cost cut on a closed PO line (`PO_CLOSED_COST_CUT`), received or not, with no override. Migration `20270103180000_po_close_short`.
+
 ## 2026-11-11 — #1775: Mason owner-accepted 1 Sol finding(s) at `6b65dddba716`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1775 at `6b65dddba716` (base `465e84ae66fe`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

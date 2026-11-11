@@ -2873,6 +2873,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261231210000',
   '20261231220000',
   '20270103160000',
+  '20270104100000',
 ]);
 
 /**
@@ -3142,6 +3143,12 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'commit_ingredients_tab',
   'commit_weights_tab',
   'promote_chemistry_proposal',
+  // 20270104100000 (DM-4, local candidate): EPA auto-fill writers; each replays through _product_parent_replay
+  // and saves its receipt (record_epa_lookup is service role only). Prune once the generated types carry them.
+  'commit_epa_proposal',
+  'record_epa_lookup',
+  'reject_epa_proposal',
+  'start_epa_lookup',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their

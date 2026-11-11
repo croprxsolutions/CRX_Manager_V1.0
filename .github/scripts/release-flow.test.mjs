@@ -250,4 +250,6 @@ test('versionProblems: one plain X.Y.Z across package.json, the lock and the not
   assert.match(versionProblems(j({ version: '0.2.0; rm -rf' }), lock('0.2.0; rm -rf', '0.2.0; rm -rf'), notes('0.2.0; rm -rf'))[0], /isn't one X.Y.Z/);
   assert.match(versionProblems(null, lock('0.2.0', '0.2.0'), notes('0.2.0'))[0], /missing or unreadable/);
   assert.match(versionProblems(j({ version: '01.2.3' }), lock('01.2.3', '01.2.3'), notes('01.2.3'))[0], /isn't one X.Y.Z/);
+  assert.deepEqual(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.2.0 (2026-11-19)\n'), []);
+  assert.match(versionProblems(j({ version: '0.2.0' }), lock('0.2.0', '0.2.0'), notes('0.2.0'), '# Changelog\n\n## v0.1.0 (2026-11-12)\n')[0], /no section for v0.2.0/);
 });

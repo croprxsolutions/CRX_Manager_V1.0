@@ -13,7 +13,7 @@ against the code. This PR fixes the ones that were real:
   release/next, and the changelog must keep every earlier release's section word for word.
   `src/releaseNotes.ts` must always be the bot's exact module, even when it equals staging's copy.
 - **Versions weren't checked.** They must now be one plain `X.Y.Z` (no leading zeros), the same in `package.json`, both
-  version fields of the lock, and `src/releaseNotes.ts`. The content check reads big files in full (no
+  version fields of the lock, and `src/releaseNotes.ts`, and CHANGELOG.md needs a section for it. The content check reads big files in full (no
   1 MB cap) and fails on any git error other than "file not in this tree".
 - **Release-gate refreshes failed silently.** They ignored a failed `gh workflow run` (`|| echo`), so a
   stale gate status could stand. That fallback was for before `release-pr.yml` reached main (#1787), and

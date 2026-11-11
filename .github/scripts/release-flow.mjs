@@ -16,12 +16,15 @@ export function releaseExtraFiles(files) {
   return files.filter((f) => !BOT_FILES.includes(f));
 }
 
-// The version the bot sets must be one plain X.Y.Z, the same in package.json, its lock and the notes.
-export function versionProblems(pkg, lock, notes) {
+// The version the bot sets must be one plain X.Y.Z, the same in package.json, its lock and the notes,
+// with its own section in CHANGELOG.md.
+export function versionProblems(pkg, lock, notes, changelog = null) {
   try {
     const versions = [JSON.parse(pkg).version, JSON.parse(lock).version, JSON.parse(lock).packages?.['']?.version,
       JSON.parse(/export const releaseNotes: ReleaseNotes = ([\s\S]*);\n$/.exec(notes)[1]).version];
-    if (/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(versions[0]) && versions.every((v) => v === versions[0])) return [];
+    if (/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(versions[0]) && versions.every((v) => v === versions[0])) {
+      return changelog === null || changelog.includes(`\n## v${versions[0]} (`) ? [] : [`CHANGELOG.md has no section for v${versions[0]}`];
+    }
     return [`the version isn't one X.Y.Z across package.json, package-lock.json and src/releaseNotes.ts (${versions.join(', ')})`];
   } catch {
     return ['package.json, package-lock.json or src/releaseNotes.ts is missing or unreadable'];
@@ -405,7 +408,7 @@ const commands = {
       return execFileSync('git', ['show', `${ref}:${f}`], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     };
     const problems = BOT_FILES.flatMap((f) => botFileProblems(f, show(expected, f), show(head, f)));
-    problems.push(...versionProblems(show(head, 'package.json'), show(head, 'package-lock.json'), show(head, 'src/releaseNotes.ts')));
+    problems.push(...versionProblems(show(head, 'package.json'), show(head, 'package-lock.json'), show(head, 'src/releaseNotes.ts'), show(head, 'CHANGELOG.md') ?? ''));
     for (const p of problems) console.log(`::error::release/next: ${p}. Only the release bot writes these files.`);
     return problems.length ? 1 : 0;
   },

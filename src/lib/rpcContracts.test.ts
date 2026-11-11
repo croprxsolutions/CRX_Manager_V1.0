@@ -2820,6 +2820,11 @@ function registryMigrationHighWater(): string {
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
 // 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
 // their files reached main just after that refresh had already moved the boundary past them.
+// 20261231200000, 20261231210000 and 20261231220000 (REG-1 Step 2, #1746) were added on 2026-11-10:
+// all three applied live and the registry refresh after it moved the boundary past them.
+// 20261231110000 (M4b standing discount, #1752) and 20261231120000 (M4a sales tax, #1767) were added on
+// 2026-11-11 when staging took main: both are local candidates, not applied live, and main's REG-1 refresh
+// had moved the boundary to 20261231220000, past them.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2867,6 +2872,11 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261215110000',
   '20261222100000',
   '20261229110000',
+  '20261231110000',
+  '20261231120000',
+  '20261231200000',
+  '20261231210000',
+  '20261231220000',
 ]);
 
 /**
@@ -3115,6 +3125,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'save_active_ingredient',
   'set_parent_chemistry',
   'set_parent_cost_reference',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): admin-only registration writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  'seed_epa_registrations',
+  'set_epa_registration',
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
@@ -3171,6 +3185,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'AFTER INSERT / UPDATE OF customer_id, invoice_type row trigger on invoices: records a chemical sale\'s rate once (ON CONFLICT DO NOTHING) and drops a draft\'s copied rate on a customer change, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _standing_discount_before_fingerprint_20261231:
     'BEFORE INSERT/UPDATE row trigger on split_invoice_provenance: recomputes the draft\'s discount line before its fingerprint is taken, a no-op when right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // REG-1 Step 2 (20261231210000, applied live 2026-11-10): trigger functions, never called as RPCs. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _capture_invoice_line_rup:
+    'AFTER INSERT/UPDATE row trigger on invoice_items (after the seed only; re-captures only on a product or saved-number change): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
+  _void_rup_records_off_posted:
+    'deferred AFTER UPDATE constraint trigger on invoices (status or deleted_at change): voids only still-active restricted-use records of an invoice that is no longer posted, paid or overdue, or is deleted, so a replay finds none and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
   _record_customer_document_restore:
     'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
@@ -3232,6 +3251,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): private helpers.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:
@@ -3490,7 +3514,8 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       const current = functions.get(rpc);
       return generatedNames.has(rpc)
         || !/p_idempotency_key\s+text/i.test(current?.definition || '')
-        || !bodyUsesIdempotency(current?.body || '');
+        // A wrapper counts only when it forwards the key to a body that really uses it.
+        || !usesIdempotencyThroughDelegates(current?.body || '');
     });
     expect(stale).toEqual([]);
   });
@@ -3566,7 +3591,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .filter((rpc) => {
         if (rpc in IDEMPOTENCY_BODY_EXEMPT) return false;
         const body = functions.get(rpc)?.body || latestFunctionBody(rpc) || '';
-        return !bodyUsesIdempotency(body);
+        return !usesIdempotencyThroughDelegates(body);
       })
       .sort();
 

@@ -32,6 +32,7 @@ import { openOrInSeasonFilter } from '../../lib/invoiceSeasonWindow';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { LoadFailedState } from '../ui/EmptyState';
 import SeasonTag from '../invoices/SeasonTag';
+import { toSentryError } from '../../lib/sentryError';
 
 // Field / Application invoices are the SECOND, segregated sale type (the work CRX
 // applies with its own sprayer), kept separate from Chemical Sales per Mason's
@@ -154,7 +155,7 @@ export default function FieldInvoicesListPanel() {
       .order('id')
       .range(from, to)))
       // A read that throws fails the same way, never leaving the skeleton up for good.
-      .catch((err: unknown) => ({ data: null, error: err instanceof Error ? err : new Error(String(err)) }));
+      .catch((err: unknown) => ({ data: null, error: toSentryError(err) }));
     if (seq !== fetchSeq.current) return;
 
     if (error || !data) {

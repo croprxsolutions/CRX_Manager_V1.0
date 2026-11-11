@@ -4,6 +4,7 @@ import { sanitizeError, supabase, checkMutationResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
+import { toSentryError } from '../../lib/sentryError';
 
 interface NoteTag {
   id: string;
@@ -139,7 +140,7 @@ export default function TagsManager({ noteId, onTagsChange }: TagsManagerProps) 
       fetchNoteTags();
       if (onTagsChange) onTagsChange();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'TagsManager.removeTagFromNote' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'TagsManager.removeTagFromNote' } });
       toast('error', sanitizeError(err));
     }
   };

@@ -56,6 +56,7 @@ import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import { toSentryError } from '../lib/sentryError';
 
 interface LineItem {
   id?: string;
@@ -481,7 +482,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         }
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'rup_post_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'rup_post_check' } });
       stopUnchecked();
       return;
     }
@@ -1005,7 +1006,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             toast('error', 'The customer changed while the product was being added. Add the product again.');
             return;
           }
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_add_product_customer_tier' } });
+          Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_add_product_customer_tier' } });
           toast('error', "Could not load this customer's price tier. The product was not added; try again.");
           return;
         } finally {
@@ -1345,7 +1346,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('success', invoice.invoice_group_id ? 'Invoice group posted' : 'Invoice posted');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'post_invoice_group' : 'post_invoice' },
       });
       // This is the single-invoice posting flow, so it must speak the same
@@ -1407,7 +1408,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setShowVoidModal(false);
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: voidedGroup ? 'void_invoice_group' : 'void_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1467,7 +1468,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         delete unpostKeysRef.current[invoice.invoice_group_id ? `grp:${invoice.invoice_group_id}` : id];
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'unpost_invoice_group' : 'unpost_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1506,7 +1507,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         transferToSchedulingIdem.resetKey();
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'transfer_invoice_to_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'transfer_invoice_to_job' } });
       toast('error', sanitizeError(err));
     }
     setTransferringToScheduling(false);
@@ -1559,7 +1560,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     try {
       match = await findDuplicatePayment(payment.customerId, amountCents, payment.reference);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'duplicate_payment_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'duplicate_payment_check' } });
       if (payAttemptRef.current === attempt) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
       setPayingInvoice(false);
       return;
@@ -1612,7 +1613,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setPayNotes('');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'allocate_payment' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'allocate_payment' } });
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH) && payAttemptRef.current === attempt) {
         // The form can be closed during the save, and this refusal has to be seen.
         setPayRetryRefused(true);
@@ -1705,7 +1706,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         applyCreditIdem.resetKey();
         setUnresolvedApplyCreditIntent(null);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'apply_credit_memo_to_invoice' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'apply_credit_memo_to_invoice' } });
       toast('error', sanitizeError(err));
     }
     setApplyingCredit(false);
@@ -1742,7 +1743,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setReverseWoTarget(null);
       if (id) fetchInvoice(id);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_write_off' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_write_off' } });
       toast('error', sanitizeError(err));
     }
     setReversingWo(false);

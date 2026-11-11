@@ -35,6 +35,7 @@ import StaleTasksAlert from '../components/team/StaleTasksAlert';
 import WorkloadView from '../components/team/WorkloadView';
 import type { TeamNote, Profile, NoteType, NotePriority, ExtendedTeamNote, LinkedEntityType } from '../types';
 import { useSearchParams } from 'react-router-dom';
+import { toSentryError } from '../lib/sentryError';
 
 const priorityVariant: Record<NotePriority, 'default' | 'info' | 'warning' | 'error'> = {
   low: 'default',
@@ -442,7 +443,7 @@ export default function TeamBoard() {
         resetForm();
         fetchNotes();
       } catch (err: unknown) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'update_team_note' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'update_team_note' } });
         toast('error', sanitizeError(err));
       }
     } else {
@@ -491,7 +492,7 @@ export default function TeamBoard() {
       toast('success', 'Note deleted');
       fetchNotes();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'delete_team_note' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'delete_team_note' } });
       toast('error', sanitizeError(err));
     }
     setDeleteConfirmId(null);
@@ -523,7 +524,7 @@ export default function TeamBoard() {
       completeIdem.resetKey();
       fetchNotes();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'toggle_note_completion' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'toggle_note_completion' } });
       if (hasRpcCode(err, RpcErrorCodes.NOT_AUTHORIZED_TO_COMPLETE)) {
         toast('error', 'Only the person who created this note, the person it is assigned to, or an admin can check it off.');
       } else if (hasRpcCode(err, RpcErrorCodes.NOTE_NOT_FOUND)) {
@@ -555,7 +556,7 @@ export default function TeamBoard() {
       checkMutationResult(result, 'Toggle note pin');
       fetchNotes();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'toggle_note_pin' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'toggle_note_pin' } });
       toast('error', sanitizeError(err));
     }
   };

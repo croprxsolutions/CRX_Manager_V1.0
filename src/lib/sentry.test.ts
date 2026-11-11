@@ -64,32 +64,6 @@ describe('initSentry', () => {
     expect(config.ignoreErrors).toContain('NetworkError');
   });
 
-  it('beforeSend redacts JWT tokens from messages', async () => {
-    import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
-    const { initSentry } = await import('./sentry');
-    initSentry();
-
-    const config = mockInit.mock.calls[0][0];
-    const event = {
-      message: 'Error with token eyJhbGciOiJIUzI1NiJ9.payload.signature',
-    };
-    const result = config.beforeSend(event);
-    expect(result.message).toContain('[JWT_REDACTED]');
-    expect(result.message).not.toContain('eyJ');
-    expect(result.message).not.toContain('payload');
-  });
-
-  it('beforeSend passes through events without messages', async () => {
-    import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
-    const { initSentry } = await import('./sentry');
-    initSentry();
-
-    const config = mockInit.mock.calls[0][0];
-    const event = { exception: { values: [] } };
-    const result = config.beforeSend(event);
-    expect(result).toEqual(event);
-  });
-
   describe('beforeSend with a Supabase error object', () => {
     async function beforeSend() {
       import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
@@ -130,73 +104,82 @@ describe('initSentry', () => {
         .toBe('Failed to fetch the current inventory row');
     });
 
-    it('redacts a whole JWT from the message', async () => {
-      const send = await beforeSend();
-      const original = { code: '', details: null, hint: null, message: 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln end' };
-      expect(send(synthetic(), { originalException: original }).exception.values[0].value).toBe('bad token [JWT_REDACTED] end');
-    });
-
-    it('redacts a JWT from a real Error message', async () => {
-      const send = await beforeSend();
-      const event = { exception: { values: [{ type: 'Error', value: 'bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln' }] } };
-      expect(send(event, { originalException: new Error('x') }).exception.values[0].value).toBe('bad token [JWT_REDACTED]');
-    });
-
-    it('leaves real Error objects alone', async () => {
+    it('keeps a real Error title', async () => {
       const send = await beforeSend();
       const event = { exception: { values: [{ type: 'Error', value: 'boom' }] } };
-      expect(send(event, { originalException: new Error('Failed to fetch') })).toEqual(event);
+      expect(send(event, { originalException: new Error('Failed to fetch') }).exception.values[0].value).toBe('boom');
     });
   });
 
-  describe('beforeBreadcrumb', () => {
-    const FILTERED_PATH = '/rest/v1/allocation_sets?customer_id=eq.11111111-2222-3333-4444-555555555555'
-      + '&total_payment_cents=eq.123456';
-
-    async function scrubber() {
+  describe('only known-safe fields reach Sentry (Mason, 2026-11-10, option B)', () => {
+    const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln';
+    const PROBES = [JWT, 'r3fr35h', 'pkce_123', 'c00kie', 'h3ader', 'xtra', 'ctx_secret', 'crumbdata', 'crumbmsg', '1,250.75'];
+    async function hooks() {
       import.meta.env.VITE_SENTRY_DSN = 'https://abc@o123.ingest.sentry.io/456';
       const { initSentry } = await import('./sentry');
       initSentry();
-      return mockInit.mock.calls[0][0].beforeBreadcrumb;
+      return mockInit.mock.calls[0][0];
     }
-
-    it.each(['fetch', 'xhr'])('removes filter values from %s urls and keeps method and status', async (category) => {
-      const beforeBreadcrumb = await scrubber();
-      const result = beforeBreadcrumb({
-        category,
-        type: 'http',
-        data: { method: 'GET', status_code: 200, url: `https://x.supabase.co${FILTERED_PATH}` },
-      });
-      expect(result.data).toEqual({
-        method: 'GET',
-        status_code: 200,
-        url: 'https://x.supabase.co/rest/v1/allocation_sets?[REDACTED]',
-      });
+    const frame = { filename: 'https://croprxsolutions.app/assets/index-abc.js?v=pkce_123', module: 'xtra', function: 'pay', lineno: 10, colno: 4, in_app: true, vars: { t: JWT }, context_line: 'xtra' };
+    const loaded = () => ({
+      event_id: 'e1', timestamp: 1, platform: 'javascript', level: 'error', release: 'r1', environment: 'production',
+      sdk: { name: 'sentry.javascript.react', version: '10' }, fingerprint: ['refresh_token=r3fr35h'], tags: { mechanism: 'unhandledrejection' },
+      user: { id: 'u1', email: 'h3ader@example.com', ip_address: '1.2.3.4' },
+      transaction: '/reset-password#access_token=' + JWT,
+      message: `Allocation of 1,250.75 failed, refresh_token=r3fr35h ${JWT}`,
+      exception: { values: [{ type: 'Error', value: `Payment of 1,250.75 failed Bearer ${JWT}`, mechanism: { type: 'generic', handled: true, data: { t: JWT } }, stacktrace: { frames: [frame] } }] },
+      extra: { __serialized__: { details: `Bearer ${JWT}` }, note: 'xtra' },
+      contexts: { trace: { trace_id: 't1', span_id: 's1', data: { url: '?code=pkce_123' } }, supabase: { headers: { authorization: 'ctx_secret' } } },
+      breadcrumbs: [
+        { category: 'navigation', timestamp: 2, data: { to: '/reset-password#refresh_token=r3fr35h' } },
+        { category: 'supabase', timestamp: 3, message: 'crumbmsg', data: { q: 'crumbdata' } },
+      ],
+      request: { url: 'https://croprxsolutions.app/auth/confirm?token_hash=pkce_123', headers: { Cookie: 'c00kie', Referer: 'h3ader' }, cookies: { sb: 'c00kie' }, query_string: 'pkce_123' },
+      debug_meta: { images: [{ type: 'sourcemap', code_file: 'https://croprxsolutions.app/assets/index-abc.js?token=pkce_123', debug_id: 'd1' }, { type: 'macho', code_file: 'xtra', debug_id: 'd2', image_addr: '0' }] },
+      spans: [{ span_id: 's2', trace_id: 't1', start_timestamp: 1, op: 'http.client', description: 'GET https://x.supabase.co/rest/v1/payments?amount=eq.1,250.75&token=pkce_123', data: { 'http.url': JWT } }],
     });
 
-    it('removes filter values from the crumb db.ts writes', async () => {
-      const beforeBreadcrumb = await scrubber();
-      const result = beforeBreadcrumb({
-        category: 'supabase',
-        message: `GET ${FILTERED_PATH}`,
-        data: { requestId: 'req-1' },
+    it.each(['beforeSend', 'beforeSendTransaction'])('%s lets no probe value through', async (hook) => {
+      const result = (await hooks())[hook](loaded(), { originalException: new Error('x') });
+      const text = JSON.stringify(result);
+      for (const probe of PROBES) expect(text).not.toContain(probe);
+    });
+
+    it('keeps what Sentry needs to group and locate the error', async () => {
+      const result = (await hooks()).beforeSend(loaded(), { originalException: new Error('x') });
+      expect(result.exception.values[0]).toEqual({
+        type: 'Error',
+        value: 'Payment of # failed [REDACTED]',
+        mechanism: { type: 'generic', handled: true },
+        stacktrace: { frames: [{ filename: 'https://croprxsolutions.app/assets/index-abc.js', function: 'pay', lineno: 10, colno: 4, in_app: true }] },
       });
-      expect(result.message).toBe('GET /rest/v1/allocation_sets?[REDACTED]');
-      expect(result.data).toEqual({ requestId: 'req-1' });
+      expect(result.tags).toEqual({ mechanism: 'unhandledrejection' });
+      expect(result.user).toEqual({ id: 'u1' });
+      expect(result.breadcrumbs).toEqual([{ category: 'navigation', timestamp: 2 }, { category: 'supabase', timestamp: 3 }]);
+      expect(result.contexts).toEqual({ trace: { trace_id: 't1', span_id: 's1' } });
+      expect(result.request).toEqual({ url: 'https://croprxsolutions.app/auth/confirm' });
+      expect(result.transaction).toBe('/reset-password');
+      expect(result.spans[0].description).toBe('GET https://x.supabase.co/rest/v1/payments');
+      expect(result.debug_meta).toEqual({ images: [{ type: 'sourcemap', code_file: 'https://croprxsolutions.app/assets/index-abc.js', debug_id: 'd1' }] });
+      expect(result.fingerprint).toBeUndefined();
+      expect(result.extra).toBeUndefined();
     });
 
-    it('removes a fragment and everything after a line break', async () => {
-      const beforeBreadcrumb = await scrubber();
-      expect(beforeBreadcrumb({ category: 'supabase', message: 'GET /auth/v1/verify#token=abc\nsecond line' }).message)
-        .toBe('GET /auth/v1/verify?[REDACTED]');
+    it('blanks figures in a plain database error used as the title', async () => {
+      const event = { exception: { values: [{ type: 'Error', value: 'Object captured as exception with keys: code, message' }] }, extra: { __serialized__: { message: 'x' } } };
+      const original = { code: 'P0001', message: 'Allocation of 1,250.75 exceeds balance 980.10' };
+      const result = (await hooks()).beforeSend(event, { originalException: original });
+      expect(result.exception.values[0].value).toBe('Allocation of # exceeds balance #');
+      expect(result.extra).toBeUndefined();
     });
 
-    it('leaves a url without a query alone and passes other crumbs through', async () => {
-      const beforeBreadcrumb = await scrubber();
-      const rpc = { category: 'fetch', data: { method: 'POST', url: 'https://x.supabase.co/rest/v1/rpc/allocate_payment' } };
-      expect(beforeBreadcrumb(rpc)).toEqual(rpc);
-      const click = { category: 'ui.click', message: 'button?not-a-url' };
-      expect(beforeBreadcrumb(click)).toEqual(click);
+    it('keeps the trace header path-only and leaves live SDK objects alone', async () => {
+      class Scope { label = 'kept'; }
+      const scope = new Scope();
+      const event = { sdkProcessingMetadata: { capturedSpanScope: scope, dynamicSamplingContext: { trace_id: 't1', transaction: '/x?token=pkce_123', user_segment: 'xtra' } } };
+      const result = (await hooks()).beforeSendTransaction(event);
+      expect(result.sdkProcessingMetadata.dynamicSamplingContext).toEqual({ trace_id: 't1', transaction: '/x' });
+      expect(result.sdkProcessingMetadata.capturedSpanScope).toBe(scope);
     });
   });
 });

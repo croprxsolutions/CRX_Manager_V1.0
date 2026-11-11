@@ -8,6 +8,7 @@ import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/doc
 import { Sentry } from '../../lib/sentry';
 import { loadDefaultTier } from '../../lib/appSettingDefaults';
 import { useAuth } from '../../contexts/AuthContext';
+import { toSentryError } from '../../lib/sentryError';
 
 interface BulkCustomerImportProps {
   open: boolean;
@@ -312,10 +313,10 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       }).select();
 
       if (customerResult.error) {
-        Sentry.captureException(customerResult.error instanceof Error ? customerResult.error : new Error(String(customerResult.error)), { extra: { context: 'Failed to insert customer' } });
+        Sentry.captureException(toSentryError(customerResult.error), { extra: { context: 'Failed to insert customer' } });
         failed++;
       } else {
-        try { checkMutationResult(customerResult, 'Insert customer'); } catch (e) { Sentry.captureException(e instanceof Error ? e : new Error(String(e))); failed++; continue; }
+        try { checkMutationResult(customerResult, 'Insert customer'); } catch (e) { Sentry.captureException(toSentryError(e)); failed++; continue; }
         success++;
       }
     }

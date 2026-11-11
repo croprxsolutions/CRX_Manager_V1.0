@@ -1960,6 +1960,21 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "a crashed rewrite check still waits for Mason");
   ok(ownerApprovalNeeded(parkedCategories(parkedSql["overwrites-data"] + parkedSql["changes-access"])).length === 0,
     "a plain rewrite plus a grant needs no approval");
+  // Security review + Luna, 2026-11-11: a delete the rewrite/access checks find
+  // (inside a called function, dynamic SQL, unreadable SQL) is still Mason's.
+  for (const [label, sql] of [
+    ["a called function that DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called function that TRUNCATEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN TRUNCATE public.customers; END $$;\nSELECT public.z();\n"],
+    ["dynamic SQL in a DO block", "DO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
+  ]) {
+    ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);
+    denies(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }), "THE ONE WAY THROUGH",
+      `${label}: the gate refuses it without an approval`);
+  }
+  ok(ownerApprovalNeeded([{ category: "overwrites-data", reason: "it runs public.f() while applying, and without the migration history this check cannot tell whether that changes existing rows" }]).length === 1,
+    "a call the check cannot see into still waits for Mason");
+  ok(ownerApprovalNeeded([{ category: "changes-access", reason: "the SQL could not be read for access changes" }]).length === 1,
+    "unreadable SQL still waits for Mason");
   // Deleting data stays Mason's; a file that deletes AND changes access does too.
   for (const [category, sql] of Object.entries({ "deletes-data": parkedSql["deletes-data"], "deletes-and-grants": `${parkedSql["deletes-data"]}${parkedSql["changes-access"]}` })) {
     const approval = approvalFor(sql);

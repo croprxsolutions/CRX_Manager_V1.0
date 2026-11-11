@@ -58,6 +58,9 @@ eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/2026092
 eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_fix_rows.sql",
   patch: "@@ -0,0 +1 @@\n+UPDATE public.invoices SET total_amount_cents = 0;" }] }), [],
   "a migration that rewrites rows no longer waits for him");
+ok(String(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_hidden.sql",
+  patch: "@@ -0,0 +2 @@\n+CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\n+SELECT public.z();" }] })[0]).includes("may delete data"),
+  "a delete hidden in a called function still waits for him");
 eq(waitingReasons({ labels: [], files: [{ filename: "supabase/migrations/20260926000000_new_fn.sql",
   patch: "@@ -0,0 +3 @@\n+CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n+REVOKE ALL ON FUNCTION public.f(uuid) FROM PUBLIC, anon;\n+GRANT EXECUTE ON FUNCTION public.f(uuid) TO authenticated;" }] }), [],
   "routine lock-down on a new function is not his");

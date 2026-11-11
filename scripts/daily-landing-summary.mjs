@@ -36,6 +36,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "../.claude/hooks/live-testdata-lib.mjs";
 import { accessChangeCheck, dataRewriteCheck } from "../.claude/hooks/migration-access-lib.mjs";
+import { ownerApprovalNeeded } from "../.claude/hooks/migration-apply-lib.mjs";
 
 const ISSUE_TITLE = "Daily landing summary";
 const MASON = "masonwells1";
@@ -111,11 +112,16 @@ export function waitingReasons({ labels = [], files = [] }) {
       continue;
     }
     // Rewrites and access changes stopped being his on 2026-11-11 ("All but
-    // deletions"); only a check that cannot classify the SQL still lists it.
-    let unknown = false;
-    try { dataRewriteCheck(added); accessChangeCheck(added); } catch { unknown = true; }
-    if (unknown) {
-      reasons.push(`its database change ${migrationName(path.basename(name))} could not be classified, so it waits for you — have an agent check it`);
+    // deletions"); a delete hidden in a function or dynamic SQL, or SQL these
+    // checks cannot read, still waits for him (the apply gate's same rule).
+    const found = [];
+    try { const r = dataRewriteCheck(added); if (r.rewrites) found.push({ category: "overwrites-data", reason: String(r.reason) }); }
+    catch { found.push({ category: "overwrites-data", reason: "could not be read" }); }
+    try { const a = accessChangeCheck(added); if (a.changesAccess) found.push({ category: "changes-access", reason: String(a.reason) }); }
+    catch { found.push({ category: "changes-access", reason: "could not be read" }); }
+    const [needs] = ownerApprovalNeeded(found);
+    if (needs) {
+      reasons.push(`its database change ${migrationName(path.basename(name))} may delete data or could not be fully read (${plainText(needs.reason, 120)}), which stays yours to approve`);
     }
   }
   return reasons;

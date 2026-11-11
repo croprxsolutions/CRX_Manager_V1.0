@@ -317,10 +317,13 @@ export function resolveMigrationSource({
 
 // Mason, 2026-11-11 ("All but deletions"): a migration that overwrites rows or
 // changes access no longer waits for his code; it lands on the same reviewer,
-// Sol and landing proofs as any other. Deleting data still needs his reply, and
-// so does a rewrite or access check that crashed (unknown is not safe).
+// Sol and landing proofs as any other. Deleting data still needs his reply,
+// including a delete the rewrite/access checks find inside a called function or
+// dynamic SQL (they file it under their own category), and so does anything
+// they could not read or crashed on (unknown is not safe).
+const OWNER_REASON_RE = /deletes rows|empties a table|dynamic SQL|cannot (?:be )?read|could not be read|cannot tell|failing closed/i;
 export const ownerApprovalNeeded = (parked) =>
-  parked.filter((c) => c.category === "deletes-data" || /failing closed$/.test(String(c.reason)));
+  parked.filter((c) => c.category === "deletes-data" || OWNER_REASON_RE.test(String(c.reason)));
 
 export function evaluateMigrationApply({
   name,

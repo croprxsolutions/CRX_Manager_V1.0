@@ -1389,6 +1389,8 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
     await waitFor(() => expect(updates).toEqual([{ standing_discount_pct: 2.5 }]));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
     expect(mockRpc).not.toHaveBeenCalledWith('save_customer', expect.anything());
+    // The rate is saved: leaving the page must not warn about unsaved changes (staging walkthrough, 11 Nov).
+    expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
   });
 
   it('refuses more than two decimals or over 100 before writing', async () => {

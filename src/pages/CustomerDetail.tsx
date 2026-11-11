@@ -1276,7 +1276,12 @@ export default function CustomerDetail() {
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
       const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
       customerRowVersionRef.current = rowVersionResult.rowVersion;
-      setCustomer((c) => ({ ...c, standing_discount_pct: pct }));
+      // Saved: an otherwise untouched form stays clean (no unsaved-changes prompt on leaving).
+      setCustomer((c) => {
+        const next = { ...c, standing_discount_pct: pct };
+        if (c === loadedCustomerRef.current) loadedCustomerRef.current = next;
+        return next;
+      });
       setDiscountDraft(null);
       if (rowVersionResult.kind === 'recovery') {
         // Same as a crop change: committed, but another edit may have landed at the same time.

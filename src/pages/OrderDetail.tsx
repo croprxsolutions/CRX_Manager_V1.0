@@ -812,7 +812,10 @@ export default function OrderDetail() {
       salesTaxIdem.resetKeyFor(scope);
       const drafts = result.drafts_updated ?? 0;
       if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
-      else toast('info', `Sales tax ${next ? 'on' : 'off'}. This sale has no draft invoices to change; posted invoices keep their tax.`);
+      else {
+        const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
+        toast('info', `Sales tax ${next ? 'on' : 'off'}. New invoices for this sale will${next ? '' : ' not'} be taxed${hasPosted ? '; posted invoices keep their tax' : ''}.`);
+      }
       await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_order_sales_tax' } });

@@ -53,6 +53,23 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
 **Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Changing it needs the order line written (a backfill Mason decides).
+## 2026-11-12 — #1817: Mason owner-accepted 2 Sol finding(s) at `bf082cbf3764`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1817 at `bf082cbf3764` (base `a4f37aed7913`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `CANDIDATE_SNAPSHOT/docs/manual/DECISION_LOG.md:15`, text sha256 `cf5d95cd4c8093ee` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref 50bfea63360e)
+- Finding 2 (HIGH) at `CANDIDATE_SNAPSHOT/src/lib/rateReviewWorkbook.ts:328`, text sha256 `feba3a841f05cc97` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref b7845a6c7ad3)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-12 — #1817: Mason owner-accepted 1 Sol finding(s) at `f0be509d06e0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1817 at `f0be509d06e0` (base `325707cb62f5`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/components/products/RateReviewWorkbookModal.tsx:35`, text sha256 `7756a596af3002d3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref bd104087d7ef)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
 ## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
 
 **Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".

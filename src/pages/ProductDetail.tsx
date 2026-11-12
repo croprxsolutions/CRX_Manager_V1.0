@@ -425,10 +425,12 @@ export default function ProductDetail() {
   // A brand list that failed, or is still loading after the check timeout, shows "could not check",
   // never "no cancelled brands".
   const [brandsRead, setBrandsRead] = useState<'loading' | 'loaded' | 'failed'>('loading');
-  const handleBrandsChange = useCallback((brands: ProductBrand[] | null | undefined) => {
+  const handleBrandsChange = useCallback((forProductId: string, brands: ProductBrand[] | null | undefined) => {
+    // A report for another product (a late reply after a switch) never lands on this one.
+    if (forProductId !== productIdRef.current) return;
     setBrandsRead(brands === undefined ? 'loading' : brands === null ? 'failed' : 'loaded');
     setBrandRegistrations((brands ?? []).map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
-  }, []);
+  }, [productIdRef]);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
   const productLoaded = persistedProduct?.id === id;

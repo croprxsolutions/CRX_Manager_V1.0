@@ -231,8 +231,8 @@ describe('ProductDetail brands section', () => {
       : { data: null, error: null }));
     render(<ProductDetail />);
     await screen.findByTestId('brands-section');
-    const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
-    act(() => props.onBrandsChange([{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (id: string, b: ProductBrand[] | null | undefined) => void };
+    act(() => props.onBrandsChange('product-1', [{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
     expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4: EPA Reg. No. 524-475, cancelled (date not recorded).');
   });
 
@@ -242,13 +242,18 @@ describe('ProductDetail brands section', () => {
       : { data: null, error: null }));
     const view = render(<ProductDetail />);
     await screen.findByTestId('brands-section');
-    const first = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
-    act(() => first.onBrandsChange([{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    const first = H.brandSection.mock.lastCall![0] as { onBrandsChange: (id: string, b: ProductBrand[] | null | undefined) => void };
+    act(() => first.onBrandsChange('product-1', [{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
     expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4');
     H.routeId = 'product-2';
     H.product = baseProduct({ id: 'product-2', product_name: 'Other Product' });
     view.rerender(<ProductDetail />);
     expect(await screen.findByTestId('brands-section')).toHaveTextContent('product-2: Other Product');
+    expect(screen.queryByTestId('cancelled-registration-banner')).toBeNull();
+    expect(screen.getByText('Checking EPA registration status…')).toBeInTheDocument();
+    // A late report from the first product's section is ignored.
+    act(() => first.onBrandsChange('product-1', [{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    await act(async () => {});
     expect(screen.queryByTestId('cancelled-registration-banner')).toBeNull();
     expect(screen.getByText('Checking EPA registration status…')).toBeInTheDocument();
   });
@@ -258,12 +263,12 @@ describe('ProductDetail brands section', () => {
     try {
       render(<ProductDetail />);
       await screen.findByTestId('brands-section');
-      const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
-      act(() => props.onBrandsChange(undefined));
+      const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (id: string, b: ProductBrand[] | null | undefined) => void };
+      act(() => props.onBrandsChange('product-1', undefined));
       expect(screen.queryByText(/Could not check/)).toBeNull();
       act(() => { vi.advanceTimersByTime(15_000); });
       expect(screen.getByText(/Could not check whether all of this product's EPA registrations are cancelled/)).toBeInTheDocument();
-      act(() => props.onBrandsChange([]));
+      act(() => props.onBrandsChange('product-1', []));
       expect(screen.queryByText(/Could not check/)).toBeNull();
     } finally {
       vi.useRealTimers();

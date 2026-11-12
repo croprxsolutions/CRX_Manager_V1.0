@@ -41,7 +41,7 @@ interface ProductBrandsSectionProps {
   /** Registrations stored as cancelled (the product page reads them); each brand row on one is marked. */
   cancelled?: CancelledRegistrations;
   /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
-  onBrandsChange?: (brands: ProductBrand[] | null | undefined) => void;
+  onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
 }
 
 interface BrandDraft {
@@ -144,8 +144,8 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [reloadToken, setReloadToken] = useState(0);
   const onBrandsChangeRef = useLatestRef(onBrandsChange);
   useEffect(() => {
-    onBrandsChangeRef.current?.(loading ? undefined : loadError ? null : brands);
-  }, [brands, loading, loadError, onBrandsChangeRef]);
+    onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
+  }, [productId, brands, loading, loadError, onBrandsChangeRef]);
 
   const [draft, setDraft] = useState<BrandDraft | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);

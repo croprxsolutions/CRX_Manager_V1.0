@@ -217,15 +217,15 @@ describe('ProductBrandsSection reporting', () => {
     render(<ProductBrandsSection productId="p1" productName="X" isAdmin={false} userId="u"
       cancelled={new Map([['524-475', null]])} onBrandsChange={onBrandsChange} />);
     expect(await screen.findByText('cancelled (date not recorded)')).toBeInTheDocument();
-    expect(onBrandsChange).toHaveBeenCalledWith(undefined);
-    await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith([expect.objectContaining({ epa_registration: '524-475' })]));
+    expect(onBrandsChange).toHaveBeenCalledWith('p1', undefined);
+    await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith('p1', [expect.objectContaining({ epa_registration: '524-475' })]));
   });
 
   it('reports a failed brand-list read as null, never as an empty list', async () => {
     brandsRead.fail = true;
     const onBrandsChange = vi.fn();
     render(<ProductBrandsSection productId="p1" productName="X" isAdmin={false} userId="u" onBrandsChange={onBrandsChange} />);
-    await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith(null));
-    expect(onBrandsChange).not.toHaveBeenCalledWith([]);
+    await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith('p1', null));
+    expect(onBrandsChange).not.toHaveBeenCalledWith('p1', []);
   });
 });

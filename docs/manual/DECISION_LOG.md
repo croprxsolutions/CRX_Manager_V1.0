@@ -10,11 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
-## 2026-11-11 — #1825 (B-1b invoice brands): a brand's own restricted-use tick counts; Sol round 5 may run
+## 2026-11-11 — #1825 (B-1b invoice brands): a brand's own restricted-use tick counts
 
 **Decision (Mason, 2026-11-11, in chat: "Yes, any tick counts").** A brand ticked restricted use on its own brand row makes that brand's sale restricted, as the product's tick does, even when the registration of its EPA number says No. This answers Sol round 4's HIGH on PR #1825.
 **Why:** any Yes already makes a sale restricted (Mason, 2026-11-10); counting the brand's tick can only add a record, never miss one. Sol rounds 1, 3 and 4 kept returning to what decides restricted use for a brand line, so the rule is settled here rather than patched again.
-**What this forbids/implies:** `20270106110000_invoice_brands_rup.sql` reads the tick live from the pick's brand row when a brand's sale is captured (never stored in the invoice's brand copy, so a tick change never makes a draft stale) and on Sales to check. Sol may run a fifth round on PR #1825 for this fix. Ignoring a brand's tick after the registration switch-on needs a new Mason decision.
+**What this forbids/implies:** `20270106110000_invoice_brands_rup.sql` reads the tick live from the pick's brand row when a brand's sale is captured (never stored in the invoice's brand copy, so a tick change never makes a draft stale) and on Sales to check. Ignoring a brand's tick after the registration switch-on needs a new Mason decision.
 
 ## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
 

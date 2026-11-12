@@ -12,6 +12,8 @@ import {
 } from '../../lib/deliveryBrands';
 
 const BRANDS_NEED_SIGNAL_MESSAGE = 'Brands save when you have signal.';
+// Completion never waits longer than this for its brand save; after it, the delivery completes unconfirmed.
+export const COMPLETION_BRAND_SAVE_TIMEOUT_MS = 10_000;
 
 function draftsOf(brands: DeliveryBrands): DraftLines {
   return Object.fromEntries(brands.lines.map((l) => [l.delivery_item_id, draftFromPicks(l.picks)]));
@@ -82,6 +84,8 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     setDrafts((prev) => ({ ...prev, [lineId]: draft }));
   }, []);
 
+  // Still waiting for the first reply. Completion does not wait for it: it completes unconfirmed.
+  const loading = enabled && !!deliveryId && !brands && !loadFailed;
   const changed = changedLineIds(brands, drafts);
   const dirty = changed.length > 0;
 
@@ -160,7 +164,13 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
    */
   const saveForCompletion = async (): Promise<number> => {
     if (!brands || !deliveryId) {
-      if (loadFailed) toast('warning', 'Brands could not be loaded. Completing anyway; the office will check this delivery’s brands.');
+      // Not loaded yet, or the load failed: completion never waits for brands.
+      if (loadFailed || loading) toast('warning', 'Brands could not be loaded. Completing anyway; the office will check this delivery’s brands.');
+      return BRANDS_NOT_CONFIRMED;
+    }
+    // A Save brands still in flight: complete without waiting for it.
+    if (saving) {
+      toast('warning', 'Brands were still saving. Completing anyway; the office will check this delivery’s brands.');
       return BRANDS_NOT_CONFIRMED;
     }
     const lines = [];
@@ -178,15 +188,22 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     try {
       // No signal: the completion's own signal check stops it next.
       if (!(await hasSignal())) return BRANDS_NOT_CONFIRMED;
-      const seq = await send(lines, true, startedAt);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), COMPLETION_BRAND_SAVE_TIMEOUT_MS); });
+      const seq = await Promise.race([send(lines, true, startedAt), timedOut]);
+      clearTimeout(timer);
+      if (seq === 'timeout') {
+        // Its late reply is dropped (the request number moves on); the completion goes ahead unconfirmed.
+        requestRef.current++;
+        toast('warning', 'Brands did not save in time. Completing anyway; the office will check this delivery’s brands.');
+        return BRANDS_NOT_CONFIRMED;
+      }
       return seq === null || leftOut ? BRANDS_NOT_CONFIRMED : seq;
     } finally {
       setSaving(false);
     }
   };
 
-  // Still waiting for the first reply: completion waits too, so it never skips picks it has not seen.
-  const loading = enabled && !!deliveryId && !brands && !loadFailed;
 
   /** Reloads the saved picks; `discard` names lines whose unsaved choices no longer apply (the line was edited). */
   const reload = useCallback(({ discard = [] }: { discard?: string[] } = {}) => {

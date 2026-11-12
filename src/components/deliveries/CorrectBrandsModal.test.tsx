@@ -73,4 +73,16 @@ describe('CorrectBrandsModal', () => {
     expect(correctDeliveryBrands).not.toHaveBeenCalled();
     signal = async () => true;
   });
+
+  it('tells the page an edited correction is unsaved, so leaving asks first', async () => {
+    getDeliveryBrands.mockImplementation(async () => brands);
+    const onDirtyChange = vi.fn();
+    const view = render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} onDirtyChange={onDirtyChange} />);
+    await screen.findByLabelText('Brand for Glyphosate');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Wrong jug' } });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    view.rerender(<CorrectBrandsModal open={false} deliveryId="D1" onClose={() => undefined} onDirtyChange={onDirtyChange} />);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
 });

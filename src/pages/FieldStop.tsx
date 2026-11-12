@@ -371,7 +371,6 @@ export default function FieldStop() {
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
-    if (brandState.loading || brandState.saving) { toast('info', 'Brands are still loading or saving. Try again in a moment.'); return; }
     // A missing or mismatched brand only warns (Mason, 2026-11-09).
     const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
     if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
@@ -829,7 +828,7 @@ export default function FieldStop() {
 
           <p className="text-sm text-secondary mt-3 text-center">Inventory will be deducted and a draft invoice created.</p>
 
-          <MainAction disabled={completing || brandState.saving} onClick={requestComplete}>
+          <MainAction disabled={completing} onClick={requestComplete}>
             <ClipboardCheck className="w-6 h-6" aria-hidden="true" /> {completing ? 'Completing…' : 'Complete Delivery'}
           </MainAction>
         </>

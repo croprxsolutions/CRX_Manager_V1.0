@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { BRANDS_NOT_CONFIRMED, type DeliveryBrands } from '../../lib/deliveryBrands';
-import { useDeliveryBrands } from './useDeliveryBrands';
+import { COMPLETION_BRAND_SAVE_TIMEOUT_MS, useDeliveryBrands } from './useDeliveryBrands';
 import { supabaseUntyped } from '../../lib/db';
 
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'driver-1' } }) }));
@@ -258,5 +258,59 @@ describe('useDeliveryBrands: every reply is tied to the stop that sent it', () =
     await act(async () => { answerD1({ ...brands(1), delivery_id: 'D1' }); });
     expect(result.current.brands?.delivery_id).toBe('D2');
     getDeliveryBrands.mockReset();
+  });
+});
+
+describe('useDeliveryBrands: completion never waits on brands (Sol r5)', () => {
+  it('completes unconfirmed at once while the brand list is still loading', async () => {
+    getDeliveryBrands.mockReturnValue(new Promise(() => undefined));
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    expect(result.current.loading).toBe(true);
+    toast.mockClear();
+    let seq = 0;
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+    expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining('Completing anyway'));
+    getDeliveryBrands.mockReset();
+  });
+
+  it('completes unconfirmed while a Save brands is still in flight, without waiting for it', async () => {
+    getDeliveryBrands.mockResolvedValue(brands(1));
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise(() => undefined) as never);
+    act(() => { void result.current.save(); });
+    await waitFor(() => expect(result.current.saving).toBe(true));
+    let seq = 0;
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+    expect(rpc).toHaveBeenCalledTimes(1); // the completion did not send a second save
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
+
+  it('gives up on a stalled completion save after the time limit and drops its late reply', async () => {
+    getDeliveryBrands.mockResolvedValue(brands(1));
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    let reply!: (v: unknown) => void;
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise((resolve) => { reply = resolve; }) as never);
+    vi.useFakeTimers();
+    try {
+      let seq = 0;
+      let done = false;
+      act(() => { void result.current.saveForCompletion().then((s) => { seq = s; done = true; }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(COMPLETION_BRAND_SAVE_TIMEOUT_MS + 10); });
+      expect(done).toBe(true);
+      expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+      await act(async () => { reply({ data: { delivery_id: 'D1', event_seq: 2, picks: [] }, error: null }); await vi.advanceTimersByTimeAsync(0); });
+      expect(result.current.brands?.event_seq).toBe(1); // the late reply changed nothing on screen
+    } finally {
+      vi.useRealTimers();
+      rpc.mockRestore();
+      getDeliveryBrands.mockReset();
+    }
   });
 });

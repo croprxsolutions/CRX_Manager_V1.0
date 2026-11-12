@@ -316,8 +316,10 @@ export default function DeliveryDetail() {
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Brands never block a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id
     && (delivery.status === 'scheduled' || delivery.status === 'in_progress') && (isAdminOrRep || isAssignedDriver));
-  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty);
   const [correctBrandsOpen, setCorrectBrandsOpen] = useState(false);
+  // An edited correction in the Correct brands dialog asks before leaving too.
+  const [correctionDirty, setCorrectionDirty] = useState(false);
+  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty || correctionDirty);
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';
   const receiptEmail = customer?.email || receiptRecipient?.email || null;
   // What complete_delivery checks before it completes (migration 20261022075000).
@@ -1126,7 +1128,6 @@ export default function DeliveryDetail() {
       return;
     }
     if (!delivery || !profile) return;
-    if (brandState.loading || brandState.saving) { toast('info', 'Brands are still loading or saving. Try again in a moment.'); return; }
     if (!hasAnyQty) {
       toast('error', 'At least one item must have a quantity greater than 0');
       return;
@@ -3067,7 +3068,7 @@ export default function DeliveryDetail() {
         <FixDeliveryModal open={fixOpen} onClose={() => setFixOpen(false)} deliveryId={delivery.id} deliveryNumber={delivery.delivery_number} />
       )}
       {delivery && isAdmin && (
-        <CorrectBrandsModal open={correctBrandsOpen} onClose={() => setCorrectBrandsOpen(false)} deliveryId={delivery.id} />
+        <CorrectBrandsModal open={correctBrandsOpen} onClose={() => setCorrectBrandsOpen(false)} deliveryId={delivery.id} onDirtyChange={setCorrectionDirty} />
       )}
 
       {/* Void Delivery Modal */}

@@ -21,7 +21,9 @@ const delivered = (line: DeliveryBrandLine) => line.quantity_delivered ?? line.q
  * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
  * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
  */
-export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open: boolean; deliveryId: string; onClose: () => void }) {
+export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyChange }: {
+  open: boolean; deliveryId: string; onClose: () => void; onDirtyChange?: (dirty: boolean) => void;
+}) {
   const { profile } = useAuth();
   const { toast } = useToast();
   const idem = useIdempotencyKey('correct_delivery_brands', profile?.id || '');
@@ -122,6 +124,9 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     else onClose();
   };
   const hasLines = !!brands && brands.lines.some(showLine);
+  // The page's leave guard asks before navigating away from an edited correction.
+  const dirty = open && ((!!brands && changedLineIds(brands, drafts).length > 0) || !!reason.trim());
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   return (
     <>

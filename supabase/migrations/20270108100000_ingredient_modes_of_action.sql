@@ -147,11 +147,12 @@ CREATE FUNCTION public._ingredient_mode_list(p_ingredient_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $function$
   SELECT COALESCE(jsonb_agg(jsonb_build_object('scheme', o.scheme, 'group_code', o.group_code, 'source_note', o.source_note)
            ORDER BY array_position(ARRAY['HRAC', 'FRAC', 'IRAC'], o.scheme),
-                    substring(o.group_code FROM '^[0-9]+')::numeric, o.group_code), '[]'::jsonb)
+                    regexp_replace(o.group_code, '[0-9].*$', ''), substring(o.group_code FROM '[0-9]+')::numeric, o.group_code), '[]'::jsonb)
     FROM public.active_ingredient_modes_of_action o
    WHERE o.ingredient_id = p_ingredient_id AND o.status = 'active';
 $function$;
 
+-- Natural order everywhere: letter prefix, then the first number, then the code (5 < 27; M3 < M10; 4A < 4B).
 -- Checks and normalizes a list sent by the screen: an array of at most 10 {scheme, group_code, source_note}
 -- objects, no other keys, no repeated scheme and code. Codes are upper-cased and trimmed (as DM-1 does); notes
 -- trimmed. Returns it in _ingredient_mode_list's order.
@@ -179,12 +180,13 @@ BEGIN
       RAISE EXCEPTION 'CHEMISTRY_MOA_INVALID: each group in % is {scheme, group_code, source_note} and nothing else', p_label;
     END IF;
     v_scheme := v_entry->>'scheme';
-    v_code := upper(btrim(v_entry->>'group_code'));
-    v_note := btrim(v_entry->>'source_note');
-    IF v_scheme NOT IN ('HRAC', 'FRAC', 'IRAC') OR v_code = '' OR char_length(v_code) > 10 THEN
-      RAISE EXCEPTION 'CHEMISTRY_MOA_INVALID: scheme is HRAC, FRAC or IRAC and the group code is 1 to 10 characters';
+    -- btrim strips only spaces; tabs and line breaks are trimmed too, and a code is letters and digits only.
+    v_code := upper(regexp_replace(v_entry->>'group_code', '^[[:space:]]+|[[:space:]]+$', '', 'g'));
+    v_note := regexp_replace(v_entry->>'source_note', '^[[:space:]]+|[[:space:]]+$', '', 'g');
+    IF v_scheme NOT IN ('HRAC', 'FRAC', 'IRAC') OR v_code !~ '^[A-Z0-9]{1,10}$' THEN
+      RAISE EXCEPTION 'CHEMISTRY_MOA_INVALID: scheme is HRAC, FRAC or IRAC and the group code is 1 to 10 letters or digits';
     END IF;
-    IF v_note = '' OR char_length(v_note) > 1000 THEN
+    IF v_note !~ '[^[:space:]]' OR char_length(v_note) > 1000 THEN
       RAISE EXCEPTION 'CHEMISTRY_MOA_INVALID: say where % % came from (1 to 1000 characters)', v_scheme, v_code;
     END IF;
     IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_out) o WHERE o->>'scheme' = v_scheme AND o->>'group_code' = v_code) THEN
@@ -193,7 +195,7 @@ BEGIN
     v_out := v_out || jsonb_build_array(jsonb_build_object('scheme', v_scheme, 'group_code', v_code, 'source_note', v_note));
   END LOOP;
   RETURN (SELECT COALESCE(jsonb_agg(o ORDER BY array_position(ARRAY['HRAC', 'FRAC', 'IRAC'], o->>'scheme'),
-                                      substring(o->>'group_code' FROM '^[0-9]+')::numeric, o->>'group_code'), '[]'::jsonb)
+                                      regexp_replace(o->>'group_code', '[0-9].*$', ''), substring(o->>'group_code' FROM '[0-9]+')::numeric, o->>'group_code'), '[]'::jsonb)
             FROM jsonb_array_elements(v_out) o);
 END;
 $function$;
@@ -256,12 +258,12 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
     SELECT ingredient_id, scheme FROM derived UNION SELECT ingredient_id, scheme FROM typed
   ), per AS (
     SELECT p.ingredient_id, p.scheme,
-           (SELECT array_agg(d.group_code ORDER BY substring(d.group_code FROM '^[0-9]+')::numeric, d.group_code)
+           (SELECT array_agg(d.group_code ORDER BY regexp_replace(d.group_code, '[0-9].*$', ''), substring(d.group_code FROM '[0-9]+')::numeric, d.group_code)
               FROM derived d WHERE d.ingredient_id = p.ingredient_id AND d.scheme = p.scheme) AS derived_codes,
-           (SELECT array_agg(t.group_code ORDER BY substring(t.group_code FROM '^[0-9]+')::numeric, t.group_code)
+           (SELECT array_agg(t.group_code ORDER BY regexp_replace(t.group_code, '[0-9].*$', ''), substring(t.group_code FROM '[0-9]+')::numeric, t.group_code)
               FROM typed t WHERE t.ingredient_id = p.ingredient_id AND t.scheme = p.scheme) AS typed_codes,
            (SELECT jsonb_agg(jsonb_build_object('row_id', t.id, 'group_code', t.group_code, 'source', t.source)
-                     ORDER BY substring(t.group_code FROM '^[0-9]+')::numeric, t.group_code, t.id)
+                     ORDER BY regexp_replace(t.group_code, '[0-9].*$', ''), substring(t.group_code FROM '[0-9]+')::numeric, t.group_code, t.id)
               FROM typed t WHERE t.ingredient_id = p.ingredient_id AND t.scheme = p.scheme) AS typed_rows
       FROM pairs p
   ), st AS (
@@ -298,7 +300,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
     'summary', COALESCE((
       SELECT jsonb_agg(jsonb_build_object('scheme', sm.scheme, 'group_code', sm.code, 'differs', sm.differs)
                ORDER BY array_position(ARRAY['HRAC', 'FRAC', 'IRAC'], sm.scheme),
-                        substring(sm.code FROM '^[0-9]+')::numeric, sm.code)
+                        regexp_replace(sm.code, '[0-9].*$', ''), substring(sm.code FROM '[0-9]+')::numeric, sm.code)
         FROM summary sm), '[]'::jsonb),
     'not_recorded_count', (SELECT count(*) FROM src s WHERE NOT EXISTS (SELECT 1 FROM st WHERE st.ingredient_id = s.ingredient_id)));
 $function$;

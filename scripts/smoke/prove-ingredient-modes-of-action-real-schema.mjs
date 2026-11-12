@@ -353,9 +353,9 @@ function case1() {
 
 function case2() {
   set(ATZ, [], [m('HRAC', '5')]);
-  set(MESO, [], [m('HRAC', '27'), m('FRAC', 'm3')]);
+  set(MESO, [], [m('HRAC', '27'), m('FRAC', 'M10'), m('FRAC', 'm3')]);
   const g = groups(P2);
-  assert.equal(summary(g), 'HRAC 5, HRAC 27, FRAC M3', 'scheme order HRAC, FRAC, IRAC; 5 sorts before 27');
+  assert.equal(summary(g), 'HRAC 5, HRAC 27, FRAC M3, FRAC M10', 'scheme order HRAC, FRAC, IRAC; 5 sorts before 27; M3 before M10');
   assert.equal(ingOf(g, ATZ).schemes[0].status, 'matches', 'a typed group equal to the list is shown once');
   assert.deepEqual(ingOf(g, ATZ).schemes[0].live, ['5']);
   assert.equal(ingOf(g, MESO).schemes.map((s) => `${s.scheme}:${s.status}`).join(','), 'HRAC:derived,FRAC:derived');
@@ -393,7 +393,7 @@ function case5() {
   const s = ingOf(g, MESO).schemes.find((x) => x.scheme === 'HRAC');
   assert.equal(s.status, 'differs'); assert.deepEqual(s.live, ['5'], 'the typed group stays live');
   assert.deepEqual(s.derived, ['27']); assert.equal(s.typed[0].group_code, '5'); assert.equal(s.typed[0].source, 'typed');
-  assert.equal(summary(g), 'HRAC 5 differs, FRAC M3');
+  assert.equal(summary(g), 'HRAC 5 differs, FRAC M3, FRAC M10');
   console.log('[case] 5 a typed HRAC 5 where the ingredient list says HRAC 27 keeps HRAC 5 live, returns both, and is flagged as differing');
 }
 
@@ -413,6 +413,9 @@ function case7() {
   refused(ADMIN, SET(GLY, cur, [m('WSSA', '9')]), /CHEMISTRY_MOA_INVALID: scheme/);
   refused(ADMIN, SET(GLY, cur, [m('HRAC', '  ')]), /CHEMISTRY_MOA_INVALID: scheme/);
   refused(ADMIN, SET(GLY, cur, [m('HRAC', '12345678901')]), /CHEMISTRY_MOA_INVALID: scheme/);
+  refused(ADMIN, SET(GLY, cur, [m('HRAC', '\t\n')]), /CHEMISTRY_MOA_INVALID: scheme/);
+  refused(ADMIN, SET(GLY, cur, [m('HRAC', '9', '\t\n ')]), /CHEMISTRY_MOA_INVALID: say where HRAC 9 came from/);
+  refused(ADMIN, SET(GLY, cur, [m('HRAC', '9 A')]), /CHEMISTRY_MOA_INVALID: scheme/);
   refused(ADMIN, SET(GLY, cur, [{ ...m('HRAC', '9'), extra: 1 }]), /CHEMISTRY_MOA_INVALID: each group/);
   refused(ADMIN, SET(GLY, cur, [{ scheme: 'HRAC', group_code: '9' }]), /CHEMISTRY_MOA_INVALID: each group/);
   refused(ADMIN, SET(GLY, cur, [{ scheme: 'HRAC', group_code: 9, source_note: 'x' }]), /CHEMISTRY_MOA_INVALID: each group/);

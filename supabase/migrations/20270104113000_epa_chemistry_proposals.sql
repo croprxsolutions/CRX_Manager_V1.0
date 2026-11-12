@@ -854,6 +854,9 @@ BEGIN
   -- Locks (sheet 3.3): exclusive REG-1 pair, registration, parent chemistry, link row, proposal.
   PERFORM public._epa_registration_lock(true);
   SELECT * INTO v_reg FROM public.epa_registrations WHERE epa_registration = v_p.epa_registration FOR UPDATE;
+  -- The parent lock first (the chemistry writers' first lock), so a save in flight is waited out and then seen as
+  -- chemistry_changed (a hold), not CHEMISTRY_STALE (Codex App, 2026-11-11).
+  PERFORM 1 FROM public.product_parents WHERE id = v_p.parent_id FOR UPDATE;
   SELECT chemistry_version INTO v_chem FROM public.product_parent_chemistry_state WHERE parent_id = v_p.parent_id;
   v_chem := public._lock_parent_chemistry(v_p.parent_id, COALESCE(v_chem, 0));
   IF v_p.link_kind = 'parent_brand' THEN
@@ -889,23 +892,37 @@ BEGIN
   -- Holds (sheet 4.C steps 5-6): returned, not raised, so the hold is kept.
   IF NOT public._epa_link_carries(v_p.parent_id, v_p.epa_registration, v_p.link_kind, v_p.link_id) THEN
     v_hold := 'relinked';
-  ELSIF v_reg.registration_version IS DISTINCT FROM v_p.registration_version THEN
-    v_hold := 'registration_changed';
-  ELSIF v_chem IS DISTINCT FROM v_p.chemistry_version THEN
-    v_hold := 'chemistry_changed';
   ELSE
-    -- Same versions, so the same rows; the re-sort also catches an ingredient retired or added elsewhere.
+    -- Re-sort under the locks. Registration facts are compared by value, not by registration_version (Taha,
+    -- 2026-11-11): another parent's commit of the same number bumps the version without changing a fact and must
+    -- not hold this one. An accepted label item that now matches (confirm) is fine; any other change to it holds.
     v_now := public._epa_proposal_items(v_p.parent_id, v_p.epa_registration, v_p.epa_input);
-    FOR v_item IN SELECT e FROM jsonb_array_elements(v_p.items) e LOOP
+    FOR v_item IN SELECT e FROM jsonb_array_elements(v_p.items) e WHERE e->>'kind' = 'label' LOOP
       IF COALESCE((v_accept->>(v_item->>'item_id'))::boolean, (v_item->>'accept_default')::boolean) THEN
         v_new := NULL;
         SELECT e INTO v_new FROM jsonb_array_elements(v_now) e WHERE e->>'item_id' = v_item->>'item_id';
-        IF v_new IS NULL OR v_new->>'class' IS DISTINCT FROM v_item->>'class' OR v_new->'change' IS DISTINCT FROM v_item->'change' THEN
-          v_hold := 'chemistry_changed';
+        IF v_new IS NULL OR (v_new->>'class' IS DISTINCT FROM 'confirm'
+            AND (v_new->>'class' IS DISTINCT FROM v_item->>'class' OR v_new->'change' IS DISTINCT FROM v_item->'change')) THEN
+          v_hold := 'registration_changed';
           EXIT;
         END IF;
       END IF;
     END LOOP;
+    IF v_hold IS NULL AND v_chem IS DISTINCT FROM v_p.chemistry_version THEN
+      v_hold := 'chemistry_changed';
+    ELSIF v_hold IS NULL THEN
+      -- Same chemistry version, so the same rows; the re-sort also catches an ingredient retired or added elsewhere.
+      FOR v_item IN SELECT e FROM jsonb_array_elements(v_p.items) e WHERE e->>'kind' = 'ingredient' LOOP
+        IF COALESCE((v_accept->>(v_item->>'item_id'))::boolean, (v_item->>'accept_default')::boolean) THEN
+          v_new := NULL;
+          SELECT e INTO v_new FROM jsonb_array_elements(v_now) e WHERE e->>'item_id' = v_item->>'item_id';
+          IF v_new IS NULL OR v_new->>'class' IS DISTINCT FROM v_item->>'class' OR v_new->'change' IS DISTINCT FROM v_item->'change' THEN
+            v_hold := 'chemistry_changed';
+            EXIT;
+          END IF;
+        END IF;
+      END LOOP;
+    END IF;
   END IF;
   IF v_hold IS NOT NULL THEN
     UPDATE public.epa_chemistry_proposals SET status = 'held', hold_reason = v_hold, proposal_version = proposal_version + 1,

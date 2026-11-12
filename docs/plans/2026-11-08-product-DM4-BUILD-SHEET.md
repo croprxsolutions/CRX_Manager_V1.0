@@ -263,7 +263,7 @@ A call without `lookupId` behaves as today and records nothing, so the other scr
    - Refuse `EPA_PROPOSAL_NOT_OPEN` if the status is not `proposed`.
 5. **Hold checks**, in this order. The first one that fails sets `held` with that reason, writes nothing else, saves the idempotency result and **returns** `{status: 'held', hold_reason}`. It does not raise, so the hold is kept.
    - **Relinked:** the stored `link_kind`/`link_id` no longer carries this number on this parent (same four places, re-read under the locks).
-   - **Registration changed:** the registration's version is not the stored `registration_version`.
+   - **Registration changed:** an accepted label item, re-sorted against the registration now, is neither unchanged nor a `confirm` (Taha, 2026-11-11: compare facts, not `registration_version`, because another product's commit of the same number bumps the version without changing a fact). Checked before chemistry.
    - **Chemistry changed:** the chemistry state version is not the stored `chemistry_version`.
 6. **Sort the items again** against the locked rows. If any accepted item's class differs from the stored class, set `held` (`chemistry_changed`) as in step 5. This cannot normally happen once the version checks pass; it is a backstop.
 7. **Chemistry:** build `p_changes` from the accepted `add`, `add_name_only`, `fill` and `confirm` items only. Call `_apply_parent_chemistry(parent_id, p_changes, 'epa', 'EPA lookup proposal ' || p_proposal_id, jsonb_build_object('proposal_id', p_proposal_id, 'lookup_id', lookup_id, 'epa_registration', epa_registration))`. Skip the call if `p_changes` is empty.

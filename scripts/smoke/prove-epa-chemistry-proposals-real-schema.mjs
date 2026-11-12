@@ -255,16 +255,17 @@ const row = (sql) => JSON.parse(scalar(`SELECT COALESCE((${sql}), 'null'::jsonb)
 const PA = id('b01'), SA = id('c01'), BA = id('e01'), LBA = id('f01');  // H1 H2 H4 H7: number on parent, size, parent brand, legacy brand
 const P3 = id('b03'), P5 = id('b05'), S5 = id('c05'), P5B = id('b55'), P6 = id('b06'), P8 = id('b08'), P9 = id('b09'), S9 = id('c09');
 const P10 = id('b10'), P13 = id('b13'), P16 = id('b16'), P20 = id('b20'), S20 = id('c20'), P21 = id('b21'), P22 = id('b22');
-const P24 = id('b24'), P25 = id('b25'), P26 = id('b26');
+const P24 = id('b24'), P25 = id('b25'), P26 = id('b26'), P27 = id('b27'), P28 = id('b28');
 const ATRAZINE = id('aa1'), DICAMBA = id('aa2');
 const CUST = id('d01'), ORD = id('d02'), INV = id('d03'), LINE = id('d04');
 const PARENTS = [[PA, 'Alpha', '101-1'], [P3, 'Failures', '103-1'], [P5, 'Crop oil', '105-1'], [P5B, 'Crop oil B', '105-3'],
   [P6, 'Typed atrazine', '106-1'], [P8, 'Relookup', '108-1'], [P9, 'Two sessions', '109-1'], [P10, 'Gate', '110-1'],
   [P13, 'Rules', '113-1'], [P16, 'Cancelled', '116-1'], [P20, 'Restricted', null], [P21, 'Unregistered', '121-1'],
-  [P22, 'Workbook', '122-1'], [P24, 'Mixed', '124-1'], [P25, 'Too much', '125-1'], [P26, 'Restricted upgrade', '126-1']];
+  [P22, 'Workbook', '122-1'], [P24, 'Mixed', '124-1'], [P25, 'Too much', '125-1'], [P26, 'Restricted upgrade', '126-1'],
+  [P27, 'Shared A', '127-1'], [P28, 'Shared B', '127-1']];
 // Registrations (121-1 deliberately has none). 116-1 is cancelled; 120-1 is still restricted-use unknown.
 const REGS = ['101-1', '101-2', '101-3', '101-4', '103-1', '105-1', '105-2', '105-3', '106-1', '108-1', '109-1', '109-2',
-  '110-1', '113-1', '116-1', '120-1', '122-1', '124-1', '125-1', '126-1', '126-2'];
+  '110-1', '113-1', '116-1', '120-1', '122-1', '124-1', '125-1', '126-1', '126-2', '127-1'];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -290,6 +291,7 @@ function seed() {
     INSERT INTO public.epa_registrations (epa_registration, registration_status, cancelled_on, rup_status, created_by, updated_by) VALUES
       ${REGS.map(reg).join(', ')};
     UPDATE public.epa_registrations SET rup_status = CASE epa_registration WHEN '126-2' THEN 'yes' ELSE 'no' END WHERE epa_registration IN ('126-1', '126-2');
+    UPDATE public.epa_registrations SET signal_word = 'Caution', rup_status = 'no' WHERE epa_registration = '127-1';
     INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint) VALUES ('${ADMIN}', 'unknown', 'prover');
     -- Typed chemistry (source label) on two numbered parents, as DM-1 had before the gate.
     INSERT INTO public.active_ingredients (id, name, cas, created_by, updated_by) VALUES
@@ -723,6 +725,22 @@ function caseH25() {
   console.log('[case] H25 a commit DM-1 refuses (over 100%) leaves no ingredient, version, event, decision or receipt; the corrected retry commits, replays, and its event names the admin with before and after');
 }
 
+function caseH27() {
+  // Taha 2026-11-11: two parents share 127-1, whose registration already holds EPA's facts. Committing A confirms
+  // them (the registration version still moves); B must commit, not hold, because no fact changed.
+  const a = lookup(P27, '127-1', found('127-1', [['Glyphosate', 41]]));
+  const b = lookup(P28, '127-1', found('127-1', [['Glyphosate', 41]]));
+  assert.equal(item(proposal(b.proposal_id), 'label:signal_word').class, 'confirm');
+  const v0 = reg('127-1').registration_version;
+  assert.equal(js(ADMIN, COMMIT(a.proposal_id, 1)).status, 'committed');
+  assert.ok(reg('127-1').registration_version > v0, 'the first commit moved the registration version');
+  const cb = js(ADMIN, COMMIT(b.proposal_id, 1));
+  assert.equal(cb.status, 'committed', 'a version bump with no fact change does not hold');
+  assert.equal(cb.commit_result['label:signal_word'], 'confirmed');
+  assert.deepEqual(ingRows(P28), [{ name: 'Glyphosate', strength: 41, source: 'epa_lookup', note: 'EPA lookup of 127-1' }]);
+  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held');
+}
+
 async function caseH9H15() {
   // H9: a commit against a REG-1 writer, both orders.
   const p1 = lookup(P9, '109-1', found('109-1', [['Glyphosate', 41]])).proposal_id;
@@ -788,6 +806,7 @@ async function main() {
   caseH4H7(ps);
   caseH3();
   caseH5();
+  caseH27();
   caseH6H23();
   caseH8H19();
   caseH10();

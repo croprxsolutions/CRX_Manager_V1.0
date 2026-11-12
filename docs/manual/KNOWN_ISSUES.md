@@ -1330,13 +1330,26 @@ per order, and a payload change is refused with a conflict dialog that reloads t
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
 - `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
-- `get_customer_summary` and `operational_dashboard_summary` pick the season from the UTC `current_date`, so from 7 PM to midnight Central on 30 September they already count the new season (found by CodeRabbit on PR #1065, 2026-10-25; that PR keeps both bodies as live has them) (LOW).
+- `get_customer_summary` and `operational_dashboard_summary` season: FIXED by `20261204110000` (KI-18 batch 2,
+  applied live); both read the Chicago date (live bodies checked 2026-11-10).
 - Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
-- `create_invoice_from_order` copies a blank unit, so a mono-billed order line with no unit cannot get a return
-  credit (MED). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
+- Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
+  get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's
+  unit; a sale line with no unit takes the order line's unit, else the product's; a delivery always completes, and
+  posting a chemical-sale invoice is refused (`INVOICE_LINE_UNIT_MISSING`) while any product line, with or without an
+  order line, still has no unit (Mason, 2026-11-10: no sale line posts without a unit); `create_invoice_from_order`
+  refuses a no-unit line (`ORDER_LINE_UNIT_MISSING`); a quick-delivery line always records its product's unit
+  (Mason, 2026-11-10). Known limit: an old line whose order and invoice units are both empty text (0 live) is filled
+  with the product unit and its return is refused. Not backfilled (Mason's call): 2 open drafts have a line with
+  no unit (2026-11-10): **CS-2026-0056** and **CS-2026-0070**, one customer, a `Gal` product. Once applied, posting
+  either is refused until it is saved (it then takes `Gal`); a return on them stays refused, because their order
+  lines also have no unit (5 such order lines, all on fulfilled orders). Also open (PR #1731 follow-ups): a line
+  inserted at the same instant as a post, or an order line edited between the order-invoice check and its copy,
+  races the check like every post-time check (LOW); the screen message drops the line names the database gives
+  (LOW); one unposted field-application invoice has a product line with no unit (not checked by design). From Taha's review (2026-11-11): following the posting message on an old order line with no unit lets the invoice post, but the order line stays blank, so a return on it is still refused (LOW). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
   concurrent split-invoice void can leave a requested return unreceivable; credits apply manually; multi-price
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the

@@ -290,8 +290,9 @@ export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string)
  */
 async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<string, number> | null> {
   const inv = await db.from('invoices').select('order_id').eq('id', invoiceId).maybeSingle();
-  if (inv.error) throw new InvoiceDetailsUnavailableError();
-  const orderId = (inv.data as { order_id?: string | null } | null)?.order_id;
+  // get_bill_split_payers has already shown this invoice to this reader, so an empty read is a failure, not "no order".
+  if (inv.error || !inv.data) throw new InvoiceDetailsUnavailableError();
+  const orderId = (inv.data as { order_id?: string | null }).order_id;
   if (!orderId) return null;
   const [order, shares, lineShares] = await Promise.all([
     db.from('orders').select('customer_id, customer:customers(farm_name)').eq('id', orderId).maybeSingle(),

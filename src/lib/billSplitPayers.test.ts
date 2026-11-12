@@ -219,6 +219,11 @@ describe('loadBillSplitPayers', () => {
       }
       await expect(loadBillSplitPayers(client([bigSky, cedar], { main: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
       await expect(loadBillSplitPayers(client([bigSky, cedar], { lineShares: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+      // The key invoice itself came back empty (the payer read already showed it to this user): not "no order".
+      const hidden = { ...(client([bigSky, cedar]) as Record<string, unknown>) };
+      const base = (hidden.from as (t: string) => unknown);
+      hidden.from = (tb: string) => (tb === 'invoices' ? read({ data: null, error: null }) : base(tb));
+      await expect(loadBillSplitPayers(hidden as never, 'inv-1')).rejects.toThrow('Could not load the invoice details');
     });
 
     it('keeps the billed share for a payer invoice with no order', async () => {

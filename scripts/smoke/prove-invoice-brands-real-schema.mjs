@@ -789,9 +789,8 @@ async function main() {
   raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
   console.log('[prover] case 21: a split draft made with no brand and corrected to a restricted brand posts with no record under the product number and is listed as stale');
 
-  // 22. (Taha, PR #1825) A size whose product, number and every listed brand are known not restricted: a split that does
-  //     not add up owes no record and is not listed. Case 6 (the same mismatch where the size could have been Alpha)
-  //     stays listed. A restricted brand added to the list later brings the line back.
+  // 22. (Mason, 2026-11-11, "always show", after Sol r5) A size whose product, number and every listed brand are known
+  //     not restricted: a split that does not add up writes no record and is still listed.
   const PN = id(42), PAR2 = id(21), FOX = id(35);
   raw(`INSERT INTO public.products (id, product_name, sku, unit_size, product_form, current_cost, tier1_price, is_active, epa_registration, is_rup, signal_word)
       VALUES ('${PN}', '[PROVER] General 2.5', 'B1B-PN', 'GL', 'liquid', 6.00, 10.00, true, '500-1', false, 'Caution');
@@ -806,12 +805,9 @@ async function main() {
   const L26 = invLine(26);
   assert.equal(postAndGen(invOf(L26), 'b1b-g26'), 0);
   assert.deepEqual(records(L26), []);
-  assert.deepEqual(reasons(L26), [], 'a line that owes no record is not listed');
   assert.ok(scalar(`SELECT (public._invoice_line_brand_allocation('${L26}') ->> 'problem')`) === 'brand_split_mismatch', 'the mismatch is real');
-  raw(`INSERT INTO public.product_parent_brands (id, parent_id, brand_name, epa_registration, signal_word, status, created_by, updated_by)
-      VALUES ('${id(36)}', '${PAR2}', 'Golf', '100-1', 'Danger', 'active', '${ADMIN}', '${ADMIN}');`);
-  assert.deepEqual(reasons(L26), ['-:brand_split_mismatch'], 'unpicked units could now be a restricted brand');
-  console.log('[prover] case 22: a split that does not add up on a size that is known not restricted (product, number and every brand) is not listed; adding a restricted brand to its list lists it');
+  assert.deepEqual(reasons(L26), ['-:brand_split_mismatch'], 'listed even though nothing on the size is restricted');
+  console.log('[prover] case 22: a split that does not add up is listed even on a size known not restricted (product, number and every brand)');
 
 
   // 23. (Sol r3) The lookup a registration change uses: a branded line counts under the product's number too, and a
@@ -858,6 +854,32 @@ async function main() {
   assert.ok(reasons(L27).includes('Bravo:now_restricted_use'), `a Bravo sale posted before the tick is listed: ${reasons(L27)}`);
   raw(`UPDATE public.product_parent_brands SET is_rup = NULL WHERE id = '${BRAVO}';`);
   console.log('[prover] case 24: a brand ticked restricted on its own row records its sale even when its registration says No; an earlier sale of it is listed now restricted');
+
+  // 25. (Sol r5) A typed pick an admin linked to a listed brand ticked restricted use records its sale.
+  raw(`UPDATE public.product_parent_brands SET is_rup = true WHERE id = '${BRAVO}';`);
+  mkDelivery(30, [[PR, 2]]);
+  set(D(30), [{ delivery_item_id: DI(30, 0), picks: [typed('Bravo typo', 2, '100-2')] }], 'b1b-k30');
+  const typedPick = js(ADMIN, 'SELECT public.get_typed_brands_for_review()::text;').find((x) => x.delivery_id === D(30)).pick_id;
+  ok(ADMIN, `SELECT public.review_typed_brand('${typedPick}', 'link', '${BRAVO}', 'it was Bravo', 'b1b-r30')::text;`);
+  complete(D(30), { [DI(30, 0)]: 2 }, 'b1b-c30');
+  const L30 = invLine(30);
+  assert.equal(postAndGen(invOf(L30), 'b1b-g30'), 1, 'the linked brand tick records the sale');
+  assert.deepEqual(reasons(L30), []);
+  raw(`UPDATE public.product_parent_brands SET is_rup = NULL WHERE id = '${BRAVO}';`);
+  console.log('[prover] case 25: a typed pick linked by an admin to a brand ticked restricted records its sale');
+
+  // 26. (Codex, PR #1825) The product's own number not yet reviewed: a brand whose registration says No is still
+  //     listed not reviewed, never silently unrecorded.
+  raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${PR}';`);
+  mkDelivery(31, [[PR, 2]]);
+  set(D(31), [{ delivery_item_id: DI(31, 0), picks: [pick(BRAVO, 2)] }], 'b1b-k31');
+  complete(D(31), { [DI(31, 0)]: 2 }, 'b1b-c31');
+  const L31 = invLine(31);
+  postAndGen(invOf(L31), 'b1b-g31');
+  assert.ok(records(L31).length === 1 || reasons(L31).includes('Bravo:not_reviewed'), `recorded or listed: ${reasons(L31)}`);
+  assert.ok(reasons(L31).includes('Bravo:not_reviewed'), `listed not reviewed: ${reasons(L31)}`);
+  raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
+  console.log('[prover] case 26: a brand on a size whose own number is not reviewed is listed not reviewed');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

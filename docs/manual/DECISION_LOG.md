@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
+
+**Decision (Mason, 2026-11-11 late evening, in chat: "Yes, always show").** On PR #1825, every branded invoice line whose brands do not add up, no longer match the picks, have no brand recorded, or whose payers changed is listed on Sales to check, whether or not anything on it looks restricted use. This replaces the filter that listed those lines only where a record might be owed.
+**Why:** brands never block a sale, a delivery or a posting, so a few extra lines to check cost little; a filter that guesses what is restricted can hide a restricted sale. Sol rounds 1, 3, 4 and 5 each found a new case where deciding restricted use for a brand line went wrong.
+**What this forbids/implies:** `get_epa_sales_to_check` in `20270106110000_invoice_brands_rup.sql` lists the line-level brand reasons with no restricted-use filter. Hiding brand problems on unrestricted products again needs a new Mason decision.
+
 ## 2026-11-11 — #1825 (B-1b invoice brands): a brand's own restricted-use tick counts
 
 **Decision (Mason, 2026-11-11, in chat: "Yes, any tick counts").** A brand ticked restricted use on its own brand row makes that brand's sale restricted, as the product's tick does, even when the registration of its EPA number says No. This answers Sol round 4's HIGH on PR #1825.

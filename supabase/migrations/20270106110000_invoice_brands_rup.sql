@@ -290,7 +290,11 @@ AS $function$
                    JOIN public.delivery_item_brands d ON d.id = (e2.v ->> 'pick_id')::uuid
                    LEFT JOIN public.product_parent_brands pb ON pb.id = d.parent_brand_id
                    LEFT JOIN public.product_brands lb ON lb.id = d.legacy_brand_id
-                  WHERE e2.v ->> 'brand_key' = e.v ->> 'brand_key' AND COALESCE(pb.is_rup, lb.is_rup, false))
+                   -- A typed pick an admin linked to a listed brand reads that brand's tick too.
+                   LEFT JOIN public.product_parent_brands rpb ON d.review_state = 'added' AND rpb.id = d.review_brand_ref
+                   LEFT JOIN public.product_brands rlb ON d.review_state = 'added' AND rlb.id = d.review_brand_ref
+                  WHERE e2.v ->> 'brand_key' = e.v ->> 'brand_key'
+                    AND (COALESCE(pb.is_rup, lb.is_rup, false) OR COALESCE(rpb.is_rup, rlb.is_rup, false)))
     FROM e
    ORDER BY e.v ->> 'brand_key', e.i;
 $function$;
@@ -1109,7 +1113,7 @@ BEGIN
            COALESCE(al.product_is_rup, false) OR r.rup_status = 'yes' OR pr.rup_status = 'yes'
              OR EXISTS (SELECT 1 FROM public._invoice_line_brand_keys(al.brand_lines) k
                          WHERE k.brand_key = b.value ->> 'brand_key' AND k.ticked) AS yes_now,
-           r.rup_status AS registration_rup_status_now,
+           r.rup_status AS registration_rup_status_now, pr.rup_status AS product_registration_rup_status_now,
            EXISTS (SELECT 1 FROM rup_sales_records s WHERE s.invoice_item_id = al.line_id AND s.voided_at IS NULL
                       AND s.brand_key = b.value ->> 'brand_key') AS has_record,
            b.value ->> 'brand_key' AS brand_key, b.value ->> 'brand_name' AS brand_name,
@@ -1136,7 +1140,8 @@ BEGIN
                 WHEN rup_status = 'yes' OR has_record THEN NULL
                 WHEN yes_now THEN 'now_restricted_use'
                 WHEN rup_status = 'unknown' AND epa_registration IS NOT NULL
-                 AND COALESCE(registration_rup_status_now, 'unknown') = 'unknown' THEN 'not_reviewed'
+                 AND (COALESCE(registration_rup_status_now, 'unknown') = 'unknown'
+                      OR COALESCE(product_registration_rup_status_now, 'unknown') = 'unknown') THEN 'not_reviewed'
                 ELSE NULL END
       FROM brands
     UNION ALL
@@ -1168,32 +1173,9 @@ BEGIN
                                    WHERE b.value ->> 'brand_key' = s.brand_key
                                      AND (b.value ->> 'quantity')::numeric = s.quantity))
              THEN 'payer_split_changed' END)) f(reason)
-     -- Only a line that may owe a restricted-use record (Taha, PR #1825): kept unless the product, every number on the
-     -- line, every stored or current brand and every brand the size could have been (unpicked units) is known 'no'.
-     CROSS JOIN LATERAL (SELECT
-         COALESCE(l.product_is_rup, false)
-         OR EXISTS (SELECT 1 FROM rup_sales_records s WHERE s.invoice_item_id = l.line_id AND s.voided_at IS NULL)
-         OR EXISTS (SELECT 1 FROM invoice_line_rup_captures c
-                     WHERE c.invoice_item_id = l.line_id AND c.rup_status IS DISTINCT FROM 'no')
-         OR EXISTS (SELECT 1 FROM invoice_line_brand_rup_captures c
-                     WHERE c.invoice_item_id = l.line_id AND c.rup_status IS DISTINCT FROM 'no')
-         OR EXISTS (SELECT 1 FROM public._delivery_line_brand_list(l.product_id) bl WHERE COALESCE(bl.is_rup, false))
-         OR EXISTS (
-              SELECT 1
-                FROM (SELECT l.product_number AS n
-                      UNION ALL SELECT l.saved_number WHERE l.saved_number IS NOT NULL
-                      UNION ALL SELECT public._normalize_epa_registration(bl.epa_registration)
-                                  FROM public._delivery_line_brand_list(l.product_id) bl
-                      UNION ALL SELECT public._normalize_epa_registration(e ->> 'epa_registration')
-                                  FROM jsonb_array_elements(
-                                         CASE WHEN jsonb_typeof(l.brand_lines) = 'array' THEN l.brand_lines ELSE '[]'::jsonb END
-                                         || CASE WHEN l.order_item_id IS NOT NULL
-                                                 THEN COALESCE(public._invoice_line_brand_lines(l.invoice_id, l.order_item_id, l.product_id), '[]'::jsonb)
-                                                 ELSE '[]'::jsonb END) e
-                                 WHERE e ->> 'brand_key' <> 'n:') x
-                LEFT JOIN epa_registrations r ON r.epa_registration = x.n
-               WHERE x.n IS NULL OR r.rup_status IS DISTINCT FROM 'no') AS may_owe) m
-     WHERE f.reason IS NOT NULL AND m.may_owe
+     -- Every brand problem is listed, restricted or not (Mason, 2026-11-11): brands never block, so a
+     -- few extra lines to check beat a restricted sale hidden by a filter.
+     WHERE f.reason IS NOT NULL
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'line_id', line_id, 'invoice_id', invoice_id, 'invoice_number', invoice_number, 'invoice_date', invoice_date,

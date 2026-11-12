@@ -10,6 +10,8 @@
 - Brands never stop a sale, a save, a posting or a correction (Mason, 2026-11-09). A line whose brands do not add up,
   bills more than was delivered, overlaps another invoice, or whose payers disagree gets no brand record and is
   listed on Sales to check with the reason; so is a brand with no EPA number and a delivery with no brand recorded.
+- A brand ticked restricted use on its own row, or the brand an admin linked a typed pick to, makes its sale restricted
+  (Mason, 2026-11-11). Every brand problem shows on Sales to check, restricted or not (Mason, 2026-11-11).
 - An admin correction of a delivery's brands re-copies open draft invoices when it saves; posted invoices never change.
 - The RUP register and its CSV show the brand; typed brands on voided or cancelled deliveries leave the review list.
 - Proof: `node scripts/smoke/prove-invoice-brands-real-schema.mjs`.

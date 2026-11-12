@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `3657639bbb62`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `3657639bbb62` (base `f52b9a05acec`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/lib/invoiceBrandWarnings.ts:85`, text sha256 `d04464577f300d52` (the wording stays with the proof, not here)
+  Mason's reason: deliveries are not in use yet and Sales to check still lists the line (ref 3747e8e82666)
+
 ## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
 
 **Decision (Mason, 2026-11-11 late evening, in chat: "Yes, always show").** On PR #1825, every branded invoice line whose brands do not add up, no longer match the picks, have no brand recorded, or whose payers changed is listed on Sales to check, whether or not anything on it looks restricted use. This replaces the filter that listed those lines only where a record might be owed.

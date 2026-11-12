@@ -31,8 +31,8 @@ const FORMAT_VERSION = 'crx-rate-review-v1';
 /** Blank rows under the rates, for adding a rate (any parent, by name). */
 export const BLANK_RATE_ROWS = 100;
 /** commit_rate_review takes at most this many rows of each kind. */
-export const MAX_RATE_REVIEW_RATE_ROWS = 3000;
-export const MAX_RATE_REVIEW_OUTCOME_ROWS = 1000;
+const MAX_RATE_REVIEW_RATE_ROWS = 3000;
+const MAX_RATE_REVIEW_OUTCOME_ROWS = 1000;
 
 const RATE_EDITABLE = [
   'basis', 'source', 'low', 'recommended', 'high', 'unit', 'is_quoting_default', 'over_label_reason', 'decision', 'reason',
@@ -118,6 +118,34 @@ async function styleSheet(sheet: Worksheet, headers: readonly string[], rowCount
   await sheet.protect('crx-rate-review-layout', { selectLockedCells: true, selectUnlockedCells: true, autoFilter: true, sort: true });
 }
 
+type ExportParent = RateReviewWorkbook['parents'][number];
+const decidedText = (by: string | null | undefined, at: string | null | undefined) => `${by ?? ''} ${at?.slice(0, 10) ?? ''}`.trim();
+
+/** One Draft Rates row; the hidden row_state keeps the downloaded id, version and values. */
+function rateSheetRow(parent: ExportParent, r: ExportParent['rates'][number]): string[] {
+  const values: RateValues = {
+    basis: r.basis, source: r.source, low: r.low, recommended: r.recommended, high: r.high, unit: r.unit,
+    is_quoting_default: r.is_quoting_default, over_label_reason: r.over_label_reason,
+  };
+  const state = { rate_id: r.rate_id, parent_id: parent.parent_id, row_version: r.row_version, ...values };
+  return [r.rate_id, JSON.stringify(state), parent.parent_name, r.status,
+    r.approved_by || r.approved_at ? decidedText(r.approved_by, r.approved_at) : '',
+    r.origin, r.source_text ?? '', yesNo(r.basis_confirmed), labelCheckText(r.label_check),
+    r.basis, r.source, r.low ?? '', r.recommended ?? '', r.high ?? '', r.unit, yesNo(r.is_quoting_default),
+    r.over_label_reason ?? '', '', ''];
+}
+
+/** One Rate Outcomes row. */
+function outcomeSheetRow(parent: ExportParent): string[] {
+  const drafts = parent.rates.filter((r) => r.status === 'draft').length;
+  const state = { parent_id: parent.parent_id, outcome_version: parent.outcome_version, outcome: parent.outcome, note: parent.outcome_note };
+  return [parent.parent_id, JSON.stringify(state), parent.parent_name, parent.product_form, parent.sizes.join('; '),
+    `${parent.rates.length} (${drafts} draft, ${parent.rates.length - drafts} approved)`,
+    parent.notes.map(noteText).filter(Boolean).join('; '),
+    parent.outcome ? decidedText(parent.outcome_decided_by, parent.outcome_decided_at) : '',
+    parent.outcome_problem ?? '', parent.outcome ?? '', parent.outcome_note ?? ''];
+}
+
 /** The download: Draft Rates, Rate Outcomes, a Units list and a hidden manifest. Grey cells are for reference. */
 export async function generateRateReviewWorkbook(exported: RateReviewWorkbook): Promise<Blob> {
   const ExcelJS = await loadExcelJs();
@@ -129,16 +157,7 @@ export async function generateRateReviewWorkbook(exported: RateReviewWorkbook): 
   let rateCount = 0;
   for (const parent of exported.parents) {
     for (const r of parent.rates) {
-      const values: RateValues = {
-        basis: r.basis, source: r.source, low: r.low, recommended: r.recommended, high: r.high, unit: r.unit,
-        is_quoting_default: r.is_quoting_default, over_label_reason: r.over_label_reason,
-      };
-      const state = { rate_id: r.rate_id, parent_id: parent.parent_id, row_version: r.row_version, ...values };
-      rates.addRow([r.rate_id, JSON.stringify(state), parent.parent_name, r.status,
-        r.approved_by || r.approved_at ? `${r.approved_by ?? ''} ${r.approved_at?.slice(0, 10) ?? ''}`.trim() : '',
-        r.origin, r.source_text ?? '', yesNo(r.basis_confirmed), labelCheckText(r.label_check),
-        r.basis, r.source, r.low ?? '', r.recommended ?? '', r.high ?? '', r.unit, yesNo(r.is_quoting_default),
-        r.over_label_reason ?? '', '', '']);
+      rates.addRow(rateSheetRow(parent, r));
       rateCount += 1;
     }
   }
@@ -158,15 +177,7 @@ export async function generateRateReviewWorkbook(exported: RateReviewWorkbook): 
 
   const outcomes = workbook.addWorksheet(OUTCOMES_SHEET);
   outcomes.addRow([...OUTCOME_HEADERS]);
-  for (const parent of exported.parents) {
-    const drafts = parent.rates.filter((r) => r.status === 'draft').length;
-    const state = { parent_id: parent.parent_id, outcome_version: parent.outcome_version, outcome: parent.outcome, note: parent.outcome_note };
-    outcomes.addRow([parent.parent_id, JSON.stringify(state), parent.parent_name, parent.product_form, parent.sizes.join('; '),
-      `${parent.rates.length} (${drafts} draft, ${parent.rates.length - drafts} approved)`,
-      parent.notes.map(noteText).filter(Boolean).join('; '),
-      parent.outcome ? `${parent.outcome_decided_by ?? ''} ${parent.outcome_decided_at?.slice(0, 10) ?? ''}`.trim() : '',
-      parent.outcome_problem ?? '', parent.outcome ?? '', parent.outcome_note ?? '']);
-  }
+  for (const parent of exported.parents) outcomes.addRow(outcomeSheetRow(parent));
   await styleSheet(outcomes, OUTCOME_HEADERS, exported.parents.length, (name) => OUTCOME_EDITABLE.has(name));
   outcomes.getCell(1, OUTCOME_HEADERS.indexOf('outcome') + 1).note =
     'approved_default (every rate approved, one approved quoting default), no_per_acre_default (every rate approved, no default), needs_label_data (hold back), or blank (undecided).';
@@ -185,15 +196,16 @@ export async function generateRateReviewWorkbook(exported: RateReviewWorkbook): 
   return new Blob([new Uint8Array(buffer as unknown as ArrayBuffer)], { type: PRICING_WORKBOOK_MIME });
 }
 
-function readRows<H extends string>(sheet: Worksheet | undefined, name: string, headers: readonly H[]): Array<Record<H, string> & { sheetRow: number }> {
+type SheetRow<H extends string> = Record<H, string> & { sheetRow: number };
+function readRows<H extends string>(sheet: Worksheet | undefined, name: string, headers: readonly H[]): Array<SheetRow<H>> {
   if (!sheet) throw new PricingWorkbookFormatError(`Missing the ${name} sheet. Download a fresh rate review workbook.`);
   const found = headers.map((_, index) => cellValueToText(sheet.getRow(1).getCell(index + 1).value, `${name} header ${index + 1}`));
   if (sheet.getRow(1).cellCount !== headers.length || headers.some((header, index) => found[index] !== header)) {
     throw new PricingWorkbookFormatError(`The ${name} sheet's columns do not match the CRX rate review workbook. Download a fresh one.`);
   }
-  const rows: Array<Record<H, string> & { sheetRow: number }> = [];
+  const rows: Array<SheetRow<H>> = [];
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
-    const row = { sheetRow: rowNumber } as Record<H, string> & { sheetRow: number };
+    const row = { sheetRow: rowNumber } as SheetRow<H>;
     headers.forEach((header, index) => {
       const cell = sheet.getCell(rowNumber, index + 1);
       if (isFormulaValue(cell.value)) throw new PricingWorkbookFormatError(`${name} row ${rowNumber}, ${header} has a formula. Type the value instead.`);
@@ -219,6 +231,58 @@ function parseDecision(text: string, where: string): RateReviewRateRow['decision
   throw new PricingWorkbookFormatError(`${where}: decision must be approve, reopen, delete or blank.`);
 }
 
+const parseState = <T>(text: string, damaged: Error): T => {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw damaged;
+  }
+};
+
+/** An edited Rate Outcomes row, or null when it matches the download. */
+function parseOutcomeRow(row: SheetRow<(typeof OUTCOME_HEADERS)[number]>): OutcomeUpload | null {
+  const damaged = new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} is damaged (its hidden download record or parent id). Download a fresh workbook.`);
+  const saved = parseState<{ parent_id?: unknown; outcome_version?: unknown; outcome?: unknown; note?: unknown } | null>(row.row_state, damaged);
+  if (!saved || saved.parent_id !== row.parent_id || typeof saved.outcome_version !== 'number') throw damaged;
+  const outcome = blankToNull(row.outcome.toLowerCase());
+  if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
+    throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
+  }
+  const note = blankToNull(row.note);
+  if (outcome === (saved.outcome ?? null) && note === ((saved.note as string | null)?.trim() || null)) return null;
+  return { sheetRow: row.sheetRow, parent_name: row.parent_name, parent_id: row.parent_id,
+    expected_outcome_version: saved.outcome_version, outcome: outcome as ProductRateOutcome | null, note };
+}
+
+/** An edited or new Draft Rates row, or null when it matches the download (or is an empty blank row). */
+function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName: Map<string, string>): RateUpload | null {
+  const where = `Draft Rates row ${row.sheetRow}`;
+  const values = {
+    basis: blankToNull(row.basis), source: blankToNull(row.source), low: blankToNull(row.low),
+    recommended: blankToNull(row.recommended), high: blankToNull(row.high), unit: blankToNull(row.unit),
+    over_label_reason: blankToNull(row.over_label_reason),
+  };
+  const decision = parseDecision(row.decision, where);
+  const reason = blankToNull(row.reason);
+  if (row.rate_id === '' && row.row_state === '') {
+    if (!RATE_EDITABLE.some((field) => row[field] !== '')) return null;
+    const parentId = parentByName.get(row.parent_name.toLowerCase());
+    if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
+    return { sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: null, parent_id: parentId, expected_row_version: null,
+      ...values, is_quoting_default: parseYesNo(row.is_quoting_default, where), decision, reason };
+  }
+  const damaged = new PricingWorkbookFormatError(`${where} is damaged (its hidden download record or rate id). Download a fresh workbook.`);
+  const saved = parseState<(Partial<RateValues> & { rate_id?: unknown; parent_id?: unknown; row_version?: unknown }) | null>(row.row_state, damaged);
+  if (!saved || saved.rate_id !== row.rate_id || typeof saved.parent_id !== 'string' || typeof saved.row_version !== 'number') throw damaged;
+  const isDefault = parseYesNo(row.is_quoting_default, where);
+  const edited = decision != null || reason != null || isDefault !== saved.is_quoting_default
+    || (['basis', 'source', 'unit', 'over_label_reason'] as const).some((f) => values[f] !== (saved[f] ?? null))
+    || (['low', 'recommended', 'high'] as const).some((f) => decimalKey(values[f]) !== decimalKey(saved[f] ?? null));
+  if (!edited) return null;
+  return { sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: row.rate_id, parent_id: saved.parent_id,
+    expected_row_version: saved.row_version, ...values, is_quoting_default: isDefault, decision, reason };
+}
+
 /**
  * Reads the upload back. Draft Rates: an existing row is sent only when a value, decision or reason changed;
  * a blank row with anything typed in it is a new rate for the named parent. Rate Outcomes: only edited rows.
@@ -240,64 +304,19 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
     throw new PricingWorkbookFormatError('This is not a CRX rate review workbook. Download a fresh one from Rate Review.');
   }
 
-  const outcomeRows = readRows(workbook.getWorksheet(OUTCOMES_SHEET), OUTCOMES_SHEET, OUTCOME_HEADERS);
   const parentByName = new Map<string, string>();
   const outcomes: OutcomeUpload[] = [];
-  for (const row of outcomeRows) {
+  for (const row of readRows(workbook.getWorksheet(OUTCOMES_SHEET), OUTCOMES_SHEET, OUTCOME_HEADERS)) {
     if (row.parent_id === '' && row.row_state === '') continue;
-    const damaged = new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} is damaged (its hidden download record or parent id). Download a fresh workbook.`);
-    let saved: { parent_id?: unknown; outcome_version?: unknown; outcome?: unknown; note?: unknown };
-    try {
-      saved = JSON.parse(row.row_state);
-    } catch {
-      throw damaged;
-    }
-    if (!saved || saved.parent_id !== row.parent_id || typeof saved.outcome_version !== 'number') throw damaged;
     parentByName.set(row.parent_name.toLowerCase(), row.parent_id);
-    const outcome = blankToNull(row.outcome.toLowerCase());
-    if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
-      throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
-    }
-    const note = blankToNull(row.note);
-    if (outcome === (saved.outcome ?? null) && note === ((saved.note as string | null)?.trim() || null)) continue;
-    outcomes.push({ sheetRow: row.sheetRow, parent_name: row.parent_name, parent_id: row.parent_id,
-      expected_outcome_version: saved.outcome_version, outcome: outcome as ProductRateOutcome | null, note });
+    const edited = parseOutcomeRow(row);
+    if (edited) outcomes.push(edited);
   }
 
   const rates: RateUpload[] = [];
   for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS)) {
-    const where = `Draft Rates row ${row.sheetRow}`;
-    const typed = RATE_EDITABLE.some((field) => row[field] !== '');
-    const values = {
-      basis: blankToNull(row.basis), source: blankToNull(row.source), low: blankToNull(row.low),
-      recommended: blankToNull(row.recommended), high: blankToNull(row.high), unit: blankToNull(row.unit),
-      over_label_reason: blankToNull(row.over_label_reason),
-    };
-    const decision = parseDecision(row.decision, where);
-    const reason = blankToNull(row.reason);
-    if (row.rate_id === '' && row.row_state === '') {
-      if (!typed) continue;
-      const parentId = parentByName.get(row.parent_name.toLowerCase());
-      if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
-      rates.push({ sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: null, parent_id: parentId, expected_row_version: null,
-        ...values, is_quoting_default: parseYesNo(row.is_quoting_default, where), decision, reason });
-      continue;
-    }
-    const damaged = new PricingWorkbookFormatError(`${where} is damaged (its hidden download record or rate id). Download a fresh workbook.`);
-    let saved: Partial<RateValues> & { rate_id?: unknown; parent_id?: unknown; row_version?: unknown };
-    try {
-      saved = JSON.parse(row.row_state);
-    } catch {
-      throw damaged;
-    }
-    if (!saved || saved.rate_id !== row.rate_id || typeof saved.parent_id !== 'string' || typeof saved.row_version !== 'number') throw damaged;
-    const isDefault = parseYesNo(row.is_quoting_default, where);
-    const edited = decision != null || reason != null || isDefault !== saved.is_quoting_default
-      || (['basis', 'source', 'unit', 'over_label_reason'] as const).some((f) => values[f] !== (saved[f] ?? null))
-      || (['low', 'recommended', 'high'] as const).some((f) => decimalKey(values[f]) !== decimalKey(saved[f] ?? null));
-    if (!edited) continue;
-    rates.push({ sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: row.rate_id, parent_id: saved.parent_id,
-      expected_row_version: saved.row_version, ...values, is_quoting_default: isDefault, decision, reason });
+    const edited = parseRateRow(row, parentByName);
+    if (edited) rates.push(edited);
   }
 
   if (rates.length > MAX_RATE_REVIEW_RATE_ROWS || outcomes.length > MAX_RATE_REVIEW_OUTCOME_ROWS) {

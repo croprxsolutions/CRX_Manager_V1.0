@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: node --test .github/scripts/release-flow.test.mjs
+      - run: node --test .github/scripts/release-flow.test.mjs .github/scripts/release-slack.test.mjs
 
   guard:
     # One check per base, so a run on a staging PR can never satisfy the one required on main.
@@ -116,6 +116,42 @@ jobs:
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet."; exit 0; fi
           gh workflow run release-pr.yml --ref main -f create=false
 
+  back-merge-reminder:
+    # Nightly, Slack only: a back-merge still open 12 hours after a release or hotfix gets one
+    # broadcast warning in its thread. Touches no branch, PR content or status.
+    name: Back-merge reminder
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    permissions:
+      contents: read
+    env:
+      RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
+    steps:
+      - name: Switched on?
+        id: on
+        run: if [ "$RELEASE_FLOW" = "on" ]; then echo "yes=1" >> "$GITHUB_OUTPUT"; else echo "::notice::Release flow not switched on yet."; fi
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Release bot token
+        if: steps.on.outputs.yes
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+          permission-contents: read # was the back-merge a merge commit?
+          permission-pull-requests: write
+      - if: steps.on.outputs.yes
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+        run: node .github/scripts/release-flow.mjs back-merge-slack
+
   back-merge:
     name: Back-merge main into staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -141,28 +177,45 @@ jobs:
         id: need
         run: |
           if [ "$RELEASE_FLOW" != "on" ]; then echo "::notice::Release flow not switched on yet; no back-merge PR."; exit 0; fi
+          echo "on=1" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor origin/main origin/staging; then echo "staging already contains main"; exit 0; fi
           echo "yes=1" >> "$GITHUB_OUTPUT"
       # The release bot App, not GITHUB_TOKEN: this repo doesn't let Actions open PRs, and a PR the
       # built-in token opens gets no CI runs of its own.
       - name: Release bot token
-        if: steps.need.outputs.yes
+        if: steps.need.outputs.on
         id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}
       - name: Open the back-merge PR
+        id: bm
         if: steps.need.outputs.yes
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           # Owner-qualified, so a fork's own "main" branch PR doesn't count as the back-merge.
           open=$(gh api "repos/$GH_REPO/pulls?state=open&base=staging&head=$OWNER:main" --jq '.[0].number // empty')
-          if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; exit 0; fi
-          gh pr create --base staging --head main \
+          if [ -n "$open" ]; then echo "::notice::Back-merge PR #$open is already open; it now carries ${SHA:0:9} too."; echo "number=$open" >> "$GITHUB_OUTPUT"; exit 0; fi
+          url=$(gh pr create --base staging --head main \
             --title "chore(staging): back-merge main after ${SHA:0:9}" \
             --body "$(printf '%s\n' \
               'Brings what just landed on main (a release or a hotfix) back into staging, so main stays inside staging.' '' \
               '**Merge with "Create a merge commit", never squash.** Same day, please: the "Main inside staging" check stays red until this lands.' '' \
-              'Opened by the release flow workflow.' '' '## Follow-ups' '- None')"
+              'Opened by the release flow workflow.' '' '## Follow-ups' '- None')")
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+          echo "new=1" >> "$GITHUB_OUTPUT"
+      # The release card turns "shipped", "vX.Y.Z is live" (or the hotfix) is posted, and the
+      # back-merge (new, or already open) is threaded under it. Optional: without the Slack secrets nothing is posted.
+      - name: Tell Slack
+        if: steps.need.outputs.on
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BACK_MERGE_PR: ${{ steps.bm.outputs.number }}
+          BACK_MERGE_NEW: ${{ steps.bm.outputs.new }}
+          SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
+          SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+        run: node .github/scripts/release-flow.mjs main-pushed

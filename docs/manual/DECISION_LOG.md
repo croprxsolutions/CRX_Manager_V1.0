@@ -17,6 +17,23 @@ with git's union driver, so two rewrites of one old entry would both survive a m
   Mason's reason: this cannot happen in our buisness (ref bd104087d7ef)
 
 **What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
+
+**Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".
+**Why:** CMP-2 is the last and largest product-comparison build; Mason wants to look at its plan again before any work starts.
+**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here.
+
+## 2026-11-11 — Resistance mode-of-action groups: shown on the product, later on quotes
+
+**Decision (Mason, 2026-11-11):** "on the product setup when it pulls in and we set the active ingredients it keeps track of which FRAC groups that product contains, and have option in quotes page to select to show the active ingredients and FRAC mode of action to help growers decide."
+**Why:** growers rotate chemistry to slow resistance; seeing each product's groups helps them choose.
+**What this forbids/implies:** logged as two future items, neither scheduled. Mason said FRAC; the item covers the resistance mode-of-action group for every chemical type (FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides). **Part A** (the product shows its groups, filled from its ingredients when actives come from the EPA lookup or the workbook) is MOA-1 in the grand plan, after DM-1b; Mason places it. **Part B** (an option on the quote page to show each line's actives and groups to the grower) is a To-Do "Later features" item and is held: Taha is working on the quote and chemical-sales screens, so no quote-screen file is touched until his UI PRs land.
+
+## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
+
+**Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.
+**Why:** brands never block delivery work (Mason, 2026-11-09). The only cost is a rare clash when a line is deleted at the same moment the delivery completes: the database cancels one of the two and that person retries. Nothing is lost or miscounted.
+**What this forbids/implies:** the line-delete trigger in `20270104120000_delivery_brands.sql` keeps allowing the delete and accepts that rare retry; changing it to refuse the delete needs a new Mason decision.
 
 ## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
 

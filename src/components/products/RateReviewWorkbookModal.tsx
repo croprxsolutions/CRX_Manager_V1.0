@@ -150,6 +150,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
 
   const runPreview = async (parsed: ParsedRateReview) => {
     setPreview(null);
+    setResumed(false);
     setPreview(await previewRateReview(parsed));
   };
 
@@ -201,6 +202,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       // lost reply to a save that went through: keep the preview so Confirm retries with the same key and gets the receipt.
       if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) {
         unanswered.current = null;
+        setResumed(false);
         setPreview(null);
       } else unanswered.current = { upload: JSON.stringify([profileId, upload]), preview };
     } finally {

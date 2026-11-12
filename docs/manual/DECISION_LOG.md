@@ -15,6 +15,12 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
 **Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Do not re-raise this as a regression; changing it needs the order line written (a backfill Mason decides).
+## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
+
+**Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.
+**Why:** brands never block delivery work (Mason, 2026-11-09). The only cost is a rare clash when a line is deleted at the same moment the delivery completes: the database cancels one of the two and that person retries. Nothing is lost or miscounted.
+**What this forbids/implies:** the line-delete trigger in `20270104120000_delivery_brands.sql` keeps allowing the delete and accepts that rare retry; changing it to refuse the delete needs a new Mason decision.
+
 ## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
 
 **Decision (Mason, in chat, 2026-11-11: "I should be able to pre authorize migration … I rely on testing and verification", then "All but deletions").** A migration that overwrites existing rows or changes who can access what no longer needs his `I approve` reply; it applies on the same two reviewer proofs, Sol proof and landing gate as any non-destructive migration. A migration that deletes data still needs his reply for that exact file, and so does one whose rewrite or access check crashed.

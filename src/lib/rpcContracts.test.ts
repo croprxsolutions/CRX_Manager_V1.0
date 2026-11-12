@@ -2874,6 +2874,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261231220000',
   '20270103160000',
   '20270104100000',
+  '20270104110000',
 ]);
 
 /**
@@ -3150,6 +3151,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'record_epa_lookup',
   'reject_epa_proposal',
   'start_epa_lookup',
+  // 20270104110000 (RT-3, local candidate): admin-only rate review commit; replays through _product_parent_replay
+  // and saves its receipt. Prune once the generated types carry it.
+  'commit_rate_review',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3295,6 +3299,16 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'admin read-only preview (DM-1b, 20270103160000): rehearses each row inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   preview_ingredients_tab:
     'admin read-only preview (DM-1b, 20270103160000): rehearses each parent inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20270104110000 (RT-3, local candidate): private helpers, the clear trigger and the dry-run preview. Prune once
+  // applied and the registry high-water moves past it.
+  _product_rate_review_approve: 'internal RT-3 helper (20270104110000): approves one locked draft, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_reopen: 'internal RT-3 helper (20270104110000): sends one locked approved row back to draft, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_outcome: 'internal RT-3 helper (20270104110000): sets or clears one parent outcome at its expected version, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_run: 'internal RT-3 helper (20270104110000): runs one whole review upload, called only by commit_rate_review after its replay check (child RT-1 writers get keys derived from the commit key) or by preview_rate_review, which always rolls back; every API-role EXECUTE is revoked',
+  _product_rates_clear_outcome:
+    'AFTER row trigger on product_rates (RT-3): any rate change makes the parent undecided and moves its outcome version; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  preview_rate_review:
+    'admin read-only preview (RT-3, 20270104110000): runs the whole upload inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   // 20261229110000 (RT-1, local candidate): private helpers behind derive_draft_product_rates. Prune once applied
   // and the registry high-water moves past it.
   _product_rate_derive_parent: 'internal RT-1 helper (20261229110000): derives one parent, called only by derive_draft_product_rates after its replay check; every API-role EXECUTE is revoked',

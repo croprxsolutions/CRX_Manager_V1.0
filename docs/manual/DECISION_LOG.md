@@ -10,6 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `53f376a556db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `53f376a556db` (base `11ea9ce0c24e`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:283`, text sha256 `fc91aa9d83feaa27` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref 9741c7ce503f)
+- Finding 2 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:227`, text sha256 `b91a5b074e4b2e15` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref abe447cbbba5)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `9554792cbe99`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `9554792cbe99` (base `a9864de8dfb1`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

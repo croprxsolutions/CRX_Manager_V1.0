@@ -21,6 +21,7 @@ function errorText(error: unknown): string {
 function LatestText({ summary }: { summary: NumberSummary }) {
   const { latest } = summary;
   if (latest.kind === 'running') return <span>Looking up…</span>;
+  if (latest.kind === 'expired') return <span>The last lookup did not finish; run it again</span>;
   if (latest.kind === 'failure') {
     const { failure } = latest;
     return (

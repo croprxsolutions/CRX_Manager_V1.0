@@ -117,6 +117,7 @@ export interface NumberSummary {
   latest:
     | { kind: 'none' }
     | { kind: 'running'; lookup: EpaLookup }
+    | { kind: 'expired'; lookup: EpaLookup }
     | { kind: 'proposal'; proposal: EpaChemistryProposal }
     | { kind: 'failure'; failure: EpaLookupFailure };
   /** The newest committed proposal, for the differences EPA showed that were kept (D-L). */
@@ -131,6 +132,8 @@ export function summarizeNumber(state: ParentEpaState, epaNumber: string, now: n
   let latest: NumberSummary['latest'] = { kind: 'none' };
   if (newest?.status === 'pending' && now - Date.parse(newest.requested_at) < LOOKUP_EXPIRY_MS) {
     latest = { kind: 'running', lookup: newest };
+  } else if (newest?.status === 'pending') {
+    latest = { kind: 'expired', lookup: newest };
   } else if (newest?.status === 'recorded') {
     const proposal = proposals.find((p) => p.lookup_id === newest.id);
     const failure = state.failures.find((f) => f.lookup_id === newest.id);

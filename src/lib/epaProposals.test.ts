@@ -30,9 +30,9 @@ describe('summarizeNumber', () => {
     expect(summary.latest).toEqual({ kind: 'failure', failure: failure('l2') });
   });
 
-  it('shows a pending lookup as running only for 30 minutes', () => {
+  it('shows a pending lookup as running only for 30 minutes, then as expired', () => {
     expect(summarizeNumber(state({ lookups: [lookup('l1', 5, 'pending')] }), '100-1', NOW).latest.kind).toBe('running');
-    expect(summarizeNumber(state({ lookups: [lookup('l1', 31, 'pending')] }), '100-1', NOW).latest.kind).toBe('none');
+    expect(summarizeNumber(state({ lookups: [lookup('l1', 31, 'pending')] }), '100-1', NOW).latest.kind).toBe('expired');
   });
 
   it('keeps the newest committed proposal for the kept differences', () => {

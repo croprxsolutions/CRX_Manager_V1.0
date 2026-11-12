@@ -164,6 +164,52 @@ export function stampProblems({ added, base, head, changed = [], onMain = [] }) 
   return problems;
 }
 
+// Mason's restamp (ship.md, 2026-11-04): when a newer migration went live first, the file gets a new,
+// newer stamp with byte-identical SQL and the same name after the stamp. On staging the old name has
+// already run, so its ledger row is renamed instead of running the SQL a second time. A restamp is a
+// file the ledger lacks whose sha256 matches exactly one row (after the baseline, holding SQL) that has
+// no file left and the same name after the stamp, with an older stamp; anything else runs as before.
+const slug = (n) => n.slice(15);
+export function planRestamps({ stored, files, highWater }) {
+  const fileless = [...stored].filter(([n, h]) => h && NAME.test(n) && n.slice(0, 14) > highWater && !files.has(n));
+  const pairs = [];
+  for (const [to, sha] of files) {
+    if (stored.has(to) || !NAME.test(to)) continue;
+    const rows = fileless.filter(([n, h]) => h === sha && slug(n) === slug(to) && n.slice(0, 14) < to.slice(0, 14));
+    if (rows.length === 1) pairs.push({ from: rows[0][0], to, sha });
+  }
+  // A row two files could claim, or a file two rows could match, is ambiguous: neither is renamed.
+  return pairs.filter((p) => pairs.filter((q) => q.from === p.from).length === 1).sort((a, b) => a.to.localeCompare(b.to));
+}
+
+// One transaction: rename only the row holding that exact SQL, then prove the new name holds it and the old
+// one is gone before COMMIT.
+export function restampSql({ from, to, sha }) {
+  for (const n of [from, to]) if (!NAME.test(n)) throw new Error(`bad migration name: ${n}`);
+  if (!/^[0-9a-f]{64}$/.test(sha ?? '')) throw new Error(`bad sha256 for ${to}`);
+  const hash = "encode(sha256(convert_to(statements[1], 'UTF8')), 'hex')";
+  return [
+    'BEGIN;',
+    `UPDATE supabase_migrations.schema_migrations SET name = '${to}' WHERE name = '${from}' AND ${hash} = '${sha}';`,
+    `DO $crx_check$ BEGIN IF (SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${to}' AND ${hash} = '${sha}') <> 1 OR EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${from}') THEN RAISE EXCEPTION 'RESTAMP_RENAME_FAILED: ${from} -> ${to}'; END IF; END $crx_check$;`,
+    'COMMIT;',
+    '',
+  ].join('\n');
+}
+
+// PR check: a deleted and an added migration with the same blob and name after the stamp, the new stamp
+// newer, are one restamp (not an edit). blob(file) is the git blob id, or null when unreadable.
+export function restampPairs({ deleted, added, blob }) {
+  const pairs = [];
+  for (const from of deleted) {
+    const b = blob(from);
+    if (!b || !NAME.test(from.replace(/\.sql$/, ''))) continue;
+    const to = added.filter((a) => NAME.test(a.replace(/\.sql$/, '')) && slug(a) === slug(from) && a.slice(0, 14) > from.slice(0, 14) && blob(a) === b);
+    if (to.length === 1) pairs.push({ from, to: to[0] });
+  }
+  return pairs;
+}
+
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file
 // (applied some other way, e.g. the SQL Editor or an unmerged branch), a row whose file changed
 // after it ran (stored text's sha256 differs), and a file never applied. stored/files map name ->
@@ -255,7 +301,7 @@ export function applyUserProblem(dbUrl) {
   return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
 }
 
-function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
+function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRestamps = false }) {
   const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
@@ -276,7 +322,11 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
   // Every check runs before anything is written.
   const stored = new Map(query(dbUrl, "SELECT name || '|' || coalesce(encode(sha256(convert_to(statements[1], 'UTF8')), 'hex'), '') FROM supabase_migrations.schema_migrations")
     .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
-  const ledgerNames = new Set(stored.keys());
+  // Staging only: a restamped file's old name already ran here, so its row is renamed, not run again.
+  const restamps = renameRestamps
+    ? planRestamps({ stored, files: new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))])), highWater })
+    : [];
+  const ledgerNames = new Set([...stored.keys(), ...restamps.map((r) => r.to)]);
   // Applied files must still be what was applied.
   const edited = [...stored].filter(([n, h]) => h && postBaseline(n) && sha256(fileBytes(n)) !== h).map(([n]) => n);
   if (edited.length) throw new Error(`STOPPED: these applied migrations no longer match the ledger (edited after they ran): ${edited.join(', ')}`);
@@ -293,6 +343,13 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     ...bare.flatMap((stem) => fileProblems(stem, fileBytes(stem), { forRun: false })),
   ];
   if (problems.length) throw new Error(`STOPPED before applying anything: ${problems.join('; ')}`);
+
+  for (const r of restamps) {
+    const f = path.join(work, `restamp-${r.to}.sql`);
+    writeFileSync(f, restampSql(r));
+    runFile(dbUrl, f);
+    console.log(`restamped ${r.from} -> ${r.to}  (same SQL, sha256 ${r.sha.slice(0, 12)}; ledger row renamed, not run again)`);
+  }
 
   for (const stem of bare) {
     const text = fileBytes(stem).toString('utf8');
@@ -332,7 +389,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     execFileSync('sleep', ['1']); // versions are the apply second; keep them unique
   }
   if (steps.length) psql(dbUrl, ['-c', "NOTIFY pgrst, 'reload schema';"]);
-  console.log(`DB_APPLY_DONE ${expectedRef}: ${steps.length} migration(s)`);
+  console.log(`DB_APPLY_DONE ${expectedRef}: ${steps.length} migration(s)${restamps.length ? `, ${restamps.length} restamp(s)` : ''}`);
 }
 
 // Read-only: compares the target's ledger with the repo's files and fails on any drift.
@@ -392,10 +449,10 @@ const commands = {
   drift() {
     return drift({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', repo: process.cwd(), report: process.env.DRIFT_MODE === 'report' });
   },
-  // env: DB_URL, TARGET_REF; optional BACKFILL=1 and ALLOW_OUT_OF_ORDER=1 (staging only)
+  // env: DB_URL, TARGET_REF; optional BACKFILL=1, ALLOW_OUT_OF_ORDER=1 and RENAME_RESTAMPS=1 (staging only)
   apply() {
     const expectedRef = process.env.TARGET_REF ?? '';
-    apply({ dbUrl: process.env.DB_URL, expectedRef, repo: process.cwd(), backfill: process.env.BACKFILL === '1', allowOutOfOrder: process.env.ALLOW_OUT_OF_ORDER === '1' });
+    apply({ dbUrl: process.env.DB_URL, expectedRef, repo: process.cwd(), backfill: process.env.BACKFILL === '1', allowOutOfOrder: process.env.ALLOW_OUT_OF_ORDER === '1', renameRestamps: process.env.RENAME_RESTAMPS === '1' });
     return 0;
   },
   // usage: db-apply.mjs stamp-check <base ref>
@@ -408,10 +465,12 @@ const commands = {
     const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
     const mainRef = baseRef.endsWith('/staging') ? baseRef.replace(/\/staging$/, '/main') : null;
     const onMain = mainRef ? added.filter((f) => { const m = blob(mainRef, f); return m !== null && m === blob('HEAD', f); }) : [];
+    // Mason's restamp: the same bytes under a newer stamp is not an edit (stampProblems still wants the new stamp newest).
+    const restamped = new Set(restampPairs({ deleted: diff('D'), added, blob: (f) => blob(baseRef, f) ?? blob('HEAD', f) }).map((r) => r.from));
     const problems = stampProblems({
       added,
       onMain,
-      changed: diff('MDT'),
+      changed: diff('MDT').filter((f) => !restamped.has(f)),
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),
     });

@@ -69,6 +69,8 @@ jobs:
       # Staging can hold staging-only migrations (e.g. a change waiting for its live partner) that sit
       # ahead of main's stamps; older files then apply after them with a warning. Live never does this.
       ALLOW_OUT_OF_ORDER: '1'
+      # Mason's restamp (same SQL, newer stamp): rename the already-run ledger row instead of running it again.
+      RENAME_RESTAMPS: '1'
     steps:
       - id: on
         run: |

@@ -115,7 +115,7 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
     assert.ok(ask({ [STAGING]: bad }), `staging call: ${bad}`);
     assert.ok(ask({ [STAGING]: ahead, [HEAD]: bad }), `head call: ${bad}`);
   }
-  assert.ok(mainCommitsInPrOnGitHub({ stagingSha: "short", headSha: HEAD, repo: "o/r", gh: () => "{}" }), "a bad staging sha fails closed");
+  assert.match(mainCommitsInPrOnGitHub({ stagingSha: "short", headSha: HEAD, repo: "o/r", gh: () => "{}" }), /unusable base commit/, "a bad staging sha fails closed");
   assert.ok(mainCommitsInPrOnGitHub({ stagingSha: STAGING, headSha: "short", repo: "o/r", gh: () => "{}" }), "a bad head sha fails closed");
 });
 

@@ -681,7 +681,7 @@ function gateRequest(request) {
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
-    `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
+    `  2. \`git fetch origin\` and merge the PR's base into the branch if the head does not contain it (origin/staging for a PR into staging, never main; GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
     `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of origin/main...HEAD and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +

@@ -147,7 +147,10 @@ export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
 // whose head holds any of them brings main into staging. Two GitHub comparisons, each listing up to 250
 // commits: staging...main (main's commits staging lacks) and head...main (those the head lacks). Any of
 // the first not in the second is carried by the PR. null when it carries none; otherwise why the merge
-// is refused. Never throws: an unreadable, cut-short or unexpected answer refuses.
+// is refused. Never throws: an unreadable, cut-short or unexpected answer refuses (so a branch more than
+// 250 of main's commits behind is refused while a back-merge is pending; merging staging in clears it).
+// ponytail: matched by commit id, so main's changes squashed or cherry-picked onto a branch (new ids)
+// are not seen; the release guard's tree comparison on release/next is the backstop for main itself.
 function mainAheadOf(sha, { repoPath, gh }) {
   let answer;
   try {
@@ -164,7 +167,7 @@ function mainAheadOf(sha, { repoPath, gh }) {
 export function mainCommitsInPrOnGitHub({ stagingSha, headSha, repo, gh }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
-  if (!SHA_RE.test(String(stagingSha || "")) || !SHA_RE.test(String(headSha || ""))) return "staging's or the pull request's commit is not a full commit id";
+  if (!SHA_RE.test(String(stagingSha || "")) || !SHA_RE.test(String(headSha || ""))) return "GitHub reported an unusable base commit or head (not a full commit id)";
   const missingFromStaging = mainAheadOf(String(stagingSha).toLowerCase(), { repoPath, gh });
   if (missingFromStaging.problem) return missingFromStaging.problem;
   if (missingFromStaging.commits.length === 0) return null; // main is inside staging: nothing to bring in
@@ -173,7 +176,7 @@ export function mainCommitsInPrOnGitHub({ stagingSha, headSha, repo, gh }) {
   const lacking = new Set(missingFromHead.commits);
   const carried = missingFromStaging.commits.filter((c) => !lacking.has(c));
   return carried.length
-    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${carried[0].slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging, or wait for the back-merge`
+    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${carried[0].slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging and merge staging (never main) into your branch, or wait for the back-merge`
     : null;
 }
 

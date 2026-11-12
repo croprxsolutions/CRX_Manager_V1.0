@@ -4005,7 +4005,7 @@ try {
     assert.equal(notASha.blocked, true, "non-SHA baseRefOid fails closed");
     assert.match(
       String(notASha.reason || notASha.message || JSON.stringify(notASha)),
-      /unusable base commit|not a full commit id/,
+      /unusable base commit/,
       "non-SHA base denial says the base is unusable"
     );
 

@@ -20,7 +20,7 @@ export default function DeliveriesMissingBrands() {
   const load = useCallback(async () => {
     const request = ++requestRef.current;
     try {
-      const next = await getDeliveriesMissingBrands(localDatePlusDays(-DAYS_SHOWN), localToday());
+      const next = await getDeliveriesMissingBrands(localDatePlusDays(1 - DAYS_SHOWN), localToday());
       if (request === requestRef.current) { setRows(next); setLoadFailed(false); }
     } catch (error) {
       if (request === requestRef.current) setLoadFailed(true);

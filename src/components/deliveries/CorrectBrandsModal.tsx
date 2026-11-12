@@ -64,10 +64,18 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
     const edited = changedLineIds(brands, drafts);
     // Nothing edited: saving confirms the picks as they stand, which clears an unconfirmed completion's flag.
     const confirming = edited.length === 0;
+    // Re-sending a typed brand someone already linked or dismissed would undo that review (the database replaces the
+    // picks), so confirming leaves such lines as they are; picking the listed brand on the line corrects them instead.
+    const reviewed = (l: DeliveryBrandLine) => l.picks.some((p) => p.source === 'typed' && p.review_state !== 'pending');
     const changed = confirming
-      ? brands.lines.filter((l) => showLine(l) && l.picks.length > 0).map((l) => l.delivery_item_id)
+      ? brands.lines.filter((l) => showLine(l) && l.picks.length > 0 && !reviewed(l)).map((l) => l.delivery_item_id)
       : edited;
-    if (changed.length === 0) { toast('info', 'No brand changes to save.'); return; }
+    if (changed.length === 0) {
+      toast('info', confirming && brands.lines.some(reviewed)
+        ? 'A typed brand here was already reviewed. To confirm that line, pick the listed brand on it.'
+        : 'No brand changes to save.');
+      return;
+    }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
     // A correction must account for everything delivered on each line it changes (the database checks it too).
     // Clearing a line on purpose ("brand unknown") is allowed; only lines with brands must add up.

@@ -96,4 +96,16 @@ describe('CorrectBrandsModal', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('do not add up to the 5 delivered')));
     expect(correctDeliveryBrands).not.toHaveBeenCalled();
   });
+  it('confirming as they are never re-sends a typed brand that was already reviewed', async () => {
+    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', review_state: 'added' as const };
+    getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], picks: [typed] }] }));
+    correctDeliveryBrands.mockReset();
+    toast.mockReset();
+    render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} />);
+    await screen.findByLabelText('Brand for Glyphosate');
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Checked' } });
+    fireEvent.click(screen.getByText('Save correction'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('info', expect.stringContaining('already reviewed')));
+    expect(correctDeliveryBrands).not.toHaveBeenCalled();
+  });
 });

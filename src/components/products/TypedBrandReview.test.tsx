@@ -34,6 +34,8 @@ describe('TypedBrandReview', () => {
     reviewTypedBrand.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({});
     render(<MemoryRouter><TypedBrandReview /></MemoryRouter>);
 
+    expect((await screen.findByText('Add to list')).closest('button')).toBeDisabled(); // restricted-use status must be chosen first
+    fireEvent.change(screen.getByLabelText('Is Credit restricted use?'), { target: { value: 'yes' } });
     fireEvent.click(await screen.findByText('Add to list'));
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', 'Brands not saved.'));
     fireEvent.click(await screen.findByText('Add to list'));
@@ -42,6 +44,8 @@ describe('TypedBrandReview', () => {
     const addKeys = saveProductBrand.mock.calls.map((c) => c[1]);
     expect(addKeys).toHaveLength(2);
     expect(addKeys[1]).toBe(addKeys[0]);
+    // Saved as the admin said: restricted use, and not marked as bought now unless ticked (the jug may be old stock).
+    expect(saveProductBrand.mock.calls[0][0]).toEqual(expect.objectContaining({ isRup: true, isCurrentlySourced: false }));
   });
 
   it('says when the review list could not load and offers a retry', async () => {

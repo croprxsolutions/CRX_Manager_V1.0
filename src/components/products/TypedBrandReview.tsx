@@ -28,6 +28,10 @@ export default function TypedBrandReview() {
   const requestRef = useRef(0);
   const linkRequestRef = useRef(0);
   const [loadFailed, setLoadFailed] = useState(false);
+  // What the admin confirms before a typed brand joins the list: its restricted-use status (never left unknown
+  // here) and whether it is bought now (a jug can be old stock).
+  const [addChoices, setAddChoices] = useState<Record<string, { rup: '' | 'yes' | 'no'; current: boolean }>>({});
+  const choiceFor = (pickId: string) => addChoices[pickId] ?? { rup: '' as const, current: false };
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
@@ -67,6 +71,10 @@ export default function TypedBrandReview() {
   };
 
   const addToList = (row: TypedBrandForReview) => run(row, async () => {
+    const choice = choiceFor(row.pick_id);
+    if (!choice.rup) throw new Error('Say whether this brand is restricted use first.');
+    // One key per exact add (these choices): a retry of the same add reuses it.
+    const addScope = JSON.stringify([row.pick_id, choice.rup, choice.current]);
     const list = await getProductBrands(row.product_id);
     let added: ProductBrand;
     try {
@@ -76,16 +84,16 @@ export default function TypedBrandReview() {
         brandName: row.brand_name,
         epaRegistration: row.epa_registration ?? '',
         manufacturer: row.manufacturer ?? '',
-        isCurrentlySourced: true,
-        isRup: null,
+        isCurrentlySourced: choice.current,
+        isRup: choice.rup === 'yes',
         signalWord: null,
-      }, addIdem.getKeyFor(row.pick_id));
+      }, addIdem.getKeyFor(addScope));
     } catch (error) {
       throw new Error(productBrandErrorMessage(error));
     }
     await link(row, added.id);
     // Kept until the link succeeds too: retrying after a failed link replays the same add, never a second brand.
-    addIdem.resetKeyFor(row.pick_id);
+    addIdem.resetKeyFor(addScope);
   }, `${row.brand_name} added to the list.`);
 
   const startLink = async (row: TypedBrandForReview) => {
@@ -159,10 +167,32 @@ export default function TypedBrandReview() {
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => { linkRequestRef.current++; setLinking(null); }}>Cancel</Button>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {/* The name is already listed, so the list refuses a second one: link it instead. */}
                   {row.review_note !== 'number_differs_from_list' && (
-                    <Button size="sm" disabled={!!busyPick} loading={busy} onClick={() => void addToList(row)}>Add to list</Button>
+                    <>
+                      <select
+                        aria-label={`Is ${row.brand_name} restricted use?`}
+                        className="min-h-11 rounded-lg border border-gray-300 px-3 text-sm"
+                        value={choiceFor(row.pick_id).rup}
+                        disabled={!!busyPick}
+                        onChange={(e) => setAddChoices((prev) => ({ ...prev, [row.pick_id]: { ...choiceFor(row.pick_id), rup: e.target.value as '' | 'yes' | 'no' } }))}
+                      >
+                        <option value="">Restricted use?</option>
+                        <option value="yes">Restricted use: yes</option>
+                        <option value="no">Restricted use: no</option>
+                      </select>
+                      <label className="flex min-h-11 items-center gap-2 text-sm text-nav-dark">
+                        <input
+                          type="checkbox"
+                          checked={choiceFor(row.pick_id).current}
+                          disabled={!!busyPick}
+                          onChange={(e) => setAddChoices((prev) => ({ ...prev, [row.pick_id]: { ...choiceFor(row.pick_id), current: e.target.checked } }))}
+                        />
+                        Bought now
+                      </label>
+                      <Button size="sm" disabled={!!busyPick || !choiceFor(row.pick_id).rup} loading={busy} onClick={() => void addToList(row)}>Add to list</Button>
+                    </>
                   )}
                   <Button size="sm" variant="secondary" disabled={!!busyPick} onClick={() => void startLink(row)}>Link to existing</Button>
                   <Button size="sm" variant="ghost" disabled={!!busyPick} onClick={() => void dismiss(row)}>Dismiss</Button>

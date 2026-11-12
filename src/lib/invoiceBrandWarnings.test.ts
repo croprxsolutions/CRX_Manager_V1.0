@@ -29,7 +29,9 @@ const asSaved = (lines: BrandWarningLine[], pending: string[] = []): DeliveryPic
     for (const x of (l.brand_lines as Array<Record<string, unknown>> | null) ?? []) {
       const item = String(x.delivery_item_id);
       if (before.has(item)) continue;
-      const cur = byItem.get(item) ?? now([], { delivery_item_id: item, delivered: Number(x.line_delivered) });
+      const cur = byItem.get(item) ?? now([], {
+        delivery_item_id: item, order_item_id: l.order_item_id, product_id: l.product_id, delivered: Number(x.line_delivered),
+      });
       if (x.brand_key !== 'n:') {
         cur.picks.push(pk({ id: String(x.pick_id), brand_name: String(x.brand_name), epa_registration: (x.epa_registration as string | null) ?? null,
           quantity: Number(x.quantity), review_state: pending.includes(String(x.pick_id)) ? 'pending' : null }));
@@ -147,6 +149,12 @@ describe('invoice brand warnings before posting', () => {
     // A line of the delivery for another order line, or one that delivered nothing, is not this line's.
     expect(invoiceBrandWarnings(saved, [now([pk({})]), now([pk({ id: 'pc' })], { delivery_item_id: 'di3', order_item_id: 'oi9' }),
       now([], { delivery_item_id: 'di4', delivered: 0 })]).noRecord).toEqual([]);
+  });
+  it('on an order-wide invoice, a trip moved to another order line no longer counts', () => {
+    const saved = [line([e({ brand_name: 'A', epa_registration: '1-1', pick_id: 'pa', quantity: 5 })])];
+    expect(invoiceBrandWarnings(saved, [now([pk({})])]).noRecord).toEqual([]);
+    expect(invoiceBrandWarnings(saved, [now([pk({})], { order_item_id: 'oi2' })]).noRecord)
+      .toEqual(['Gly: Brands changed since this invoice was made']);
   });
   it('a line saved with no brands whose delivery line now has a pick gets no RUP record', () => {
     const picked = [now([pk({})])];

@@ -77,12 +77,13 @@ const pickKey = (trip: string, p: { id?: unknown; brand_name?: unknown; epa_regi
  * posting records nothing for the line and lists it as brand_lines_stale (20270106110000 compares the whole snapshot).
  */
 function brandsChanged(l: BrandWarningLine, entries: Entries | null, current: DeliveryPickLine[]): boolean {
-  const own = (c: DeliveryPickLine) => c.delivery_id === l.delivery_id && c.order_item_id === l.order_item_id
-    && c.product_id === l.product_id && tenThousandths(c.delivered) > 0;
+  const ofLine = (c: DeliveryPickLine) => c.order_item_id === l.order_item_id && c.product_id === l.product_id
+    && tenThousandths(c.delivered) > 0;
+  const own = (c: DeliveryPickLine) => c.delivery_id === l.delivery_id && ofLine(c);
   // No brands saved: stale once a pick exists on the invoice's own delivery line.
   if (entries === null || entries.length === 0) return !!l.delivery_id && current.some((c) => own(c) && c.picks.length > 0);
   const named = new Set(entries.map((e) => e.delivery_item_id));
-  const covered = current.filter((c) => (l.delivery_id ? own(c) : named.has(c.delivery_item_id)));
+  const covered = current.filter((c) => (l.delivery_id ? own(c) : named.has(c.delivery_item_id) && ofLine(c)));
   const saved = entries.map((e) => {
     const trip = tripKey(e.delivery_item_id, e.line_delivered);
     return e.brand_key === 'n:' ? `${trip}|-` : pickKey(trip, { ...e, id: e.pick_id });

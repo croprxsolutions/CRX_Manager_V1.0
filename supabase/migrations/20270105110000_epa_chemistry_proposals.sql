@@ -405,23 +405,27 @@ BEGIN
            CASE WHEN jsonb_typeof(e->'percent') = 'number' THEN round((e->>'percent')::numeric, 10) END AS strength
       FROM jsonb_array_elements(p_result->'activeIngredients') WITH ORDINALITY AS t(e, o)
   ), keyed AS (
-    -- A name-only entry joins a same-name entry that has a CAS number, so one ingredient is never two rows (Sol, 2026-11-11).
-    SELECT r.*, CASE WHEN r.cas IS NOT NULL THEN 'cas:' || r.cas
-                     ELSE COALESCE((SELECT 'cas:' || min(r2.cas) FROM raw r2 WHERE lower(r2.name) = lower(r.name) AND r2.cas IS NOT NULL),
-                                   'name:' || lower(r.name)) END AS key
+    -- A name-only entry joins the one same-name entry that has a CAS number, so one ingredient is never two rows (Sol,
+    -- 2026-11-11). When that name carries several CAS numbers, it joins none and is flagged ambiguous (Luna, 2026-11-11).
+    SELECT r.*, CASE WHEN r.cas IS NOT NULL THEN 'cas:' || r.cas WHEN c.n = 1 THEN 'cas:' || c.cas
+                     ELSE 'name:' || lower(r.name) END AS key,
+           r.cas IS NULL AND c.n > 1 AS ambiguous
       FROM raw r
+      CROSS JOIN LATERAL (SELECT count(DISTINCT r2.cas) AS n, min(r2.cas) AS cas FROM raw r2
+                           WHERE lower(r2.name) = lower(r.name) AND r2.cas IS NOT NULL) c
   ), merged AS (
     SELECT key, min(o) AS first_o,
            (array_agg(name ORDER BY o))[1] AS name,
            (array_agg(cas ORDER BY o) FILTER (WHERE cas IS NOT NULL))[1] AS cas,
            bool_or(cas IS NULL AND cas_given) AS cas_dropped,
            (array_agg(strength ORDER BY o))[1] AS strength,
-           count(DISTINCT COALESCE(strength::text, 'unknown')) > 1 AS conflict
+           count(DISTINCT COALESCE(strength::text, 'unknown')) > 1 AS conflict,
+           bool_or(ambiguous) AS ambiguous
       FROM keyed GROUP BY key
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object('key', key, 'name', name, 'cas', cas,
            'cas_note', CASE WHEN cas_dropped THEN 'EPA''s CAS number is not valid, so it was left out' END,
-           'strength', strength, 'conflict', conflict) ORDER BY first_o), '[]'::jsonb)
+           'strength', strength, 'conflict', conflict, 'ambiguous', ambiguous) ORDER BY first_o), '[]'::jsonb)
     INTO v_ings FROM merged;
 
   -- One labelPdfs entry gives both the date and the link: the newest valid date, ties to EPA's first.
@@ -475,6 +479,13 @@ BEGIN
   -- Ingredients. CAS matches first, then names (lower case, spaces collapsed) against the parent's own rows only.
   FOR v_ing IN SELECT e FROM jsonb_array_elements(p_input->'ingredients') e ORDER BY (e->>'cas') IS NULL, e->>'key' LOOP
     v_s := (v_ing->>'strength')::numeric;
+    IF (v_ing->>'ambiguous')::boolean THEN
+      -- EPA gives this name with several CAS numbers and once with none: that entry names no one chemical.
+      v_items := v_items || jsonb_build_array(jsonb_build_object('item_id', 'ing:' || (v_ing->>'key'), 'kind', 'ingredient',
+        'class', 'epa_conflict', 'epa', v_ing, 'current', NULL, 'accept_default', false,
+        'note', 'EPA lists ' || (v_ing->>'name') || ' under more than one CAS number and once with none.'));
+      CONTINUE;
+    END IF;
     IF v_ing->>'cas' IS NOT NULL THEN
       SELECT ppi.id, ppi.ingredient_id, ppi.strength_value, ppi.strength_unit, ppi.strength_basis, ppi.source, a.name, a.cas
         INTO v_row
@@ -963,6 +974,7 @@ BEGIN
     v_ok := v_item->>'class' IN ('add', 'add_name_only', 'fill', 'confirm', 'rup_upgrade')
             AND COALESCE((v_accept->>(v_item->>'item_id'))::boolean, (v_item->>'accept_default')::boolean);
     v_commit := v_commit || jsonb_build_object(v_item->>'item_id', CASE
+      WHEN v_item->>'class' = 'matches' THEN 'confirmed'  -- agrees with EPA; nothing to write (Luna, 2026-11-11)
       WHEN v_item->>'class' NOT IN ('add', 'add_name_only', 'fill', 'confirm', 'rup_upgrade') THEN 'kept_difference'
       WHEN NOT v_ok THEN 'skipped'
       WHEN v_item->>'class' = 'confirm' THEN 'confirmed'

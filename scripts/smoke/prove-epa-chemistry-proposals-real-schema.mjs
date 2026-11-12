@@ -457,7 +457,15 @@ function caseH5() {
   // Sol 2026-11-11: a name-only entry and a same-name entry with a CAS number are one ingredient, not two.
   const merged = JSON.parse(scalar(`SELECT public._epa_lookup_input(${J(found('105-1', [['glyphosate', 41, null], ['Glyphosate', 41]]))}::jsonb)->'ingredients';`));
   assert.equal(merged.length, 1, 'one ingredient'); assert.equal(merged[0].key, `cas:${CAS.Glyphosate}`); assert.equal(merged[0].cas, CAS.Glyphosate);
-  console.log('[case] H5 a name-only ingredient needs a tick; a second lookup of the parent confirms the same row (no duplicate); another parent gets its own provisional row, as DM-1 rules');
+  // Luna 2026-11-11: the name under two CAS numbers plus once with none: the CAS-less entry joins neither and is one
+  // unticked conflict with no row.
+  const amb = found('105-1', [['Glyphosate', 41, CAS.Glyphosate], ['Glyphosate', 20, CAS.Atrazine], ['Glyphosate', 10, null]]);
+  const ambIn = JSON.parse(scalar(`SELECT public._epa_lookup_input(${J(amb)}::jsonb)->'ingredients';`));
+  assert.equal(ambIn.length, 3); assert.deepEqual(ambIn.map((i) => i.ambiguous), [false, false, true]);
+  const ambItem = JSON.parse(scalar(`SELECT public._epa_proposal_items('${P5}', '105-1', public._epa_lookup_input(${J(amb)}::jsonb));`))
+    .find((i) => i.item_id === 'ing:name:glyphosate');
+  assert.equal(ambItem.class, 'epa_conflict'); assert.equal(ambItem.accept_default, false); assert.equal(ambItem.current, null);
+  console.log('[case] H5 a name-only ingredient needs a tick; a second lookup of the parent confirms the same row (no duplicate); another parent gets its own provisional row, as DM-1 rules; a name under several CAS numbers is one unticked conflict');
 }
 
 function caseH6H23() {
@@ -742,6 +750,15 @@ function caseH27() {
   const cb = js(ADMIN, COMMIT(b.proposal_id, 1));
   assert.equal(cb.status, 'committed', 'a version bump with no fact change does not hold');
   assert.equal(cb.commit_result['label:signal_word'], 'confirmed');
+  // Luna 2026-11-11: a status that matches EPA is receipted as confirmed, not as a kept difference.
+  const st = item(proposal(b.proposal_id), 'label:registration_status').class;
+  assert.equal(cb.commit_result['label:registration_status'], st === 'matches' ? 'confirmed' : 'kept_difference');
+  if (st !== 'matches') {
+    raw(`UPDATE public.epa_registrations SET registration_status = 'active' WHERE epa_registration = '127-1';`);
+    const m = lookup(P28, '127-1', found('127-1', [['Glyphosate', 41]]));
+    assert.equal(item(proposal(m.proposal_id), 'label:registration_status').class, 'matches');
+    assert.equal(js(ADMIN, COMMIT(m.proposal_id, 1)).commit_result['label:registration_status'], 'confirmed');
+  }
   assert.deepEqual(ingRows(P28), [{ name: 'Glyphosate', strength: 41, source: 'epa_lookup', note: 'EPA lookup of 127-1' }]);
   // Codex App 2026-11-11: a CAS entry under another name and a name-only entry both land on P24's Dicamba row:
   // both are conflicts, neither is ticked, nothing is written for that row.

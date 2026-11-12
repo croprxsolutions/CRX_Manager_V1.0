@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1840 (B-2 brand screens): an unconfirmed brand step still completes, flagged for the office
+
+**Decision (Mason, 2026-11-12, in chat: "Yes, warn and flag later").** On PR #1840, when the delivery screens cannot confirm the brand picks at completion (the brand list did not load, or a choice was left out, refused by the database, failed to save, or overtaken by someone else's save), the delivery still completes and the driver is warned. The completion is recorded as picks not confirmed, so every picked line lands on the office's Deliveries missing brands list.
+**Why:** brands never block a delivery (Mason, 2026-11-09). Sol rounds 1, 3 and 4 each found another way a brand problem at completion either blocked the completion or left a wrong brand unflagged.
+**What this forbids/implies:** `saveForCompletion` in `src/components/deliveries/useDeliveryBrands.ts` sends the loaded brand seq only when every choice on screen was saved. Otherwise it sends `BRANDS_NOT_CONFIRMED` (-1), which `complete_delivery` records as `picks_confirmed: false` (20270104120000). Refusing a completion over brands needs a new Mason decision.
+
 ## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
 
 **Decision (Mason, 2026-11-11 late evening, in chat: "Yes, always show").** On PR #1825, every branded invoice line whose brands do not add up, no longer match the picks, have no brand recorded, or whose payers changed is listed on Sales to check, whether or not anything on it looks restricted use. This replaces the filter that listed those lines only where a record might be owed.

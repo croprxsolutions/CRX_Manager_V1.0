@@ -99,6 +99,17 @@ describe('EpaProposalModal', () => {
     expect(mocks.commit.mock.calls[1][3]).toBe(mocks.commit.mock.calls[0][3]);
   });
 
+  it('shows both label links so two links with the same date can be told apart, and never links an unsafe address', () => {
+    const withLinks = { ...proposal, items: [
+      { item_id: 'label:label_document', kind: 'label', class: 'differs', accept_default: false,
+        epa: { label_accepted_on: '2025-12-12', label_url: 'https://www3.epa.gov/new.pdf' },
+        current: { label_accepted_on: '2025-12-12', label_url: 'javascript:alert(1)' } },
+    ] } as unknown as EpaChemistryProposal;
+    render(<EpaProposalModal proposal={withLinks} draft={newEpaProposalDraft()} profileId="u1" onClose={vi.fn()} onSettled={vi.fn()} onRunAgain={vi.fn()} />);
+    expect(screen.getByRole('link', { name: 'https://www3.epa.gov/new.pdf' })).toHaveAttribute('href', 'https://www3.epa.gov/new.pdf');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
   it('needs a reason to reject', async () => {
     mocks.reject.mockResolvedValueOnce(undefined);
     view();

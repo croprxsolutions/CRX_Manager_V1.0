@@ -10,12 +10,19 @@ import { Sentry } from '../../lib/sentry';
 import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { plainRefusal } from '../../lib/productChemistry';
 import {
-  CLASS_LABEL, HOLD_LABEL, WRITABLE_CLASSES, commitEpaProposal, itemName, rejectEpaProposal, sideText, type EpaDecision,
+  CLASS_LABEL, HOLD_LABEL, WRITABLE_CLASSES, commitEpaProposal, itemName, rejectEpaProposal, sideLabelUrl, sideText, type EpaDecision,
   type EpaProposalDraft,
 } from '../../lib/epaProposals';
 import type { EpaChemistryProposal, EpaProposalItem } from '../../types';
 
 type KeySlot = 'commitKey' | 'rejectKey';
+
+/** The label document's own address, so two links with the same date can be told apart and opened. */
+function LabelLink({ item, side }: { item: EpaProposalItem; side: 'epa' | 'current' }) {
+  const url = sideLabelUrl(item, side);
+  if (!url) return null;
+  return <>{' '}<a href={url} target="_blank" rel="noopener noreferrer" className="break-all text-crx-green hover:underline">{url}</a></>;
+}
 
 function classVariant(item: EpaProposalItem): BadgeVariant {
   if (item.class === 'confirm' || item.class === 'matches') return 'success';
@@ -49,8 +56,8 @@ function ItemRow({ item, ticked, editable, onTick }: {
           <span className="font-medium text-primary">{itemName(item)}</span>
           <Badge variant={classVariant(item)} normalCase>{CLASS_LABEL[item.class]}</Badge>
         </div>
-        <p className="text-secondary">Now: {sideText(item, 'current')}</p>
-        <p className="text-secondary">EPA: {sideText(item, 'epa')}</p>
+        <p className="text-secondary">Now: {sideText(item, 'current')}<LabelLink item={item} side="current" /></p>
+        <p className="text-secondary">EPA: {sideText(item, 'epa')}<LabelLink item={item} side="epa" /></p>
         {item.note && <p className="text-xs text-amber-700">{item.note}</p>}
         {hint && <p className="text-xs text-secondary">{hint}</p>}
       </div>

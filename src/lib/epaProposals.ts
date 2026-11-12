@@ -201,6 +201,13 @@ function labelText(fact: string, value: unknown): string {
   return '—';
 }
 
+/** The label link on one side of a label_document item, only when it is an http(s) address safe to open. */
+export function sideLabelUrl(item: EpaProposalItem, side: 'epa' | 'current'): string | null {
+  if (item.item_id !== 'label:label_document') return null;
+  const url = (item[side] as { label_url?: unknown } | null)?.label_url;
+  return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null;
+}
+
 /** "What we have now" or "what EPA says" for one item, in words. */
 export function sideText(item: EpaProposalItem, side: 'epa' | 'current'): string {
   const value = item[side];

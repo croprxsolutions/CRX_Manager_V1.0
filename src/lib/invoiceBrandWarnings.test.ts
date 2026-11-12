@@ -58,6 +58,10 @@ describe('invoice brand notes (paper)', () => {
     const bl = [e({ brand_name: 'A', epa_registration: '1-1', quantity: 2 }), e({ brand_name: 'B', epa_registration: '1-2', quantity: 3 })];
     expect(invoiceLineEpaText(bl, '9-9')).toBe('1-1, 1-2');
     expect(invoiceLineEpaText([bl[0]], '1-1')).toBe('1-1');
+    // One brand: its own number, even when the saved line number differs.
+    expect(invoiceLineEpaText([bl[0]], '9-9')).toBe('1-1');
+    // A brand with no number is recorded under the product's.
+    expect(invoiceLineEpaText([bl[0], e({ brand_name: 'C', quantity: 1 })], '9-9')).toBe('1-1, 9-9');
     expect(invoiceLineEpaText(null, '9-9')).toBe('9-9');
   });
   it('no-brand trip entry prints not recorded', () => {

@@ -117,9 +117,10 @@ export function brandLinesDelivered(entries: InvoiceBrandEntry[]): number {
 
 /** The EPA column: a line covering several numbered brands prints them joined; otherwise the line's own number. */
 export function invoiceLineEpaText(brandLines: unknown, lineEpa: string | null | undefined): string {
-  const entries = parseBrandLines(brandLines) ?? [];
-  const numbers = [...new Set(entries.filter(isPick).map((e) => e.epa_registration).filter((n): n is string => !!n))];
-  return numbers.length > 1 ? numbers.join(', ') : (lineEpa || '');
+  // Each delivered brand's own number; a brand with none is recorded under the product's (the line's) number.
+  const picks = (parseBrandLines(brandLines) ?? []).filter(isPick);
+  const numbers = [...new Set(picks.map((e) => e.epa_registration || lineEpa || ''))].filter((n) => n !== '');
+  return picks.length > 0 ? numbers.join(', ') : (lineEpa || '');
 }
 
 /** The notes under one invoice line. onTheLoad: a Bill Split payer's line, whose brand amounts are the whole load's. */

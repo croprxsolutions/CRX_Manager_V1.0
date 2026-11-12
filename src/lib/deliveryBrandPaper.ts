@@ -35,7 +35,9 @@ const touches = (rows: unknown, itemId: string) =>
 /**
  * Receipt brand keys per delivery line id, by the receipt's own rule (20270109100000): a line completed from an
  * out-of-date screen, or before brand capture (no completion event), prints no brand until the office corrects it; and "not recorded" uses the brand list the line had at
- * completion. Before completion nothing is delivered yet, so only picks already made are shown.
+ * completion. Before completion nothing is delivered yet, so only picks already made are shown. A completion that sent
+ * no brand sequence (picks_confirmed null, an older app) counts as confirmed, as the receipt counts it (Mason,
+ * 2026-11-12, Sol r2: deliveries are not in use yet, so none completes from an older app).
  */
 export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map<string, ReceiptBrandInfo> {
   const completed = read.status === 'completed';
@@ -55,19 +57,16 @@ export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map
 }
 
 export async function loadDeliveryBrandInfo(deliveryId: string): Promise<Map<string, ReceiptBrandInfo>> {
-  const read = await readDeliveryBrands(deliveryId);
-  let events: BrandPaperEvent[] = [];
-  if (read.status === 'completed') {
-    const { data, error } = await supabaseUntyped
-      .from('delivery_brand_events')
-      .select('seq, event_type, details, before_rows, after_rows')
-      .eq('delivery_id', deliveryId)
-      .in('event_type', ['completed', 'corrected'])
-      .order('seq');
-    if (error) throw error;
-    events = (data ?? []) as BrandPaperEvent[];
-  }
-  return paperBrandInfo(read, events);
+  // Events before picks: a correction landing between the two reads then reads as not yet made, so its line prints
+  // no brand rather than the pick it replaced.
+  const { data, error } = await supabaseUntyped
+    .from('delivery_brand_events')
+    .select('seq, event_type, details, before_rows, after_rows')
+    .eq('delivery_id', deliveryId)
+    .in('event_type', ['completed', 'corrected'])
+    .order('seq');
+  if (error) throw error;
+  return paperBrandInfo(await readDeliveryBrands(deliveryId), (data ?? []) as BrandPaperEvent[]);
 }
 
 /** Every delivery line's current picks across the given deliveries (the invoice Post warnings). */

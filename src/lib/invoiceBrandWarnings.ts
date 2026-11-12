@@ -3,7 +3,9 @@
 // get_epa_sales_to_check), so a line warned "no RUP record" here is the line the register skips and lists.
 // shortcut: billed-above is summed over the lines given (this invoice, or its Bill Split group), and on an order-wide
 // invoice (no delivery of its own) only the trips its saved brands name are compared with today's picks, so a later
-// trip for the order is not seen; another invoice billing the same order line is not read here either. The database lists those cases on Sales to check after posting.
+// trip for the order is not seen; another invoice billing the same order line is not read here either (Mason,
+// 2026-11-12, Sol r2: accepted, the warning stays a best effort). The database lists those cases on Sales to check
+// after posting.
 import {
   brandLinesDelivered,
   brandSplitMismatch,

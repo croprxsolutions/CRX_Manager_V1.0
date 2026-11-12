@@ -182,6 +182,16 @@ export function planRestamps({ stored, files, highWater }) {
   return pairs.filter((p) => pairs.filter((q) => q.from === p.from).length === 1).sort((a, b) => a.to.localeCompare(b.to));
 }
 
+// Mason (2026-11-12): a restamp that is not clean blocks. A file the ledger lacks that looks like a restamp
+// (a row after the baseline with no file left, the same name after the stamp, an older stamp) but was not
+// planned (different SQL, a row holding no SQL, or ambiguous) would otherwise run its SQL a second time.
+export function unmatchedRestamps({ stored, files, highWater, restamps }) {
+  const planned = new Set(restamps.map((r) => r.to));
+  const fileless = [...stored.keys()].filter((n) => NAME.test(n) && n.slice(0, 14) > highWater && !files.has(n));
+  return [...files.keys()].filter((to) => NAME.test(to) && !stored.has(to) && !planned.has(to)
+    && fileless.some((n) => slug(n) === slug(to) && n.slice(0, 14) < to.slice(0, 14))).sort();
+}
+
 // One transaction: rename only the row holding that exact SQL, then prove the new name holds it and the old
 // one is gone before COMMIT.
 export function restampSql({ from, to, sha }) {
@@ -324,9 +334,10 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   const stored = new Map(query(dbUrl, "SELECT name || '|' || coalesce(encode(sha256(convert_to(statements[1], 'UTF8')), 'hex'), '') FROM supabase_migrations.schema_migrations")
     .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
   // Staging only: a restamped file's old name already ran here, so its row is renamed, not run again.
-  const restamps = renameRestamps
-    ? planRestamps({ stored, files: new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))])), highWater })
-    : [];
+  const postFiles = renameRestamps ? new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))])) : null;
+  const restamps = renameRestamps ? planRestamps({ stored, files: postFiles, highWater }) : [];
+  const unmatched = renameRestamps ? unmatchedRestamps({ stored, files: postFiles, highWater, restamps }) : [];
+  if (unmatched.length) throw new Error(`STOPPED before applying anything: ${unmatched.join(', ')} look(s) like a restamp of a migration this database already ran, but the SQL is not byte-identical to what ran here (or more than one file or row could match), so it would run a second time. Restamp with the exact same bytes, one file per migration.`);
   const ledgerNames = new Set([...stored.keys(), ...restamps.map((r) => r.to)]);
   // Applied files must still be what was applied.
   const edited = [...stored].filter(([n, h]) => h && postBaseline(n) && sha256(fileBytes(n)) !== h).map(([n]) => n);

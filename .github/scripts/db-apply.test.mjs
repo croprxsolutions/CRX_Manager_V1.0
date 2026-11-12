@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -236,6 +236,18 @@ test('planRestamps: anything short of a clean restamp runs (or stops) as before'
   assert.deepEqual(one([['20260101000000_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), [], 'the old row is before the baseline');
   assert.deepEqual(one([['20261231110000_m4b', H('a')], ['20261231110001_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), [], 'two rows could match');
   assert.deepEqual(one([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')], ['20270102000001_m4b', H('a')]]), [], 'two files could match');
+});
+test('unmatchedRestamps: a restamp that is not clean blocks instead of running again (Mason, 2026-11-12)', () => {
+  const highWater = '20260727174805';
+  const run = (stored, files) => { const s = new Map(stored); const f = new Map(files); return unmatchedRestamps({ stored: s, files: f, highWater, restamps: planRestamps({ stored: s, files: f, highWater }) }); };
+  assert.deepEqual(run([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), [], 'a clean restamp is planned, not blocked');
+  assert.deepEqual(run([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('d')]]), ['20270102000000_m4b'], 'different SQL blocks');
+  assert.deepEqual(run([['20261231110000_m4b', '']], [['20270102000000_m4b', H('a')]]), ['20270102000000_m4b'], 'a row holding no SQL blocks');
+  assert.deepEqual(run([['20261231110000_m4b', H('a')], ['20261231110001_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), ['20270102000000_m4b'], 'two rows could match: blocks');
+  assert.deepEqual(run([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')], ['20270102000001_m4b', H('a')]]).length, 2, 'two files could match: both block');
+  assert.deepEqual(run([['20261231110000_m4b', H('a')]], [['20261231110000_m4b', H('a')], ['20270102000000_new', H('b')]]), [], 'an ordinary new migration runs');
+  assert.deepEqual(run([['20270103000000_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), [], 'an older stamp is not a restamp (the out-of-order check handles it)');
+  assert.deepEqual(run([['20260101000000_m4b', H('a')]], [['20270102000000_m4b', H('a')]]), [], 'a row before the baseline is not a restamp');
 });
 test('restampSql: one transaction, renames only the row holding that exact SQL, and proves it before COMMIT', () => {
   const sql = restampSql({ from: '20261231110000_m4b', to: '20270102000000_m4b', sha: H('a') });

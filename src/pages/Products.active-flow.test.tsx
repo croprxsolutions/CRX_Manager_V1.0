@@ -23,6 +23,7 @@ function chainable(result: unknown) {
   builder.then = vi.fn((resolve: (value: unknown) => void) => Promise.resolve(result).then(resolve));
   return builder;
 }
+vi.mock('../components/products/TypedBrandReview', () => ({ default: () => null }));
 vi.mock('../lib/db', async (original) => ({
   ...(await original<typeof import('../lib/db')>()),
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },

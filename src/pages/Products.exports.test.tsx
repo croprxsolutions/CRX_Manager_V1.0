@@ -62,6 +62,7 @@ function chainable(resolveWith: unknown) {
   return builder;
 }
 
+vi.mock('../components/products/TypedBrandReview', () => ({ default: () => null }));
 vi.mock('../lib/db', () => ({
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
   supabaseUntyped: { from: vi.fn(() => chainable({

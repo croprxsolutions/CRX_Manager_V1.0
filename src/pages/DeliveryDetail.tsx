@@ -56,6 +56,11 @@ import { deliveryPhotoPath } from '../lib/privatePhotos';
 import { billSplitCompletion, billSplitFailedMessage, createdInvoicesMessage } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
 import { toSentryError } from '../lib/sentryError';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
+import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
+import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
+import { brandWarnings } from '../lib/deliveryBrands';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -308,6 +313,11 @@ export default function DeliveryDetail() {
   const canVoid = isAdmin && delivery?.status === 'completed';
   const [fixOpen, setFixOpen] = useState(false);
   const isAssignedDriver = isDriver && profile?.id === delivery?.assigned_driver;
+  // Brand PR B (B-2): which brand went off the truck, saved before completion. Brands never block a completion.
+  const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id
+    && (delivery.status === 'scheduled' || delivery.status === 'in_progress') && (isAdminOrRep || isAssignedDriver));
+  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty);
+  const [correctBrandsOpen, setCorrectBrandsOpen] = useState(false);
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';
   const receiptEmail = customer?.email || receiptRecipient?.email || null;
   // What complete_delivery checks before it completes (migration 20261022075000).
@@ -820,8 +830,13 @@ export default function DeliveryDetail() {
     if (error) {
       toast('error', sanitizeError(error));
     } else {
-      assertRpcResult(data, 'edit_delivery');
+      const edited = assertRpcResult<{ brand_lines_dropped?: { product_id: string | null }[] }>(data, 'edit_delivery');
       editIdem.resetKeyFor(editScope);
+      // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
+      const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
+        (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
+      if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
+      void brandState.reload();
       toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
       setEditing(false);
       fetchDelivery();
@@ -1238,6 +1253,10 @@ export default function DeliveryDetail() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
+    // Unsaved brand choices are saved first, so completion uses the picks on screen. A failed save completes
+    // nothing (its reason is shown). The seq is not part of the completion's key: a retry replays on the key.
+    const brandBaseSeq = brandState.brands ? await brandState.save() : null;
+    if (brandState.brands && brandBaseSeq === null) return;
     // The checks above can take a few seconds; never complete (or upload for) a delivery the user has left.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -1277,6 +1296,7 @@ export default function DeliveryDetail() {
       // passed during them, a date of "today" is now a past date and must carry its own timestamp.
       const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
+        ...(brandBaseSeq !== null ? { p_brand_base_seq: brandBaseSeq } : {}),
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, idemKey, () => (
           usesDeliveredOn ? paperDeliveredAt(paperDeliveredOn) : undefined)),
@@ -1547,19 +1567,34 @@ export default function DeliveryDetail() {
 
   // Shared by both layouts. The driver layout used to omit it, so a driver's
   // Complete Delivery tap opened nothing (found during the Goal 5 offline check).
+  // A missing or mismatched brand only warns (Mason, 2026-11-09).
+  const completeBrandWarnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
   const completeConfirmModal = (
-    <ConfirmModal
-      open={completeConfirmOpen}
-      onClose={() => setCompleteConfirmOpen(false)}
-      onConfirm={handleComplete}
-      title="Complete Delivery"
-      message={`${completionEvidence === 'no_proof' ? 'Record this delivery as completed WITHOUT customer proof? Your name and reason are saved with it. ' : ''}${isPartialDelivery
-        ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
-        : 'Complete this delivery? This will update inventory and cannot be undone.'}`}
-      confirmLabel="Complete Delivery"
-      variant="warning"
-      loading={completing}
-    />
+    <>
+      <ConfirmModal
+        open={completeConfirmOpen}
+        onClose={() => setCompleteConfirmOpen(false)}
+        onConfirm={handleComplete}
+        title="Complete Delivery"
+        message={`${completeBrandWarnings.length > 0 ? `${completeBrandWarnings.join(' ')} You can still complete; the office will follow up. ` : ''}${completionEvidence === 'no_proof' ? 'Record this delivery as completed WITHOUT customer proof? Your name and reason are saved with it. ' : ''}${isPartialDelivery
+          ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
+          : 'Complete this delivery? This will update inventory and cannot be undone.'}`}
+        confirmLabel={completeBrandWarnings.length > 0 ? 'Complete anyway' : 'Complete Delivery'}
+        cancelLabel={completeBrandWarnings.length > 0 ? 'Pick brand' : undefined}
+        variant="warning"
+        loading={completing}
+      />
+      <ConfirmModal
+        open={brandLeaveBlocker.state === 'blocked'}
+        onClose={() => brandLeaveBlocker.reset?.()}
+        onConfirm={() => brandLeaveBlocker.proceed?.()}
+        title="Leave this delivery?"
+        message="Brand choices not saved. Leave anyway?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="warning"
+      />
+    </>
   );
 
   if (isDriver) {
@@ -1745,6 +1780,8 @@ export default function DeliveryDetail() {
               })}
             </ul>
           </section>
+
+          {isActive && <DeliveryBrandsPanel state={brandState} busy={completing} />}
 
           {/* How the completion was confirmed: signature, photo proof, or recorded without proof */}
           <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} />
@@ -2200,6 +2237,11 @@ export default function DeliveryDetail() {
                 Fix Delivery
               </Button>
             )}
+            {isAdmin && delivery.status === 'completed' && (
+              <Button variant="secondary" size="sm" showChevron={false} onClick={() => setCorrectBrandsOpen(true)}>
+                Correct brands
+              </Button>
+            )}
             {isAdminOrRep && delivery.status === 'completed' && delivery.order_id && (
               <Button
                 variant="secondary"
@@ -2614,6 +2656,12 @@ export default function DeliveryDetail() {
         </SectionBand>
       )}
 
+      {(delivery.status === 'scheduled' || delivery.status === 'in_progress') && isAdminOrRep && (brandState.loadFailed || brandState.brands) && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <DeliveryBrandsPanel state={brandState} busy={completing} />
+        </div>
+      )}
+
       {/* Complete Delivery section — admin/sales_rep view when in_progress */}
       {delivery.status === 'in_progress' && isAdminOrRep && (
         <SectionBand id="delivery-complete" icon={<CheckCircle2 className="w-5 h-5" />} title="Complete Delivery">
@@ -3010,6 +3058,9 @@ export default function DeliveryDetail() {
 
       {delivery && (
         <FixDeliveryModal open={fixOpen} onClose={() => setFixOpen(false)} deliveryId={delivery.id} deliveryNumber={delivery.delivery_number} />
+      )}
+      {delivery && isAdmin && (
+        <CorrectBrandsModal open={correctBrandsOpen} onClose={() => setCorrectBrandsOpen(false)} deliveryId={delivery.id} />
       )}
 
       {/* Void Delivery Modal */}

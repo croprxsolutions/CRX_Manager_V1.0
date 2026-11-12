@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, FileUp, Download, FileText, Eye, EyeOff, ChevronDown, FileSpreadsheet, Upload, Power, PowerOff } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import TypedBrandReview from '../components/products/TypedBrandReview';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
@@ -1509,6 +1510,8 @@ export default function Products() {
           />
         </div>
       </Card>
+
+      {isAdmin && <TypedBrandReview />}
 
       {isAdmin && (
         <ProductSetupWorkbookModal

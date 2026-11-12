@@ -25,7 +25,7 @@ test('the hidden marker round-trips, is replaced in place and ignores junk', () 
   for (const junk of [null, '', 'no marker', '<!-- crx-slack {bad json} -->', '<!-- crx-slack [1] -->']) assert.equal(readMarker(junk), null, String(junk));
   // A value can never close the comment early, and a malformed one is dropped on read.
   const odd = writeMarker('', { ts: '-->x<!--', ch: 'C1' });
-  assert.equal(odd.match(/-->/g).length, 1);
+  assert.equal(odd.match(/--!?>/g).length, 1);
   assert.deepEqual(readMarker(odd), { ch: 'C1' });
 });
 

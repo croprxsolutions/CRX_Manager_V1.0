@@ -30,6 +30,18 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
 **Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Changing it needs the order line written (a backfill Mason decides).
+## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
+
+**Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".
+**Why:** CMP-2 is the last and largest product-comparison build; Mason wants to look at its plan again before any work starts.
+**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here.
+
+## 2026-11-11 — Resistance mode-of-action groups: shown on the product, later on quotes
+
+**Decision (Mason, 2026-11-11):** "on the product setup when it pulls in and we set the active ingredients it keeps track of which FRAC groups that product contains, and have option in quotes page to select to show the active ingredients and FRAC mode of action to help growers decide."
+**Why:** growers rotate chemistry to slow resistance; seeing each product's groups helps them choose.
+**What this forbids/implies:** logged as two future items, neither scheduled. Mason said FRAC; the item covers the resistance mode-of-action group for every chemical type (FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides). **Part A** (the product shows its groups, filled from its ingredients when actives come from the EPA lookup or the workbook) is MOA-1 in the grand plan, after DM-1b; Mason places it. **Part B** (an option on the quote page to show each line's actives and groups to the grower) is a To-Do "Later features" item and is held: Taha is working on the quote and chemical-sales screens, so no quote-screen file is touched until his UI PRs land.
+
 ## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
 
 **Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.

@@ -1,4 +1,4 @@
-## 2026-11-11 — DM-4: EPA auto-fill proposals (database, not applied)
+## 2026-11-11 — DM-4: EPA auto-fill proposals (database, applied live 2026-11-12)
 
 - Migration `20270105110000_epa_chemistry_proposals.sql`; build sheet `docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md`.
 - An admin starts an EPA lookup for one EPA number on a product (the product's own number, a size's, or a brand's;

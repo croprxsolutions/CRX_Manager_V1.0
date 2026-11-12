@@ -189,5 +189,8 @@ export function agentMergeProblem(base, headRef) {
   if (base === "staging" && headRef === "main") {
     return "the back-merge (main into staging) is Taha's or Mason's to merge, with \"Create a merge commit\"";
   }
+  if (base === "staging" && (headRef === "release/next" || /^hotfix\//.test(String(headRef || "")))) {
+    return "release/next and hotfix/<name> go into main, not staging; a PR from either into staging is a mistake: retarget it to main (Taha or Mason merges it)";
+  }
   return null;
 }

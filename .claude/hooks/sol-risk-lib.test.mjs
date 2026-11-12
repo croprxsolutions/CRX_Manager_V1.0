@@ -90,7 +90,8 @@ check("an agent never merges the back-merge (main into staging)", () => {
   assert.match(agentMergeProblem("staging", "main"), /back-merge.*Taha's or Mason's/);
 });
 check("feature work into staging is the agent's, migrations included", () => {
-  for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "hotfix/x", "release/next"]) assert.equal(agentMergeProblem("staging", head), null, head);
+  for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "release/nextish", "hotfixes"]) assert.equal(agentMergeProblem("staging", head), null, head);
+  for (const head of ["hotfix/x", "release/next"]) assert.match(agentMergeProblem("staging", head), /go into main, not staging/, head);
 });
 check("other bases are not this rule's business", () => {
   assert.equal(agentMergeProblem("claude/feature", "claude/x"), null);

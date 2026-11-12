@@ -21,6 +21,33 @@ const delivered = (line: DeliveryBrandLine) => line.quantity_delivered ?? line.q
  * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
  * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
  */
+// Re-sending a typed brand someone already linked or dismissed would undo that review (the database replaces the
+// picks), so confirming leaves such lines as they are; picking the listed brand on the line corrects them instead.
+function hasReviewedTypedPick(line: DeliveryBrandLine): boolean {
+  return line.picks.some((p) => p.source === 'typed' && p.review_state !== 'pending');
+}
+
+function nothingToSaveMessage(confirming: boolean, lines: DeliveryBrandLine[]): string {
+  return confirming && lines.some(hasReviewedTypedPick)
+    ? 'A typed brand here was already reviewed. To confirm that line, pick the listed brand on it.'
+    : 'No brand changes to save.';
+}
+
+/** The lines "save with no changes" confirms: those with picks, except a reviewed typed brand's. */
+function linesToConfirm(lines: DeliveryBrandLine[]): string[] {
+  return lines.filter((l) => l.picks.length > 0 && !hasReviewedTypedPick(l)).map((l) => l.delivery_item_id);
+}
+
+/**
+ * A correction must account for everything delivered on each line it changes (the database checks it too).
+ * Clearing a line on purpose ("brand unknown") is allowed; only lines with brands must add up.
+ */
+function correctionMismatch(brands: DeliveryBrands, changed: string[], drafts: DraftLines): string | undefined {
+  const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id) && (drafts[l.delivery_item_id] ?? []).length > 0);
+  return brandWarnings({ ...brands, lines: changedLines }, drafts,
+    Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])), true)[0];
+}
+
 export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyChange }: {
   open: boolean; deliveryId: string; onClose: () => void; onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -64,24 +91,13 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
     const edited = changedLineIds(brands, drafts);
     // Nothing edited: saving confirms the picks as they stand, which clears an unconfirmed completion's flag.
     const confirming = edited.length === 0;
-    // Re-sending a typed brand someone already linked or dismissed would undo that review (the database replaces the
-    // picks), so confirming leaves such lines as they are; picking the listed brand on the line corrects them instead.
-    const reviewed = (l: DeliveryBrandLine) => l.picks.some((p) => p.source === 'typed' && p.review_state !== 'pending');
-    const changed = confirming
-      ? brands.lines.filter((l) => showLine(l) && l.picks.length > 0 && !reviewed(l)).map((l) => l.delivery_item_id)
-      : edited;
+    const changed = confirming ? linesToConfirm(brands.lines.filter(showLine)) : edited;
     if (changed.length === 0) {
-      toast('info', confirming && brands.lines.some(reviewed)
-        ? 'A typed brand here was already reviewed. To confirm that line, pick the listed brand on it.'
-        : 'No brand changes to save.');
+      toast('info', nothingToSaveMessage(confirming, brands.lines));
       return;
     }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
-    // A correction must account for everything delivered on each line it changes (the database checks it too).
-    // Clearing a line on purpose ("brand unknown") is allowed; only lines with brands must add up.
-    const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id) && (drafts[l.delivery_item_id] ?? []).length > 0);
-    const mismatch = brandWarnings({ ...brands, lines: changedLines }, drafts,
-      Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])), true)[0];
+    const mismatch = correctionMismatch(brands, changed, drafts);
     if (mismatch) { toast('error', mismatch.replace(' Those choices will not be saved.', '')); return; }
     let lines;
     try {

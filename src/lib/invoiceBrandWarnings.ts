@@ -36,16 +36,36 @@ export function typedBrandDeliveryIds(lines: BrandWarningLine[]): string[] {
   return [...ids];
 }
 
+type Entries = NonNullable<ReturnType<typeof parseBrandLines>>;
+
+const groupKey = (l: BrandWarningLine) => (l.order_item_id && l.product_id ? `${l.order_item_id}|${l.product_id}` : null);
+
+/** The payer group: lines billing the same order line and product share what was delivered (ten-thousandths). */
+function billedByGroup(lines: BrandWarningLine[]): Map<string, number> {
+  const billed = new Map<string, number>();
+  for (const l of lines) {
+    const k = groupKey(l);
+    if (k && l.quantity > 0) billed.set(k, (billed.get(k) ?? 0) + tenThousandths(l.quantity));
+  }
+  return billed;
+}
+
+function pickFollowUps(label: string, entries: Entries, pendingTypedPickIds: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.brand_key === 'n:') continue;
+    if (!e.epa_registration) out.push(`${label}: EPA number not recorded for ${e.brand_name || 'a brand'} (uses the product's EPA number)`);
+    if (e.typed && e.pick_id && pendingTypedPickIds.has(e.pick_id)) {
+      out.push(`${label}: Brand typed at delivery, not yet checked (${e.brand_name || 'unnamed'})`);
+    }
+  }
+  return out;
+}
+
 export function invoiceBrandWarnings(lines: BrandWarningLine[], pendingTypedPickIds: ReadonlySet<string>): BrandWarnings {
   const noRecord: string[] = [];
   const followUp: string[] = [];
-  // The payer group: lines billing the same order line and product share what was delivered.
-  const billed = new Map<string, number>();
-  for (const l of lines) {
-    if (!l.order_item_id || !l.product_id || !(l.quantity > 0)) continue;
-    const k = `${l.order_item_id}|${l.product_id}`;
-    billed.set(k, (billed.get(k) ?? 0) + tenThousandths(l.quantity));
-  }
+  const billed = billedByGroup(lines);
   for (const l of lines) {
     const entries = parseBrandLines(l.brand_lines);
     if (entries === null || !(l.quantity > 0)) continue;
@@ -53,25 +73,18 @@ export function invoiceBrandWarnings(lines: BrandWarningLine[], pendingTypedPick
       followUp.push(`${l.label}: Brand not recorded (uses the product's EPA number)`);
     }
     if (entries.length === 0) continue;
-    const picks = entries.filter((e) => e.brand_key !== 'n:');
-    for (const e of picks) {
-      if (!e.epa_registration) followUp.push(`${l.label}: EPA number not recorded for ${e.brand_name || 'a brand'} (uses the product's EPA number)`);
-      if (e.typed && e.pick_id && pendingTypedPickIds.has(e.pick_id)) {
-        followUp.push(`${l.label}: Brand typed at delivery, not yet checked (${e.brand_name || 'unnamed'})`);
-      }
-    }
+    followUp.push(...pickFollowUps(l.label, entries, pendingTypedPickIds));
     const mismatch = brandSplitMismatch(entries);
     if (mismatch) {
       noRecord.push(`${l.label}: Split does not match delivered (${fmtBrandQty(mismatch.picked)} of ${fmtBrandQty(mismatch.delivered)} recorded)`);
       continue;
     }
     const delivered = brandLinesDelivered(entries);
-    const total = l.order_item_id && l.product_id ? billed.get(`${l.order_item_id}|${l.product_id}`) ?? 0 : tenThousandths(l.quantity);
-    if (total > delivered) {
-      noRecord.push(`${l.label}: Billed above delivered (${fmtBrandQty(total / 10000)} billed, ${fmtBrandQty(delivered / 10000)} delivered)`);
-    } else if (total < delivered) {
-      followUp.push(`${l.label}: Quantity changed from delivered (${fmtBrandQty(total / 10000)} billed, ${fmtBrandQty(delivered / 10000)} delivered)`);
-    }
+    const k = groupKey(l);
+    const total = k ? billed.get(k) ?? 0 : tenThousandths(l.quantity);
+    const amounts = `(${fmtBrandQty(total / 10000)} billed, ${fmtBrandQty(delivered / 10000)} delivered)`;
+    if (total > delivered) noRecord.push(`${l.label}: Billed above delivered ${amounts}`);
+    else if (total < delivered) followUp.push(`${l.label}: Quantity changed from delivered ${amounts}`);
   }
   return { noRecord, followUp };
 }

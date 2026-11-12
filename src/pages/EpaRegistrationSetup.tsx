@@ -26,7 +26,7 @@ const REASON_TEXT: Record<SaleToCheck['reason'], string> = {
   overlapping_invoices: 'Another invoice bills the same delivery: check the invoices',
   payer_split_changed: 'Split-bill payers no longer agree on brands: check the invoices',
   billed_above_delivered: 'Billed more than was delivered: check the invoice',
-  brand_lines_stale: 'Delivery brands changed after posting: check the record',
+  brand_lines_stale: 'Delivery brands changed after the invoice was made: check the record',
   brand_not_recorded: 'No brand recorded for this delivery: check what was sold',
 };
 

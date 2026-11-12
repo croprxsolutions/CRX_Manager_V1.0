@@ -577,7 +577,11 @@ async function main() {
   }
   raw(`UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${D(12)}';`);
   assert.equal(zulu().pick_id, pickId);
-  ok(ADMIN, `SELECT public.review_typed_brand('${pickId}', 'dismiss', NULL, 'not a brand', 'b1b-r-ok')::text;`);
+  const reviewed = ok(ADMIN, `SELECT public.review_typed_brand('${pickId}', 'dismiss', NULL, 'not a brand', 'b1b-r-ok')::text;`);
+  raw(`UPDATE public.deliveries SET status = 'voided' WHERE id = '${D(12)}';`);
+  assert.equal(ok(ADMIN, `SELECT public.review_typed_brand('${pickId}', 'dismiss', NULL, 'not a brand', 'b1b-r-ok')::text;`), reviewed,
+    'a retry of a committed review answers the same after the delivery is voided');
+  raw(`UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${D(12)}';`);
   console.log('[prover] case 10: typed brands on voided or cancelled deliveries are not listed and cannot be reviewed; on a live delivery they can');
 
   // 11. Partial billing, two payers at 50/50, a 5-place delivered amount, a typed '~none' brand.
@@ -753,6 +757,21 @@ async function main() {
   for (const l of L24) assert.equal(postAndGen(invOf(l), `b1b-g24-${l}`), 0, 'no record under the old brand');
   for (const l of L24) assert.ok(reasons(l).includes('-:brand_lines_stale'), `${l}: ${reasons(l)}`);
   console.log('[prover] case 20: a Bill Split draft corrected after it was made keeps its brands and claim, counts as skipped, posts with no record, and is listed as stale');
+
+  // 21. (Sol r1) A Bill Split draft made with no pick ([]) on a restricted product, then corrected to a brand: posting
+  //     writes no per-line record under the product's number; the line is listed as stale.
+  raw(`UPDATE public.products SET epa_registration = '500-2' WHERE id = '${PR}';`);
+  mkDelivery(25, [[PR, 2]]);
+  billSplit(25);
+  complete(D(25), { [DI(25, 0)]: 2 }, 'b1b-c25');
+  const L25 = payerLines(25, 0);
+  assert.equal(L25.length, 2);
+  for (const l of L25) assert.deepEqual(brandLines(l), [], 'made with no pick');
+  ok(ADMIN, CORRECT(D(25), [{ delivery_item_id: DI(25, 0), picks: [pick(ALPHA, 2)] }], 'it was Alpha', 'b1b-x25'));
+  for (const l of L25) assert.equal(postAndGen(invOf(l), `b1b-g25-${l}`), 0, 'no record under the product number');
+  for (const l of L25) { assert.deepEqual(records(l), []); assert.ok(reasons(l).includes('-:brand_lines_stale'), `${l}: ${reasons(l)}`); }
+  raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
+  console.log('[prover] case 21: a split draft made with no brand and corrected to a restricted brand posts with no record under the product number and is listed as stale');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

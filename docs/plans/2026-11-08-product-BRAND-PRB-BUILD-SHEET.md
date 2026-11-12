@@ -940,7 +940,7 @@ Read on `main` `167126d17` and live (read-only) on 2026-11-11, after B-1a's appl
      - otherwise update its covered lines whose stored `brand_lines` differs from the reader, so the fill trigger recomputes them.
    - Any error in one invoice is caught and raised as a warning; that draft stays as it was (Q5). Busy order lock, terminal order, lock timeout and deadlock are all covered.
    - Several events in one transaction re-copy several times; the later ones find nothing different.
-   - **Never a wrong record:** posting writes no brand record for a line whose stored `brand_lines` differs from the reader at that moment (a split draft corrected after it was made, or a draft the re-copy skipped). The line is listed `brand_lines_stale`. A NULL or `[]` line keeps #1746's per-line record.
+   - **Never a wrong record:** posting writes no brand record for a line whose stored `brand_lines` differs from the reader at that moment (a split draft corrected after it was made, or a draft the re-copy skipped). The line is listed `brand_lines_stale`. A NULL or `[]` line keeps #1746's per-line record, unless the picks now name brands (a split draft made with no pick, corrected afterwards): then no record under the product's number, and the line is listed `brand_lines_stale` (Sol r1).
 4. **Allocation `_invoice_line_brand_allocation(line_id)`.**
    - **Input.** Reads only stored values: the line's `brand_lines`, its `quantity` and `extended_cents`, and the stored `brand_lines` and quantities of its payer group.
    - **Arithmetic.** `numeric` (no overflow), quantities as whole units of 0.0001, cents as whole cents. Floor division only; leftovers go to the largest remainders, ties to the earlier entry.

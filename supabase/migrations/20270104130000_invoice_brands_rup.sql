@@ -869,6 +869,9 @@ BEGIN
         JOIN invoice_line_rup_captures c ON c.invoice_item_id = ii.id
        WHERE ii.invoice_id = p_invoice_id AND c.rup_status = 'yes' AND ii.quantity > 0
          AND COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(ii.brand_lines) = 'array' THEN ii.brand_lines END), 0) = 0
+         -- Never a per-line record under the product's number when the picks now name brands (a NULL or [] split
+         -- draft corrected after it was made): the line is listed as brand_lines_stale instead (Sol r1).
+         AND COALESCE(jsonb_array_length(public._invoice_line_brand_lines(ii.invoice_id, ii.order_item_id, ii.product_id)), 0) = 0
          AND NOT EXISTS (SELECT 1 FROM rup_sales_records r WHERE r.invoice_item_id = ii.id AND r.voided_at IS NULL)
       UNION ALL
       SELECT ii.id, ii.product_id, p.product_name, (b.value ->> 'quantity')::numeric,
@@ -1211,13 +1214,16 @@ BEGIN
   END IF;
   SELECT delivery_id INTO v_delivery_id FROM public.delivery_item_brands WHERE id = p_pick_id;
   IF v_delivery_id IS NULL THEN RAISE EXCEPTION 'BRAND_PICK_NOT_FOUND' USING ERRCODE = 'P0002'; END IF;
-  -- B-1b: a voided or cancelled delivery's picks are not reviewed, as a deleted one's.
-  PERFORM 1 FROM public.deliveries WHERE id = v_delivery_id AND deleted_at IS NULL
-     AND status NOT IN ('voided', 'cancelled') FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'BRAND_PICK_NOT_FOUND' USING ERRCODE = 'P0002'; END IF;
+  PERFORM 1 FROM public.deliveries WHERE id = v_delivery_id FOR UPDATE;
   v_fp := md5(jsonb_build_array(p_pick_id, p_action, p_brand_id, p_reason)::text);
   v_existing := public._product_parent_replay(p_idempotency_key, 'review_typed_brand', v_fp);
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  -- B-1b: a voided or cancelled delivery's picks are not reviewed, as a deleted one's; after the replay, so a
+  -- committed review still answers its retry (Sol r1).
+  IF NOT EXISTS (SELECT 1 FROM public.deliveries WHERE id = v_delivery_id AND deleted_at IS NULL
+                    AND status NOT IN ('voided', 'cancelled')) THEN
+    RAISE EXCEPTION 'BRAND_PICK_NOT_FOUND' USING ERRCODE = 'P0002';
+  END IF;
 
   -- Re-read under the delivery lock: a correction or edit may have replaced the pick meanwhile.
   SELECT * INTO v_pick FROM public.delivery_item_brands WHERE id = p_pick_id FOR UPDATE;

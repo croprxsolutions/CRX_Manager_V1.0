@@ -633,6 +633,7 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - A repeated upload with the same retry key writes once.
 
 **MOA-1 · Resistance mode-of-action groups shown on the product** (Mason, 2026-11-11; planned, no build scheduled; Mason places it)
+- **Build sheet:** `docs/plans/2026-11-12-product-MOA1-BUILD-SHEET.md` (2026-11-12; a plan only, waiting on Mason's review and his four questions).
 - **Mason's words:** "on the product setup when it pulls in and we set the active ingredients it keeps track of which FRAC groups that product contains". Mason said FRAC; this item covers the resistance mode-of-action group for every chemical type: FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides.
 - **What already exists (checked 2026-11-11 against `main`):**
   - DM-1 (live) built `product_parent_modes_of_action`: one row per parent, ingredient, scheme and group, with scheme limited to `HRAC`, `FRAC` or `IRAC` (no separate `WSSA`; the August record D-17 chose the numeric global herbicide code, which HRAC and WSSA now share).

@@ -271,7 +271,7 @@ function copyDatabase(from, to) {
 // ---------------------------------------------------------------------------------------------------------------
 const id = (n) => `bb1b0000-0000-4000-8000-${Number(n).toString(16).padStart(12, '0')}`;
 const ADMIN = id(1), REP = id(2), DRV = id(3);
-const CUST = id(10);
+const CUST = id(10), LAND = id(11);
 const PAR = id(20);
 const ALPHA = id(30), BRAVO = id(31), CHARLIE = id(32), DELTA = id(33), ECHO = id(34);
 const PR = id(40), PX = id(41);
@@ -356,7 +356,8 @@ function seed() {
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     UPDATE public.profiles SET role = 'driver', is_active = true WHERE id = '${DRV}';
     INSERT INTO public.customers (id, farm_name, is_active, email, contact_name) VALUES
-      ('${CUST}', '[PROVER] B1B Farm', true, 'b1b-farm@example.invalid', 'Pat Prover');`);
+      ('${CUST}', '[PROVER] B1B Farm', true, 'b1b-farm@example.invalid', 'Pat Prover'),
+      ('${LAND}', '[PROVER] B1B Landlord', true, 'b1b-land@example.invalid', 'Lee Prover');`);
   // REG-1's seed, on a database with no numbered products yet (nothing to pick), switches registrations on.
   const pv = js(ADMIN, `SELECT public.preview_epa_registration_seed('no')::text;`);
   assert.equal(pv.registration_count, 0, JSON.stringify(pv));
@@ -682,6 +683,76 @@ async function main() {
     'a posted line keeps its brand captures when the product number changes and the line is touched');
   raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
   console.log('[prover] case 16: the split-invoice claim leaves the brand snapshot out; a split-group draft is not re-copied, so its claim still matches; a posted line keeps its brand captures');
+
+  // 17. A REAL Bill Split completion (the body drafts one invoice per payer before B-1a's completion rule runs):
+  //     one pick of 3 loaded, 2 delivered, and a brand-listed line with no pick.
+  const payerLines = (n, k = 0) => scalar(`SELECT string_agg(ii.id::text, ',' ORDER BY i.customer_id) FROM public.invoice_items ii
+    JOIN public.invoices i ON i.id = ii.invoice_id WHERE i.order_id = '${O(n)}' AND ii.order_item_id = '${OI(n, k)}' AND i.deleted_at IS NULL;`).split(',').filter(Boolean);
+  const claimMatches = (inv) => scalar(`SELECT (sp.content_claim = public._split_invoice_content_claim(sp.invoice_id))::text
+    FROM public.split_invoice_provenance sp WHERE sp.invoice_id = '${inv}';`);
+  const billSplit = (n) => raw(`INSERT INTO public.order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents)
+    SELECT '${O(n)}', '${LAND}', '[PROVER] B1B Landlord', 40, round(sum(total_price) * 40)::bigint FROM public.order_items WHERE order_id = '${O(n)}';`);
+  const noStale = (l) => assert.ok(!reasons(l).some((x) => /stale|mismatch|payer_split/.test(x)), `${l}: ${reasons(l)}`);
+  mkDelivery(21, [[PR, 3], [PR, 2]]);
+  billSplit(21);
+  set(D(21), [{ delivery_item_id: DI(21, 0), picks: [pick(ALPHA, 3)] }], 'b1b-k21');
+  complete(D(21), { [DI(21, 0)]: 2, [DI(21, 1)]: 2 }, 'b1b-c21');
+  const L21 = payerLines(21, 0), L21n = payerLines(21, 1);
+  assert.equal(L21.length, 2, 'the completion drafted one line per payer (the Bill Split ran)');
+  for (const l of L21) {
+    assert.deepEqual(keys(l), ['Alpha:2'], 'each payer line holds the trimmed pick');
+    assert.equal(Number(brandLines(l)[0].line_delivered), 2);
+    assert.equal(claimMatches(invOf(l)), 'true', 'the stored split claim matches');
+  }
+  for (const l of L21n) assert.deepEqual(brandLines(l), [], 'a brand-listed line with no pick holds [] (not NULL)');
+  let gen21 = 0;
+  for (const inv of new Set(L21.map(invOf))) gen21 += postAndGen(inv, `b1b-g21-${inv}`);
+  assert.equal(gen21, 2, 'each payer gets its Alpha record');
+  assert.equal(L21.reduce((s, l) => s + records(l).reduce((x, r) => x + Number(r.qty), 0), 0), 2, 'the payers\' Alpha records add up to what was delivered');
+  for (const l of [...L21, ...L21n]) noStale(l);
+  console.log('[prover] case 17: a real Bill Split completion drafts each payer line with the trimmed pick and [] for a listed line with no pick; the stored split claims match; posting writes each payer\'s record and nothing is listed stale');
+
+  // 18. A REAL landlord (field) auto-split completion: the order's lines are allocated to a field the landlord owns.
+  mkDelivery(22, [[PR, 3], [PR, 2]]);
+  raw(`UPDATE public.order_items SET total_units_needed = 2, total_price = 20, profit = 8, quantity_remaining = 2 WHERE id = '${OI(22, 0)}';
+    INSERT INTO public.fields (id, customer_id, field_name, crop_type, total_acres) VALUES ('${id(0x1622)}', '${LAND}', '[PROVER] B1B Field', 'corn', 100);
+    INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
+      VALUES ('${OI(22, 0)}', '${id(0x1622)}', 100), ('${OI(22, 1)}', '${id(0x1622)}', 100);`);
+  set(D(22), [{ delivery_item_id: DI(22, 0), picks: [pick(ALPHA, 3)] }], 'b1b-k22');
+  complete(D(22), { [DI(22, 0)]: 2, [DI(22, 1)]: 2 }, 'b1b-c22');
+  const L22 = payerLines(22, 0), L22n = payerLines(22, 1);
+  assert.ok(L22.length >= 1 && L22n.length >= 1,
+    `the landlord auto-split ran (needs_split_billing=${scalar(`SELECT needs_split_billing::text FROM public.orders WHERE id = '${O(22)}';`)})`);
+  for (const l of L22) { assert.deepEqual(keys(l), ['Alpha:2'], 'the landlord line holds the trimmed pick'); assert.equal(claimMatches(invOf(l)), 'true'); }
+  for (const l of L22n) assert.deepEqual(brandLines(l), [], 'a listed line with no pick holds []');
+  for (const inv of new Set(L22.map(invOf))) postAndGen(inv, `b1b-g22-${inv}`);
+  assert.equal(L22.reduce((s, l) => s + records(l).length, 0), L22.length, 'one Alpha record per landlord line');
+  for (const l of [...L22, ...L22n]) noStale(l);
+  console.log('[prover] case 18: a real landlord auto-split completion drafts its lines with the trimmed pick and []; claims match; posting records and lists nothing stale');
+
+  // 19. A backdated completion of a plain sale: the draft holds the final brands too.
+  mkDelivery(23, [[PR, 3]]);
+  set(D(23), [{ delivery_item_id: DI(23, 0), picks: [pick(ALPHA, 3)] }], 'b1b-k23');
+  ok(ADMIN, `SELECT public.complete_delivery(p_delivery_id => '${D(23)}', p_signed_by => '${NO_PROOF}', p_performed_by => '${ADMIN}',
+    p_quantities => ${J({ [DI(23, 0)]: 2 })}, p_idempotency_key => 'b1b-c23', p_completed_at => now() - interval '3 days',
+    p_evidence => 'no_proof', p_evidence_ref => '[PROVER] no proof on the stop')::text;`);
+  assert.deepEqual(keys(invLine(23)), ['Alpha:2']);
+  console.log('[prover] case 19: a backdated plain completion drafts the trimmed pick');
+
+  // 20. A Bill Split draft corrected after it was made keeps its brands (never re-copied); posting writes no record
+  //     under the old brand and lists the line as stale.
+  mkDelivery(24, [[PR, 2]]);
+  billSplit(24);
+  set(D(24), [{ delivery_item_id: DI(24, 0), picks: [pick(ALPHA, 2)] }], 'b1b-k24');
+  complete(D(24), { [DI(24, 0)]: 2 }, 'b1b-c24');
+  const L24 = payerLines(24, 0);
+  assert.equal(L24.length, 2);
+  ok(ADMIN, CORRECT(D(24), [{ delivery_item_id: DI(24, 0), picks: [pick(DELTA, 2)] }], 'was Delta', 'b1b-x24'));
+  for (const l of L24) { assert.deepEqual(keys(l), ['Alpha:2'], 'a split draft is not re-copied'); assert.equal(claimMatches(invOf(l)), 'true'); }
+  assert.equal(scalar(`SELECT public._invoice_brand_recopy_invoice('${invOf(L24[0])}')::text;`), 'false', 'a split draft counts as skipped');
+  for (const l of L24) assert.equal(postAndGen(invOf(l), `b1b-g24-${l}`), 0, 'no record under the old brand');
+  for (const l of L24) assert.ok(reasons(l).includes('-:brand_lines_stale'), `${l}: ${reasons(l)}`);
+  console.log('[prover] case 20: a Bill Split draft corrected after it was made keeps its brands and claim, counts as skipped, posts with no record, and is listed as stale');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

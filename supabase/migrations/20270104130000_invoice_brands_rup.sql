@@ -31,11 +31,21 @@
 --      returns brand_name (DROP and CREATE, same grants).
 --   6. get_typed_brands_for_review leaves out picks on voided or cancelled deliveries; review_typed_brand refuses them.
 --   7. Backfill: open drafts re-copied once.
+--   8. _complete_delivery_aggregate_impl re-issued (md5 pinned, B-1a's body plus one marked setting): while the body
+--      runs, the delivery being completed is named in crx.brand_completing_delivery, and _invoice_line_brand_lines
+--      reads it as B-1a's completion rule will leave it. Lines written during a completion (Bill Split and landlord
+--      split drafts, which the re-copy never touches) therefore hold the final brands.
+--   9. Posting writes no brand record for a line whose stored brands no longer match its picks (a split draft
+--      corrected after it was made, or a draft the re-copy skipped because another writer held it); the line is
+--      listed as brand_lines_stale on Sales to check instead.
 --
 -- ACCEPTED EFFECT: posting checks the invoice it was reviewed against (_invoice_post_content_version hashes whole
 --   lines). Adding brand_lines, the backfill, and a later re-copy each change that hash, so a draft open on a screen
 --   at that moment is refused once as changed since loaded; reloading shows the current brands and posts (as the
 --   price_tier_at_sale column did, 20261027060000).
+-- ACCEPTED EFFECT: a re-copy never waits (FOR SHARE NOWAIT). A draft another writer holds at that moment keeps its
+--   old brands until its next save; if it is posted first, posting writes no brand record for the line and lists it
+--   as brand_lines_stale. The same holds for a split draft corrected after it was made: it is never re-copied.
 --
 -- NOT CHANGED: every amount, quantity, price, cost and stock column and function; invoice saving and posting
 --   wrappers; B-1a's writers.
@@ -43,6 +53,8 @@
 -- ROLLBACK (its own reviewed migration, a forward repair): drop the two triggers, restore the re-issued bodies from
 --   their md5 pins below. The new columns, the capture table and its rows, and the (line, brand key) index STAY: the
 --   old generator never writes brand records, and the index still allows one per-line record per line.
+--   get_rup_sales_register's old body needs DROP, CREATE and its grants again (authenticated, service_role): its
+--   returned columns change.
 --
 -- ORDERING: after 20270104120000 (B-1a) and the REG-1 seed run; the preflight refuses before the seed.
 --
@@ -52,6 +64,7 @@
 -- caller-analysis: _capture_invoice_line_rup :: trigger function of trg_zz_capture_invoice_line_rup only
 -- caller-analysis: _epa_registration_unrecorded_posted_lines :: called only by set_epa_registration; same signature, private
 -- caller-analysis: _guard_rup_sales_record_line :: trigger function of trg_rup_sales_record_line only
+-- caller-analysis: _complete_delivery_aggregate_impl :: called only by B-1a's complete_delivery / start_and_complete_delivery bodies; same signature, owner, mode and grants (none for app roles); only sets and clears a transaction-local setting around the unchanged body call
 -- caller-analysis: review_typed_brand, get_typed_brands_for_review :: same signatures and grants (authenticated); no caller in the app yet (B-2)
 -- caller-analysis: all-functions :: every new _-prefixed helper is internal (EXECUTE revoked from PUBLIC, anon, authenticated, service_role)
 
@@ -90,7 +103,10 @@ BEGIN
       ('public.review_typed_brand(uuid,text,uuid,text,text)', '654a80598fef179ed430edf0ac57ee81'),
       ('public._epa_registrations_seeded()', 'bfda524a07d41a733f891541f5c3c68f'),
       ('public._epa_registration_lock(boolean)', '0470f94473b8d22cc7ac19f5e880ca70'),
-      ('public._split_invoice_content_claim(uuid)', 'ab4bb76a486afa09d35715f6b101231b')) v(sig, body_md5)
+      ('public._split_invoice_content_claim(uuid)', 'ab4bb76a486afa09d35715f6b101231b'),
+      ('public._complete_delivery_aggregate_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)',
+       'fb5708a0eba6a6c9997b04b8958d9549'),
+      ('public._delivery_brands_on_complete(uuid,boolean)', 'e0c40003cb79e8570a6c2f69982abf0f')) v(sig, body_md5)
   LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure(v_pin.sig)
                       AND md5(replace(p.prosrc, chr(13), '')) = v_pin.body_md5 AND p.proowner = 'postgres'::regrole) THEN
@@ -195,7 +211,11 @@ AS $function$
          END;
 $function$;
 
--- One read of a line's covered picks. Used to write the snapshot and to detect a stale one; posting never calls it.
+-- One read of a line's covered picks. Used to write the snapshot, to detect a stale one, and by posting to refuse a
+-- stale one a record. A delivery being completed in this transaction (crx.brand_completing_delivery, set only by
+-- _complete_delivery_aggregate_impl around the body, before B-1a's completion rule runs) is read as that rule will
+-- leave it: had_list from the current brand list, and a single pick above the delivered amount trimmed to it
+-- (20270104120000 _delivery_brands_on_complete steps 1 and 2; step 5 changes no field read here).
 CREATE FUNCTION public._invoice_line_brand_lines(p_invoice_id uuid, p_order_item_id uuid, p_product_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -207,29 +227,40 @@ AS $function$
     SELECT i.delivery_id FROM public.invoices i
      WHERE i.id = p_invoice_id AND i.invoice_type <> 'credit_memo'
        AND p_order_item_id IS NOT NULL AND p_product_id IS NOT NULL
-  ), covered AS (
-    SELECT di.id AS delivery_item_id, d.id AS delivery_id, d.completed_at,
-           round(COALESCE(di.quantity_delivered, di.quantity), 4) AS line_delivered,
-           EXISTS (SELECT 1 FROM public.delivery_brand_events e, jsonb_array_elements(e.details -> 'lines') l
-                    WHERE e.delivery_id = d.id AND e.event_type = 'completed'
-                      AND l.value ->> 'delivery_item_id' = di.id::text
-                      AND COALESCE((l.value ->> 'brand_list_size')::integer, 0) > 0) AS had_list,
-           EXISTS (SELECT 1 FROM public.delivery_item_brands b
-                    WHERE b.delivery_item_id = di.id AND b.superseded_at IS NULL) AS has_picks
+  ), lines AS (
+    SELECT di.id AS delivery_item_id, di.product_id, d.id AS delivery_id, d.completed_at,
+           COALESCE(di.quantity_delivered, di.quantity) AS raw_delivered,
+           d.id::text = current_setting('crx.brand_completing_delivery', true)
+             AND NOT EXISTS (SELECT 1 FROM public.delivery_brand_events e
+                              WHERE e.delivery_id = d.id AND e.event_type = 'completed') AS completing
       FROM inv
       JOIN public.delivery_items di ON di.order_item_id = p_order_item_id AND di.product_id = p_product_id
       JOIN public.deliveries d ON d.id = di.delivery_id
      WHERE d.status = 'completed' AND d.deleted_at IS NULL
        AND (inv.delivery_id IS NULL OR d.id = inv.delivery_id)
        AND round(COALESCE(di.quantity_delivered, di.quantity), 4) > 0
+  ), covered AS (
+    SELECT x.delivery_item_id, x.delivery_id, x.completed_at, x.raw_delivered, x.completing,
+           round(x.raw_delivered, 4) AS line_delivered,
+           CASE WHEN x.completing THEN EXISTS (SELECT 1 FROM public._delivery_line_brand_list(x.product_id))
+                ELSE EXISTS (SELECT 1 FROM public.delivery_brand_events e, jsonb_array_elements(e.details -> 'lines') l
+                              WHERE e.delivery_id = x.delivery_id AND e.event_type = 'completed'
+                                AND l.value ->> 'delivery_item_id' = x.delivery_item_id::text
+                                AND COALESCE((l.value ->> 'brand_list_size')::integer, 0) > 0) END AS had_list,
+           (SELECT count(*) FROM public.delivery_item_brands b
+             WHERE b.delivery_item_id = x.delivery_item_id AND b.superseded_at IS NULL) AS pick_count
+      FROM lines x
   )
   SELECT CASE
-    WHEN NOT EXISTS (SELECT 1 FROM covered WHERE had_list OR has_picks) THEN NULL
-    WHEN NOT EXISTS (SELECT 1 FROM covered WHERE has_picks) THEN '[]'::jsonb
+    WHEN NOT EXISTS (SELECT 1 FROM covered WHERE had_list OR pick_count > 0) THEN NULL
+    WHEN NOT EXISTS (SELECT 1 FROM covered WHERE pick_count > 0) THEN '[]'::jsonb
     ELSE (SELECT jsonb_agg(jsonb_build_object(
             'brand_key', public._invoice_brand_key(b.brand_name, b.epa_registration),
             'brand_name', b.brand_name, 'epa_registration', b.epa_registration, 'manufacturer', b.manufacturer,
-            'signal_word', b.signal_word, 'quantity', COALESCE(b.quantity, c.line_delivered),
+            'signal_word', b.signal_word,
+            'quantity', CASE WHEN c.completing AND c.pick_count = 1 AND b.quantity > c.raw_delivered
+                                  AND c.raw_delivered = round(c.raw_delivered, 4)
+                             THEN c.raw_delivered ELSE COALESCE(b.quantity, c.line_delivered) END,
             'line_delivered', c.line_delivered, 'typed', COALESCE(b.source = 'typed', false), 'pick_id', b.id,
             'delivery_id', c.delivery_id, 'delivery_item_id', c.delivery_item_id, 'completed_at', c.completed_at)
             ORDER BY c.completed_at, c.delivery_id, c.delivery_item_id, lower(b.brand_name),
@@ -308,10 +339,14 @@ BEGIN
     -- NOWAIT: a posting or save holding the invoice makes this a caught 55P03 (the draft keeps its brands and is
     -- re-copied on its next save), so a delivery write never waits here. A split-group invoice is skipped: its
     -- stored provenance claim covers epa_registration, which a re-copy can change, and a mismatch blocks posting.
+    -- It keeps the brands it was made with (final, see _invoice_line_brand_lines); a later correction is caught at
+    -- posting (no record, listed as brand_lines_stale), so it counts as skipped.
+    IF EXISTS (SELECT 1 FROM public.split_invoice_provenance sp WHERE sp.invoice_id = p_invoice_id) THEN
+      RETURN false;
+    END IF;
     PERFORM 1 FROM public.invoices i
      WHERE i.id = p_invoice_id AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
        AND i.invoice_type <> 'credit_memo'
-       AND NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance sp WHERE sp.invoice_id = i.id)
        FOR SHARE NOWAIT;
     IF FOUND THEN
       UPDATE public.invoice_items ii SET brand_lines = NULL  -- trg_fill_invoice_line_zbrands writes the real value
@@ -532,7 +567,7 @@ BEGIN
   RETURN jsonb_build_object('problem', NULL, 'brands', COALESCE((
     SELECT jsonb_agg(jsonb_build_object('brand_key', k.brand_key, 'brand_name', k.brand_name,
              'epa_registration', k.epa_registration, 'signal_word', k.signal_word,
-             'quantity', s.ticks / 10000, 'cents', s.cents * v_sign) ORDER BY k.first_index)
+             'quantity', round(s.ticks / 10000, 4), 'cents', s.cents * v_sign) ORDER BY k.first_index)
       FROM public._invoice_line_brand_keys(v_entries) k
       CROSS JOIN LATERAL (
         SELECT sum(v_x[i]) AS ticks, sum(v_cents[i]) AS cents
@@ -848,6 +883,9 @@ BEGIN
        WHERE ii.invoice_id = p_invoice_id AND c.rup_status = 'yes' AND ii.quantity > 0
          AND jsonb_typeof(ii.brand_lines) = 'array' AND jsonb_array_length(ii.brand_lines) > 0
          AND (b.value ->> 'quantity')::numeric > 0
+         -- Never a record under brands the picks no longer say (a corrected split draft, a skipped re-copy):
+         -- the line is listed as brand_lines_stale instead.
+         AND ii.brand_lines IS NOT DISTINCT FROM public._invoice_line_brand_lines(ii.invoice_id, ii.order_item_id, ii.product_id)
          AND NOT EXISTS (SELECT 1 FROM rup_sales_records r
                           WHERE r.invoice_item_id = ii.id AND r.voided_at IS NULL AND r.brand_key = c.brand_key)
        ORDER BY 1, 11 NULLS FIRST;
@@ -1245,6 +1283,102 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
+-- 9b. Completion (WHAT 8): B-1a's _complete_delivery_aggregate_impl (20270104120000 section 8, md5 pinned), with
+--     two marked additions that name the delivery being completed while the body runs.
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public._complete_delivery_aggregate_impl(
+  p_delivery_id uuid,
+  p_signed_by text,
+  p_performed_by uuid DEFAULT NULL::uuid,
+  p_quantities jsonb DEFAULT NULL::jsonb,
+  p_issue_type text DEFAULT NULL::text,
+  p_issue_notes text DEFAULT NULL::text,
+  p_idempotency_key text DEFAULT NULL::text,
+  p_completed_at timestamp with time zone DEFAULT NULL::timestamp with time zone
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_actor uuid;
+  v_actor_role text;
+  v_delivery record;
+  v_base_seq text := NULLIF(current_setting('crx.brand_base_seq', true), '');  -- 20270104120000
+  v_picks_confirmed boolean;  -- 20270104120000
+  v_result jsonb;  -- 20270104120000
+BEGIN
+  v_actor := auth.uid();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'AUTH_REQUIRED';
+  END IF;
+
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH';
+  END IF;
+
+  SELECT id, assigned_driver, status
+    INTO v_delivery
+    FROM public.deliveries
+   WHERE id = p_delivery_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Delivery not found: %', p_delivery_id;
+  END IF;
+
+  SELECT role
+    INTO v_actor_role
+    FROM public.profiles
+   WHERE id = v_actor
+     AND is_active = true;
+
+  IF v_actor_role IS NULL OR NOT (
+    v_actor_role IN ('admin', 'sales_rep')
+    OR (v_actor_role = 'driver' AND v_actor = v_delivery.assigned_driver)
+  ) THEN
+    RAISE EXCEPTION 'Not authorized to complete this delivery';
+  END IF;
+
+  -- 20270104120000 (Brand PR B): brands never refuse a completion (Mason 2026-11-09). A screen that sent the
+  -- brand seq it loaded confirms the picks only if they have not changed since; otherwise the completion still
+  -- goes through and the 'completed' event records picks_confirmed false, which puts its picked lines on the
+  -- office list. A caller that sent no seq (the app before B-2) records NULL: not stated, not flagged.
+  PERFORM set_config('crx.brand_base_seq', '', true);
+  -- Only the wrappers set the value; anything that is not a plain number reads as not confirmed, never an error.
+  v_picks_confirmed := CASE WHEN v_base_seq IS NULL THEN NULL
+    WHEN v_base_seq ~ '^[0-9]{1,18}$' THEN v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id)
+    ELSE false END;
+
+  -- 20270104130000 (B-1b): invoice lines the body writes while completing this delivery (Bill Split and landlord
+  -- split drafts, which the re-copy never touches) read its brands as the completion rule below will leave them.
+  IF v_delivery.status = 'in_progress' THEN
+    PERFORM set_config('crx.brand_completing_delivery', p_delivery_id::text, true);
+  END IF;
+  v_result := public._complete_delivery_authorized_impl(
+    p_delivery_id,
+    p_signed_by,
+    p_performed_by,
+    p_quantities,
+    p_issue_type,
+    p_issue_notes,
+    p_idempotency_key,
+    p_completed_at
+  );
+  PERFORM set_config('crx.brand_completing_delivery', '', true);  -- 20270104130000
+
+  -- 20270104120000: the brand completion rule, once, for a delivery this call completed. Outside the body's Bill
+  -- Split fallback, so an error here fails the completion instead of changing the billing.
+  IF v_delivery.status = 'in_progress'
+     AND (SELECT d.status FROM public.deliveries d WHERE d.id = p_delivery_id) = 'completed' THEN
+    PERFORM public._delivery_brands_on_complete(p_delivery_id, v_picks_confirmed);
+  END IF;
+  RETURN v_result;
+END;
+$function$;
+
+-- ---------------------------------------------------------------------------------------------
 -- 10. Grants
 -- ---------------------------------------------------------------------------------------------
 
@@ -1311,7 +1445,8 @@ BEGIN
       'public._delivery_brand_event_recopy()', 'public._brand_largest_remainder(numeric,numeric[],numeric)',
       'public._invoice_line_brand_allocation(uuid)', 'public._invoice_brand_rup_facts(uuid,text,text)',
       'public._sync_invoice_line_brand_captures(uuid,uuid,jsonb,text)', 'public._capture_invoice_line_rup()',
-      'public._guard_rup_sales_record_line()', 'public._epa_registration_unrecorded_posted_lines(text)'] LOOP
+      'public._guard_rup_sales_record_line()', 'public._epa_registration_unrecorded_posted_lines(text)',
+      'public._complete_delivery_aggregate_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'] LOOP
       IF has_function_privilege(v_role, v_sig, 'EXECUTE') THEN
         RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: % can run %', v_role, v_sig;
       END IF;
@@ -1327,7 +1462,8 @@ BEGIN
                                   '_invoice_brand_recopy', '_delivery_brand_event_recopy', '_invoice_line_brand_allocation',
                                   '_invoice_brand_rup_facts', '_sync_invoice_line_brand_captures', '_capture_invoice_line_rup',
                                   'generate_rup_sales_records', 'get_epa_sales_to_check', 'get_rup_sales_register',
-                                  'review_typed_brand', 'get_typed_brands_for_review', '_epa_registration_unrecorded_posted_lines')
+                                  'review_typed_brand', 'get_typed_brands_for_review', '_epa_registration_unrecorded_posted_lines',
+                                  '_complete_delivery_aggregate_impl')
                 AND (p.proowner <> 'postgres'::regrole
                      OR NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) s
                                      WHERE replace(s, '"', '') = 'search_path=public, pg_temp'))) THEN
@@ -1338,6 +1474,14 @@ BEGIN
      OR has_function_privilege('authenticated', 'public._split_invoice_content_claim(uuid)', 'EXECUTE')
      OR has_function_privilege('anon', 'public._split_invoice_content_claim(uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: the split-invoice claim does not leave brand_lines out, or its owner or grants changed';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = '_complete_delivery_aggregate_impl') <> 1
+     OR position('crx.brand_completing_delivery' IN (SELECT prosrc FROM pg_proc
+          WHERE oid = 'public._complete_delivery_aggregate_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure)) = 0
+     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+                 WHERE p.oid = 'public._complete_delivery_aggregate_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure
+                   AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: the completion does not name the delivery it completes, or PUBLIC can run it';
   END IF;
   -- Public functions keep their grants.
   IF has_function_privilege('anon', 'public.generate_rup_sales_records(uuid,text)', 'EXECUTE')

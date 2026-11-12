@@ -40,8 +40,14 @@ function lineNumberText(line: SeedLine): string {
   return own === productNumber ? productNumber : `${productNumber} (line says ${own})`;
 }
 
+const WHOLE_LINE_BRAND_REASONS = new Set<SaleToCheck['reason']>([
+  'brand_split_mismatch', 'overlapping_invoices', 'payer_split_changed', 'billed_above_delivered', 'brand_lines_stale', 'brand_not_recorded',
+]);
+
 /** The captured number, never replaced by the line's saved one: a missing capture must look missing. */
 function capturedNumberText(r: SaleToCheck): string {
+  // A row about the whole line's brands has no single brand number to show.
+  if (r.brand_key == null && WHOLE_LINE_BRAND_REASONS.has(r.reason)) return '—';
   const captured = r.epa_registration ?? 'None captured';
   return r.saved_number && r.saved_number !== r.epa_registration ? `${captured} (line saved ${r.saved_number})` : captured;
 }

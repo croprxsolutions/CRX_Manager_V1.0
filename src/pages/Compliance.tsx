@@ -845,7 +845,7 @@ export default function Compliance() {
                 loading={loading || rupLoading}
                 searchable
                 searchPlaceholder="Search RUP sales..."
-                searchKeys={['buyer_name', 'product_name', 'epa_registration', 'buyer_certification_number']}
+                searchKeys={['buyer_name', 'product_name', 'brand_name', 'epa_registration', 'buyer_certification_number']}
                 emptyTitle="No RUP sales records"
                 emptyDescription="RUP sales records are auto-generated when invoices with RUP products are posted."
               />

@@ -13,3 +13,5 @@
 - An admin correction of a delivery's brands re-copies open draft invoices when it saves; posted invoices never change.
 - The RUP register and its CSV show the brand; typed brands on voided or cancelled deliveries leave the review list.
 - Proof: `node scripts/smoke/prove-invoice-brands-real-schema.mjs`.
+
+An invoice open on a screen when its brands are re-copied (or when this change is applied) asks for one reload before it posts. Split-billed drafts are never re-copied, so their stored copy still matches when they post.

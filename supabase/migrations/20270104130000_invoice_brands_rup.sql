@@ -32,6 +32,11 @@
 --   6. get_typed_brands_for_review leaves out picks on voided or cancelled deliveries; review_typed_brand refuses them.
 --   7. Backfill: open drafts re-copied once.
 --
+-- ACCEPTED EFFECT: posting checks the invoice it was reviewed against (_invoice_post_content_version hashes whole
+--   lines). Adding brand_lines, the backfill, and a later re-copy each change that hash, so a draft open on a screen
+--   at that moment is refused once as changed since loaded; reloading shows the current brands and posts (as the
+--   price_tier_at_sale column did, 20261027060000).
+--
 -- NOT CHANGED: every amount, quantity, price, cost and stock column and function; invoice saving and posting
 --   wrappers; B-1a's writers.
 --
@@ -84,7 +89,8 @@ BEGIN
       ('public.get_typed_brands_for_review()', '97d8af013659a7c93f5d4ecbe11f7446'),
       ('public.review_typed_brand(uuid,text,uuid,text,text)', '654a80598fef179ed430edf0ac57ee81'),
       ('public._epa_registrations_seeded()', 'bfda524a07d41a733f891541f5c3c68f'),
-      ('public._epa_registration_lock(boolean)', '0470f94473b8d22cc7ac19f5e880ca70')) v(sig, body_md5)
+      ('public._epa_registration_lock(boolean)', '0470f94473b8d22cc7ac19f5e880ca70'),
+      ('public._split_invoice_content_claim(uuid)', 'ab4bb76a486afa09d35715f6b101231b')) v(sig, body_md5)
   LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = to_regprocedure(v_pin.sig)
                       AND md5(replace(p.prosrc, chr(13), '')) = v_pin.body_md5 AND p.proowner = 'postgres'::regrole) THEN
@@ -123,6 +129,46 @@ COMMENT ON COLUMN public.invoice_items.brand_lines IS
 GRANT SELECT (brand_lines) ON public.invoice_items TO authenticated;
 GRANT REFERENCES (brand_lines) ON public.invoice_items TO authenticated;
 GRANT SELECT (brand_lines) ON public.invoice_items TO anon;
+
+-- The split-invoice provenance claim compares every line column except these; a new column must be left out in
+-- the same file or every stored claim stops matching and split groups can no longer post (as price_tier_at_sale,
+-- 20261027060000). Re-issued from that file (md5 pinned above) with brand_lines added; owner and grants kept.
+CREATE OR REPLACE FUNCTION public._split_invoice_content_claim(p_invoice_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+  SELECT jsonb_build_object(
+    'contract_version', 'split_invoice_provenance_v1',
+    'invoice', jsonb_build_object(
+      'invoice_id', i.id,
+      'invoice_number', i.invoice_number,
+      'order_id', i.order_id,
+      'customer_id', i.customer_id,
+      'invoice_type', i.invoice_type,
+      'season', i.season,
+      'salesman_id', i.salesman_id,
+      'created_by', i.created_by,
+      'total_amount_cents', i.total_amount_cents,
+      'invoice_date', i.invoice_date,
+      'invoice_group_id', i.invoice_group_id,
+      'header_notes', i.header_notes,
+      'pricing_pending', i.pricing_pending
+    ),
+    'items', COALESCE((
+      SELECT jsonb_agg(
+               to_jsonb(ii) - ARRAY['created_at', 'updated_at', 'price_tier_at_sale', 'brand_lines']::text[]
+               ORDER BY ii.sort_order, ii.id
+             )
+        FROM public.invoice_items ii
+       WHERE ii.invoice_id = i.id
+    ), '[]'::jsonb)
+  )
+  FROM public.invoices i
+  WHERE i.id = p_invoice_id;
+$function$;
 
 ALTER TABLE public.rup_sales_records ADD COLUMN brand_name text;
 ALTER TABLE public.rup_sales_records ADD COLUMN brand_key text;
@@ -259,11 +305,14 @@ SET search_path = public, pg_temp
 AS $function$
 BEGIN
   BEGIN
-    -- Waits for a posting that holds the invoice; the status is then re-checked on the row as it now is.
+    -- NOWAIT: a posting or save holding the invoice makes this a caught 55P03 (the draft keeps its brands and is
+    -- re-copied on its next save), so a delivery write never waits here. A split-group invoice is skipped: its
+    -- stored provenance claim covers epa_registration, which a re-copy can change, and a mismatch blocks posting.
     PERFORM 1 FROM public.invoices i
      WHERE i.id = p_invoice_id AND i.status IN ('draft', 'unposted') AND i.deleted_at IS NULL
        AND i.invoice_type <> 'credit_memo'
-       FOR SHARE;
+       AND NOT EXISTS (SELECT 1 FROM public.split_invoice_provenance sp WHERE sp.invoice_id = i.id)
+       FOR SHARE NOWAIT;
     IF FOUND THEN
       UPDATE public.invoice_items ii SET brand_lines = NULL  -- trg_fill_invoice_line_zbrands writes the real value
        WHERE ii.invoice_id = p_invoice_id AND ii.order_item_id IS NOT NULL
@@ -580,11 +629,14 @@ BEGIN
   END IF;
   -- B-1b: the per-brand captures, before the per-line early return below. The registration lock first, so no
   -- registration edit runs between reading the facts and writing them.
-  IF NEW.product_id IS NOT NULL AND jsonb_typeof(NEW.brand_lines) = 'array' AND jsonb_array_length(NEW.brand_lines) > 0 THEN
-    PERFORM public._epa_registration_lock(false);
-    PERFORM public._sync_invoice_line_brand_captures(NEW.id, NEW.product_id, NEW.brand_lines, 'save');
-  ELSE
-    DELETE FROM public.invoice_line_brand_rup_captures WHERE invoice_item_id = NEW.id;
+  -- Only while the invoice is open, the same freeze as the brand snapshot: a posted line's captures stay as posted.
+  IF NOT EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = NEW.invoice_id AND i.status NOT IN ('draft', 'unposted')) THEN
+    IF NEW.product_id IS NOT NULL AND jsonb_typeof(NEW.brand_lines) = 'array' AND jsonb_array_length(NEW.brand_lines) > 0 THEN
+      PERFORM public._epa_registration_lock(false);
+      PERFORM public._sync_invoice_line_brand_captures(NEW.id, NEW.product_id, NEW.brand_lines, 'save');
+    ELSE
+      DELETE FROM public.invoice_line_brand_rup_captures WHERE invoice_item_id = NEW.id;
+    END IF;
   END IF;
   IF NEW.product_id IS NULL THEN
     DELETE FROM public.invoice_line_rup_captures WHERE invoice_item_id = NEW.id;
@@ -1248,7 +1300,8 @@ BEGIN
     IF has_table_privilege(v_role, 'public.invoice_line_brand_rup_captures', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
        OR has_any_column_privilege(v_role, 'public.invoice_line_brand_rup_captures', 'SELECT,INSERT,UPDATE,REFERENCES')
        OR has_table_privilege(v_role, 'public.rup_sales_records', 'INSERT,UPDATE,DELETE,TRUNCATE')
-       OR has_any_column_privilege(v_role, 'public.rup_sales_records', 'INSERT,UPDATE') THEN
+       OR has_any_column_privilege(v_role, 'public.rup_sales_records', 'INSERT,UPDATE')
+       OR (v_role <> 'service_role' AND has_column_privilege(v_role, 'public.invoice_items', 'brand_lines', 'INSERT,UPDATE')) THEN
       RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: % can touch brand captures or write restricted-use records', v_role;
     END IF;
     FOREACH v_sig IN ARRAY ARRAY[
@@ -1279,6 +1332,12 @@ BEGIN
                      OR NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) s
                                      WHERE replace(s, '"', '') = 'search_path=public, pg_temp'))) THEN
     RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: a SECURITY DEFINER function is not owned by postgres or lacks its search_path';
+  END IF;
+  IF position('''brand_lines''' IN (SELECT prosrc FROM pg_proc WHERE oid = 'public._split_invoice_content_claim(uuid)'::regprocedure)) = 0
+     OR (SELECT proowner FROM pg_proc WHERE oid = 'public._split_invoice_content_claim(uuid)'::regprocedure) <> 'postgres'::regrole
+     OR has_function_privilege('authenticated', 'public._split_invoice_content_claim(uuid)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._split_invoice_content_claim(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_INVOICE_BRANDS_RUP: the split-invoice claim does not leave brand_lines out, or its owner or grants changed';
   END IF;
   -- Public functions keep their grants.
   IF has_function_privilege('anon', 'public.generate_rup_sales_records(uuid,text)', 'EXECUTE')

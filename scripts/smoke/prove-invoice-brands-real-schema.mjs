@@ -464,9 +464,9 @@ async function main() {
   set(D(4), [{ delivery_item_id: DI(4, 0), picks: [pick(ALPHA, 6), pick(BRAVO, 4)] }], 'b1b-k4');
   complete(D(4), { [DI(4, 0)]: 10 }, 'b1b-c4');
   const L4 = invLine(4);
-  const ext4 = Number(scalar(`SELECT extended_cents FROM public.invoice_items WHERE id = '${L4}';`));
+  const ext4 = BigInt(scalar(`SELECT extended_cents FROM public.invoice_items WHERE id = '${L4}';`)); assert.equal(ext4 % 10n, 0n, 'whole-cent expectation');
   assert.equal(postAndGen(invOf(L4), 'b1b-g4'), 1);
-  assert.deepEqual(records(L4), [{ brand: 'Alpha', key: 'b:alpha|100-1', epa: '100-1', qty: 6, cents: ext4 * 6 / 10, signal: 'Danger' }]);
+  assert.deepEqual(records(L4), [{ brand: 'Alpha', key: 'b:alpha|100-1', epa: '100-1', qty: 6, cents: Number(ext4 * 6n / 10n), signal: 'Danger' }]);
   assert.equal(postAndGen(invOf(L4), 'b1b-g4'), 1, 'a replay answers the same');
   assert.equal(ok(ADMIN, `SELECT brand_name FROM public.get_rup_sales_register() WHERE invoice_id = '${invOf(L4)}';`), 'Alpha', 'the register shows the brand');
   mkDelivery(5, [[PR, 3]]);
@@ -660,6 +660,28 @@ async function main() {
       FROM public.invoices i WHERE i.id = '${invOf(invLine(n))}'))::text;`);
   assert.equal(money(19), money(18));
   console.log('[prover] case 14: a delivery with brands and one without leave identical invoice amounts and totals');
+
+  // 16. Split-billing provenance and posted-line captures.
+  assert.equal(scalar(`SELECT count(*) FROM public.invoice_items ii WHERE ii.brand_lines IS NOT NULL
+      AND public._split_invoice_content_claim(ii.invoice_id)->'items'->0 ? 'brand_lines';`), '0', 'the split claim leaves brand_lines out');
+  mkDelivery(20, [[PR, 4]]);
+  set(D(20), [{ delivery_item_id: DI(20, 0), picks: [pick(ALPHA, 4)] }], 'b1b-k20');
+  complete(D(20), { [DI(20, 0)]: 4 }, 'b1b-c20');
+  const L20 = invLine(20); const INV20 = invOf(L20);
+  raw(`INSERT INTO public.split_invoice_provenance (invoice_id, order_id, invoice_group_id, customer_id, invoice_type, season, total_amount_cents, content_claim, created_by)
+    SELECT i.id, i.order_id, gen_random_uuid(), i.customer_id, i.invoice_type, 2027, 0, public._split_invoice_content_claim(i.id), '${ADMIN}'
+      FROM public.invoices i WHERE i.id = '${INV20}';`);
+  const claim20 = scalar(`SELECT content_claim::text FROM public.split_invoice_provenance WHERE invoice_id = '${INV20}';`);
+  ok(ADMIN, CORRECT(D(20), [{ delivery_item_id: DI(20, 0), picks: [pick(BRAVO, 4)] }], 'was Bravo', 'b1b-x20'));
+  assert.deepEqual(keys(L20), ['Alpha:4'], 'a split-group draft is not re-copied');
+  assert.equal(scalar(`SELECT public._split_invoice_content_claim('${INV20}')::text;`), claim20, 'so its stored claim still matches');
+  const cap4 = scalar(`SELECT jsonb_agg(to_jsonb(c) ORDER BY brand_key)::text FROM public.invoice_line_brand_rup_captures c WHERE invoice_item_id = '${L4}';`);
+  raw(`UPDATE public.products SET epa_registration = '500-2' WHERE id = '${PR}';`);
+  psql(`UPDATE public.invoice_items SET cost_cents = cost_cents WHERE id = '${L4}';`, { user: 'supabase_admin' });
+  assert.equal(scalar(`SELECT jsonb_agg(to_jsonb(c) ORDER BY brand_key)::text FROM public.invoice_line_brand_rup_captures c WHERE invoice_item_id = '${L4}';`), cap4,
+    'a posted line keeps its brand captures when the product number changes and the line is touched');
+  raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
+  console.log('[prover] case 16: the split-invoice claim leaves the brand snapshot out; a split-group draft is not re-copied, so its claim still matches; a posted line keeps its brand captures');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

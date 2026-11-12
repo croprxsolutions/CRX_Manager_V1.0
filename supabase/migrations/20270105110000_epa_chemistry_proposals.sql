@@ -2,15 +2,12 @@
 -- (start_epa_lookup, commit_epa_proposal and reject_epa_proposal require p_idempotency_key and check it before any
 --  write with PAR-1's _product_parent_replay(key, scope, fingerprint), then save their receipt with save_idempotency.
 --  record_epa_lookup runs under the service role, where auth.uid() is empty, so it does the same steps by hand with
---  check_idempotency against p_actor. The hook only recognises check_idempotency.)
--- actor-binding-check: exempt
--- (record_epa_lookup's p_actor: the function is granted to service_role ONLY (postflight proves no authenticated or
---  anon EXECUTE), so no browser can call it, and under the service role auth.uid() is empty and cannot bind it.
---  The epa-lookup Edge Function passes the caller it verified from the JWT. The body still binds p_actor: it must be
---  the admin who started the lookup (epa_lookups.requested_by, written from auth.uid() by start_epa_lookup) and an
---  active admin, else EPA_LOOKUP_ACTOR.)
+--  check_idempotency, keyed by the lookup. The hook only recognises check_idempotency.)
+-- record_epa_lookup takes no actor parameter: it is granted to service_role ONLY (postflight proves no authenticated
+--  or anon EXECUTE), and it records the admin who started the lookup (epa_lookups.requested_by, written from
+--  auth.uid() by start_epa_lookup), who must still be an active admin, else EPA_LOOKUP_ACTOR.
 -- Written 2026-11-11. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270104113000_epa_chemistry_proposals.md.
+-- docs/reference/migrations.d/20270105110000_epa_chemistry_proposals.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: Product Master DM-4, EPA auto-fill (docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md, its section 13 for
@@ -23,8 +20,8 @@
 --   - epa_lookups (one request), epa_lookup_failures (append-only), epa_chemistry_proposals. RLS on; admins read;
 --     no client writes. epa_lookups is also readable by service_role (the epa-lookup Edge Function reads the row).
 --   - start_epa_lookup, commit_epa_proposal, reject_epa_proposal: admin, granted to authenticated.
---   - record_epa_lookup: service_role ONLY. EPA's answer reaches the database only from the Edge Function, with the
---     verified caller as p_actor; a browser cannot submit a made-up "EPA result" (D-Z).
+--   - record_epa_lookup: service_role ONLY. EPA's answer reaches the database only from the Edge Function, recorded
+--     as the admin who started the lookup; a browser cannot submit a made-up "EPA result" (D-Z).
 --   - Private helpers (no grants): the link finder, the result shape check, the result normalizer, the item sorter.
 --   - _parent_chemistry_epa_refusal re-issued (same signature, owner and no grants): a number is excused only
 --     when its newest non-abandoned lookup failed as not_found, bound to the registration's current version and a
@@ -701,12 +698,13 @@ $function$;
 -- 4. record_epa_lookup (service role only: the epa-lookup Edge Function)
 -- ---------------------------------------------------------------------------------------------
 
-CREATE FUNCTION public.record_epa_lookup(p_lookup_id uuid, p_actor uuid, p_result jsonb, p_idempotency_key text DEFAULT NULL)
+CREATE FUNCTION public.record_epa_lookup(p_lookup_id uuid, p_result jsonb, p_idempotency_key text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
 DECLARE
   -- First answer wins: a retry with a different EPA answer replays the saved result (sheet 4.B step 1).
-  v_fp text := md5(jsonb_build_object('lookup_id', p_lookup_id, 'actor_id', p_actor)::text);
+  v_fp text := md5(jsonb_build_object('lookup_id', p_lookup_id)::text);
+  v_actor uuid;
   v_existing jsonb;
   v_lookup public.epa_lookups;
   v_reason text;
@@ -724,7 +722,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('crx.product_parent:record_epa_lookup:' || p_idempotency_key));
   v_existing := public.check_idempotency(p_idempotency_key, 'record_epa_lookup');
   IF v_existing IS NOT NULL THEN
-    IF v_existing->>'actor_id' IS DISTINCT FROM p_actor::text OR v_existing->>'request_fingerprint' IS DISTINCT FROM v_fp THEN
+    IF v_existing->>'request_fingerprint' IS DISTINCT FROM v_fp THEN
       RAISE EXCEPTION 'IDEMPOTENCY_PAYLOAD_MISMATCH';
     END IF;
     RETURN v_existing->'response';
@@ -737,10 +735,10 @@ BEGIN
   PERFORM 1 FROM public.product_parents WHERE id = v_lookup.parent_id FOR UPDATE;
   SELECT * INTO v_lookup FROM public.epa_lookups WHERE id = p_lookup_id FOR UPDATE;
 
-  -- Actor binding: only the admin who started this lookup (requested_by came from auth.uid()), still an active admin.
-  IF p_actor IS NULL OR p_actor IS DISTINCT FROM v_lookup.requested_by
-     OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = p_actor AND role = 'admin' AND is_active) THEN
-    RAISE EXCEPTION 'EPA_LOOKUP_ACTOR: only the admin who started this lookup can record it';
+  -- The actor is the admin who started this lookup (requested_by came from auth.uid()), still an active admin.
+  v_actor := v_lookup.requested_by;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_actor AND role = 'admin' AND is_active) THEN
+    RAISE EXCEPTION 'EPA_LOOKUP_ACTOR: the admin who started this lookup is no longer an active admin';
   END IF;
   -- A newer start abandoned this lookup; say so by name before the plain status check.
   IF EXISTS (SELECT 1 FROM public.epa_lookups l
@@ -782,7 +780,7 @@ BEGIN
     INSERT INTO public.epa_lookup_failures (lookup_id, parent_id, epa_registration, link_kind, link_id, registration_version,
       reason, transferred_to, detail, created_by)
     VALUES (v_lookup.id, v_lookup.parent_id, v_lookup.epa_registration, v_lookup.link_kind, v_lookup.link_id,
-      v_lookup.registration_version, v_reason, v_transferred, v_detail, p_actor)
+      v_lookup.registration_version, v_reason, v_transferred, v_detail, v_actor)
     RETURNING id INTO v_id;
     v_result := jsonb_build_object('lookup_id', v_lookup.id, 'outcome', 'failure', 'failure_id', v_id, 'reason', v_reason);
   ELSE
@@ -802,14 +800,14 @@ BEGIN
         'regType', p_result->'regType', 'productStatus', p_result->'productStatus', 'isCancelled', p_result->'isCancelled',
         'needsManual', p_result->'needsManual', 'latestLabelPdfUrl', p_result->'latestLabelPdfUrl',
         'newest_label_date', v_input->'label'->'label_accepted_on', 'base_label_note', p_result->>'regType' = 'distributor'),
-      p_actor)
+      v_actor)
     RETURNING id INTO v_id;
     v_result := jsonb_build_object('lookup_id', v_lookup.id, 'outcome', 'proposal', 'proposal_id', v_id);
   END IF;
 
   UPDATE public.epa_lookups SET status = 'recorded', recorded_at = now(), updated_at = now() WHERE id = v_lookup.id;
   PERFORM public.save_idempotency(p_idempotency_key, 'record_epa_lookup',
-    jsonb_build_object('actor_id', p_actor, 'request_fingerprint', v_fp, 'response', v_result));
+    jsonb_build_object('actor_id', v_actor, 'request_fingerprint', v_fp, 'response', v_result));
   RETURN v_result;
 END;
 $function$;
@@ -1095,7 +1093,7 @@ DO $grants$
 DECLARE
   f text;
 BEGIN
-  FOREACH f IN ARRAY ARRAY['public.start_epa_lookup(uuid,text,text)', 'public.record_epa_lookup(uuid,uuid,jsonb,text)',
+  FOREACH f IN ARRAY ARRAY['public.start_epa_lookup(uuid,text,text)', 'public.record_epa_lookup(uuid,jsonb,text)',
     'public.commit_epa_proposal(uuid,bigint,jsonb,text)', 'public.reject_epa_proposal(uuid,bigint,text,text)',
     'public._parent_chemistry_epa_refusal(uuid)']
   LOOP
@@ -1107,7 +1105,7 @@ $grants$;
 GRANT EXECUTE ON FUNCTION public.start_epa_lookup(uuid, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.commit_epa_proposal(uuid, bigint, jsonb, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.reject_epa_proposal(uuid, bigint, text, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.record_epa_lookup(uuid, uuid, jsonb, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.record_epa_lookup(uuid, jsonb, text) TO service_role;
 
 DO $postflight$
 DECLARE
@@ -1121,9 +1119,9 @@ BEGIN
      OR has_function_privilege('anon', 'public.start_epa_lookup(uuid,text,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.commit_epa_proposal(uuid,bigint,jsonb,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.reject_epa_proposal(uuid,bigint,text,text)', 'EXECUTE')
-     OR NOT has_function_privilege('service_role', 'public.record_epa_lookup(uuid,uuid,jsonb,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.record_epa_lookup(uuid,uuid,jsonb,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.record_epa_lookup(uuid,uuid,jsonb,text)', 'EXECUTE')
+     OR NOT has_function_privilege('service_role', 'public.record_epa_lookup(uuid,jsonb,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.record_epa_lookup(uuid,jsonb,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.record_epa_lookup(uuid,jsonb,text)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._parent_chemistry_epa_refusal(uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_EPA_PROPOSALS_FUNCTION_GRANTS_WRONG';
   END IF;

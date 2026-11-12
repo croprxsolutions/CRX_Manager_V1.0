@@ -329,12 +329,12 @@ const notFound = (extra = {}) => ({
 let seq = 0;
 const key = (tag) => `dm4-${tag}-${++seq}`;
 const START = (pid, num, k = key('s')) => `SELECT public.start_epa_lookup('${pid}', ${q(num)}, ${q(k)});`;
-const RECORD = (lid, actor, result, k = key('r')) => `SELECT public.record_epa_lookup('${lid}', ${q(actor)}, ${J(result)}, ${q(k)});`;
+const RECORD = (lid, result, k = key('r')) => `SELECT public.record_epa_lookup('${lid}', ${J(result)}, ${q(k)});`;
 const COMMIT = (pid, ver, decisions = [], k = key('c')) => `SELECT public.commit_epa_proposal('${pid}', ${ver}, ${J(decisions)}, ${q(k)});`;
 const REJECT = (pid, ver, reason = 'not this one', k = key('j')) => `SELECT public.reject_epa_proposal('${pid}', ${ver}, ${q(reason)}, ${q(k)});`;
 const SETREG = (num, ver, changes, k = key('g')) => `SELECT public.set_epa_registration('${num}', ${ver ?? 'NULL'}, ${J(changes)}, 'label checked', NULL, ${q(k)});`;
 const start = (pid, num) => js(ADMIN, START(pid, num));
-const record = (lid, result) => js(SERVICE, RECORD(lid, ADMIN, result));
+const record = (lid, result) => js(SERVICE, RECORD(lid, result));
 // Start and record in one go; returns the record result.
 const lookup = (pid, num, result) => record(start(pid, num).lookup_id, result);
 const proposal = (pid) => row(`SELECT to_jsonb(p) FROM public.epa_chemistry_proposals p WHERE id = '${pid}'`);
@@ -504,11 +504,11 @@ function caseH8H19() {
 
   const s = start(P8, '108-1');
   const k = key('r19');
-  const first = js(SERVICE, RECORD(s.lookup_id, ADMIN, found('108-1', [['Glyphosate', 30]]), k));
+  const first = js(SERVICE, RECORD(s.lookup_id, found('108-1', [['Glyphosate', 30]]), k));
   const total = n('SELECT count(*) FROM public.epa_chemistry_proposals;');
-  assert.deepEqual(js(SERVICE, RECORD(s.lookup_id, ADMIN, found('108-1', [['Glyphosate', 99]]), k)), first, 'the first answer wins');
+  assert.deepEqual(js(SERVICE, RECORD(s.lookup_id, found('108-1', [['Glyphosate', 99]]), k)), first, 'the first answer wins');
   assert.equal(n('SELECT count(*) FROM public.epa_chemistry_proposals;'), total);
-  refused(SERVICE, RECORD(s.lookup_id, ADMIN, found('108-1', [['Glyphosate', 99]])), /EPA_LOOKUP_NOT_PENDING: this lookup is recorded/);
+  refused(SERVICE, RECORD(s.lookup_id, found('108-1', [['Glyphosate', 99]])), /EPA_LOOKUP_NOT_PENDING: this lookup is recorded/);
   console.log('[case] H19 a record retry with a different EPA answer replays the first result and writes nothing; a new key on a recorded lookup is refused');
 }
 
@@ -552,27 +552,24 @@ function caseH12H13H14H17H18() {
   const s1 = start(P13, '113-1');
   const s2 = start(P13, '113-1');
   assert.equal(scalar(`SELECT status FROM public.epa_lookups WHERE id = '${s1.lookup_id}';`), 'abandoned');
-  refused(SERVICE, RECORD(s1.lookup_id, ADMIN, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_SUPERSEDED/);
+  refused(SERVICE, RECORD(s1.lookup_id, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_SUPERSEDED/);
   assert.equal(n(`SELECT count(*) FROM public.epa_chemistry_proposals WHERE lookup_id = '${s1.lookup_id}';`), 0);
   console.log('[case] H18 an older lookup recorded after a newer start is refused EPA_LOOKUP_SUPERSEDED; it stays abandoned with no proposal');
 
   // H14: provenance.
-  refused(ADMIN, RECORD(s2.lookup_id, ADMIN, found('113-1', [['Glyphosate', 41]])), /permission denied for function record_epa_lookup/);
-  refused(SERVICE, RECORD(s2.lookup_id, ADMIN2, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_ACTOR/);
-  refused(SERVICE, RECORD(s2.lookup_id, REP, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_ACTOR/);
-  refused(SERVICE, RECORD(s2.lookup_id, null, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_ACTOR/);
+  refused(ADMIN, RECORD(s2.lookup_id, found('113-1', [['Glyphosate', 41]])), /permission denied for function record_epa_lookup/);
   raw(`UPDATE public.profiles SET is_active = false WHERE id = '${ADMIN}';`);
-  refused(SERVICE, RECORD(s2.lookup_id, ADMIN, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_ACTOR/);
+  refused(SERVICE, RECORD(s2.lookup_id, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_ACTOR/);
   raw(`UPDATE public.profiles SET is_active = true WHERE id = '${ADMIN}';`);
-  console.log('[case] H14 an admin cannot record a result; the service role must name the admin who started the lookup, and that admin must still be active');
+  console.log('[case] H14 an admin cannot record a result; the service role records it as the admin who started the lookup, who must still be active');
 
   // H13: expired, stale and closed.
   const s3 = start(P13, '113-1');
   // Back-date every lookup of the number, keeping s3 the newest, so only its age is wrong.
   raw(`UPDATE public.epa_lookups SET requested_at = now() - interval '2 hours' WHERE parent_id = '${P13}' AND id <> '${s3.lookup_id}';
        UPDATE public.epa_lookups SET requested_at = now() - interval '31 minutes' WHERE id = '${s3.lookup_id}';`);
-  refused(SERVICE, RECORD(s3.lookup_id, ADMIN, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_EXPIRED/);
-  refused(SERVICE, RECORD(start(P13, '113-1').lookup_id, ADMIN, { pad: 'x'.repeat(270000) }), /EPA_RESULT_TOO_LARGE/);
+  refused(SERVICE, RECORD(s3.lookup_id, found('113-1', [['Glyphosate', 41]])), /EPA_LOOKUP_EXPIRED/);
+  refused(SERVICE, RECORD(start(P13, '113-1').lookup_id, { pad: 'x'.repeat(270000) }), /EPA_RESULT_TOO_LARGE/);
   const r = lookup(P13, '113-1', found('113-1', [['Glyphosate', 41]]));
   refused(ADMIN, COMMIT(r.proposal_id, 2), /EPA_PROPOSAL_STALE/);
   refused(ADMIN, REJECT(r.proposal_id, 1, '  '), /EPA_REJECT_REASON_REQUIRED/);
@@ -592,10 +589,10 @@ function caseH12H13H14H17H18() {
     refused(REP, sql, /ADMIN_REQUIRED/);
     refused(null, sql, /permission denied for function/);
   }
-  refused(REP, RECORD(s2.lookup_id, REP, notFound()), /permission denied for function record_epa_lookup/);
-  refused(null, RECORD(s2.lookup_id, ADMIN, notFound()), /permission denied for function record_epa_lookup/);
+  refused(REP, RECORD(s2.lookup_id, notFound()), /permission denied for function record_epa_lookup/);
+  refused(null, RECORD(s2.lookup_id, notFound()), /permission denied for function record_epa_lookup/);
   refused(ADMIN, START(P13, '113-1', null), /IDEMPOTENCY_KEY_REQUIRED/);
-  refused(SERVICE, RECORD(s2.lookup_id, ADMIN, notFound(), ''), /IDEMPOTENCY_KEY_REQUIRED/);
+  refused(SERVICE, RECORD(s2.lookup_id, notFound(), ''), /IDEMPOTENCY_KEY_REQUIRED/);
   const k = key('s12');
   const once = js(ADMIN, START(P13, '113-1', k));
   assert.deepEqual(js(ADMIN, START(P13, '113-1', k)), once, 'the same key replays the same start');
@@ -772,14 +769,14 @@ async function caseH9H15() {
   // H15: two results for one parent at once.
   const la = start(P9, '109-1').lookup_id;
   const lb = start(P9, '109-2').lookup_id;
-  const first = asAsync(SERVICE, `${RECORD(la, ADMIN, found('109-1', [['Glyphosate', 41]]))} SELECT pg_sleep(2);`);
+  const first = asAsync(SERVICE, `${RECORD(la, found('109-1', [['Glyphosate', 41]]))} SELECT pg_sleep(2);`);
   await pause(500);
-  const second = await asAsync(SERVICE, RECORD(lb, ADMIN, found('109-2', [['Glyphosate', 41]])));
+  const second = await asAsync(SERVICE, RECORD(lb, found('109-2', [['Glyphosate', 41]])));
   const f = await first;
   assert.equal(f.status, 0, f.output); assert.equal(second.status, 0, second.output);
   assert.ok(second.ms >= 1200, `the second record waited on the parent (${second.ms} ms)`);
   const lc = start(P9, '109-1').lookup_id;
-  const holding = asAsync(SERVICE, `${RECORD(lc, ADMIN, found('109-1', [['Glyphosate', 41]]))} SELECT pg_sleep(2);`);
+  const holding = asAsync(SERVICE, `${RECORD(lc, found('109-1', [['Glyphosate', 41]]))} SELECT pg_sleep(2);`);
   await pause(500);
   const restart = await asAsync(ADMIN, START(P9, '109-1'));
   const h = await holding;

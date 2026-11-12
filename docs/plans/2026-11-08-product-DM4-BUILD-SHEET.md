@@ -84,7 +84,7 @@ Grants:
 - `record_epa_lookup` grants `EXECUTE` to `service_role` **only**. No browser can call it; only the `epa-lookup` Edge Function can (section 4.B).
 - Helpers and the re-issued gate get no grant.
 
-The first statement of the three browser RPCs is `v_actor := public._product_parent_require_admin();`. The actor recorded anywhere is `v_actor`, never a parameter. The one exception is `record_epa_lookup`, which the Edge Function calls with the service role, so `auth.uid()` is empty there. It takes `p_actor uuid`, which the function takes from the caller's verified token, and the database accepts it only when it equals the lookup's `requested_by` **and** that profile is still an active admin.
+The first statement of the three browser RPCs is `v_actor := public._product_parent_require_admin();`. The actor recorded anywhere is `v_actor`, never a parameter. The one exception is `record_epa_lookup`, which the Edge Function calls with the service role, so `auth.uid()` is empty there. It takes no actor parameter: it records the lookup's `requested_by` (written from `auth.uid()` by `start_epa_lookup`) and refuses unless that profile is still an active admin. The Edge Function separately refuses a caller who is not `requested_by` (section 4.B step 2).
 
 Every mutating RPC:
 - takes `p_idempotency_key text DEFAULT NULL`;
@@ -206,7 +206,7 @@ A `differs` label fact is never written (D-L applies to registration facts as we
 7. Insert the lookup with the registration version and the chemistry version (0 when there is no state row).
 8. Return `{lookup_id, epa_registration, link_kind, link_id, registration_version, chemistry_version}`.
 
-### 4.B `record_epa_lookup(p_lookup_id uuid, p_actor uuid, p_result jsonb, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
+### 4.B `record_epa_lookup(p_lookup_id uuid, p_result jsonb, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`
 
 **Who calls it: only the `epa-lookup` Edge Function.** The browser never sends EPA's answer to the database, so an admin cannot type a fake "EPA result" and then commit it as `epa_lookup` chemistry (D-Z). The flow:
 1. The screen calls `start_epa_lookup` and gets a `lookup_id`.
@@ -215,17 +215,17 @@ A `differs` label fact is never written (D-L applies to registration facts as we
    - if the row is already `recorded` (a retry after a lost reply), does **not** fetch EPA again and calls `record_epa_lookup` with the same key and `p_result = '{}'`. The replay in step 1 runs before any status or shape check and returns the first saved result;
    - if the row is `abandoned`, refuses. So a failure (or success) can never be recorded against a number other than the one the lookup was started for.
 3. **Only when `lookupId` is present**, the function requires an admin (`requireActiveProfile(…, ['admin'])`). A call without `lookupId` keeps today's check (any active user), so existing screens are unchanged for non-admins. It fetches EPA, then calls `record_epa_lookup` with its service-role client, passing:
-   - `p_actor` = the verified caller ID;
+   - no actor: the database records the lookup's `requested_by` (the caller step 2 already matched to it). An actor parameter was dropped on 2026-11-11, because the rls-security reviewer flags any caller-supplied actor the database cannot bind to `auth.uid()`;
    - `p_result` = the exact `EpaLookupResult` it built, or `{error}` when the EPA fetch failed;
    - `p_idempotency_key` = `'epa-record:' || lookupId`, so a retry replays.
 4. The function returns its usual result plus `{record: <the RPC result>}`.
 
 A call without `lookupId` behaves as today and records nothing, so the other screens that use the lookup keep working. This function change ships with the DM-4 screens PR and needs a Mason-approved deploy (section 10).
 
-1. Key check and replay (scope `record_epa_lookup`). It **cannot** use `_product_parent_replay`, because that helper compares the saved `actor_id` with `auth.uid()`, and `auth.uid()` is empty under the service role (`20261108120000:501-503`). Instead it does the same steps by hand: refuse a missing key; take `pg_advisory_xact_lock(hashtext('crx.product_parent:record_epa_lookup:' || key))`; read `check_idempotency(key, 'record_epa_lookup')`; and replay only when the saved `actor_id` equals `p_actor` and the saved `request_fingerprint` matches, else refuse `IDEMPOTENCY_PAYLOAD_MISMATCH`. The result saved through `save_idempotency` uses the same envelope (`actor_id` = `p_actor`, `request_fingerprint`, `response`). The fingerprint is md5 of `{lookup_id, actor_id}` only, **not** `p_result`: the first recorded answer for a lookup wins, and a retry with a different EPA answer replays the saved result instead of refusing. (A fresh answer needs a new lookup.)
+1. Key check and replay (scope `record_epa_lookup`). It **cannot** use `_product_parent_replay`, because that helper compares the saved `actor_id` with `auth.uid()`, and `auth.uid()` is empty under the service role (`20261108120000:501-503`). Instead it does the same steps by hand: refuse a missing key; take `pg_advisory_xact_lock(hashtext('crx.product_parent:record_epa_lookup:' || key))`; read `check_idempotency(key, 'record_epa_lookup')`; and replay only when the saved `request_fingerprint` (of the lookup ID) matches, else refuse `IDEMPOTENCY_PAYLOAD_MISMATCH`. The result saved through `save_idempotency` uses the same envelope (`actor_id` = the lookup's `requested_by`, `request_fingerprint`, `response`). The fingerprint is md5 of `{lookup_id}` only, **not** `p_result`: the first recorded answer for a lookup wins, and a retry with a different EPA answer replays the saved result instead of refusing. (A fresh answer needs a new lookup.)
 2. Take the shared advisory pair. Lock the registration `FOR SHARE`, then the parent `FOR UPDATE`, then the lookup `FOR UPDATE`.
    - **Newest lookup only:** if a later lookup exists for the same number and parent (by `requested_at`, then `id`), refuse `EPA_LOOKUP_SUPERSEDED` (it is already `abandoned`: the newer start marked it). Because start and record both hold the parent lock, an older lookup can never be recorded after a newer one starts, and its proposal can never be left open over a newer result.
-   - Refuse `EPA_LOOKUP_ACTOR` unless `p_actor` equals the lookup's `requested_by` and that profile is active with role `admin`. Refuse if it is missing (`EPA_LOOKUP_NOT_FOUND`), if it is not `pending` (`EPA_LOOKUP_NOT_PENDING`), or if it is more than 30 minutes old (`EPA_LOOKUP_EXPIRED`). A refused lookup records nothing; the screen starts a new one.
+   - The actor is the lookup's `requested_by`; refuse `EPA_LOOKUP_ACTOR` unless that profile is still active with role `admin`. Refuse if it is missing (`EPA_LOOKUP_NOT_FOUND`), if it is not `pending` (`EPA_LOOKUP_NOT_PENDING`), or if it is more than 30 minutes old (`EPA_LOOKUP_EXPIRED`). A refused lookup records nothing; the screen starts a new one.
 3. Refuse `EPA_RESULT_TOO_LARGE` if `octet_length(p_result::text) > 262144`.
 4. **Shape check.** This mirrors `isEpaLookupResult` as changed by PR #1648, plus the database's own limits. Any failure here records a failure row with reason `invalid_result` and `detail` = the rule that failed; it never raises.
    - The result is an object.
@@ -361,7 +361,7 @@ The harness is `scripts/smoke/prove-epa-chemistry-proposals-real-schema.mjs`, ru
 | H11 | `percent` basis | Five real payloads from different label types are compared with their PDF labels; all % w/w active ingredient (build check, not a container case) |
 | H12 | Grants and replays | Non-admin refused on all four RPCs; anon has no execute; the same key replays the same result; the same key with other arguments refuses |
 | H13 | Stale and closed | Wrong expected version → `EPA_PROPOSAL_STALE`; commit on rejected → `EPA_PROPOSAL_NOT_OPEN`; record on an expired lookup refuses |
-| H14 | Provenance | `authenticated` (even an admin) cannot execute `record_epa_lookup`; `service_role` with a `p_actor` other than the lookup's requester, or a non-admin, refuses `EPA_LOOKUP_ACTOR`. Edge Function test: a call with `lookupId` records once; a retry replays |
+| H14 | Provenance | `authenticated` (even an admin) cannot execute `record_epa_lookup`; `service_role` records as the lookup's requester and refuses `EPA_LOOKUP_ACTOR` when that admin is no longer active. Edge Function test: a call with `lookupId` records once; a retry replays |
 | H15 | Two results for the same parent at once (two sessions) | The second waits on the parent lock, then supersedes the first; no unique-index error |
 | H16 | Bad `acceptedDate`; EPA "active" against a cancelled registration | The date is ignored with a note and the commit succeeds; the status shows as a `differs` item |
 | H18 | Older lookup recorded after a newer start | Refused `EPA_LOOKUP_SUPERSEDED`; the older lookup is `abandoned`; no proposal from it |

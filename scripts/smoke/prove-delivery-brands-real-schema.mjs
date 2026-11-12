@@ -70,7 +70,9 @@ function docker(args, options = {}) {
   if (r.error || (!options.allowFailure && r.status !== 0)) throw new Error(`${r.error?.message ?? ''}\n${r.stderr || r.stdout}`.trim());
   return r;
 }
-function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', DB, '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
+// Central time: the container clock is UTC, so a UTC current_date is tomorrow from 6 PM Central and the completion's
+// Chicago-dated DELIVERED_ON_IN_FUTURE check refuses the seeded delivery dates.
+function psqlArgs(user = 'postgres') { return ['exec', '-i', '-e', 'PGTZ=America/Chicago', NAME, 'psql', '-U', user, '-d', DB, '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }

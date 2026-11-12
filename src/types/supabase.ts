@@ -4499,6 +4499,7 @@ export type Database = {
         Row: {
           acres: number | null
           billing_line_id: string | null
+          brand_lines: Json | null
           charge_type: string | null
           cost_cents: number
           created_at: string
@@ -4535,6 +4536,7 @@ export type Database = {
         Insert: {
           acres?: number | null
           billing_line_id?: string | null
+          brand_lines?: Json | null
           charge_type?: string | null
           cost_cents?: number
           created_at?: string
@@ -4571,6 +4573,7 @@ export type Database = {
         Update: {
           acres?: number | null
           billing_line_id?: string | null
+          brand_lines?: Json | null
           charge_type?: string | null
           cost_cents?: number
           created_at?: string

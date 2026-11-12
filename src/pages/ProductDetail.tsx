@@ -17,7 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
-import { CHECK_TIMEOUT_MS, useCancelledRegistrations } from '../lib/epaRegistrationStatus';
+import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations } from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -431,20 +431,26 @@ export default function ProductDetail() {
   }, []);
   // Another product's brands never sit under this product's number.
   useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  const productLoaded = persistedProduct?.id === id;
+  // The brand list's clock starts once the product (and so the Brands section) has loaded.
   const [brandsReadSlow, setBrandsReadSlow] = useState(false);
   useEffect(() => {
     setBrandsReadSlow(false);
-    if (brandsRead !== 'loading') return undefined;
+    if (!productLoaded || brandsRead !== 'loading') return undefined;
     const timer = setTimeout(() => setBrandsReadSlow(true), CHECK_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [brandsRead, id]);
-  const brandsReadFailed = brandsRead === 'failed' || (brandsRead === 'loading' && brandsReadSlow);
+  }, [brandsRead, productLoaded, id]);
   const registrationSources = useMemo(() => (
     persistedProduct && persistedProduct.id === id
       ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
       : []
   ), [persistedProduct, id, brandRegistrations]);
   const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const registrationCheckState = registrationCheck(
+    productLoaded,
+    brandsRead === 'loading' && brandsReadSlow ? 'slow' : brandsRead,
+    registrationStatus.lookup,
+  );
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
     const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
@@ -1333,7 +1339,7 @@ export default function ProductDetail() {
         </p>
       )}
       {!isNew && (
-        <CancelledRegistrationBanner sources={registrationSources} cancelled={registrationStatus.cancelled} failed={registrationStatus.failed || brandsReadFailed} />
+        <CancelledRegistrationBanner sources={registrationSources} cancelled={registrationStatus.cancelled} check={registrationCheckState} />
       )}
 
       {duplicateSource && (

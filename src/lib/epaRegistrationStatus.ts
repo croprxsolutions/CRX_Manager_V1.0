@@ -36,27 +36,49 @@ export async function getCancelledRegistrations(numbers: (string | null | undefi
 
 export const CHECK_TIMEOUT_MS = 15_000;
 
-/** Loads the cancelled set for these numbers; a failed read is reported, never treated as "none cancelled". */
-export function useCancelledRegistrations(numbers: (string | null | undefined)[]) {
+/** Where the registration lookup stands for the current numbers. */
+export type LookupState = 'checking' | 'done' | 'failed';
+/** Where the product's brand list stands: `slow` is still loading after CHECK_TIMEOUT_MS. */
+export type BrandListState = 'loading' | 'slow' | 'loaded' | 'failed';
+/** What the page can say: still checking, every number checked, or some could not be checked. */
+export type RegistrationCheck = 'checking' | 'complete' | 'incomplete';
+
+/**
+ * The one place that decides what the page may claim. "Complete" (so "none cancelled" when nothing
+ * was found) only when the product, its whole brand list and the lookup for exactly those numbers
+ * have all answered; any failure or timeout is "incomplete", never "complete".
+ */
+export function registrationCheck(productLoaded: boolean, brands: BrandListState, lookup: LookupState): RegistrationCheck {
+  if (!productLoaded) return 'checking';
+  if (lookup === 'failed' || brands === 'failed' || brands === 'slow') return 'incomplete';
+  if (lookup === 'checking' || brands === 'loading') return 'checking';
+  return 'complete';
+}
+
+/**
+ * Loads the cancelled set for these numbers. A failed read, or none within CHECK_TIMEOUT_MS, is
+ * `failed`, never "none cancelled"; a late reply still lands. An answer for other numbers is never used.
+ */
+export function useCancelledRegistrations(numbers: (string | null | undefined)[]): { cancelled: CancelledRegistrations; lookup: LookupState } {
   const key = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
-  const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; failed: boolean }>(
-    { key: '', cancelled: new Map(), failed: false },
+  const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; lookup: LookupState }>(
+    { key: '', cancelled: new Map(), lookup: 'done' },
   );
   useEffect(() => {
     let active = true;
+    // Each request starts as "checking", so an earlier answer for the same numbers is never reused.
+    setState({ key, cancelled: new Map(), lookup: 'checking' });
     getCancelledRegistrations(key ? key.split('|') : [])
-      .then((cancelled) => { if (active) setState({ key, cancelled, failed: false }); })
+      .then((cancelled) => { if (active) setState({ key, cancelled, lookup: 'done' }); })
       .catch((err: unknown) => {
         if (!active) return;
         Sentry.captureException(toSentryError(err), { extra: { context: 'get_epa_registrations' } });
-        setState({ key, cancelled: new Map(), failed: true });
+        setState({ key, cancelled: new Map(), lookup: 'failed' });
       });
-    // A check with no reply after 15 seconds shows "could not check" rather than nothing; a late reply still lands.
     const timer = setTimeout(() => {
-      if (active) setState((prev) => (prev.key === key ? prev : { key, cancelled: new Map(), failed: true }));
+      if (active) setState((prev) => (prev.key === key && prev.lookup !== 'checking' ? prev : { key, cancelled: new Map(), lookup: 'failed' }));
     }, CHECK_TIMEOUT_MS);
     return () => { active = false; clearTimeout(timer); };
   }, [key]);
-  // Until this key's reply lands, show nothing rather than the previous numbers' answer.
-  return state.key === key ? state : { key, cancelled: new Map() as CancelledRegistrations, failed: false };
+  return state.key === key ? state : { cancelled: new Map(), lookup: 'checking' };
 }

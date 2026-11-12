@@ -146,7 +146,7 @@ vi.mock('../lib/productBrands', async (importOriginal) => ({
 // Same for the cancelled-registration read.
 vi.mock('../lib/epaRegistrationStatus', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/epaRegistrationStatus')>()),
-  useCancelledRegistrations: () => ({ key: '', cancelled: new Map(), failed: false }),
+  useCancelledRegistrations: () => ({ cancelled: new Map(), lookup: 'done' }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({

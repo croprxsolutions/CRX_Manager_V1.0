@@ -236,6 +236,23 @@ describe('ProductDetail brands section', () => {
     expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4: EPA Reg. No. 524-475, cancelled (date not recorded).');
   });
 
+  it('after switching products, the previous brands never show under the new one', async () => {
+    H.rpc.mockImplementation(async (name: string) => (name === 'get_epa_registrations'
+      ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }
+      : { data: null, error: null }));
+    const view = render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    const first = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
+    act(() => first.onBrandsChange([{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4');
+    H.routeId = 'product-2';
+    H.product = baseProduct({ id: 'product-2', product_name: 'Other Product' });
+    view.rerender(<ProductDetail />);
+    expect(await screen.findByTestId('brands-section')).toHaveTextContent('product-2: Other Product');
+    expect(screen.queryByTestId('cancelled-registration-banner')).toBeNull();
+    expect(screen.getByText('Checking EPA registration status…')).toBeInTheDocument();
+  });
+
   it('a brand list still loading after the check timeout shows "could not check"', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

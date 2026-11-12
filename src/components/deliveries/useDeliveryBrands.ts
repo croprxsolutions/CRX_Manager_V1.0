@@ -193,8 +193,9 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       const seq = await Promise.race([send(lines, true, startedAt), timedOut]);
       clearTimeout(timer);
       if (seq === 'timeout') {
-        // Its late reply is dropped (the request number moves on); the completion goes ahead unconfirmed.
-        requestRef.current++;
+        // Its late reply is dropped (the request number moves on); the completion goes ahead unconfirmed. Only
+        // when this save is still the latest request: a newer load (another stop opened) must keep its reply.
+        if (requestRef.current === startedAt + 1) requestRef.current++;
         toast('warning', 'Brands did not save in time. Completing anyway; the office will check this delivery’s brands.');
         return BRANDS_NOT_CONFIRMED;
       }

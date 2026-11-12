@@ -313,4 +313,29 @@ describe('useDeliveryBrands: completion never waits on brands (Sol r5)', () => {
       getDeliveryBrands.mockReset();
     }
   });
+  it('a completion save timing out after the driver moved to another stop does not drop the new stop load', async () => {
+    getDeliveryBrands.mockResolvedValueOnce(brands(1));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise(() => undefined) as never);
+    let d2!: (b: DeliveryBrands) => void;
+    getDeliveryBrands.mockReturnValueOnce(new Promise((resolve) => { d2 = resolve; }));
+    vi.useFakeTimers();
+    try {
+      let done = false;
+      act(() => { void result.current.saveForCompletion().then(() => { done = true; }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      rerender({ id: 'D2' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(COMPLETION_BRAND_SAVE_TIMEOUT_MS + 10); });
+      expect(done).toBe(true);
+      await act(async () => { d2({ ...brands(9), delivery_id: 'D2' }); await vi.advanceTimersByTimeAsync(0); });
+      expect(result.current.brands?.delivery_id).toBe('D2'); // D2's own load still landed
+      expect(result.current.brands?.event_seq).toBe(9);
+    } finally {
+      vi.useRealTimers();
+      rpc.mockRestore();
+      getDeliveryBrands.mockReset();
+    }
+  });
 });

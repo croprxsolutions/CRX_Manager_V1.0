@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270105100000 (KI-76: invoice lines with no unit). Builds the checked-in schema
+ * Real-schema proof for 20270106100000 (KI-76: invoice lines with no unit). Builds the checked-in schema
  * baseline in a network-disabled PostgreSQL container and replays every migration before the candidate.
  * With invented rows (an admin, a rep, a customer, a product sold in gal and one with no unit), every flow
  * runs through the real RPCs as the signed-in user (the API role), rolled back.
@@ -50,7 +50,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270105100000_blank_unit_fill_and_post_refusal.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270106100000_blank_unit_fill_and_post_refusal.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

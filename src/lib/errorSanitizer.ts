@@ -178,10 +178,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
   [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,
    'Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay'],
-  // create_invoice_from_order (20270105100000, KI-76): a line with no unit can't be billed or credited.
+  // create_invoice_from_order (20270106100000, KI-76): a line with no unit can't be billed or credited.
   [/^ORDER_LINE_UNIT_MISSING\b/,
    'Nothing was billed. A line on this order has no unit. Set each line\'s unit on the order before billing it'],
-  // Posting (20270105100000, KI-76): a sale line still has no unit, so it could never be credited.
+  // Posting (20270106100000, KI-76): a sale line still has no unit, so it could never be credited.
   [/^INVOICE_LINE_UNIT_MISSING\b/,
    'Nothing was posted. A line on this invoice has no unit. Set the unit on the product, save the draft invoice, then post it again'],
   [/^ORDER_INVOICE_LINE_INVALID\b/,

@@ -81,7 +81,7 @@ function SummaryNotes({ proposal }: { proposal: EpaChemistryProposal }) {
       )}
       {proposal.status === 'held' && proposal.hold_reason && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-amber-800" role="alert">
-          On hold: {HOLD_LABEL[proposal.hold_reason]} It can no longer be committed. Run the lookup again or reject it.
+          On hold: {HOLD_LABEL[proposal.hold_reason]} It can no longer be committed. Reject it, or run a new lookup if this number is still on the product.
         </p>
       )}
     </div>

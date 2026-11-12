@@ -65,7 +65,7 @@ export default function EpaLookups() {
             <h2 className="mb-2 text-base font-semibold text-primary">Failed lookups by EPA number</h2>
             {overview.truncated && <p className="mb-2 text-xs text-secondary">Showing the newest {overview.failures.length} failed lookups.</p>}
             {overview.failures.length === 0
-              ? <EmptyState title="No failed lookups" description="Every EPA lookup so far produced a proposal." />
+              ? <EmptyState title="No failed lookups" description="No EPA lookup has failed." />
               : (
                 <ul className="space-y-3 text-sm">
                   {byNumber(overview.failures).map(([epaNumber, failures]) => (

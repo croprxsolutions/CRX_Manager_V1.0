@@ -79,6 +79,7 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
   const [pendingTick, setPendingTick] = useState(0);
   const [waiting, setWaiting] = useState<number | null>(null);
   const tokens = useRef(0);
+  const gateSeq = useRef(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   const forKey = JSON.stringify([parentId, parentVersion, refreshKey, attempt]);
   const state = loaded?.forKey === forKey ? loaded : null;
@@ -113,7 +114,10 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
   // the lookup panel and stop a Look up all that is still running.
   const refreshGate = () => {
     const at = forKey;
+    const seq = ++gateSeq.current;
     fetchParentChemistry(parentId).then((next) => {
+      // Only the newest re-read lands: an older, slower reply never restores a stale gate.
+      if (seq !== gateSeq.current) return;
       setLoaded((prev) => (prev?.forKey === at ? { forKey: at, status: 'loaded', chem: next } : prev));
     }).catch((error: unknown) => { Sentry.captureException(errorOf(error), { extra: { context: 'get_parent_chemistry refresh' } }); });
   };

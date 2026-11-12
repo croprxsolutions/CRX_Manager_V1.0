@@ -350,3 +350,55 @@ export function normalizeDistributorBasePayload(
     transferredTo: null,
   };
 }
+
+// DM-4 record mode (sheet 4.B): the screen sends only a lookup ID. The function reads the lookup row itself, so EPA
+// is asked about the number stored when the lookup started, and only its requester can run it.
+export const LOOKUP_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface StoredLookup {
+  epa_registration: string;
+  status: string;
+  requested_by: string;
+}
+
+export type RecordPlan =
+  | { action: "fetch"; regNumber: string }
+  | { action: "replay" }
+  | { action: "refuse"; status: number; error: string };
+
+export function planRecordedLookup(
+  lookup: StoredLookup | null,
+  callerId: string,
+): RecordPlan {
+  if (!lookup) {
+    return { action: "refuse", status: 404, error: "That EPA lookup does not exist." };
+  }
+  if (lookup.requested_by !== callerId) {
+    return {
+      action: "refuse",
+      status: 403,
+      error: "Only the admin who started this EPA lookup can run it.",
+    };
+  }
+  // A retry after a lost reply: EPA is not asked again; the record call replays the first saved answer.
+  if (lookup.status === "recorded") return { action: "replay" };
+  if (lookup.status !== "pending") {
+    return {
+      action: "refuse",
+      status: 409,
+      error: "A newer lookup of this number replaced this one. Start a new lookup.",
+    };
+  }
+  return { action: "fetch", regNumber: lookup.epa_registration };
+}
+
+export function recordIdempotencyKey(lookupId: string): string {
+  return `epa-record:${lookupId.toLowerCase()}`;
+}
+
+/** A refusal the record function raises on purpose ("EPA_LOOKUP_EXPIRED: ..."), safe to show the admin. */
+export function isRecordRefusal(message: unknown): message is string {
+  return typeof message === "string" &&
+    /^(EPA_[A-Z_]+|IDEMPOTENCY_[A-Z_]+)(:|$)/.test(message);
+}

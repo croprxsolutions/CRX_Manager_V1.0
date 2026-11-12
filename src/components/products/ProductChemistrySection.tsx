@@ -8,6 +8,7 @@ import IngredientReviewModal from './IngredientReviewModal';
 import ChemistryEntryModal from './ChemistryEntryModal';
 import ChemistryCorrectionModal from './ChemistryCorrectionModal';
 import ChemistryActiveCosts from './ChemistryActiveCosts';
+import EpaLookupPanel from './EpaLookupPanel';
 import { ChemistryLists, PendingSavesNotice } from './ChemistryParts';
 import { errorOf, type ReplacePrefill, type SaveOutcome } from './chemistryFormHelpers';
 import type { ParentChemistry } from '../../types';
@@ -63,7 +64,7 @@ function ChemistryForms({ form, chem, profileId, onClose, onFinished, onReviewCl
 
 /**
  * DM-1: a parent's ingredients, modes of action and fertilizer analysis, shared by every size. Everyone signed in
- * reads it; admins enter, correct, review the ingredient list and see cost per lb of active (admin only).
+ * reads it; admins enter, correct, review the ingredient list, see cost per lb of active and run EPA lookups (DM-4).
  */
 export default function ProductChemistrySection({ parentId, parentVersion, refreshKey, isAdmin, profileId, busy }: {
   parentId: string; parentVersion: number; isAdmin: boolean; profileId: string;
@@ -120,6 +121,10 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
         {chem && (
           <ChemistryBody chem={chem} isAdmin={isAdmin} busy={busy} profileId={profileId} reloadKey={forKey} pending={pending}
             onPendingSettled={(outcome) => finished(outcome === 'uncertain' ? 'uncertain' : 'saved')} onCostSettled={() => setPendingTick((n) => n + 1)} />
+        )}
+        {chem && isAdmin && (
+          <EpaLookupPanel key={parentId} parentId={parentId} profileId={profileId} reloadKey={forKey} epaRefusal={chem.epa_refusal}
+            locked={busy || pending.length > 0} onCommitted={reload} />
         )}
       </div>
       {form && <ChemistryForms form={form} chem={chem} profileId={profileId} onClose={() => setForm(null)} onFinished={finished} onReviewClosed={() => { setForm(null); reload(); }} open={open} />}

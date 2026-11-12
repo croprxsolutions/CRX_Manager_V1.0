@@ -21,6 +21,15 @@ function CancelledNote({ label, epa, cancelled, testId }: { label: string; epa: 
   );
 }
 
+/** The name and EPA number of the brand a row picks: typed from the jug, listed, or a saved pick no longer listed. */
+function pickedBrand(line: DeliveryBrandLine, row: DraftPick): { name: string; epa: string | null } | null {
+  if (row.brandId === OTHER_BRAND) return { name: row.typedName.trim() || 'Typed brand', epa: row.typedEpa };
+  const listed = line.brand_list.find((b) => b.brand_id === row.brandId);
+  if (listed) return { name: listed.brand_name, epa: listed.epa_registration };
+  const saved = row.brandId ? line.picks.find((p) => (p.parent_brand_id ?? p.legacy_brand_id) === row.brandId) : undefined;
+  return saved ? { name: saved.brand_name, epa: saved.epa_registration } : null;
+}
+
 const FIELD_CLASS = 'min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-nav-dark focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green disabled:bg-gray-50';
 
 interface DeliveryBrandPickerProps {
@@ -94,12 +103,7 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                   ? line.picks.find((p) => (p.parent_brand_id ?? p.legacy_brand_id) === row.brandId)?.brand_name ?? 'Saved brand'
                   : null;
                 const label = `Brand for ${product}${rows.length > 1 ? ` (${index + 1})` : ''}`;
-                const listedBrand = line.brand_list.find((b) => b.brand_id === row.brandId);
-                const savedPick = savedName ? line.picks.find((p) => (p.parent_brand_id ?? p.legacy_brand_id) === row.brandId) : undefined;
-                const picked = row.brandId === OTHER_BRAND
-                  ? { name: row.typedName.trim() || 'Typed brand', epa: row.typedEpa }
-                  : listedBrand ? { name: listedBrand.brand_name, epa: listedBrand.epa_registration }
-                    : savedPick ? { name: savedPick.brand_name, epa: savedPick.epa_registration } : null;
+                const picked = pickedBrand(line, row);
                 return (
                   <div key={index} className="space-y-2">
                     <div className="flex items-center gap-2">

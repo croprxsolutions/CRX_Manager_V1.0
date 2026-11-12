@@ -160,7 +160,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     try {
       const parsed = await parseRateReviewWorkbook(await file.arrayBuffer());
       setUpload(parsed);
-      if (unanswered.current?.upload === JSON.stringify(parsed)) {
+      if (unanswered.current?.upload === JSON.stringify([profileId, parsed])) {
         setPreview(unanswered.current.preview);
         setResumed(true);
       } else if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed);
@@ -202,7 +202,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) {
         unanswered.current = null;
         setPreview(null);
-      } else unanswered.current = { upload: JSON.stringify(upload), preview };
+      } else unanswered.current = { upload: JSON.stringify([profileId, upload]), preview };
     } finally {
       setBusy(false);
     }

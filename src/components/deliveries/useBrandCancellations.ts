@@ -23,7 +23,9 @@ function useProductRegistrations(productIds: string[]) {
     setState({ key, numbers: new Map(), status: 'loading' });
     void supabase.from('products').select('id, epa_registration').in('id', key.split('|')).then(({ data, error }) => {
       if (!active) return;
-      if (error || !data) {
+      // A product the read did not return (hidden or gone) was not checked, so it is never "none cancelled".
+      const ids = key.split('|');
+      if (error || !data || ids.some((id) => !data.some((p) => p.id === id))) {
         Sentry.captureException(toSentryError(error), { extra: { context: 'delivery brand pick: product EPA numbers' } });
         setState({ key, numbers: new Map(), status: 'failed' });
         return;

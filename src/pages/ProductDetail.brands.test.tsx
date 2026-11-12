@@ -258,6 +258,38 @@ describe('ProductDetail brands section', () => {
     expect(screen.getByText('Checking EPA registration status…')).toBeInTheDocument();
   });
 
+  it('a product cancellation already shown stays when the later brand-number check fails (Sol r4 #1)', async () => {
+    H.product = baseProduct({ epa_registration: '524-475' });
+    H.rpc.mockImplementation(async (name: string, args: { p_numbers: string[] }) => (name !== 'get_epa_registrations'
+      ? { data: null, error: null }
+      : args.p_numbers.length === 1
+        ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }
+        : { data: null, error: new Error('offline') }));
+    render(<ProductDetail />);
+    expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('This product: EPA Reg. No. 524-475');
+    const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (id: string, b: ProductBrand[] | null | undefined) => void };
+    act(() => props.onBrandsChange('product-1', [{ brand_name: 'Other', epa_registration: '100-885' } as ProductBrand]));
+    expect(await screen.findByText(/Could not check whether all/)).toBeInTheDocument();
+    expect(screen.getByTestId('cancelled-registration-banner')).toHaveTextContent('This product: EPA Reg. No. 524-475');
+  });
+
+  it('a brand cancellation already shown stays when a brand-list refresh fails (Sol r4 #2)', async () => {
+    H.rpc.mockImplementation(async (name: string) => (name === 'get_epa_registrations'
+      ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }
+      : { data: null, error: null }));
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (id: string, b: ProductBrand[] | null | undefined) => void };
+    act(() => props.onBrandsChange('product-1', [{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4');
+    act(() => props.onBrandsChange('product-1', undefined));
+    act(() => props.onBrandsChange('product-1', null));
+    expect(await screen.findByText(/Could not check whether all/)).toBeInTheDocument();
+    expect(screen.getByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4: EPA Reg. No. 524-475');
+    const latest = H.brandSection.mock.lastCall![0] as { cancelled: Map<string, string | null> };
+    expect(latest.cancelled.has('524-475')).toBe(true);
+  });
+
   it('a brand list still loading after the check timeout shows "could not check"', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

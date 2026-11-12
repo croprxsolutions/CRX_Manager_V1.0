@@ -17,7 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
-import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations } from '../lib/epaRegistrationStatus';
+import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations, useStickyCancellations } from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -448,6 +448,7 @@ export default function ProductDetail() {
       : []
   ), [persistedProduct, id, brandRegistrations]);
   const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const shownCancellations = useStickyCancellations(id ?? '', registrationSources, registrationStatus.cancelled);
   const registrationCheckState = registrationCheck(
     productLoaded,
     brandsRead === 'loading' && brandsReadSlow ? 'slow' : brandsRead,
@@ -1341,7 +1342,7 @@ export default function ProductDetail() {
         </p>
       )}
       {!isNew && (
-        <CancelledRegistrationBanner sources={registrationSources} cancelled={registrationStatus.cancelled} check={registrationCheckState} />
+        <CancelledRegistrationBanner sources={shownCancellations.sources} cancelled={shownCancellations.cancelled} check={registrationCheckState} />
       )}
 
       {duplicateSource && (
@@ -2043,7 +2044,7 @@ export default function ProductDetail() {
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
-                cancelled={registrationStatus.cancelled}
+                cancelled={shownCancellations.cancelled}
                 onBrandsChange={handleBrandsChange}
               />
             </PhoneSection>

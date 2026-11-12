@@ -82,3 +82,38 @@ export function useCancelledRegistrations(numbers: (string | null | undefined)[]
   }, [key]);
   return state.key === key ? state : { cancelled: new Map(), lookup: 'checking' };
 }
+
+/** Who carries a number: "This product" or a brand. */
+export interface RegistrationSource {
+  label: string;
+  epaRegistration: string | null | undefined;
+}
+
+interface Hit { source: RegistrationSource; key: string; cancelledOn: string | null }
+const hitId = (hit: Hit) => `${hit.source.label}|${hit.key}`;
+
+/**
+ * Once a cancellation has shown for `scope` (the product), it keeps showing until the page reloads or the
+ * product changes, even if a later check fails or no longer covers that number (Mason, 2026-11-12).
+ */
+export function useStickyCancellations(scope: string, sources: RegistrationSource[], cancelled: CancelledRegistrations) {
+  const [seen, setSeen] = useState<{ scope: string; hits: Hit[] }>({ scope, hits: [] });
+  const current = sources.flatMap((source): Hit[] => {
+    const key = normalizeEpaRegistration(source.epaRegistration);
+    return key && cancelled.has(key) ? [{ source, key, cancelledOn: cancelled.get(key) ?? null }] : [];
+  });
+  const kept = seen.scope === scope ? seen.hits : [];
+  const keptOnly = kept.filter((hit) => !current.some((c) => hitId(c) === hitId(hit)));
+  const all = [...keptOnly, ...current];
+  const signature = all.map(hitId).sort().join('\n');
+  const seenSignature = kept.map(hitId).sort().join('\n');
+  useEffect(() => {
+    if (seen.scope !== scope || signature !== seenSignature) setSeen({ scope, hits: all });
+    // `all` is fully described by `signature`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, signature, seenSignature, seen.scope]);
+  return {
+    sources: [...sources, ...keptOnly.map((hit) => hit.source)],
+    cancelled: new Map([...keptOnly.map((hit): [string, string | null] => [hit.key, hit.cancelledOn]), ...cancelled]) as CancelledRegistrations,
+  };
+}

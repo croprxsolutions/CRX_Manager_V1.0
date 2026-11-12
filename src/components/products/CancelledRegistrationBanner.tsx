@@ -1,11 +1,7 @@
 import { AlertTriangle } from 'lucide-react';
-import { cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations, type RegistrationCheck } from '../../lib/epaRegistrationStatus';
-
-export interface RegistrationSource {
-  /** Who carries the number: "This product" or a brand name. */
-  label: string;
-  epaRegistration: string | null | undefined;
-}
+import {
+  cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations, type RegistrationCheck, type RegistrationSource,
+} from '../../lib/epaRegistrationStatus';
 
 /** Grand plan §8 (D-T, D-W): warn loudly, never block a sale. */
 export default function CancelledRegistrationBanner({ sources, cancelled, check }: {

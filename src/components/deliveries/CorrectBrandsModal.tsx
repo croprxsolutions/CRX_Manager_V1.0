@@ -54,9 +54,17 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     else requestRef.current++;
   }, [open, load]);
 
+  // Every delivered line, even when its product's brands were all retired since: an old gap stays fixable by typing it.
+  const showLine = (line: DeliveryBrandLine) => delivered(line) > 0;
+
   const save = async () => {
     if (!brands || saving) return;
-    const changed = changedLineIds(brands, drafts);
+    const edited = changedLineIds(brands, drafts);
+    // Nothing edited: saving confirms the picks as they stand, which clears an unconfirmed completion's flag.
+    const confirming = edited.length === 0;
+    const changed = confirming
+      ? brands.lines.filter((l) => showLine(l) && l.picks.length > 0).map((l) => l.delivery_item_id)
+      : edited;
     if (changed.length === 0) { toast('info', 'No brand changes to save.'); return; }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
     // A correction must account for everything delivered on each line it changes (the database checks it too).
@@ -88,7 +96,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       // Unposted invoices are re-copied, but a split-billed draft keeps its brands (it lands on Sales to check).
       toast('success', result.invoice_ids.length > 0
         ? 'Brands corrected. Open draft invoices for this delivery were re-copied; a split-billed draft keeps its old brands.'
-        : 'Brands corrected.');
+        : confirming ? 'Brands confirmed as they are.' : 'Brands corrected.');
       onClose();
     } catch (error) {
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
@@ -104,8 +112,6 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     }
   };
 
-  // Every delivered line, even when its product's brands were all retired since: an old gap stays fixable by typing it.
-  const showLine = (line: DeliveryBrandLine) => delivered(line) > 0;
   // Closing with an edited brand or a typed reason asks first, so a correction is never dropped silently.
   const requestClose = () => {
     if (saving) return;
@@ -133,7 +139,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       {brands && !hasLines && <p className="text-sm text-secondary">No delivered product on this delivery has a brand list.</p>}
       {brands && hasLines && (
         <div className="space-y-4">
-          <p className="text-sm text-secondary">The brand amounts on each line must add up to what was delivered. The old brands stay in the history.</p>
+          <p className="text-sm text-secondary">The brand amounts on each line must add up to what was delivered. The old brands stay in the history. Saving with no changes confirms the brands as they are.</p>
           <DeliveryBrandPicker
             brands={brands}
             drafts={drafts}

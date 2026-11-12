@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270104113000_epa_chemistry_proposals (DM-4, EPA auto-fill; build sheet
+ * Real-schema proof for 20270105110000_epa_chemistry_proposals (DM-4, EPA auto-fill; build sheet
  * docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md sections 6 and 13).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270104113000_epa_chemistry_proposals.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270105110000_epa_chemistry_proposals.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

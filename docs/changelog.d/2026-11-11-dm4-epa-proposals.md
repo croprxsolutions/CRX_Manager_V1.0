@@ -1,6 +1,6 @@
 ## 2026-11-11 — DM-4: EPA auto-fill proposals (database, not applied)
 
-- Migration `20270104113000_epa_chemistry_proposals.sql`; build sheet `docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md`.
+- Migration `20270105110000_epa_chemistry_proposals.sql`; build sheet `docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md`.
 - An admin starts an EPA lookup for one EPA number on a product (the product's own number, a size's, or a brand's;
   each gets its own lookup). The EPA answer becomes a proposal; nothing is written until an admin commits it.
 - A lookup that finds nothing, errors, or returns something unreadable is listed by number and writes nothing else; a "transferred" answer also closes (supersedes) the open proposal for that number.

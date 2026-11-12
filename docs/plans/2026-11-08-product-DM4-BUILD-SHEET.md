@@ -492,7 +492,7 @@ This sheet is the settled contract; it went through three Luna rounds and four C
 4. **Questions (section 11):** the build uses both recommendations (name-only ingredients unticked; typing allowed only after "not found"). Posted to Mason as the plan; he can redirect.
 5. **Commit can still raise** when DM-1's own checks refuse the result (for example, ingredients that outweigh a liquid's approved weight per gallon). That rolls the whole commit back; the screen keeps the ticks.
 
-**Delivery:** DB PR first (`20270104113000_epa_chemistry_proposals.sql`), compatible with the deployed app (it adds tables and functions and re-issues the gate; nothing calls the new functions until the screens PR). Then the screens PR plus the `epa-lookup` record step, whose deploy needs Mason's typed approval.
+**Delivery:** DB PR first (`20270105110000_epa_chemistry_proposals.sql`), compatible with the deployed app (it adds tables and functions and re-issues the gate; nothing calls the new functions until the screens PR). Then the screens PR plus the `epa-lookup` record step, whose deploy needs Mason's typed approval.
 
 ### 13.1 Cold challenge (Astra `gpt-6-astra` high, 2026-11-11): 19 findings, how each is settled
 

@@ -2081,7 +2081,7 @@ export interface ChemistryChangeProposal {
   updated_at: string;
 }
 
-/** DM-4 (20270104113000): EPA auto-fill. Admin read only; written only by the four EPA lookup functions. */
+/** DM-4 (20270105110000): EPA auto-fill. Admin read only; written only by the four EPA lookup functions. */
 export type EpaLinkKind = 'parent' | 'size' | 'parent_brand' | 'legacy_brand';
 export type EpaLookupStatus = 'pending' | 'recorded' | 'abandoned';
 export type EpaLookupFailureReason = 'not_found' | 'transferred' | 'upstream_error' | 'invalid_result';

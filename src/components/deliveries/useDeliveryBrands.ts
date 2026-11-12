@@ -78,8 +78,11 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const changed = changedLineIds(brands, drafts);
   const dirty = changed.length > 0;
 
-  const send = async (lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[], completing: boolean): Promise<number | null> => {
-    if (!brands || !deliveryId) return null;
+  /** `startedAt` is the request number when the save began: a reload or a different delivery since then cancels it. */
+  const send = async (
+    lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[], completing: boolean, startedAt: number,
+  ): Promise<number | null> => {
+    if (!brands || !deliveryId || requestRef.current !== startedAt) return null;
     // One key per exact save (this delivery, these choices, this base): a retry of the same save reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, brands.event_seq]);
     const request = ++requestRef.current;
@@ -133,10 +136,11 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     }
     if (lines.length === 0) return brands.event_seq;
     // Disabled from here, so no choice can change between building this save and its reply.
+    const startedAt = requestRef.current;
     setSaving(true);
     try {
       if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
-      return await send(lines, false);
+      return await send(lines, false, startedAt);
     } finally {
       setSaving(false);
     }
@@ -162,11 +166,12 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       } catch { leftOut = true; }
     }
     if (lines.length === 0) return leftOut ? BRANDS_NOT_CONFIRMED : brands.event_seq;
+    const startedAt = requestRef.current;
     setSaving(true);
     try {
       // No signal: the completion's own signal check stops it next.
       if (!(await hasSignal())) return BRANDS_NOT_CONFIRMED;
-      const seq = await send(lines, true);
+      const seq = await send(lines, true, startedAt);
       return seq === null || leftOut ? BRANDS_NOT_CONFIRMED : seq;
     } finally {
       setSaving(false);

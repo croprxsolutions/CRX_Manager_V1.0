@@ -7,7 +7,8 @@ import { supabaseUntyped } from '../../lib/db';
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'driver-1' } }) }));
 const toast = vi.fn();
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast }) }));
-vi.mock('../../lib/connectivity', () => ({ hasSignal: async () => true }));
+let signal: () => Promise<boolean> = async () => true;
+vi.mock('../../lib/connectivity', () => ({ hasSignal: () => signal() }));
 
 const getDeliveryBrands = vi.fn();
 vi.mock('../../lib/deliveryBrands', async (importOriginal) => ({
@@ -147,6 +148,40 @@ describe('useDeliveryBrands when the stop changes while a save is in flight', ()
     expect(result.current.brands?.delivery_id).toBe('D2');
     expect(result.current.brands?.event_seq).toBe(20);
     rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
+});
+
+describe('useDeliveryBrands when the stop changes during the signal check', () => {
+  it('never sends the old stop’s save, so its reply cannot replace the new stop’s brands', async () => {
+    getDeliveryBrands.mockImplementation(async (id: string) => ({ ...brands(id === 'D1' ? 1 : 20), delivery_id: id }));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    act(() => result.current.setLineDraft('L1', [pick]));
+
+    let answer!: (v: boolean) => void;
+    signal = () => new Promise((resolve) => { answer = resolve; });
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc');
+    let saving!: Promise<number | null>;
+    let completing!: Promise<number>;
+    act(() => { saving = result.current.save(); });
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    signal = async () => true;
+    await act(async () => { answer(true); expect(await saving).toBeNull(); });
+
+    // Completion's save is bound the same way.
+    act(() => result.current.setLineDraft('L1', [pick]));
+    signal = () => new Promise((resolve) => { answer = resolve; });
+    act(() => { completing = result.current.saveForCompletion(); });
+    rerender({ id: 'D1' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    await act(async () => { answer(true); expect(await completing).toBe(BRANDS_NOT_CONFIRMED); });
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(result.current.brands?.event_seq).toBe(1);
+    rpc.mockRestore();
+    signal = async () => true;
     getDeliveryBrands.mockReset();
   });
 });

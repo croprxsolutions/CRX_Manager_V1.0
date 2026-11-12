@@ -308,6 +308,19 @@ BEGIN
       v_fails := v_fails || ' (F) a rep refused with the wrong error: ' || SQLERRM || ';';
     END IF;
   END;
+  -- A sale with no salesman is no rep's own (20270103190000: the NULL owner once let any rep through).
+  PERFORM pg_temp.smk_as(v_admin);
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
+    VALUES ('SMK-TAX-NOREP-' || v_suffix, v_payer2, CURRENT_DATE, 'confirmed', NULL) RETURNING id INTO v_order;
+  PERFORM pg_temp.smk_as(v_rep);
+  BEGIN
+    PERFORM set_order_sales_tax(v_order, true, 'smk-tax-f-norep-' || v_suffix);
+    v_fails := v_fails || ' (F) a rep changed a sale with no salesman;';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'SALES_TAX_NOT_ALLOWED%' THEN
+      v_fails := v_fails || ' (F) a rep on a sale with no salesman refused with the wrong error: ' || SQLERRM || ';';
+    END IF;
+  END;
   PERFORM pg_temp.smk_as(v_admin);
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
     VALUES ('SMK-TAX-REP-' || v_suffix, v_payer2, CURRENT_DATE, 'confirmed', v_rep) RETURNING id INTO v_order;

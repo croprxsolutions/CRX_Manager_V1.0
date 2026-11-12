@@ -99,11 +99,11 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                     </div>
                     {row.brandId === OTHER_BRAND && (
                       <div className="grid gap-2 sm:grid-cols-3">
-                        <input className={FIELD_CLASS} aria-label={`Brand name on the jug for ${product}`} placeholder="Brand name on the jug" maxLength={200}
+                        <input className={FIELD_CLASS} aria-label={`Brand name on the jug for ${label}`} placeholder="Brand name on the jug" maxLength={200}
                           value={row.typedName} disabled={disabled} onChange={(e) => update(index, { typedName: e.target.value })} />
-                        <input className={FIELD_CLASS} aria-label={`EPA number for ${product} (optional)`} placeholder="EPA number, from the jug label (optional)" inputMode="numeric"
+                        <input className={FIELD_CLASS} aria-label={`EPA number for ${label} (optional)`} placeholder="EPA number, from the jug label (optional)" inputMode="numeric"
                           value={row.typedEpa} disabled={disabled} onChange={(e) => update(index, { typedEpa: e.target.value })} />
-                        <input className={FIELD_CLASS} aria-label={`Manufacturer for ${product} (optional)`} placeholder="Manufacturer (optional)" maxLength={200}
+                        <input className={FIELD_CLASS} aria-label={`Manufacturer for ${label} (optional)`} placeholder="Manufacturer (optional)" maxLength={200}
                           value={row.typedManufacturer} disabled={disabled} onChange={(e) => update(index, { typedManufacturer: e.target.value })} />
                       </div>
                     )}

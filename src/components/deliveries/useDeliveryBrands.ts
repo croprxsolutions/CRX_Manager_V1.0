@@ -33,6 +33,8 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   // Only the latest request's reply is used.
   const requestRef = useRef(0);
+  // Lines changed on screen since the last reply landed; a reload keeps those choices (still unsaved).
+  const touchedRef = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
@@ -40,8 +42,14 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     try {
       const next = await getDeliveryBrands(deliveryId);
       if (request !== requestRef.current) return;
+      const touched = touchedRef.current;
+      touchedRef.current = new Set();
       setBrands(next);
-      setDrafts(draftsOf(next));
+      setDrafts((prev) => {
+        const fresh = draftsOf(next);
+        for (const lineId of touched) if (lineId in fresh && prev[lineId]) fresh[lineId] = prev[lineId];
+        return fresh;
+      });
       setLoadFailed(false);
     } catch (error) {
       if (request !== requestRef.current) return;
@@ -52,11 +60,13 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   }, [deliveryId, enabled]);
 
   useEffect(() => {
+    touchedRef.current = new Set();
     setBrands(null); setDrafts({}); setSavedAt(null); setLoadFailed(false);
     void load();
   }, [load]);
 
   const setLineDraft = useCallback((lineId: string, draft: DraftPick[]) => {
+    touchedRef.current.add(lineId);
     setDrafts((prev) => ({ ...prev, [lineId]: draft }));
   }, []);
 
@@ -94,6 +104,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
         event_seq: result.event_seq,
         lines: brands.lines.map((l) => ({ ...l, picks: result.picks.filter((p) => p.delivery_item_id === l.delivery_item_id) })),
       };
+      touchedRef.current = new Set();
       setBrands(next);
       setDrafts(draftsOf(next));
       setSavedAt(new Date());
@@ -102,6 +113,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
         idem.resetKeyFor(scope);
         toast('warning', 'Someone else changed these brands. They have been reloaded; check them and try again.');
+        touchedRef.current = new Set();
         await load();
         return null;
       }

@@ -58,8 +58,9 @@ export default function TypedBrandReview() {
     } catch (error) {
       toast('error', deliveryBrandErrorMessage(error));
     } finally {
-      setBusyPick(null);
+      // The row stays disabled until the list has refreshed, so a finished row is never clicked again.
       await load();
+      setBusyPick(null);
     }
   };
 
@@ -117,6 +118,12 @@ export default function TypedBrandReview() {
     <Card>
       <h2 className="font-heading text-lg font-semibold text-nav-dark">Brands to review</h2>
       <p className="mb-3 text-sm text-secondary">Drivers typed these brands because they were not on the product's list.</p>
+      {loadFailed && (
+        <p className="mb-3 text-sm text-amber-800">
+          This list could not be refreshed and may be out of date.{' '}
+          <button type="button" className="font-medium underline" onClick={() => void load()}>Try again</button>
+        </p>
+      )}
       <ul className="divide-y divide-gray-100">
         {rows.map((row) => {
           const busy = busyPick === row.pick_id;

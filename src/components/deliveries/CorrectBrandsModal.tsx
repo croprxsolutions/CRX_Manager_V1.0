@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import ConfirmModal from '../ui/ConfirmModal';
+import { hasSignal } from '../../lib/connectivity';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
@@ -28,6 +30,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const requestRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -65,6 +68,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       toast('error', error instanceof Error ? error.message : 'Check the brand choices');
       return;
     }
+    if (!(await hasSignal())) { toast('error', 'Brands save when you have signal.'); return; }
     // One key per exact correction: a retry of the same one reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, reason.trim(), brands.event_seq]);
     const request = ++requestRef.current;
@@ -92,17 +96,24 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
   };
 
   const hideLine = (line: DeliveryBrandLine) => delivered(line) <= 0;
+  // Closing with an edited brand or a typed reason asks first, so a correction is never dropped silently.
+  const requestClose = () => {
+    if (saving) return;
+    if ((brands && changedLineIds(brands, drafts).length > 0) || reason.trim()) setConfirmDiscard(true);
+    else onClose();
+  };
   const hasLines = !!brands && brands.lines.some((l) => isBrandedLine(l) && !hideLine(l));
 
   return (
+    <>
     <Modal
       open={open}
-      onClose={onClose}
-      closeDisabled={saving}
+      onClose={requestClose}
+      closeDisabled={saving || confirmDiscard}
       title="Correct brands"
       footer={(
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" onClick={requestClose} disabled={saving}>Cancel</Button>
           <Button onClick={() => void save()} loading={saving} disabled={!hasLines || saving}>Save correction</Button>
         </div>
       )}
@@ -136,5 +147,16 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
         </div>
       )}
     </Modal>
+    <ConfirmModal
+      open={confirmDiscard}
+      onClose={() => setConfirmDiscard(false)}
+      onConfirm={() => { setConfirmDiscard(false); onClose(); }}
+      title="Discard this correction?"
+      message="Your brand changes and reason are not saved."
+      confirmLabel="Discard"
+      cancelLabel="Keep editing"
+      variant="warning"
+    />
+    </>
   );
 }

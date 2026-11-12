@@ -41,7 +41,7 @@ describe('DeliveryBrandPicker', () => {
     fireEvent.click(screen.getByText(/Split: add another brand/));
     expect(latest.L1.map((p) => p.quantity)).toEqual(['10', '']);
     fireEvent.change(screen.getByLabelText('Brand for Glyphosate 2.5 (2)'), { target: { value: OTHER_BRAND } });
-    fireEvent.change(screen.getByLabelText('Brand name on the jug for Glyphosate 2.5'), { target: { value: 'Credit' } });
+    fireEvent.change(screen.getByLabelText('Brand name on the jug for Brand for Glyphosate 2.5 (2)'), { target: { value: 'Credit' } });
     expect(latest.L1[1]).toEqual(expect.objectContaining({ brandId: OTHER_BRAND, typedName: 'Credit' }));
 
     fireEvent.click(screen.getByLabelText('Remove Brand for Glyphosate 2.5 (2)'));

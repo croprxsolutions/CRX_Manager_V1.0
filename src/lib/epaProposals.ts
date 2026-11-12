@@ -211,6 +211,8 @@ export interface EpaLookupOverview {
   open: Pick<EpaChemistryProposal, 'id' | 'parent_id' | 'epa_registration' | 'status' | 'hold_reason' | 'created_at'>[];
   /** parent id → its name and one size to open the product page on. */
   parents: Map<string, { name: string; productId: string | null }>;
+  /** More failures exist than were read. */
+  truncated: boolean;
 }
 
 /** shortcut: the newest 500 failures only; page through them if the list ever outgrows that. */
@@ -227,7 +229,8 @@ export async function fetchEpaLookupOverview(): Promise<EpaLookupOverview> {
   ]);
   const parentIds = [...new Set([...failures, ...open].map((r) => r.parent_id))];
   const parents = new Map<string, { name: string; productId: string | null }>();
-  if (parentIds.length === 0) return { failures, open, parents };
+  const truncated = failures.length === OVERVIEW_FAILURE_LIMIT;
+  if (parentIds.length === 0) return { failures, open, parents, truncated };
   const [names, members] = await Promise.all([
     rows<{ id: string; name: string }>(supabaseUntyped.from('product_parents').select('id, name').in('id', parentIds)),
     rows<{ product_id: string; parent_id: string }>(supabaseUntyped.from('product_parent_members')
@@ -236,5 +239,20 @@ export async function fetchEpaLookupOverview(): Promise<EpaLookupOverview> {
   for (const parent of names) {
     parents.set(parent.id, { name: parent.name, productId: members.find((m) => m.parent_id === parent.id)?.product_id ?? null });
   }
-  return { failures, open, parents };
+  return { failures, open, parents, truncated };
+}
+
+/** A retry after a lost reply reuses the key only for the same request; anything else gets a new key. */
+type HeldKey = { key: string; request: string } | null;
+
+/**
+ * Kept by the caller per proposal version, so closing and reopening the dialog keeps the admin's ticks and an
+ * unconfirmed save's key (a retry then replays it instead of writing defaults the admin had unticked).
+ */
+type DraftState = { ticks?: Record<string, boolean>; commitKey?: HeldKey; rejectKey?: HeldKey };
+export type EpaProposalDraft = { read: () => DraftState; update: (patch: DraftState) => void };
+
+export function newEpaProposalDraft(): EpaProposalDraft {
+  let state: DraftState = {};
+  return { read: () => state, update: (patch) => { state = { ...state, ...patch }; } };
 }

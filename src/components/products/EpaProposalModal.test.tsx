@@ -9,6 +9,7 @@ vi.mock('../../lib/epaProposals', async () => {
 });
 
 import EpaProposalModal from './EpaProposalModal';
+import { newEpaProposalDraft, type EpaProposalDraft } from '../../lib/epaProposals';
 import type { EpaChemistryProposal } from '../../types';
 
 const proposal = {
@@ -26,7 +27,8 @@ const proposal = {
   ],
 } as unknown as EpaChemistryProposal;
 
-const view = () => render(<EpaProposalModal proposal={proposal} profileId="u1" onClose={vi.fn()} onSettled={vi.fn()} onRunAgain={vi.fn()} />);
+const view = (draft: EpaProposalDraft = newEpaProposalDraft()) =>
+  render(<EpaProposalModal proposal={proposal} draft={draft} profileId="u1" onClose={vi.fn()} onSettled={vi.fn()} onRunAgain={vi.fn()} />);
 const commitAndConfirm = async () => {
   fireEvent.click(screen.getAllByRole('button', { name: 'Commit' })[0]);
   const buttons = await screen.findAllByRole('button', { name: 'Commit' });
@@ -79,6 +81,22 @@ describe('EpaProposalModal', () => {
     // A definite refusal frees the key.
     expect(mocks.commit.mock.calls[2][3]).not.toBe(mocks.commit.mock.calls[1][3]);
     await waitFor(() => expect(mocks.toast).toHaveBeenLastCalledWith('warning', expect.stringContaining('Not committed')));
+  });
+
+  it('keeps the ticks and the unconfirmed key when the dialog is closed and reopened', async () => {
+    mocks.commit.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce({ status: 'held', proposal_id: 'p1', hold_reason: 'chemistry_changed', proposal_version: 2 });
+    const draft = newEpaProposalDraft();
+    const first = view(draft);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Accept Atrazine' }));
+    await commitAndConfirm();
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
+    first.unmount();
+    view(draft);
+    expect(screen.getByRole('checkbox', { name: 'Accept Atrazine' })).not.toBeChecked();
+    await commitAndConfirm();
+    await waitFor(() => expect(mocks.commit).toHaveBeenCalledTimes(2));
+    expect(mocks.commit.mock.calls[1][2]).toEqual(mocks.commit.mock.calls[0][2]);
+    expect(mocks.commit.mock.calls[1][3]).toBe(mocks.commit.mock.calls[0][3]);
   });
 
   it('needs a reason to reject', async () => {

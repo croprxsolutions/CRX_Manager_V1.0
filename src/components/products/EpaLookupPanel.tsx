@@ -8,7 +8,8 @@ import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../../lib/idem
 import { plainRefusal } from '../../lib/productChemistry';
 import { runRecordedEpaLookup } from '../../lib/epaLookupClient';
 import {
-  FAILURE_LABEL, fetchParentEpaState, itemName, sideText, startEpaLookup, summarizeNumber, type NumberSummary, type ParentEpaState,
+  FAILURE_LABEL, fetchParentEpaState, itemName, newEpaProposalDraft, sideText, startEpaLookup, summarizeNumber, type EpaProposalDraft,
+  type NumberSummary, type ParentEpaState,
 } from '../../lib/epaProposals';
 import EpaProposalModal from './EpaProposalModal';
 
@@ -67,7 +68,8 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
 }) {
   const { toast } = useToast();
   // `at`: when the rows were read, so a running lookup older than 30 minutes shows as expired.
-  const [loaded, setLoaded] = useState<{ state: ParentEpaState; at: number } | 'failed' | null>(null);
+  // `key`: which read they came from; while a newer read is on its way, lookups wait for it.
+  const [loaded, setLoaded] = useState<{ state: ParentEpaState; at: number; key: string } | 'failed' | null>(null);
   const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -78,16 +80,24 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
   // A start whose reply was lost keeps its key, so a retry replays it instead of starting a second lookup.
   const startKeys = useRef(new Map<string, string>());
   const mounted = useRef(true);
+  // Ticks and unconfirmed-save keys per proposal version, kept across closing and reopening the review.
+  const [drafts] = useState(() => new Map<string, EpaProposalDraft>());
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const loadKey = `${parentId}|${reloadKey}|${attempt}`;
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     const seq = ++loadSeq.current;
-    fetchParentEpaState(parentId).then((next) => { if (seq === loadSeq.current) setLoaded({ state: next, at: Date.now() }); }).catch((error: unknown) => {
+    fetchParentEpaState(parentId).then((next) => {
+      if (seq === loadSeq.current) setLoaded({ state: next, at: Date.now(), key: loadKey });
+    }).catch((error: unknown) => {
       Sentry.captureException(error, { extra: { context: 'fetchParentEpaState' } });
       if (seq === loadSeq.current) setLoaded('failed');
     });
-  }, [parentId, reloadKey, attempt]);
+  }, [parentId, loadKey]);
 
   const setBusy = (epaNumber: string, busy: boolean) => {
     if (busy) inFlight.current.add(epaNumber); else inFlight.current.delete(epaNumber);
@@ -136,6 +146,13 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
   }
   const { state, at: now } = loaded;
   const reviewed = reviewing ? state.proposals.find((p) => p.id === reviewing) ?? null : null;
+  // One lookup at a time, and none on rows a newer read is replacing.
+  const lookupsBlocked = locked || loaded.key !== loadKey || running.size > 0;
+  const draftFor = (proposal: { id: string; proposal_version: number }) => {
+    const id = `${proposal.id}:${proposal.proposal_version}`;
+    if (!drafts.has(id)) drafts.set(id, newEpaProposalDraft());
+    return drafts.get(id) as EpaProposalDraft;
+  };
 
   return (
     <section className="space-y-2 rounded-lg border border-gray-200 px-3 py-2" data-testid="epa-lookup-panel">
@@ -144,7 +161,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
         <div className="flex items-center gap-2">
           <Link to="/epa-lookups" className="text-xs text-crx-green hover:underline">All EPA lookups</Link>
           {state.numbers.length > 1 && (
-            <Button size="sm" variant="secondary" disabled={locked || running.size > 0} onClick={() => { void runAll(state.numbers); }}>
+            <Button size="sm" variant="secondary" disabled={lookupsBlocked} onClick={() => { void runAll(state.numbers); }}>
               Look up all
             </Button>
           )}
@@ -170,7 +187,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
                       {summary.open.status === 'held' ? 'Review (on hold)' : 'Review proposal'}
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" icon={<Search className="h-4 w-4" />} disabled={locked || running.has(epaNumber)}
+                  <Button size="sm" variant="secondary" icon={<Search className="h-4 w-4" />} disabled={lookupsBlocked}
                     onClick={() => { void run(epaNumber); }}>
                     {running.has(epaNumber) ? 'Looking up…' : 'Run lookup'}
                   </Button>
@@ -182,7 +199,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
         })}
       </ul>
       {reviewed && (
-        <EpaProposalModal key={`${reviewed.id}:${reviewed.proposal_version}`} proposal={reviewed} profileId={profileId}
+        <EpaProposalModal key={`${reviewed.id}:${reviewed.proposal_version}`} proposal={reviewed} draft={draftFor(reviewed)} profileId={profileId}
           onClose={() => setReviewing(null)}
           onSettled={() => { setReviewing(null); reload(); onCommitted(); }}
           onRunAgain={(epaNumber) => { setReviewing(null); void run(epaNumber); }} />

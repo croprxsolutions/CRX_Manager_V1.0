@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -11,11 +11,11 @@ import { generateIdempotencyKey, isDefinitiveRpcRejection } from '../../lib/idem
 import { plainRefusal } from '../../lib/productChemistry';
 import {
   CLASS_LABEL, HOLD_LABEL, WRITABLE_CLASSES, commitEpaProposal, itemName, rejectEpaProposal, sideText, type EpaDecision,
+  type EpaProposalDraft,
 } from '../../lib/epaProposals';
 import type { EpaChemistryProposal, EpaProposalItem } from '../../types';
 
-/** A retry after a lost reply reuses the key only for the same request; anything else gets a new key. */
-type HeldKey = { key: string; request: string } | null;
+type KeySlot = 'commitKey' | 'rejectKey';
 
 function classVariant(item: EpaProposalItem): BadgeVariant {
   if (item.class === 'confirm' || item.class === 'matches') return 'success';
@@ -95,29 +95,30 @@ function confirmMessage(items: EpaProposalItem[], ticks: Record<string, boolean>
  * DM-4: review one EPA proposal. Writable items have a tick box; differences are shown and never written (D-L).
  * Nothing is written until Commit (D-I). Ticks survive a refused commit.
  */
-export default function EpaProposalModal({ proposal, profileId, onClose, onSettled, onRunAgain }: {
-  proposal: EpaChemistryProposal; profileId: string; onClose: () => void;
+export default function EpaProposalModal({ proposal, draft, profileId, onClose, onSettled, onRunAgain }: {
+  proposal: EpaChemistryProposal; draft: EpaProposalDraft; profileId: string; onClose: () => void;
   /** A commit, hold or reject was saved: re-read the rows. */
   onSettled: () => void;
   onRunAgain: (epaNumber: string) => void;
 }) {
   const { toast } = useToast();
-  const [ticks, setTicks] = useState<Record<string, boolean>>(() => Object.fromEntries(
+  const [ticks, setTicks] = useState<Record<string, boolean>>(() => draft.read().ticks ?? Object.fromEntries(
     proposal.items.filter((item) => WRITABLE_CLASSES.has(item.class)).map((item) => [item.item_id, item.accept_default])));
   const [asking, setAsking] = useState<'commit' | 'reject' | null>(null);
   const [saving, setSaving] = useState(false);
-  const commitKey = useRef<HeldKey>(null);
-  const rejectKey = useRef<HeldKey>(null);
   const open = proposal.status === 'proposed' || proposal.status === 'held';
   const ingredients = proposal.items.filter((item) => item.kind === 'ingredient');
   const labels = proposal.items.filter((item) => item.kind === 'label');
 
-  const keyFor = (held: MutableRefObject<HeldKey>, operation: string, request: string) => {
-    if (held.current?.request !== request) held.current = { key: generateIdempotencyKey(operation, profileId), request };
-    return held.current.key;
+  const keyFor = (slot: KeySlot, operation: string, request: string) => {
+    const held = draft.read()[slot];
+    if (held?.request === request) return held.key;
+    const key = generateIdempotencyKey(operation, profileId);
+    draft.update({ [slot]: { key, request } });
+    return key;
   };
-  const failed = (error: unknown, held: MutableRefObject<HeldKey>, context: string) => {
-    if (isDefinitiveRpcRejection(error)) held.current = null;
+  const failed = (error: unknown, slot: KeySlot, context: string) => {
+    if (isDefinitiveRpcRejection(error)) draft.update({ [slot]: null });
     else Sentry.captureException(error, { extra: { context } });
     const message = error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
       ? plainRefusal((error as { message: string }).message) : 'It may not have saved. Try again; a retry is safe.';
@@ -126,11 +127,11 @@ export default function EpaProposalModal({ proposal, profileId, onClose, onSettl
 
   const commit = async () => {
     const decisions: EpaDecision[] = Object.entries(ticks).map(([item_id, accept]) => ({ item_id, accept }));
-    const key = keyFor(commitKey, 'commit_epa_proposal', JSON.stringify(decisions));
+    const key = keyFor('commitKey', 'commit_epa_proposal', JSON.stringify(decisions));
     setSaving(true);
     try {
       const result = await commitEpaProposal(proposal.id, proposal.proposal_version, decisions, key);
-      commitKey.current = null;
+      draft.update({ commitKey: null });
       setAsking(null);
       if (result.status === 'held') {
         toast('warning', `Not committed. ${HOLD_LABEL[result.hold_reason]} Run the lookup again.`);
@@ -142,24 +143,24 @@ export default function EpaProposalModal({ proposal, profileId, onClose, onSettl
       onSettled();
     } catch (error) {
       setAsking(null);
-      failed(error, commitKey, 'commit_epa_proposal');
+      failed(error, 'commitKey', 'commit_epa_proposal');
     } finally {
       setSaving(false);
     }
   };
 
   const reject = async (reason: string) => {
-    const key = keyFor(rejectKey, 'reject_epa_proposal', reason);
+    const key = keyFor('rejectKey', 'reject_epa_proposal', reason);
     setSaving(true);
     try {
       await rejectEpaProposal(proposal.id, proposal.proposal_version, reason, key);
-      rejectKey.current = null;
+      draft.update({ rejectKey: null });
       setAsking(null);
       toast('success', `Rejected the EPA ${proposal.epa_registration} proposal.`);
       onSettled();
     } catch (error) {
       setAsking(null);
-      failed(error, rejectKey, 'reject_epa_proposal');
+      failed(error, 'rejectKey', 'reject_epa_proposal');
     } finally {
       setSaving(false);
     }
@@ -167,7 +168,11 @@ export default function EpaProposalModal({ proposal, profileId, onClose, onSettl
 
   const row = (item: EpaProposalItem) => (
     <ItemRow key={item.item_id} item={item} ticked={ticks[item.item_id] ?? false} editable={proposal.status === 'proposed' && !saving}
-      onTick={(accept) => setTicks((current) => ({ ...current, [item.item_id]: accept }))} />
+      onTick={(accept) => {
+        const next = { ...ticks, [item.item_id]: accept };
+        draft.update({ ticks: next });
+        setTicks(next);
+      }} />
   );
 
   return (

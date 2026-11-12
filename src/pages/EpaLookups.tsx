@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Card from '../components/ui/Card';
 import SplitHeading from '../components/ui/SplitHeading';
@@ -27,11 +27,13 @@ function byNumber(failures: EpaLookupFailure[]): [string, EpaLookupFailure[]][] 
  */
 export default function EpaLookups() {
   const [overview, setOverview] = useState<EpaLookupOverview | 'failed' | null>(null);
+  const loadSeq = useRef(0);
   const load = useCallback(() => {
+    const seq = ++loadSeq.current;
     setOverview(null);
-    fetchEpaLookupOverview().then(setOverview).catch((error: unknown) => {
+    fetchEpaLookupOverview().then((next) => { if (seq === loadSeq.current) setOverview(next); }).catch((error: unknown) => {
       Sentry.captureException(error, { extra: { context: 'fetchEpaLookupOverview' } });
-      setOverview('failed');
+      if (seq === loadSeq.current) setOverview('failed');
     });
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -61,6 +63,7 @@ export default function EpaLookups() {
           </Card>
           <Card>
             <h2 className="mb-2 text-base font-semibold text-primary">Failed lookups by EPA number</h2>
+            {overview.truncated && <p className="mb-2 text-xs text-secondary">Showing the newest {overview.failures.length} failed lookups.</p>}
             {overview.failures.length === 0
               ? <EmptyState title="No failed lookups" description="Every EPA lookup so far produced a proposal." />
               : (

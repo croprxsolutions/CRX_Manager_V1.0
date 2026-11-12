@@ -77,6 +77,9 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const loadSeq = useRef(0);
+  // Look up all reads this between numbers, so an edit that starts mid-run stops the rest.
+  const lockedNow = useRef(locked);
+  useEffect(() => { lockedNow.current = locked; }, [locked]);
   const inFlight = useRef(new Set<string>());
   // The newest lookup per number: a reply for any other lookup is ignored (sheet 5, request ownership).
   const latestLookup = useRef(new Map<string, string>());
@@ -134,7 +137,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
 
   const runAll = async (numbers: string[]) => {
     for (const epaNumber of numbers) {
-      if (!mounted.current) return;
+      if (!mounted.current || lockedNow.current) return;
       await run(epaNumber);
     }
   };

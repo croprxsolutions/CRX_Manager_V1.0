@@ -31,8 +31,8 @@ const exported: RateReviewWorkbook = {
 };
 
 type Wb = import('exceljs').Workbook;
-async function roundTrip(edit?: (wb: Wb) => void) {
-  const blob = await generateRateReviewWorkbook(exported);
+async function roundTrip(edit?: (wb: Wb) => void, data: RateReviewWorkbook = exported) {
+  const blob = await generateRateReviewWorkbook(data);
   const ExcelJS = await loadExcelJs();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -87,6 +87,19 @@ describe('rate review workbook', () => {
       set(wb, 'Draft Rates', 4, 'low', '1');
     })).rejects.toThrow('type a parent name exactly');
     await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', 'approved'))).rejects.toThrow('outcome must be');
+  });
+
+  it('refuses a file with a downloaded row deleted, and a new rate for a name two parents share', async () => {
+    await expect(roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'decision', 'approve');
+      wb.getWorksheet('Draft Rates')!.spliceRows(3, 1);
+    })).rejects.toThrow('has 1 downloaded rows; the download had 2');
+    const P2 = '22222222-1111-4111-8111-111111111111';
+    const twin = { ...exported, parents: [...exported.parents, { ...exported.parents[0], parent_id: P2, parent_name: 'ATRAZINE 4L', rates: [] }] };
+    await expect(roundTrip((wb) => {
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Atrazine 4L');
+      set(wb, 'Draft Rates', 4, 'low', '1');
+    }, twin)).rejects.toThrow('more than one parent is named');
   });
 
   it('writes the blank add rows and the reference sheets', async () => {

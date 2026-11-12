@@ -151,6 +151,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
 
   const readFile = async (file: File) => {
     reset();
+    setTotals(null); // they described the last download, not necessarily this file
     setBusy(true);
     try {
       const parsed = await parseRateReviewWorkbook(await file.arrayBuffer());

@@ -235,6 +235,15 @@ function parseDecision(text: string, where: string): RateReviewRateRow['decision
   throw new PricingWorkbookFormatError(`${where}: decision must be approve, reopen, delete or blank.`);
 }
 
+/** Marks a parent name two parents share, so a new rate is never sent to the wrong one. */
+const AMBIGUOUS = '';
+/** A deleted or pasted-in row would silently drop or duplicate an edit: the file must keep every downloaded row. */
+function checkRowCount(sheet: string, found: number, expected: string | undefined) {
+  if (String(found) !== expected) {
+    throw new PricingWorkbookFormatError(`The ${sheet} sheet has ${found} downloaded rows; the download had ${expected ?? 'an unknown number'}. Do not delete or copy rows. Download a fresh workbook.`);
+  }
+}
+
 const parseState = <T>(text: string, damaged: Error): T => {
   try {
     return JSON.parse(text) as T;
@@ -271,6 +280,7 @@ function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName
   if (row.rate_id === '' && row.row_state === '') {
     if (!RATE_EDITABLE.some((field) => row[field] !== '')) return null;
     const parentId = parentByName.get(row.parent_name.toLowerCase());
+    if (parentId === AMBIGUOUS) throw new PricingWorkbookFormatError(`${where}: more than one parent is named "${row.parent_name}". Add this rate in the setup workbook, or rename one parent first.`);
     if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
     return { sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: null, parent_id: parentId, expected_row_version: null,
       ...values, is_quoting_default: parseYesNo(row.is_quoting_default, where), decision, reason };
@@ -310,10 +320,13 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
 
   const parentByName = new Map<string, string>();
   const outcomes: OutcomeUpload[] = [];
+  let outcomeRows = 0;
   const recorded: Record<string, string> = {};
   for (const row of readRows(workbook.getWorksheet(OUTCOMES_SHEET), OUTCOMES_SHEET, OUTCOME_HEADERS)) {
     if (row.parent_id === '' && row.row_state === '') continue;
-    parentByName.set(row.parent_name.toLowerCase(), row.parent_id);
+    const key = row.parent_name.toLowerCase();
+    parentByName.set(key, parentByName.has(key) && parentByName.get(key) !== row.parent_id ? AMBIGUOUS : row.parent_id);
+    outcomeRows += 1;
     const edited = parseOutcomeRow(row);
     if (edited) outcomes.push(edited);
     const downloaded = (JSON.parse(row.row_state) as { outcome?: unknown }).outcome;
@@ -321,11 +334,15 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
   }
 
   const rates: RateUpload[] = [];
+  let rateRows = 0;
   for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS)) {
+    if (row.rate_id !== '' || row.row_state !== '') rateRows += 1;
     const edited = parseRateRow(row, parentByName);
     if (edited) rates.push(edited);
   }
 
+  checkRowCount(RATES_SHEET, rateRows, entries.get('rate_row_count'));
+  checkRowCount(OUTCOMES_SHEET, outcomeRows, entries.get('outcome_row_count'));
   if (rates.length > MAX_RATE_REVIEW_RATE_ROWS || outcomes.length > MAX_RATE_REVIEW_OUTCOME_ROWS) {
     throw new PricingWorkbookFormatError(`Send at most ${MAX_RATE_REVIEW_RATE_ROWS} changed rates and ${MAX_RATE_REVIEW_OUTCOME_ROWS} changed outcomes at a time.`);
   }

@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1844: Mason owner-accepted 1 Sol finding(s) at `b9df7ab46525`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1844 at `b9df7ab46525` (base `9c63dfc52f9f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/epaRegistrationStatus.ts:34`, text sha256 `8645bc5565107be0` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our business (ref 22f926bda5c3)
+
 ## 2026-11-12 — #1844 (cancelled-registration banner): a shown warning stays until the page reloads
 
 **Decision (Mason, 2026-11-12, in chat: "Yes, keep it").** On PR #1844, once the product page has shown a cancelled EPA registration (the product's own number or a brand's), that warning and the brand row's mark stay until the page is reloaded or another product is opened, even if a later check fails or no longer covers that number. A failed or unfinished check adds the "could not check" notice beside the red warning; it never replaces it.

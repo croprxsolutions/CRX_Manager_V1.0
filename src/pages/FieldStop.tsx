@@ -125,7 +125,9 @@ export default function FieldStop() {
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
-  const [brandWarningList, setBrandWarningList] = useState<string[]>([]);
+  // Tied to the stop that raised it: on another stop it never shows, so its Complete anyway cannot act there.
+  const [brandWarning, setBrandWarning] = useState<{ stopId: string; list: string[] } | null>(null);
+  const brandWarningList = brandWarning && brandWarning.stopId === id ? brandWarning.list : [];
   const brandLeaveBlocker = useUnsavedChanges(brandState.dirty && step !== 'done');
 
   // Every photo-list read and local add takes a number; only the newest read may replace the list,
@@ -372,7 +374,7 @@ export default function FieldStop() {
     if (brandState.loading) { toast('info', 'Brands are still loading. Try again in a moment.'); return; }
     // A missing or mismatched brand only warns (Mason, 2026-11-09).
     const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
-    if (warnings.length > 0) { setBrandWarningList(warnings); return; }
+    if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
     void handleComplete();
   };
 
@@ -853,8 +855,12 @@ export default function FieldStop() {
 
       <ConfirmModal
         open={brandWarningList.length > 0}
-        onClose={() => { setBrandWarningList([]); setStep('verify'); }}
-        onConfirm={() => { setBrandWarningList([]); void handleComplete(); }}
+        onClose={() => { setBrandWarning(null); setStep('verify'); }}
+        onConfirm={() => {
+          const raisedHere = brandWarning?.stopId === id;
+          setBrandWarning(null);
+          if (raisedHere) void handleComplete();
+        }}
         title="Brands not complete"
         message={`${brandWarningList.join(' ')} You can still complete; the office will follow up.`}
         confirmLabel="Complete anyway"

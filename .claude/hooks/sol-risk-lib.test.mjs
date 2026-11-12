@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  stagingMigrationOnGitHub, stagingMigrationProblem,
+  agentMergeProblem,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -76,26 +76,24 @@ check("GitHub failures and mismatched comparisons need Sol", () => {
   assert.equal(ask(answer(), { headSha: "short" }).risky, true);
 });
 
-// staging (Mason on #1363, 2026-11-04: "yes with the guard updates first").
+// staging-first release flow: feature work, migrations included, merges into staging; only Taha or
+// Mason merges into main (the weekly release PR and hotfixes) and the back-merge of main into staging.
 check("main and staging are the merge bases every gate covers", () => {
   assert.deepEqual([...GATED_MERGE_BASES], ["main", "staging"]);
 });
-check("a migration file cannot merge into staging", () => {
-  assert.equal(stagingMigrationProblem([file("src/lib/units.ts"), file("supabase/functions/send-email/index.ts")]), null);
-  assert.match(stagingMigrationProblem([file("supabase/migrations/20261107000000_x.sql", { status: "added" })]), /into main/);
-  assert.match(stagingMigrationProblem([file("Supabase\\Migrations\\x.sql")]), /into main/);
-  assert.match(stagingMigrationProblem([file("docs/x.sql", { status: "renamed", previous_filename: "supabase/migrations/x.sql" })]), /into main/);
+check("an agent never merges into main, whatever the branch", () => {
+  for (const head of ["release/next", "hotfix/cents", "claude/x", "taha/x", "main", "", undefined]) {
+    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason/, String(head));
+  }
 });
-check("an unreadable or possibly truncated list cannot merge into staging", () => {
-  const many = Array.from({ length: SOL_RISK_MAX_FILES }, (_, i) => file(`src/f${i}.ts`));
-  for (const files of [null, [], [null], [{ status: "added" }], many]) assert.ok(stagingMigrationProblem(files));
+check("an agent never merges the back-merge (main into staging)", () => {
+  assert.match(agentMergeProblem("staging", "main"), /back-merge.*Taha's or Mason's/);
 });
-check("the staging migration check reads base...head and fails closed", () => {
-  const askStaging = (stdout) => stagingMigrationOnGitHub({ baseSha: BASE, headSha: HEAD, repo: "o/r",
-    gh: () => { if (stdout instanceof Error) throw stdout; return stdout; } });
-  assert.equal(askStaging(answer()), null);
-  assert.ok(askStaging(answer({ files: [file("supabase/migrations/a.sql", { status: "added" })] })));
-  for (const out of [new Error("boom"), "not json", answer({ head: "c".repeat(40) }), answer({ status: "behind" })]) assert.ok(askStaging(out));
+check("feature work into staging is the agent's, migrations included", () => {
+  for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "hotfix/x", "release/next"]) assert.equal(agentMergeProblem("staging", head), null, head);
+});
+check("other bases are not this rule's business", () => {
+  assert.equal(agentMergeProblem("claude/feature", "claude/x"), null);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

@@ -195,9 +195,11 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   const number = pr?.number ? `#${pr.number}` : "the pull request";
   if (String(pr?.state || "").toUpperCase() !== "OPEN") return refuse(`${number} is not open.`);
-  // Migrations do not go through staging yet (sol-risk-lib.mjs stagingMigrationProblem).
+  // Staging-first: a migration PR into staging is never applied live before its merge; the
+  // staging database job applies it after the merge, and live gets it at release time. Only a
+  // hotfix (a PR into main) is applied live before its merge (ship.md › Staging).
   if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
-    return refuse(`${number} does not target main. A migration is applied live only from a PR into main, never one into staging or another branch (ship.md Step 5).`);
+    return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only a hotfix PR into main is applied live first.`);
   }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);

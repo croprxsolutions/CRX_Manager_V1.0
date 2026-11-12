@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, GATED_MERGE_BASES, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -491,7 +491,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -507,10 +507,9 @@ function gateRequest(request) {
   }
   // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
   if (!GATED_MERGE_BASES.includes(base)) return;
-  if (base === "staging") {
-    const migration = stagingMigrationOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
-    if (migration) deny(`PR MERGE GATE: this merge into staging is refused: ${migration}.`);
-  }
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
+  const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
+  if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
 
   // ── no merging over an unresolved objection ────────────────────────────────
   // Mason removed main's required-approval rule on 2026-09-02, so a MISSING

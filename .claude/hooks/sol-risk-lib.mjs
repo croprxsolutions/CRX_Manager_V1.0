@@ -132,35 +132,25 @@ export function solRiskOnGitHub(args) {
   }
 }
 
-// ── staging (Mason on #1363, 2026-11-04: "yes with the guard updates first") ──
+// ── staging (Mason on #1363, 2026-11-04) and the staging-first release flow ──
 // A merge into either base is a landing on the way to production, so both merge
 // guards give staging every gate main has. The Sol proof stays bound to
 // origin/main (write-codex-push-proof.mjs), so a merge into staging needs staging
 // to already contain the main that Sol reviewed against.
 export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
 
-// Until Mason approves the job that applies migrations to the staging database
-// (#crx-approvals, the CI/CD plan), a migration reaches production only as today:
-// a PR into main, applied live first (ship.md Step 5). null when `files` (GitHub
-// compare entries) hold no migration; otherwise why the merge is refused.
-const MIGRATIONS_DIR = "supabase/migrations/";
-export function stagingMigrationProblem(files) {
-  if (!Array.isArray(files) || files.length === 0) return "GitHub did not return a readable list of changed files";
-  if (files.length >= SOL_RISK_MAX_FILES) return `${files.length} changed files may be a truncated list`;
-  for (const entry of files) {
-    if (entry === null || typeof entry !== "object" || typeof entry.filename !== "string" || !entry.filename) return "a changed-file entry is unreadable";
-    for (const name of [entry.filename, entry.previous_filename]) {
-      if (typeof name === "string" && name.replace(/\\/g, "/").toLowerCase().startsWith(MIGRATIONS_DIR)) {
-        return `${show(name)} is a migration, and migrations do not go through staging yet: open the PR into main, ` +
-          "apply it live first and merge it there (ship.md Step 5), then merge main into staging";
-      }
-    }
+// Staging-first: feature work, migrations included, merges into staging, and the
+// staging database job applies a migration after the merge. Only the weekly
+// release PR (release/next) and hotfix/<name> PRs go into main, and Taha or Mason
+// merges them, never an agent; the same for the back-merge of main into staging.
+// null when an agent may merge this PR (its other gates still apply).
+export function agentMergeProblem(base, headRef) {
+  if (base === "main") {
+    return "an agent never merges into main: only the weekly release PR (release/next) and hotfix/<name> PRs go there, " +
+      "and Taha or Mason merges them. Feature PRs, migrations included, target staging (ship.md › Staging)";
+  }
+  if (base === "staging" && headRef === "main") {
+    return "the back-merge (main into staging) is Taha's or Mason's to merge, with \"Create a merge commit\"";
   }
   return null;
-}
-
-// GitHub's base...head checked for migrations. Never throws: any failure refuses.
-export function stagingMigrationOnGitHub(args) {
-  const compared = compareOnGitHub(args);
-  return compared.problem ? `${compared.problem}, so it cannot be shown to carry no migration (fail closed)` : stagingMigrationProblem(compared.files);
 }

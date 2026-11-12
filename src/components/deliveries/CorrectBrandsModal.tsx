@@ -59,7 +59,8 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     if (changed.length === 0) { toast('info', 'No brand changes to save.'); return; }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
     // A correction must account for everything delivered on each line it changes (the database checks it too).
-    const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id));
+    // Clearing a line on purpose ("brand unknown") is allowed; only lines with brands must add up.
+    const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id) && (drafts[l.delivery_item_id] ?? []).length > 0);
     const mismatch = brandWarnings({ ...brands, lines: changedLines }, drafts,
       Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])))[0];
     if (mismatch) { toast('error', mismatch.replace(' Those choices will not be saved.', '')); return; }
@@ -83,8 +84,9 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       const result = await correctDeliveryBrands(deliveryId, lines, reason.trim(), brands.event_seq, idem.getKeyFor(scope));
       idem.resetKeyFor(scope);
       if (request !== requestRef.current) return;
+      // Unposted invoices are re-copied, but a split-billed draft keeps its brands (it lands on Sales to check).
       toast('success', result.invoice_ids.length > 0
-        ? 'Brands corrected. The unposted invoice now shows the corrected brands.'
+        ? 'Brands corrected. Open draft invoices for this delivery were re-copied; a split-billed draft keeps its old brands.'
         : 'Brands corrected.');
       onClose();
     } catch (error) {

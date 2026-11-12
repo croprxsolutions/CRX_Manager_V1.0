@@ -7,7 +7,7 @@ import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../../
 import { hasSignal } from '../../lib/connectivity';
 import { Sentry } from '../../lib/sentry';
 import {
-  changedLineIds, deliveryBrandErrorMessage, draftFromPicks, getDeliveryBrands, picksPayload, setDeliveryBrands,
+  changedLineIds, deliveryBrandErrorMessage, isBrandChoiceRefusal, draftFromPicks, getDeliveryBrands, picksPayload, setDeliveryBrands,
   type DeliveryBrands, type DraftLines, type DraftPick,
 } from '../../lib/deliveryBrands';
 
@@ -78,7 +78,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const changed = changedLineIds(brands, drafts);
   const dirty = changed.length > 0;
 
-  const send = async (lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[]): Promise<number | null> => {
+  const send = async (lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[], completing: boolean): Promise<number | null> => {
     if (!brands || !deliveryId) return null;
     // One key per exact save (this delivery, these choices, this base): a retry of the same save reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, brands.event_seq]);
@@ -106,6 +106,13 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
         return null;
       }
       if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);
+      if (completing && isBrandChoiceRefusal(error)) {
+        // Brands never block a completion (Mason, 2026-11-09): it goes ahead on the picks already saved,
+        // and the driver is told these choices were not kept.
+        idem.resetKeyFor(scope);
+        toast('warning', `${deliveryBrandErrorMessage(error)} The delivery is completed without these brand choices; the office will follow up.`);
+        return brands.event_seq;
+      }
       toast('error', deliveryBrandErrorMessage(error));
       return null;
     }
@@ -115,7 +122,8 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
    * Saves the changed lines. Returns the delivery's brand event seq to complete against (unchanged when
    * nothing needed saving), or null when the save did not happen (the reason is already shown).
    * `skipIncomplete` (completion) leaves out lines whose choices cannot be saved instead of refusing:
-   * the confirm step already warned about them, and brands never block a completion.
+   * the confirm step already warned about them, and brands never block a completion. It also completes on the
+   * saved picks when the database refuses the choices themselves (the driver is told).
    */
   const save = async ({ skipIncomplete = false } = {}): Promise<number | null> => {
     if (!brands || !deliveryId || saving) return null;
@@ -135,7 +143,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     setSaving(true);
     try {
       if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
-      return await send(lines);
+      return await send(lines, skipIncomplete);
     } finally {
       setSaving(false);
     }

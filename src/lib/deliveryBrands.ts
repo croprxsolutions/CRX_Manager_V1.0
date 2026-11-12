@@ -225,13 +225,26 @@ export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines,
   return warnings;
 }
 
-/** Plain-English message for a refused brand save: the database's own sentence after the token. */
-export function deliveryBrandErrorMessage(error: unknown): string {
+const BRAND_REFUSAL = /^(BRAND_[A-Z_]+|DELIVERY_BRANDS_LOCKED|DELIVERY_ITEM_NOT_ON_DELIVERY|DELIVERY_NOT_COMPLETED|INVOICE_POSTED|NOT_AUTHORIZED|ADMIN_REQUIRED):\s*(.+)$/s;
+
+function errorText(error: unknown): string | undefined {
   const message = error instanceof Error ? error.message
     : typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined;
-  const detail = typeof message === 'string'
-    ? message.match(/^(?:BRAND_[A-Z_]+|DELIVERY_BRANDS_LOCKED|DELIVERY_ITEM_NOT_ON_DELIVERY|DELIVERY_NOT_COMPLETED|INVOICE_POSTED|NOT_AUTHORIZED|ADMIN_REQUIRED):\s*(.+)$/s)?.[1]
-    : undefined;
+  return typeof message === 'string' ? message : undefined;
+}
+
+/**
+ * The database refused the brand choices themselves (a brand no longer listed, amounts it will not take...),
+ * as opposed to a lost connection or someone else saving first (BRAND_PICKS_CHANGED).
+ */
+export function isBrandChoiceRefusal(error: unknown): boolean {
+  const token = errorText(error)?.match(BRAND_REFUSAL)?.[1];
+  return !!token && token !== 'BRAND_PICKS_CHANGED';
+}
+
+/** Plain-English message for a refused brand save: the database's own sentence after the token. */
+export function deliveryBrandErrorMessage(error: unknown): string {
+  const detail = errorText(error)?.match(BRAND_REFUSAL)?.[2];
   if (detail) return `Brands not saved. ${detail.charAt(0).toUpperCase()}${detail.slice(1)}`;
   return sanitizeError(error);
 }

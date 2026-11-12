@@ -42,7 +42,11 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
           if (rows.length === 1 && patch.brandId === '') { onChange(line.delivery_item_id, []); return; }
           onChange(line.delivery_item_id, rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
         };
-        const remove = (index: number) => onChange(line.delivery_item_id, rows.filter((_, i) => i !== index));
+        const remove = (index: number) => {
+          const left = rows.filter((_, i) => i !== index);
+          // One brand left: its amount field is hidden, so it covers the whole line again.
+          onChange(line.delivery_item_id, left.length === 1 ? [{ ...left[0], quantity: '' }] : left);
+        };
         const split = () => {
           // On the first split the one brand starts with the whole amount; the driver moves some to the new one.
           const first = rows.length === 1 && rows[0].quantity.trim() === ''

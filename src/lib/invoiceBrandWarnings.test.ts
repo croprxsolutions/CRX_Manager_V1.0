@@ -136,6 +136,7 @@ describe('invoice brand warnings before posting', () => {
     // A different pick, a new amount, a brand or EPA number corrected in place, or a trip added since: changed.
     expect(invoiceBrandWarnings(saved, [now([pk({ id: 'pb' })])]).noRecord).toEqual([changed]);
     expect(invoiceBrandWarnings(saved, [now([pk({ quantity: 4 })])]).noRecord).toEqual([changed]);
+    expect(invoiceBrandWarnings(saved, [now([pk({})], { delivered: 6 })]).noRecord).toEqual([changed]);
     expect(invoiceBrandWarnings(saved, [now([pk({ brand_name: 'B' })])]).noRecord).toEqual([changed]);
     expect(invoiceBrandWarnings(saved, [now([pk({ epa_registration: '1-2' })])]).noRecord).toEqual([changed]);
     expect(invoiceBrandWarnings(saved, [now([pk({})]), now([pk({ id: 'pc' })], { delivery_item_id: 'di2' })]).noRecord).toEqual([changed]);

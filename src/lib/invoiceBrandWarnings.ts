@@ -65,9 +65,10 @@ function billedByGroup(lines: BrandWarningLine[]): Map<string, number> {
   return billed;
 }
 
-/** A covered trip as the snapshot names it: each pick (id, brand, number, amount), or "-" for a trip with none. */
-const pickKey = (itemId: unknown, p: { id?: unknown; brand_name?: unknown; epa_registration?: unknown; quantity?: unknown }) =>
-  `${itemId}|${p.id}|${p.brand_name}|${p.epa_registration ?? ''}|${tenThousandths(p.quantity)}`;
+/** A covered trip as the snapshot names it: what it delivered, then each pick (id, brand, number, amount) or "-". */
+const tripKey = (itemId: unknown, delivered: unknown) => `${itemId}|${tenThousandths(delivered)}`;
+const pickKey = (trip: string, p: { id?: unknown; brand_name?: unknown; epa_registration?: unknown; quantity?: unknown }) =>
+  `${trip}|${p.id}|${p.brand_name}|${p.epa_registration ?? ''}|${tenThousandths(p.quantity)}`;
 
 /**
  * The saved brands no longer say what the picks say (a Bill Split draft is never re-copied after a correction):
@@ -80,10 +81,14 @@ function brandsChanged(l: BrandWarningLine, entries: Entries | null, current: De
   if (entries === null || entries.length === 0) return !!l.delivery_id && current.some((c) => own(c) && c.picks.length > 0);
   const named = new Set(entries.map((e) => e.delivery_item_id));
   const covered = current.filter((c) => (l.delivery_id ? own(c) : named.has(c.delivery_item_id)));
-  const saved = entries.map((e) => (e.brand_key === 'n:' ? `${e.delivery_item_id}|-`
-    : pickKey(e.delivery_item_id, { ...e, id: e.pick_id }))).sort();
-  const today = covered.flatMap((c) => (c.picks.length === 0 ? [`${c.delivery_item_id}|-`]
-    : c.picks.map((p) => pickKey(c.delivery_item_id, p)))).sort();
+  const saved = entries.map((e) => {
+    const trip = tripKey(e.delivery_item_id, e.line_delivered);
+    return e.brand_key === 'n:' ? `${trip}|-` : pickKey(trip, { ...e, id: e.pick_id });
+  }).sort();
+  const today = covered.flatMap((c) => {
+    const trip = tripKey(c.delivery_item_id, c.delivered);
+    return c.picks.length === 0 ? [`${trip}|-`] : c.picks.map((p) => pickKey(trip, p));
+  }).sort();
   return saved.join(',') !== today.join(',');
 }
 

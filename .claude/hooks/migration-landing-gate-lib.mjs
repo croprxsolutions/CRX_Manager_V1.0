@@ -29,6 +29,7 @@ import {
   headContainsBaseOnGitHub,
   proofSearchDirs,
   proofValid,
+  newestCheckRollup,
   pullRequestChecksGreen,
   pullRequestReviewBlocked,
 } from "./codex-push-lib.mjs";
@@ -201,10 +202,12 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
     return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only a hotfix PR into main is applied live first.`);
   }
-  // Into main, only a hotfix is applied live before its merge. The weekly release's migrations wait for
-  // Mason's release-day decision (ship.md › Staging); any other branch into main is not allowed at all.
-  if (!/^hotfix\/[^/]+$/.test(String(pr?.headRefName || ""))) {
-    return refuse(`${number} is not a hotfix/<name> PR. Into main, only a hotfix's migration is applied live before its merge; a release's migrations wait for Mason's release-day decision, and feature work goes to staging (ship.md › Staging).`);
+  // Into main, only the weekly release (release/next) and a hotfix are applied live before their merge
+  // (Mason's Decision A, 2026-11-12: his agents apply a release's migrations from the release PR, in stamp
+  // order). Any other branch into main is not allowed at all.
+  const headRef = String(pr?.headRefName || "");
+  if (headRef !== "release/next" && !/^hotfix\/[^/]+$/.test(headRef)) {
+    return refuse(`${number} is not the release PR (release/next) or a hotfix/<name> PR. Into main, only those are applied live before their merge; feature work goes to staging (ship.md › Staging).`);
   }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
@@ -214,6 +217,13 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
+  }
+  // The name alone proves nothing: main's release guard checks that release/next is exactly staging + main
+  // (plus the bot's version files) and that a hotfix carries no unreleased staging work. Its run on this
+  // head must be there and green, not merely absent.
+  const guard = (newestCheckRollup(pr?.statusCheckRollup) || []).filter((c) => c?.__typename === "CheckRun" && c?.name === "Release flow guard (main)");
+  if (!guard.length || !guard.every((c) => String(c.status || "").toUpperCase() === "COMPLETED" && String(c.conclusion || "").toUpperCase() === "SUCCESS")) {
+    return refuse(`${number} has no green "Release flow guard (main)" check, so it is not proven to carry only what it should. Wait for it, or fix what it reports.`);
   }
   // A money PR needs a completed CodeRabbit review of its head before it merges
   // (Mason, 2026-10-21), so it needs one before its migration applies too —

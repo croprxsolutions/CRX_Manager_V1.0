@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1844 (cancelled-registration banner): a shown warning stays until the page reloads
+
+**Decision (Mason, 2026-11-12, in chat: "Yes, keep it").** On PR #1844, once the product page has shown a cancelled EPA registration (the product's own number or a brand's), that warning and the brand row's mark stay until the page is reloaded or another product is opened, even if a later check fails or no longer covers that number. A failed or unfinished check adds the "could not check" notice beside the red warning; it never replaces it.
+**Why:** the warning exists to warn loudly (selling is never blocked), so information already confirmed must not disappear because a later read failed. Sol rounds 1, 2 and 4 each found a new case in how the banner handled checks that failed or had not finished.
+**What this forbids/implies:** `useStickyCancellations` in `src/lib/epaRegistrationStatus.ts` keeps each shown cancellation per product for the page session. Clearing a shown warning before reload needs a new Mason decision.
+
 ## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
 
 **Decision (Mason, 2026-11-11 late evening, in chat: "Yes, always show").** On PR #1825, every branded invoice line whose brands do not add up, no longer match the picks, have no brand recorded, or whose payers changed is listed on Sales to check, whether or not anything on it looks restricted use. This replaces the filter that listed those lines only where a record might be owed.

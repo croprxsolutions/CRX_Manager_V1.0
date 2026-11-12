@@ -67,7 +67,7 @@ function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateRevi
                 <tr key={`rate-${r.index}`}>
                   <td>Draft Rates {r.sheetRow}</td><td>{r.label}</td>
                   <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
-                  <td>{(r.actions ?? []).includes('delete') ? '' : rateValueText(upload.rates[r.index])}</td>
+                  <td>{rateValueText(upload.rates[r.index])}</td>
                   <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}</td>
                 </tr>
               ))}

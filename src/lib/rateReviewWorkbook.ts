@@ -321,12 +321,15 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
   const parentByName = new Map<string, string>();
   const outcomes: OutcomeUpload[] = [];
   let outcomeRows = 0;
+  const seenParents = new Set<string>();
   const recorded: Record<string, string> = {};
   for (const row of readRows(workbook.getWorksheet(OUTCOMES_SHEET), OUTCOMES_SHEET, OUTCOME_HEADERS)) {
     if (row.parent_id === '' && row.row_state === '') continue;
     const key = row.parent_name.toLowerCase();
     parentByName.set(key, parentByName.has(key) && parentByName.get(key) !== row.parent_id ? AMBIGUOUS : row.parent_id);
     outcomeRows += 1;
+    if (seenParents.has(row.parent_id)) throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
+    seenParents.add(row.parent_id);
     const edited = parseOutcomeRow(row);
     if (edited) outcomes.push(edited);
     const downloaded = (JSON.parse(row.row_state) as { outcome?: unknown }).outcome;
@@ -335,8 +338,13 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
 
   const rates: RateUpload[] = [];
   let rateRows = 0;
+  const seenRates = new Set<string>();
   for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS)) {
-    if (row.rate_id !== '' || row.row_state !== '') rateRows += 1;
+    if (row.rate_id !== '' || row.row_state !== '') {
+      rateRows += 1;
+      if (seenRates.has(row.rate_id)) throw new PricingWorkbookFormatError(`Draft Rates row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
+      seenRates.add(row.rate_id);
+    }
     const edited = parseRateRow(row, parentByName);
     if (edited) rates.push(edited);
   }

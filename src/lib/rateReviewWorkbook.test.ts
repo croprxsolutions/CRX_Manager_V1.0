@@ -94,6 +94,10 @@ describe('rate review workbook', () => {
       set(wb, 'Draft Rates', 2, 'decision', 'approve');
       wb.getWorksheet('Draft Rates')!.spliceRows(3, 1);
     })).rejects.toThrow('has 1 downloaded rows; the download had 2');
+    await expect(roundTrip((wb) => {
+      const ws = wb.getWorksheet('Draft Rates')!;
+      ws.getRow(2).eachCell((cell, col) => { ws.getCell(3, col).value = cell.value; });
+    })).rejects.toThrow('Draft Rates row 3 repeats another row');
     const P2 = '22222222-1111-4111-8111-111111111111';
     const twin = { ...exported, parents: [...exported.parents, { ...exported.parents[0], parent_id: P2, parent_name: 'ATRAZINE 4L', rates: [] }] };
     await expect(roundTrip((wb) => {

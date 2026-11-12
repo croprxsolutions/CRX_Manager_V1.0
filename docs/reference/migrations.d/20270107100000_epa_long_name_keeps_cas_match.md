@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** Follow-up to #1810 (Taha's post-merge LOW, 2026-11-12): `20270107100000_epa_long_name_keeps_cas_match.sql` (SQL sha256: `856f92a9decd3b806e584b2630370b1390e518d5cea3002909626735fd88a484`). Re-issues the private helper `_epa_proposal_items` (same signature, owner postgres, SECURITY DEFINER, `search_path = public, pg_temp`, no grants). When EPA lists an ingredient under a name longer than 200 characters, the entry stays an unticked conflict with nothing written, but its CAS now finds the parent's own row, so the conflict shows that row and the row is no longer reported "missing from EPA". Display only. Preflight refuses unless the live body is the one `20270105110000` applied (md5 pinned); postflight checks owner, grants, SECURITY DEFINER and the new body.
+
+Proof: `node scripts/smoke/prove-epa-chemistry-proposals-real-schema.mjs` (applies `20270105110000`, replays the live migrations that sort between, then this file; cases M2 and H28; prints `EPA_CHEMISTRY_PROPOSALS_PROOF_PASS`).
+
+Rollback (its own reviewed migration): re-issue the function body from `20270105110000` (lines 467-666).

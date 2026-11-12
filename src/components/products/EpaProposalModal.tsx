@@ -99,7 +99,8 @@ export default function EpaProposalModal({ proposal, draft, profileId, onClose, 
   proposal: EpaChemistryProposal; draft: EpaProposalDraft; profileId: string; onClose: () => void;
   /** A commit, hold or reject was saved: re-read the rows. */
   onSettled: () => void;
-  onRunAgain: (epaNumber: string) => void;
+  /** Absent when the number is no longer on the product, so only Reject is offered for a held proposal. */
+  onRunAgain?: (epaNumber: string) => void;
 }) {
   const { toast } = useToast();
   const [ticks, setTicks] = useState<Record<string, boolean>>(() => draft.read().ticks ?? Object.fromEntries(
@@ -182,7 +183,7 @@ export default function EpaProposalModal({ proposal, draft, profileId, onClose, 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <Button variant="secondary" disabled={saving} onClick={() => setAsking('reject')}>Reject</Button>
             {proposal.status === 'held'
-              ? <Button icon={<RefreshCw className="h-4 w-4" />} disabled={saving} onClick={() => onRunAgain(proposal.epa_registration)}>Run lookup again</Button>
+              ? onRunAgain && <Button icon={<RefreshCw className="h-4 w-4" />} disabled={saving} onClick={() => onRunAgain(proposal.epa_registration)}>Run lookup again</Button>
               : <Button disabled={saving} onClick={() => setAsking('commit')}>Commit</Button>}
           </div>
         ) : undefined}>

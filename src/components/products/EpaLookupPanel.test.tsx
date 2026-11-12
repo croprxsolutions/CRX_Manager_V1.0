@@ -57,6 +57,19 @@ describe('EpaLookupPanel', () => {
     await waitFor(() => expect(mocks.toast).toHaveBeenLastCalledWith('warning', expect.stringContaining('100-1:')));
   });
 
+  it('keeps a held proposal for a number taken off the product reachable, with Reject but no new lookup', async () => {
+    const held = { id: 'p9', lookup_id: 'l9', parent_id: 'par1', epa_registration: '999-9', status: 'held', proposal_version: 2, hold_reason: 'chemistry_changed',
+      epa_summary: { productname: 'OLD', manufacturer: 'X', isCancelled: false, base_label_note: false }, items: [] };
+    mocks.fetchState.mockResolvedValue({ ...empty, proposals: [held] });
+    panel();
+    expect(await screen.findByText('EPA 999-9')).toBeInTheDocument();
+    expect(screen.getByText('No longer on this product')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Run lookup' })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Review (on hold)' }));
+    expect(await screen.findByRole('button', { name: 'Reject' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run lookup again' })).toBeNull();
+  });
+
   it('says chemistry can be typed only when the database gate allows it', async () => {
     panel(null);
     expect(await screen.findByText('EPA has no record of these numbers, so chemistry can be typed.')).toBeInTheDocument();

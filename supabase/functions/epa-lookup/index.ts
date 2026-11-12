@@ -19,6 +19,14 @@ import {
   type StoredLookup,
 } from "./logic.ts";
 
+// A null reply with no error means the call saved nothing; never report it as recorded.
+function assertRpcResult<T>(data: unknown, rpcName: string): T {
+  if (data === null || data === undefined) {
+    throw new Error(`${rpcName} returned no data`);
+  }
+  return data as T;
+}
+
 const MAX_REQUEST_BODY_BYTES = 4_096;
 const MAX_UPSTREAM_RESPONSE_BYTES = 2_000_000;
 const EPA_TIMEOUT_MS = 10_000;
@@ -324,7 +332,7 @@ async function recordLookup(
     }
   }
 
-  const { data: record, error: recordError } = await adminClient.rpc(
+  const { data: recordData, error: recordError } = await adminClient.rpc(
     "record_epa_lookup",
     {
       p_lookup_id: lookupId,
@@ -338,6 +346,7 @@ async function recordLookup(
     }
     throw recordError;
   }
+  const record = assertRpcResult<unknown>(recordData, "record_epa_lookup");
   return jsonResponse({ ...(result ?? {}), record });
 }
 

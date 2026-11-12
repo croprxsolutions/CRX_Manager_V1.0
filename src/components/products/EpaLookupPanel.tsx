@@ -155,6 +155,10 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
     return drafts.get(id) as EpaProposalDraft;
   };
 
+  // A number taken off the product keeps its waiting proposal reachable, so it can still be rejected.
+  const unlinked = [...new Set(state.proposals.filter((p) => (p.status === 'proposed' || p.status === 'held')
+    && !state.numbers.includes(p.epa_registration)).map((p) => p.epa_registration))].sort();
+
   return (
     <section className="space-y-2 rounded-lg border border-gray-200 px-3 py-2" data-testid="epa-lookup-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -173,14 +177,15 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
         <p className="text-xs text-secondary">EPA has no record of {state.numbers.length === 1 ? 'this number' : 'these numbers'}, so chemistry can be typed.</p>
       )}
       <ul className="divide-y divide-gray-100">
-        {state.numbers.map((epaNumber) => {
+        {[...state.numbers, ...unlinked].map((epaNumber) => {
           const summary = summarizeNumber(state, epaNumber, now);
+          const linked = state.numbers.includes(epaNumber);
           return (
             <li key={epaNumber} className="py-2">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <div className="min-w-0">
                   <span className="font-medium text-primary">EPA {epaNumber}</span>
-                  <span className="ml-2 text-secondary"><LatestText summary={summary} /></span>
+                  <span className="ml-2 text-secondary">{linked ? <LatestText summary={summary} /> : 'No longer on this product'}</span>
                 </div>
                 <div className="flex gap-2">
                   {summary.open && (
@@ -188,10 +193,12 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
                       {summary.open.status === 'held' ? 'Review (on hold)' : 'Review proposal'}
                     </Button>
                   )}
-                  <Button size="sm" variant="secondary" icon={<Search className="h-4 w-4" />} disabled={lookupsBlocked}
-                    onClick={() => { void run(epaNumber); }}>
-                    {running.has(epaNumber) ? 'Looking up…' : 'Run lookup'}
-                  </Button>
+                  {linked && (
+                    <Button size="sm" variant="secondary" icon={<Search className="h-4 w-4" />} disabled={lookupsBlocked}
+                      onClick={() => { void run(epaNumber); }}>
+                      {running.has(epaNumber) ? 'Looking up…' : 'Run lookup'}
+                    </Button>
+                  )}
                 </div>
               </div>
               <KeptDifferences summary={summary} />
@@ -203,7 +210,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
         <EpaProposalModal key={`${reviewed.id}:${reviewed.proposal_version}`} proposal={reviewed} draft={draftFor(reviewed)} profileId={profileId}
           onClose={() => setReviewing(null)}
           onSettled={() => { setReviewing(null); reload(); onCommitted(); }}
-          onRunAgain={(epaNumber) => { setReviewing(null); void run(epaNumber); }} />
+          onRunAgain={state.numbers.includes(reviewed.epa_registration) ? (epaNumber) => { setReviewing(null); void run(epaNumber); } : undefined} />
       )}
     </section>
   );

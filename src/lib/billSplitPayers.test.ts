@@ -149,7 +149,10 @@ describe('loadBillSplitPayers', () => {
   const flat = (id: string, name: string, cents: number) => ({ id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, farm_name: name });
   const db = (data: unknown[] | null, count: number | null, error: unknown = null) => {
     const calls: unknown[][] = [];
-    return { calls, client: { rpc: (...a: unknown[]) => { calls.push(a); return Promise.resolve({ data, error, count }); } } as never };
+    return { calls, client: {
+      rpc: (...a: unknown[]) => { calls.push(a); return Promise.resolve({ data, error, count }); },
+      from: () => read({ data: { order_id: null }, error: null }),
+    } as never };
   };
   it('reads every payer of the sale through get_bill_split_payers, for the invoice opened', async () => {
     const { calls, client } = db([flat('1', 'Farmer', 6000), flat('2', 'Landlord', 4000)], 2);
@@ -210,13 +213,16 @@ describe('loadBillSplitPayers', () => {
       expect((await pcts(client([bigSky, cedar], { lineShares: 1 }))).map((p) => p[1])).toEqual([50.92, 49.08]);
     });
 
-    it("keeps the billed share when the order or its split can't be read, never failing the invoice", async () => {
+    it("refuses, as a failed payer read does, when the order or its split can't be read, rather than quietly showing another basis", async () => {
       for (const fail of ['invoices', 'orders', 'order_shares', 'order_item_shares']) {
-        expect((await pcts(client([bigSky, cedar], { fail }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+        await expect(loadBillSplitPayers(client([bigSky, cedar], { fail }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
       }
+      await expect(loadBillSplitPayers(client([bigSky, cedar], { main: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+      await expect(loadBillSplitPayers(client([bigSky, cedar], { lineShares: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+    });
+
+    it('keeps the billed share for a payer invoice with no order', async () => {
       expect((await pcts(client([bigSky, cedar], { orderId: null }))).map((p) => p[1])).toEqual([50.92, 49.08]);
-      expect((await pcts(client([bigSky, cedar], { main: null }))).map((p) => p[1])).toEqual([50.92, 49.08]);
-      expect((await pcts(client([bigSky, cedar], { lineShares: null }))).map((p) => p[1])).toEqual([50.92, 49.08]);
     });
 
     it("keeps the billed share when the payers don't match the card one to one", async () => {

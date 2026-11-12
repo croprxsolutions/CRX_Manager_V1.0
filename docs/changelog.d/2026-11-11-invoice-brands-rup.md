@@ -1,4 +1,4 @@
-## 2026-11-11 — Brand PR B, part B-1b: brands on invoices and restricted-use records (database, not applied)
+## 2026-11-11 — Brand PR B, part B-1b: brands on invoices and restricted-use records (database, applied live 2026-11-12)
 
 - Migration `20270106110000_invoice_brands_rup.sql`; build sheet `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md`
   sections 14.4 and 16; issue #1697.

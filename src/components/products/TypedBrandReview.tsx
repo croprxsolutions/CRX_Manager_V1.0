@@ -154,7 +154,7 @@ export default function TypedBrandReview() {
                     <option value="">Pick a listed brand…</option>
                     {linking.brands.map((b) => <option key={b.id} value={b.id}>{b.brand_name}{b.epa_registration ? ` · EPA ${b.epa_registration}` : ''}</option>)}
                   </select>
-                  <Button size="sm" disabled={!linking.brandId || busy} loading={busy}
+                  <Button size="sm" disabled={!linking.brandId || !!busyPick} loading={busy}
                     onClick={() => void run(row, () => link(row, linking.brandId), 'Linked.')}>Link</Button>
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => { linkRequestRef.current++; setLinking(null); }}>Cancel</Button>
                 </div>

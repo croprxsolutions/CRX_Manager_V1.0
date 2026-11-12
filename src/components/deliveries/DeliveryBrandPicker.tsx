@@ -44,8 +44,9 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
         };
         const remove = (index: number) => onChange(line.delivery_item_id, rows.filter((_, i) => i !== index));
         const split = () => {
-          // The first brand starts with the whole amount; the driver moves some of it to the new one.
-          const first = rows.map((r) => (r.quantity.trim() === '' ? { ...r, quantity: String(fullQuantity(line)) } : r));
+          // On the first split the one brand starts with the whole amount; the driver moves some to the new one.
+          const first = rows.length === 1 && rows[0].quantity.trim() === ''
+            ? [{ ...rows[0], quantity: String(fullQuantity(line)) }] : rows;
           onChange(line.delivery_item_id, [...first, EMPTY_PICK]);
         };
         return (

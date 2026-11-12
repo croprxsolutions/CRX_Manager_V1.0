@@ -10,15 +10,36 @@ import {
 
 const e = (o: Record<string, unknown>) => ({
   brand_key: `b:${String(o.brand_name ?? '').toLowerCase()}|${o.epa_registration ?? ''}`,
-  epa_registration: null, typed: false, pick_id: null, delivery_id: 'd1', delivery_item_id: 'di1', line_delivered: 5,
+  epa_registration: null, typed: false, pick_id: `pk-${String(o.brand_name)}`, delivery_id: 'd1', delivery_item_id: 'di1', line_delivered: 5,
   ...o,
 });
 const line = (brand_lines: unknown, quantity = 5, extra: Partial<BrandWarningLine> = {}): BrandWarningLine => ({
   label: 'Gly', quantity, order_item_id: 'oi1', product_id: 'p1', delivery_id: null, brand_lines, ...extra,
 });
-const now = (picks: DeliveryPickLine['picks'], extra: Partial<DeliveryPickLine> = {}): DeliveryPickLine => ({
-  delivery_id: 'd1', delivery_item_id: 'di1', order_item_id: 'oi1', product_id: 'p1', picks, ...extra,
+type Pick = DeliveryPickLine['picks'][number];
+const pk = (o: Partial<Pick>): Pick => ({ id: 'pa', brand_name: 'A', epa_registration: '1-1', quantity: 5, review_state: null, ...o });
+const now = (picks: Pick[], extra: Partial<DeliveryPickLine> = {}): DeliveryPickLine => ({
+  delivery_id: 'd1', delivery_item_id: 'di1', order_item_id: 'oi1', product_id: 'p1', delivered: 5, picks, ...extra,
 });
+/** Today's picks exactly as the lines saved them (nothing changed since), with the given picks still pending review. */
+const asSaved = (lines: BrandWarningLine[], pending: string[] = []): DeliveryPickLine[] => {
+  const byItem = new Map<string, DeliveryPickLine>();
+  for (const l of lines) {
+    const before = new Set(byItem.keys()); // payers of one Bill Split share the trip: take it once
+    for (const x of (l.brand_lines as Array<Record<string, unknown>> | null) ?? []) {
+      const item = String(x.delivery_item_id);
+      if (before.has(item)) continue;
+      const cur = byItem.get(item) ?? now([], { delivery_item_id: item, delivered: Number(x.line_delivered) });
+      if (x.brand_key !== 'n:') {
+        cur.picks.push(pk({ id: String(x.pick_id), brand_name: String(x.brand_name), epa_registration: (x.epa_registration as string | null) ?? null,
+          quantity: Number(x.quantity), review_state: pending.includes(String(x.pick_id)) ? 'pending' : null }));
+      }
+      byItem.set(item, cur);
+    }
+  }
+  return [...byItem.values()];
+};
+const warn = (lines: BrandWarningLine[], pending: string[] = []) => invoiceBrandWarnings(lines, asSaved(lines, pending));
 
 describe('invoice brand notes (paper)', () => {
   it('prints nothing for a line with no brand information, and not recorded for []', () => {
@@ -65,12 +86,12 @@ describe('receipt brand notes', () => {
 
 describe('invoice brand warnings before posting', () => {
   it('says nothing for a clean branded line', () => {
-    const w = invoiceBrandWarnings([line([e({ brand_name: 'A', epa_registration: '1-1', quantity: 5 })])], []);
+    const w = warn([line([e({ brand_name: 'A', epa_registration: '1-1', quantity: 5 })])]);
     expect(w).toEqual({ noRecord: [], followUp: [] });
     expect(brandPostWarningText(w)).toBeNull();
   });
   it('a split that does not add up gets no RUP record', () => {
-    const w = invoiceBrandWarnings([line([e({ brand_name: 'A', epa_registration: '1-1', quantity: 4 })])], []);
+    const w = warn([line([e({ brand_name: 'A', epa_registration: '1-1', quantity: 4 })])]);
     expect(w.noRecord).toEqual(['Gly: Split does not match delivered (4 of 5 recorded)']);
   });
   it('two wrong trips are each named, so they never cancel into a total that looks right', () => {
@@ -78,22 +99,22 @@ describe('invoice brand warnings before posting', () => {
       e({ brand_name: 'A', epa_registration: '1-1', quantity: 6, delivery_item_id: 'di-1' }),
       e({ brand_name: 'A', epa_registration: '1-1', quantity: 4, delivery_item_id: 'di-2' }),
     ];
-    const w = invoiceBrandWarnings([line(bl, 10)], []);
+    const w = warn([line(bl, 10)]);
     expect(w.noRecord).toEqual(['Gly: Split does not match delivered (6 of 5, 4 of 5 recorded)']);
   });
   it('billed above delivered across a Bill Split group gets no RUP record; below is a follow-up', () => {
     const bl = [e({ brand_name: 'A', epa_registration: '1-1', quantity: 5 })];
-    const above = invoiceBrandWarnings([line(bl, 3, { label: 'X-1 Gly' }), line(bl, 3, { label: 'X-2 Gly' })], []);
+    const above = warn([line(bl, 3, { label: 'X-1 Gly' }), line(bl, 3, { label: 'X-2 Gly' })]);
     expect(above.noRecord).toEqual(['X-1 Gly: Billed above delivered (6 billed, 5 delivered)', 'X-2 Gly: Billed above delivered (6 billed, 5 delivered)']);
-    const below = invoiceBrandWarnings([line(bl, 4)], []);
+    const below = warn([line(bl, 4)]);
     expect(below.noRecord).toEqual([]);
     expect(below.followUp).toEqual(['Gly: Quantity changed from delivered (4 billed, 5 delivered)']);
   });
   it('not recorded, no EPA number and a typed brand still waiting are follow-ups', () => {
-    const w = invoiceBrandWarnings([
+    const w = warn([
       line([]),
       line([e({ brand_name: 'Golf', typed: true, pick_id: 'p9', quantity: 5 })], 5, { label: 'Dic', order_item_id: 'oi2' }),
-    ], [now([{ id: 'p9', quantity: 5, review_state: 'pending' }])]);
+    ], ['p9']);
     expect(w.noRecord).toEqual([]);
     expect(w.followUp).toEqual([
       "Gly: Brand not recorded (uses the product's EPA number)",
@@ -105,23 +126,25 @@ describe('invoice brand warnings before posting', () => {
     expect(brandPostWarningText(w)).toContain('Brand follow-ups to check:');
   });
   it('a checked typed brand does not warn', () => {
-    const w = invoiceBrandWarnings([line([e({ brand_name: 'Golf', epa_registration: '1-9', typed: true, pick_id: 'p9', quantity: 5 })])],
-      [now([{ id: 'p9', quantity: 5, review_state: 'added' }])]);
+    const w = warn([line([e({ brand_name: 'Golf', epa_registration: '1-9', typed: true, pick_id: 'p9', quantity: 5 })])]);
     expect(w).toEqual({ noRecord: [], followUp: [] });
   });
   it('saved brands that no longer match the picks (a corrected Bill Split draft) get no RUP record', () => {
-    const saved = [e({ brand_name: 'A', epa_registration: '1-1', pick_id: 'pa', quantity: 5 })];
-    const corrected = [now([{ id: 'pb', quantity: 5, review_state: null }])];
-    expect(invoiceBrandWarnings([line(saved, 5, { label: 'X-1 Gly' })], corrected).noRecord)
-      .toEqual(['X-1 Gly: Brands changed since this invoice was made']);
-    // Same pick, new amount: also changed.
-    expect(invoiceBrandWarnings([line(saved)], [now([{ id: 'pa', quantity: 4, review_state: null }])]).noRecord)
-      .toEqual(['Gly: Brands changed since this invoice was made']);
-    // Unchanged: nothing.
-    expect(invoiceBrandWarnings([line(saved)], [now([{ id: 'pa', quantity: 5, review_state: null }])]).noRecord).toEqual([]);
+    const saved = [line([e({ brand_name: 'A', epa_registration: '1-1', pick_id: 'pa', quantity: 5 })], 5, { label: 'X-1 Gly', delivery_id: 'd1' })];
+    const changed = 'X-1 Gly: Brands changed since this invoice was made';
+    expect(invoiceBrandWarnings(saved, [now([pk({})])]).noRecord).toEqual([]);
+    // A different pick, a new amount, a brand or EPA number corrected in place, or a trip added since: changed.
+    expect(invoiceBrandWarnings(saved, [now([pk({ id: 'pb' })])]).noRecord).toEqual([changed]);
+    expect(invoiceBrandWarnings(saved, [now([pk({ quantity: 4 })])]).noRecord).toEqual([changed]);
+    expect(invoiceBrandWarnings(saved, [now([pk({ brand_name: 'B' })])]).noRecord).toEqual([changed]);
+    expect(invoiceBrandWarnings(saved, [now([pk({ epa_registration: '1-2' })])]).noRecord).toEqual([changed]);
+    expect(invoiceBrandWarnings(saved, [now([pk({})]), now([pk({ id: 'pc' })], { delivery_item_id: 'di2' })]).noRecord).toEqual([changed]);
+    // A line of the delivery for another order line, or one that delivered nothing, is not this line's.
+    expect(invoiceBrandWarnings(saved, [now([pk({})]), now([pk({ id: 'pc' })], { delivery_item_id: 'di3', order_item_id: 'oi9' }),
+      now([], { delivery_item_id: 'di4', delivered: 0 })]).noRecord).toEqual([]);
   });
   it('a line saved with no brands whose delivery line now has a pick gets no RUP record', () => {
-    const picked = [now([{ id: 'pa', quantity: 5, review_state: null }])];
+    const picked = [now([pk({})])];
     expect(invoiceBrandWarnings([line(null, 5, { delivery_id: 'd1' })], picked).noRecord)
       .toEqual(['Gly: Brands changed since this invoice was made']);
     expect(invoiceBrandWarnings([line([], 5, { delivery_id: 'd1' })], picked).noRecord)

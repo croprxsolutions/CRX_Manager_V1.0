@@ -1,9 +1,9 @@
 // Brand PR B-3: the brand warnings shown before an invoice posts. They warn and never block: posting records what the
 // saved lines carry (Mason, Q5). The rules mirror the database's (20270106110000 _invoice_line_brand_alloc and
 // get_epa_sales_to_check), so a line warned "no RUP record" here is the line the register skips and lists.
-// shortcut: billed-above is summed over the lines given (this invoice, or its Bill Split group), and a line with no
-// brands on an order-wide invoice (no delivery) is not checked for picks added since; another invoice billing the same
-// order line is not read here either. The database lists those cases on Sales to check after posting.
+// shortcut: billed-above is summed over the lines given (this invoice, or its Bill Split group), and on an order-wide
+// invoice (no delivery of its own) only the trips its saved brands name are compared with today's picks, so a later
+// trip for the order is not seen; another invoice billing the same order line is not read here either. The database lists those cases on Sales to check after posting.
 import {
   brandLinesDelivered,
   brandSplitMismatch,
@@ -27,7 +27,9 @@ export interface DeliveryPickLine {
   delivery_item_id: string;
   order_item_id: string | null;
   product_id: string | null;
-  picks: Array<{ id: string; quantity: number; review_state: string | null }>;
+  /** quantity_delivered, else quantity. */
+  delivered: number;
+  picks: Array<{ id: string; brand_name: string; epa_registration: string | null; quantity: number; review_state: string | null }>;
 }
 
 export interface BrandWarnings {
@@ -63,23 +65,26 @@ function billedByGroup(lines: BrandWarningLine[]): Map<string, number> {
   return billed;
 }
 
-const pickText = (id: string | null | undefined, q: unknown) => `${id}|${tenThousandths(q)}`;
+/** A covered trip as the snapshot names it: each pick (id, brand, number, amount), or "-" for a trip with none. */
+const pickKey = (itemId: unknown, p: { id?: unknown; brand_name?: unknown; epa_registration?: unknown; quantity?: unknown }) =>
+  `${itemId}|${p.id}|${p.brand_name}|${p.epa_registration ?? ''}|${tenThousandths(p.quantity)}`;
 
 /**
  * The saved brands no longer say what the picks say (a Bill Split draft is never re-copied after a correction):
- * posting records nothing for the line and lists it as brand_lines_stale (20270106110000).
+ * posting records nothing for the line and lists it as brand_lines_stale (20270106110000 compares the whole snapshot).
  */
 function brandsChanged(l: BrandWarningLine, entries: Entries | null, current: DeliveryPickLine[]): boolean {
-  if (entries === null || entries.length === 0) {
-    // No brands saved: stale once a pick exists on the invoice's own delivery line.
-    return !!l.delivery_id && current.some((c) => c.delivery_id === l.delivery_id && c.order_item_id === l.order_item_id
-      && c.product_id === l.product_id && c.picks.length > 0);
-  }
-  const items = new Set(entries.map((e) => e.delivery_item_id));
-  const saved = entries.filter((e) => e.pick_id).map((e) => pickText(e.pick_id, e.quantity)).sort();
-  const now = current.filter((c) => items.has(c.delivery_item_id))
-    .flatMap((c) => c.picks.map((p) => pickText(p.id, p.quantity))).sort();
-  return saved.join(',') !== now.join(',');
+  const own = (c: DeliveryPickLine) => c.delivery_id === l.delivery_id && c.order_item_id === l.order_item_id
+    && c.product_id === l.product_id && tenThousandths(c.delivered) > 0;
+  // No brands saved: stale once a pick exists on the invoice's own delivery line.
+  if (entries === null || entries.length === 0) return !!l.delivery_id && current.some((c) => own(c) && c.picks.length > 0);
+  const named = new Set(entries.map((e) => e.delivery_item_id));
+  const covered = current.filter((c) => (l.delivery_id ? own(c) : named.has(c.delivery_item_id)));
+  const saved = entries.map((e) => (e.brand_key === 'n:' ? `${e.delivery_item_id}|-`
+    : pickKey(e.delivery_item_id, { ...e, id: e.pick_id }))).sort();
+  const today = covered.flatMap((c) => (c.picks.length === 0 ? [`${c.delivery_item_id}|-`]
+    : c.picks.map((p) => pickKey(c.delivery_item_id, p)))).sort();
+  return saved.join(',') !== today.join(',');
 }
 
 function pickFollowUps(label: string, entries: Entries, pendingTypedPickIds: ReadonlySet<string>): string[] {

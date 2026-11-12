@@ -81,7 +81,10 @@ export async function loadDeliveryPicks(deliveryIds: string[]): Promise<Delivery
         delivery_item_id: l.delivery_item_id,
         order_item_id: l.order_item_id,
         product_id: l.product_id,
-        picks: (l.picks ?? []).map((p) => ({ id: p.id, quantity: p.quantity, review_state: p.review_state })),
+        delivered: Number(l.quantity_delivered ?? l.quantity),
+        picks: (l.picks ?? []).map((p) => ({
+          id: p.id, brand_name: p.brand_name, epa_registration: p.epa_registration, quantity: p.quantity, review_state: p.review_state,
+        })),
       });
     }
   }

@@ -121,8 +121,12 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   const [saved, setSaved] = useState<CommitRateReviewResult | null>(null);
   // Scoped to the exact upload: a retry of the same file reuses its key (the server returns the first receipt).
   const commitKey = useIdempotencyKey('commit_rate_review', profileId, JSON.stringify(upload));
+  // A Confirm that got no reply may have saved. Kept across close and re-upload so the same file can still redeem its
+  // receipt: a fresh preview would call the saved rows stale and block Confirm.
+  const unanswered = useRef<{ upload: string; preview: RateReviewResult } | null>(null);
+  const [resumed, setResumed] = useState(false);
 
-  const reset = () => { setUpload(null); setPreview(null); setSaved(null); };
+  const reset = () => { setUpload(null); setPreview(null); setSaved(null); setResumed(false); };
   const close = () => { reset(); setTotals(null); onClose(); };
 
   const download = async () => {
@@ -156,7 +160,10 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     try {
       const parsed = await parseRateReviewWorkbook(await file.arrayBuffer());
       setUpload(parsed);
-      if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed);
+      if (unanswered.current?.upload === JSON.stringify(parsed)) {
+        setPreview(unanswered.current.preview);
+        setResumed(true);
+      } else if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -183,6 +190,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     try {
       const receipt = await commitRateReview(upload, commitKey.getKey());
       commitKey.resetKey();
+      unanswered.current = null;
       setSaved(receipt);
       setTotals(null); // stale now; the success line asks for a fresh download
       toast('success', `Saved ${count(receipt.rates_changed, 'rate', 'rates')} and ${count(receipt.outcomes_changed, 'outcome', 'outcomes')}`);
@@ -191,7 +199,10 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       const raw = String((error as { message?: unknown } | null)?.message ?? '');
       // A database refusal (nothing saved) drops the preview so the next try checks again. Any other failure may be a
       // lost reply to a save that went through: keep the preview so Confirm retries with the same key and gets the receipt.
-      if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) setPreview(null);
+      if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) {
+        unanswered.current = null;
+        setPreview(null);
+      } else unanswered.current = { upload: JSON.stringify(upload), preview };
     } finally {
       setBusy(false);
     }
@@ -231,6 +242,9 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
             </h3>
             {!preview && !saved && (
               <Button variant="secondary" onClick={() => void retryPreview()} loading={busy}>Preview again</Button>
+            )}
+            {resumed && !saved && (
+              <p className="text-amber-800">Your last Confirm of this file got no reply, so it may already be saved. Confirm again to get its result; it will not save twice.</p>
             )}
             {shown && <PreviewDetail shown={shown} upload={upload} />}
             {shown && shown.changes.length === 0 && shown.problems.length === 0 && (

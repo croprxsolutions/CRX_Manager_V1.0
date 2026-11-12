@@ -101,6 +101,25 @@ describe('RateReviewWorkbookModal', () => {
     expect(await screen.findByText(/Saved 1 rate and 0 outcomes\./)).toBeInTheDocument();
   });
 
+  it('after a lost reply, re-uploading the same file restores Confirm with the same key instead of a fresh preview', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    H.commit.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] });
+    await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(1));
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Close' }))[0]);
+    const file = new File(['x'], 'review.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+    fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+    expect(await screen.findByText(/last Confirm of this file got no reply/)).toBeInTheDocument();
+    expect(H.preview).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(2));
+    expect(H.commit.mock.calls[1][1]).toBe(H.commit.mock.calls[0][1]);
+    expect(await screen.findByText(/Saved 1 rate and 0 outcomes\./)).toBeInTheDocument();
+  });
+
   it('warns when a rate change clears a recorded outcome the file does not set again', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['reopen'] }], outcomes: [] });
     H.parse.mockResolvedValue({ ...upload, outcomes: [], recorded: { [P1]: 'approved_default' } });

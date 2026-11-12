@@ -298,6 +298,9 @@ async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<st
       db.from('order_shares').select('customer_id, split_percentage, customer:customers(farm_name)').eq('order_id', orderId),
       db.from('order_item_shares').select('id, order_items!inner(order_id)', { count: 'exact', head: true }).eq('order_items.order_id', orderId),
     ]);
+    // A count of 0 means no line has its own payers: order_item_shares_select and order_shares_select admit the same
+    // readers (admin or rep, order not deleted; 20261215110000), and only those or the service role get this far
+    // (get_bill_split_payers), so whoever reads the card also sees every line share (Luna MED, refuted).
     type Row = { customer_id: string; split_percentage?: number | string; customer?: { farm_name?: string | null } | null };
     const main = order.data as Row | null;
     if (order.error || shares.error || lineShares.error || lineShares.count !== 0 || !main || !Array.isArray(shares.data)) return null;

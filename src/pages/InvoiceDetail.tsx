@@ -44,9 +44,9 @@ import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
-import { brandPostWarningText, invoiceBrandWarnings, typedBrandDeliveryIds, type BrandWarningLine } from '../lib/invoiceBrandWarnings';
+import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type BrandWarningLine } from '../lib/invoiceBrandWarnings';
 import { invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
-import { loadPendingTypedPickIds } from '../lib/deliveryBrandPaper';
+import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
@@ -428,6 +428,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       quantity: Number(it.quantity),
       order_item_id: it.order_item_id ?? null,
       product_id: it.product_id,
+      delivery_id: invoice?.delivery_id ?? null,
       brand_lines: it.brand_lines,
     }));
     // A RUP finding is a warning on the confirm, not a gate. A check that could not run
@@ -445,7 +446,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         // this screen loaded, the post would be refused, so reload now and show what would post.
         const { data: grp, error: grpError } = await supabase
           .from(INVOICES_POSTABLE)
-          .select(`id, invoice_number, customer_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id, order_item_id, description, quantity, brand_lines)`)
+          .select(`id, invoice_number, customer_id, delivery_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id, order_item_id, description, quantity, brand_lines)`)
           .eq('invoice_group_id', invoice.invoice_group_id)
           .is('deleted_at', null);
         if (grpError || !Array.isArray(grp)) {
@@ -471,12 +472,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           }
           if (finding) parts.push(finding);
         }
-        brandLines = (grp as Array<{ invoice_number: string; invoice_items: Array<{ product_id: string | null; order_item_id: string | null; description: string | null; quantity: number | null; brand_lines: unknown }> | null }>)
+        brandLines = (grp as Array<{ invoice_number: string; delivery_id: string | null; invoice_items: Array<{ product_id: string | null; order_item_id: string | null; description: string | null; quantity: number | null; brand_lines: unknown }> | null }>)
           .flatMap((m) => (m.invoice_items ?? []).map((it) => ({
             label: `${m.invoice_number} ${it.description || 'line'}`,
             quantity: Number(it.quantity ?? 0),
             order_item_id: it.order_item_id,
             product_id: it.product_id,
+            delivery_id: m.delivery_id,
             brand_lines: it.brand_lines,
           })));
         if (parts.length > 0) {
@@ -509,11 +511,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       stopUnchecked();
       return;
     }
-    // A typed brand warns only while it waits for the office's check; a read that fails stops here, as the RUP check does.
+    // The current picks: saved brands that no longer match them, and typed brands still waiting for the office's check.
+    // A read that fails stops here, as the RUP check does.
     let brandWarning: string | null;
     try {
-      const pending = await loadPendingTypedPickIds(typedBrandDeliveryIds(brandLines));
-      brandWarning = brandPostWarningText(invoiceBrandWarnings(brandLines, pending));
+      const picks = await loadDeliveryPicks(brandDeliveryIds(brandLines));
+      brandWarning = brandPostWarningText(invoiceBrandWarnings(brandLines, picks));
     } catch (err) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'brand_post_check' } });
       toast('error', 'The delivered brands could not be checked, so the invoice was not posted. Try again.');

@@ -243,4 +243,12 @@ describe('useStickyCancellations', () => {
     rerender({ scope: 'p2', cancelled: new Map() });
     expect(result.current.cancelled.size).toBe(0);
   });
+
+  it('a kept warning whose source is still listed shows once', () => {
+    const { result, rerender } = renderHook(({ cancelled }) => useStickyCancellations('p1', [product], cancelled),
+      { initialProps: { cancelled: new Map([['524-475', null]]) as Map<string, string | null> } });
+    rerender({ cancelled: new Map() });
+    render(<CancelledRegistrationBanner sources={result.current.sources} cancelled={result.current.cancelled} check="incomplete" />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+  });
 });

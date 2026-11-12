@@ -115,7 +115,9 @@ export function useStickyCancellations(scope: string, sources: RegistrationSourc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, signature, seenSignature, seen.scope]);
   return {
-    sources: [...sources, ...keptOnly.map((hit) => hit.source)],
+    // A kept warning whose source is still listed already shows through it; add only the ones that left.
+    sources: [...sources, ...keptOnly.filter((hit) => !sources.some((s) => s.label === hit.source.label
+      && normalizeEpaRegistration(s.epaRegistration) === hit.key)).map((hit) => hit.source)],
     cancelled: new Map([...keptOnly.map((hit): [string, string | null] => [hit.key, hit.cancelledOn]), ...cancelled]) as CancelledRegistrations,
   };
 }

@@ -1,6 +1,6 @@
 # Product Master MOA-1 build sheet: resistance mode-of-action groups shown on the product
 
-**Status (2026-11-12):** a plan only. No code and no migration have been written. It was written against `main` (`8b6c3281c`) and the live database, using read-only SQL only (counts, no product names). For building, this sheet replaces the MOA-1 outline in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (Stage 2, "MOA-1 ·"). Where the two differ, this sheet wins on *how*, and section 2 lists each difference; the grand plan still wins on order and on Mason's settled decisions. **Nothing here authorizes building; the package starts when Mason says so** (Mason, 2026-11-11: he reviews the plan before any build).
+**Status (2026-11-12):** a plan only. No code and no migration have been written. It was written against `main` (`8b6c3281c`) and the live database, using read-only SQL only (counts, no product names). For building, this sheet replaces the MOA-1 outline in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (Stage 2, "MOA-1 ·"). Where the two differ, this sheet wins on *how*, and section 2 lists each difference; the grand plan still wins on order and on Mason's settled decisions. **Nothing here authorizes building; the package starts when Mason says so** (Mason, 2026-11-11: he reviews the plan before any build). **Mason answered section 9 on 2026-11-12:** yes to questions 1-3; on question 4 he chose a one-time bulk load of every ingredient's groups (3.6) and only a simple per-ingredient editor afterwards, since a new ingredient arrives about once a year. The sheet below reflects those answers.
 
 **What MOA-1 does, in one line.** Each shared active ingredient carries one reviewed list of its resistance groups (FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides), and every product containing that ingredient shows those groups, with a "Groups: …" summary, without anyone retyping them per product.
 
@@ -124,11 +124,21 @@ For each **active ingredient row** of the parent, and for each scheme:
 - **`_parent_mode_groups(p_parent_id uuid) RETURNS jsonb`** (private, `STABLE SECURITY DEFINER`, `search_path` pinned, no grants): the 3.3 result, `{chemistry_version, ingredients: [{ingredient_id, name, derived_from, acid_name, schemes: [{scheme, live: [...], derived: [...], typed: [{row_id, group_code, source}], status}], not_recorded}], summary: [{scheme, group_code, differs}], not_recorded_count}`. Active rows only. CMP-2 calls this helper for its filter.
 - **`get_parent_mode_groups(p_parent_id uuid) RETURNS jsonb`**: refuses a caller who is not an active profile (`is_active_profile()`), refuses an unknown parent, returns the helper's result. `EXECUTE` for `authenticated`. Everyone who can see the product page sees its groups (groups are label facts, not costs).
 - **`get_ingredient_mode_users(p_ingredient_id uuid) RETURNS jsonb`**: admin only. The ingredient's active list (with notes) and the `parents_affected` / `products_affected` counts of 3.2 step 8, for the editor to show before saving. `EXECUTE` for `authenticated`; refuses non-admins inside.
-- **`get_ingredient_mode_worklist() RETURNS jsonb`**: admin only. Active ingredients used by at least one active parent that have no list of their own and whose acid (if any) has none, with the count of products using each, sorted by that count. `EXECUTE` for `authenticated`; refuses non-admins inside.
+- No "no group yet" worklist read (Mason, 2026-11-12): the one-time load (3.6) fills every ingredient at once and reports any it could not match; after that a gap shows as "group not recorded" on the product page.
 
 ### 3.5 Who may edit
 
 **Admins only** (the writer calls `_product_parent_require_admin`). Reasons: every DM-1, DM-1b and DM-4 chemistry writer is admin-only; one ingredient-list save changes what every product containing it shows, so a typo spreads catalog-wide; and groups feed resistance advice to growers. Everyone with an active profile can read them.
+
+### 3.6 The one-time bulk load (Mason, 2026-11-12)
+
+Mason does not want groups typed ingredient by ingredient. So every ingredient's groups are loaded once, in bulk, and the editor (3.2) is kept only for the rare new ingredient (about once a year).
+
+- **When:** after the DB and screen PRs, and after the setup workbook and EPA lookups have put the ingredients in (`active_ingredients` has 0 rows today, and a group can only attach to an ingredient that exists).
+- **The list:** the builder prepares one table of `ingredient name -> scheme, group` for every active ingredient then in the system, taken from the published HRAC, FRAC and IRAC classification lists (public reference data, no private names). Each row names its source list and edition, which becomes that row's `source_note`. Mason spot-checks a handful against product labels (the group number is printed on the label) and says yes before anything is written.
+- **How it is written:** its own small reviewed migration, `<stamp>_ingredient_modes_of_action_load.sql`, not a new screen or function. It matches each row to an active ingredient by exact name (the same trimmed, case-insensitive name `active_ingredients` already keeps unique), inserts rows only for ingredients that have **no list yet** (never overwrites one), writes one `active_ingredient_events` 'updated' event per ingredient with before `[]` and the new list after, and is safe to re-run (a second run finds every list already filled and writes nothing). It is a non-destructive data migration: Sol and the apply proof gate as usual, plus Mason's yes on the list.
+- **What it reports:** the migration's postflight prints counts only (rows written, ingredients filled, list rows that matched no ingredient, active ingredients still without a group). Unmatched names are fixed in the list and the load re-run, or set by hand with the editor.
+- **A new ingredient later:** an admin clicks "Set groups" on it from the product page (3.2, section 5). No other machinery.
 
 ---
 
@@ -137,33 +147,33 @@ For each **active ingredient row** of the parent, and for each scheme:
 **File:** `supabase/migrations/<stamp>_ingredient_modes_of_action.sql`. The stamp is chosen at build: after `20270106110000` (newest file on `main` today) and after any stamp claimed in `docs/changelog.d/` or the sibling notes folder.
 
 ### 4.A Preflight (refuse unless all hold; one transaction, the temp-table pattern of `20270105110000`)
-- `active_ingredient_modes_of_action` does not exist; no function named `set_active_ingredient_modes`, `get_parent_mode_groups`, `get_ingredient_mode_users`, `get_ingredient_mode_worklist` or `_parent_mode_groups` exists with any argument list (`pg_proc` by name).
+- `active_ingredient_modes_of_action` does not exist; no function named `set_active_ingredient_modes`, `get_parent_mode_groups`, `get_ingredient_mode_users` or `_parent_mode_groups` exists with any argument list (`pg_proc` by name).
 - These exist: `active_ingredients`, `active_ingredient_events`, `product_parent_ingredients`, `product_parent_modes_of_action` with its `source` column, `_product_parent_require_admin()`, `_product_parent_replay(text,text,text)`, `save_idempotency(text,text,jsonb)`, `_active_ingredient_event(uuid,text,text,text,jsonb,jsonb)`, `is_active_profile()`, `is_admin()`.
 - Capture an md5 of source, settings, owner, security mode and grants for the functions MOA-1 must not touch: `_apply_parent_chemistry`, `_parent_chemistry_values`, `_check_parent_chemistry`, `_chemistry_kept_modes`, `_parent_chemistry_epa_refusal`, `get_parent_chemistry`, `set_parent_chemistry`, `correct_parent_chemistry`, `_ingredient_users`, `_ingredient_usage_fingerprint`, `get_active_ingredient_worklist`, `retire_active_ingredient`, `reactivate_active_ingredient`, `promote_chemistry_proposal`, `commit_epa_proposal`.
 - Capture row counts and an md5 of `(id, status, row_version)` for `product_parent_modes_of_action` and `active_ingredients`.
 
 ### 4.B Body
-Section 3.1's table, index, RLS, policy and grants; 3.2's writer; 3.4's helper and three reads. Every function owned by `postgres` with `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT EXECUTE … TO authenticated` on the four public ones only. Header line `-- idempotency-body-check: exempt` with the house reason (the writer checks its key through `_product_parent_replay`, which calls `check_idempotency`, and saves its receipt with `save_idempotency` last).
+Section 3.1's table, index, RLS, policy and grants; 3.2's writer; 3.4's helper and two reads. Every function owned by `postgres` with `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT EXECUTE … TO authenticated` on the three public ones only. Header line `-- idempotency-body-check: exempt` with the house reason (the writer checks its key through `_product_parent_replay`, which calls `check_idempotency`, and saves its receipt with `save_idempotency` last).
 
 ### 4.C What the migration does not touch
 No existing table, column, row, grant, policy or trigger. None of the fifteen functions in 4.A. The EPA gate is unchanged. Typed groups keep working exactly as today on ungated parents.
 
 ### 4.D Rollback (its own reviewed migration)
-Revert the screen PR first, so no screen calls a dropped function. Then revoke `EXECUTE` on the four public functions and drop all five (never CASCADE); revoke `SELECT` on `active_ingredient_modes_of_action` and keep it as unreadable history (the house rule for DM-1b and DM-4 tables). No product data to restore: nothing outside the new table was written. The ingredient events written by MOA-1 stay (append-only history).
+Revert the screen PR first, so no screen calls a dropped function. Then revoke `EXECUTE` on the three public functions and drop all four (never CASCADE); revoke `SELECT` on `active_ingredient_modes_of_action` and keep it as unreadable history (the house rule for DM-1b and DM-4 tables). No product data to restore: nothing outside the new table was written. The ingredient events written by MOA-1 stay (append-only history).
 
 ### 4.E Lock and timing
 `SET LOCAL lock_timeout = '5s'`. The new table's foreign key briefly locks `active_ingredients` against writes while it is created (milliseconds; the table is empty today). If an ingredient save holds it, the migration waits at most 5 seconds and then fails whole, changing nothing, and is simply re-run. No product, price or stock table is locked, so no fixed window is needed (Luna round 1).
 
 ### 4.F Postflight (inside the migration)
 - RLS on, one policy, exact grants (read from `has_table_privilege` for each role), no write privilege for any role.
-- Each new function: owner `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`; `EXECUTE` only for `authenticated` on the four public ones and for nobody on the helper (`has_function_privilege` for `PUBLIC`, `anon`, `authenticated`, `service_role`, `metabase_ro`).
+- Each new function: owner `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`; `EXECUTE` only for `authenticated` on the three public ones and for nobody on the helper (`has_function_privilege` for `PUBLIC`, `anon`, `authenticated`, `service_role`, `metabase_ro`).
 - The fifteen captured md5s and both row-count captures are unchanged.
 
 ### 4.G Files
 - the migration;
 - `docs/changelog.d/<date>-moa1-ingredient-groups.md` and `docs/reference/migrations.d/<stamp>_ingredient_modes_of_action.md`;
 - `scripts/smoke/prove-ingredient-modes-of-action-real-schema.mjs` (cases in section 6);
-- `docs/reference/rpc-functions.md` entries for the four public functions;
+- `docs/reference/rpc-functions.md` entries for the three public functions;
 - `src/types/index.ts` (`IngredientModeOfAction`, `ParentModeGroups`) and regenerated `src/types/supabase.ts`;
 - after apply: schema registry refresh, live function snapshot entries, `npm run db-sweeps:live` (and the sweep allowlist if it flags the new `SECURITY DEFINER` functions).
 
@@ -185,13 +195,12 @@ Revert the screen PR first, so no screen calls a dropped function. Then revoke `
 Lands after the database PR is applied (migration-plus-callers split, `docs/workflows/DATABASE_CHANGE_CHECKLIST.md`).
 
 **Files:**
-- `src/lib/productModeGroups.ts` (new): `fetchParentModeGroups`, `fetchIngredientModeUsers`, `fetchIngredientModeWorklist`, `setIngredientModes`, each through `src/lib/db.ts` with `assertRpcResult()` and one retry key per intent (the `getCreateKeyFor` pattern; a new key whenever the request changes).
+- `src/lib/productModeGroups.ts` (new): `fetchParentModeGroups`, `fetchIngredientModeUsers`, `setIngredientModes`, each through `src/lib/db.ts` with `assertRpcResult()` and one retry key per intent (the `getCreateKeyFor` pattern; a new key whenever the request changes).
 - `src/components/products/ChemistryParts.tsx`: `ChemistryLists` shows each ingredient's live groups with the 3.3 label; a difference shows both values and "differs"; an ingredient with none shows "group not recorded". Admins get **"Set groups"** beside each ingredient.
 - `src/components/products/IngredientGroupsModal.tsx` (new): edits one ingredient's list (scheme and group rows, the existing `ModeRows` look, each row with its own required "Where is this from?" note), and a reason for the change. It always says "Used by N products" (from `get_ingredient_mode_users`); only when the group codes themselves change (not just a note) does it say "This changes the groups shown on N products", and with no change at all the save button stays off (Luna round 2). Its load is tagged with the ingredient ID and a request number, and a reply for another ingredient or an older load is ignored, so it can never show or send another ingredient's list (Luna round 2). It sends the list it loaded (notes included) as `p_expected_modes`. While saving, every input, row button, submit and close are disabled, so the form always shows exactly what was sent (Luna round 2). A reply that times out keeps the form locked and **re-sends the identical request with the same retry key** until it gets an answer (the database either returns the saved answer or runs it once, behind the same lock), and only then says saved or refused; it never decides from a plain reload, which could run before the timed-out save commits (Luna round 1). A `MOA_LIST_STALE` refusal reloads and says "someone else just changed this".
 - `src/components/products/ProductChemistrySection.tsx`: reads `get_parent_mode_groups` beside `get_parent_chemistry` and shows the **"Groups: …"** summary at the top of the Chemistry section; refreshes it after any chemistry or group save. Each pair of reads is tagged with the parent ID and a request number; a reply for another parent or an older request is ignored, and the groups show only once both reads of the same request have answered (Luna round 1). `get_parent_mode_groups` also returns the `chemistry_version` it read; if it differs from the one `get_parent_chemistry` returned (an ingredient or typed group changed between the two calls), the section re-reads both once before showing groups, and on a second mismatch shows "Groups are being updated; reload" instead of a mixed picture. An ingredient-list change does not move `chemistry_version`, but it only changes derived groups, which come wholly from the one groups read, so they are never mixed with an older read (Luna round 2).
-- `src/components/products/IngredientReviewModal.tsx`: a third list, **"Ingredients with no group yet"**, from `get_ingredient_mode_worklist`, each with "Set groups". Each load carries a request number and only the newest reply is shown (Luna round 2).
 - `src/components/products/ChemistryEntryModal.tsx`: when an admin picks an existing ingredient that has a list, show "Groups from the ingredient list: …" above the per-product group rows, so nobody retypes them. No change to what it saves.
-- Tests: component tests for each 3.3 row, the summary line, the editor's stale and timeout paths, and the worklist.
+- Tests: component tests for each 3.3 row, the summary line, and the editor's stale and timeout paths.
 
 **Not touched:** `src/pages/ProductDetail.tsx` (the section already renders inside it), the setup workbook, every quote, job, invoice, PDF and field-app file.
 
@@ -214,7 +223,7 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 10. A non-admin active user can read groups; an inactive profile and `anon` cannot; nobody can write the table directly.
 11. The postflight md5s prove none of the fifteen DM-1/DM-1b/DM-4 functions changed.
 
-**Observed in the app against the private test copy (`scripts/local-app/`):** as an admin, set groups on an ingredient from the product page; see them on a second product that contains it without typing; see a premix's summary; see "group not recorded" and the worklist entry for an ingredient without a list; as a non-admin, see the groups and no "Set groups" button. A flow the test copy cannot run is recorded as owed, not passed.
+**Observed in the app against the private test copy (`scripts/local-app/`):** as an admin, set groups on an ingredient from the product page; see them on a second product that contains it without typing; see a premix's summary; see "group not recorded" for an ingredient without a list; as a non-admin, see the groups and no "Set groups" button. A flow the test copy cannot run is recorded as owed, not passed.
 
 ---
 
@@ -222,7 +231,8 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 
 - **Ready to build now:** DM-1, DM-1b and DM-4's database parts are live (`20270105110000` applied 2026-11-12). MOA-1 needs nothing else.
 - **Lands before CMP-2:** CMP-2's mode-of-action filter reads `_parent_mode_groups`. CMP-2 is on hold until Mason re-reviews its plan (Stage 5); MOA-1 does not wait for it.
-- **Out of scope:** anything on the quote page. Taha owns the quote screens; the quote-page option to show each line's actives and groups to the grower stays a logged "Later features" item until his quote work lands. No quote file is touched. Also out: a groups column on the setup workbook, a bulk import of a published classification list, and showing groups on the product list or in search.
+- **Out of scope:** anything on the quote page. Taha owns the quote screens; the quote-page option to show each line's actives and groups to the grower stays a logged "Later features" item until his quote work lands. No quote file is touched. Also out: a groups column on the setup workbook, a permanent bulk-import screen (the one-time load in 3.6 is a reviewed migration instead), and showing groups on the product list or in search.
+- **Then the one-time load (3.6):** after both PRs land and the ingredients are in; its own small migration, applied only after Mason says yes to the list.
 - **Other sessions:** the screen PR edits only `src/components/products/` chemistry files and a new lib file. Before building, check open PRs for those files (none on 2026-11-12) and never edit a file another open PR touches.
 
 ---
@@ -230,7 +240,7 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 ## 8. Named deferrals
 
 - **Retiring a typed group on an EPA-gated parent** stays refused (DM-1's gate). There are 0 typed groups live and MOA-1 removes the need to type them; if one ever needs removing, a follow-up re-issues that one gate allowance with its own review.
-- **Bulk-filling ingredient lists** from a published HRAC/FRAC/IRAC table or a workbook tab: later, if typing them from the worklist proves slow.
+- **A repeatable bulk-import screen:** not built (Mason, 2026-11-12: new ingredients arrive about once a year). The one-time load (3.6) and the editor cover it.
 
 ---
 
@@ -245,8 +255,10 @@ One save changes every product that contains that ingredient. **Recommended: adm
 **NEEDS MASON - DECISION REQUIRED (3 of 4): should a salt or ester form automatically use its acid's groups?**
 For example, a 2,4-D ester showing 2,4-D's group. **Recommended: yes**, unless that form has its own list, so you type each group once per acid.
 
-**NEEDS MASON - DECISION REQUIRED (4 of 4): how should the lists get filled?**
-There are no ingredients in the system yet; they arrive as EPA lookups and the workbook fill products in. **Recommended: an admin types each ingredient's groups from a "no group yet" list, noting where each came from** (a label or the published HRAC/FRAC/IRAC list). No bulk import for now.
+**Answered 2026-11-12:** Mason said yes to 1, 2 and 3 as recommended.
+
+**DECIDED (4 of 4): how should the lists get filled?**
+Mason chose (2026-11-12) **a one-time bulk load of every ingredient's groups** from the published lists, which he spot-checks first (3.6), and only the simple per-ingredient editor afterwards. The original recommendation (type each from a "no group yet" worklist) and that worklist are dropped.
 
 ---
 
@@ -267,3 +279,5 @@ There are no ingredients in the system yet; they arrive as EPA lookups and the w
 - MED: the editor's load had no ownership guard → tagged with ingredient and request number (section 5).
 - LOW: the worklist load had no ownership guard → newest reply only (section 5).
 - LOW: "This changes N products" showed even for a note-only or no-op save → "Used by N products" always; "changes the groups shown" only when codes change; no-op saves are off (section 5).
+
+**After Mason's answers (2026-11-12, the commit after `a8cc85f22`):** plan text only, from his decision on question 4: added 3.6 (one-time bulk load as its own reviewed migration), dropped the worklist read and screen. No rule file changed. The load migration gets its own Luna and Sol rounds when it is built.

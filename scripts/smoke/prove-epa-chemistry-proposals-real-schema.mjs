@@ -630,7 +630,15 @@ function caseH16() {
   const after = reg('116-1');
   assert.equal(after.label_accepted_on, '2025-05-01'); assert.equal(after.label_url, 'https://www3.epa.gov/good.pdf');
   assert.equal(after.registration_status, 'cancelled', 'the status is never written');
-  console.log('[case] H16 an unreadable label date is ignored with a note and the commit succeeds with the good one; "active" against a cancelled registration is shown as a difference, never written');
+  // Luna 2026-11-11: an undated EPA link is not filled beside an existing date; it is shown as a difference.
+  raw(`UPDATE public.epa_registrations SET label_url = NULL WHERE epa_registration = '116-1';`);
+  const undated = JSON.parse(scalar(`SELECT public._epa_proposal_items('${P16}', '116-1', public._epa_lookup_input(${J(found('116-1', [], { latestLabelPdfUrl: 'https://www3.epa.gov/undated.pdf' }))}));`))
+    .find((i) => i.item_id === 'label:label_document');
+  assert.equal(undated.class, 'differs'); assert.equal(undated.change ?? null, null);
+  raw(`UPDATE public.epa_registrations SET label_url = 'https://www3.epa.gov/good.pdf' WHERE epa_registration = '116-1';`);
+  // Luna 2026-11-11: "transferred to" the number being looked up is not a move.
+  assert.match(scalar(`SELECT public._epa_lookup_shape_error(${J(notFound({ transferredTo: '116-1' }))}, '116-1');`), /transferredTo is the number being looked up/);
+  console.log('[case] H16 an unreadable label date is ignored with a note and the commit succeeds with the good one; "active" against a cancelled registration is shown as a difference, never written; an undated link beside a date is a difference; a transfer to itself is unreadable');
 }
 
 function caseH20H21() {
@@ -741,7 +749,21 @@ function caseH27() {
     .filter((i) => i.kind === 'ingredient' && i.current);
   assert.equal(both.length, 2);
   for (const i of both) { assert.equal(i.class, 'epa_conflict', i.item_id); assert.equal(i.accept_default, false); assert.equal(i.change, null); }
-  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts');
+  // Codex App 2026-11-11: two of P24's rows share a name (distinct CAS, EPA-sourced, no strength) and EPA gives that
+  // name with no CAS: one unticked conflict, no row chosen, neither row reported missing. Rows removed afterwards.
+  const T1 = id('c91'), T2 = id('c92');
+  raw(`INSERT INTO public.active_ingredients (id, name, cas, created_by, updated_by) VALUES
+      ('${T1}', 'Twin', '50-00-0', '${ADMIN}', '${ADMIN}'), ('${T2}', 'Twin', '64-17-5', '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.product_parent_ingredients (parent_id, ingredient_id, strength_value, strength_unknown, strength_unit, strength_basis, source, source_note, created_by, updated_by) VALUES
+      ('${P24}', '${T1}', NULL, true, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 124-1', '${ADMIN}', '${ADMIN}'),
+      ('${P24}', '${T2}', NULL, true, 'pct_ww', 'active_ingredient', 'epa_lookup', 'EPA lookup of 124-1', '${ADMIN}', '${ADMIN}');`);
+  const twin = JSON.parse(scalar(`SELECT public._epa_proposal_items('${P24}', '124-1', public._epa_lookup_input(${J(found('124-1', [['Dicamba', 30, CAS.Dicamba], ['Twin', 20, null]]))}));`))
+    .filter((i) => i.kind === 'ingredient');
+  const tw = twin.filter((i) => i.epa?.name === 'Twin' || [T1, T2].includes(i.current?.ingredient_id));
+  assert.equal(tw.length, 1, JSON.stringify(twin));
+  assert.equal(tw[0].class, 'epa_conflict'); assert.equal(tw[0].accept_default, false); assert.equal(tw[0].current, null);
+  raw(`DELETE FROM public.product_parent_ingredients WHERE ingredient_id IN ('${T1}', '${T2}'); DELETE FROM public.active_ingredients WHERE id IN ('${T1}', '${T2}');`);
+  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts; a name shared by two rows is one unticked conflict');
 }
 
 async function caseH9H15() {

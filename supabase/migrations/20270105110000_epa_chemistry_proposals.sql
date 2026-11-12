@@ -372,6 +372,9 @@ BEGIN
     IF COALESCE(public._normalize_epa_registration(p_result->>'transferredTo'), '') !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN
       RETURN 'transferredTo is not an EPA registration number';
     END IF;
+    IF public._normalize_epa_registration(p_result->>'transferredTo') = public._normalize_epa_registration(p_number) THEN
+      RETURN 'transferredTo is the number being looked up';  -- Luna 2026-11-11: not a move
+    END IF;
   END IF;
   IF jsonb_typeof(p_result->'latestLabelPdfUrl') = 'string' AND p_result->>'latestLabelPdfUrl' NOT LIKE 'https://www3.epa.gov/%' THEN
     RETURN 'latestLabelPdfUrl is not an EPA address';
@@ -459,6 +462,7 @@ DECLARE
   v_ing jsonb;
   v_row record;
   v_matched uuid[] := '{}';
+  v_ids uuid[];
   v_class text;
   v_s numeric;
   v_note text := 'EPA lookup of ' || p_number;
@@ -494,12 +498,23 @@ BEGIN
         END IF;
       END IF;
     ELSE
+      v_ids := ARRAY(SELECT ppi.id
+        FROM public.product_parent_ingredients ppi JOIN public.active_ingredients a ON a.id = ppi.ingredient_id
+       WHERE ppi.parent_id = p_parent_id AND ppi.status = 'active'
+         AND lower(regexp_replace(btrim(a.name), '\s+', ' ', 'g')) = lower(v_ing->>'name'));
+      IF cardinality(v_ids) > 1 THEN
+        -- Several of the parent's rows share this name and EPA gives no CAS: no row can be chosen, so none is written
+        -- and none is reported missing (Codex App, 2026-11-11).
+        v_matched := v_matched || v_ids;
+        v_items := v_items || jsonb_build_array(jsonb_build_object('item_id', 'ing:' || (v_ing->>'key'), 'kind', 'ingredient',
+          'class', 'epa_conflict', 'epa', v_ing, 'current', NULL, 'accept_default', false,
+          'note', 'More than one of your ingredients is named ' || (v_ing->>'name') || ' and EPA gives no CAS number.'));
+        CONTINUE;
+      END IF;
       SELECT ppi.id, ppi.ingredient_id, ppi.strength_value, ppi.strength_unit, ppi.strength_basis, ppi.source, a.name, a.cas
         INTO v_row
         FROM public.product_parent_ingredients ppi JOIN public.active_ingredients a ON a.id = ppi.ingredient_id
-       WHERE ppi.parent_id = p_parent_id AND ppi.status = 'active'
-         AND lower(regexp_replace(btrim(a.name), '\s+', ' ', 'g')) = lower(v_ing->>'name')
-       ORDER BY ppi.id LIMIT 1;
+       WHERE ppi.id = v_ids[1];
     END IF;
 
     v_change := NULL;
@@ -602,7 +617,8 @@ BEGIN
     v_class := 'differs';
   ELSIF v_url IS NULL THEN
     v_class := v_dclass;  -- confirm, or no item when EPA gave neither
-  ELSIF v_reg.label_url IS NULL AND v_dclass IS NULL THEN
+  ELSIF v_reg.label_url IS NULL AND v_dclass IS NULL AND v_reg.label_accepted_on IS NULL THEN
+    -- An undated link is filled only onto a registration with no date either (Luna, 2026-11-11).
     v_class := 'fill';
     v_change := jsonb_build_object('label_url', v_url);
   ELSIF v_reg.label_url = v_url THEN

@@ -109,6 +109,14 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
     if (outcome !== 'refused') { setForm(null); reload(); }
   };
   const chem = state?.status === 'loaded' ? state.chem : null;
+  // A recorded EPA lookup can change whether chemistry may be typed. Re-read in place: a full reload would unmount
+  // the lookup panel and stop a Look up all that is still running.
+  const refreshGate = () => {
+    const at = forKey;
+    fetchParentChemistry(parentId).then((next) => {
+      setLoaded((prev) => (prev?.forKey === at ? { forKey: at, status: 'loaded', chem: next } : prev));
+    }).catch((error: unknown) => { Sentry.captureException(errorOf(error), { extra: { context: 'get_parent_chemistry refresh' } }); });
+  };
 
   return (
     <Card data-testid="product-chemistry">
@@ -124,7 +132,7 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
         )}
         {chem && isAdmin && (
           <EpaLookupPanel key={parentId} parentId={parentId} profileId={profileId} reloadKey={forKey} epaRefusal={chem.epa_refusal}
-            locked={busy || pending.length > 0} onCommitted={reload} />
+            locked={busy || pending.length > 0} onCommitted={reload} onLookupRecorded={refreshGate} />
         )}
       </div>
       {form && <ChemistryForms form={form} chem={chem} profileId={profileId} onClose={() => setForm(null)} onFinished={finished} onReviewClosed={() => { setForm(null); reload(); }} open={open} />}

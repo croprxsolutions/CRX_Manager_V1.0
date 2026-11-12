@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ fetchState: vi.fn(), start: vi.fn(), record: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetchState: vi.fn(), start: vi.fn(), record: vi.fn(), toast: vi.fn(), recorded: vi.fn() }));
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../../lib/epaLookupClient', () => ({ runRecordedEpaLookup: mocks.record }));
 vi.mock('../../lib/epaProposals', async () => {
@@ -15,7 +15,7 @@ import EpaLookupPanel from './EpaLookupPanel';
 const empty = { numbers: ['100-1', '100-1-200'], lookups: [], proposals: [], failures: [] };
 const panel = (epaRefusal: string | null = 'CHEMISTRY_FROM_EPA_ONLY: x') => render(
   <MemoryRouter>
-    <EpaLookupPanel parentId="par1" profileId="u1" reloadKey="k" epaRefusal={epaRefusal} locked={false} onCommitted={vi.fn()} />
+    <EpaLookupPanel parentId="par1" profileId="u1" reloadKey="k" epaRefusal={epaRefusal} locked={false} onCommitted={vi.fn()} onLookupRecorded={mocks.recorded} />
   </MemoryRouter>,
 );
 
@@ -42,6 +42,8 @@ describe('EpaLookupPanel', () => {
     expect(mocks.start).toHaveBeenCalledWith('par1', '100-1', expect.any(String));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'EPA answered for 100-1. Review the proposal.'));
     await waitFor(() => expect(mocks.fetchState.mock.calls.length).toBeGreaterThanOrEqual(2));
+    // The chemistry card re-reads its typed-chemistry gate once the lookup is recorded.
+    await waitFor(() => expect(mocks.recorded).toHaveBeenCalledTimes(1));
   });
 
   it('retries a start whose reply was lost with the same key', async () => {

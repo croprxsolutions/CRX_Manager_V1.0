@@ -58,7 +58,7 @@ function KeptDifferences({ summary }: { summary: NumberSummary }) {
  * DM-4: look up each EPA number on a parent (its own, each size's and each brand's, one by one), and review what EPA
  * proposes. Admin only. The rows are always re-read from the database after a reply; the reply itself is not trusted.
  */
-export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefusal, locked, onCommitted }: {
+export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefusal, locked, onCommitted, onLookupRecorded }: {
   parentId: string; profileId: string;
   /** Changes when the chemistry card reloads. */
   reloadKey: string;
@@ -66,6 +66,8 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
   /** Other unsaved edits on the page: lookups wait for them. */
   locked: boolean;
   onCommitted: () => void;
+  /** A lookup was recorded: the chemistry card re-reads whether chemistry may be typed, without unmounting this panel. */
+  onLookupRecorded: () => void;
 }) {
   const { toast } = useToast();
   // `at`: when the rows were read, so a running lookup older than 30 minutes shows as expired.
@@ -126,7 +128,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
       if (lookupId === null || latestLookup.current.get(epaNumber) === lookupId) toast('error', `${epaNumber}: ${errorText(error)}`);
     } finally {
       setBusy(epaNumber, false);
-      if (mounted.current) reload();
+      if (mounted.current) { reload(); if (lookupId !== null) onLookupRecorded(); }
     }
   };
 

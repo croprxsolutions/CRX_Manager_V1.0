@@ -49,4 +49,9 @@ describe('DeliveryBrandPicker', () => {
     fireEvent.change(screen.getByLabelText('Brand for Glyphosate 2.5'), { target: { value: '' } });
     expect(latest.L1).toEqual([]);
   });
+  it('a correction can show a delivered line whose product has no listed brands left, so it can be typed', () => {
+    render(<DeliveryBrandPicker brands={brands} drafts={{}} disabled={false} fullQuantity={(l) => l.quantity}
+      onChange={() => undefined} showLine={() => true} />);
+    expect(screen.getByText('Unbranded seed')).toBeTruthy();
+  });
 });

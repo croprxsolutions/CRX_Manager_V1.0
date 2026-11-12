@@ -1126,7 +1126,7 @@ export default function DeliveryDetail() {
       return;
     }
     if (!delivery || !profile) return;
-    if (brandState.loading) { toast('info', 'Brands are still loading. Try again in a moment.'); return; }
+    if (brandState.loading || brandState.saving) { toast('info', 'Brands are still loading or saving. Try again in a moment.'); return; }
     if (!hasAnyQty) {
       toast('error', 'At least one item must have a quantity greater than 0');
       return;

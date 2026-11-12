@@ -110,7 +110,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
         // Brands never block a completion (Mason, 2026-11-09): it goes ahead on the picks already saved,
         // and the driver is told these choices were not kept.
         idem.resetKeyFor(scope);
-        toast('warning', `${deliveryBrandErrorMessage(error)} The delivery is completed without these brand choices; the office will follow up.`);
+        toast('warning', `${deliveryBrandErrorMessage(error)} Completing without these brand choices; the office will follow up.`);
         return brands.event_seq;
       }
       toast('error', deliveryBrandErrorMessage(error));

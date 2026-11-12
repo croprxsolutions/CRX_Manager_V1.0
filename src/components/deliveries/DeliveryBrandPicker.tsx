@@ -15,8 +15,8 @@ interface DeliveryBrandPickerProps {
   disabled: boolean;
   /** The amount one brand covers when the line is not split: loaded before completion, delivered in a correction. */
   fullQuantity: (line: DeliveryBrandLine) => number;
-  /** Lines to leave out (a correction skips lines that delivered nothing). */
-  hideLine?: (line: DeliveryBrandLine) => boolean;
+  /** Lines to show: by default those with a brand list or picks; a correction shows every delivered line. */
+  showLine?: (line: DeliveryBrandLine) => boolean;
 }
 
 /**
@@ -24,8 +24,8 @@ interface DeliveryBrandPickerProps {
  * (currently bought first, then old stock), "Other brand…" typed from the jug, and Split for several brands
  * with an amount each. Showing nothing here never stops a completion.
  */
-export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled, fullQuantity, hideLine }: DeliveryBrandPickerProps) {
-  const lines = brands.lines.filter((l) => isBrandedLine(l) && !hideLine?.(l));
+export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled, fullQuantity, showLine = isBrandedLine }: DeliveryBrandPickerProps) {
+  const lines = brands.lines.filter(showLine);
   if (lines.length === 0) return null;
 
   return (

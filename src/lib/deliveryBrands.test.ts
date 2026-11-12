@@ -36,6 +36,14 @@ describe('brandWarnings (warn, never block)', () => {
     expect(brandWarnings(brands([line()]), { L1: split }, { L1: 10 })).toHaveLength(1);
     expect(brandWarnings(brands([line()]), { L1: split }, { L1: 9 })).toEqual([]);
   });
+
+  it('checks typed choices on a line with no brand list left (a correction), so a short split is caught', () => {
+    const split = [
+      { brandId: OTHER_BRAND, typedName: 'Credit', typedEpa: '', typedManufacturer: '', quantity: '4' },
+      { brandId: OTHER_BRAND, typedName: 'Other', typedEpa: '', typedManufacturer: '', quantity: '3' },
+    ];
+    expect(brandWarnings(brands([line({ brand_list: [] })]), { L1: split }, { L1: 10 })).toHaveLength(1);
+  });
 });
 
 describe('picksPayload', () => {

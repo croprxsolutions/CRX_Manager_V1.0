@@ -205,7 +205,8 @@ export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines,
   if (!brands) return [];
   const warnings: string[] = [];
   for (const line of brands.lines) {
-    if (!isBrandedLine(line)) continue;
+    // A line with no brand list is checked only when choices were typed on it (a correction).
+    if (!isBrandedLine(line) && !drafts[line.delivery_item_id]?.length) continue;
     const qty = delivered[line.delivery_item_id] ?? line.quantity;
     if (qty <= 0) continue;
     const name = line.product_name || 'this product';

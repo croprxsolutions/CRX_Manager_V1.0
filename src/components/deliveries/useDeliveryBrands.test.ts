@@ -91,7 +91,7 @@ describe('useDeliveryBrands when the database refuses the choices at completion'
     toast.mockClear();
     await act(async () => { seq = await result.current.save({ skipIncomplete: true }); });
     expect(seq).toBe(7);
-    expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining('completed without these brand choices'));
+    expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining('Completing without these brand choices'));
 
     rpc.mockResolvedValue({ data: null, error: { message: 'BRAND_PICKS_CHANGED: someone else saved' } } as never);
     getDeliveryBrands.mockResolvedValueOnce(brands(8));

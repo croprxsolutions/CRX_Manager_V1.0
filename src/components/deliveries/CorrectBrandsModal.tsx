@@ -10,7 +10,7 @@ import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { Sentry } from '../../lib/sentry';
 import {
-  brandWarnings, changedLineIds, correctDeliveryBrands, deliveryBrandErrorMessage, draftFromPicks, getDeliveryBrands, isBrandedLine,
+  brandWarnings, changedLineIds, correctDeliveryBrands, deliveryBrandErrorMessage, draftFromPicks, getDeliveryBrands,
   picksPayload, type DeliveryBrandLine, type DeliveryBrands, type DraftLines,
 } from '../../lib/deliveryBrands';
 import DeliveryBrandPicker from './DeliveryBrandPicker';
@@ -103,14 +103,15 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     }
   };
 
-  const hideLine = (line: DeliveryBrandLine) => delivered(line) <= 0;
+  // Every delivered line, even when its product's brands were all retired since: an old gap stays fixable by typing it.
+  const showLine = (line: DeliveryBrandLine) => delivered(line) > 0;
   // Closing with an edited brand or a typed reason asks first, so a correction is never dropped silently.
   const requestClose = () => {
     if (saving) return;
     if ((brands && changedLineIds(brands, drafts).length > 0) || reason.trim()) setConfirmDiscard(true);
     else onClose();
   };
-  const hasLines = !!brands && brands.lines.some((l) => isBrandedLine(l) && !hideLine(l));
+  const hasLines = !!brands && brands.lines.some(showLine);
 
   return (
     <>
@@ -138,7 +139,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
             onChange={(lineId, draft) => setDrafts((prev) => ({ ...prev, [lineId]: draft }))}
             disabled={saving}
             fullQuantity={delivered}
-            hideLine={hideLine}
+            showLine={showLine}
           />
           <label className="block text-sm font-medium text-nav-dark">
             Reason (required)

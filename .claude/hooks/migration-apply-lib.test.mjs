@@ -1790,6 +1790,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, conclusion: "SKIPPED" }] } }), "no green \"Release flow guard (main)\"", `${head}: a skipped release guard is refused`);
     refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, status: "IN_PROGRESS", conclusion: "" }] } }), "not merge-ready", `${head}: a running release guard is refused`);
     refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, name: "Release flow guard (staging)" }] } }), "no green \"Release flow guard (main)\"", `${head}: the staging guard does not count`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, workflowName: "Other" }] } }), "no green \"Release flow guard (main)\"", `${head}: a job of that name in another workflow does not count`);
   }
   const earlier = new Date(Date.now() - 60000).toISOString();
   ok(gate({ pr: { headRefName: "release/next", statusCheckRollup: [build, { ...guardRun, conclusion: "FAILURE", startedAt: earlier, completedAt: earlier }, guardRun] } }).ok === true,

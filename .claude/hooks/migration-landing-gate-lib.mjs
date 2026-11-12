@@ -220,8 +220,10 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   // The name alone proves nothing: main's release guard checks that release/next is exactly staging + main
   // (plus the bot's version files) and that a hotfix carries no unreleased staging work. Its run on this
-  // head must be there and green, not merely absent.
-  const guard = (newestCheckRollup(pr?.statusCheckRollup) || []).filter((c) => c?.__typename === "CheckRun" && c?.name === "Release flow guard (main)");
+  // head must be there and green, not merely absent. A PR could add a job with that name, or edit the
+  // workflow: both are under .github/, which needs a code owner's review on main, and mergeStateStatus
+  // (CLEAN, checked above) is not CLEAN without it.
+  const guard = (newestCheckRollup(pr?.statusCheckRollup) || []).filter((c) => c?.__typename === "CheckRun" && c?.workflowName === "Release flow" && c?.name === "Release flow guard (main)");
   if (!guard.length || !guard.every((c) => String(c.status || "").toUpperCase() === "COMPLETED" && String(c.conclusion || "").toUpperCase() === "SUCCESS")) {
     return refuse(`${number} has no green "Release flow guard (main)" check, so it is not proven to carry only what it should. Wait for it, or fix what it reports.`);
   }

@@ -10,6 +10,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1731: the quick-delivery unit rule stays; the PR lands (KI-76)
+
+**Decision (Mason, in chat, 2026-11-12: "Yes, keep it"):** a quick-delivery line keeps recording its product's own unit, as decided on 2026-11-10, and #1731 is merged now that `20270106100000` is live.
+**Why:** the app's quick-delivery screen always sends the product's unit, and no quick delivery has been recorded live.
+
 ## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `53f376a556db`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `53f376a556db` (base `11ea9ce0c24e`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.

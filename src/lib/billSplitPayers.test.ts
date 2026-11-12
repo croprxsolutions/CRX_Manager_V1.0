@@ -230,10 +230,21 @@ describe('loadBillSplitPayers', () => {
       expect((await pcts(client([bigSky, cedar], { orderId: null }))).map((p) => p[1])).toEqual([50.92, 49.08]);
     });
 
-    it("keeps the billed share when the payers don't match the card one to one", async () => {
-      // Two payers with one name can't be told apart; a payer missing from the card, or a card payer with no invoice.
+    it('shows the split for two customers with one farm name when their shares are equal', async () => {
       const twin = flat('2', 'Big Sky Farms 18', 70826);
-      expect((await pcts(client([bigSky, twin], { shares: [share('c2', 'Big Sky Farms 18', 50)] }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+      expect((await pcts(client([bigSky, twin], { shares: [share('c2', 'Big Sky Farms 18', 50)] }))).map((p) => p[1])).toEqual([50, 50]);
+    });
+
+    it('adds up two card rows for one customer', async () => {
+      expect((await pcts(client([bigSky, cedar], { shares: [share('c2', 'Cedar Creek Farms 12', 25), share('c2', 'Cedar Creek Farms 12', 25)] }))).map((p) => p[1]))
+        .toEqual([50, 50]);
+    });
+
+    it("keeps the billed share when the payers don't match the card one to one", async () => {
+      // Two customers with one name and different shares can't be told apart; a payer missing from the card, or a
+      // card payer with no invoice.
+      const twin = flat('2', 'Big Sky Farms 18', 70826);
+      expect((await pcts(client([bigSky, twin], { shares: [share('c2', 'Big Sky Farms 18', 40)] }))).map((p) => p[1])).toEqual([50.92, 49.08]);
       expect((await pcts(client([bigSky, cedar], { shares: [share('c3', 'Someone Else', 50)] }))).map((p) => p[1])).toEqual([50.92, 49.08]);
       expect((await pcts(client([bigSky], { shares: [share('c2', 'Cedar Creek Farms 12', 50)] }))).map((p) => p[1])).toEqual([100]);
     });

@@ -272,23 +272,25 @@ export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string)
   const rows = assertRpcResult<Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>>(data, 'get_bill_split_payers');
   if (!Array.isArray(rows) || count !== rows.length) throw new InvoiceDetailsUnavailableError();
   const split = await orderSplit(db, invoiceId);
-  const names = rows.map((r) => r.farm_name || 'Unknown');
-  // The order's split names exactly these payers, one each (names are how get_bill_split_payers identifies them).
-  const matches = split !== null && new Set(names).size === names.length && names.length === split.size
-    && names.every((n) => split.has(n));
+  // Names are how get_bill_split_payers identifies payers. The card must name exactly these payers, as many per name,
+  // and customers who share a name must share a weight, so it can't matter which payer is which.
+  const perName = new Map<string, number>();
+  for (const r of rows) perName.set(r.farm_name || 'Unknown', (perName.get(r.farm_name || 'Unknown') ?? 0) + 1);
+  const matches = split !== null && split.size === perName.size
+    && [...perName].every(([n, k]) => split.get(n)?.length === k && split.get(n)!.every((w) => w === split.get(n)![0]));
   return billSplitPayerShares(rows
     .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })),
-    matches ? (n) => split.get(n)! : undefined);
+    matches ? (n) => split.get(n)![0] : undefined);
 }
 
 /**
  * The sale's split from its order (Mason, 2026-11-12: the % column shows "the 50/50 split from the order, with freight
  * as its own line for that payer", not the share of billed totals that freight, discount and tax move): each payer's
  * card share in whole millionths of a percent, the main customer taking whatever the card leaves (as the split bills),
- * keyed by farm name. Null, so the billed share shows, when the invoice has no order, a line has its own payers (the
- * card doesn't bill those lines) or two payers share a name. A failed read refuses, as a failed payer read does.
+ * keyed by farm name (one weight per customer of that name). Null, so the billed share shows, when the invoice has no
+ * order or a line has its own payers (the card doesn't bill those lines). A failed read refuses, as a failed payer read does.
  */
-async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<string, number> | null> {
+async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<string, number[]> | null> {
   const inv = await db.from('invoices').select('order_id').eq('id', invoiceId).maybeSingle();
   // get_bill_split_payers has already shown this invoice to this reader, so an empty read is a failure, not "no order".
   if (inv.error || !inv.data) throw new InvoiceDetailsUnavailableError();
@@ -314,18 +316,17 @@ async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<st
   for (const s of shares.data as Row[]) {
     const w = Math.round(Number(s.split_percentage) * 1_000_000);
     if (!Number.isFinite(w) || w <= 0) return null;
-    byCustomer.set(s.customer_id, { name: s.customer?.farm_name || 'Unknown', weight: w });
+    const seen = byCustomer.get(s.customer_id);
+    if (seen) seen.weight += w;
+    else byCustomer.set(s.customer_id, { name: s.customer?.farm_name || 'Unknown', weight: w });
     left -= w;
   }
   if (left < 0) return null;
   const own = byCustomer.get(main.customer_id);
   if (own) own.weight += left;
   else if (left > 0) byCustomer.set(main.customer_id, { name: main.customer?.farm_name || 'Unknown', weight: left });
-  const byName = new Map<string, number>();
-  for (const { name, weight } of byCustomer.values()) {
-    if (byName.has(name)) return null;
-    byName.set(name, weight);
-  }
+  const byName = new Map<string, number[]>();
+  for (const { name, weight } of byCustomer.values()) byName.set(name, [...(byName.get(name) ?? []), weight]);
   return byName;
 }
 

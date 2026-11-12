@@ -2874,6 +2874,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261231220000',
   '20270103160000',
   '20270104110000',
+  '20270105110000',
 ]);
 
 /**
@@ -3148,6 +3149,13 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'correct_delivery_brands',
   'review_typed_brand',
   'set_delivery_brands',
+  // 20270105110000 (DM-4, local candidate): EPA auto-fill writers; start, commit and reject replay through
+  // _product_parent_replay, record_epa_lookup (service role only) through check_idempotency; each saves its
+  // receipt. Prune once the generated types carry them.
+  'commit_epa_proposal',
+  'record_epa_lookup',
+  'reject_epa_proposal',
+  'start_epa_lookup',
   // 20270104110000 (RT-3, local candidate): admin-only rate review commit; replays through _product_parent_replay
   // and saves its receipt. Prune once the generated types carry it.
   'commit_rate_review',

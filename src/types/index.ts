@@ -2113,6 +2113,82 @@ export interface ChemistryChangeProposal {
   updated_at: string;
 }
 
+/** DM-4 (20270105110000): EPA auto-fill. Admin read only; written only by the four EPA lookup functions. */
+export type EpaLinkKind = 'parent' | 'size' | 'parent_brand' | 'legacy_brand';
+export type EpaLookupStatus = 'pending' | 'recorded' | 'abandoned';
+export type EpaLookupFailureReason = 'not_found' | 'transferred' | 'upstream_error' | 'invalid_result';
+export type EpaChemistryProposalStatus = 'proposed' | 'held' | 'committed' | 'rejected' | 'superseded';
+export type EpaProposalHoldReason = 'relinked' | 'chemistry_changed' | 'registration_changed';
+/** Writable: add, add_name_only, fill, confirm, rup_upgrade. Every other class is shown, never written. */
+export type EpaProposalItemClass =
+  | 'add' | 'add_name_only' | 'fill' | 'confirm' | 'rup_upgrade'
+  | 'differs' | 'differs_typed' | 'differs_epa' | 'differs_identity' | 'epa_conflict' | 'ingredient_retired'
+  | 'matches' | 'missing_from_epa';
+export type EpaCommitItemResult = 'written' | 'confirmed' | 'skipped' | 'kept_difference';
+export interface EpaProposalItem {
+  /** 'ing:cas:<cas>', 'ing:name:<name>', 'missing:<ingredient_id>' or 'label:<fact>'. */
+  item_id: string;
+  kind: 'ingredient' | 'label';
+  class: EpaProposalItemClass;
+  epa: unknown;
+  current: unknown;
+  accept_default: boolean;
+  note?: string | null;
+  change?: Record<string, unknown> | null;
+}
+export interface EpaLookup {
+  id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  chemistry_version: number;
+  status: EpaLookupStatus;
+  requested_by: string;
+  requested_at: string;
+  recorded_at: string | null;
+  updated_at: string;
+}
+export interface EpaLookupFailure {
+  id: string;
+  lookup_id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  reason: EpaLookupFailureReason;
+  transferred_to: string | null;
+  detail: string | null;
+  created_by: string;
+  created_at: string;
+}
+export interface EpaChemistryProposal {
+  id: string;
+  lookup_id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  chemistry_version: number;
+  status: EpaChemistryProposalStatus;
+  proposal_version: number;
+  hold_reason: EpaProposalHoldReason | null;
+  epa_input: Record<string, unknown>;
+  items: EpaProposalItem[];
+  epa_summary: Record<string, unknown>;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  commit_result: Record<string, EpaCommitItemResult> | null;
+  superseded_by_lookup_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProductParentModeOfAction {
   id: string;
   parent_id: string;

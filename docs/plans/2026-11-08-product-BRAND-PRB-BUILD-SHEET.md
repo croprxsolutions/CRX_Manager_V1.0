@@ -896,7 +896,7 @@ Astra's challenge of this contract was triaged against the live code. **Fixed in
 
 ## 16. Behavior contract for B-1b (2026-11-11, `plan-contract`)
 
-Read on `main` `167126d17` and live (read-only) on 2026-11-11, after B-1a's apply (ledger `20261111235530`). Section 14 holds; this section records how B-1b meets it against the live code, which mechanisms it chooses, and what the cold challenge (16.10) changed. Migration stamp `20270104130000`.
+Read on `main` `167126d17` and live (read-only) on 2026-11-11, after B-1a's apply (ledger `20261111235530`). Section 14 holds; this section records how B-1b meets it against the live code, which mechanisms it chooses, and what the cold challenge (16.10) changed. Migration stamp `20270106110000`.
 
 ### 16.1 Facts (live, 2026-11-11)
 

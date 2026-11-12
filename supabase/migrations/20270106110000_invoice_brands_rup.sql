@@ -5,7 +5,7 @@
 --  save_idempotency pair. The hook only recognises check_idempotency.)
 --
 -- Written 2026-11-11. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270104130000_invoice_brands_rup.md. Re-read the live ledger before applying.
+-- docs/reference/migrations.d/20270106110000_invoice_brands_rup.md. Re-read the live ledger before applying.
 --
 -- sql-safety: exempt-registry — rup_sales_records.invoice_item_id is live (#1746, 20261231210000) and in this
 -- worktree's refreshed registry; the main checkout's 2026-11-10 registry the hook reads predates it.
@@ -139,7 +139,7 @@ $preflight$;
 
 ALTER TABLE public.invoice_items ADD COLUMN brand_lines jsonb;
 COMMENT ON COLUMN public.invoice_items.brand_lines IS
-  'Brand PR B-1b (20270104130000): the delivered brands this line covers, frozen once the invoice leaves draft/unposted. NULL = no brand information; [] = a brand list but no pick; else one entry per pick (or per unpicked covered delivery line, brand_key ''n:''): brand_key, brand_name, epa_registration, manufacturer, signal_word, quantity, line_delivered, typed, pick_id, delivery_id, delivery_item_id, completed_at. Written only by trg_fill_invoice_line_zbrands.';
+  'Brand PR B-1b (20270106110000): the delivered brands this line covers, frozen once the invoice leaves draft/unposted. NULL = no brand information; [] = a brand list but no pick; else one entry per pick (or per unpicked covered delivery line, brand_key ''n:''): brand_key, brand_name, epa_registration, manufacturer, signal_word, quantity, line_delivered, typed, pick_id, delivery_id, delivery_item_id, completed_at. Written only by trg_fill_invoice_line_zbrands.';
 -- invoice_items is column-carved (20261022101000): readable like the line's other non-cost columns, as
 -- price_tier_at_sale was (20261027060000); no INSERT or UPDATE grant, since only the trigger writes it.
 GRANT SELECT (brand_lines) ON public.invoice_items TO authenticated;
@@ -1357,7 +1357,7 @@ BEGIN
     WHEN v_base_seq ~ '^[0-9]{1,18}$' THEN v_base_seq::bigint = public._delivery_brand_max_seq(p_delivery_id)
     ELSE false END;
 
-  -- 20270104130000 (B-1b): invoice lines the body writes while completing this delivery (Bill Split and landlord
+  -- 20270106110000 (B-1b): invoice lines the body writes while completing this delivery (Bill Split and landlord
   -- split drafts, which the re-copy never touches) read its brands as the completion rule below will leave them.
   IF v_delivery.status = 'in_progress' THEN
     PERFORM set_config('crx.brand_completing_delivery', p_delivery_id::text, true);
@@ -1372,7 +1372,7 @@ BEGIN
     p_idempotency_key,
     p_completed_at
   );
-  PERFORM set_config('crx.brand_completing_delivery', '', true);  -- 20270104130000
+  PERFORM set_config('crx.brand_completing_delivery', '', true);  -- 20270106110000
 
   -- 20270104120000: the brand completion rule, once, for a delivery this call completed. Outside the body's Bill
   -- Split fallback, so an error here fails the completion instead of changing the billing.

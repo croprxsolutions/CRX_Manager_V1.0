@@ -33,6 +33,8 @@ export const BLANK_RATE_ROWS = 100;
 /** commit_rate_review takes at most this many rows of each kind. */
 const MAX_RATE_REVIEW_RATE_ROWS = 3000;
 const MAX_RATE_REVIEW_OUTCOME_ROWS = 1000;
+/** A sheet longer than this is not a rate review download (refused before reading every row). */
+const MAX_SHEET_ROWS = 20000;
 
 const RATE_EDITABLE = [
   'basis', 'source', 'low', 'recommended', 'high', 'unit', 'is_quoting_default', 'over_label_reason', 'decision', 'reason',
@@ -53,7 +55,8 @@ type RateValues = Pick<RateReviewRateRow, 'basis' | 'source' | 'low' | 'recommen
 /** One Draft Rates row as read back; `sheetRow` is its row number in the file. */
 export interface RateUpload extends RateReviewRateRow { sheetRow: number; parent_name: string }
 export interface OutcomeUpload extends RateReviewOutcomeRow { sheetRow: number; parent_name: string }
-export interface ParsedRateReview { rates: RateUpload[]; outcomes: OutcomeUpload[] }
+/** `recorded`: each parent's outcome as downloaded (parent id to outcome), to warn when a rate change clears it. */
+export interface ParsedRateReview { rates: RateUpload[]; outcomes: OutcomeUpload[]; recorded: Record<string, string> }
 
 export async function loadRateReviewWorkbook(): Promise<RateReviewWorkbook> {
   const { data, error } = await supabaseUntyped.rpc('get_rate_review_workbook');
@@ -204,6 +207,7 @@ function readRows<H extends string>(sheet: Worksheet | undefined, name: string, 
     throw new PricingWorkbookFormatError(`The ${name} sheet's columns do not match the CRX rate review workbook. Download a fresh one.`);
   }
   const rows: Array<SheetRow<H>> = [];
+  if (sheet.rowCount > MAX_SHEET_ROWS) throw new PricingWorkbookFormatError(`The ${name} sheet has more than ${MAX_SHEET_ROWS} rows. Download a fresh rate review workbook.`);
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = { sheetRow: rowNumber } as SheetRow<H>;
     headers.forEach((header, index) => {
@@ -306,11 +310,14 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
 
   const parentByName = new Map<string, string>();
   const outcomes: OutcomeUpload[] = [];
+  const recorded: Record<string, string> = {};
   for (const row of readRows(workbook.getWorksheet(OUTCOMES_SHEET), OUTCOMES_SHEET, OUTCOME_HEADERS)) {
     if (row.parent_id === '' && row.row_state === '') continue;
     parentByName.set(row.parent_name.toLowerCase(), row.parent_id);
     const edited = parseOutcomeRow(row);
     if (edited) outcomes.push(edited);
+    const downloaded = (JSON.parse(row.row_state) as { outcome?: unknown }).outcome;
+    if (typeof downloaded === 'string') recorded[row.parent_id] = downloaded;
   }
 
   const rates: RateUpload[] = [];
@@ -322,8 +329,15 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
   if (rates.length > MAX_RATE_REVIEW_RATE_ROWS || outcomes.length > MAX_RATE_REVIEW_OUTCOME_ROWS) {
     throw new PricingWorkbookFormatError(`Send at most ${MAX_RATE_REVIEW_RATE_ROWS} changed rates and ${MAX_RATE_REVIEW_OUTCOME_ROWS} changed outcomes at a time.`);
   }
-  return { rates, outcomes };
+  return { rates, outcomes, recorded };
 }
 
 /** Plain words for a database refusal: drops the error code before the first colon. */
+/** The values a rate row saves, so Confirm shows the number being approved. */
+export function rateValueText(r: RateUpload | undefined): string {
+  if (!r) return '';
+  const amount = [r.low, r.recommended, r.high].map((v) => v ?? '-').join(' / ');
+  return `${r.basis ?? '?'} ${r.source ?? '?'}: ${amount} ${r.unit ?? ''}${r.is_quoting_default ? ', quoting default' : ''}`;
+}
+
 export const problemText = (problem: string | undefined) => (problem ?? '').replace(/^[A-Z_]+:\s*/, '');

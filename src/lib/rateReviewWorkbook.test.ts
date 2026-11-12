@@ -54,7 +54,7 @@ describe('rate review workbook', () => {
   it('sends nothing for an untouched download, and keeps the blank add rows', async () => {
     const blob = await generateRateReviewWorkbook(exported);
     expect(blob.size).toBeGreaterThan(0);
-    expect(await roundTrip()).toEqual({ rates: [], outcomes: [] });
+    expect(await roundTrip()).toEqual({ rates: [], outcomes: [], recorded: {} });
   });
 
   it('sends only edited rows, with the downloaded versions and a decimal-equal value left alone', async () => {

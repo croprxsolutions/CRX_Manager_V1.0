@@ -13,6 +13,7 @@ import {
   parseRateReviewWorkbook,
   previewRateReview,
   problemText,
+  rateValueText,
   type ParsedRateReview,
 } from '../../lib/rateReviewWorkbook';
 import type { CommitRateReviewResult, RateReviewResult, RateReviewWorkbook } from '../../types';
@@ -27,7 +28,66 @@ function previewRows(upload: ParsedRateReview, preview: RateReviewResult) {
   const all = [...rates, ...outcomes];
   const changes = all.filter((r) => r.status === 'change');
   const problems = all.filter((r) => r.status !== 'change' && r.status !== 'unchanged');
-  return { rates, outcomes, changes, problems, blocked: problems.length > 0 || changes.length === 0 };
+  // The database clears a parent's recorded outcome when any of its rates change; say so unless this file sets it again.
+  const outcomeSet = new Set(outcomes.filter((o) => o.status === 'change').map((o) => o.parent_id));
+  const cleared = new Map<string, string>();
+  for (const r of rates) {
+    const parentId = upload.rates[r.index]?.parent_id;
+    const was = parentId ? upload.recorded[parentId] : undefined;
+    if (r.status === 'change' && parentId && was && !outcomeSet.has(parentId)) cleared.set(parentId, `${r.label ?? parentId} (${was.replace(/_/g, ' ')})`);
+  }
+  return { rates, outcomes, changes, problems, cleared: [...cleared.values()], blocked: problems.length > 0 || changes.length === 0 };
+}
+
+type Shown = ReturnType<typeof previewRows>;
+
+/** Problems, the changes Confirm will save (with each rate's values), and outcomes the save will clear. */
+function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateReview }) {
+  return (
+    <>
+      {shown.problems.length > 0 && (
+        <div className="space-y-1">
+          {shown.problems.map((p) => (
+            <p key={`${p.kind}-${p.index}`} className="text-red-700">
+              {p.kind === 'rate' ? 'Draft Rates' : 'Rate Outcomes'} row {p.sheetRow ?? '?'} ({p.label ?? 'unknown parent'}): {problemText(p.problem) || p.status}
+            </p>
+          ))}
+          <p className="text-red-700">
+            Nothing will save until these are fixed. Fix them in the file and upload it again; for a row changed by someone else, download a fresh workbook.
+          </p>
+        </div>
+      )}
+      {shown.changes.length > 0 && (
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-left" aria-label="Rate review changes">
+            <thead><tr className="text-secondary"><th className="font-medium">Row</th><th className="font-medium">Parent</th>
+              <th className="font-medium">Change</th><th className="font-medium">Rate saved</th><th className="font-medium">Label check</th></tr></thead>
+            <tbody>
+              {shown.rates.filter((r) => r.status === 'change').map((r) => (
+                <tr key={`rate-${r.index}`}>
+                  <td>Draft Rates {r.sheetRow}</td><td>{r.label}</td>
+                  <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
+                  <td>{(r.actions ?? []).includes('delete') ? '' : rateValueText(upload.rates[r.index])}</td>
+                  <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}</td>
+                </tr>
+              ))}
+              {shown.outcomes.filter((o) => o.status === 'change').map((o) => (
+                <tr key={`outcome-${o.index}`}>
+                  <td>Rate Outcomes {o.sheetRow}</td><td>{o.label}</td>
+                  <td>{o.outcome ? `outcome: ${o.outcome.replace(/_/g, ' ')}` : 'outcome cleared (undecided)'}{o.note ? ` · "${o.note}"` : ''}</td><td /><td />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {shown.cleared.length > 0 && (
+        <p className="text-amber-800">
+          These rate changes clear the recorded outcome of {shown.cleared.join(', ')}. Set it again on Rate Outcomes once its rates are approved.
+        </p>
+      )}
+    </>
+  );
 }
 
 function Totals({ totals }: { totals: RateReviewWorkbook['totals'] }) {
@@ -123,11 +183,14 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       const receipt = await commitRateReview(upload, commitKey.getKey());
       commitKey.resetKey();
       setSaved(receipt);
+      setTotals(null); // stale now; the success line asks for a fresh download
       toast('success', `Saved ${count(receipt.rates_changed, 'rate', 'rates')} and ${count(receipt.outcomes_changed, 'outcome', 'outcomes')}`);
     } catch (error) {
       toast('error', sanitizeError(error));
-      // A refused save is usually stale: drop the preview so the next try checks the database again.
-      setPreview(null);
+      const raw = String((error as { message?: unknown } | null)?.message ?? '');
+      // A database refusal (nothing saved) drops the preview so the next try checks again. Any other failure may be a
+      // lost reply to a save that went through: keep the preview so Confirm retries with the same key and gets the receipt.
+      if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) setPreview(null);
     } finally {
       setBusy(false);
     }
@@ -168,44 +231,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
             {!preview && !saved && (
               <Button variant="secondary" onClick={() => void retryPreview()} loading={busy}>Preview again</Button>
             )}
-            {shown && shown.problems.length > 0 && (
-              <div className="space-y-1">
-                {shown.problems.map((p) => (
-                  <p key={`${p.kind}-${p.index}`} className="text-red-700">
-                    {p.kind === 'rate' ? 'Draft Rates' : 'Rate Outcomes'} row {p.sheetRow ?? '?'} ({p.label ?? 'unknown parent'}): {problemText(p.problem) || p.status}
-                  </p>
-                ))}
-                <p className="text-red-700">
-                  Nothing will save until these are fixed. Fix them in the file and upload it again; for a row changed by someone else, download a fresh workbook.
-                </p>
-              </div>
-            )}
-            {shown && shown.changes.length > 0 && (
-              <div className="max-h-72 overflow-auto">
-                <table className="w-full text-left" aria-label="Rate review changes">
-                  <thead><tr className="text-secondary"><th className="font-medium">Row</th><th className="font-medium">Parent</th>
-                    <th className="font-medium">Change</th><th className="font-medium">Label check</th></tr></thead>
-                  <tbody>
-                    {shown.rates.filter((r) => r.status === 'change').map((r) => {
-                      const check = labelCheckText(r.label_check);
-                      return (
-                        <tr key={`rate-${r.index}`}>
-                          <td>Draft Rates {r.sheetRow}</td><td>{r.label}</td>
-                          <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
-                          <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{check}</td>
-                        </tr>
-                      );
-                    })}
-                    {shown.outcomes.filter((o) => o.status === 'change').map((o) => (
-                      <tr key={`outcome-${o.index}`}>
-                        <td>Rate Outcomes {o.sheetRow}</td><td>{o.label}</td>
-                        <td>{o.outcome ? `outcome: ${o.outcome.replace(/_/g, ' ')}` : 'outcome cleared (undecided)'}{o.note ? ` · "${o.note}"` : ''}</td><td />
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {shown && <PreviewDetail shown={shown} upload={upload} />}
             {shown && shown.changes.length === 0 && shown.problems.length === 0 && (
               <p className="text-secondary">Everything in this file already matches the database. Nothing to save.</p>
             )}

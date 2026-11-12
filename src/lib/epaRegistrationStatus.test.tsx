@@ -16,6 +16,7 @@ import {
   normalizeEpaRegistration,
   registrationCheck,
   useCancelledRegistrations,
+  useStickyCancellations,
   type BrandListState,
   type LookupState,
   type RegistrationCheck,
@@ -227,5 +228,19 @@ describe('ProductBrandsSection reporting', () => {
     render(<ProductBrandsSection productId="p1" productName="X" isAdmin={false} userId="u" onBrandsChange={onBrandsChange} />);
     await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith('p1', null));
     expect(onBrandsChange).not.toHaveBeenCalledWith('p1', []);
+  });
+});
+
+describe('useStickyCancellations', () => {
+  const product = { label: 'This product', epaRegistration: '524-475' };
+
+  it('keeps a shown cancellation, with its latest date, after a later check drops it; a new product starts fresh', () => {
+    const { result, rerender } = renderHook(({ scope, cancelled }) => useStickyCancellations(scope, [product], cancelled),
+      { initialProps: { scope: 'p1', cancelled: new Map([['524-475', null]]) as Map<string, string | null> } });
+    rerender({ scope: 'p1', cancelled: new Map([['524-475', '2025-03-01']]) });
+    rerender({ scope: 'p1', cancelled: new Map() });
+    expect([...result.current.cancelled]).toEqual([['524-475', '2025-03-01']]);
+    rerender({ scope: 'p2', cancelled: new Map() });
+    expect(result.current.cancelled.size).toBe(0);
   });
 });

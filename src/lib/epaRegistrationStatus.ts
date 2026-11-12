@@ -105,8 +105,10 @@ export function useStickyCancellations(scope: string, sources: RegistrationSourc
   const kept = seen.scope === scope ? seen.hits : [];
   const keptOnly = kept.filter((hit) => !current.some((c) => hitId(c) === hitId(hit)));
   const all = [...keptOnly, ...current];
-  const signature = all.map(hitId).sort().join('\n');
-  const seenSignature = kept.map(hitId).sort().join('\n');
+  // The date is in the signature, so a date that arrives later is kept too.
+  const withDate = (hit: Hit) => `${hitId(hit)}|${hit.cancelledOn}`;
+  const signature = all.map(withDate).sort().join('\n');
+  const seenSignature = kept.map(withDate).sort().join('\n');
   useEffect(() => {
     if (seen.scope !== scope || signature !== seenSignature) setSeen({ scope, hits: all });
     // `all` is fully described by `signature`.

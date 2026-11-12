@@ -363,4 +363,26 @@ describe('useDeliveryBrands: completion never waits on brands (Sol r5)', () => {
     rpc.mockRestore();
     getDeliveryBrands.mockReset();
   });
+  it('a completion save keeps a choice it could not save, so a retry still completes unconfirmed', async () => {
+    const saved = brands(1);
+    saved.lines[0].picks = [{ id: 'k1', delivery_item_id: 'L1', source: 'size', parent_brand_id: null, legacy_brand_id: 'b1', brand_name: 'A', epa_registration: null, manufacturer: null, quantity: 5, review_state: null }];
+    getDeliveryBrands.mockResolvedValueOnce(saved);
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    const halfSplit = [{ ...pick, quantity: '2' }, { ...pick, brandId: '', quantity: '' }];
+    act(() => result.current.setLineDraft('L1', halfSplit));
+    act(() => result.current.setLineDraft('L2', [pick]));
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockResolvedValue({
+      data: { delivery_id: 'D1', event_seq: 2, picks: [{ ...saved.lines[0].picks[0] }, { ...saved.lines[0].picks[0], id: 'k2', delivery_item_id: 'L2' }] }, error: null,
+    } as never);
+    let seq = 0;
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+    expect(result.current.drafts.L1).toEqual(halfSplit); // not silently put back to the old brand
+    expect(result.current.dirty).toBe(true);
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED); // the retry still flags it for the office
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
 });

@@ -109,9 +109,15 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
         event_seq: result.event_seq,
         lines: brands.lines.map((l) => ({ ...l, picks: result.picks.filter((p) => p.delivery_item_id === l.delivery_item_id) })),
       };
-      touchedRef.current = new Set();
+      // Lines left out of this save (a choice completion could not save) keep their unsaved choices, still dirty.
+      const sent = new Set(lines.map((l) => l.delivery_item_id));
+      touchedRef.current = new Set([...touchedRef.current].filter((id) => !sent.has(id)));
       setBrands(next);
-      setDrafts(draftsOf(next));
+      setDrafts((prev) => {
+        const fresh = draftsOf(next);
+        for (const lineId of Object.keys(fresh)) if (!sent.has(lineId) && prev[lineId]) fresh[lineId] = prev[lineId];
+        return fresh;
+      });
       setSavedAt(new Date());
       return result.event_seq;
     } catch (error) {

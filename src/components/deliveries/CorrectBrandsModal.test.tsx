@@ -85,4 +85,15 @@ describe('CorrectBrandsModal', () => {
     view.rerender(<CorrectBrandsModal open={false} deliveryId="D1" onClose={() => undefined} onDirtyChange={onDirtyChange} />);
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
+  it('refuses a single brand amount above what was delivered before sending', async () => {
+    getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], quantity: 10, quantity_delivered: 5 }] }));
+    correctDeliveryBrands.mockReset();
+    render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} />);
+    await screen.findByLabelText('Brand for Glyphosate');
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Fix' } });
+    fireEvent.click(screen.getByText('Save correction'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('do not add up to the 5 delivered')));
+    expect(correctDeliveryBrands).not.toHaveBeenCalled();
+  });
 });

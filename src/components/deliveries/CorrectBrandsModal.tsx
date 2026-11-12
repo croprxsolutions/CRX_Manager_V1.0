@@ -73,7 +73,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
     // Clearing a line on purpose ("brand unknown") is allowed; only lines with brands must add up.
     const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id) && (drafts[l.delivery_item_id] ?? []).length > 0);
     const mismatch = brandWarnings({ ...brands, lines: changedLines }, drafts,
-      Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])))[0];
+      Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])), true)[0];
     if (mismatch) { toast('error', mismatch.replace(' Those choices will not be saved.', '')); return; }
     let lines;
     try {

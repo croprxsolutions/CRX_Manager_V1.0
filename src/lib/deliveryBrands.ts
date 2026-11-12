@@ -237,7 +237,8 @@ export function changedLineIds(brands: DeliveryBrands | null, drafts: DraftLines
  * or picks that do not add up to what is being delivered. `delivered` maps line id to the amount the screen
  * is about to complete with.
  */
-export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines, delivered: Record<string, number>): string[] {
+/** `exact`: a correction must match delivered exactly (the database does not trim a single pick there). */
+export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines, delivered: Record<string, number>, exact = false): string[] {
   if (!brands) return [];
   const warnings: string[] = [];
   for (const line of brands.lines) {
@@ -255,7 +256,7 @@ export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines,
     }
     // One pick at or above the delivered amount is trimmed to it by the database; anything else is a mismatch.
     const sum = draft.reduce((s, d) => s + (d.quantity.trim() === '' && draft.length === 1 ? qty : Number(d.quantity) || 0), 0);
-    if (draft.length === 1 ? sum < qty : Math.abs(sum - qty) > 1e-9) {
+    if (draft.length === 1 && !exact ? sum < qty : Math.abs(sum - qty) > 1e-9) {
       warnings.push(`${name}: the brand amounts (${sum}) do not add up to the ${qty} delivered.`);
     }
   }

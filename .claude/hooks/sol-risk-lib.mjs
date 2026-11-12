@@ -158,7 +158,7 @@ function mainAheadOf(sha, { repoPath, gh }) {
   } catch (error) {
     return { problem: `GitHub's main comparison could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})` };
   }
-  if (answer?.status === "identical" || answer?.status === "behind") return { commits: [] };
+  if ((answer?.status === "identical" || answer?.status === "behind") && answer?.ahead_by === 0) return { commits: [] };
   if (!["ahead", "diverged"].includes(answer?.status) || !Array.isArray(answer?.commits) || !Number.isInteger(answer?.ahead_by) || answer.ahead_by !== answer.commits.length) {
     return { problem: "GitHub's list of main's commits is unreadable, unexpected or cut short, so this can't be shown not to be a back-merge (fail closed)" };
   }

@@ -111,7 +111,7 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
   assert.equal(ask({ [STAGING]: ahead, [HEAD]: j({ status: "diverged", ahead_by: 2, commits: [c("b"), c("c")] }) }), null, "the head holds neither");
   assert.match(ask({ [STAGING]: ahead, [HEAD]: j({ status: "identical", ahead_by: 0, commits: [] }) }), /2 commit\(s\)/, "the head holds all of main");
   // unreadable, cut short, unexpected or malformed answers fail closed, on either call.
-  for (const bad of [new Error("offline"), "not json", j({ status: "ahead", ahead_by: 300, commits: [c("b")] }), j({ status: "ahead", ahead_by: 1 }), j({ status: "weird", ahead_by: 0, commits: [] })]) {
+  for (const bad of [new Error("offline"), "not json", j({ status: "ahead", ahead_by: 300, commits: [c("b")] }), j({ status: "ahead", ahead_by: 1 }), j({ status: "weird", ahead_by: 0, commits: [] }), j({ status: "behind", ahead_by: 1, commits: [] })]) {
     assert.ok(ask({ [STAGING]: bad }), `staging call: ${bad}`);
     assert.ok(ask({ [STAGING]: ahead, [HEAD]: bad }), `head call: ${bad}`);
   }

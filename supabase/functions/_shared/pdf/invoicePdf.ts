@@ -204,7 +204,7 @@ export interface InvoicePdfShare {
   invoice_number?: string | null;
 }
 
-/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the whole sale. */
+/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the sale (the order's split when it bills the whole sale, else of the billed totals). */
 export interface BillSplitPayer extends InvoicePdfShare {
   invoice_id: string;
 }
@@ -233,13 +233,19 @@ export function billSplitPayerShares(rows: Array<{
   invoice_number: string | null;
   total_amount_cents: number | null;
   customer?: { farm_name?: string | null } | null;
-}>): BillSplitPayer[] {
-  const total = rows.reduce((sum, r) => sum + (r.total_amount_cents ?? 0), 0);
+}>, weightOf: (name: string) => number = () => NaN): BillSplitPayer[] {
   // Numeric, so -10 follows -2. The database sorts the suffix as text.
   const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
+  // Each payer's weight: the order's split when the caller has it (whole millionths of a percent), else their
+  // billed total (cents).
+  const weights = ordered.map((r) => {
+    const w = weightOf(r.customer?.farm_name || 'Unknown');
+    return Number.isNaN(w) ? (r.total_amount_cents ?? 0) : w;
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0);
   // Hundredths of a percent, largest remainder first, so the printed column adds up to exactly 100%.
-  // Whole numbers throughout (cents x 10000 stays exact), so equal remainders tie exactly and go in order.
-  const parts = ordered.map((r) => (total > 0 ? (r.total_amount_cents ?? 0) * 10000 : 0));
+  // Whole numbers throughout (cents or millionths x 10000 stay exact), so equal remainders tie exactly and go in order.
+  const parts = weights.map((w) => (total > 0 ? w * 10000 : 0));
   const bp = parts.map((p) => (total > 0 ? Math.floor(p / total) : 0));
   const short = total > 0 ? 10000 - bp.reduce((s, v) => s + v, 0) : 0;
   parts.map((p, i) => [total > 0 ? p - bp[i] * total : 0, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
@@ -265,8 +271,58 @@ export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string)
   if (error) throw new InvoiceDetailsUnavailableError();
   const rows = assertRpcResult<Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>>(data, 'get_bill_split_payers');
   if (!Array.isArray(rows) || count !== rows.length) throw new InvoiceDetailsUnavailableError();
+  const split = await orderSplit(db, invoiceId);
+  const names = rows.map((r) => r.farm_name || 'Unknown');
+  // The order's split names exactly these payers, one each (names are how get_bill_split_payers identifies them).
+  const matches = split !== null && new Set(names).size === names.length && names.length === split.size
+    && names.every((n) => split.has(n));
   return billSplitPayerShares(rows
-    .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })));
+    .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })),
+    matches ? (n) => split.get(n)! : undefined);
+}
+
+/**
+ * The sale's split from its order (Mason, 2026-11-12: the % column shows "the 50/50 split from the order, with freight
+ * as its own line for that payer", not the share of billed totals that freight, discount and tax move): each payer's
+ * card share in whole millionths of a percent, the main customer taking whatever the card leaves (as the split bills),
+ * keyed by farm name. Null, so the billed share shows, when a line has its own payers (the card doesn't bill those
+ * lines), two payers share a name, or anything can't be read: the % column never fails the invoice.
+ */
+async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<string, number> | null> {
+  try {
+    const inv = await db.from('invoices').select('order_id').eq('id', invoiceId).maybeSingle();
+    const orderId = (inv.data as { order_id?: string | null } | null)?.order_id;
+    if (inv.error || !orderId) return null;
+    const [order, shares, lineShares] = await Promise.all([
+      db.from('orders').select('customer_id, customer:customers(farm_name)').eq('id', orderId).maybeSingle(),
+      db.from('order_shares').select('customer_id, split_percentage, customer:customers(farm_name)').eq('order_id', orderId),
+      db.from('order_item_shares').select('id, order_items!inner(order_id)', { count: 'exact', head: true }).eq('order_items.order_id', orderId),
+    ]);
+    type Row = { customer_id: string; split_percentage?: number | string; customer?: { farm_name?: string | null } | null };
+    const main = order.data as Row | null;
+    if (order.error || shares.error || lineShares.error || lineShares.count !== 0 || !main || !Array.isArray(shares.data)) return null;
+    // numeric(9,6): whole millionths are exact.
+    const byCustomer = new Map<string, { name: string; weight: number }>();
+    let left = 100_000_000;
+    for (const s of shares.data as Row[]) {
+      const w = Math.round(Number(s.split_percentage) * 1_000_000);
+      if (!Number.isFinite(w) || w <= 0) return null;
+      byCustomer.set(s.customer_id, { name: s.customer?.farm_name || 'Unknown', weight: w });
+      left -= w;
+    }
+    if (left < 0) return null;
+    const own = byCustomer.get(main.customer_id);
+    if (own) own.weight += left;
+    else if (left > 0) byCustomer.set(main.customer_id, { name: main.customer?.farm_name || 'Unknown', weight: left });
+    const byName = new Map<string, number>();
+    for (const { name, weight } of byCustomer.values()) {
+      if (byName.has(name)) return null;
+      byName.set(name, weight);
+    }
+    return byName;
+  } catch {
+    return null;
+  }
 }
 
 // Supabase returns null data, not an error, when a call is denied; this shared file runs in Deno too,

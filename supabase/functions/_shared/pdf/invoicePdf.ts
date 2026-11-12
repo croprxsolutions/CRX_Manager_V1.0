@@ -18,6 +18,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
 import { dueDateFromTerms } from "../paymentTerms.ts";
+import { invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
 import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
@@ -54,7 +55,7 @@ export interface InvoicePrintOptions {
 export const INVOICE_PDF_ITEM_COLUMNS =
   'order_item_id, product_id, return_credit_source_item_id, description, quantity, unit_size, unit_price_cents, ' +
   'extended_cents, rate_per_acre, rate_unit, acres, total_applied, total_applied_unit, total_applied_gl_lb, ' +
-  'gl_lb_unit, epa_registration, is_application_fee, product_form, product:products(product_name, epa_registration, product_form)';
+  'gl_lb_unit, epa_registration, is_application_fee, product_form, brand_lines, product:products(product_name, epa_registration, product_form)';
 
 
 // ── PDF Data Interfaces ─────────────────────────────────────────────────
@@ -81,6 +82,8 @@ export interface InvoicePdfItem {
   epa_registration?: string | null;
   is_application_fee?: boolean;
   product_form?: string | null;
+  /** Brand PR B-3: invoice_items.brand_lines as stored (see brandNotes.ts). */
+  brand_lines?: unknown;
 }
 
 /** Convert a database invoice-item row into the one PDF shape every caller uses. */
@@ -110,6 +113,7 @@ export function mapInvoicePdfItem(item: unknown): InvoicePdfItem {
     epa_registration: (row.epa_registration as string) || row.product?.epa_registration || null,
     is_application_fee: Boolean(row.is_application_fee),
     product_form: (row.product_form as string) || row.product?.product_form || null,
+    brand_lines: row.brand_lines ?? null,
   };
 }
 
@@ -183,6 +187,15 @@ export function groupReturnCreditDisplayItems<T extends ReturnCreditDisplayItem>
  * plain dollar amount (no "/AC"). The Amount + invoice total use extended_cents
  * and are unchanged — this is display only.
  */
+/**
+ * The product cell: the name, then the delivered brands under it (Brand PR B-3). On a Bill Split payer's invoice the
+ * brand amounts are the whole load's, so they read "on the load".
+ */
+export function productCellText(item: InvoicePdfItem, data: Pick<InvoicePdfData, 'shares'>): string {
+  const onTheLoad = (data.shares ?? []).some((s) => 'invoice_id' in s && !!(s as BillSplitPayer).invoice_id);
+  return [item.product_name || item.description, ...invoiceBrandNotes(item.brand_lines, onTheLoad)].join('\n');
+}
+
 export function isFuelSurchargeLine(item: InvoicePdfItem): boolean {
   return Boolean(item.is_application_fee) && item.description === 'Fuel Surcharge';
 }
@@ -1088,10 +1101,11 @@ function drawFieldApplicationLayout(
         ? `${fmtNum(item.unit_price_cents / 100, 2)} AC`
         : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`;
 
+    const product = productCellText(item, data);
     const row = showEpa
       ? [
-        item.product_name || item.description,
-        item.epa_registration || '',
+        product,
+        invoiceLineEpaText(item.brand_lines, item.epa_registration),
         rateStr,
         totalApplied,
         glLb,
@@ -1099,7 +1113,7 @@ function drawFieldApplicationLayout(
         fmt(item.extended_cents),
       ]
       : [
-        item.product_name || item.description,
+        product,
         rateStr,
         totalApplied,
         glLb,
@@ -1265,9 +1279,10 @@ function drawChemicalSaleLayout(
     const qtyStr = `${fmtNum(item.quantity, 2)} ${item.unit_size || item.rate_unit || ''}`;
     const costStr = `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
 
+    const product = productCellText(item, data);
     return showEpa
-      ? [fmtDate(data.invoice_date), item.product_name || item.description, item.epa_registration || '', qtyStr, costStr, fmt(item.extended_cents)]
-      : [fmtDate(data.invoice_date), item.product_name || item.description, qtyStr, costStr, fmt(item.extended_cents)];
+      ? [fmtDate(data.invoice_date), product, invoiceLineEpaText(item.brand_lines, item.epa_registration), qtyStr, costStr, fmt(item.extended_cents)]
+      : [fmtDate(data.invoice_date), product, qtyStr, costStr, fmt(item.extended_cents)];
   });
 
   autoTable(doc, {

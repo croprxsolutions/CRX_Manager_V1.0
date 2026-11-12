@@ -105,6 +105,9 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockCaptureExcepti
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyDeliveryCompleted: vi.fn() }));
 vi.mock('../lib/deliveryPdf', () => ({ generateBatchDeliveryPdf: mockGenerateBatchDeliveryPdf }));
+// Brand PR B-3: the load sheet prints each line's delivered brands (read per delivery).
+const mockLoadDeliveryBrandInfo = vi.hoisted(() => vi.fn(async () => new Map()));
+vi.mock('../lib/deliveryBrandPaper', () => ({ loadDeliveryBrandInfo: mockLoadDeliveryBrandInfo }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
 }));
@@ -301,9 +304,10 @@ describe('Deliveries warehouse load sheet', () => {
     expect(mockGenerateBatchDeliveryPdf).toHaveBeenCalledWith([
       expect.objectContaining({
         delivery_number: 'DEL-TIER-1',
-        items: [expect.objectContaining({ product_name: 'Atrazine 4L', quantity: 6 })],
+        items: [expect.objectContaining({ product_name: 'Atrazine 4L', quantity: 6, brand_notes: [] })],
       }),
     ]);
+    expect(mockLoadDeliveryBrandInfo).toHaveBeenCalledTimes(1);
     expect(mockToast).toHaveBeenCalledWith('success', 'Delivery receipt(s) generated');
   });
 });

@@ -92,10 +92,11 @@ Unique active `(ingredient_id, scheme, group_code)`; index on `ingredient_id`. A
 1. `v_actor := _product_parent_require_admin()` (admin and active, else refused).
 2. Fingerprint `md5(actor, ingredient, expected, modes, reason)`; `_product_parent_replay(p_idempotency_key, 'set_active_ingredient_modes', fp)` refuses a missing key (`IDEMPOTENCY_KEY_REQUIRED`), returns the saved answer for a repeat, refuses the same key with a different request (`IDEMPOTENCY_PAYLOAD_MISMATCH`).
 3. `pg_advisory_xact_lock(hashtext('crx.active_ingredients'))` (the lock every DM-1 chemistry and ingredient writer takes), then the ingredient row `FOR UPDATE`. It takes no parent or product lock, so it cannot invert DM-1's order (parents, then sizes, then this lock).
-4. Refuse: ingredient not found (`INGREDIENT_NOT_FOUND`); retired (`INGREDIENT_RETIRED: reactivate it first`); `p_modes` not an array of `{scheme, group_code}` objects with no other keys, more than 10 entries, a repeated pair, or a bad scheme or code (`CHEMISTRY_MOA_INVALID`, the DM-1 wording); a blank or over-1000-character reason (`MOA_REASON_REQUIRED`).
-5. **Stale check:** the ingredient's active list, sorted, must equal `p_expected_modes` sorted (the list the screen showed), else `MOA_LIST_STALE: the groups of "<name>" changed since you opened them; reload`. No new version column is needed.
-6. Retire each active row not in `p_modes` (`status 'retired'`, `row_version + 1`); insert each pair not yet active, with `source_note = p_reason`. If nothing changed, return `{unchanged: true}` and write no event.
-7. Write the ingredient event; `save_idempotency` last; return `{ingredient_id, modes, parents_affected}` (count of active parents with an active row of this ingredient or of a form whose acid it is).
+4. Refuse: ingredient not found (`INGREDIENT_NOT_FOUND`); retired (`INGREDIENT_RETIRED: reactivate it first`); `p_modes` not an array of `{scheme, group_code, source_note}` objects with no other keys (each `source_note` trimmed, 1–1000 characters: where that one group came from), more than 10 entries, a repeated pair, or a bad scheme or code (`CHEMISTRY_MOA_INVALID`, the DM-1 wording); a blank or over-1000-character reason for the change (`MOA_REASON_REQUIRED`; it goes on the ingredient event).
+5. **Stale check:** the ingredient's active list of `{scheme, group_code, source_note}`, sorted, must equal `p_expected_modes` sorted (the list the screen showed, notes included), else `MOA_LIST_STALE: the groups of "<name>" changed since you opened them; reload`. No new version column is needed.
+6. Retire each active row not in `p_modes` (`status 'retired'`, `row_version + 1`); insert each pair not yet active with its own `source_note`; on a pair that stays, update `source_note` (and `row_version + 1`) when the request's note differs, so a corrected source is never silently dropped (Luna round 1).
+7. If nothing changed, write no event and set the result to `{unchanged: true}`; otherwise write the ingredient event. **Either way `save_idempotency` runs last**, so a key used for a no-change request still refuses a later different request (Luna round 1).
+8. Return `{ingredient_id, modes, parents_affected, products_affected}`: the active parents, and the active sizes of those parents, whose shown groups this list feeds. That is parents with an active row of this ingredient, plus parents with an active row of a form whose acid it is **and that has no list of its own** (3.3). The editor's "This changes N products" uses `products_affected`, read before saving from the same count in `get_ingredient_mode_users` (3.4).
 
 No product row, chemistry version or parent event changes: a list change is shown live on every product (2.2).
 
@@ -122,6 +123,7 @@ For each **active ingredient row** of the parent, and for each scheme:
 
 - **`_parent_mode_groups(p_parent_id uuid) RETURNS jsonb`** (private, `STABLE SECURITY DEFINER`, `search_path` pinned, no grants): the 3.3 result, `{ingredients: [{ingredient_id, name, derived_from, acid_name, schemes: [{scheme, live: [...], derived: [...], typed: [{row_id, group_code, source}], status}], not_recorded}], summary: [{scheme, group_code, differs}], not_recorded_count}`. Active rows only. CMP-2 calls this helper for its filter.
 - **`get_parent_mode_groups(p_parent_id uuid) RETURNS jsonb`**: refuses a caller who is not an active profile (`is_active_profile()`), refuses an unknown parent, returns the helper's result. `EXECUTE` for `authenticated`. Everyone who can see the product page sees its groups (groups are label facts, not costs).
+- **`get_ingredient_mode_users(p_ingredient_id uuid) RETURNS jsonb`**: admin only. The ingredient's active list (with notes) and the `parents_affected` / `products_affected` counts of 3.2 step 8, for the editor to show before saving. `EXECUTE` for `authenticated`; refuses non-admins inside.
 - **`get_ingredient_mode_worklist() RETURNS jsonb`**: admin only. Active ingredients used by at least one active parent that have no list of their own and whose acid (if any) has none, with the count of products using each, sorted by that count. `EXECUTE` for `authenticated`; refuses non-admins inside.
 
 ### 3.5 Who may edit
@@ -135,33 +137,33 @@ For each **active ingredient row** of the parent, and for each scheme:
 **File:** `supabase/migrations/<stamp>_ingredient_modes_of_action.sql`. The stamp is chosen at build: after `20270106110000` (newest file on `main` today) and after any stamp claimed in `docs/changelog.d/` or the sibling notes folder.
 
 ### 4.A Preflight (refuse unless all hold; one transaction, the temp-table pattern of `20270105110000`)
-- `active_ingredient_modes_of_action` does not exist; no function named `set_active_ingredient_modes`, `get_parent_mode_groups`, `get_ingredient_mode_worklist` or `_parent_mode_groups` exists with any argument list (`pg_proc` by name).
+- `active_ingredient_modes_of_action` does not exist; no function named `set_active_ingredient_modes`, `get_parent_mode_groups`, `get_ingredient_mode_users`, `get_ingredient_mode_worklist` or `_parent_mode_groups` exists with any argument list (`pg_proc` by name).
 - These exist: `active_ingredients`, `active_ingredient_events`, `product_parent_ingredients`, `product_parent_modes_of_action` with its `source` column, `_product_parent_require_admin()`, `_product_parent_replay(text,text,text)`, `save_idempotency(text,text,jsonb)`, `_active_ingredient_event(uuid,text,text,text,jsonb,jsonb)`, `is_active_profile()`, `is_admin()`.
 - Capture an md5 of source, settings, owner, security mode and grants for the functions MOA-1 must not touch: `_apply_parent_chemistry`, `_parent_chemistry_values`, `_check_parent_chemistry`, `_chemistry_kept_modes`, `_parent_chemistry_epa_refusal`, `get_parent_chemistry`, `set_parent_chemistry`, `correct_parent_chemistry`, `_ingredient_users`, `_ingredient_usage_fingerprint`, `get_active_ingredient_worklist`, `retire_active_ingredient`, `reactivate_active_ingredient`, `promote_chemistry_proposal`, `commit_epa_proposal`.
 - Capture row counts and an md5 of `(id, status, row_version)` for `product_parent_modes_of_action` and `active_ingredients`.
 
 ### 4.B Body
-Section 3.1's table, index, RLS, policy and grants; 3.2's writer; 3.4's helper and two reads. Every function owned by `postgres` with `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT EXECUTE … TO authenticated` on the three public ones only. Header line `-- idempotency-body-check: exempt` with the house reason (the writer checks its key through `_product_parent_replay`, which calls `check_idempotency`, and saves its receipt with `save_idempotency` last).
+Section 3.1's table, index, RLS, policy and grants; 3.2's writer; 3.4's helper and three reads. Every function owned by `postgres` with `REVOKE ALL … FROM PUBLIC, anon, authenticated, service_role, metabase_ro`, then `GRANT EXECUTE … TO authenticated` on the four public ones only. Header line `-- idempotency-body-check: exempt` with the house reason (the writer checks its key through `_product_parent_replay`, which calls `check_idempotency`, and saves its receipt with `save_idempotency` last).
 
 ### 4.C What the migration does not touch
 No existing table, column, row, grant, policy or trigger. None of the fifteen functions in 4.A. The EPA gate is unchanged. Typed groups keep working exactly as today on ungated parents.
 
 ### 4.D Rollback (its own reviewed migration)
-Revert the screen PR first, so no screen calls a dropped function. Then revoke `EXECUTE` on the three public functions and drop all four (never CASCADE); revoke `SELECT` on `active_ingredient_modes_of_action` and keep it as unreadable history (the house rule for DM-1b and DM-4 tables). No product data to restore: nothing outside the new table was written. The ingredient events written by MOA-1 stay (append-only history).
+Revert the screen PR first, so no screen calls a dropped function. Then revoke `EXECUTE` on the four public functions and drop all five (never CASCADE); revoke `SELECT` on `active_ingredient_modes_of_action` and keep it as unreadable history (the house rule for DM-1b and DM-4 tables). No product data to restore: nothing outside the new table was written. The ingredient events written by MOA-1 stay (append-only history).
 
 ### 4.E Lock and timing
-`SET LOCAL lock_timeout = '5s'`. Creating a new table and functions takes no lock on any existing table, so any time of day is fine.
+`SET LOCAL lock_timeout = '5s'`. The new table's foreign key briefly locks `active_ingredients` against writes while it is created (milliseconds; the table is empty today). If an ingredient save holds it, the migration waits at most 5 seconds and then fails whole, changing nothing, and is simply re-run. No product, price or stock table is locked, so no fixed window is needed (Luna round 1).
 
 ### 4.F Postflight (inside the migration)
 - RLS on, one policy, exact grants (read from `has_table_privilege` for each role), no write privilege for any role.
-- Each new function: owner `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`; `EXECUTE` only for `authenticated` on the three public ones and for nobody on the helper (`has_function_privilege` for `PUBLIC`, `anon`, `authenticated`, `service_role`, `metabase_ro`).
+- Each new function: owner `postgres`, `SECURITY DEFINER`, `search_path = public, pg_temp`; `EXECUTE` only for `authenticated` on the four public ones and for nobody on the helper (`has_function_privilege` for `PUBLIC`, `anon`, `authenticated`, `service_role`, `metabase_ro`).
 - The fifteen captured md5s and both row-count captures are unchanged.
 
 ### 4.G Files
 - the migration;
 - `docs/changelog.d/<date>-moa1-ingredient-groups.md` and `docs/reference/migrations.d/<stamp>_ingredient_modes_of_action.md`;
 - `scripts/smoke/prove-ingredient-modes-of-action-real-schema.mjs` (cases in section 6);
-- `docs/reference/rpc-functions.md` entries for the three public functions;
+- `docs/reference/rpc-functions.md` entries for the four public functions;
 - `src/types/index.ts` (`IngredientModeOfAction`, `ParentModeGroups`) and regenerated `src/types/supabase.ts`;
 - after apply: schema registry refresh, live function snapshot entries, `npm run db-sweeps:live` (and the sweep allowlist if it flags the new `SECURITY DEFINER` functions).
 
@@ -169,7 +171,7 @@ Revert the screen PR first, so no screen calls a dropped function. Then revoke `
 
 | Risk | Handling |
 |---|---|
-| A wrong group on one ingredient shows on every product with it | Admin only; a required source note; the editor shows "This changes N products" before saving; every save is logged with before and after. |
+| A wrong group on one ingredient shows on every product with it | Admin only; a required source note per group; the editor shows "This changes N products" before saving; every save is logged with before and after. |
 | Two admins edit one ingredient's list at once | The stale check (3.2 step 5) refuses the second save by name. |
 | A salt shows its acid's groups when the salt itself is different | It cannot differ in mode of action; and a form that has its own list uses only its own. |
 | A typed group that disagrees can't be removed on a gated parent | DM-1's gate refuses group retires there. Live count of typed groups: **0**, and after MOA-1 nobody needs to type one on a gated parent. The flag shows the difference; removing such a row is deferred to a follow-up only if one ever appears (section 8). |
@@ -185,8 +187,8 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 **Files:**
 - `src/lib/productModeGroups.ts` (new): `fetchParentModeGroups`, `fetchIngredientModeWorklist`, `setIngredientModes`, each through `src/lib/db.ts` with `assertRpcResult()` and one retry key per intent (the `getCreateKeyFor` pattern; a new key whenever the request changes).
 - `src/components/products/ChemistryParts.tsx`: `ChemistryLists` shows each ingredient's live groups with the 3.3 label; a difference shows both values and "differs"; an ingredient with none shows "group not recorded". Admins get **"Set groups"** beside each ingredient.
-- `src/components/products/IngredientGroupsModal.tsx` (new): edits one ingredient's list (scheme and group rows, the existing `ModeRows` look), a required "Where is this from?" note, and "This changes N products". It sends the list it loaded as `p_expected_modes`. Submit and close are disabled while saving; a reply that times out keeps the form locked, reloads, and says whether the save landed; a `MOA_LIST_STALE` refusal reloads and says "someone else just changed this".
-- `src/components/products/ProductChemistrySection.tsx`: reads `get_parent_mode_groups` beside `get_parent_chemistry` and shows the **"Groups: …"** summary at the top of the Chemistry section; refreshes it after any chemistry or group save.
+- `src/components/products/IngredientGroupsModal.tsx` (new): edits one ingredient's list (scheme and group rows, the existing `ModeRows` look, each row with its own required "Where is this from?" note), a reason for the change, and "This changes N products" (from `get_ingredient_mode_users`). It sends the list it loaded (notes included) as `p_expected_modes`. Submit and close are disabled while saving. A reply that times out keeps the form locked and **re-sends the identical request with the same retry key** until it gets an answer (the database either returns the saved answer or runs it once, behind the same lock), and only then says saved or refused; it never decides from a plain reload, which could run before the timed-out save commits (Luna round 1). A `MOA_LIST_STALE` refusal reloads and says "someone else just changed this".
+- `src/components/products/ProductChemistrySection.tsx`: reads `get_parent_mode_groups` beside `get_parent_chemistry` and shows the **"Groups: …"** summary at the top of the Chemistry section; refreshes it after any chemistry or group save. Each pair of reads is tagged with the parent ID and a request number; a reply for another parent or an older request is ignored, and the groups show only once both reads of the same request have answered, so a slow reply for product A never shows under product B and the two lists never come from different moments (Luna round 1).
 - `src/components/products/IngredientReviewModal.tsx`: a third list, **"Ingredients with no group yet"**, from `get_ingredient_mode_worklist`, each with "Set groups".
 - `src/components/products/ChemistryEntryModal.tsx`: when an admin picks an existing ingredient that has a list, show "Groups from the ingredient list: …" above the per-product group rows, so nobody retypes them. No change to what it saves.
 - Tests: component tests for each 3.3 row, the summary line, the editor's stale and timeout paths, and the worklist.
@@ -207,7 +209,7 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 5. A typed `HRAC 5` on a product whose ingredient list says `HRAC 27` keeps `HRAC 5` live and returns both, flagged as differing.
 6. A product on an EPA-gated parent shows derived groups (the gate is not consulted by the read and not changed).
 7. Refusals: a non-admin save; a retired ingredient; a bad scheme or code; a repeated pair; 11 groups; a blank reason; a stale `p_expected_modes`; a missing retry key.
-8. The same retry key twice writes once; the same key with a different list is refused.
+8. The same retry key twice writes once; the same key with a different list is refused, including after a first request that changed nothing; changing only a kept group's note updates the note and logs an event.
 9. A save that removes a group retires the row (not deleted) and writes one ingredient event with before and after.
 10. A non-admin active user can read groups; an inactive profile and `anon` cannot; nobody can write the table directly.
 11. The postflight md5s prove none of the fifteen DM-1/DM-1b/DM-4 functions changed.
@@ -250,4 +252,10 @@ There are no ingredients in the system yet; they arrive as EPA lookups and the w
 
 ## 10. Review record
 
-(Filled in as reviews run.)
+**Luna round 1** (gpt-6-luna xhigh, head `021efe046`): 6 findings (4 MED, 2 LOW), no BLOCKER or HIGH. All fixed:
+- MED: a no-change save saved no retry receipt, so its key could be reused for a different list → the receipt is saved on every path (3.2 step 7).
+- MED: a kept group's source note could never be corrected → notes are per group, compared in the stale check, and updated when they change (3.2 steps 4–6).
+- MED: the timeout path decided from a plain reload, which can run before the save commits → it re-sends the same request with the same key and reports only that answer (section 5).
+- MED: the product page's two reads had no guard against a late reply for another product → replies are tagged with parent and request number and shown only as a matched pair (section 5).
+- LOW: "This changes N products" counted parents, and counted salt forms that have their own list → `products_affected` counts active sizes and excludes forms with their own list; a new admin read gives the number before saving (3.2 step 8, 3.4).
+- LOW: "creating a table takes no lock on an existing table" was wrong for the foreign key → 4.E now states the brief lock and the 5-second clean failure.

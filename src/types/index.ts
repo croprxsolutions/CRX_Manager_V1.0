@@ -4854,6 +4854,8 @@ export interface RUPSalesRecord {
   compliance_status: 'compliant' | 'warning' | 'non_compliant';
   compliance_notes: string | null;
   season: number | null;
+  /** Brand PR B-1b: the brand this record is for; null on a whole-line record. */
+  brand_name?: string | null;
   invoice_number?: string;
   created_at: string;
 }

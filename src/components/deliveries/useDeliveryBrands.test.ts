@@ -185,3 +185,27 @@ describe('useDeliveryBrands when the stop changes during the signal check', () =
     getDeliveryBrands.mockReset();
   });
 });
+
+describe('useDeliveryBrands when a caller saves for a stop no longer on screen', () => {
+  it('refuses the old stop’s completion save, so it never replaces the new stop’s brands', async () => {
+    getDeliveryBrands.mockImplementation(async (id: string) => ({ ...brands(id === 'D1' ? 1 : 20), delivery_id: id }));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    await waitFor(() => expect(result.current.dirty).toBe(true));
+    // The completion handler captured this render's function, then awaited its own signal check.
+    const oldSaveForCompletion = result.current.saveForCompletion;
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc');
+
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    let seq = 0;
+    await act(async () => { seq = await oldSaveForCompletion(); });
+
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(result.current.brands?.event_seq).toBe(20);
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
+});

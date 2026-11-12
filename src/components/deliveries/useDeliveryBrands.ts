@@ -37,6 +37,9 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const touchedRef = useRef(new Set<string>());
   // Whether this delivery's picks are on screen (a later refresh failing must not hide them).
   const loadedRef = useRef(false);
+  // The delivery on screen now: a save captured by an older render (a caller awaiting something) is refused.
+  const liveDeliveryRef = useRef(deliveryId);
+  useEffect(() => { liveDeliveryRef.current = deliveryId; }, [deliveryId]);
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
@@ -82,7 +85,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const send = async (
     lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[], completing: boolean, startedAt: number,
   ): Promise<number | null> => {
-    if (!brands || !deliveryId || requestRef.current !== startedAt) return null;
+    if (!brands || !deliveryId || requestRef.current !== startedAt || liveDeliveryRef.current !== deliveryId) return null;
     // One key per exact save (this delivery, these choices, this base): a retry of the same save reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, brands.event_seq]);
     const request = ++requestRef.current;

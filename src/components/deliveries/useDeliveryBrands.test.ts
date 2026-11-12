@@ -338,4 +338,29 @@ describe('useDeliveryBrands: completion never waits on brands (Sol r5)', () => {
       getDeliveryBrands.mockReset();
     }
   });
+  it('a Save brands still pending on the last stop does not leave the new stop disabled', async () => {
+    getDeliveryBrands.mockResolvedValueOnce(brands(1));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    let reply!: (v: unknown) => void;
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise((resolve) => { reply = resolve; }) as never);
+    let d1Save!: Promise<number | null>;
+    act(() => { d1Save = result.current.save(); });
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1));
+    expect(result.current.saving).toBe(true);
+    getDeliveryBrands.mockResolvedValueOnce({ ...brands(5), delivery_id: 'D2' });
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    expect(result.current.saving).toBe(false); // D2 can be picked and saved
+    // D2 starts its own save; D1's late finish must not clear it.
+    act(() => result.current.setLineDraft('L1', [pick]));
+    rpc.mockReturnValue(new Promise(() => undefined) as never);
+    act(() => { void result.current.save(); });
+    await waitFor(() => expect(result.current.saving).toBe(true));
+    await act(async () => { reply({ data: { delivery_id: 'D1', event_seq: 2, picks: [] }, error: null }); await d1Save; });
+    expect(result.current.saving).toBe(true);
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
 });

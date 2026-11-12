@@ -35,6 +35,8 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   // Only the latest request's reply is used.
   const requestRef = useRef(0);
+  // Which save owns `saving`: a stop change clears it, and an older save finishing never clears a newer one's.
+  const saveTokenRef = useRef(0);
   // Lines changed on screen since the last reply landed; a reload keeps those choices (still unsaved).
   const touchedRef = useRef(new Set<string>());
   // Whether this delivery's picks are on screen (a later refresh failing must not hide them).
@@ -76,6 +78,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     touchedRef.current = new Set();
     loadedRef.current = false;
     setBrands(null); setDrafts({}); setSavedAt(null); setLoadFailed(false);
+    saveTokenRef.current++; setSaving(false);
     void load();
   }, [load]);
 
@@ -148,12 +151,13 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     if (lines.length === 0) return brands.event_seq;
     // Disabled from here, so no choice can change between building this save and its reply.
     const startedAt = requestRef.current;
+    const token = ++saveTokenRef.current;
     setSaving(true);
     try {
       if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
       return await send(lines, false, startedAt);
     } finally {
-      setSaving(false);
+      if (saveTokenRef.current === token) setSaving(false);
     }
   };
 
@@ -184,6 +188,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     }
     if (lines.length === 0) return leftOut ? BRANDS_NOT_CONFIRMED : brands.event_seq;
     const startedAt = requestRef.current;
+    const token = ++saveTokenRef.current;
     setSaving(true);
     try {
       // No signal: the completion's own signal check stops it next.
@@ -201,7 +206,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       }
       return seq === null || leftOut ? BRANDS_NOT_CONFIRMED : seq;
     } finally {
-      setSaving(false);
+      if (saveTokenRef.current === token) setSaving(false);
     }
   };
 

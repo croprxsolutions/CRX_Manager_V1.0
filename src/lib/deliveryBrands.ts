@@ -83,21 +83,15 @@ export async function getDeliveryBrands(deliveryId: string): Promise<DeliveryBra
 
 interface BrandWriteResult { delivery_id: string; event_seq: number; picks: DeliveryBrandPick[] }
 
-/**
- * A brand write re-copies picks onto the order's unposted invoices, which can briefly find the order busy
- * (ORDER_LIFECYCLE_BUSY_RETRY). That refusal rolls back and records nothing, so it is retried once on the same key.
- */
-async function retryingBusyOnce<T extends { error: unknown }>(call: () => PromiseLike<T>): Promise<T> {
-  const first = await call();
-  return hasRpcCode(first.error, RpcErrorCodes.ORDER_LIFECYCLE_BUSY_RETRY) ? call() : first;
-}
-
 export async function setDeliveryBrands(
   deliveryId: string, lines: { delivery_item_id: string; picks: PickPayload[] }[], baseSeq: number, key: string,
 ): Promise<BrandWriteResult> {
-  const { data, error } = await retryingBusyOnce(() => supabaseUntyped.rpc('set_delivery_brands', {
-    p_delivery_id: deliveryId, p_lines: lines, p_base_event_seq: baseSeq, p_idempotency_key: key,
-  }));
+  const args = { p_delivery_id: deliveryId, p_lines: lines, p_base_event_seq: baseSeq, p_idempotency_key: key };
+  // Re-copying picks onto unposted invoices can briefly find the order busy; that refusal rolls back and
+  // records nothing, so it is retried once on the same key.
+  const firstTry = await supabaseUntyped.rpc('set_delivery_brands', args);
+  const { data, error } = hasRpcCode(firstTry.error, RpcErrorCodes.ORDER_LIFECYCLE_BUSY_RETRY)
+    ? await supabaseUntyped.rpc('set_delivery_brands', args) : firstTry;
   if (error) throw error;
   return assertRpcResult<BrandWriteResult>(data, 'set_delivery_brands');
 }
@@ -106,9 +100,12 @@ export async function correctDeliveryBrands(
   deliveryId: string, lines: { delivery_item_id: string; picks: PickPayload[] }[], reason: string, baseSeq: number,
   key: string,
 ): Promise<BrandWriteResult & { invoice_ids: string[] }> {
-  const { data, error } = await retryingBusyOnce(() => supabaseUntyped.rpc('correct_delivery_brands', {
-    p_delivery_id: deliveryId, p_lines: lines, p_reason: reason, p_base_event_seq: baseSeq, p_idempotency_key: key,
-  }));
+  const args = { p_delivery_id: deliveryId, p_lines: lines, p_reason: reason, p_base_event_seq: baseSeq, p_idempotency_key: key };
+  // Re-copying picks onto unposted invoices can briefly find the order busy; that refusal rolls back and
+  // records nothing, so it is retried once on the same key.
+  const firstTry = await supabaseUntyped.rpc('correct_delivery_brands', args);
+  const { data, error } = hasRpcCode(firstTry.error, RpcErrorCodes.ORDER_LIFECYCLE_BUSY_RETRY)
+    ? await supabaseUntyped.rpc('correct_delivery_brands', args) : firstTry;
   if (error) throw error;
   return assertRpcResult<BrandWriteResult & { invoice_ids: string[] }>(data, 'correct_delivery_brands');
 }

@@ -113,7 +113,10 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     }
   }, [brands, changed, deliveryId, drafts, idem, load, toast]);
 
-  return { brands, drafts, setLineDraft, dirty, saving, savedAt, loadFailed, save, reload: load };
+  // Still waiting for the first reply: completion waits too, so it never skips picks it has not seen.
+  const loading = enabled && !!deliveryId && !brands && !loadFailed;
+
+  return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, reload: load };
 }
 
 export type DeliveryBrandsState = ReturnType<typeof useDeliveryBrands>;

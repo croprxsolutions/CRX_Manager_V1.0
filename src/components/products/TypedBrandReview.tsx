@@ -26,13 +26,16 @@ export default function TypedBrandReview() {
   // The brand list a "Link" choice is made from, per pick being linked.
   const [linking, setLinking] = useState<{ pickId: string; brands: ProductBrand[]; brandId: string } | null>(null);
   const requestRef = useRef(0);
+  const linkRequestRef = useRef(0);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
     try {
       const next = await getTypedBrandsForReview();
-      if (request === requestRef.current) setRows(next);
+      if (request === requestRef.current) { setRows(next); setLoadFailed(false); }
     } catch (error) {
+      if (request === requestRef.current) setLoadFailed(true);
       Sentry.captureException(error, { level: 'warning', extra: { context: 'Typed brands for review could not be loaded' } });
     }
   }, []);
@@ -77,16 +80,18 @@ export default function TypedBrandReview() {
     } catch (error) {
       throw new Error(productBrandErrorMessage(error));
     }
-    addIdem.resetKeyFor(row.pick_id);
     await link(row, added.id);
+    // Kept until the link succeeds too: retrying after a failed link replays the same add, never a second brand.
+    addIdem.resetKeyFor(row.pick_id);
   }, `${row.brand_name} added to the list.`);
 
   const startLink = async (row: TypedBrandForReview) => {
+    const request = ++linkRequestRef.current;
     try {
       const list = await getProductBrands(row.product_id);
-      setLinking({ pickId: row.pick_id, brands: list.brands, brandId: '' });
+      if (request === linkRequestRef.current) setLinking({ pickId: row.pick_id, brands: list.brands, brandId: '' });
     } catch (error) {
-      toast('error', productBrandErrorMessage(error));
+      if (request === linkRequestRef.current) toast('error', productBrandErrorMessage(error));
     }
   };
 
@@ -96,7 +101,17 @@ export default function TypedBrandReview() {
     reviewIdem.resetKeyFor(scope);
   }, 'Dismissed.');
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    if (!loadFailed) return null;
+    return (
+      <Card>
+        <p className="text-sm text-amber-800">
+          Brands to review could not be loaded.{' '}
+          <button type="button" className="font-medium underline" onClick={() => void load()}>Try again</button>
+        </p>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -132,7 +147,7 @@ export default function TypedBrandReview() {
                   </select>
                   <Button size="sm" disabled={!linking.brandId || busy} loading={busy}
                     onClick={() => void run(row, () => link(row, linking.brandId), 'Linked.')}>Link</Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setLinking(null)}>Cancel</Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => { linkRequestRef.current++; setLinking(null); }}>Cancel</Button>
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">

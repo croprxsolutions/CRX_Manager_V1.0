@@ -69,6 +69,14 @@ describe('invoice brand warnings before posting', () => {
     const w = invoiceBrandWarnings([line([e({ brand_name: 'A', epa_registration: '1-1', quantity: 4 })])], new Set());
     expect(w.noRecord).toEqual(['Gly: Split does not match delivered (4 of 5 recorded)']);
   });
+  it('two wrong trips are each named, so they never cancel into a total that looks right', () => {
+    const bl = [
+      e({ brand_name: 'A', epa_registration: '1-1', quantity: 6, delivery_item_id: 'di-1' }),
+      e({ brand_name: 'A', epa_registration: '1-1', quantity: 4, delivery_item_id: 'di-2' }),
+    ];
+    const w = invoiceBrandWarnings([line(bl, 10)], new Set());
+    expect(w.noRecord).toEqual(['Gly: Split does not match delivered (6 of 5, 4 of 5 recorded)']);
+  });
   it('billed above delivered across a Bill Split group gets no RUP record; below is a follow-up', () => {
     const bl = [e({ brand_name: 'A', epa_registration: '1-1', quantity: 5 })];
     const above = invoiceBrandWarnings([line(bl, 3, { label: 'X-1 Gly' }), line(bl, 3, { label: 'X-2 Gly' })], new Set());

@@ -76,7 +76,7 @@ export function invoiceBrandWarnings(lines: BrandWarningLine[], pendingTypedPick
     followUp.push(...pickFollowUps(l.label, entries, pendingTypedPickIds));
     const mismatch = brandSplitMismatch(entries);
     if (mismatch) {
-      noRecord.push(`${l.label}: Split does not match delivered (${fmtBrandQty(mismatch.picked)} of ${fmtBrandQty(mismatch.delivered)} recorded)`);
+      noRecord.push(`${l.label}: Split does not match delivered (${mismatch} recorded)`);
       continue;
     }
     const delivered = brandLinesDelivered(entries);

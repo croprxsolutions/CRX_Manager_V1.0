@@ -31,8 +31,10 @@ function brandLabel(name: string | null | undefined, epa: string | null | undefi
   return `${name || 'Unnamed brand'} (${epa ? `EPA ${epa}` : 'no EPA number'})`;
 }
 
-function mismatchNote(picked: unknown, delivered: unknown): string {
-  return `Brand amounts do not match delivered: ${fmtBrandQty(picked)} of ${fmtBrandQty(delivered)} recorded`;
+const ofText = (picked: unknown, delivered: unknown) => `${fmtBrandQty(picked)} of ${fmtBrandQty(delivered)}`;
+
+function mismatchNote(amounts: string): string {
+  return `Brand amounts do not match delivered: ${amounts} recorded`;
 }
 
 /** The notes under one delivery/receipt line. */
@@ -41,7 +43,7 @@ export function receiptBrandNotes(line: ReceiptBrandInfo & { qty: number | strin
   if (!Array.isArray(line.brands) || line.brands.length === 0) return [];
   const notes = line.brands.map((b) =>
     `Brand: ${brandLabel(b.name, b.epa_registration)}${b.quantity != null ? ` - ${fmtBrandQty(b.quantity)}` : ''}`);
-  if (line.brand_picked_quantity != null) notes.push(mismatchNote(line.brand_picked_quantity, line.qty));
+  if (line.brand_picked_quantity != null) notes.push(mismatchNote(ofText(line.brand_picked_quantity, line.qty)));
   return notes;
 }
 
@@ -89,8 +91,11 @@ export function parseBrandLines(v: unknown): InvoiceBrandEntry[] | null {
 
 const isPick = (e: InvoiceBrandEntry) => e.brand_key !== 'n:';
 
-/** Per covered delivery line with picks whose picks do not add up to what it delivered (the database's 4-place rule). */
-export function brandSplitMismatch(entries: InvoiceBrandEntry[]): { picked: number; delivered: number } | null {
+/**
+ * Per covered delivery line with picks whose picks do not add up to what it delivered (the database's 4-place rule):
+ * "picked of delivered" for each such trip, so two wrong trips never cancel into a total that looks right.
+ */
+export function brandSplitMismatch(entries: InvoiceBrandEntry[]): string | null {
   const byTrip = new Map<string, { picked: number; delivered: number; picks: boolean }>();
   for (const e of entries) {
     const k = e.delivery_item_id ?? '';
@@ -100,10 +105,7 @@ export function brandSplitMismatch(entries: InvoiceBrandEntry[]): { picked: numb
   }
   const bad = [...byTrip.values()].filter((t) => t.picks && t.picked !== t.delivered);
   if (bad.length === 0) return null;
-  return {
-    picked: bad.reduce((s, t) => s + t.picked, 0) / 10000,
-    delivered: bad.reduce((s, t) => s + t.delivered, 0) / 10000,
-  };
+  return bad.map((t) => ofText(t.picked / 10000, t.delivered / 10000)).join(', ');
 }
 
 /** What the covered trips delivered in total (each delivery line once), in ten-thousandths. */
@@ -129,6 +131,6 @@ export function invoiceBrandNotes(brandLines: unknown, onTheLoad = false): strin
     `Brand: ${brandLabel(e.brand_name, e.epa_registration)} - ${fmtBrandQty(e.quantity)}${onTheLoad ? ' on the load' : ''}`);
   if (entries.some((e) => !isPick(e))) notes.push('Brand not recorded');
   const mismatch = brandSplitMismatch(entries);
-  if (mismatch) notes.push(mismatchNote(mismatch.picked, mismatch.delivered));
+  if (mismatch) notes.push(mismatchNote(mismatch));
   return notes;
 }

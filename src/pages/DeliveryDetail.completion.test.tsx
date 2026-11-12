@@ -45,6 +45,7 @@ function buildChain(table: string): Record<string, unknown> {
   return self;
 }
 
+vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }) }));
 vi.mock('../lib/db', () => ({
   supabase: {
     from: mockFrom,
@@ -79,6 +80,13 @@ vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resol
 vi.mock('../lib/deliverySplitBilling', () => ({
   fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
 }));
+// No branded lines: the brand list loads empty, so completion confirms it (seq 0) and warns about nothing.
+vi.mock('../lib/deliveryBrands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/deliveryBrands')>()),
+  getDeliveryBrands: () => brandsLoad(),
+}));
+const emptyBrands = async () => ({ delivery_id: 'del-1', status: 'in_progress', event_seq: 0, lines: [] });
+let brandsLoad: () => Promise<unknown> = emptyBrands;
 vi.mock('../lib/imageCompression', () => ({ compressImage: vi.fn() }));
 vi.mock('../components/deliveries/StartDeliveryModal', () => ({ default: () => null }));
 vi.mock('../components/team/QuickTaskModal', () => ({ default: () => null }));
@@ -181,6 +189,22 @@ describe('Record without proof is admin-only on screen', () => {
 });
 
 describe('completion paths', () => {
+  it('completes as brands not confirmed when the brand list never finishes loading (brands never block)', async () => {
+    brandsLoad = () => new Promise(() => undefined);
+    try {
+      mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
+      await renderPage();
+      fireEvent.click(await screen.findByLabelText(/Record without proof/i));
+      fireEvent.change(screen.getByLabelText(/Why is there no proof/i), { target: { value: 'Customer confirmed by phone that all arrived' } });
+      fireEvent.change(screen.getByLabelText(/^Delivered on$/), { target: { value: '2026-10-01' } });
+      await completeAndConfirm();
+      await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
+      expect(completeRpcCalls()[0][1].p_brand_base_seq).toBe(-1);
+    } finally {
+      brandsLoad = emptyBrands;
+    }
+  });
+
   it('sends no customer receipt email after a no-proof completion, and sends its date', async () => {
     mockRpc.mockResolvedValue({ data: COMPLETE_RESULT, error: null });
     await renderPage();

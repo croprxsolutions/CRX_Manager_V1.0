@@ -33,13 +33,14 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const requestRef = useRef(0);
 
-  const load = useCallback(async () => {
+  /** `keep` holds edited lines whose choices stay on screen over the reloaded picks. */
+  const load = useCallback(async (keep: DraftLines = {}) => {
     const request = ++requestRef.current;
     try {
       const next = await getDeliveryBrands(deliveryId);
       if (request !== requestRef.current) return;
       setBrands(next);
-      setDrafts(Object.fromEntries(next.lines.map((l) => [l.delivery_item_id, draftFromPicks(l.picks)])));
+      setDrafts(Object.fromEntries(next.lines.map((l) => [l.delivery_item_id, keep[l.delivery_item_id] ?? draftFromPicks(l.picks)])));
       setLoadFailed(false);
     } catch (error) {
       if (request !== requestRef.current) return;
@@ -92,8 +93,8 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     } catch (error) {
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
         idem.resetKeyFor(scope);
-        toast('warning', 'Someone else changed these brands. They have been reloaded; check them and save again.');
-        await load();
+        toast('warning', 'Someone else changed these brands. Your corrections are still on screen; check them and save again.');
+        await load(Object.fromEntries(changed.map((lineId) => [lineId, drafts[lineId]])));
         return;
       }
       if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);

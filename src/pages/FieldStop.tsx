@@ -447,10 +447,10 @@ export default function FieldStop() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
-    // Unsaved brand choices are saved first, so completion uses the picks on screen; choices that cannot be
-    // saved were warned about and are left out. A failed save completes nothing (its reason is shown). The seq is not part of the completion's key: a retry replays on the key.
-    const brandBaseSeq = brandState.brands ? await brandState.save({ skipIncomplete: true }) : null;
-    if (brandState.brands && brandBaseSeq === null) return;
+    // Unsaved brand choices are saved first. Anything not saved (left out, refused, overtaken, or brands not
+    // loaded) completes anyway as "not confirmed", which lands on the office's list. The seq is not part of the
+    // completion's key: a retry replays on the key.
+    const brandBaseSeq = await brandState.saveForCompletion();
     // The checks above can take a few seconds; re-check the stop did not change meanwhile.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -485,7 +485,7 @@ export default function FieldStop() {
       // passed during them, a ticket dated "today" is now a past date and must carry its own timestamp.
       const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
-        ...(brandBaseSeq !== null ? { p_brand_base_seq: brandBaseSeq } : {}),
+        p_brand_base_seq: brandBaseSeq,
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, rpcParams.p_idempotency_key, () => (
           usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined)),

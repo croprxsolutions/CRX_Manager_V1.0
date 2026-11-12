@@ -52,6 +52,12 @@ export interface DeliveryBrands {
 
 /** The picker's value for "Other brand…" (a brand typed from the jug); real brand ids are uuids. */
 export const OTHER_BRAND = 'other';
+/**
+ * The brand seq a completion sends when the screen could not confirm the saved picks (brands did not load, or a
+ * choice was left out, refused or overtaken). complete_delivery still completes, records picks_confirmed false,
+ * and lists every picked line on the office's missing-brands list (20270104120000): warn, never block.
+ */
+export const BRANDS_NOT_CONFIRMED = -1;
 
 /** What the screen holds for one pick while it is being edited: a brand id, OTHER_BRAND, or '' (not chosen yet). */
 export interface DraftPick {

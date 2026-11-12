@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import type { DeliveryBrands } from '../../lib/deliveryBrands';
+import { BRANDS_NOT_CONFIRMED, type DeliveryBrands } from '../../lib/deliveryBrands';
 import { useDeliveryBrands } from './useDeliveryBrands';
 import { supabaseUntyped } from '../../lib/db';
 
@@ -56,8 +56,9 @@ describe('useDeliveryBrands completion save', () => {
     await act(async () => { seq = await result.current.save(); });
     expect(seq).toBeNull(); // an ordinary save still refuses and says why
 
-    await act(async () => { seq = await result.current.save({ skipIncomplete: true }); });
-    expect(seq).toBe(3); // completion goes ahead against the saved picks
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    // Completion goes ahead, but not as confirmed: the driver's choice differs from the saved picks.
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
   });
 });
 
@@ -76,7 +77,7 @@ describe('useDeliveryBrands after a delivery edit', () => {
 });
 
 describe('useDeliveryBrands when the database refuses the choices at completion', () => {
-  it('completes on the saved picks and tells the driver, but an ordinary save still refuses', async () => {
+  it('completes unconfirmed and tells the driver, but an ordinary save still refuses', async () => {
     getDeliveryBrands.mockResolvedValueOnce(brands(7));
     const { result } = renderHook(() => useDeliveryBrands('D1', true));
     await waitFor(() => expect(result.current.brands?.event_seq).toBe(7));
@@ -89,14 +90,36 @@ describe('useDeliveryBrands when the database refuses the choices at completion'
     expect(seq).toBeNull();
 
     toast.mockClear();
-    await act(async () => { seq = await result.current.save({ skipIncomplete: true }); });
-    expect(seq).toBe(7);
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
     expect(toast).toHaveBeenCalledWith('warning', expect.stringContaining('Completing without these brand choices'));
 
     rpc.mockResolvedValue({ data: null, error: { message: 'BRAND_PICKS_CHANGED: someone else saved' } } as never);
     getDeliveryBrands.mockResolvedValueOnce(brands(8));
-    await act(async () => { seq = await result.current.save({ skipIncomplete: true }); });
-    expect(seq).toBeNull(); // someone else saving first still stops it, and reloads
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED); // someone else saving first: completes unconfirmed, office follows up
+    // The driver's choice stays on screen over the reloaded picks.
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(8));
+    expect(result.current.drafts.L1).toEqual([pick]);
+
+    rpc.mockResolvedValue({ data: null, error: { message: 'timeout' } } as never);
+    await act(async () => { seq = await result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED); // any failed brand save still completes
     rpc.mockRestore();
+  });
+
+  it('completes unconfirmed when the brands never loaded, and confirmed when nothing changed', async () => {
+    getDeliveryBrands.mockRejectedValueOnce(new Error('down'));
+    const failed = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(failed.result.current.loadFailed).toBe(true));
+    let seq = 0;
+    await act(async () => { seq = await failed.result.current.saveForCompletion(); });
+    expect(seq).toBe(BRANDS_NOT_CONFIRMED);
+
+    getDeliveryBrands.mockResolvedValueOnce(brands(4));
+    const ok = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(ok.result.current.brands?.event_seq).toBe(4));
+    await act(async () => { seq = await ok.result.current.saveForCompletion(); });
+    expect(seq).toBe(4);
   });
 });

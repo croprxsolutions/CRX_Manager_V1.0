@@ -54,4 +54,9 @@ describe('DeliveryBrandPicker', () => {
       onChange={() => undefined} showLine={() => true} />);
     expect(screen.getByText('Unbranded seed')).toBeTruthy();
   });
+  it('shows the amount of a single saved brand that covers less than the line, so a correction can fix it', () => {
+    const short: DraftLines = { L1: [{ brandId: 'b1', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '4' }] };
+    render(<DeliveryBrandPicker brands={brands} drafts={short} disabled={false} fullQuantity={() => 5} onChange={() => undefined} />);
+    expect((screen.getByLabelText('Amount of Brand for Glyphosate 2.5') as HTMLInputElement).value).toBe('4');
+  });
 });

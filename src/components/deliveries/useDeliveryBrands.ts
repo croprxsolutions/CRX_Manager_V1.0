@@ -7,7 +7,7 @@ import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../../
 import { hasSignal } from '../../lib/connectivity';
 import { Sentry } from '../../lib/sentry';
 import {
-  changedLineIds, deliveryBrandErrorMessage, isBrandChoiceRefusal, draftFromPicks, getDeliveryBrands, picksPayload, setDeliveryBrands,
+  BRANDS_NOT_CONFIRMED, changedLineIds, deliveryBrandErrorMessage, isBrandChoiceRefusal, draftFromPicks, getDeliveryBrands, picksPayload, setDeliveryBrands,
   type DeliveryBrands, type DraftLines, type DraftPick,
 } from '../../lib/deliveryBrands';
 
@@ -100,32 +100,24 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     } catch (error) {
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
         idem.resetKeyFor(scope);
-        toast('warning', 'Someone else changed these brands. They have been reloaded; check them and try again.');
-        touchedRef.current = new Set();
+        // The driver's choices stay on screen over the reloaded picks; saving again sends them on the new base.
+        for (const line of lines) touchedRef.current.add(line.delivery_item_id);
+        toast('warning', completing
+          ? 'Someone else changed these brands. Completing without your brand choices; the office will check them.'
+          : 'Someone else changed these brands. Your choices are still on screen; check them and save again.');
         await load();
         return null;
       }
-      if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);
-      if (completing && isBrandChoiceRefusal(error)) {
-        // Brands never block a completion (Mason, 2026-11-09): it goes ahead on the picks already saved,
-        // and the driver is told these choices were not kept.
-        idem.resetKeyFor(scope);
-        toast('warning', `${deliveryBrandErrorMessage(error)} Completing without these brand choices; the office will follow up.`);
-        return brands.event_seq;
-      }
-      toast('error', deliveryBrandErrorMessage(error));
+      if (getIdempotencyBindingRejection(error) || isBrandChoiceRefusal(error)) idem.resetKeyFor(scope);
+      toast(completing ? 'warning' : 'error', completing
+        ? `${deliveryBrandErrorMessage(error)} Completing without these brand choices; the office will check them.`
+        : deliveryBrandErrorMessage(error));
       return null;
     }
   };
 
-  /**
-   * Saves the changed lines. Returns the delivery's brand event seq to complete against (unchanged when
-   * nothing needed saving), or null when the save did not happen (the reason is already shown).
-   * `skipIncomplete` (completion) leaves out lines whose choices cannot be saved instead of refusing:
-   * the confirm step already warned about them, and brands never block a completion. It also completes on the
-   * saved picks when the database refuses the choices themselves (the driver is told).
-   */
-  const save = async ({ skipIncomplete = false } = {}): Promise<number | null> => {
+  /** Saves the changed lines. Returns the new brand event seq (unchanged when nothing needed saving), or null when it did not save (the reason is shown). */
+  const save = async (): Promise<number | null> => {
     if (!brands || !deliveryId || saving) return null;
     const lines = [];
     for (const lineId of changed) {
@@ -133,7 +125,6 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       try {
         lines.push({ delivery_item_id: lineId, picks: picksPayload(line.product_name || 'This product', drafts[lineId], line.quantity) });
       } catch (error) {
-        if (skipIncomplete) continue;
         toast('error', error instanceof Error ? error.message : 'Check the brand choices');
         return null;
       }
@@ -143,12 +134,42 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     setSaving(true);
     try {
       if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
-      return await send(lines, skipIncomplete);
+      return await send(lines, false);
     } finally {
       setSaving(false);
     }
   };
 
+  /**
+   * Completion's brand step (brands never block a completion, Mason 2026-11-09 and 2026-11-12): saves what it
+   * can and returns the seq to complete against. That is the saved seq only when every choice on screen was
+   * saved; otherwise BRANDS_NOT_CONFIRMED, so the completion still goes through and the office follows up.
+   */
+  const saveForCompletion = async (): Promise<number> => {
+    if (!brands || !deliveryId) {
+      if (loadFailed) toast('warning', 'Brands could not be loaded. Completing anyway; the office will check this delivery’s brands.');
+      return BRANDS_NOT_CONFIRMED;
+    }
+    const lines = [];
+    let leftOut = false;
+    for (const lineId of changed) {
+      const line = brands.lines.find((l) => l.delivery_item_id === lineId)!;
+      // A choice that cannot be saved is left out (the confirm step already warned about it).
+      try {
+        lines.push({ delivery_item_id: lineId, picks: picksPayload(line.product_name || 'This product', drafts[lineId], line.quantity) });
+      } catch { leftOut = true; }
+    }
+    if (lines.length === 0) return leftOut ? BRANDS_NOT_CONFIRMED : brands.event_seq;
+    setSaving(true);
+    try {
+      // No signal: the completion's own signal check stops it next.
+      if (!(await hasSignal())) return BRANDS_NOT_CONFIRMED;
+      const seq = await send(lines, true);
+      return seq === null || leftOut ? BRANDS_NOT_CONFIRMED : seq;
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Still waiting for the first reply: completion waits too, so it never skips picks it has not seen.
   const loading = enabled && !!deliveryId && !brands && !loadFailed;
@@ -159,7 +180,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     return load();
   }, [load]);
 
-  return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, reload };
+  return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, saveForCompletion, reload };
 }
 
 export type DeliveryBrandsState = ReturnType<typeof useDeliveryBrands>;

@@ -112,7 +112,8 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                           value={row.typedManufacturer} disabled={disabled} onChange={(e) => update(index, { typedManufacturer: e.target.value })} />
                       </div>
                     )}
-                    {rows.length > 1 && (
+                    {/* One brand covers the whole line, unless its saved amount says otherwise (then it can be fixed). */}
+                    {(rows.length > 1 || (row.quantity.trim() !== '' && Number(row.quantity) !== fullQuantity(line))) && (
                       <label className="flex items-center gap-2 text-sm text-secondary">
                         Amount
                         <input className={`${FIELD_CLASS} w-32`} type="number" min="0" step="any" inputMode="decimal"

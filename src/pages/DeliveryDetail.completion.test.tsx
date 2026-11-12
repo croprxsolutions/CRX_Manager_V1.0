@@ -80,6 +80,11 @@ vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resol
 vi.mock('../lib/deliverySplitBilling', () => ({
   fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
 }));
+// No branded lines: the brand list loads empty, so completion confirms it (seq 0) and warns about nothing.
+vi.mock('../lib/deliveryBrands', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/deliveryBrands')>()),
+  getDeliveryBrands: async () => ({ delivery_id: 'del-1', status: 'in_progress', event_seq: 0, lines: [] }),
+}));
 vi.mock('../lib/imageCompression', () => ({ compressImage: vi.fn() }));
 vi.mock('../components/deliveries/StartDeliveryModal', () => ({ default: () => null }));
 vi.mock('../components/team/QuickTaskModal', () => ({ default: () => null }));

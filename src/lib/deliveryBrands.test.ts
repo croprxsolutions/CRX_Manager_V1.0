@@ -83,3 +83,14 @@ describe('setDeliveryBrands', () => {
     rpc.mockRestore();
   });
 });
+
+describe('brandWarnings for choices that cannot be saved', () => {
+  it('warns that a half-filled split or an over-sized split will not be saved', () => {
+    const half = [{ brandId: 'b1', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '5' },
+      { brandId: '', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '' }];
+    expect(brandWarnings(brands([line()]), { L1: half }, { L1: 10 })[0]).toMatch(/will not be saved/);
+    const over = [{ ...half[0], quantity: '8' }, { ...half[0], quantity: '3' }];
+    expect(() => picksPayload('X', over, 10)).toThrow(/more than the 10/);
+    expect(brandWarnings(brands([line()]), { L1: over }, { L1: 10 })[0]).toMatch(/will not be saved/);
+  });
+});

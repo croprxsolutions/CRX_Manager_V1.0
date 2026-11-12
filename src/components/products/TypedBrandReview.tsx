@@ -53,6 +53,8 @@ export default function TypedBrandReview() {
     setBusyPick(row.pick_id);
     try {
       await step();
+      // Gone from the list at once, so a failed refresh never leaves a finished row to click again.
+      setRows((prev) => prev.filter((r) => r.pick_id !== row.pick_id));
       toast('success', done);
       setLinking(null);
     } catch (error) {

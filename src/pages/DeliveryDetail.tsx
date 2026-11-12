@@ -1254,9 +1254,9 @@ export default function DeliveryDetail() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
-    // Unsaved brand choices are saved first, so completion uses the picks on screen. A failed save completes
-    // nothing (its reason is shown). The seq is not part of the completion's key: a retry replays on the key.
-    const brandBaseSeq = brandState.brands ? await brandState.save() : null;
+    // Unsaved brand choices are saved first, so completion uses the picks on screen; choices that cannot be
+    // saved were warned about and are left out. A failed save completes nothing (its reason is shown). The seq is not part of the completion's key: a retry replays on the key.
+    const brandBaseSeq = brandState.brands ? await brandState.save({ skipIncomplete: true }) : null;
     if (brandState.brands && brandBaseSeq === null) return;
     // The checks above can take a few seconds; never complete (or upload for) a delivery the user has left.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.

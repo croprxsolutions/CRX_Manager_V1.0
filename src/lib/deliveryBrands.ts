@@ -160,7 +160,7 @@ export function draftFromPicks(picks: DeliveryBrandPick[]): DraftPick[] {
  * amount before completion, the delivered amount in a correction). Throws a plain message the screen shows.
  */
 export function picksPayload(productName: string, draft: DraftPick[], fullQuantity: number): PickPayload[] {
-  return draft.map((d) => {
+  const picks = draft.map((d) => {
     const raw = d.quantity.trim();
     const quantity = draft.length === 1 && raw === '' ? fullQuantity : Number(raw);
     if (!Number.isFinite(quantity) || quantity <= 0 || Math.round(quantity * 10000) / 10000 !== quantity) {
@@ -176,6 +176,12 @@ export function picksPayload(productName: string, draft: DraftPick[], fullQuanti
       quantity,
     };
   });
+  // Amounts have at most 4 decimals, so whole ten-thousandths compare exactly.
+  const total = picks.reduce((s, p) => s + Math.round(p.quantity * 10000), 0);
+  if (total > Math.round(fullQuantity * 10000)) {
+    throw new Error(`${productName}: the brand amounts add up to more than the ${fullQuantity} on this line`);
+  }
+  return picks;
 }
 
 /** Same comparison form for a saved line and a draft line, to tell which lines changed. */
@@ -205,6 +211,11 @@ export function brandWarnings(brands: DeliveryBrands | null, drafts: DraftLines,
     const name = line.product_name || 'this product';
     const draft = drafts[line.delivery_item_id] ?? draftFromPicks(line.picks);
     if (draft.length === 0) { warnings.push(`No brand picked for ${name}.`); continue; }
+    // Choices that cannot be saved are left out at completion (warn, never block); say so here.
+    try { picksPayload(name, draft, line.quantity); } catch (error) {
+      warnings.push(`${error instanceof Error ? error.message : name}. Those choices will not be saved.`);
+      continue;
+    }
     // One pick at or above the delivered amount is trimmed to it by the database; anything else is a mismatch.
     const sum = draft.reduce((s, d) => s + (d.quantity.trim() === '' && draft.length === 1 ? qty : Number(d.quantity) || 0), 0);
     if (draft.length === 1 ? sum < qty : Math.abs(sum - qty) > 1e-9) {

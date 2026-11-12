@@ -68,11 +68,12 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       toast('error', error instanceof Error ? error.message : 'Check the brand choices');
       return;
     }
-    if (!(await hasSignal())) { toast('error', 'Brands save when you have signal.'); return; }
+    // Disabled from here, so nothing changes between building this correction and its reply.
+    setSaving(true);
+    if (!(await hasSignal())) { setSaving(false); toast('error', 'Brands save when you have signal.'); return; }
     // One key per exact correction: a retry of the same one reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, reason.trim(), brands.event_seq]);
     const request = ++requestRef.current;
-    setSaving(true);
     try {
       const result = await correctDeliveryBrands(deliveryId, lines, reason.trim(), brands.event_seq, idem.getKeyFor(scope));
       idem.resetKeyFor(scope);

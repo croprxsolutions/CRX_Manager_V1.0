@@ -41,3 +41,19 @@ describe('useDeliveryBrands', () => {
     expect(result.current.dirty).toBe(true);
   });
 });
+
+describe('useDeliveryBrands completion save', () => {
+  it('leaves out a half-filled split instead of refusing, so completion is never blocked by brands', async () => {
+    getDeliveryBrands.mockResolvedValueOnce(brands(3));
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(3));
+    act(() => result.current.setLineDraft('L1', [{ ...pick, quantity: '5' }, { ...pick, brandId: '', quantity: '' }]));
+
+    let seq: number | null = null;
+    await act(async () => { seq = await result.current.save(); });
+    expect(seq).toBeNull(); // an ordinary save still refuses and says why
+
+    await act(async () => { seq = await result.current.save({ skipIncomplete: true }); });
+    expect(seq).toBe(3); // completion goes ahead against the saved picks
+  });
+});

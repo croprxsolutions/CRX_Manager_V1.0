@@ -35,6 +35,8 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const requestRef = useRef(0);
   // Lines changed on screen since the last reply landed; a reload keeps those choices (still unsaved).
   const touchedRef = useRef(new Set<string>());
+  // Whether this delivery's picks are on screen (a later refresh failing must not hide them).
+  const loadedRef = useRef(false);
 
   const load = useCallback(async () => {
     const request = ++requestRef.current;
@@ -44,6 +46,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       if (request !== requestRef.current) return;
       const touched = touchedRef.current;
       touchedRef.current = new Set();
+      loadedRef.current = true;
       setBrands(next);
       setDrafts((prev) => {
         const fresh = draftsOf(next);
@@ -53,14 +56,16 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       setLoadFailed(false);
     } catch (error) {
       if (request !== requestRef.current) return;
-      setBrands(null);
-      setLoadFailed(true);
+      // A failed refresh keeps the picks and unsaved choices on screen (a later save still checks the base
+      // seq); only a failed first load shows the failure.
+      if (!loadedRef.current) setLoadFailed(true);
       Sentry.captureException(error, { level: 'warning', extra: { context: 'Delivery brands could not be loaded' } });
     }
   }, [deliveryId, enabled]);
 
   useEffect(() => {
     touchedRef.current = new Set();
+    loadedRef.current = false;
     setBrands(null); setDrafts({}); setSavedAt(null); setLoadFailed(false);
     void load();
   }, [load]);
@@ -73,28 +78,11 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const changed = changedLineIds(brands, drafts);
   const dirty = changed.length > 0;
 
-  /**
-   * Saves the changed lines. Returns the delivery's brand event seq to complete against (unchanged when
-   * nothing needed saving), or null when the save did not happen (the reason is already shown).
-   */
-  const save = useCallback(async (): Promise<number | null> => {
+  const send = async (lines: { delivery_item_id: string; picks: ReturnType<typeof picksPayload> }[]): Promise<number | null> => {
     if (!brands || !deliveryId) return null;
-    if (changed.length === 0) return brands.event_seq;
-    let lines;
-    try {
-      lines = changed.map((lineId) => {
-        const line = brands.lines.find((l) => l.delivery_item_id === lineId)!;
-        return { delivery_item_id: lineId, picks: picksPayload(line.product_name || 'This product', drafts[lineId], line.quantity) };
-      });
-    } catch (error) {
-      toast('error', error instanceof Error ? error.message : 'Check the brand choices');
-      return null;
-    }
-    if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
     // One key per exact save (this delivery, these choices, this base): a retry of the same save reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, brands.event_seq]);
     const request = ++requestRef.current;
-    setSaving(true);
     try {
       const result = await setDeliveryBrands(deliveryId, lines, brands.event_seq, idem.getKeyFor(scope));
       idem.resetKeyFor(scope);
@@ -120,10 +108,39 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);
       toast('error', deliveryBrandErrorMessage(error));
       return null;
+    }
+  };
+
+  /**
+   * Saves the changed lines. Returns the delivery's brand event seq to complete against (unchanged when
+   * nothing needed saving), or null when the save did not happen (the reason is already shown).
+   * `skipIncomplete` (completion) leaves out lines whose choices cannot be saved instead of refusing:
+   * the confirm step already warned about them, and brands never block a completion.
+   */
+  const save = async ({ skipIncomplete = false } = {}): Promise<number | null> => {
+    if (!brands || !deliveryId || saving) return null;
+    const lines = [];
+    for (const lineId of changed) {
+      const line = brands.lines.find((l) => l.delivery_item_id === lineId)!;
+      try {
+        lines.push({ delivery_item_id: lineId, picks: picksPayload(line.product_name || 'This product', drafts[lineId], line.quantity) });
+      } catch (error) {
+        if (skipIncomplete) continue;
+        toast('error', error instanceof Error ? error.message : 'Check the brand choices');
+        return null;
+      }
+    }
+    if (lines.length === 0) return brands.event_seq;
+    // Disabled from here, so no choice can change between building this save and its reply.
+    setSaving(true);
+    try {
+      if (!(await hasSignal())) { toast('error', BRANDS_NEED_SIGNAL_MESSAGE); return null; }
+      return await send(lines);
     } finally {
       setSaving(false);
     }
-  }, [brands, changed, deliveryId, drafts, idem, load, toast]);
+  };
+
 
   // Still waiting for the first reply: completion waits too, so it never skips picks it has not seen.
   const loading = enabled && !!deliveryId && !brands && !loadFailed;

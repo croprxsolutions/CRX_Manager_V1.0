@@ -4,6 +4,7 @@ import { Plus, FileUp, Download, FileText, Eye, EyeOff, ChevronDown, FileSpreads
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import TypedBrandReview from '../components/products/TypedBrandReview';
+import DeliveriesMissingBrands from '../components/deliveries/DeliveriesMissingBrands';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
@@ -1512,6 +1513,7 @@ export default function Products() {
       </Card>
 
       {isAdmin && <TypedBrandReview />}
+      {isAdmin && <DeliveriesMissingBrands />}
 
       {isAdmin && (
         <ProductSetupWorkbookModal

@@ -139,6 +139,36 @@ export async function getTypedBrandsForReview(): Promise<TypedBrandForReview[]> 
   return reply;
 }
 
+/** One completed line on the office's missing-brands follow-up list (get_deliveries_missing_brands). */
+export interface DeliveryMissingBrandsLine {
+  delivery_id: string;
+  delivery_number: string | null;
+  delivered_on: string;
+  delivery_item_id: string;
+  product_name: string | null;
+  quantity_delivered: number;
+  picked_quantity: number;
+  reasons: string[];
+}
+
+/** Plain words for each reason the database gives (unknown reasons show as they are). */
+export const MISSING_BRAND_REASON_LABELS: Record<string, string> = {
+  completed_before_brand_capture: 'Completed before brand capture',
+  brand_not_recorded: 'Brand not recorded',
+  split_does_not_match_delivered: 'Split does not match delivered',
+  epa_number_not_recorded: 'EPA number not recorded',
+  brand_no_longer_listed: 'Brand no longer listed',
+  picks_not_confirmed: 'Brands not confirmed at completion',
+};
+
+export async function getDeliveriesMissingBrands(from: string, to: string): Promise<DeliveryMissingBrandsLine[]> {
+  const { data, error } = await supabaseUntyped.rpc('get_deliveries_missing_brands', { p_from: from, p_to: to });
+  if (error) throw error;
+  const reply = assertRpcResult<DeliveryMissingBrandsLine[]>(data, 'get_deliveries_missing_brands');
+  if (!Array.isArray(reply)) throw new Error('get_deliveries_missing_brands returned an unexpected shape');
+  return reply;
+}
+
 export async function reviewTypedBrand(
   pickId: string, action: 'link' | 'dismiss', brandId: string | null, key: string,
 ): Promise<void> {

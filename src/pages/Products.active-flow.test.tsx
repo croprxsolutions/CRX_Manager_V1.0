@@ -24,6 +24,7 @@ function chainable(result: unknown) {
   return builder;
 }
 vi.mock('../components/products/TypedBrandReview', () => ({ default: () => null }));
+vi.mock('../components/deliveries/DeliveriesMissingBrands', () => ({ default: () => null }));
 vi.mock('../lib/db', async (original) => ({
   ...(await original<typeof import('../lib/db')>()),
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },

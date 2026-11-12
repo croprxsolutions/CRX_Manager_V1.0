@@ -9,6 +9,8 @@
   only warns ("Complete anyway" / "Pick brand"); nothing about brands blocks a completion (Mason, 2026-11-09).
   Brand saves need signal, like completion. Leaving with unsaved choices asks first.
 - Editing a delivery says which lines lost their brand picks.
+- Admins get a "Deliveries missing brands" list on Products (last 90 days; each row links to its delivery) for lines
+  completed with no brand, a split that does not add up, or brands not confirmed.
 - Admins get "Correct brands" on a completed delivery (reason required; a posted invoice must be voided and reissued
   first) and a "Brands to review" list on Products for brands drivers typed.
 - The Deliveries list's one-click Mark Delivered is unchanged; a branded line with no pick lands on the missing-brands list.

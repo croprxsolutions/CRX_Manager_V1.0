@@ -827,6 +827,21 @@ async function main() {
   assert.ok(!unrec('100-1').some((x) => x.invoice_item_id === L27), 'not under a number it does not carry');
   assert.ok(unrec('500-1').some((x) => x.invoice_item_id === L6 && x.brand_key === undefined), 'a mismatched line is listed once under the product number');
   assert.ok(unrec('100-1').some((x) => x.invoice_item_id === L6), 'and under its brand number');
+  // (Luna) A posted payer line with its Alpha record whose split stops reconciling is still listed under Bravo's number.
+  mkDelivery(28, [[PR, 10]]);
+  set(D(28), [{ delivery_item_id: DI(28, 0), picks: [pick(ALPHA, 5), pick(BRAVO, 5)] }], 'b1b-k28');
+  complete(D(28), { [DI(28, 0)]: 10 }, 'b1b-c28');
+  const L28 = invLine(28);
+  raw(`UPDATE public.invoice_items SET quantity = 6, extended_cents = 6000 WHERE id = '${L28}';
+    INSERT INTO public.invoices (id, customer_id, order_id, delivery_id, invoice_number, status, invoice_date, created_by)
+      VALUES ('${id(0x2808)}', '${CUST}', '${O(28)}', '${D(28)}', 'B1B-I28b', 'draft', current_date, '${ADMIN}');
+    INSERT INTO public.invoice_items (id, invoice_id, product_id, order_item_id, description, quantity, unit_size, unit_price_cents, extended_cents, brand_lines)
+      SELECT '${id(0x2809)}', '${id(0x2808)}', '${PR}', '${OI(28, 0)}', '[PROVER] second payer', 4, 'GL', 1000, 4000, brand_lines
+        FROM public.invoice_items WHERE id = '${L28}';`);
+  assert.equal(postAndGen(invOf(L28), 'b1b-g28'), 1, 'the Alpha record');
+  raw(`UPDATE public.invoice_items SET brand_lines = '[]'::jsonb WHERE id = '${id(0x2809)}';`);
+  assert.equal(alloc(L28).problem, 'payer_split_changed');
+  assert.ok(unrec('100-2').some((x) => x.invoice_item_id === L28 && x.brand_key === undefined), 'listed despite its Alpha record');
   console.log('[prover] case 23: the registration-change lookup lists a branded line under the product number and its brand number, and a line whose brands do not reconcile under any number it carries');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');

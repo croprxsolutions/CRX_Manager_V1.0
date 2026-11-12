@@ -1033,7 +1033,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
                         WHERE public._normalize_epa_registration(e ->> 'epa_registration') = p_number)
             OR EXISTS (SELECT 1 FROM public.invoice_line_brand_rup_captures c
                         WHERE c.invoice_item_id = ii.id AND c.epa_registration = p_number))
-       AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records s WHERE s.invoice_item_id = ii.id AND s.voided_at IS NULL)
+       -- listed even with a record for some brand: a record never settles a split that does not reconcile (Luna)
   ) x;
 $function$;
 

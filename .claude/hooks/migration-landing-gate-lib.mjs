@@ -198,9 +198,9 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (String(pr?.state || "").toUpperCase() !== "OPEN") return refuse(`${number} is not open.`);
   // Staging-first: a migration PR into staging is never applied live before its merge; the
   // staging database job applies it after the merge, and live gets it at release time. Only a
-  // hotfix (a PR into main) is applied live before its merge (ship.md › Staging).
+  // PR into main (the release PR or a hotfix, below) is applied live before its merge (ship.md › Staging).
   if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
-    return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only a hotfix PR into main is applied live first.`);
+    return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only the release PR or a hotfix PR into main is applied live first.`);
   }
   // Into main, only the weekly release (release/next) and a hotfix are applied live before their merge
   // (Mason's Decision A, 2026-11-12: his agents apply a release's migrations from the release PR, in stamp

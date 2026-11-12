@@ -1,4 +1,4 @@
-## 2026-11-11 — Brand PR B, part B-1a: delivery brands (database, not applied yet)
+## 2026-11-11 — Brand PR B, part B-1a: delivery brands (database, applied live 2026-11-11)
 
 - Migration `20270104120000_delivery_brands.sql`; build sheet `docs/plans/2026-11-08-product-BRAND-PRB-BUILD-SHEET.md`
   section 15; issue #1697.

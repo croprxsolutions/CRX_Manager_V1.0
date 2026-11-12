@@ -398,8 +398,12 @@ const moneyShape = (d) => scalar(`SELECT jsonb_build_object(
 const stock = (p) => scalar(`SELECT quantity_available || '/' || quantity_prebooked FROM public.inventory WHERE product_id = '${p}';`);
 
 async function main() {
-  if (REUSE) copyDatabase('bb_snap', 'postgres');
-  else {
+  if (REUSE) {
+    // Only this prover's own throwaway containers, and only once the saved copy exists, so a mistyped name never renames a real database.
+    if (!/^crx-brandb1-\d+-[a-z0-9]+$/.test(REUSE)) throw new Error(`CRX_PROVER_REUSE must name a crx-brandb1-<pid>-<id> prover container, got ${REUSE}`);
+    if (scalar(`SELECT count(*) FROM pg_database WHERE datname = 'bb_snap';`) !== '1') throw new Error(`${REUSE} has no bb_snap copy; run the prover fresh`);
+    copyDatabase('bb_snap', 'postgres');
+  } else {
     buildContainer();
     if (KEEP) copyDatabase('postgres', 'bb_snap');
   }

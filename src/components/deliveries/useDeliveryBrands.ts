@@ -98,6 +98,9 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       setSavedAt(new Date());
       return result.event_seq;
     } catch (error) {
+      if (getIdempotencyBindingRejection(error) || isBrandChoiceRefusal(error)) idem.resetKeyFor(scope);
+      // A reply for a delivery no longer on screen (or a superseded request) must not reload or touch this one.
+      if (request !== requestRef.current) return null;
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
         idem.resetKeyFor(scope);
         // The driver's choices stay on screen over the reloaded picks; saving again sends them on the new base.
@@ -108,7 +111,6 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
         await load();
         return null;
       }
-      if (getIdempotencyBindingRejection(error) || isBrandChoiceRefusal(error)) idem.resetKeyFor(scope);
       toast(completing ? 'warning' : 'error', completing
         ? `${deliveryBrandErrorMessage(error)} Completing without these brand choices; the office will check them.`
         : deliveryBrandErrorMessage(error));

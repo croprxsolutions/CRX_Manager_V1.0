@@ -123,3 +123,30 @@ describe('useDeliveryBrands when the database refuses the choices at completion'
     expect(seq).toBe(4);
   });
 });
+
+describe('useDeliveryBrands when the stop changes while a save is in flight', () => {
+  it('ignores the old stop’s late conflict, so its brands never replace the new stop’s', async () => {
+    getDeliveryBrands.mockReset();
+    getDeliveryBrands.mockImplementation(async (id: string) => ({ ...brands(id === 'D1' ? 1 : 20), delivery_id: id }));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    act(() => result.current.setLineDraft('L1', [pick]));
+
+    let refuse!: (v: unknown) => void;
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise((resolve) => { refuse = resolve; }) as never);
+    let saving!: Promise<number | null>;
+    act(() => { saving = result.current.save(); });
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    getDeliveryBrands.mockClear();
+    await act(async () => { refuse({ data: null, error: { message: 'BRAND_PICKS_CHANGED: someone else saved' } }); await saving; });
+
+    expect(getDeliveryBrands).not.toHaveBeenCalledWith('D1');
+    expect(result.current.brands?.delivery_id).toBe('D2');
+    expect(result.current.brands?.event_seq).toBe(20);
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
+});

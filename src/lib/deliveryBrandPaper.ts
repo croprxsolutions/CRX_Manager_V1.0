@@ -34,7 +34,7 @@ const touches = (rows: unknown, itemId: string) =>
 
 /**
  * Receipt brand keys per delivery line id, by the receipt's own rule (20270109100000): a line completed from an
- * out-of-date screen and not corrected since prints no brand, and "not recorded" uses the brand list the line had at
+ * out-of-date screen, or before brand capture (no completion event), prints no brand until the office corrects it; and "not recorded" uses the brand list the line had at
  * completion. Before completion nothing is delivered yet, so only picks already made are shown.
  */
 export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map<string, ReceiptBrandInfo> {
@@ -44,7 +44,7 @@ export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map
     const id = l.delivery_item_id;
     const corrected = events.some((e) => e.event_type === 'corrected' && (!done || e.seq > done.seq)
       && (touches(e.before_rows, id) || touches(e.after_rows, id)));
-    if (done?.details?.picks_confirmed === false && !corrected) return [id, {}];
+    if (completed && (!done || done.details?.picks_confirmed === false) && !corrected) return [id, {}];
     const delivered = Number(l.quantity_delivered ?? l.quantity);
     const listSize = done?.details?.lines?.find((x) => x.delivery_item_id === id)?.brand_list_size ?? 0;
     const info = receiptBrandInfoFromPicks(l.picks ?? [], delivered, !!done && delivered > 0 && listSize > 0);

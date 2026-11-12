@@ -154,4 +154,9 @@ describe('delivery paper brand notes follow the receipt rule', () => {
     expect(paperBrandInfo(read([]), [completed(true, 2)]).get('di1')).toEqual({ brand_recorded: false });
     expect(paperBrandInfo(read([]), []).get('di1')).toEqual({});
   });
+  it('a delivery completed before brand capture prints no brand until the office corrects it', () => {
+    expect(paperBrandInfo(read([pick]), []).get('di1')).toEqual({});
+    const fix: BrandPaperEvent = { seq: 5, event_type: 'corrected', details: null, before_rows: [{ delivery_item_id: 'di1' }], after_rows: [] };
+    expect(paperBrandInfo(read([pick]), [fix]).get('di1')?.brands).toHaveLength(1);
+  });
 });

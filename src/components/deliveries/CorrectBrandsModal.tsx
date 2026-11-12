@@ -10,7 +10,7 @@ import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { Sentry } from '../../lib/sentry';
 import {
-  changedLineIds, correctDeliveryBrands, deliveryBrandErrorMessage, draftFromPicks, getDeliveryBrands, isBrandedLine,
+  brandWarnings, changedLineIds, correctDeliveryBrands, deliveryBrandErrorMessage, draftFromPicks, getDeliveryBrands, isBrandedLine,
   picksPayload, type DeliveryBrandLine, type DeliveryBrands, type DraftLines,
 } from '../../lib/deliveryBrands';
 import DeliveryBrandPicker from './DeliveryBrandPicker';
@@ -58,6 +58,11 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
     const changed = changedLineIds(brands, drafts);
     if (changed.length === 0) { toast('info', 'No brand changes to save.'); return; }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
+    // A correction must account for everything delivered on each line it changes (the database checks it too).
+    const changedLines = brands.lines.filter((l) => changed.includes(l.delivery_item_id));
+    const mismatch = brandWarnings({ ...brands, lines: changedLines }, drafts,
+      Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])))[0];
+    if (mismatch) { toast('error', mismatch.replace(' Those choices will not be saved.', '')); return; }
     let lines;
     try {
       lines = changed.map((lineId) => {

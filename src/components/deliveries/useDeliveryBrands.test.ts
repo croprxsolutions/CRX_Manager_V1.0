@@ -57,3 +57,17 @@ describe('useDeliveryBrands completion save', () => {
     expect(seq).toBe(3); // completion goes ahead against the saved picks
   });
 });
+
+describe('useDeliveryBrands after a delivery edit', () => {
+  it('drops unsaved choices on lines the edit cleared, so they are never saved against the changed line', async () => {
+    getDeliveryBrands.mockResolvedValueOnce(brands(1));
+    const { result } = renderHook(() => useDeliveryBrands('D1', true));
+    await waitFor(() => expect(result.current.brands?.event_seq).toBe(1));
+    act(() => { result.current.setLineDraft('L1', [pick]); result.current.setLineDraft('L2', [pick]); });
+
+    getDeliveryBrands.mockResolvedValueOnce(brands(2));
+    await act(async () => { await result.current.reload({ discard: ['L1'] }); });
+    expect(result.current.drafts.L1).toEqual([]);
+    expect(result.current.drafts.L2).toEqual([pick]);
+  });
+});

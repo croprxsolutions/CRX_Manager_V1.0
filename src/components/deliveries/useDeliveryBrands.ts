@@ -145,7 +145,13 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   // Still waiting for the first reply: completion waits too, so it never skips picks it has not seen.
   const loading = enabled && !!deliveryId && !brands && !loadFailed;
 
-  return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, reload: load };
+  /** Reloads the saved picks; `discard` names lines whose unsaved choices no longer apply (the line was edited). */
+  const reload = useCallback(({ discard = [] }: { discard?: string[] } = {}) => {
+    for (const lineId of discard) touchedRef.current.delete(lineId);
+    return load();
+  }, [load]);
+
+  return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, reload };
 }
 
 export type DeliveryBrandsState = ReturnType<typeof useDeliveryBrands>;

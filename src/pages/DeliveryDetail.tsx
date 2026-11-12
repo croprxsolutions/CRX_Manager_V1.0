@@ -830,13 +830,14 @@ export default function DeliveryDetail() {
     if (error) {
       toast('error', sanitizeError(error));
     } else {
-      const edited = assertRpcResult<{ brand_lines_dropped?: { product_id: string | null }[] }>(data, 'edit_delivery');
+      const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
       editIdem.resetKeyFor(editScope);
       // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
       const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
         (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
       if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
-      void brandState.reload();
+      // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
+      void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
       toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
       setEditing(false);
       fetchDelivery();

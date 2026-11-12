@@ -251,7 +251,7 @@ A generic has several EPA numbers, one per brand row.
 - a warning when the product is added to a quote;
 - a warning at the delivery brand pick.
 
-They ship after REG-1, not in brand PR B. Delivery and application records keep a snapshot of the EPA number written at the time, so correcting a brand's number never rewrites history.
+They ship after REG-1, not in brand PR B. Status 2026-11-12: the product banner is built; the delivery brand-pick warning follows B-2; the quote warning is deferred (see the note after MOA-1). Delivery and application records keep a snapshot of the EPA number written at the time, so correcting a brand's number never rewrites history.
 
 ### 9. Data clean-up vs bulk tools (DM-0; Sol 1, 55)
 **Settled:** DM-0 moves into Stage 1, right after WP-PM-9 and before bulk import (WP-PM-10) and the detail upload (WP-PM-11a). Bulk tools need each product to have one identity.
@@ -644,6 +644,8 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
 - **Relation to CMP-2:** CMP-2's mode-of-action filter reads the same data, so MOA-1 should land before it. CMP-2 is on hold (Stage 5).
 - **Quote screen (Part B), logged only:** an option on the quote page to show each line's actives and groups to the grower is a To-Do "Later features" item, **on hold while Taha works on the quote and chemical-sales screens**; no quote-screen file is touched until his UI PRs land.
 - **Done when** (draft, refined in its build sheet): a product whose actives come from an EPA lookup or the workbook shows its groups without anyone typing them; a two-ingredient premix shows both groups; an ingredient with no known group shows "group not recorded", never a guess.
+
+**Cancelled-registration warning on the quote page, deferred** (2026-11-12): the §8 warning when a product on a cancelled registration is added to a quote is **on hold while Taha works on the quote screens**, like MOA-1's quote item above; no quote-screen file (`QuoteBuilder.tsx`, quote components, `components/ui`) is touched until his UI PRs land. The product-page banner and the Brands-table mark ship first; the delivery brand-pick warning follows brand PR B-2.
 
 **DM-5 · dropped (2026-10-29).** Parent records (PAR-1) replace copying between sizes; the nickname moved to PAR-1 (overlaps 7, 13).
 

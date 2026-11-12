@@ -1,0 +1,56 @@
+import { useEffect, useState } from 'react';
+import { assertRpcResult, supabaseUntyped } from './db';
+import { parseLocalDate } from './dateUtils';
+import { Sentry } from './sentry';
+import { toSentryError } from './sentryError';
+
+/** Same key the database stores registrations under (`_normalize_epa_registration`). */
+export function normalizeEpaRegistration(value: string | null | undefined): string | null {
+  return (value ?? '').replace(/\s/g, '').toUpperCase() || null;
+}
+
+/** "cancelled 3/1/2025", or says the date was not recorded. */
+export function cancelledOnText(cancelledOn: string | null | undefined): string {
+  return cancelledOn ? `cancelled ${parseLocalDate(cancelledOn).toLocaleDateString()}` : 'cancelled (date not recorded)';
+}
+
+/** Registration number (normalized) → the date EPA cancelled it (`YYYY-MM-DD`), or null when not recorded. */
+export type CancelledRegistrations = Map<string, string | null>;
+
+interface RegistrationRow {
+  epa_registration: string;
+  registration_status: string;
+  cancelled_on: string | null;
+}
+
+/** Which of these numbers are stored as cancelled (REG-1). Only reads; nothing here ever blocks a sale. */
+export async function getCancelledRegistrations(numbers: (string | null | undefined)[]): Promise<CancelledRegistrations> {
+  const wanted = [...new Set(numbers.map(normalizeEpaRegistration).filter((n): n is string => n !== null))];
+  // An empty or NULL list would ask for every registration.
+  if (wanted.length === 0) return new Map();
+  const { data, error } = await supabaseUntyped.rpc('get_epa_registrations', { p_numbers: wanted });
+  if (error) throw error;
+  const rows = assertRpcResult<RegistrationRow[]>(data, 'get_epa_registrations');
+  return new Map(rows.filter((r) => r.registration_status === 'cancelled').map((r) => [r.epa_registration, r.cancelled_on]));
+}
+
+/** Loads the cancelled set for these numbers; a failed read is reported, never treated as "none cancelled". */
+export function useCancelledRegistrations(numbers: (string | null | undefined)[]) {
+  const key = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
+  const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; failed: boolean }>(
+    { key: '', cancelled: new Map(), failed: false },
+  );
+  useEffect(() => {
+    let active = true;
+    getCancelledRegistrations(key ? key.split('|') : [])
+      .then((cancelled) => { if (active) setState({ key, cancelled, failed: false }); })
+      .catch((err: unknown) => {
+        if (!active) return;
+        Sentry.captureException(toSentryError(err), { extra: { context: 'get_epa_registrations' } });
+        setState({ key, cancelled: new Map(), failed: true });
+      });
+    return () => { active = false; };
+  }, [key]);
+  // Until this key's reply lands, show nothing rather than the previous numbers' answer.
+  return state.key === key ? state : { key, cancelled: new Map() as CancelledRegistrations, failed: false };
+}

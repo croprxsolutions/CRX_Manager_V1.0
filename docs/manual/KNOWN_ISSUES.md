@@ -1337,7 +1337,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
-  get a return credit (MED): changes when `20270106100000` applies. A new order line with no unit takes the product's
+  get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's
   unit; a sale line with no unit takes the order line's unit, else the product's; a delivery always completes, and
   posting a chemical-sale invoice is refused (`INVOICE_LINE_UNIT_MISSING`) while any product line, with or without an
   order line, still has no unit (Mason, 2026-11-10: no sale line posts without a unit); `create_invoice_from_order`

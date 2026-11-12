@@ -207,7 +207,8 @@ export function restampPairs({ deleted, added, blob }) {
     const to = added.filter((a) => NAME.test(a.replace(/\.sql$/, '')) && slug(a) === slug(from) && a.slice(0, 14) > from.slice(0, 14) && blob(a) === b);
     if (to.length === 1) pairs.push({ from, to: to[0] });
   }
-  return pairs;
+  // One new file two deleted files could claim is ambiguous (staging couldn't pick a row to rename): no restamp.
+  return pairs.filter((p) => pairs.filter((q) => q.to === p.to).length === 1);
 }
 
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file

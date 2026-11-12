@@ -251,6 +251,7 @@ test('restampPairs: a deleted and an added migration with the same blob and name
   assert.deepEqual(pairs, [{ from: '20261231110000_m4b.sql', to: '20270102000000_m4b.sql' }], 'm4a changed its bytes; x has another name');
   assert.deepEqual(restampPairs({ deleted: ['20270103000000_m4b.sql'], added: ['20270102000000_m4b.sql'], blob: () => 'same' }), [], 'an older new stamp is no restamp');
   assert.deepEqual(restampPairs({ deleted: ['20261231110000_m4b.sql'], added: ['20270102000000_m4b.sql'], blob: () => null }), [], 'an unreadable blob is no restamp');
+  assert.deepEqual(restampPairs({ deleted: ['20261231110000_m4b.sql', '20261231110001_m4b.sql'], added: ['20270102000000_m4b.sql'], blob: () => 'same' }), [], 'two deleted files claiming one new file is no restamp');
 });
 test('stampProblems: a restamp is not an edit, and its new stamp must still be the newest', () => {
   const base = ['20261231110000_m4b.sql', '20270101000000_live.sql'];

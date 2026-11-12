@@ -780,7 +780,28 @@ function caseH27() {
   assert.equal(tw.length, 1, JSON.stringify(twin));
   assert.equal(tw[0].class, 'epa_conflict'); assert.equal(tw[0].accept_default, false); assert.equal(tw[0].current, null);
   raw(`DELETE FROM public.product_parent_ingredients WHERE ingredient_id IN ('${T1}', '${T2}'); DELETE FROM public.active_ingredients WHERE id IN ('${T1}', '${T2}');`);
-  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts; a name shared by two rows is one unticked conflict');
+  // Sol 2026-11-11: EPA's month-name dates are read; a registration edited after the proposal holds the commit even
+  // when the item still sorts as the same fill.
+  assert.equal(scalar(`SELECT public._epa_label_date('December 12, 2025');`), '2025-12-12');
+  assert.equal(scalar(`SELECT public._epa_label_date('February 30, 2025') IS NULL;`), 't');
+  raw(`UPDATE public.epa_registrations SET label_accepted_on = '2020-01-01', label_url = 'https://www3.epa.gov/old.pdf' WHERE epa_registration = '127-1';`);
+  const lp = lookup(P27, '127-1', found('127-1', [['Glyphosate', 41]], { labelPdfs: [
+    { fileName: 'new.pdf', acceptedDate: 'December 12, 2025', url: 'https://www3.epa.gov/new.pdf' }] }));
+  assert.equal(item(proposal(lp.proposal_id), 'label:label_document').class, 'fill');
+  raw(`UPDATE public.epa_registrations SET label_accepted_on = '2024-01-01', label_url = 'https://www3.epa.gov/mid.pdf' WHERE epa_registration = '127-1';`);
+  const lh = js(ADMIN, COMMIT(lp.proposal_id, 1));
+  assert.equal(lh.status, 'held'); assert.equal(lh.hold_reason, 'registration_changed');
+  assert.equal(reg('127-1').label_url, 'https://www3.epa.gov/mid.pdf', "the other admin's link is kept");
+  // Sol 2026-11-11: a 250-character name passes the shape check and is shown, not written; a percent too small to
+  // store is a conflict with no strength.
+  const longName = 'X'.repeat(250);
+  assert.equal(scalar(`SELECT public._epa_lookup_shape_error(${J(found('127-1', [[longName, 5, null]]))}, '127-1') IS NULL;`), 't');
+  const li = JSON.parse(scalar(`SELECT public._epa_proposal_items('${P27}', '127-1', public._epa_lookup_input(${J(found('127-1', [[longName, 5, null]]))}));`))
+    .find((i) => i.epa?.name === longName);
+  assert.equal(li.class, 'epa_conflict'); assert.equal(li.accept_default, false);
+  const tiny = JSON.parse(scalar(`SELECT public._epa_lookup_input(${J(found('127-1', [['Glyphosate', 0.00000000001]]))})->'ingredients';`));
+  assert.equal(tiny[0].strength, null); assert.equal(tiny[0].conflict, true);
+  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts; a name shared by two rows is one unticked conflict; month-name label dates read; a registration edit after the proposal holds; an over-long name or unstorable percent is a conflict');
 }
 
 async function caseH9H15() {

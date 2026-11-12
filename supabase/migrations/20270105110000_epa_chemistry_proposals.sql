@@ -294,7 +294,8 @@ BEGIN
 END;
 $function$;
 
--- A calendar date from EPA's acceptedDate (YYYY-MM-DD or MM/DD/YYYY), or NULL when it is not a real date.
+-- A calendar date from EPA's acceptedDate (YYYY-MM-DD, MM/DD/YYYY, or "December 12, 2025" as the epa-lookup
+-- normalizer passes EPA's own text; Sol, 2026-11-11), or NULL when it is not a real date.
 CREATE FUNCTION public._epa_label_date(p text) RETURNS date
 LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -307,6 +308,9 @@ BEGIN
   ELSIF v_t ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$' THEN
     v_d := to_date(v_t, 'MM/DD/YYYY');
     IF to_char(v_d, 'MM/DD/YYYY') = v_t THEN RETURN v_d; END IF;
+  ELSIF v_t ~ '^(January|February|March|April|May|June|July|August|September|October|November|December) [0-9]{1,2}, [0-9]{4}$' THEN
+    v_d := to_date(v_t, 'FMMonth FMDD, YYYY');
+    IF to_char(v_d, 'FMMonth FMDD, YYYY') = v_t THEN RETURN v_d; END IF;
   END IF;
   RETURN NULL;
 EXCEPTION WHEN others THEN
@@ -343,8 +347,8 @@ BEGIN
   END IF;
   FOR v_e IN SELECT e FROM jsonb_array_elements(p_result->'activeIngredients') e LOOP
     IF jsonb_typeof(v_e) IS DISTINCT FROM 'object' OR jsonb_typeof(v_e->'name') IS DISTINCT FROM 'string'
-       OR btrim(v_e->>'name') = '' OR char_length(btrim(v_e->>'name')) > 200 THEN
-      RETURN 'an active ingredient has no name of at most 200 characters';
+       OR btrim(v_e->>'name') = '' OR char_length(btrim(v_e->>'name')) > 300 THEN
+      RETURN 'an active ingredient has no name of at most 300 characters';  -- the epa-lookup normalizer's limit
     END IF;
     IF jsonb_typeof(v_e->'percent') IS DISTINCT FROM 'null'
        AND (jsonb_typeof(v_e->'percent') IS DISTINCT FROM 'number' OR NOT ((v_e->>'percent')::numeric > 0 AND (v_e->>'percent')::numeric <= 100)) THEN
@@ -402,7 +406,9 @@ BEGIN
            CASE WHEN jsonb_typeof(e->'casNumber') = 'string' AND btrim(e->>'casNumber') ~ '^[0-9]{2,7}-[0-9]{2}-[0-9]$'
                      AND public._ingredient_cas_valid(btrim(e->>'casNumber')) THEN btrim(e->>'casNumber') END AS cas,
            jsonb_typeof(e->'casNumber') = 'string' AND btrim(e->>'casNumber') <> '' AS cas_given,
-           CASE WHEN jsonb_typeof(e->'percent') = 'number' THEN round((e->>'percent')::numeric, 10) END AS strength
+           NULLIF(CASE WHEN jsonb_typeof(e->'percent') = 'number' THEN round((e->>'percent')::numeric, 10) END, 0) AS strength,
+           -- A positive percent below 10 decimal places rounds to zero: not storable, so a conflict (Sol, 2026-11-11).
+           jsonb_typeof(e->'percent') = 'number' AND round((e->>'percent')::numeric, 10) = 0 AS tiny
       FROM jsonb_array_elements(p_result->'activeIngredients') WITH ORDINALITY AS t(e, o)
   ), keyed AS (
     -- A name-only entry joins the one same-name entry that has a CAS number, so one ingredient is never two rows (Sol,
@@ -419,7 +425,7 @@ BEGIN
            (array_agg(cas ORDER BY o) FILTER (WHERE cas IS NOT NULL))[1] AS cas,
            bool_or(cas IS NULL AND cas_given) AS cas_dropped,
            (array_agg(strength ORDER BY o))[1] AS strength,
-           count(DISTINCT COALESCE(strength::text, 'unknown')) > 1 AS conflict,
+           count(DISTINCT COALESCE(strength::text, 'unknown')) > 1 OR bool_or(tiny) AS conflict,
            bool_or(ambiguous) AS ambiguous
       FROM keyed GROUP BY key
   )
@@ -479,6 +485,13 @@ BEGIN
   -- Ingredients. CAS matches first, then names (lower case, spaces collapsed) against the parent's own rows only.
   FOR v_ing IN SELECT e FROM jsonb_array_elements(p_input->'ingredients') e ORDER BY (e->>'cas') IS NULL, e->>'key' LOOP
     v_s := (v_ing->>'strength')::numeric;
+    IF char_length(v_ing->>'name') > 200 THEN
+      -- Longer than an ingredient name can be stored (Sol, 2026-11-11): shown, never written.
+      v_items := v_items || jsonb_build_array(jsonb_build_object('item_id', 'ing:' || (v_ing->>'key'), 'kind', 'ingredient',
+        'class', 'epa_conflict', 'epa', v_ing, 'current', NULL, 'accept_default', false,
+        'note', 'EPA''s ingredient name is longer than 200 characters.'));
+      CONTINUE;
+    END IF;
     IF (v_ing->>'ambiguous')::boolean THEN
       -- EPA gives this name with several CAS numbers and once with none: that entry names no one chemical.
       v_items := v_items || jsonb_build_array(jsonb_build_object('item_id', 'ing:' || (v_ing->>'key'), 'kind', 'ingredient',
@@ -936,7 +949,8 @@ BEGIN
         v_new := NULL;
         SELECT e INTO v_new FROM jsonb_array_elements(v_now) e WHERE e->>'item_id' = v_item->>'item_id';
         IF v_new IS NULL OR (v_new->>'class' IS DISTINCT FROM 'confirm'
-            AND (v_new->>'class' IS DISTINCT FROM v_item->>'class' OR v_new->'change' IS DISTINCT FROM v_item->'change')) THEN
+            AND (v_new->>'class' IS DISTINCT FROM v_item->>'class' OR v_new->'change' IS DISTINCT FROM v_item->'change'
+                 OR v_new->'current' IS DISTINCT FROM v_item->'current')) THEN  -- Sol 2026-11-11: an edit to the facts holds
           v_hold := 'registration_changed';
           EXIT;
         END IF;

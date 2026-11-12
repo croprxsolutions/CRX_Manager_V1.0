@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261111152650",
+    "migrations_high_water": "20261111211435",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -578,6 +578,8 @@
       "20270103140000_dry_product_fluid_ounce_guard",
       "20270103150000_ki108_stock_matches_history",
       "20270103160000_setup_workbook_chemistry_tabs",
+      "20270103170000_cycle_count_variance_vs_onhand_at_count",
+      "20270103180000_po_close_short",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -5741,6 +5743,12 @@
       "constraint": "purchase_order_items_unit_cost_whole_cents_chk",
       "def": "CHECK (((unit_cost IS NULL) OR ((unit_cost = round(unit_cost, 2)) AND (unit_cost > '-Infinity'::numeric) AND (unit_cost < 'Infinity'::numeric) AND (unit_cost >= (0)::numeric) AND (unit_cost = ((unit_cost_cents)::numeric / 100.0)))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "purchase_orders",
+      "constraint": "purchase_orders_closed_fields_check",
+      "def": "CHECK ((((status = 'closed'::text) = ((closed_at IS NOT NULL) AND (closed_by IS NOT NULL) AND (close_reason IS NOT NULL))) AND ((closed_at IS NULL) = (closed_by IS NULL)) AND ((closed_at IS NULL) = (close_reason IS NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "purchase_orders",
@@ -11363,7 +11371,10 @@
       "cancelled_at",
       "cancelled_by",
       "cancel_reason",
-      "total_cost_cents"
+      "total_cost_cents",
+      "closed_at",
+      "closed_by",
+      "close_reason"
     ],
     "quote_items": [
       "id",

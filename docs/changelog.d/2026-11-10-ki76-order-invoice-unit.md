@@ -12,5 +12,5 @@
 - KI-76's season item was already fixed by `20261204110000` (KI-18 batch 2); the entry is updated.
 - Applied live 2026-11-11 (ledger version `20261112055003`). Live check: the four triggers are on, the save fix and
   the quick-delivery edit fix are in the live bodies, and the four new functions are closed to signed-in callers.
-  Three cost-exposure allowlist entries re-keyed (save_invoice, create_invoice_from_order,
-  create_split_invoices_from_order).
+  Four cost-exposure allowlist entries re-keyed (save_invoice, create_invoice_from_order,
+  create_split_invoices_from_order, complete_delivery).

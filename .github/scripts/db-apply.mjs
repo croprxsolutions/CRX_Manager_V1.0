@@ -339,7 +339,8 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   const unmatched = renameRestamps ? unmatchedRestamps({ stored, files: postFiles, highWater, restamps }) : [];
   if (unmatched.length) throw new Error(`STOPPED before applying anything: ${unmatched.join(', ')} look(s) like a restamp of a migration this database already ran, but the SQL is not byte-identical to what ran here (or more than one file or row could match), so it would run a second time. Restamp with the exact same bytes, one file per migration.`);
   const ledgerNames = new Set([...stored.keys(), ...restamps.map((r) => r.to)]);
-  // Applied files must still be what was applied.
+  // Applied files must still be what was applied. postBaseline needs the file, so a restamped row's old
+  // name (its file is gone) is skipped here and renamed below.
   const edited = [...stored].filter(([n, h]) => h && postBaseline(n) && sha256(fileBytes(n)) !== h).map(([n]) => n);
   if (edited.length) throw new Error(`STOPPED: these applied migrations no longer match the ledger (edited after they ran): ${edited.join(', ')}`);
   const { steps, outOfOrder } = planMigrations({ files, highWater, ledgerNames, oneShots, allowOutOfOrder });

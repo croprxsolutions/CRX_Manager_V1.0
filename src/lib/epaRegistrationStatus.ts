@@ -34,6 +34,8 @@ export async function getCancelledRegistrations(numbers: (string | null | undefi
   return new Map(rows.filter((r) => r.registration_status === 'cancelled').map((r) => [r.epa_registration, r.cancelled_on]));
 }
 
+export const CHECK_TIMEOUT_MS = 15_000;
+
 /** Loads the cancelled set for these numbers; a failed read is reported, never treated as "none cancelled". */
 export function useCancelledRegistrations(numbers: (string | null | undefined)[]) {
   const key = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
@@ -49,7 +51,11 @@ export function useCancelledRegistrations(numbers: (string | null | undefined)[]
         Sentry.captureException(toSentryError(err), { extra: { context: 'get_epa_registrations' } });
         setState({ key, cancelled: new Map(), failed: true });
       });
-    return () => { active = false; };
+    // A check with no reply after 15 seconds shows "could not check" rather than nothing; a late reply still lands.
+    const timer = setTimeout(() => {
+      if (active) setState((prev) => (prev.key === key ? prev : { key, cancelled: new Map(), failed: true }));
+    }, CHECK_TIMEOUT_MS);
+    return () => { active = false; clearTimeout(timer); };
   }, [key]);
   // Until this key's reply lands, show nothing rather than the previous numbers' answer.
   return state.key === key ? state : { key, cancelled: new Map() as CancelledRegistrations, failed: false };

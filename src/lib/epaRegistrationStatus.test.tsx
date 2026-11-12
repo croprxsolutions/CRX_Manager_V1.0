@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockRpc } = vi.hoisted(() => ({ mockRpc: vi.fn() }));
@@ -9,7 +9,7 @@ vi.mock('./db', () => ({
 }));
 vi.mock('./sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 
-import { cancelledOnText, getCancelledRegistrations, normalizeEpaRegistration } from './epaRegistrationStatus';
+import { CHECK_TIMEOUT_MS, cancelledOnText, getCancelledRegistrations, normalizeEpaRegistration, useCancelledRegistrations } from './epaRegistrationStatus';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 
@@ -102,5 +102,18 @@ describe('cancelled registrations', () => {
       cancelled={new Map([['524-475', null]])} onBrandsChange={onBrandsChange} />);
     expect(await screen.findByText('cancelled (date not recorded)')).toBeInTheDocument();
     await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith([expect.objectContaining({ epa_registration: '524-475' })]));
+  });
+
+  it('a check with no reply shows "could not check" after the timeout', () => {
+    vi.useFakeTimers();
+    try {
+      mockRpc.mockReturnValue(new Promise(() => {}));
+      const { result } = renderHook(() => useCancelledRegistrations(['524-475']));
+      expect(result.current.failed).toBe(false);
+      act(() => { vi.advanceTimersByTime(CHECK_TIMEOUT_MS); });
+      expect(result.current.failed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

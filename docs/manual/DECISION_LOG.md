@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
+
+**Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.
+**Why:** brands never block delivery work (Mason, 2026-11-09). The only cost is a rare clash when a line is deleted at the same moment the delivery completes: the database cancels one of the two and that person retries. Nothing is lost or miscounted.
+**What this forbids/implies:** reviewers should not re-raise that deadlock on the line-delete trigger (`20270104120000_delivery_brands.sql`) as a BLOCKER or HIGH; refusing the delete would need a new Mason decision.
+
 ## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
 
 **Decision (Mason, in chat, 2026-11-11: "I should be able to pre authorize migration … I rely on testing and verification", then "All but deletions").** A migration that overwrites existing rows or changes who can access what no longer needs his `I approve` reply; it applies on the same two reviewer proofs, Sol proof and landing gate as any non-destructive migration. A migration that deletes data still needs his reply for that exact file, and so does one whose rewrite or access check crashed.

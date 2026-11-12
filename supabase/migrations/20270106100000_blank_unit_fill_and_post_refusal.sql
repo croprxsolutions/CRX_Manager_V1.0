@@ -268,8 +268,10 @@ $function$;
 -- 2026-11-10). The app's quick-delivery screen sends the product's unit, so nothing it does changes; a request
 -- built outside the app can no longer record a delivery in one unit (e.g. case) while the order and invoice
 -- lines carry the product's (e.g. Gal) and are credited in it. It also runs when a line's unit or product is
--- edited directly (an admin may update delivery lines through the API; the app never edits these columns), so the unit
--- cannot be changed afterwards either. Never refuses: a driver is never stopped.
+-- edited directly (an admin may update delivery lines through the API; the app never edits these columns): an edit that
+-- keeps the product keeps the unit the line was recorded in, so it still matches the order and invoice lines even if
+-- the product's unit changed since; an edit that changes the product takes the new product's unit. Never refuses:
+-- a driver is never stopped.
 -- Live 2026-11-10: 0 quick-delivery lines.
 CREATE FUNCTION public._lock_quick_delivery_line_unit()
  RETURNS trigger
@@ -280,7 +282,11 @@ AS $function$
 BEGIN
   IF NEW.product_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM public.deliveries d WHERE d.id = NEW.delivery_id AND d.is_quick_delivery) THEN
-    NEW.unit_size := (SELECT p.unit_size FROM public.products p WHERE p.id = NEW.product_id);
+    IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
+      NEW.unit_size := OLD.unit_size;
+    ELSE
+      NEW.unit_size := (SELECT p.unit_size FROM public.products p WHERE p.id = NEW.product_id);
+    END IF;
   END IF;
   RETURN NEW;
 END;

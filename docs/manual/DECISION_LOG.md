@@ -10,16 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
-## 2026-11-11 — #1731 lands as Taha reviewed it; his two LOW notes wait (KI-76)
+## 2026-11-11 — #1731 lands; quick-delivery edits keep their unit (KI-76)
 
-**Decision (Mason, in chat, 2026-11-11: "Yes, land it"):** after Taha's review of #1731 ("fine to apply as written", two LOWs), apply and merge it without further changes to the migration; his two LOW notes are follow-ups under KI-76.
-**Why:** neither note blocks the fix, and changing the SQL now would void his review.
+**Decision (Mason, in chat, 2026-11-11: "Yes, land it"):** after Taha's review of #1731 ("fine to apply as written", two LOWs), land it. Then, after Sol round 5 (Mason: "Yes, do that"): an admin's direct edit of a quick-delivery line keeps the unit the line was recorded in unless the product changes (Taha's first LOW, fixed); the empty-text limit from 2026-11-10 stays as decided; Taha's second LOW is a follow-up under KI-76.
+**Why:** the edit fix is one line and keeps the delivery, order and invoice units the same; the empty-text case had 0 live rows and fixing it needs a backfill.
 
 ## 2026-11-10 — Sale lines carry a unit; quick deliveries use the product's unit (KI-76, #1731, `20270106100000`)
 
 **Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
 **Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
-**Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Do not re-raise this as a regression; changing it needs the order line written (a backfill Mason decides).
+**Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Changing it needs the order line written (a backfill Mason decides).
 ## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
 
 **Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.

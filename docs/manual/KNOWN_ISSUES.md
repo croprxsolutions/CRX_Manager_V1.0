@@ -1349,7 +1349,7 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   lines also have no unit (5 such order lines, all on fulfilled orders). Also open (PR #1731 follow-ups): a line
   inserted at the same instant as a post, or an order line edited between the order-invoice check and its copy,
   races the check like every post-time check (LOW); the screen message drops the line names the database gives
-  (LOW); one unposted field-application invoice has a product line with no unit (not checked by design). From Taha's review (2026-11-11): an admin's later edit of a quick-delivery line's unit takes the product's unit as it is then, so it can differ from the order and invoice lines if the product's unit changed (LOW); following the posting message on an old order line with no unit lets the invoice post, but the order line stays blank, so a return on it is still refused (LOW). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
+  (LOW); one unposted field-application invoice has a product line with no unit (not checked by design). From Taha's review (2026-11-11): following the posting message on an old order line with no unit lets the invoice post, but the order line stays blank, so a return on it is still refused (LOW). A return can go stale after an earlier return is cancelled or rejected (cancel and recreate); a
   concurrent split-invoice void can leave a requested return unreceivable; credits apply manually; multi-price
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the

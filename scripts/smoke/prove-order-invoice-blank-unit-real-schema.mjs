@@ -492,13 +492,15 @@ RESET ROLE;
 SELECT 'QUICK=[' || (SELECT coalesce(di.unit_size, '<null>') FROM public.delivery_items di WHERE di.delivery_id = (q.res->>'delivery_id')::uuid)
   || ',' || (SELECT coalesce(oi.unit_size, '<null>') FROM public.order_items oi WHERE oi.order_id = (q.res->>'order_id')::uuid)
   || ',' || (SELECT coalesce(ii.unit_size, '<null>') FROM public.invoice_items ii WHERE ii.invoice_id = (q.res->>'invoice_id')::uuid) || ']' FROM q;
--- Then a direct edit of the delivery line's unit as a signed-in admin (the update policy is admin-only), counting rows hit.
+-- Then the product's unit changes to 'case' and a signed-in admin edits the delivery line's unit to 'pail' directly
+-- (the update policy is admin-only), counting rows hit.
+UPDATE public.products SET unit_size = 'case' WHERE id = '${PROD}';
 ${claims(ADMIN)}
 SET LOCAL ROLE authenticated;
 DO $e$
 DECLARE n int;
 BEGIN
-  UPDATE public.delivery_items SET unit_size = 'case' WHERE delivery_id = (SELECT (res->>'delivery_id')::uuid FROM q);
+  UPDATE public.delivery_items SET unit_size = 'pail' WHERE delivery_id = (SELECT (res->>'delivery_id')::uuid FROM q);
   GET DIAGNOSTICS n = ROW_COUNT;
   RAISE NOTICE 'EDITROWS=[%]', n;
 END;
@@ -546,9 +548,9 @@ function main() {
     'BEFORE: a hand-replaced draft line with no order link and no unit posts blank');
   assert.deepEqual(dBefore.gal, { order: 'gal', done: 'true completed', unit: 'gal', post: 'posted', credit: 'posted -1 gal -1000' });
   const quickBefore = quick();
-  console.log(`[prover] BEFORE quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickBefore.units}; then a direct edit to 'case': ${quickBefore.edit}`);
+  console.log(`[prover] BEFORE quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickBefore.units}; then the product turns 'case' and a direct edit to 'pail': ${quickBefore.edit}`);
   assert.equal(quickBefore.units, 'case,<null>,<null>', 'BEFORE: the delivery records the named unit; the order and invoice lines have none');
-  assert.equal(quickBefore.edit, '1 rows -> case', 'BEFORE: a signed-in admin can edit the delivery line unit directly');
+  assert.equal(quickBefore.edit, '1 rows -> pail', 'BEFORE: a signed-in admin can edit the delivery line unit directly');
   const before = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] BEFORE order side: ${JSON.stringify(before)}`);
   assert.deepEqual(before, { null: { unit: '<null>' }, empty: { unit: ' \t' }, gal: { unit: 'gal' } }, 'BEFORE: each line is billed with its unit as is, blank included');
@@ -589,8 +591,8 @@ function main() {
   assert.match(dAfter.handno.post ?? '', /^INVOICE_LINE_UNIT_MISSING: invoice \S+ has a line with no unit \(\[PROVER\] DU handno\)/,'AFTER: posting it is refused');
 
   const quickAfter = quick();
-  console.log(`[prover] AFTER quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickAfter.units}; then a direct edit to 'case': ${quickAfter.edit}`);
-  assert.equal(quickAfter.edit, '1 rows -> gal', "AFTER: a direct edit of a quick-delivery line's unit keeps the product's unit");
+  console.log(`[prover] AFTER quick delivery naming 'case' on a 'gal' product (delivery,order,invoice): ${quickAfter.units}; then the product turns 'case' and a direct edit to 'pail': ${quickAfter.edit}`);
+  assert.equal(quickAfter.edit, '1 rows -> gal', "AFTER: a direct edit of a quick-delivery line's unit keeps the unit it was recorded in, even after the product's unit changes");
   assert.equal(quickAfter.units, 'gal,gal,gal', "AFTER (Mason 2026-11-10): a quick delivery records the product's own unit on every line");
   const after = Object.fromEntries(Object.keys(CASES).map((k) => [k, flow(k)]));
   console.log(`[prover] AFTER order side: ${JSON.stringify(after)}`);

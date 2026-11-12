@@ -210,7 +210,7 @@ export default function EpaLookupPanel({ parentId, profileId, reloadKey, epaRefu
         <EpaProposalModal key={`${reviewed.id}:${reviewed.proposal_version}`} proposal={reviewed} draft={draftFor(reviewed)} profileId={profileId}
           onClose={() => setReviewing(null)}
           onSettled={() => { setReviewing(null); reload(); onCommitted(); }}
-          onRunAgain={state.numbers.includes(reviewed.epa_registration) ? (epaNumber) => { setReviewing(null); void run(epaNumber); } : undefined} />
+          onRunAgain={state.numbers.includes(reviewed.epa_registration) && !lookupsBlocked ? (epaNumber) => { setReviewing(null); void run(epaNumber); } : undefined} />
       )}
     </section>
   );

@@ -440,25 +440,34 @@ const ADMIN = "11111111-1111-4111-8111-111111111111";
 const OTHER_ADMIN = "22222222-2222-4222-8222-222222222222";
 
 Deno.test("record mode asks EPA only about the stored number, and only for the admin who started it", () => {
-  const lookup = { epa_registration: "100-1234", status: "pending", requested_by: ADMIN };
+  const lookup = { epa_registration: "100-1234", status: "pending", requested_by: ADMIN, requested_at: new Date().toISOString() };
   assertEquals(planRecordedLookup(lookup, ADMIN), { action: "fetch", regNumber: "100-1234" });
   assertEquals(planRecordedLookup(lookup, OTHER_ADMIN).action, "refuse");
   assertEquals((planRecordedLookup(lookup, OTHER_ADMIN) as { status: number }).status, 403);
   assertEquals((planRecordedLookup(null, ADMIN) as { status: number }).status, 404);
 });
 
+Deno.test("record mode refuses a pending lookup the database would call expired, without asking EPA", () => {
+  const startedAt = Date.parse("2026-11-12T15:00:00Z");
+  const lookup = { epa_registration: "100-1234", status: "pending", requested_by: ADMIN, requested_at: "2026-11-12T15:00:00Z" };
+  assertEquals(planRecordedLookup(lookup, ADMIN, startedAt + 29 * 60_000).action, "fetch");
+  const expired = planRecordedLookup(lookup, ADMIN, startedAt + 30 * 60_000) as { action: string; status: number; error: string };
+  assertEquals([expired.action, expired.status], ["refuse", 409]);
+  assertEquals(expired.error.startsWith("EPA_LOOKUP_EXPIRED:"), true);
+});
+
 Deno.test("record mode replays a recorded lookup and refuses an abandoned one", () => {
   assertEquals(
-    planRecordedLookup({ epa_registration: "100-1234", status: "recorded", requested_by: ADMIN }, ADMIN),
+    planRecordedLookup({ epa_registration: "100-1234", status: "recorded", requested_by: ADMIN, requested_at: new Date().toISOString() }, ADMIN),
     { action: "replay" },
   );
   // Ownership is checked before the replay: another admin never reads someone else's saved answer.
   assertEquals(
-    planRecordedLookup({ epa_registration: "100-1234", status: "recorded", requested_by: ADMIN }, OTHER_ADMIN).action,
+    planRecordedLookup({ epa_registration: "100-1234", status: "recorded", requested_by: ADMIN, requested_at: new Date().toISOString() }, OTHER_ADMIN).action,
     "refuse",
   );
   const abandoned = planRecordedLookup(
-    { epa_registration: "100-1234", status: "abandoned", requested_by: ADMIN },
+    { epa_registration: "100-1234", status: "abandoned", requested_by: ADMIN, requested_at: new Date().toISOString() },
     ADMIN,
   );
   assertEquals((abandoned as { status: number }).status, 409);

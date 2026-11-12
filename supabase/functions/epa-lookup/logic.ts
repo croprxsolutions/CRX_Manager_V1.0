@@ -360,7 +360,11 @@ export interface StoredLookup {
   epa_registration: string;
   status: string;
   requested_by: string;
+  requested_at: string;
 }
+
+/** record_epa_lookup refuses a pending lookup older than this, so EPA is not asked for one. */
+const LOOKUP_EXPIRY_MS = 30 * 60 * 1000;
 
 export type RecordPlan =
   | { action: "fetch"; regNumber: string }
@@ -370,6 +374,7 @@ export type RecordPlan =
 export function planRecordedLookup(
   lookup: StoredLookup | null,
   callerId: string,
+  now: number = Date.now(),
 ): RecordPlan {
   if (!lookup) {
     return { action: "refuse", status: 404, error: "That EPA lookup does not exist." };
@@ -388,6 +393,13 @@ export function planRecordedLookup(
       action: "refuse",
       status: 409,
       error: "A newer lookup of this number replaced this one. Start a new lookup.",
+    };
+  }
+  if (now - Date.parse(lookup.requested_at) >= LOOKUP_EXPIRY_MS) {
+    return {
+      action: "refuse",
+      status: 409,
+      error: "EPA_LOOKUP_EXPIRED: this lookup is more than 30 minutes old; start a new one",
     };
   }
   return { action: "fetch", regNumber: lookup.epa_registration };

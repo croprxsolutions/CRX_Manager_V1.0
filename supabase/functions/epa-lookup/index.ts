@@ -297,7 +297,7 @@ async function recordLookup(
 ): Promise<Response> {
   const { data: lookup, error: readError } = await adminClient
     .from("epa_lookups")
-    .select("epa_registration, status, requested_by")
+    .select("epa_registration, status, requested_by, requested_at")
     .eq("id", lookupId)
     .maybeSingle();
   if (readError) throw readError;

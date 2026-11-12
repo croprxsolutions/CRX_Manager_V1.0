@@ -22,6 +22,49 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** any Yes already makes a sale restricted (Mason, 2026-11-10); counting the brand's tick can only add a record, never miss one. Sol rounds 1, 3 and 4 kept returning to what decides restricted use for a brand line, so the rule is settled here rather than patched again.
 **What this forbids/implies:** `20270106110000_invoice_brands_rup.sql` reads the tick live from the pick's brand row when a brand's sale is captured (never stored in the invoice's brand copy, so a tick change never makes a draft stale) and on Sales to check. Ignoring a brand's tick after the registration switch-on needs a new Mason decision.
 
+## 2026-11-12 — #1731: Mason owner-accepted 1 Sol finding(s) at `2d312b756cf4`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1731 at `2d312b756cf4` (base `a4f37aed7913`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:20`, text sha256 `9a61f50f511ffd2f` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen (ref d1a70a9e249f)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-12 — #1731: the quick-delivery unit rule stays; the PR lands (KI-76)
+
+**Decision (Mason, in chat, 2026-11-12: "Yes, keep it"):** a quick-delivery line keeps recording its product's own unit, as decided on 2026-11-10, and #1731 is merged now that `20270106100000` is live.
+**Why:** the app's quick-delivery screen always sends the product's unit, and no quick delivery has been recorded live.
+
+## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `53f376a556db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `53f376a556db` (base `11ea9ce0c24e`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:283`, text sha256 `fc91aa9d83feaa27` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref 9741c7ce503f)
+- Finding 2 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:227`, text sha256 `b91a5b074e4b2e15` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref abe447cbbba5)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `9554792cbe99`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `9554792cbe99` (base `a9864de8dfb1`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:284`, text sha256 `1b370274f50ba11a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisnes (ref c9ddd013792d)
+- Finding 2 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:227`, text sha256 `dc584e8216ceea93` (the wording stays with the proof, not here)
+  Mason's reason: old lines with empty-text units had 0 live rows; fixing them needs a backfill I decide separately (ref d8d76c4660fa)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1731 lands; quick-delivery edits keep their unit (KI-76)
+
+**Decision (Mason, in chat, 2026-11-11: "Yes, land it"):** after Taha's review of #1731 ("fine to apply as written", two LOWs), land it. Then, after Sol round 5 (Mason: "Yes, do that"): an admin's direct edit of a quick-delivery line keeps the unit the line was recorded in unless the product changes (Taha's first LOW, fixed); the empty-text limit from 2026-11-10 stays as decided; Taha's second LOW is a follow-up under KI-76.
+**Why:** the edit fix is one line and keeps the delivery, order and invoice units the same; the empty-text case had 0 live rows and fixing it needs a backfill.
+
+## 2026-11-10 — Sale lines carry a unit; quick deliveries use the product's unit (KI-76, #1731, `20270106100000`)
+
+**Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
+**Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
+**Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Changing it needs the order line written (a backfill Mason decides).
 ## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
 
 **Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".

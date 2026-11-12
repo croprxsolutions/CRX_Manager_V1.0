@@ -10,7 +10,7 @@
 --  the admin who started the lookup (epa_lookups.requested_by, written from auth.uid() by start_epa_lookup) and an
 --  active admin, else EPA_LOOKUP_ACTOR.)
 -- Written 2026-11-11. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270104100000_epa_chemistry_proposals.md.
+-- docs/reference/migrations.d/20270104113000_epa_chemistry_proposals.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: Product Master DM-4, EPA auto-fill (docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md, its section 13 for

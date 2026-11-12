@@ -343,6 +343,22 @@ function postAndGen(inv, key) {
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   return Number(r.stdout.match(/GEN=(\d+)/)[1]);
 }
+// The app's own posting path (post_invoice with the version a screen would load), for the split cases (Sol r3 LOW).
+function realPost(inv, key) {
+  const grp = scalar(`SELECT COALESCE(invoice_group_id::text, '') FROM public.invoices WHERE id = '${inv}';`);
+  if (scalar(`SELECT status FROM public.invoices WHERE id = '${inv}';`) !== 'posted') {
+    if (grp) {
+      const versions = scalar(`SELECT jsonb_object_agg(id, public._invoice_post_version(id))::text FROM public.invoices
+        WHERE invoice_group_id = '${grp}' AND deleted_at IS NULL;`);
+      ok(ADMIN, `SELECT public.post_invoice_group('${grp}', '${ADMIN}', ${q(versions)}::jsonb, ${q(key)})::text;`);
+    } else {
+      ok(ADMIN, `SELECT public.post_invoice('${inv}', ${q(scalar(`SELECT public._invoice_post_version('${inv}');`))}, ${q(key)})::text;`);
+    }
+  }
+  assert.equal(scalar(`SELECT status FROM public.invoices WHERE id = '${inv}';`), 'posted');
+  return Number(scalar(`SELECT count(*) FROM public.rup_sales_records s JOIN public.invoice_items ii ON ii.id = s.invoice_item_id
+    WHERE ii.invoice_id = '${inv}' AND s.voided_at IS NULL;`));
+}
 const toCheck = () => js(ADMIN, 'SELECT public.get_epa_sales_to_check()::text;');
 const reasons = (line) => toCheck().filter((x) => x.line_id === line).map((x) => `${x.brand_name ?? '-'}:${x.reason}`).sort();
 const alloc = (line) => ownerJs(`SELECT public._invoice_line_brand_allocation('${line}')::text;`);
@@ -710,7 +726,7 @@ async function main() {
   }
   for (const l of L21n) assert.deepEqual(brandLines(l), [], 'a brand-listed line with no pick holds [] (not NULL)');
   let gen21 = 0;
-  for (const inv of new Set(L21.map(invOf))) gen21 += postAndGen(inv, `b1b-g21-${inv}`);
+  for (const inv of new Set(L21.map(invOf))) gen21 += realPost(inv, `b1b-g21-${inv}`);
   assert.equal(gen21, 2, 'each payer gets its Alpha record');
   assert.equal(L21.reduce((s, l) => s + records(l).reduce((x, r) => x + Number(r.qty), 0), 0), 2, 'the payers\' Alpha records add up to what was delivered');
   for (const l of [...L21, ...L21n]) noStale(l);
@@ -729,7 +745,7 @@ async function main() {
     `the landlord auto-split ran (needs_split_billing=${scalar(`SELECT needs_split_billing::text FROM public.orders WHERE id = '${O(22)}';`)})`);
   for (const l of L22) { assert.deepEqual(keys(l), ['Alpha:2'], 'the landlord line holds the trimmed pick'); assert.equal(claimMatches(invOf(l)), 'true'); }
   for (const l of L22n) assert.deepEqual(brandLines(l), [], 'a listed line with no pick holds []');
-  for (const inv of new Set(L22.map(invOf))) postAndGen(inv, `b1b-g22-${inv}`);
+  for (const inv of new Set(L22.map(invOf))) realPost(inv, `b1b-g22-${inv}`);
   assert.equal(L22.reduce((s, l) => s + records(l).length, 0), L22.length, 'one Alpha record per landlord line');
   for (const l of [...L22, ...L22n]) noStale(l);
   console.log('[prover] case 18: a real landlord auto-split completion drafts its lines with the trimmed pick and []; claims match; posting records and lists nothing stale');
@@ -754,7 +770,7 @@ async function main() {
   ok(ADMIN, CORRECT(D(24), [{ delivery_item_id: DI(24, 0), picks: [pick(DELTA, 2)] }], 'was Delta', 'b1b-x24'));
   for (const l of L24) { assert.deepEqual(keys(l), ['Alpha:2'], 'a split draft is not re-copied'); assert.equal(claimMatches(invOf(l)), 'true'); }
   assert.equal(scalar(`SELECT public._invoice_brand_recopy_invoice('${invOf(L24[0])}')::text;`), 'false', 'a split draft counts as skipped');
-  for (const l of L24) assert.equal(postAndGen(invOf(l), `b1b-g24-${l}`), 0, 'no record under the old brand');
+  for (const l of L24) assert.equal(realPost(invOf(l), `b1b-g24-${l}`), 0, 'no record under the old brand');
   for (const l of L24) assert.ok(reasons(l).includes('-:brand_lines_stale'), `${l}: ${reasons(l)}`);
   console.log('[prover] case 20: a Bill Split draft corrected after it was made keeps its brands and claim, counts as skipped, posts with no record, and is listed as stale');
 
@@ -768,10 +784,50 @@ async function main() {
   assert.equal(L25.length, 2);
   for (const l of L25) assert.deepEqual(brandLines(l), [], 'made with no pick');
   ok(ADMIN, CORRECT(D(25), [{ delivery_item_id: DI(25, 0), picks: [pick(ALPHA, 2)] }], 'it was Alpha', 'b1b-x25'));
-  for (const l of L25) assert.equal(postAndGen(invOf(l), `b1b-g25-${l}`), 0, 'no record under the product number');
+  for (const l of L25) assert.equal(realPost(invOf(l), `b1b-g25-${l}`), 0, 'no record under the product number');
   for (const l of L25) { assert.deepEqual(records(l), []); assert.ok(reasons(l).includes('-:brand_lines_stale'), `${l}: ${reasons(l)}`); }
   raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
   console.log('[prover] case 21: a split draft made with no brand and corrected to a restricted brand posts with no record under the product number and is listed as stale');
+
+  // 22. (Taha, PR #1825) A size whose product, number and every listed brand are known not restricted: a split that does
+  //     not add up owes no record and is not listed. Case 6 (the same mismatch where the size could have been Alpha)
+  //     stays listed. A restricted brand added to the list later brings the line back.
+  const PN = id(42), PAR2 = id(21), FOX = id(35);
+  raw(`INSERT INTO public.products (id, product_name, sku, unit_size, product_form, current_cost, tier1_price, is_active, epa_registration, is_rup, signal_word)
+      VALUES ('${PN}', '[PROVER] General 2.5', 'B1B-PN', 'GL', 'liquid', 6.00, 10.00, true, '500-1', false, 'Caution');
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PN}', 'Main Warehouse', 1000, 0, 'GL');
+    INSERT INTO public.product_parents (id, name, product_form, created_by, updated_by) VALUES ('${PAR2}', '[PROVER] General parent', 'liquid', '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.product_parent_members (product_id, parent_id, added_by) VALUES ('${PN}', '${PAR2}', '${ADMIN}');
+    INSERT INTO public.product_parent_brands (id, parent_id, brand_name, epa_registration, signal_word, status, created_by, updated_by)
+      VALUES ('${FOX}', '${PAR2}', 'Foxtrot', '100-2', 'Caution', 'active', '${ADMIN}', '${ADMIN}');`);
+  mkDelivery(26, [[PN, 10]]);
+  set(D(26), [{ delivery_item_id: DI(26, 0), picks: [pick(FOX, 7)] }], 'b1b-k26');
+  complete(D(26), { [DI(26, 0)]: 10 }, 'b1b-c26');
+  const L26 = invLine(26);
+  assert.equal(postAndGen(invOf(L26), 'b1b-g26'), 0);
+  assert.deepEqual(records(L26), []);
+  assert.deepEqual(reasons(L26), [], 'a line that owes no record is not listed');
+  assert.ok(scalar(`SELECT (public._invoice_line_brand_allocation('${L26}') ->> 'problem')`) === 'brand_split_mismatch', 'the mismatch is real');
+  raw(`INSERT INTO public.product_parent_brands (id, parent_id, brand_name, epa_registration, signal_word, status, created_by, updated_by)
+      VALUES ('${id(36)}', '${PAR2}', 'Golf', '100-1', 'Danger', 'active', '${ADMIN}', '${ADMIN}');`);
+  assert.deepEqual(reasons(L26), ['-:brand_split_mismatch'], 'unpicked units could now be a restricted brand');
+  console.log('[prover] case 22: a split that does not add up on a size that is known not restricted (product, number and every brand) is not listed; adding a restricted brand to its list lists it');
+
+
+  // 23. (Sol r3) The lookup a registration change uses: a branded line counts under the product's number too, and a
+  //     branded line whose brands do not reconcile is listed once under any number it carries.
+  const unrec = (n) => JSON.parse(scalar(`SELECT public._epa_registration_unrecorded_posted_lines('${n}')::text;`));
+  mkDelivery(27, [[PR, 2]]);
+  set(D(27), [{ delivery_item_id: DI(27, 0), picks: [pick(BRAVO, 2)] }], 'b1b-k27');
+  complete(D(27), { [DI(27, 0)]: 2 }, 'b1b-c27');
+  const L27 = invLine(27);
+  assert.equal(postAndGen(invOf(L27), 'b1b-g27'), 0, 'Bravo is not restricted');
+  assert.ok(unrec('500-1').some((x) => x.invoice_item_id === L27 && x.brand_name === 'Bravo'), 'listed under the product number');
+  assert.ok(unrec('100-2').some((x) => x.invoice_item_id === L27 && x.brand_name === 'Bravo'), 'listed under the brand number');
+  assert.ok(!unrec('100-1').some((x) => x.invoice_item_id === L27), 'not under a number it does not carry');
+  assert.ok(unrec('500-1').some((x) => x.invoice_item_id === L6 && x.brand_key === undefined), 'a mismatched line is listed once under the product number');
+  assert.ok(unrec('100-1').some((x) => x.invoice_item_id === L6), 'and under its brand number');
+  console.log('[prover] case 23: the registration-change lookup lists a branded line under the product number and its brand number, and a line whose brands do not reconcile under any number it carries');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

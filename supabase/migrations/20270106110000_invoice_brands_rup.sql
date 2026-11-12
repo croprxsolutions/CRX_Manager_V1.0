@@ -1004,15 +1004,36 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $funct
              'invoice_number', i.invoice_number, 'product_id', ii.product_id,
              'brand_key', b.value ->> 'brand_key', 'brand_name', b.value ->> 'brand_name')
       FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.products p ON p.id = ii.product_id
      CROSS JOIN LATERAL public._invoice_line_brand_allocation(ii.id) a
      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN a ->> 'problem' IS NULL THEN a -> 'brands' ELSE '[]'::jsonb END) b
       LEFT JOIN public.invoice_line_brand_rup_captures c ON c.invoice_item_id = ii.id AND c.brand_key = b.value ->> 'brand_key'
      WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL AND i.invoice_type <> 'credit_memo'
        AND ii.quantity > 0 AND jsonb_typeof(ii.brand_lines) = 'array' AND jsonb_array_length(ii.brand_lines) > 0
        AND (b.value ->> 'quantity')::numeric > 0
-       AND (c.epa_registration = p_number OR public._normalize_epa_registration(b.value ->> 'epa_registration') = p_number)
+       -- the product's number counts too: Sales to check treats it as making each brand restricted now (Sol r3)
+       AND (c.epa_registration = p_number OR public._normalize_epa_registration(b.value ->> 'epa_registration') = p_number
+            OR public._normalize_epa_registration(p.epa_registration) = p_number)
        AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records s
                         WHERE s.invoice_item_id = ii.id AND s.voided_at IS NULL AND s.brand_key = b.value ->> 'brand_key')
+    UNION ALL
+    -- A branded line whose brands do not reconcile records nothing; it is listed once under any number it carries (Sol r3).
+    SELECT ii.id, NULL::text,
+           jsonb_build_object('invoice_item_id', ii.id, 'invoice_id', ii.invoice_id,
+             'invoice_number', i.invoice_number, 'product_id', ii.product_id)
+      FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.products p ON p.id = ii.product_id
+     CROSS JOIN LATERAL public._invoice_line_brand_allocation(ii.id) a
+     WHERE i.status IN ('posted', 'paid', 'overdue') AND i.deleted_at IS NULL AND i.invoice_type <> 'credit_memo'
+       AND ii.quantity > 0 AND jsonb_typeof(ii.brand_lines) = 'array' AND jsonb_array_length(ii.brand_lines) > 0
+       AND a ->> 'problem' IS NOT NULL
+       AND (public._normalize_epa_registration(ii.epa_registration) = p_number
+            OR public._normalize_epa_registration(p.epa_registration) = p_number
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(ii.brand_lines) e
+                        WHERE public._normalize_epa_registration(e ->> 'epa_registration') = p_number)
+            OR EXISTS (SELECT 1 FROM public.invoice_line_brand_rup_captures c
+                        WHERE c.invoice_item_id = ii.id AND c.epa_registration = p_number))
+       AND NOT EXISTS (SELECT 1 FROM public.rup_sales_records s WHERE s.invoice_item_id = ii.id AND s.voided_at IS NULL)
   ) x;
 $function$;
 
@@ -1133,7 +1154,32 @@ BEGIN
                                    WHERE b.value ->> 'brand_key' = s.brand_key
                                      AND (b.value ->> 'quantity')::numeric = s.quantity))
              THEN 'payer_split_changed' END)) f(reason)
-     WHERE f.reason IS NOT NULL
+     -- Only a line that may owe a restricted-use record (Taha, PR #1825): kept unless the product, every number on the
+     -- line, every stored or current brand and every brand the size could have been (unpicked units) is known 'no'.
+     CROSS JOIN LATERAL (SELECT
+         COALESCE(l.product_is_rup, false)
+         OR EXISTS (SELECT 1 FROM rup_sales_records s WHERE s.invoice_item_id = l.line_id AND s.voided_at IS NULL)
+         OR EXISTS (SELECT 1 FROM invoice_line_rup_captures c
+                     WHERE c.invoice_item_id = l.line_id AND c.rup_status IS DISTINCT FROM 'no')
+         OR EXISTS (SELECT 1 FROM invoice_line_brand_rup_captures c
+                     WHERE c.invoice_item_id = l.line_id AND c.rup_status IS DISTINCT FROM 'no')
+         OR EXISTS (SELECT 1 FROM public._delivery_line_brand_list(l.product_id) bl WHERE COALESCE(bl.is_rup, false))
+         OR EXISTS (
+              SELECT 1
+                FROM (SELECT l.product_number AS n
+                      UNION ALL SELECT l.saved_number WHERE l.saved_number IS NOT NULL
+                      UNION ALL SELECT public._normalize_epa_registration(bl.epa_registration)
+                                  FROM public._delivery_line_brand_list(l.product_id) bl
+                      UNION ALL SELECT public._normalize_epa_registration(e ->> 'epa_registration')
+                                  FROM jsonb_array_elements(
+                                         CASE WHEN jsonb_typeof(l.brand_lines) = 'array' THEN l.brand_lines ELSE '[]'::jsonb END
+                                         || CASE WHEN l.order_item_id IS NOT NULL
+                                                 THEN COALESCE(public._invoice_line_brand_lines(l.invoice_id, l.order_item_id, l.product_id), '[]'::jsonb)
+                                                 ELSE '[]'::jsonb END) e
+                                 WHERE e ->> 'brand_key' <> 'n:') x
+                LEFT JOIN epa_registrations r ON r.epa_registration = x.n
+               WHERE x.n IS NULL OR r.rup_status IS DISTINCT FROM 'no') AS may_owe) m
+     WHERE f.reason IS NOT NULL AND m.may_owe
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object(
            'line_id', line_id, 'invoice_id', invoice_id, 'invoice_number', invoice_number, 'invoice_date', invoice_date,

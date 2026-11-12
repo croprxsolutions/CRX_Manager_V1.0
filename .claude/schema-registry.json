@@ -6,7 +6,7 @@
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261111235530",
+    "migrations_high_water": "20261112123046",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -582,6 +582,9 @@
       "20270103180000_po_close_short",
       "20270104110000_product_rate_review",
       "20270104120000_delivery_brands",
+      "20270105110000_epa_chemistry_proposals",
+      "20270106100000_blank_unit_fill_and_post_refusal",
+      "20270106110000_invoice_brands_rup",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1348,12 +1351,29 @@
       "failed",
       "bounced"
     ],
+    "epa_chemistry_proposals.status": [
+      "proposed",
+      "held",
+      "committed",
+      "rejected",
+      "superseded"
+    ],
+    "epa_lookups.status": [
+      "pending",
+      "recorded",
+      "abandoned"
+    ],
     "epa_registrations.registration_status": [
       "active",
       "cancelled",
       "unknown"
     ],
     "epa_registrations.rup_status": [
+      "yes",
+      "no",
+      "unknown"
+    ],
+    "invoice_line_brand_rup_captures.rup_status": [
       "yes",
       "no",
       "unknown"
@@ -1590,6 +1610,7 @@
     "delivery_items",
     "delivery_photos",
     "email_log",
+    "epa_lookup_failures",
     "epa_registration_events",
     "epa_registration_seed_run",
     "field_app_billing_lines",
@@ -1607,6 +1628,7 @@
     "inventory_transactions",
     "invoice_delivery_recovery_capabilities",
     "invoice_line_allocations",
+    "invoice_line_brand_rup_captures",
     "invoice_line_rup_captures",
     "invoice_line_share_snapshots",
     "invoice_line_shares",
@@ -2240,6 +2262,83 @@
         "email_log_status_check"
       ]
     },
+    "epa_chemistry_proposals.hold_reason": {
+      "values": [
+        "relinked",
+        "chemistry_changed",
+        "registration_changed"
+      ],
+      "constraints": [
+        "epa_chemistry_proposals_hold_reason_check"
+      ],
+      "nullable": true
+    },
+    "epa_chemistry_proposals.link_kind": {
+      "values": [
+        "parent",
+        "size",
+        "parent_brand",
+        "legacy_brand"
+      ],
+      "constraints": [
+        "epa_chemistry_proposals_link_kind_check"
+      ]
+    },
+    "epa_chemistry_proposals.status": {
+      "values": [
+        "proposed",
+        "held",
+        "committed",
+        "rejected",
+        "superseded"
+      ],
+      "constraints": [
+        "epa_chemistry_proposals_status_check"
+      ]
+    },
+    "epa_lookup_failures.link_kind": {
+      "values": [
+        "parent",
+        "size",
+        "parent_brand",
+        "legacy_brand"
+      ],
+      "constraints": [
+        "epa_lookup_failures_link_kind_check"
+      ]
+    },
+    "epa_lookup_failures.reason": {
+      "values": [
+        "not_found",
+        "transferred",
+        "upstream_error",
+        "invalid_result"
+      ],
+      "constraints": [
+        "epa_lookup_failures_reason_check"
+      ]
+    },
+    "epa_lookups.link_kind": {
+      "values": [
+        "parent",
+        "size",
+        "parent_brand",
+        "legacy_brand"
+      ],
+      "constraints": [
+        "epa_lookups_link_kind_check"
+      ]
+    },
+    "epa_lookups.status": {
+      "values": [
+        "pending",
+        "recorded",
+        "abandoned"
+      ],
+      "constraints": [
+        "epa_lookups_status_check"
+      ]
+    },
     "epa_registration_events.event_type": {
       "values": [
         "seeded",
@@ -2497,6 +2596,25 @@
         "chk_invoice_items_price_source"
       ],
       "nullable": true
+    },
+    "invoice_line_brand_rup_captures.rup_status": {
+      "values": [
+        "yes",
+        "no",
+        "unknown"
+      ],
+      "constraints": [
+        "invoice_line_brand_rup_captures_rup_status_check"
+      ]
+    },
+    "invoice_line_brand_rup_captures.source": {
+      "values": [
+        "save",
+        "posting"
+      ],
+      "constraints": [
+        "invoice_line_brand_rup_captures_source_check"
+      ]
     },
     "invoice_line_rup_captures.rup_status": {
       "values": [
@@ -4426,6 +4544,108 @@
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_chemistry_version_check",
+      "def": "CHECK ((chemistry_version >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_decided",
+      "def": "CHECK (((status = ANY (ARRAY['proposed'::text, 'held'::text, 'superseded'::text])) OR ((decided_at IS NOT NULL) AND (decided_by IS NOT NULL))))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_decision_reason_check",
+      "def": "CHECK (((decision_reason IS NULL) OR ((btrim(decision_reason) <> ''::text) AND (length(decision_reason) <= 500))))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_epa_summary_check",
+      "def": "CHECK ((jsonb_typeof(epa_summary) = 'object'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_held",
+      "def": "CHECK (((status = 'held'::text) = (hold_reason IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_items_check",
+      "def": "CHECK ((jsonb_typeof(items) = 'array'::text))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_proposal_version_check",
+      "def": "CHECK ((proposal_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_registration_version_check",
+      "def": "CHECK ((registration_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_rejected",
+      "def": "CHECK (((status <> 'rejected'::text) OR (decision_reason IS NOT NULL)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_chemistry_proposals",
+      "constraint": "epa_chemistry_proposals_superseded",
+      "def": "CHECK (((status = 'superseded'::text) = (superseded_by_lookup_id IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookup_failures",
+      "constraint": "epa_lookup_failures_detail_check",
+      "def": "CHECK (((detail IS NULL) OR (length(detail) <= 500)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookup_failures",
+      "constraint": "epa_lookup_failures_registration_version_check",
+      "def": "CHECK ((registration_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookup_failures",
+      "constraint": "epa_lookup_failures_transferred",
+      "def": "CHECK (((reason = 'transferred'::text) = (transferred_to IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookup_failures",
+      "constraint": "epa_lookup_failures_transferred_to_check",
+      "def": "CHECK (((transferred_to IS NULL) OR (transferred_to ~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookups",
+      "constraint": "epa_lookups_chemistry_version_check",
+      "def": "CHECK ((chemistry_version >= 0))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookups",
+      "constraint": "epa_lookups_recorded_at",
+      "def": "CHECK (((status = 'recorded'::text) = (recorded_at IS NOT NULL)))",
+      "reason": "unparseable — hooks do NOT validate this constraint"
+    },
+    {
+      "table": "epa_lookups",
+      "constraint": "epa_lookups_registration_version_check",
+      "def": "CHECK ((registration_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "epa_registration_seed_run",
       "constraint": "epa_registration_seed_run_id_check",
       "def": "CHECK (id)",
@@ -4604,6 +4824,12 @@
       "constraint": "invoice_line_allocations_split_percentage_check",
       "def": "CHECK (((split_percentage > (0)::numeric) AND (split_percentage <= (100)::numeric)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "invoice_line_brand_rup_captures",
+      "constraint": "invoice_line_brand_rup_captures_brand_key_check",
+      "def": "CHECK (((brand_key = 'n:'::text) OR (brand_key ~~ 'b:%'::text)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "invoice_line_shares",
@@ -6004,6 +6230,12 @@
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "rup_sales_records",
+      "constraint": "rup_sales_records_brand_name_has_key",
+      "def": "CHECK (((brand_name IS NULL) OR (brand_key IS NOT NULL)))",
+      "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "split_invoice_provenance",
       "constraint": "split_invoice_provenance_content_claim_check",
       "def": "CHECK ((jsonb_typeof(content_claim) = 'object'::text))",
@@ -6901,6 +7133,61 @@
         "status"
       ]
     },
+    "epa_chemistry_proposals": {
+      "no_default": [
+        "lookup_id",
+        "parent_id",
+        "epa_registration",
+        "link_kind",
+        "link_id",
+        "registration_version",
+        "chemistry_version",
+        "epa_input",
+        "items",
+        "epa_summary",
+        "created_by"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "proposal_version",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "epa_lookup_failures": {
+      "no_default": [
+        "lookup_id",
+        "parent_id",
+        "epa_registration",
+        "link_kind",
+        "link_id",
+        "registration_version",
+        "reason",
+        "created_by"
+      ],
+      "with_default": [
+        "id",
+        "created_at"
+      ]
+    },
+    "epa_lookups": {
+      "no_default": [
+        "parent_id",
+        "epa_registration",
+        "link_kind",
+        "link_id",
+        "registration_version",
+        "chemistry_version",
+        "requested_by"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "requested_at",
+        "updated_at"
+      ]
+    },
     "epa_registration_events": {
       "no_default": [
         "epa_registration",
@@ -7236,6 +7523,19 @@
       "with_default": [
         "id",
         "created_at"
+      ]
+    },
+    "invoice_line_brand_rup_captures": {
+      "no_default": [
+        "invoice_item_id",
+        "brand_key",
+        "product_id",
+        "rup_status",
+        "source",
+        "basis"
+      ],
+      "with_default": [
+        "captured_at"
       ]
     },
     "invoice_line_rup_captures": {
@@ -9871,6 +10171,58 @@
       "created_at",
       "send_lock_key"
     ],
+    "epa_chemistry_proposals": [
+      "id",
+      "lookup_id",
+      "parent_id",
+      "epa_registration",
+      "link_kind",
+      "link_id",
+      "registration_version",
+      "chemistry_version",
+      "status",
+      "proposal_version",
+      "hold_reason",
+      "epa_input",
+      "items",
+      "epa_summary",
+      "decided_by",
+      "decided_at",
+      "decision_reason",
+      "commit_result",
+      "superseded_by_lookup_id",
+      "created_by",
+      "created_at",
+      "updated_at"
+    ],
+    "epa_lookup_failures": [
+      "id",
+      "lookup_id",
+      "parent_id",
+      "epa_registration",
+      "link_kind",
+      "link_id",
+      "registration_version",
+      "reason",
+      "transferred_to",
+      "detail",
+      "created_by",
+      "created_at"
+    ],
+    "epa_lookups": [
+      "id",
+      "parent_id",
+      "epa_registration",
+      "link_kind",
+      "link_id",
+      "registration_version",
+      "chemistry_version",
+      "status",
+      "requested_by",
+      "requested_at",
+      "recorded_at",
+      "updated_at"
+    ],
     "epa_registration_events": [
       "id",
       "epa_registration",
@@ -10226,7 +10578,8 @@
       "return_credit_cogs_cents",
       "return_credit_source_item_id",
       "charge_type",
-      "price_tier_at_sale"
+      "price_tier_at_sale",
+      "brand_lines"
     ],
     "invoice_line_allocations": [
       "id",
@@ -10238,6 +10591,18 @@
       "split_invoice_id",
       "created_at",
       "invoice_id"
+    ],
+    "invoice_line_brand_rup_captures": [
+      "invoice_item_id",
+      "brand_key",
+      "brand_name",
+      "product_id",
+      "epa_registration",
+      "rup_status",
+      "signal_word",
+      "source",
+      "basis",
+      "captured_at"
     ],
     "invoice_line_rup_captures": [
       "invoice_item_id",
@@ -11891,7 +12256,9 @@
       "voided_at",
       "voided_by",
       "void_reason",
-      "invoice_item_id"
+      "invoice_item_id",
+      "brand_name",
+      "brand_key"
     ],
     "split_invoice_creation_claims": [
       "transaction_id",

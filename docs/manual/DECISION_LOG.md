@@ -10,6 +10,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1848: Mason owner-accepted 3 Sol finding(s) at `07f3fca34460`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `07f3fca34460` (base `9c63dfc52f9f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `730738816390b32f` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bd909543f1b3)
+- Finding 2 (HIGH) at `src/lib/invoiceBrandWarnings.ts:85`, text sha256 `6212d3b8de7535b8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 4632ae22123b)
+- Finding 3 (HIGH) at `src/lib/invoiceBrandWarnings.ts:61`, text sha256 `02703d0f85ba3885` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9676e1c15a8a)
+
 ## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `3657639bbb62`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `3657639bbb62` (base `f52b9a05acec`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

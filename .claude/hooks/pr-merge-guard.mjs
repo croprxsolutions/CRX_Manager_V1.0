@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { agentMergeProblem, GATED_MERGE_BASES, solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -510,6 +510,11 @@ function gateRequest(request) {
   // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
   const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
   if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
+  if (base === "staging") {
+    const ownCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, prCommits: ownCommits, repo: request.repo, gh: hardGateGh });
+    if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
+  }
 
   // ── no merging over an unresolved objection ────────────────────────────────
   // Mason removed main's required-approval rule on 2026-09-02, so a MISSING

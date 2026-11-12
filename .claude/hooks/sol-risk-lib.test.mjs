@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  agentMergeProblem,
+  agentMergeProblem, mainCommitsInPrOnGitHub,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -94,6 +94,24 @@ check("feature work into staging is the agent's, migrations included", () => {
 });
 check("other bases are not this rule's business", () => {
   assert.equal(agentMergeProblem("claude/feature", "claude/x"), null);
+});
+
+check("a PR into staging carrying main's commits that staging lacks is a back-merge under another name", () => {
+  const STAGING = "s".repeat(40).replace(/s/g, "a");
+  const c = (ch) => ch.repeat(40);
+  const ask = (stdout, prCommits, extra = {}) => mainCommitsInPrOnGitHub({ stagingSha: STAGING, prCommits: new Set(prCommits), repo: "o/r",
+    gh: (args) => { if (stdout instanceof Error) throw stdout; assert.match(args[1], new RegExp(`compare/${STAGING}\\.\\.\\.main$`)); return stdout; }, ...extra });
+  // main inside staging (the normal state): nothing to smuggle.
+  for (const status of ["identical", "behind"]) assert.equal(ask(JSON.stringify({ status, ahead_by: 0, commits: [] }), [c("1")]), null, status);
+  // main ahead of staging: a PR holding one of those commits is refused; one that doesn't is fine.
+  const ahead = JSON.stringify({ status: "ahead", ahead_by: 2, commits: [c("b"), c("c")] });
+  assert.match(ask(ahead, [c("1"), c("c")]), /back-merge.*Taha's or Mason's/);
+  assert.equal(ask(ahead, [c("1"), c("2")]), null);
+  // unreadable, truncated or malformed answers fail closed.
+  for (const bad of [new Error("offline"), "not json", JSON.stringify({ status: "ahead", ahead_by: 300, commits: [c("b")] }), JSON.stringify({ status: "ahead", ahead_by: 1 })]) {
+    assert.ok(ask(bad, [c("1")]), String(bad));
+  }
+  assert.ok(mainCommitsInPrOnGitHub({ stagingSha: "short", prCommits: new Set(), repo: "o/r", gh: () => "{}" }), "a bad staging sha fails closed");
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

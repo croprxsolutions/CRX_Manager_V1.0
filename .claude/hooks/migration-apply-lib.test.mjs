@@ -1634,7 +1634,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
-    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
+    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
     author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
@@ -1774,6 +1774,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ behindBy: "" }), "does not contain its base", "an empty compare answer fails closed");
   ok(gate({ behindBy: "0\n" }).ok === true, "a head that contains its base passes");
   refused(gate({ pr: { baseRefName: "develop" } }), "does not target main", "a PR into another branch is refused");
+  refused(gate({ pr: { baseRefName: "staging" } }), "staging database job applies it after the merge", "a PR into staging is never applied live before its merge");
+  for (const head of ["release/next", "claude/feature", "main", "hotfix/a/b", ""]) {
+    refused(gate({ pr: { headRefName: head } }), "is not a hotfix/<name> PR", `into main, only a hotfix is applied live first (${head || "no head"})`);
+  }
   refused(gate({ pr: { headRefOid: "c".repeat(40) } }), "is not this checkout's HEAD", "a checkout behind or ahead of the PR head is refused");
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.

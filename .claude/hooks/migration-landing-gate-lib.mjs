@@ -188,7 +188,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let pr;
   try {
     pr = JSON.parse(gh(["pr", "view", branch, "--json",
-      "number,url,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
+      "number,url,state,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not find or read the open pull request for branch "${branch}" (${error?.message || error}).`);
@@ -200,6 +200,11 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // hotfix (a PR into main) is applied live before its merge (ship.md › Staging).
   if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
     return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only a hotfix PR into main is applied live first.`);
+  }
+  // Into main, only a hotfix is applied live before its merge. The weekly release's migrations wait for
+  // Mason's release-day decision (ship.md › Staging); any other branch into main is not allowed at all.
+  if (!/^hotfix\/[^/]+$/.test(String(pr?.headRefName || ""))) {
+    return refuse(`${number} is not a hotfix/<name> PR. Into main, only a hotfix's migration is applied live before its merge; a release's migrations wait for Mason's release-day decision, and feature work goes to staging (ship.md › Staging).`);
   }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);

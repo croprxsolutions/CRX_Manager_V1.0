@@ -143,6 +143,29 @@ export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
 // staging database job applies a migration after the merge. Only the weekly
 // release PR (release/next) and hotfix/<name> PRs go into main, and Taha or Mason
 // merges them, never an agent; the same for the back-merge of main into staging.
+// A back-merge under another branch name: while main has commits staging lacks, a PR into staging
+// carrying any of them brings main into staging. GitHub's staging...main lists them (up to 250).
+// null when the PR carries none; otherwise why the merge is refused. Never throws: failures refuse.
+export function mainCommitsInPrOnGitHub({ stagingSha, prCommits, repo, gh }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  if (!SHA_RE.test(String(stagingSha || ""))) return "staging's commit is not a full commit id";
+  let answer;
+  try {
+    answer = JSON.parse(String(gh(["api", `${repoPath}/compare/${String(stagingSha).toLowerCase()}...main`, "--jq", "{status: .status, ahead_by: .ahead_by, commits: [.commits[]?.sha]}"])));
+  } catch (error) {
+    return `GitHub's main-versus-staging comparison could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})`;
+  }
+  if (answer?.status === "identical" || answer?.status === "behind") return null;
+  if (!Array.isArray(answer?.commits) || !Number.isInteger(answer?.ahead_by) || answer.ahead_by !== answer.commits.length) {
+    return "GitHub's list of main's commits that staging lacks is unreadable or cut short, so this can't be shown not to be a back-merge (fail closed)";
+  }
+  const carried = answer.commits.filter((sha) => prCommits.has(String(sha).toLowerCase()));
+  return carried.length
+    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${String(carried[0]).slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging, or wait for the back-merge`
+    : null;
+}
+
 // null when an agent may merge this PR (its other gates still apply).
 export function agentMergeProblem(base, headRef) {
   if (base === "main") {

@@ -98,8 +98,13 @@ const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f"
   files: { totalCount: files.length, nodes: files.map((p) => ({ path: p })) },
   commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
 } } } });
+// Staging-first: a merge into staging asks GitHub for main's commits staging lacks. Fixtures answer
+// "main is inside staging" (the normal state) unless a test answers that call itself (mainCompare).
+const MAIN_INSIDE_STAGING = JSON.stringify({ status: "identical", ahead_by: 0, commits: [] });
+const isMainCompare = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args?.[1] ?? ""));
+const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
-  options?.rawThreads ? options : { ...options, runGh: withThreadDefault(options?.runGh) },
+  { ...options, runGh: withMainCompareDefault(options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh), options?.mainCompare) },
 );
 
 const projectRoot = process.cwd();
@@ -1873,6 +1878,22 @@ try {
     });
     assert.equal(backMerge.blocked, true, "an agent never merges the back-merge (main into staging)");
     assert.match(backMerge.reason, /back-merge/, "...and the denial names it");
+    // The same back-merge under another branch name: main is ahead of staging and the PR carries one of those commits.
+    const disguised = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
+      mainCompare: JSON.stringify({ status: "ahead", ahead_by: 1, commits: [risky.sha] }),
+      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+        : JSON.stringify({ ...mainPr, baseRefName: "staging", headRefName: "backmerge/x", commits: [{ oid: risky.sha }] })),
+    });
+    assert.equal(disguised.blocked, true, "a PR into staging carrying main's commits that staging lacks is refused");
+    assert.match(disguised.reason, /back-merge/, "...as a back-merge under another name");
+    const failClosed = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
+      mainCompare: "not json",
+      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+        : JSON.stringify({ ...mainPr, baseRefName: "staging" })),
+    });
+    assert.equal(failClosed.blocked, true, "an unreadable main-versus-staging answer refuses (fail closed)");
     assert.equal(merge(() => { throw new Error("offline"); }).blocked, true, "an unreadable staging PR is denied (fail closed)");
   }
 
@@ -3975,7 +3996,7 @@ try {
     assert.equal(notASha.blocked, true, "non-SHA baseRefOid fails closed");
     assert.match(
       String(notASha.reason || notASha.message || JSON.stringify(notASha)),
-      /unusable base commit/,
+      /unusable base commit|not a full commit id/,
       "non-SHA base denial says the base is unusable"
     );
 

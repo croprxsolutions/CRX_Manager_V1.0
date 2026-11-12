@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { agentMergeProblem, GATED_MERGE_BASES, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -646,7 +646,7 @@ function resolvePullRequest({ request, repoDir, runGh }) {
   // baseRefOid is GitHub's CURRENT tip of the base branch — the commit the merge
   // will actually land on. Without it the gate falls back to local origin/main,
   // which can be stale (Codex P1, 2026-07-25).
-  args.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
+  args.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
   if (request.repo) args.push("--repo", request.repo);
   const data = JSON.parse(runGh(args, repoDir));
   // baseRefOid is required only for main-bound merges; gatePullRequestMerge
@@ -712,6 +712,11 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
   const notAgents = agentMergeProblem(base, normalize(pullRequest.headRefName));
   if (notAgents) return denied(`CODEX PRODUCTION GATE: this merge is refused: ${notAgents}.`);
+  if (base === "staging") {
+    const ownCommits = new Set((Array.isArray(pullRequest.commits) ? pullRequest.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, prCommits: ownCommits, repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
+  }
   // Main's PR #560 migrated this gate from "no approval" to "an active
   // objection", matching the Claude side. Taking main's predicate: the denial
   // text below already describes CHANGES_REQUESTED, so keeping !approved here

@@ -10,6 +10,14 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1817: Mason owner-accepted 1 Sol finding(s) at `f0be509d06e0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1817 at `f0be509d06e0` (base `325707cb62f5`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/components/products/RateReviewWorkbookModal.tsx:35`, text sha256 `7756a596af3002d3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref bd104087d7ef)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
 ## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
 
 **Decision (Mason, in chat, 2026-11-11: "I should be able to pre authorize migration … I rely on testing and verification", then "All but deletions").** A migration that overwrites existing rows or changes who can access what no longer needs his `I approve` reply; it applies on the same two reviewer proofs, Sol proof and landing gate as any non-destructive migration. A migration that deletes data still needs his reply for that exact file, and so does one whose rewrite or access check crashed.

@@ -11,7 +11,7 @@ import {
   type DeliveryBrands, type DraftLines, type DraftPick,
 } from '../../lib/deliveryBrands';
 
-export const BRANDS_NEED_SIGNAL_MESSAGE = 'Brands save when you have signal.';
+const BRANDS_NEED_SIGNAL_MESSAGE = 'Brands save when you have signal.';
 
 function draftsOf(brands: DeliveryBrands): DraftLines {
   return Object.fromEntries(brands.lines.map((l) => [l.delivery_item_id, draftFromPicks(l.picks)]));

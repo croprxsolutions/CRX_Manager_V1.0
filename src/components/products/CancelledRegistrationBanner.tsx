@@ -17,16 +17,16 @@ export default function CancelledRegistrationBanner({ sources, cancelled, failed
     const key = normalizeEpaRegistration(source.epaRegistration);
     return key && cancelled.has(key) ? [{ ...source, key, cancelledOn: cancelled.get(key) }] : [];
   });
-  if (failed) {
-    return (
-      <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        Could not check whether this product's EPA registrations are cancelled. Reload the page to try again.
-      </p>
-    );
-  }
-  if (hits.length === 0) return null;
+  // Both can show: a failed brand-list read still leaves the product's own number checked.
+  const notice = failed && (
+    <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      Could not check whether all of this product's EPA registrations are cancelled. Reload the page to try again.
+    </p>
+  );
+  if (hits.length === 0) return notice || null;
   return (
+    <>
     <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert" data-testid="cancelled-registration-banner">
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
       <div>
@@ -39,5 +39,7 @@ export default function CancelledRegistrationBanner({ sources, cancelled, failed
         <p className="mt-1">Selling is not blocked. Check the registration with EPA before selling or applying it.</p>
       </div>
     </div>
+    {notice}
+    </>
   );
 }

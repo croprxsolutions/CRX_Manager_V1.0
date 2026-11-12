@@ -13,20 +13,21 @@ import { cancelledOnText, getCancelledRegistrations, normalizeEpaRegistration } 
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 
+const brandsRead = vi.hoisted(() => ({ fail: false }));
 vi.mock('./productBrands', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./productBrands')>()),
-  getProductBrands: async () => ({
+  getProductBrands: async () => { if (brandsRead.fail) throw new Error('offline'); return {
     parentId: null,
     parentName: null,
     brands: [{ id: 'b1', product_id: 'p1', brand_name: 'Slam 5.4', epa_registration: '524-475', manufacturer: null,
       is_currently_sourced: true, is_rup: null, signal_word: null, row_version: 1, created_by: 'u', updated_by: 'u',
       created_at: '2026-10-22T00:00:00Z', updated_at: '2026-10-22T00:00:00Z' }],
-  }),
+  }; },
 }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 describe('cancelled registrations', () => {
-  beforeEach(() => mockRpc.mockReset());
+  beforeEach(() => { mockRpc.mockReset(); brandsRead.fail = false; });
 
   it('normalizes like the database', () => {
     expect(normalizeEpaRegistration(' 100-1234-abc ')).toBe('100-1234-ABC');
@@ -78,6 +79,21 @@ describe('cancelled registrations', () => {
     expect(container).toBeEmptyDOMElement();
     rerender(<CancelledRegistrationBanner sources={sources} cancelled={new Map()} failed />);
     expect(screen.getByRole('status')).toHaveTextContent('Could not check');
+  });
+
+  it('a failed check still shows what was found as cancelled', () => {
+    render(<CancelledRegistrationBanner sources={[{ label: 'This product', epaRegistration: '524-475' }]}
+      cancelled={new Map([['524-475', null]])} failed />);
+    expect(screen.getByRole('alert')).toHaveTextContent('This product: EPA Reg. No. 524-475');
+    expect(screen.getByRole('status')).toHaveTextContent('Could not check');
+  });
+
+  it('reports a failed brand-list read as null, never as an empty list', async () => {
+    brandsRead.fail = true;
+    const onBrandsChange = vi.fn();
+    render(<ProductBrandsSection productId="p1" productName="X" isAdmin={false} userId="u" onBrandsChange={onBrandsChange} />);
+    await waitFor(() => expect(onBrandsChange).toHaveBeenCalledWith(null));
+    expect(onBrandsChange).not.toHaveBeenCalledWith([]);
   });
 
   it('marks a brand row on a cancelled registration and reports the loaded brands', async () => {

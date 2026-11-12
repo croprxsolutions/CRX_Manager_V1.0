@@ -422,11 +422,14 @@ export default function ProductDetail() {
 
   // Cancelled-registration warning (grand plan §8): the saved product number and its brands' numbers.
   const [brandRegistrations, setBrandRegistrations] = useState<{ label: string; epaRegistration: string | null }[]>([]);
-  const handleBrandsChange = useCallback((brands: ProductBrand[]) => {
-    setBrandRegistrations(brands.map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
+  // A failed brand-list read is shown as "could not check", never as "no cancelled brands".
+  const [brandsReadFailed, setBrandsReadFailed] = useState(false);
+  const handleBrandsChange = useCallback((brands: ProductBrand[] | null) => {
+    setBrandsReadFailed(brands === null);
+    setBrandRegistrations((brands ?? []).map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
   }, []);
   // Another product's brands never sit under this product's number.
-  useEffect(() => { setBrandRegistrations([]); }, [id]);
+  useEffect(() => { setBrandRegistrations([]); setBrandsReadFailed(false); }, [id]);
   const registrationSources = useMemo(() => (
     persistedProduct && persistedProduct.id === id
       ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
@@ -1321,7 +1324,7 @@ export default function ProductDetail() {
         </p>
       )}
       {!isNew && (
-        <CancelledRegistrationBanner sources={registrationSources} cancelled={registrationStatus.cancelled} failed={registrationStatus.failed} />
+        <CancelledRegistrationBanner sources={registrationSources} cancelled={registrationStatus.cancelled} failed={registrationStatus.failed || brandsReadFailed} />
       )}
 
       {duplicateSource && (

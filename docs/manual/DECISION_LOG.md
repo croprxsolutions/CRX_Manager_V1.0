@@ -14,7 +14,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.
 **Why:** brands never block delivery work (Mason, 2026-11-09). The only cost is a rare clash when a line is deleted at the same moment the delivery completes: the database cancels one of the two and that person retries. Nothing is lost or miscounted.
-**What this forbids/implies:** reviewers should not re-raise that deadlock on the line-delete trigger (`20270104120000_delivery_brands.sql`) as a BLOCKER or HIGH; refusing the delete would need a new Mason decision.
+**What this forbids/implies:** the line-delete trigger in `20270104120000_delivery_brands.sql` keeps allowing the delete and accepts that rare retry; changing it to refuse the delete needs a new Mason decision.
 
 ## 2026-11-11 — Migration approval: only deletions wait for Mason ("All but deletions")
 

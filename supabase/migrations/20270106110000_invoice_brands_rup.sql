@@ -270,19 +270,29 @@ AS $function$
   END;
 $function$;
 
--- One row per brand key of a snapshot, with the first entry's facts (entries are in a total order).
+-- One row per brand key of a snapshot, with the first entry's facts (entries are in a total order). ticked: the brand
+-- row of any of the key's picks is ticked restricted use now (Mason, 2026-11-11, "any tick counts", after Sol r4); read
+-- live, never stored in the snapshot, so a tick change never makes a draft's brands stale.
 CREATE FUNCTION public._invoice_line_brand_keys(p_brand_lines jsonb)
-RETURNS TABLE(brand_key text, brand_name text, epa_registration text, signal_word text, first_index integer)
+RETURNS TABLE(brand_key text, brand_name text, epa_registration text, signal_word text, first_index integer, ticked boolean)
 LANGUAGE sql
-IMMUTABLE
+STABLE
 SET search_path = public, pg_temp
 AS $function$
-  SELECT DISTINCT ON (e.value ->> 'brand_key')
-         e.value ->> 'brand_key', e.value ->> 'brand_name', e.value ->> 'epa_registration', e.value ->> 'signal_word',
-         e.ordinality::integer
-    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_brand_lines) = 'array' THEN p_brand_lines ELSE '[]'::jsonb END)
-         WITH ORDINALITY e
-   ORDER BY e.value ->> 'brand_key', e.ordinality;
+  WITH e AS (
+    SELECT x.value AS v, x.ordinality::integer AS i
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_brand_lines) = 'array' THEN p_brand_lines ELSE '[]'::jsonb END)
+           WITH ORDINALITY x
+  )
+  SELECT DISTINCT ON (e.v ->> 'brand_key')
+         e.v ->> 'brand_key', e.v ->> 'brand_name', e.v ->> 'epa_registration', e.v ->> 'signal_word', e.i,
+         EXISTS (SELECT 1 FROM e e2
+                   JOIN public.delivery_item_brands d ON d.id = (e2.v ->> 'pick_id')::uuid
+                   LEFT JOIN public.product_parent_brands pb ON pb.id = d.parent_brand_id
+                   LEFT JOIN public.product_brands lb ON lb.id = d.legacy_brand_id
+                  WHERE e2.v ->> 'brand_key' = e.v ->> 'brand_key' AND COALESCE(pb.is_rup, lb.is_rup, false))
+    FROM e
+   ORDER BY e.v ->> 'brand_key', e.i;
 $function$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -638,8 +648,9 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM public._invoice_line_brand_keys(p_brand_lines) k WHERE k.brand_key = c.brand_key);
   INSERT INTO public.invoice_line_brand_rup_captures AS c
     (invoice_item_id, brand_key, brand_name, product_id, epa_registration, rup_status, signal_word, source, basis)
-  SELECT p_line_id, k.brand_key, k.brand_name, p_product_id, f.epa_registration, f.rup_status, f.signal_word, p_source,
-         md5(jsonb_build_array(k.brand_name, k.epa_registration, k.signal_word, p_product_id,
+  SELECT p_line_id, k.brand_key, k.brand_name, p_product_id, f.epa_registration,
+         CASE WHEN k.ticked THEN 'yes' ELSE f.rup_status END, f.signal_word, p_source,
+         md5(jsonb_build_array(k.brand_name, k.epa_registration, k.signal_word, p_product_id, k.ticked,
                (SELECT public._normalize_epa_registration(p.epa_registration) FROM public.products p WHERE p.id = p_product_id))::text)
     FROM public._invoice_line_brand_keys(p_brand_lines) k
    CROSS JOIN LATERAL public._invoice_brand_rup_facts(p_product_id, k.epa_registration, k.signal_word) f
@@ -825,8 +836,9 @@ BEGIN
     -- B-1b: the same for each brand of a branded line.
     INSERT INTO invoice_line_brand_rup_captures
       (invoice_item_id, brand_key, brand_name, product_id, epa_registration, rup_status, signal_word, source, basis)
-    SELECT ii.id, k.brand_key, k.brand_name, ii.product_id, f.epa_registration, f.rup_status, f.signal_word, 'posting',
-           md5(jsonb_build_array(k.brand_name, k.epa_registration, k.signal_word, ii.product_id,
+    SELECT ii.id, k.brand_key, k.brand_name, ii.product_id, f.epa_registration,
+           CASE WHEN k.ticked THEN 'yes' ELSE f.rup_status END, f.signal_word, 'posting',
+           md5(jsonb_build_array(k.brand_name, k.epa_registration, k.signal_word, ii.product_id, k.ticked,
                  (SELECT public._normalize_epa_registration(p.epa_registration) FROM products p WHERE p.id = ii.product_id))::text)
       FROM invoice_items ii
      CROSS JOIN LATERAL public._invoice_line_brand_keys(ii.brand_lines) k
@@ -852,7 +864,7 @@ BEGIN
        WHERE ii.invoice_id = p_invoice_id AND c.invoice_item_id = ii.id AND c.rup_status <> 'yes'
          AND (EXISTS (SELECT 1 FROM public._invoice_line_brand_keys(ii.brand_lines) k
                        CROSS JOIN LATERAL public._invoice_brand_rup_facts(ii.product_id, k.epa_registration, k.signal_word) f
-                       WHERE k.brand_key = c.brand_key AND f.rup_status = 'yes')
+                       WHERE k.brand_key = c.brand_key AND (f.rup_status = 'yes' OR k.ticked))
               OR EXISTS (SELECT 1 FROM epa_registrations r
                           WHERE r.epa_registration = c.epa_registration AND r.rup_status = 'yes'));
     END IF;
@@ -1094,7 +1106,9 @@ BEGIN
     -- One row per brand with a positive share on a branded line without a problem.
     SELECT al.line_id, al.invoice_id, al.invoice_number, al.invoice_date, al.product_id, al.product_name,
            c.epa_registration, al.saved_number, al.quantity, c.rup_status, c.source AS capture_source,
-           COALESCE(al.product_is_rup, false) OR r.rup_status = 'yes' OR pr.rup_status = 'yes' AS yes_now,
+           COALESCE(al.product_is_rup, false) OR r.rup_status = 'yes' OR pr.rup_status = 'yes'
+             OR EXISTS (SELECT 1 FROM public._invoice_line_brand_keys(al.brand_lines) k
+                         WHERE k.brand_key = b.value ->> 'brand_key' AND k.ticked) AS yes_now,
            r.rup_status AS registration_rup_status_now,
            EXISTS (SELECT 1 FROM rup_sales_records s WHERE s.invoice_item_id = al.line_id AND s.voided_at IS NULL
                       AND s.brand_key = b.value ->> 'brand_key') AS has_record,

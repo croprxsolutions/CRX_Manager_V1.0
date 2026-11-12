@@ -844,6 +844,21 @@ async function main() {
   assert.ok(unrec('100-2').some((x) => x.invoice_item_id === L28 && x.brand_key === undefined), 'listed despite its Alpha record');
   console.log('[prover] case 23: the registration-change lookup lists a branded line under the product number and its brand number, and a line whose brands do not reconcile under any number it carries');
 
+
+  // 24. (Mason, 2026-11-11, "any tick counts", after Sol r4) A brand ticked restricted use on its own row counts, as
+  //     the product's tick does, even when its number's registration says No: posting writes its record.
+  raw(`UPDATE public.product_parent_brands SET is_rup = true WHERE id = '${BRAVO}';`);
+  mkDelivery(29, [[PR, 2]]);
+  set(D(29), [{ delivery_item_id: DI(29, 0), picks: [pick(BRAVO, 2)] }], 'b1b-k29');
+  complete(D(29), { [DI(29, 0)]: 2 }, 'b1b-c29');
+  const L29 = invLine(29);
+  assert.equal(postAndGen(invOf(L29), 'b1b-g29'), 1, 'the ticked brand gets its record');
+  assert.deepEqual(records(L29).map((r) => [r.brand, r.epa, Number(r.qty)]), [['Bravo', '100-2', 2]]);
+  assert.deepEqual(reasons(L29), []);
+  assert.ok(reasons(L27).includes('Bravo:now_restricted_use'), `a Bravo sale posted before the tick is listed: ${reasons(L27)}`);
+  raw(`UPDATE public.product_parent_brands SET is_rup = NULL WHERE id = '${BRAVO}';`);
+  console.log('[prover] case 24: a brand ticked restricted on its own row records its sale even when its registration says No; an earlier sale of it is listed now restricted');
+
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }
 

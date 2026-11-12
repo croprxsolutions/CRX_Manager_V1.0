@@ -14,4 +14,4 @@
 - The RUP register and its CSV show the brand; typed brands on voided or cancelled deliveries leave the review list.
 - Proof: `node scripts/smoke/prove-invoice-brands-real-schema.mjs`.
 
-An invoice open on a screen when its brands are re-copied (or when this change is applied) asks for one reload before it posts. Split-billed drafts are never re-copied, so their stored copy still matches when they post.
+An invoice open on a screen when its brands are re-copied (or when this change is applied) asks for one reload before it posts. Split-billed drafts are never re-copied, so their split claim still matches when they post; if the delivery's brands were corrected after the split, the line posts with no brand record and is listed on Sales to check as stale.

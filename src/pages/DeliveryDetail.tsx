@@ -784,6 +784,11 @@ export default function DeliveryDetail() {
 
   const saveEdit = async () => {
     if (!delivery || !profile) return;
+    // An edit can recreate the delivery's lines, which would orphan unsaved brand choices: save them first.
+    if (brandState.dirty) {
+      toast('error', 'Press Save brands (or clear the unfinished brand choice) first, then save the delivery changes.');
+      return;
+    }
 
     // Validate: if scheduled and items changed, must have at least 1 item with qty > 0
     const isScheduled = delivery.status === 'scheduled';

@@ -140,7 +140,7 @@ export default function TypedBrandReview() {
                 <Link to={`/deliveries/${row.delivery_id}`} className="text-crx-green underline">{row.delivery_number || 'a delivery'}</Link>
               </p>
               {row.review_note === 'number_differs_from_list' && (
-                <p className="text-sm text-amber-800">The name is on the list, but with a different EPA number.</p>
+                <p className="text-sm text-amber-800">The name is on the list, but with a different EPA number. Link it to the listed brand.</p>
               )}
               {linkOpen ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -160,7 +160,10 @@ export default function TypedBrandReview() {
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" disabled={!!busyPick} loading={busy} onClick={() => void addToList(row)}>Add to list</Button>
+                  {/* The name is already listed, so the list refuses a second one: link it instead. */}
+                  {row.review_note !== 'number_differs_from_list' && (
+                    <Button size="sm" disabled={!!busyPick} loading={busy} onClick={() => void addToList(row)}>Add to list</Button>
+                  )}
                   <Button size="sm" variant="secondary" disabled={!!busyPick} onClick={() => void startLink(row)}>Link to existing</Button>
                   <Button size="sm" variant="ghost" disabled={!!busyPick} onClick={() => void dismiss(row)}>Dismiss</Button>
                 </div>

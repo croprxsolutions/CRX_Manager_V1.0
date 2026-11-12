@@ -50,4 +50,11 @@ describe('TypedBrandReview', () => {
     fireEvent.click(await screen.findByText('Try again'));
     expect(await screen.findByText('Brands to review')).toBeTruthy();
   });
+
+  it('offers only Link when the typed name is already listed under another EPA number', async () => {
+    getTypedBrandsForReview.mockResolvedValue([{ ...row, review_note: 'number_differs_from_list' }]);
+    render(<MemoryRouter><TypedBrandReview /></MemoryRouter>);
+    expect(await screen.findByText('Link to existing')).toBeTruthy();
+    expect(screen.queryByText('Add to list')).toBeNull();
+  });
 });

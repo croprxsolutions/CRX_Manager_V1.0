@@ -15,6 +15,17 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, 2026-11-12, in chat: "Yes, keep it").** On PR #1844, once the product page has shown a cancelled EPA registration (the product's own number or a brand's), that warning and the brand row's mark stay until the page is reloaded or another product is opened, even if a later check fails or no longer covers that number. A failed or unfinished check adds the "could not check" notice beside the red warning; it never replaces it.
 **Why:** the warning exists to warn loudly (selling is never blocked), so information already confirmed must not disappear because a later read failed. Sol rounds 1, 2 and 4 each found a new case in how the banner handled checks that failed or had not finished.
 **What this forbids/implies:** `useStickyCancellations` in `src/lib/epaRegistrationStatus.ts` keeps each shown cancellation per product for the page session. Clearing a shown warning before reload needs a new Mason decision.
+## 2026-11-12 — #1840: Mason owner-accepted 1 Sol finding(s) at `de529580591b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1840 at `de529580591b` (base `8b6c3281c24c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/CorrectBrandsModal.tsx:94`, text sha256 `2cf94e722dd4660e` (the wording stays with the proof, not here)
+  Mason's reason: brand retuurns to review list, office relinks (ref 775f98f6999f)
+
+## 2026-11-12 — #1840 (B-2 brand screens): an unconfirmed brand step still completes, flagged for the office
+
+**Decision (Mason, 2026-11-12, in chat: "Yes, warn and flag later").** On PR #1840, when the delivery screens cannot confirm the brand picks at completion (the brand list did not load, or a choice was left out, refused by the database, failed to save, or overtaken by someone else's save), the delivery still completes and the driver is warned. The completion is recorded as picks not confirmed, so every picked line lands on the office's Deliveries missing brands list.
+**Why:** brands never block a delivery (Mason, 2026-11-09). Sol rounds 1, 3 and 4 each found another way a brand problem at completion either blocked the completion or left a wrong brand unflagged.
+**What this forbids/implies:** `saveForCompletion` in `src/components/deliveries/useDeliveryBrands.ts` sends the loaded brand seq only when every choice on screen was saved. Otherwise it sends `BRANDS_NOT_CONFIRMED` (-1), which `complete_delivery` records as `picks_confirmed: false` (20270104120000). Refusing a completion over brands needs a new Mason decision. Completion never waits on brands either (Sol round 5, applying this same decision): a brand list still loading, a Save brands still in flight, or a completion brand save with no reply within 10 seconds all complete as not confirmed.
 
 ## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
 

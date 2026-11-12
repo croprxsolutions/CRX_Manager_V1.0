@@ -2110,6 +2110,12 @@
       "description": "Migration 20261229150000: reads Sales Detail, every Sales Summary grouping and the dashboard as an admin; a rep sells a Bill Split 60/40, delivered and billed per payer; Sales Detail shows one row per payer (payer 2 exactly 40% rounded down, the main customer the rest), each with that payer's own invoice, and every other row unchanged; detail, every summary grouping and the dashboard headline grew by exactly the line; the customer filter and \"by customer\" credit payer 2; a rep gets the payer rows with cost, profit and margin empty; no API role may call _sales_line_payers. Terminal rollback.",
       "covers": ["get_sales_detail_report", "get_sales_summary_report", "financial_dashboard_summary", "_sales_line_payers"],
       "area": ["billing", "regression"]
+    },
+    "epa_long_name_cas_match": {
+      "chain": "smoke-epa_long_name_cas_match.sql",
+      "description": "REQUIRES 20270107100000 (#1810 follow-up). On an invented product with one Glyphosate row, an admin starts an EPA lookup and the epa-lookup role records an answer listing Glyphosate by CAS under a 250-character name: the proposal shows that entry as an unticked conflict with no change, shows the product's row beside it, and does not list the row as missing from EPA. Fails before the migration. Terminal rollback.",
+      "covers": ["_epa_proposal_items", "start_epa_lookup", "record_epa_lookup", "_epa_lookup_input"],
+      "area": ["regression"]
     }
   }
 }

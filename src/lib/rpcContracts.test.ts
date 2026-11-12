@@ -3257,6 +3257,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _delivery_brand_insert: 'internal B-1a helper (20270104120000): called only by set_delivery_brands and correct_delivery_brands after their own replay check; every API-role EXECUTE is revoked',
   _delivery_brands_on_complete: 'internal B-1a helper (20270104120000): called only by _complete_delivery_aggregate_impl on a fresh completion (a replay returns before it); every API-role EXECUTE is revoked',
   _delivery_brands_on_line_delete: 'B-1a trigger function (20270104120000): BEFORE DELETE on delivery_items, appends one line_removed brand event for a deleted line\'s current picks; runs only as a trigger, every API-role EXECUTE is revoked',
+  _delivery_brand_event_recopy: 'B-1b trigger function (20270104130000): deferred constraint trigger on delivery_brand_events, re-copies brand snapshots onto open draft invoices when the writing transaction commits; runs only as a trigger, every API-role EXECUTE is revoked',
+  _invoice_brand_recopy: 'internal B-1b helper (20270104130000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
+  _invoice_brand_recopy_invoice: 'internal B-1b helper (20270104130000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
+  _sync_invoice_line_brand_captures: 'internal B-1b helper (20270104130000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

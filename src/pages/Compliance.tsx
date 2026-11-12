@@ -497,6 +497,7 @@ export default function Compliance() {
       key: 'product_name',
       header: 'Product',
       sortable: true,
+      render: (r) => (r.brand_name ? `${r.product_name} (${r.brand_name})` : r.product_name),
     },
     {
       key: 'epa_registration',
@@ -777,6 +778,7 @@ export default function Compliance() {
                           { key: 'sale_date', header: 'Sale Date' },
                           { key: 'buyer_name', header: 'Buyer Name' },
                           { key: 'product_name', header: 'Product' },
+                          { key: 'brand_name', header: 'Brand' },
                           { key: 'epa_registration', header: 'EPA Reg #' },
                           { key: 'quantity', header: 'Quantity' },
                           { key: 'unit', header: 'Unit' },

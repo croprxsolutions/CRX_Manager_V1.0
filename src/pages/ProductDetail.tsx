@@ -17,7 +17,7 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
-import { useCancelledRegistrations } from '../lib/epaRegistrationStatus';
+import { CHECK_TIMEOUT_MS, useCancelledRegistrations } from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -422,14 +422,23 @@ export default function ProductDetail() {
 
   // Cancelled-registration warning (grand plan §8): the saved product number and its brands' numbers.
   const [brandRegistrations, setBrandRegistrations] = useState<{ label: string; epaRegistration: string | null }[]>([]);
-  // A failed brand-list read is shown as "could not check", never as "no cancelled brands".
-  const [brandsReadFailed, setBrandsReadFailed] = useState(false);
-  const handleBrandsChange = useCallback((brands: ProductBrand[] | null) => {
-    setBrandsReadFailed(brands === null);
+  // A brand list that failed, or is still loading after the check timeout, shows "could not check",
+  // never "no cancelled brands".
+  const [brandsRead, setBrandsRead] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const handleBrandsChange = useCallback((brands: ProductBrand[] | null | undefined) => {
+    setBrandsRead(brands === undefined ? 'loading' : brands === null ? 'failed' : 'loaded');
     setBrandRegistrations((brands ?? []).map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
   }, []);
   // Another product's brands never sit under this product's number.
-  useEffect(() => { setBrandRegistrations([]); setBrandsReadFailed(false); }, [id]);
+  useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  const [brandsReadSlow, setBrandsReadSlow] = useState(false);
+  useEffect(() => {
+    setBrandsReadSlow(false);
+    if (brandsRead !== 'loading') return undefined;
+    const timer = setTimeout(() => setBrandsReadSlow(true), CHECK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [brandsRead, id]);
+  const brandsReadFailed = brandsRead === 'failed' || (brandsRead === 'loading' && brandsReadSlow);
   const registrationSources = useMemo(() => (
     persistedProduct && persistedProduct.id === id
       ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]

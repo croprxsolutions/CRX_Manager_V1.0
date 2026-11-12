@@ -92,7 +92,8 @@ describe('cancelled registrations', () => {
     brandsRead.fail = true;
     const onBrandsChange = vi.fn();
     render(<ProductBrandsSection productId="p1" productName="X" isAdmin={false} userId="u" onBrandsChange={onBrandsChange} />);
-    await waitFor(() => expect(onBrandsChange).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onBrandsChange).toHaveBeenLastCalledWith(null));
+    expect(onBrandsChange).toHaveBeenCalledWith(undefined);
     expect(onBrandsChange).not.toHaveBeenCalledWith([]);
   });
 

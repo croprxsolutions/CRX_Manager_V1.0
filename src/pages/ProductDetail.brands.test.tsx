@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { Product } from '../types';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { Product, ProductBrand } from '../types';
 
 const H = vi.hoisted(() => ({
   product: {} as Product | null,
@@ -223,6 +223,34 @@ describe('ProductDetail brands section', () => {
     H.savedPayload = null;
     H.created = null;
     H.optionLoadFailed = false;
+  });
+
+  it('names a brand on a cancelled registration in the page banner', async () => {
+    H.rpc.mockImplementation(async (name: string) => (name === 'get_epa_registrations'
+      ? { data: [{ epa_registration: '524-475', registration_status: 'cancelled', cancelled_on: null }], error: null }
+      : { data: null, error: null }));
+    render(<ProductDetail />);
+    await screen.findByTestId('brands-section');
+    const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
+    act(() => props.onBrandsChange([{ brand_name: 'Slam 5.4', epa_registration: '524-475' } as ProductBrand]));
+    expect(await screen.findByTestId('cancelled-registration-banner')).toHaveTextContent('Brand Slam 5.4: EPA Reg. No. 524-475, cancelled (date not recorded).');
+  });
+
+  it('a brand list still loading after the check timeout shows "could not check"', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<ProductDetail />);
+      await screen.findByTestId('brands-section');
+      const props = H.brandSection.mock.lastCall![0] as { onBrandsChange: (b: ProductBrand[] | null | undefined) => void };
+      act(() => props.onBrandsChange(undefined));
+      expect(screen.queryByText(/Could not check/)).toBeNull();
+      act(() => { vi.advanceTimersByTime(15_000); });
+      expect(screen.getByText(/Could not check whether all of this product's EPA registrations are cancelled/)).toBeInTheDocument();
+      act(() => props.onBrandsChange([]));
+      expect(screen.queryByText(/Could not check/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the brands section for the product that loaded, with its saved name', async () => {

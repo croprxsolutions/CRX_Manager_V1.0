@@ -3144,6 +3144,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'commit_ingredients_tab',
   'commit_weights_tab',
   'promote_chemistry_proposal',
+  // 20270104120000 (Brand PR B part B-1a, local candidate): delivery brand writers; each requires p_idempotency_key and
+  // replays through _product_parent_replay, then saves its receipt. Prune once the generated types carry them.
+  'correct_delivery_brands',
+  'review_typed_brand',
+  'set_delivery_brands',
   // 20270105110000 (DM-4, local candidate): EPA auto-fill writers; start, commit and reject replay through
   // _product_parent_replay, record_epa_lookup (service role only) through check_idempotency; each saves its
   // receipt. Prune once the generated types carry them.
@@ -3255,6 +3260,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  // 20270104120000 (Brand PR B part B-1a, local candidate): private helpers. Prune once applied and the types carry them.
+  _delivery_brand_event: 'internal B-1a helper (20270104120000): called only by the keyed delivery brand writers, edit_delivery and the completion step, each after its own replay check; every API-role EXECUTE is revoked',
+  _delivery_brand_insert: 'internal B-1a helper (20270104120000): called only by set_delivery_brands and correct_delivery_brands after their own replay check; every API-role EXECUTE is revoked',
+  _delivery_brands_on_complete: 'internal B-1a helper (20270104120000): called only by _complete_delivery_aggregate_impl on a fresh completion (a replay returns before it); every API-role EXECUTE is revoked',
+  _delivery_brands_on_line_delete: 'B-1a trigger function (20270104120000): BEFORE DELETE on delivery_items, appends one line_removed brand event for a deleted line\'s current picks; runs only as a trigger, every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

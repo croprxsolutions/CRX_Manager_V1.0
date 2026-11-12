@@ -1312,6 +1312,38 @@ export interface DeliveryItem {
   product?: Product;
 }
 
+/** One brand recorded on a delivery line (delivery_item_brands, 20270104120000). Current when superseded_at is null. */
+export interface DeliveryItemBrand {
+  id: string;
+  delivery_item_id: string;
+  delivery_id: string;
+  product_id: string;
+  /** parent = a parent product's brand, size = a size's own (legacy) brand, typed = typed from the jug. */
+  source: 'parent' | 'size' | 'typed';
+  parent_id: string | null;
+  parent_brand_id: string | null;
+  legacy_brand_id: string | null;
+  brand_name: string;
+  epa_registration: string | null;
+  manufacturer: string | null;
+  signal_word: BrandSignalWord | null;
+  quantity: number;
+  /** Typed picks only: waiting for an admin, linked to a listed brand, or dismissed. */
+  review_state: 'pending' | 'added' | 'dismissed' | null;
+  review_note: 'number_differs_from_list' | null;
+  review_brand_ref: string | null;
+  review_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  entered_by: string | null;
+  entered_at: string;
+  updated_at: string;
+  superseded_at: string | null;
+  superseded_by: string | null;
+  supersede_reason: string | null;
+  superseded_by_event_seq: number | null;
+}
+
 export interface DeliveryPhoto {
   id: string;
   delivery_id: string;

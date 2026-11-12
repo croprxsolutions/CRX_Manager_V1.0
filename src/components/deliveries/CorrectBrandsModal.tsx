@@ -83,12 +83,14 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
       toast('error', error instanceof Error ? error.message : 'Check the brand choices');
       return;
     }
-    // Disabled from here, so nothing changes between building this correction and its reply.
+    // Disabled from here, so nothing changes between building this correction and its reply. The request number is
+    // taken before the signal check: closing the dialog or another delivery loading since then cancels it.
     setSaving(true);
+    const request = ++requestRef.current;
     if (!(await hasSignal())) { setSaving(false); toast('error', 'Brands save when you have signal.'); return; }
+    if (request !== requestRef.current) { setSaving(false); return; }
     // One key per exact correction: a retry of the same one reuses it.
     const scope = fingerprintIntentPayload([deliveryId, lines, reason.trim(), brands.event_seq]);
-    const request = ++requestRef.current;
     try {
       const result = await correctDeliveryBrands(deliveryId, lines, reason.trim(), brands.event_seq, idem.getKeyFor(scope));
       idem.resetKeyFor(scope);
@@ -99,13 +101,14 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose }: { open
         : confirming ? 'Brands confirmed as they are.' : 'Brands corrected.');
       onClose();
     } catch (error) {
+      if (getIdempotencyBindingRejection(error) || hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) idem.resetKeyFor(scope);
+      // A reply after the dialog closed or moved to another delivery changes nothing on screen.
+      if (request !== requestRef.current) return;
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
-        idem.resetKeyFor(scope);
         toast('warning', 'Someone else changed these brands. Your corrections are still on screen; check them and save again.');
         await load(Object.fromEntries(changed.map((lineId) => [lineId, drafts[lineId]])));
         return;
       }
-      if (getIdempotencyBindingRejection(error)) idem.resetKeyFor(scope);
       toast('error', deliveryBrandErrorMessage(error));
     } finally {
       setSaving(false);

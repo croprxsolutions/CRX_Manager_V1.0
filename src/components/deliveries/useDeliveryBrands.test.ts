@@ -209,3 +209,54 @@ describe('useDeliveryBrands when a caller saves for a stop no longer on screen',
     getDeliveryBrands.mockReset();
   });
 });
+
+describe('useDeliveryBrands: every reply is tied to the stop that sent it', () => {
+  const twoStops = () => getDeliveryBrands.mockImplementation(async (id: string) => ({ ...brands(id === 'D1' ? 1 : 20), delivery_id: id }));
+
+  it('drops the old stop’s late successful save', async () => {
+    twoStops();
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    act(() => result.current.setLineDraft('L1', [pick]));
+    let reply!: (v: unknown) => void;
+    const rpc = vi.spyOn(supabaseUntyped, 'rpc').mockReturnValue(new Promise((resolve) => { reply = resolve; }) as never);
+    let saving!: Promise<number | null>;
+    act(() => { saving = result.current.save(); });
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    await act(async () => { reply({ data: { delivery_id: 'D1', event_seq: 2, picks: [] }, error: null }); expect(await saving).toBeNull(); });
+    expect(result.current.brands?.delivery_id).toBe('D2');
+    expect(result.current.brands?.event_seq).toBe(20);
+    expect(result.current.savedAt).toBeNull();
+    rpc.mockRestore();
+    getDeliveryBrands.mockReset();
+  });
+
+  it('ignores a reload the old stop asked for after an edit that finished late', async () => {
+    twoStops();
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D1'));
+    const oldReload = result.current.reload;
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    getDeliveryBrands.mockClear();
+    await act(async () => { await oldReload({ discard: ['L1'] }); });
+    expect(getDeliveryBrands).not.toHaveBeenCalled();
+    expect(result.current.brands?.delivery_id).toBe('D2');
+    getDeliveryBrands.mockReset();
+  });
+
+  it('drops the old stop’s late load reply', async () => {
+    let answerD1!: (b: DeliveryBrands) => void;
+    getDeliveryBrands.mockImplementation((id: string) => (id === 'D1'
+      ? new Promise((resolve) => { answerD1 = resolve; })
+      : Promise.resolve({ ...brands(20), delivery_id: id })));
+    const { result, rerender } = renderHook(({ id }) => useDeliveryBrands(id, true), { initialProps: { id: 'D1' } });
+    rerender({ id: 'D2' });
+    await waitFor(() => expect(result.current.brands?.delivery_id).toBe('D2'));
+    await act(async () => { answerD1({ ...brands(1), delivery_id: 'D1' }); });
+    expect(result.current.brands?.delivery_id).toBe('D2');
+    getDeliveryBrands.mockReset();
+  });
+});

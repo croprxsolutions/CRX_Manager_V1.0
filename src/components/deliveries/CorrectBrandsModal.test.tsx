@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { DeliveryBrands } from '../../lib/deliveryBrands';
 import CorrectBrandsModal from './CorrectBrandsModal';
 
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'admin-1' } }) }));
 const toast = vi.fn();
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast }) }));
-vi.mock('../../lib/connectivity', () => ({ hasSignal: async () => true }));
+let signal: () => Promise<boolean> = async () => true;
+vi.mock('../../lib/connectivity', () => ({ hasSignal: () => signal() }));
 
 const getDeliveryBrands = vi.fn();
 const correctDeliveryBrands = vi.fn();
@@ -51,5 +52,25 @@ describe('CorrectBrandsModal', () => {
     expect(seq).toBe(7);
     expect(toast).toHaveBeenCalledWith('success', 'Brands confirmed as they are.');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the dialog closes', 'close'],
+    ['another delivery loads', 'switch'],
+  ])('sends nothing when %s during the signal check', async (_label, how) => {
+    getDeliveryBrands.mockImplementation(async (id: string) => ({ ...brands, delivery_id: id }));
+    correctDeliveryBrands.mockReset();
+    let answer!: (v: boolean) => void;
+    signal = () => new Promise((resolve) => { answer = resolve; });
+    const view = render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} />);
+    await screen.findByLabelText('Brand for Glyphosate');
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Checked' } });
+    fireEvent.click(screen.getByText('Save correction'));
+    await waitFor(() => expect(answer).toBeTypeOf('function'));
+    if (how === 'close') view.rerender(<CorrectBrandsModal open={false} deliveryId="D1" onClose={() => undefined} />);
+    else view.rerender(<CorrectBrandsModal open deliveryId="D2" onClose={() => undefined} />);
+    await act(async () => { answer(true); });
+    expect(correctDeliveryBrands).not.toHaveBeenCalled();
+    signal = async () => true;
   });
 });

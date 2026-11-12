@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { hasRpcCode, RpcErrorCodes } from '../../lib/db';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
@@ -37,16 +37,20 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
   const touchedRef = useRef(new Set<string>());
   // Whether this delivery's picks are on screen (a later refresh failing must not hide them).
   const loadedRef = useRef(false);
-  // The delivery on screen now: a save captured by an older render (a caller awaiting something) is refused.
+  // The delivery on screen now. Every load, save and reply is tied to the delivery and request that sent it: a
+  // function captured by an older render (a caller still awaiting something after the stop changed) is refused,
+  // and a reply for another delivery or an overtaken request is dropped. Updated at commit, before any effect.
   const liveDeliveryRef = useRef(deliveryId);
-  useEffect(() => { liveDeliveryRef.current = deliveryId; }, [deliveryId]);
+  useLayoutEffect(() => { liveDeliveryRef.current = deliveryId; }, [deliveryId]);
 
   const load = useCallback(async () => {
+    // A load captured for a delivery no longer on screen (a reload after an edit that finished late) does nothing.
+    if (liveDeliveryRef.current !== deliveryId) return;
     const request = ++requestRef.current;
     if (!deliveryId || !enabled) return;
     try {
       const next = await getDeliveryBrands(deliveryId);
-      if (request !== requestRef.current) return;
+      if (request !== requestRef.current || liveDeliveryRef.current !== deliveryId) return;
       const touched = touchedRef.current;
       touchedRef.current = new Set();
       loadedRef.current = true;
@@ -58,7 +62,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
       });
       setLoadFailed(false);
     } catch (error) {
-      if (request !== requestRef.current) return;
+      if (request !== requestRef.current || liveDeliveryRef.current !== deliveryId) return;
       // A failed refresh keeps the picks and unsaved choices on screen (a later save still checks the base
       // seq); only a failed first load shows the failure.
       if (!loadedRef.current) setLoadFailed(true);
@@ -92,7 +96,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     try {
       const result = await setDeliveryBrands(deliveryId, lines, brands.event_seq, idem.getKeyFor(scope));
       idem.resetKeyFor(scope);
-      if (request !== requestRef.current) return null;
+      if (request !== requestRef.current || liveDeliveryRef.current !== deliveryId) return null;
       const next: DeliveryBrands = {
         ...brands,
         event_seq: result.event_seq,
@@ -106,7 +110,7 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
     } catch (error) {
       if (getIdempotencyBindingRejection(error) || isBrandChoiceRefusal(error)) idem.resetKeyFor(scope);
       // A reply for a delivery no longer on screen (or a superseded request) must not reload or touch this one.
-      if (request !== requestRef.current) return null;
+      if (request !== requestRef.current || liveDeliveryRef.current !== deliveryId) return null;
       if (hasRpcCode(error, RpcErrorCodes.BRAND_PICKS_CHANGED)) {
         idem.resetKeyFor(scope);
         // The driver's choices stay on screen over the reloaded picks; saving again sends them on the new base.
@@ -186,9 +190,10 @@ export function useDeliveryBrands(deliveryId: string | undefined, enabled: boole
 
   /** Reloads the saved picks; `discard` names lines whose unsaved choices no longer apply (the line was edited). */
   const reload = useCallback(({ discard = [] }: { discard?: string[] } = {}) => {
+    if (liveDeliveryRef.current !== deliveryId) return Promise.resolve();
     for (const lineId of discard) touchedRef.current.delete(lineId);
     return load();
-  }, [load]);
+  }, [load, deliveryId]);
 
   return { brands, drafts, setLineDraft, dirty, saving, loading, savedAt, loadFailed, save, saveForCompletion, reload };
 }

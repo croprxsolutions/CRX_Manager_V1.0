@@ -511,8 +511,7 @@ function gateRequest(request) {
   const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
   if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const ownCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
-    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, prCommits: ownCommits, repo: request.repo, gh: hardGateGh });
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
   }
 

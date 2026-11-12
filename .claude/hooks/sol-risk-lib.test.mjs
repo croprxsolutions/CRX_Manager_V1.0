@@ -97,21 +97,26 @@ check("other bases are not this rule's business", () => {
 });
 
 check("a PR into staging carrying main's commits that staging lacks is a back-merge under another name", () => {
-  const STAGING = "s".repeat(40).replace(/s/g, "a");
   const c = (ch) => ch.repeat(40);
-  const ask = (stdout, prCommits, extra = {}) => mainCommitsInPrOnGitHub({ stagingSha: STAGING, prCommits: new Set(prCommits), repo: "o/r",
-    gh: (args) => { if (stdout instanceof Error) throw stdout; assert.match(args[1], new RegExp(`compare/${STAGING}\\.\\.\\.main$`)); return stdout; }, ...extra });
-  // main inside staging (the normal state): nothing to smuggle.
-  for (const status of ["identical", "behind"]) assert.equal(ask(JSON.stringify({ status, ahead_by: 0, commits: [] }), [c("1")]), null, status);
-  // main ahead of staging: a PR holding one of those commits is refused; one that doesn't is fine.
-  const ahead = JSON.stringify({ status: "ahead", ahead_by: 2, commits: [c("b"), c("c")] });
-  assert.match(ask(ahead, [c("1"), c("c")]), /back-merge.*Taha's or Mason's/);
-  assert.equal(ask(ahead, [c("1"), c("2")]), null);
-  // unreadable, truncated or malformed answers fail closed.
-  for (const bad of [new Error("offline"), "not json", JSON.stringify({ status: "ahead", ahead_by: 300, commits: [c("b")] }), JSON.stringify({ status: "ahead", ahead_by: 1 })]) {
-    assert.ok(ask(bad, [c("1")]), String(bad));
+  const STAGING = c("a"); const HEAD = c("e");
+  // answers[sha] = what GitHub says for <sha>...main
+  const ask = (answers, extra = {}) => mainCommitsInPrOnGitHub({ stagingSha: STAGING, headSha: HEAD, repo: "o/r",
+    gh: (args) => { const sha = /compare\/([0-9a-f]{40})\.\.\.main$/.exec(args[1])?.[1]; const a = answers[sha]; if (a instanceof Error) throw a; return a ?? "missing"; }, ...extra });
+  const j = (o) => JSON.stringify(o);
+  // main inside staging (the normal state): one call, nothing to bring in.
+  for (const status of ["identical", "behind"]) assert.equal(ask({ [STAGING]: j({ status, ahead_by: 0, commits: [] }) }), null, status);
+  // main ahead of staging by b and c.
+  const ahead = j({ status: "ahead", ahead_by: 2, commits: [c("b"), c("c")] });
+  assert.match(ask({ [STAGING]: ahead, [HEAD]: j({ status: "ahead", ahead_by: 1, commits: [c("b")] }) }), /1 commit\(s\) from main.*back-merge.*Taha's or Mason's/, "the head holds c");
+  assert.equal(ask({ [STAGING]: ahead, [HEAD]: j({ status: "diverged", ahead_by: 2, commits: [c("b"), c("c")] }) }), null, "the head holds neither");
+  assert.match(ask({ [STAGING]: ahead, [HEAD]: j({ status: "identical", ahead_by: 0, commits: [] }) }), /2 commit\(s\)/, "the head holds all of main");
+  // unreadable, cut short, unexpected or malformed answers fail closed, on either call.
+  for (const bad of [new Error("offline"), "not json", j({ status: "ahead", ahead_by: 300, commits: [c("b")] }), j({ status: "ahead", ahead_by: 1 }), j({ status: "weird", ahead_by: 0, commits: [] })]) {
+    assert.ok(ask({ [STAGING]: bad }), `staging call: ${bad}`);
+    assert.ok(ask({ [STAGING]: ahead, [HEAD]: bad }), `head call: ${bad}`);
   }
-  assert.ok(mainCommitsInPrOnGitHub({ stagingSha: "short", prCommits: new Set(), repo: "o/r", gh: () => "{}" }), "a bad staging sha fails closed");
+  assert.ok(mainCommitsInPrOnGitHub({ stagingSha: "short", headSha: HEAD, repo: "o/r", gh: () => "{}" }), "a bad staging sha fails closed");
+  assert.ok(mainCommitsInPrOnGitHub({ stagingSha: STAGING, headSha: "short", repo: "o/r", gh: () => "{}" }), "a bad head sha fails closed");
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

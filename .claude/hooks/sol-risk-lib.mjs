@@ -144,25 +144,36 @@ export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
 // release PR (release/next) and hotfix/<name> PRs go into main, and Taha or Mason
 // merges them, never an agent; the same for the back-merge of main into staging.
 // A back-merge under another branch name: while main has commits staging lacks, a PR into staging
-// carrying any of them brings main into staging. GitHub's staging...main lists them (up to 250).
-// null when the PR carries none; otherwise why the merge is refused. Never throws: failures refuse.
-export function mainCommitsInPrOnGitHub({ stagingSha, prCommits, repo, gh }) {
-  const repoPath = ghApiRepoPath(repo);
-  if (!repoPath) return "the pull request's repository could not be read";
-  if (!SHA_RE.test(String(stagingSha || ""))) return "staging's commit is not a full commit id";
+// whose head holds any of them brings main into staging. Two GitHub comparisons, each listing up to 250
+// commits: staging...main (main's commits staging lacks) and head...main (those the head lacks). Any of
+// the first not in the second is carried by the PR. null when it carries none; otherwise why the merge
+// is refused. Never throws: an unreadable, cut-short or unexpected answer refuses.
+function mainAheadOf(sha, { repoPath, gh }) {
   let answer;
   try {
-    answer = JSON.parse(String(gh(["api", `${repoPath}/compare/${String(stagingSha).toLowerCase()}...main`, "--jq", "{status: .status, ahead_by: .ahead_by, commits: [.commits[]?.sha]}"])));
+    answer = JSON.parse(String(gh(["api", `${repoPath}/compare/${sha}...main`, "--jq", "{status: .status, ahead_by: .ahead_by, commits: [.commits[]?.sha]}"])));
   } catch (error) {
-    return `GitHub's main-versus-staging comparison could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})`;
+    return { problem: `GitHub's main comparison could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})` };
   }
-  if (answer?.status === "identical" || answer?.status === "behind") return null;
-  if (!Array.isArray(answer?.commits) || !Number.isInteger(answer?.ahead_by) || answer.ahead_by !== answer.commits.length) {
-    return "GitHub's list of main's commits that staging lacks is unreadable or cut short, so this can't be shown not to be a back-merge (fail closed)";
+  if (answer?.status === "identical" || answer?.status === "behind") return { commits: [] };
+  if (!["ahead", "diverged"].includes(answer?.status) || !Array.isArray(answer?.commits) || !Number.isInteger(answer?.ahead_by) || answer.ahead_by !== answer.commits.length) {
+    return { problem: "GitHub's list of main's commits is unreadable, unexpected or cut short, so this can't be shown not to be a back-merge (fail closed)" };
   }
-  const carried = answer.commits.filter((sha) => prCommits.has(String(sha).toLowerCase()));
+  return { commits: answer.commits.map((c) => String(c).toLowerCase()) };
+}
+export function mainCommitsInPrOnGitHub({ stagingSha, headSha, repo, gh }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  if (!SHA_RE.test(String(stagingSha || "")) || !SHA_RE.test(String(headSha || ""))) return "staging's or the pull request's commit is not a full commit id";
+  const missingFromStaging = mainAheadOf(String(stagingSha).toLowerCase(), { repoPath, gh });
+  if (missingFromStaging.problem) return missingFromStaging.problem;
+  if (missingFromStaging.commits.length === 0) return null; // main is inside staging: nothing to bring in
+  const missingFromHead = mainAheadOf(String(headSha).toLowerCase(), { repoPath, gh });
+  if (missingFromHead.problem) return missingFromHead.problem;
+  const lacking = new Set(missingFromHead.commits);
+  const carried = missingFromStaging.commits.filter((c) => !lacking.has(c));
   return carried.length
-    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${String(carried[0]).slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging, or wait for the back-merge`
+    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${carried[0].slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging, or wait for the back-merge`
     : null;
 }
 

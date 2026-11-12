@@ -646,7 +646,7 @@ function resolvePullRequest({ request, repoDir, runGh }) {
   // baseRefOid is GitHub's CURRENT tip of the base branch — the commit the merge
   // will actually land on. Without it the gate falls back to local origin/main,
   // which can be stale (Codex P1, 2026-07-25).
-  args.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+  args.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
   if (request.repo) args.push("--repo", request.repo);
   const data = JSON.parse(runGh(args, repoDir));
   // baseRefOid is required only for main-bound merges; gatePullRequestMerge
@@ -713,8 +713,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   const notAgents = agentMergeProblem(base, normalize(pullRequest.headRefName));
   if (notAgents) return denied(`CODEX PRODUCTION GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const ownCommits = new Set((Array.isArray(pullRequest.commits) ? pullRequest.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
-    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, prCommits: ownCommits, repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, headSha: pullRequest.headRefOid, repo: request.repo, gh: (args) => runGh(args, repoDir) });
     if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
   }
   // Main's PR #560 migrated this gate from "no approval" to "an active

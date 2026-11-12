@@ -104,7 +104,8 @@ const MAIN_INSIDE_STAGING = JSON.stringify({ status: "identical", ahead_by: 0, c
 const isMainCompare = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args?.[1] ?? ""));
 const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
-  { ...options, runGh: withMainCompareDefault(options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh), options?.mainCompare) },
+  { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare)))(
+    options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh)) },
 );
 
 const projectRoot = process.cwd();
@@ -1881,9 +1882,17 @@ try {
     // The same back-merge under another branch name: main is ahead of staging and the PR carries one of those commits.
     const disguised = evaluateProductionAction({
       toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
-      mainCompare: JSON.stringify({ status: "ahead", ahead_by: 1, commits: [risky.sha] }),
-      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
-        : JSON.stringify({ ...mainPr, baseRefName: "staging", headRefName: "backmerge/x", commits: [{ oid: risky.sha }] })),
+      rawMainCompare: true,
+      runGh: (args) => {
+        // staging...main: main has one commit staging lacks; head...main: the head holds it (identical).
+        if (args[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args[1]))) {
+          return String(args[1]).includes(`/compare/${mainPr.headRefOid}...`) || String(args[1]).includes(`/compare/${risky.sha}...`)
+            ? JSON.stringify({ status: "identical", ahead_by: 0, commits: [] })
+            : JSON.stringify({ status: "ahead", ahead_by: 1, commits: ["f".repeat(40)] });
+        }
+        return args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+          : JSON.stringify({ ...mainPr, baseRefName: "staging", headRefName: "backmerge/x" });
+      },
     });
     assert.equal(disguised.blocked, true, "a PR into staging carrying main's commits that staging lacks is refused");
     assert.match(disguised.reason, /back-merge/, "...as a back-merge under another name");

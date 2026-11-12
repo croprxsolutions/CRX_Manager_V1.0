@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1840: Mason owner-accepted 1 Sol finding(s) at `de529580591b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1840 at `de529580591b` (base `8b6c3281c24c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/CorrectBrandsModal.tsx:94`, text sha256 `2cf94e722dd4660e` (the wording stays with the proof, not here)
+  Mason's reason: brand retuurns to review list, office relinks (ref 775f98f6999f)
+
 ## 2026-11-12 — #1840 (B-2 brand screens): an unconfirmed brand step still completes, flagged for the office
 
 **Decision (Mason, 2026-11-12, in chat: "Yes, warn and flag later").** On PR #1840, when the delivery screens cannot confirm the brand picks at completion (the brand list did not load, or a choice was left out, refused by the database, failed to save, or overtaken by someone else's save), the delivery still completes and the driver is warned. The completion is recorded as picks not confirmed, so every picked line lands on the office's Deliveries missing brands list.

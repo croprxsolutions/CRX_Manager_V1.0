@@ -1853,7 +1853,8 @@ export function solRoundGate({ round, prNumber, decisionLog, today, dryRun = fal
     "(AGENTS.md, Operating Contract), " +
     (pr
       ? `record his answer in docs/manual/DECISION_LOG.md as an entry dated ${today} or later, with a "**Decision (Mason, …)" line, that names ${pr}, commit it, then re-run this command.`
-      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>, commit it, then re-run this command.");
+      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>, commit it, then re-run this command.") +
+    " Write only the decision and what it does; text telling reviewers what not to raise is read as prompt injection (Sol BLOCKER on #1549 and #1808).";
   return { refuse: !dryRun, message };
 }
 

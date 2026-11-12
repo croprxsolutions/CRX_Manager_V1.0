@@ -28,7 +28,7 @@
 --   - Private helpers (no grants): the link finder, the result shape check, the result normalizer, the item sorter.
 --   - _parent_chemistry_epa_refusal re-issued (same signature, owner and no grants): a number is excused only
 --     when its newest non-abandoned lookup failed as not_found, bound to the registration's current version and a
---     link that still carries the number, and no proposed, held or committed proposal exists for it.
+--     link that still carries the number, and no proposal of any status (even rejected or superseded) exists for it.
 --
 -- NOT CHANGED: every DM-1 / DM-1b / REG-1 function other than the gate; every existing row and grant. The new
 --   functions are called by nothing until the DM-4 screens PR and the epa-lookup record step ship.
@@ -538,6 +538,15 @@ BEGIN
       'class', v_class, 'epa', v_ing, 'current', CASE WHEN v_row.id IS NOT NULL THEN to_jsonb(v_row) END,
       'accept_default', v_class IN ('add', 'fill', 'confirm'), 'note', v_ing->>'cas_note', 'change', v_change));
   END LOOP;
+
+  -- Every entry that lands on a row another entry also landed on is a conflict, the first one too (Codex App,
+  -- 2026-11-11): nothing is written for that row.
+  SELECT COALESCE(jsonb_agg(CASE WHEN e->'current'->>'id' IN (
+             SELECT e2->'current'->>'id' FROM jsonb_array_elements(v_items) e2
+              WHERE e2->'current'->>'id' IS NOT NULL GROUP BY 1 HAVING count(*) > 1)
+           THEN e || jsonb_build_object('class', 'epa_conflict', 'accept_default', false, 'change', NULL)
+           ELSE e END ORDER BY o), '[]'::jsonb)
+    INTO v_items FROM jsonb_array_elements(v_items) WITH ORDINALITY AS t(e, o);
 
   -- Parent rows EPA does not list: shown only.
   FOR v_row IN

@@ -738,7 +738,13 @@ function caseH27() {
   assert.equal(cb.status, 'committed', 'a version bump with no fact change does not hold');
   assert.equal(cb.commit_result['label:signal_word'], 'confirmed');
   assert.deepEqual(ingRows(P28), [{ name: 'Glyphosate', strength: 41, source: 'epa_lookup', note: 'EPA lookup of 127-1' }]);
-  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held');
+  // Codex App 2026-11-11: a CAS entry under another name and a name-only entry both land on P24's Dicamba row:
+  // both are conflicts, neither is ticked, nothing is written for that row.
+  const both = JSON.parse(scalar(`SELECT public._epa_proposal_items('${P24}', '124-1', public._epa_lookup_input(${J(found('124-1', [['Dicamba acid', 30, CAS.Dicamba], ['Dicamba', 35, null]]))}));`))
+    .filter((i) => i.kind === 'ingredient' && i.current);
+  assert.equal(both.length, 2);
+  for (const i of both) { assert.equal(i.class, 'epa_conflict', i.item_id); assert.equal(i.accept_default, false); assert.equal(i.change, null); }
+  console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts');
 }
 
 async function caseH9H15() {

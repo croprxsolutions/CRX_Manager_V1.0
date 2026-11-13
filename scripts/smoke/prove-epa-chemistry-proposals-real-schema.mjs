@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270105110000_epa_chemistry_proposals (DM-4, EPA auto-fill; build sheet
+ * Real-schema proof for 20270105110000_epa_chemistry_proposals and its follow-up
+ * 20270107100000_epa_long_name_keeps_cas_match (DM-4, EPA auto-fill; build sheet
  * docs/plans/2026-11-08-product-DM4-BUILD-SHEET.md sections 6 and 13).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -27,6 +28,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270105110000_epa_chemistry_proposals.sql');
+// Taha 2026-11-12 (#1810): an over-long EPA name still matches by CAS. Applied right after the candidate.
+const FOLLOW_UP = path.join(MIGRATIONS, '20270107100000_epa_long_name_keeps_cas_match.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -138,13 +141,19 @@ function restoreLiveBodies() {
       expected, `${signature} is not the pinned live body before the candidate`);
   }
 }
+let BETWEEN = [];
 function plan() {
   const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs', '--include-one-shot'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  const fu = all.indexOf(FOLLOW_UP);
+  assert.ok(fu > at, 'the follow-up must be selected for post-baseline replay, after the candidate');
+  // Files between the candidate and the follow-up are live (applied after it there too): replayed after the candidate
+  // in main(), so the follow-up and every case run on live's order. Only files after the follow-up must stay clear.
+  BETWEEN = all.slice(at + 1, fu);
+  for (const file of all.slice(fu + 1)) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -804,6 +813,36 @@ function caseH27() {
   console.log('[case] H27 two products share a number: committing one only confirms the registration, so the other commits instead of being held; two EPA entries on one row are both conflicts; a name shared by two rows is one unticked conflict; month-name label dates read; a registration edit after the proposal holds; an over-long name or unstorable percent is a conflict');
 }
 
+function caseH28() {
+  // Taha 2026-11-12 (#1810 post-merge LOW): P27 holds Glyphosate (CAS 1071-83-6) from H27's commit. EPA lists it
+  // under a 250-character name with that CAS: still an unticked conflict with nothing written, but the conflict shows
+  // P27's row and the row is not reported missing from EPA.
+  const longName = 'G'.repeat(250);
+  const items = (ings) => JSON.parse(scalar(`SELECT public._epa_proposal_items('${P27}', '127-1', public._epa_lookup_input(${J(found('127-1', ings))}));`))
+    .filter((i) => i.kind === 'ingredient');
+  const withCas = items([[longName, 40, CAS.Glyphosate]]);
+  const li = withCas.find((i) => i.epa?.name === longName);
+  assert.equal(li.class, 'epa_conflict'); assert.equal(li.accept_default, false); assert.equal(li.change ?? null, null);
+  assert.equal(li.current?.name, 'Glyphosate', JSON.stringify(withCas));
+  assert.equal(li.current?.cas, CAS.Glyphosate);
+  assert.equal(withCas.filter((i) => i.class === 'missing_from_epa').length, 0, JSON.stringify(withCas));
+  assert.equal(withCas.length, 1, JSON.stringify(withCas));
+  // With no CAS there is nothing to match by: the row is still reported missing, as before.
+  const noCas = items([[longName, 40, null]]);
+  assert.equal(noCas.find((i) => i.epa?.name === longName).current ?? null, null);
+  assert.equal(noCas.filter((i) => i.class === 'missing_from_epa' && i.current?.name === 'Glyphosate').length, 1, JSON.stringify(noCas));
+  // A long-name CAS entry and a normal entry for the same chemical land on one row: both conflicts, nothing ticked.
+  // (Two entries with one CAS are merged by _epa_lookup_input before this point, so the second is name-only.)
+  const pair = items([[longName, 40, CAS.Glyphosate], ['Glyphosate', 41, null]]);
+  assert.equal(pair.length, 2, JSON.stringify(pair));
+  for (const i of pair) { assert.equal(i.class, 'epa_conflict', i.item_id); assert.equal(i.accept_default, false); assert.equal(i.change ?? null, null); }
+  // A long-name entry with no CAS after a matched entry does not inherit that entry's row.
+  const after = items([['Glyphosate', 41], ['Z'.repeat(250), 3, null]]);
+  assert.equal(after.find((i) => i.epa?.name === 'Z'.repeat(250)).current ?? null, null, JSON.stringify(after));
+  assert.equal(after.find((i) => i.epa?.name === 'Glyphosate').class, 'confirm', JSON.stringify(after));
+  console.log('[case] H28 an over-long EPA name with a CAS the parent holds is an unticked conflict that shows the row, and the row is not reported missing; with no CAS the row is still missing; a long-name and a normal entry on one row are both conflicts; a long name never inherits the row of the entry before it');
+}
+
 async function caseH9H15() {
   // H9: a commit against a REG-1 writer, both orders.
   const p1 = lookup(P9, '109-1', found('109-1', [['Glyphosate', 41]])).proposal_id;
@@ -864,12 +903,26 @@ async function main() {
     const tr = psql(`TRUNCATE public.${t} CASCADE;`, { allowFailure: true });
     assert.notEqual(tr.status, 0, `${t} must refuse TRUNCATE`); assert.match(tr.stderr, /EPA_/);
   }
+  for (const [i, file] of BETWEEN.entries()) {
+    const name = `between-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
+    if (r.status !== 0) throw new Error(`replay after the candidate failed at ${path.basename(file)}:
+${r.output}`);
+    ledger(path.basename(file, '.sql'));
+  }
+  console.log(`[prover] replayed ${BETWEEN.length} live migrations that sort between the candidate and the follow-up: ${BETWEEN.map((f) => path.basename(f)).join(', ')}`);
+  stageText('follow-up.sql', lf(FOLLOW_UP));
+  const fu = apply('follow-up.sql');
+  assert.equal(fu.status, 0, fu.output);
+  const fu2 = apply('follow-up.sql');
+  assert.notEqual(fu2.status, 0); assert.match(fu2.output, /EPA_LONG_NAME_PREFLIGHT: _epa_proposal_items is not the 20270105110000 body/);
+  console.log('[case] M2 the long-name follow-up applies on top (its postflight checks owner, grants and body) and a second run refuses');
   console.log('[case] M1 the candidate applies (its postflight checks every grant), a second run refuses, and the three tables refuse TRUNCATE');
   const ps = caseH1H2();
   caseH4H7(ps);
   caseH3();
   caseH5();
   caseH27();
+  caseH28();
   caseH6H23();
   caseH8H19();
   caseH10();

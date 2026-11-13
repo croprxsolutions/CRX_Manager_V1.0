@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
@@ -8,11 +8,24 @@ import {
   confirmedDistributorListing,
   distributorBaseRegistration,
   type EpaLookupResult,
+  isRecordRefusal,
+  LOOKUP_ID_PATTERN,
   needsDistributorBaseLookup,
   normalizeDistributorBasePayload,
   normalizeEpaPayload,
+  planRecordedLookup,
+  recordIdempotencyKey,
   type RegistrationClassification,
+  type StoredLookup,
 } from "./logic.ts";
+
+// A null reply with no error means the call saved nothing; never report it as recorded.
+function assertRpcResult<T>(data: unknown, rpcName: string): T {
+  if (data === null || data === undefined) {
+    throw new Error(`${rpcName} returned no data`);
+  }
+  return data as T;
+}
 
 const MAX_REQUEST_BODY_BYTES = 4_096;
 const MAX_UPSTREAM_RESPONSE_BYTES = 2_000_000;
@@ -275,6 +288,68 @@ async function fetchEpaLookup(
   }
 }
 
+// DM-4 record mode (sheet 4.B). The browser never sends EPA's answer: this function asks EPA about the number stored
+// on the lookup row and saves the answer through record_epa_lookup, which only the service role may call.
+async function recordLookup(
+  adminClient: SupabaseClient,
+  lookupId: string,
+  callerId: string,
+): Promise<Response> {
+  const { data: lookup, error: readError } = await adminClient
+    .from("epa_lookups")
+    .select("epa_registration, status, requested_by, requested_at")
+    .eq("id", lookupId)
+    .maybeSingle();
+  if (readError) throw readError;
+  const plan = planRecordedLookup(lookup as StoredLookup | null, callerId);
+  if (plan.action === "refuse") {
+    return jsonResponse({ error: plan.error }, plan.status);
+  }
+
+  let result: EpaLookupResult | null = null;
+  // A replay sends an empty answer: record_epa_lookup returns the first saved result before reading it.
+  let recordInput: EpaLookupResult | { error: string } | Record<string, never> = {};
+  if (plan.action === "fetch") {
+    const classification = classifyRegistrationNumber(plan.regNumber);
+    if (!classification.supported) {
+      recordInput = { error: clientErrorForClassification(classification) };
+    } else {
+      try {
+        // Not from the cache: a lookup is a fresh question to EPA.
+        result = await fetchEpaLookup(classification);
+        setCached(classification.normalized, result, Date.now());
+        recordInput = result;
+      } catch (error) {
+        if (!(error instanceof UpstreamResponseError)) throw error;
+        await captureEdgeException(error, {
+          function: "epa-lookup",
+          level: "warning",
+          tags: { phase: "epa-fetch-record" },
+          user: { id: callerId },
+        });
+        recordInput = { error: error.message };
+      }
+    }
+  }
+
+  const { data: recordData, error: recordError } = await adminClient.rpc(
+    "record_epa_lookup",
+    {
+      p_lookup_id: lookupId,
+      p_result: recordInput,
+      p_idempotency_key: recordIdempotencyKey(lookupId),
+    },
+  );
+  if (recordError) {
+    if (isRecordRefusal(recordError.message)) {
+      return jsonResponse({ error: recordError.message }, 409);
+    }
+    throw recordError;
+  }
+  const record = assertRpcResult<unknown>(recordData, "record_epa_lookup");
+  return jsonResponse({ ...(result ?? {}), record });
+}
+
 warnIfSentryMisconfigured("epa-lookup");
 
 Deno.serve(async (req: Request) => {
@@ -343,11 +418,27 @@ Deno.serve(async (req: Request) => {
       );
     }
     const requestBody = body as Record<string, unknown>;
-    if (Object.keys(requestBody).some((key) => key !== "regNumber")) {
+    if (
+      Object.keys(requestBody).some((key) =>
+        key !== "regNumber" && key !== "lookupId"
+      )
+    ) {
       return jsonResponse(
         { error: "Request contains unsupported fields." },
         400,
       );
+    }
+
+    // With a lookup ID, any regNumber is ignored: the number comes from the lookup row (sheet 4.B).
+    if (requestBody.lookupId !== undefined) {
+      if (
+        typeof requestBody.lookupId !== "string" ||
+        !LOOKUP_ID_PATTERN.test(requestBody.lookupId)
+      ) {
+        return jsonResponse({ error: "lookupId must be a lookup ID." }, 400);
+      }
+      phase = "record";
+      return await recordLookup(adminClient, requestBody.lookupId, caller.id);
     }
 
     phase = "registration-classification";

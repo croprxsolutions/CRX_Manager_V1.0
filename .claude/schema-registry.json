@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-12",
+    "generated_at": "2026-11-13",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261112123046",
+    "migrations_high_water": "20261113011216",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -585,6 +585,9 @@
       "20270105110000_epa_chemistry_proposals",
       "20270106100000_blank_unit_fill_and_post_refusal",
       "20270106110000_invoice_brands_rup",
+      "20270107100000_epa_long_name_keeps_cas_match",
+      "20270108100000_ingredient_modes_of_action",
+      "20270109100000_delivery_receipt_brands",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1274,6 +1277,10 @@
       "open",
       "closed"
     ],
+    "active_ingredient_modes_of_action.status": [
+      "active",
+      "retired"
+    ],
     "active_ingredients.status": [
       "active",
       "retired"
@@ -1632,9 +1639,7 @@
     "invoice_line_rup_captures",
     "invoice_line_share_snapshots",
     "invoice_line_shares",
-    "invoice_sales_tax_rates",
     "invoice_shares",
-    "invoice_standing_discount_rates",
     "job_applied_record_crew",
     "job_attachments",
     "job_chemicals",
@@ -1733,6 +1738,25 @@
       ],
       "constraints": [
         "active_ingredient_events_event_type_check"
+      ]
+    },
+    "active_ingredient_modes_of_action.scheme": {
+      "values": [
+        "HRAC",
+        "FRAC",
+        "IRAC"
+      ],
+      "constraints": [
+        "active_ingredient_modes_of_action_scheme_check"
+      ]
+    },
+    "active_ingredient_modes_of_action.status": {
+      "values": [
+        "active",
+        "retired"
+      ],
+      "constraints": [
+        "active_ingredient_modes_of_action_status_check"
       ]
     },
     "active_ingredients.status": {
@@ -2581,9 +2605,7 @@
         "freight",
         "application_fee",
         "service",
-        "other",
-        "standing_discount",
-        "sales_tax"
+        "other"
       ],
       "constraints": [
         "invoice_items_charge_type_check"
@@ -3978,6 +4000,24 @@
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
     },
     {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_group_code_check",
+      "def": "CHECK (((group_code = upper(btrim(group_code))) AND (group_code <> ''::text) AND (char_length(group_code) <= 10)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_row_version_check",
+      "def": "CHECK ((row_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_source_note_check",
+      "def": "CHECK (((source_note = btrim(source_note)) AND (source_note <> ''::text) AND (char_length(source_note) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
       "table": "active_ingredients",
       "constraint": "active_ingredients_canonical_fraction_check",
       "def": "CHECK (((canonical_fraction IS NULL) OR ((canonical_fraction > (0)::numeric) AND (canonical_fraction <= (1)::numeric) AND (scale(canonical_fraction) <= 10))))",
@@ -4796,7 +4836,7 @@
     {
       "table": "invoice_items",
       "constraint": "invoice_items_charge_line_shape_chk",
-      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (extended_cents = unit_price_cents) AND\nCASE\n    WHEN (charge_type = 'standing_discount'::text) THEN (unit_price_cents < 0)\n    ELSE (unit_price_cents > 0)\nEND)))",
+      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (unit_price_cents > 0) AND (extended_cents = unit_price_cents))))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6442,12 +6482,6 @@
       "constraint": "write_offs_amount_cents_check",
       "def": "CHECK ((amount_cents > 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
-    },
-    {
-      "table": "app_settings",
-      "constraint": "app_settings_sales_tax_rate_chk",
-      "def": "CHECK (((setting_key <> 'sales_tax_rate'::text) OR (setting_value ~ '^[0-9]{1,2}(\\.[0-9]{1,3})?$'::text)))",
-      "reason": "regex on one setting key — not an IN-list; hooks do NOT validate this constraint"
     }
   ],
   "not_null_columns": {
@@ -6472,6 +6506,23 @@
       "with_default": [
         "id",
         "changed_at"
+      ]
+    },
+    "active_ingredient_modes_of_action": {
+      "no_default": [
+        "ingredient_id",
+        "scheme",
+        "group_code",
+        "source_note",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "row_version",
+        "created_at",
+        "updated_at"
       ]
     },
     "active_ingredients": {
@@ -6994,8 +7045,7 @@
         "updated_at",
         "prepay_balance_cents",
         "crops",
-        "row_version",
-        "standing_discount_pct"
+        "row_version"
       ]
     },
     "cycle_count_items": {
@@ -7595,15 +7645,6 @@
         "created_at"
       ]
     },
-    "invoice_sales_tax_rates": {
-      "no_default": [
-        "invoice_id",
-        "rate_pct"
-      ],
-      "with_default": [
-        "set_at"
-      ]
-    },
     "invoice_shares": {
       "no_default": [
         "invoice_id",
@@ -7615,15 +7656,6 @@
       "with_default": [
         "id",
         "created_at"
-      ]
-    },
-    "invoice_standing_discount_rates": {
-      "no_default": [
-        "invoice_id",
-        "rate_pct"
-      ],
-      "with_default": [
-        "set_at"
       ]
     },
     "invoices": {
@@ -8052,8 +8084,7 @@
         "is_planned",
         "booking_draw",
         "pricing_status",
-        "row_version",
-        "sales_tax"
+        "row_version"
       ]
     },
     "payments": {
@@ -9404,6 +9435,19 @@
       "changed_by",
       "changed_at"
     ],
+    "active_ingredient_modes_of_action": [
+      "id",
+      "ingredient_id",
+      "scheme",
+      "group_code",
+      "source_note",
+      "status",
+      "row_version",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
+    ],
     "active_ingredients": [
       "id",
       "name",
@@ -10009,8 +10053,7 @@
       "finance_charge_grace_days",
       "default_application_service_id",
       "crops",
-      "row_version",
-      "standing_discount_pct"
+      "row_version"
     ],
     "cycle_count_items": [
       "id",
@@ -10690,11 +10733,6 @@
       "created_by",
       "created_at"
     ],
-    "invoice_sales_tax_rates": [
-      "invoice_id",
-      "rate_pct",
-      "set_at"
-    ],
     "invoice_shares": [
       "id",
       "invoice_id",
@@ -10708,12 +10746,6 @@
       "created_at",
       "price_per_acre_cents",
       "pricing_note"
-    ],
-    "invoice_standing_discount_rates": [
-      "invoice_id",
-      "rate_pct",
-      "set_by",
-      "set_at"
     ],
     "invoices": [
       "id",
@@ -11237,8 +11269,7 @@
       "pricing_reminder_sent_at",
       "pricing_escalation_sent_at",
       "needs_split_billing",
-      "row_version",
-      "sales_tax"
+      "row_version"
     ],
     "payments": [
       "id",

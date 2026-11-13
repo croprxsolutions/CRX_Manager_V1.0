@@ -58,6 +58,162 @@ export type Database = {
           },
         ]
       }
+      active_ingredient_events: {
+        Row: {
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          event_type: string
+          evidence: string | null
+          id: number
+          ingredient_id: string
+          reason: string | null
+        }
+        Insert: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          event_type: string
+          evidence?: string | null
+          id?: never
+          ingredient_id: string
+          reason?: string | null
+        }
+        Update: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          event_type?: string
+          evidence?: string | null
+          id?: never
+          ingredient_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "active_ingredient_events_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "active_ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      active_ingredient_modes_of_action: {
+        Row: {
+          created_at: string
+          created_by: string
+          group_code: string
+          id: string
+          ingredient_id: string
+          row_version: number
+          scheme: string
+          source_note: string
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          group_code: string
+          id?: string
+          ingredient_id: string
+          row_version?: number
+          scheme: string
+          source_note: string
+          status?: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          group_code?: string
+          id?: string
+          ingredient_id?: string
+          row_version?: number
+          scheme?: string
+          source_note?: string
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "active_ingredient_modes_of_action_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "active_ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      active_ingredients: {
+        Row: {
+          canonical_fraction: number | null
+          canonical_ingredient_id: string | null
+          cas: string | null
+          created_at: string
+          created_by: string
+          fraction_basis: string | null
+          id: string
+          is_parent_form: boolean
+          name: string
+          name_key: string | null
+          retire_reason: string | null
+          row_version: number
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          canonical_fraction?: number | null
+          canonical_ingredient_id?: string | null
+          cas?: string | null
+          created_at?: string
+          created_by: string
+          fraction_basis?: string | null
+          id?: string
+          is_parent_form?: boolean
+          name: string
+          name_key?: string | null
+          retire_reason?: string | null
+          row_version?: number
+          status?: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          canonical_fraction?: number | null
+          canonical_ingredient_id?: string | null
+          cas?: string | null
+          created_at?: string
+          created_by?: string
+          fraction_basis?: string | null
+          id?: string
+          is_parent_form?: boolean
+          name?: string
+          name_key?: string | null
+          retire_reason?: string | null
+          row_version?: number
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "active_ingredients_canonical_ingredient_id_fkey"
+            columns: ["canonical_ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "active_ingredients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activity_feed: {
         Row: {
           created_at: string
@@ -967,6 +1123,63 @@ export type Database = {
           },
         ]
       }
+      blend_ticket_product_weights: {
+        Row: {
+          blend_ticket_id: string
+          captured_at: string
+          captured_how: string
+          lb_per_unit: number | null
+          none_reason: string | null
+          per_unit: string | null
+          product_form: string | null
+          product_id: string
+          product_name: string
+          source: string | null
+          unit_factors: Json
+          value_basis: Json | null
+          value_id: string | null
+          value_reviewed_at: string | null
+          value_reviewed_by: string | null
+          weight_kind: string
+        }
+        Insert: {
+          blend_ticket_id: string
+          captured_at?: string
+          captured_how?: string
+          lb_per_unit?: number | null
+          none_reason?: string | null
+          per_unit?: string | null
+          product_form?: string | null
+          product_id: string
+          product_name: string
+          source?: string | null
+          unit_factors: Json
+          value_basis?: Json | null
+          value_id?: string | null
+          value_reviewed_at?: string | null
+          value_reviewed_by?: string | null
+          weight_kind: string
+        }
+        Update: {
+          blend_ticket_id?: string
+          captured_at?: string
+          captured_how?: string
+          lb_per_unit?: number | null
+          none_reason?: string | null
+          per_unit?: string | null
+          product_form?: string | null
+          product_id?: string
+          product_name?: string
+          source?: string | null
+          unit_factors?: Json
+          value_basis?: Json | null
+          value_id?: string | null
+          value_reviewed_at?: string | null
+          value_reviewed_by?: string | null
+          weight_kind?: string
+        }
+        Relationships: []
+      }
       blend_ticket_products: {
         Row: {
           blend_ticket_id: string
@@ -1104,6 +1317,32 @@ export type Database = {
             columns: ["order_item_id"]
             isOneToOne: false
             referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      blend_ticket_weight_basis: {
+        Row: {
+          blend_ticket_id: string
+          captured_at: string
+          unit_factors: Json
+        }
+        Insert: {
+          blend_ticket_id: string
+          captured_at?: string
+          unit_factors: Json
+        }
+        Update: {
+          blend_ticket_id?: string
+          captured_at?: string
+          unit_factors?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blend_ticket_weight_basis_blend_ticket_id_fkey"
+            columns: ["blend_ticket_id"]
+            isOneToOne: true
+            referencedRelation: "blend_tickets"
             referencedColumns: ["id"]
           },
         ]
@@ -1300,6 +1539,62 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: false
             referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chemistry_change_proposals: {
+        Row: {
+          applied_chemistry_version: number | null
+          base_chemistry_version: number
+          created_at: string
+          created_by: string
+          decided_at: string | null
+          decided_by: string | null
+          has_delete: boolean
+          id: string
+          items: Json
+          parent_id: string
+          proposal_version: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          applied_chemistry_version?: number | null
+          base_chemistry_version: number
+          created_at?: string
+          created_by: string
+          decided_at?: string | null
+          decided_by?: string | null
+          has_delete: boolean
+          id?: string
+          items: Json
+          parent_id: string
+          proposal_version?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          applied_chemistry_version?: number | null
+          base_chemistry_version?: number
+          created_at?: string
+          created_by?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          has_delete?: boolean
+          id?: string
+          items?: Json
+          parent_id?: string
+          proposal_version?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chemistry_change_proposals_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
             referencedColumns: ["id"]
           },
         ]
@@ -1626,6 +1921,7 @@ export type Database = {
           paid_note: string | null
           recipient: string
           recipient_user_id: string | null
+          replaces_commission_id: string | null
           season: number | null
           split_percentage: number
           status: string
@@ -1649,6 +1945,7 @@ export type Database = {
           paid_note?: string | null
           recipient?: string
           recipient_user_id?: string | null
+          replaces_commission_id?: string | null
           season?: number | null
           split_percentage?: number
           status?: string
@@ -1672,6 +1969,7 @@ export type Database = {
           paid_note?: string | null
           recipient?: string
           recipient_user_id?: string | null
+          replaces_commission_id?: string | null
           season?: number | null
           split_percentage?: number
           status?: string
@@ -1732,6 +2030,8 @@ export type Database = {
           id: string
           new_cost: number | null
           new_pricing_version: number | null
+          new_rate_per_acre: number | null
+          new_rate_unit: string | null
           new_tier1_margin: number | null
           new_tier1_price: number | null
           new_tier2_margin: number | null
@@ -1740,12 +2040,15 @@ export type Database = {
           new_tier3_price: number | null
           old_cost: number | null
           old_pricing_version: number | null
+          old_rate_per_acre: number | null
+          old_rate_unit: string | null
           old_tier1_margin: number | null
           old_tier1_price: number | null
           old_tier2_margin: number | null
           old_tier2_price: number | null
           old_tier3_margin: number | null
           old_tier3_price: number | null
+          price_source: string | null
           product_id: string
         }
         Insert: {
@@ -1758,6 +2061,8 @@ export type Database = {
           id?: string
           new_cost?: number | null
           new_pricing_version?: number | null
+          new_rate_per_acre?: number | null
+          new_rate_unit?: string | null
           new_tier1_margin?: number | null
           new_tier1_price?: number | null
           new_tier2_margin?: number | null
@@ -1766,12 +2071,15 @@ export type Database = {
           new_tier3_price?: number | null
           old_cost?: number | null
           old_pricing_version?: number | null
+          old_rate_per_acre?: number | null
+          old_rate_unit?: string | null
           old_tier1_margin?: number | null
           old_tier1_price?: number | null
           old_tier2_margin?: number | null
           old_tier2_price?: number | null
           old_tier3_margin?: number | null
           old_tier3_price?: number | null
+          price_source?: string | null
           product_id: string
         }
         Update: {
@@ -1784,6 +2092,8 @@ export type Database = {
           id?: string
           new_cost?: number | null
           new_pricing_version?: number | null
+          new_rate_per_acre?: number | null
+          new_rate_unit?: string | null
           new_tier1_margin?: number | null
           new_tier1_price?: number | null
           new_tier2_margin?: number | null
@@ -1792,12 +2102,15 @@ export type Database = {
           new_tier3_price?: number | null
           old_cost?: number | null
           old_pricing_version?: number | null
+          old_rate_per_acre?: number | null
+          old_rate_unit?: string | null
           old_tier1_margin?: number | null
           old_tier1_price?: number | null
           old_tier2_margin?: number | null
           old_tier2_price?: number | null
           old_tier3_margin?: number | null
           old_tier3_price?: number | null
+          price_source?: string | null
           product_id?: string
         }
         Relationships: [
@@ -2083,6 +2396,44 @@ export type Database = {
           },
         ]
       }
+      customer_document_restores: {
+        Row: {
+          customer_id: string
+          document_id: string
+          id: string
+          removed_at: string
+          removed_by: string | null
+          restored_at: string
+          restored_by: string
+        }
+        Insert: {
+          customer_id: string
+          document_id: string
+          id?: string
+          removed_at: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by: string
+        }
+        Update: {
+          customer_id?: string
+          document_id?: string
+          id?: string
+          removed_at?: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_document_restores_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "customer_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_documents: {
         Row: {
           contact_id: string | null
@@ -2168,44 +2519,6 @@ export type Database = {
             columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      customer_document_restores: {
-        Row: {
-          customer_id: string
-          document_id: string
-          id: string
-          removed_at: string
-          removed_by: string | null
-          restored_at: string
-          restored_by: string
-        }
-        Insert: {
-          customer_id: string
-          document_id: string
-          id?: string
-          removed_at: string
-          removed_by?: string | null
-          restored_at?: string
-          restored_by: string
-        }
-        Update: {
-          customer_id?: string
-          document_id?: string
-          id?: string
-          removed_at?: string
-          removed_by?: string | null
-          restored_at?: string
-          restored_by?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "customer_document_restores_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "customer_documents"
             referencedColumns: ["id"]
           },
         ]
@@ -2790,6 +3103,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "deliveries_completion_no_proof_by_fkey"
+            columns: ["completion_no_proof_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "deliveries_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
@@ -2822,6 +3142,63 @@ export type Database = {
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_brand_events: {
+        Row: {
+          actor: string | null
+          actor_name: string | null
+          after_rows: Json
+          before_rows: Json
+          created_at: string
+          delivery_id: string
+          details: Json
+          event_type: string
+          invoice_ids: string[]
+          reason: string | null
+          seq: number
+        }
+        Insert: {
+          actor?: string | null
+          actor_name?: string | null
+          after_rows?: Json
+          before_rows?: Json
+          created_at?: string
+          delivery_id: string
+          details?: Json
+          event_type: string
+          invoice_ids?: string[]
+          reason?: string | null
+          seq?: never
+        }
+        Update: {
+          actor?: string | null
+          actor_name?: string | null
+          after_rows?: Json
+          before_rows?: Json
+          created_at?: string
+          delivery_id?: string
+          details?: Json
+          event_type?: string
+          invoice_ids?: string[]
+          reason?: string | null
+          seq?: never
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_brand_events_actor_fkey"
+            columns: ["actor"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_brand_events_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
             referencedColumns: ["id"]
           },
         ]
@@ -2859,6 +3236,143 @@ export type Database = {
           {
             foreignKeyName: "delivery_external_billings_recorded_by_fkey"
             columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_item_brands: {
+        Row: {
+          brand_name: string
+          delivery_id: string
+          delivery_item_id: string
+          entered_at: string
+          entered_by: string | null
+          epa_registration: string | null
+          id: string
+          legacy_brand_id: string | null
+          manufacturer: string | null
+          parent_brand_id: string | null
+          parent_id: string | null
+          product_id: string
+          quantity: number
+          review_brand_ref: string | null
+          review_note: string | null
+          review_reason: string | null
+          review_state: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          signal_word: string | null
+          source: string
+          supersede_reason: string | null
+          superseded_at: string | null
+          superseded_by: string | null
+          superseded_by_event_seq: number | null
+          updated_at: string
+        }
+        Insert: {
+          brand_name: string
+          delivery_id: string
+          delivery_item_id: string
+          entered_at?: string
+          entered_by?: string | null
+          epa_registration?: string | null
+          id?: string
+          legacy_brand_id?: string | null
+          manufacturer?: string | null
+          parent_brand_id?: string | null
+          parent_id?: string | null
+          product_id: string
+          quantity: number
+          review_brand_ref?: string | null
+          review_note?: string | null
+          review_reason?: string | null
+          review_state?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          signal_word?: string | null
+          source: string
+          supersede_reason?: string | null
+          superseded_at?: string | null
+          superseded_by?: string | null
+          superseded_by_event_seq?: number | null
+          updated_at?: string
+        }
+        Update: {
+          brand_name?: string
+          delivery_id?: string
+          delivery_item_id?: string
+          entered_at?: string
+          entered_by?: string | null
+          epa_registration?: string | null
+          id?: string
+          legacy_brand_id?: string | null
+          manufacturer?: string | null
+          parent_brand_id?: string | null
+          parent_id?: string | null
+          product_id?: string
+          quantity?: number
+          review_brand_ref?: string | null
+          review_note?: string | null
+          review_reason?: string | null
+          review_state?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          signal_word?: string | null
+          source?: string
+          supersede_reason?: string | null
+          superseded_at?: string | null
+          superseded_by?: string | null
+          superseded_by_event_seq?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_item_brands_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_line_fkey"
+            columns: ["delivery_item_id", "delivery_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "delivery_items"
+            referencedColumns: ["id", "delivery_id", "product_id"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_parent_brand_fkey"
+            columns: ["parent_id", "parent_brand_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_brands"
+            referencedColumns: ["parent_id", "id"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_size_brand_fkey"
+            columns: ["product_id", "legacy_brand_id"]
+            isOneToOne: false
+            referencedRelation: "product_brands"
+            referencedColumns: ["product_id", "id"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_superseded_by_event_seq_fkey"
+            columns: ["superseded_by_event_seq"]
+            isOneToOne: false
+            referencedRelation: "delivery_brand_events"
+            referencedColumns: ["seq"]
+          },
+          {
+            foreignKeyName: "delivery_item_brands_superseded_by_fkey"
+            columns: ["superseded_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -3189,6 +3703,7 @@ export type Database = {
           idempotency_key: string | null
           recipient_email: string
           resend_message_id: string | null
+          send_lock_key: string | null
           status: string
           subject: string
         }
@@ -3204,6 +3719,7 @@ export type Database = {
           idempotency_key?: string | null
           recipient_email: string
           resend_message_id?: string | null
+          send_lock_key?: string | null
           status?: string
           subject: string
         }
@@ -3219,6 +3735,7 @@ export type Database = {
           idempotency_key?: string | null
           recipient_email?: string
           resend_message_id?: string | null
+          send_lock_key?: string | null
           status?: string
           subject?: string
         }
@@ -3228,6 +3745,417 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      epa_chemistry_proposals: {
+        Row: {
+          chemistry_version: number
+          commit_result: Json | null
+          created_at: string
+          created_by: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_reason: string | null
+          epa_input: Json
+          epa_registration: string
+          epa_summary: Json
+          hold_reason: string | null
+          id: string
+          items: Json
+          link_id: string
+          link_kind: string
+          lookup_id: string
+          parent_id: string
+          proposal_version: number
+          registration_version: number
+          status: string
+          superseded_by_lookup_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          chemistry_version: number
+          commit_result?: Json | null
+          created_at?: string
+          created_by: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          epa_input: Json
+          epa_registration: string
+          epa_summary: Json
+          hold_reason?: string | null
+          id?: string
+          items: Json
+          link_id: string
+          link_kind: string
+          lookup_id: string
+          parent_id: string
+          proposal_version?: number
+          registration_version: number
+          status?: string
+          superseded_by_lookup_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          chemistry_version?: number
+          commit_result?: Json | null
+          created_at?: string
+          created_by?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          epa_input?: Json
+          epa_registration?: string
+          epa_summary?: Json
+          hold_reason?: string | null
+          id?: string
+          items?: Json
+          link_id?: string
+          link_kind?: string
+          lookup_id?: string
+          parent_id?: string
+          proposal_version?: number
+          registration_version?: number
+          status?: string
+          superseded_by_lookup_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "epa_chemistry_proposals_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_chemistry_proposals_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_chemistry_proposals_epa_registration_fkey"
+            columns: ["epa_registration"]
+            isOneToOne: false
+            referencedRelation: "epa_registrations"
+            referencedColumns: ["epa_registration"]
+          },
+          {
+            foreignKeyName: "epa_chemistry_proposals_lookup_id_fkey"
+            columns: ["lookup_id"]
+            isOneToOne: true
+            referencedRelation: "epa_lookups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_chemistry_proposals_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_chemistry_proposals_superseded_by_lookup_id_fkey"
+            columns: ["superseded_by_lookup_id"]
+            isOneToOne: false
+            referencedRelation: "epa_lookups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      epa_lookup_failures: {
+        Row: {
+          created_at: string
+          created_by: string
+          detail: string | null
+          epa_registration: string
+          id: string
+          link_id: string
+          link_kind: string
+          lookup_id: string
+          parent_id: string
+          reason: string
+          registration_version: number
+          transferred_to: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          detail?: string | null
+          epa_registration: string
+          id?: string
+          link_id: string
+          link_kind: string
+          lookup_id: string
+          parent_id: string
+          reason: string
+          registration_version: number
+          transferred_to?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          detail?: string | null
+          epa_registration?: string
+          id?: string
+          link_id?: string
+          link_kind?: string
+          lookup_id?: string
+          parent_id?: string
+          reason?: string
+          registration_version?: number
+          transferred_to?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "epa_lookup_failures_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_lookup_failures_epa_registration_fkey"
+            columns: ["epa_registration"]
+            isOneToOne: false
+            referencedRelation: "epa_registrations"
+            referencedColumns: ["epa_registration"]
+          },
+          {
+            foreignKeyName: "epa_lookup_failures_lookup_id_fkey"
+            columns: ["lookup_id"]
+            isOneToOne: true
+            referencedRelation: "epa_lookups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_lookup_failures_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      epa_lookups: {
+        Row: {
+          chemistry_version: number
+          epa_registration: string
+          id: string
+          link_id: string
+          link_kind: string
+          parent_id: string
+          recorded_at: string | null
+          registration_version: number
+          requested_at: string
+          requested_by: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          chemistry_version: number
+          epa_registration: string
+          id?: string
+          link_id: string
+          link_kind: string
+          parent_id: string
+          recorded_at?: string | null
+          registration_version: number
+          requested_at?: string
+          requested_by: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          chemistry_version?: number
+          epa_registration?: string
+          id?: string
+          link_id?: string
+          link_kind?: string
+          parent_id?: string
+          recorded_at?: string | null
+          registration_version?: number
+          requested_at?: string
+          requested_by?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "epa_lookups_epa_registration_fkey"
+            columns: ["epa_registration"]
+            isOneToOne: false
+            referencedRelation: "epa_registrations"
+            referencedColumns: ["epa_registration"]
+          },
+          {
+            foreignKeyName: "epa_lookups_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_lookups_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      epa_registration_events: {
+        Row: {
+          affected: Json
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          changed_by_name: string | null
+          epa_registration: string
+          event_type: string
+          id: number
+          reason: string | null
+        }
+        Insert: {
+          affected?: Json
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          changed_by_name?: string | null
+          epa_registration: string
+          event_type: string
+          id?: never
+          reason?: string | null
+        }
+        Update: {
+          affected?: Json
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          changed_by_name?: string | null
+          epa_registration?: string
+          event_type?: string
+          id?: never
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "epa_registration_events_epa_registration_fkey"
+            columns: ["epa_registration"]
+            isOneToOne: false
+            referencedRelation: "epa_registrations"
+            referencedColumns: ["epa_registration"]
+          },
+        ]
+      }
+      epa_registration_seed_run: {
+        Row: {
+          fingerprint: string
+          id: boolean
+          rup_default: string
+          seeded_at: string
+          seeded_by: string
+        }
+        Insert: {
+          fingerprint: string
+          id?: boolean
+          rup_default: string
+          seeded_at?: string
+          seeded_by: string
+        }
+        Update: {
+          fingerprint?: string
+          id?: boolean
+          rup_default?: string
+          seeded_at?: string
+          seeded_by?: string
+        }
+        Relationships: []
+      }
+      epa_registrations: {
+        Row: {
+          cancelled_on: string | null
+          checked_at: string | null
+          created_at: string
+          created_by: string
+          epa_registration: string
+          label_accepted_on: string | null
+          label_adjuvants: Json | null
+          label_url: string | null
+          max_label_rate: number | null
+          max_label_rate_unit: string | null
+          phi_days: number | null
+          registration_status: string
+          registration_version: number
+          rei_hours: number | null
+          rup_status: string
+          signal_word: string | null
+          source: string | null
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          cancelled_on?: string | null
+          checked_at?: string | null
+          created_at?: string
+          created_by: string
+          epa_registration: string
+          label_accepted_on?: string | null
+          label_adjuvants?: Json | null
+          label_url?: string | null
+          max_label_rate?: number | null
+          max_label_rate_unit?: string | null
+          phi_days?: number | null
+          registration_status?: string
+          registration_version?: number
+          rei_hours?: number | null
+          rup_status?: string
+          signal_word?: string | null
+          source?: string | null
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          cancelled_on?: string | null
+          checked_at?: string | null
+          created_at?: string
+          created_by?: string
+          epa_registration?: string
+          label_accepted_on?: string | null
+          label_adjuvants?: Json | null
+          label_url?: string | null
+          max_label_rate?: number | null
+          max_label_rate_unit?: string | null
+          phi_days?: number | null
+          registration_status?: string
+          registration_version?: number
+          rei_hours?: number | null
+          rup_status?: string
+          signal_word?: string | null
+          source?: string | null
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "epa_registrations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "epa_registrations_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -4745,6 +5673,88 @@ export type Database = {
           },
         ]
       }
+      invoice_line_brand_rup_captures: {
+        Row: {
+          basis: string
+          brand_key: string
+          brand_name: string | null
+          captured_at: string
+          epa_registration: string | null
+          invoice_item_id: string
+          product_id: string
+          rup_status: string
+          signal_word: string | null
+          source: string
+        }
+        Insert: {
+          basis: string
+          brand_key: string
+          brand_name?: string | null
+          captured_at?: string
+          epa_registration?: string | null
+          invoice_item_id: string
+          product_id: string
+          rup_status: string
+          signal_word?: string | null
+          source: string
+        }
+        Update: {
+          basis?: string
+          brand_key?: string
+          brand_name?: string | null
+          captured_at?: string
+          epa_registration?: string | null
+          invoice_item_id?: string
+          product_id?: string
+          rup_status?: string
+          signal_word?: string | null
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_brand_rup_captures_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_line_rup_captures: {
+        Row: {
+          captured_at: string
+          epa_registration: string | null
+          invoice_item_id: string
+          rup_status: string
+          signal_word: string | null
+          source: string
+        }
+        Insert: {
+          captured_at?: string
+          epa_registration?: string | null
+          invoice_item_id: string
+          rup_status: string
+          signal_word?: string | null
+          source: string
+        }
+        Update: {
+          captured_at?: string
+          epa_registration?: string | null
+          invoice_item_id?: string
+          rup_status?: string
+          signal_word?: string | null
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_rup_captures_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: true
+            referencedRelation: "invoice_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_line_share_snapshots: {
         Row: {
           allocated_acres: number | null
@@ -5804,6 +6814,24 @@ export type Database = {
         }
         Relationships: []
       }
+      job_epa_sprayed: {
+        Row: {
+          job_id: string
+          not_recorded: boolean
+          recorded_at: string
+        }
+        Insert: {
+          job_id: string
+          not_recorded?: boolean
+          recorded_at?: string
+        }
+        Update: {
+          job_id?: string
+          not_recorded?: boolean
+          recorded_at?: string
+        }
+        Relationships: []
+      }
       job_field_shares: {
         Row: {
           created_at: string
@@ -5903,6 +6931,80 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: false
             referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_loader_worksheet_weights: {
+        Row: {
+          captured_at: string
+          identity_generation: number | null
+          job_id: string
+          lb_per_unit: number | null
+          member_generation: number | null
+          none_reason: string | null
+          pack_generation: number | null
+          per_unit: string | null
+          product_form: string | null
+          product_id: string
+          product_name: string
+          source: string | null
+          unit_factors: Json
+          value_basis: Json | null
+          value_id: string | null
+          value_reviewed_at: string | null
+          value_reviewed_by: string | null
+          weight_kind: string
+          worksheet_id: string
+        }
+        Insert: {
+          captured_at?: string
+          identity_generation?: number | null
+          job_id: string
+          lb_per_unit?: number | null
+          member_generation?: number | null
+          none_reason?: string | null
+          pack_generation?: number | null
+          per_unit?: string | null
+          product_form?: string | null
+          product_id: string
+          product_name: string
+          source?: string | null
+          unit_factors: Json
+          value_basis?: Json | null
+          value_id?: string | null
+          value_reviewed_at?: string | null
+          value_reviewed_by?: string | null
+          weight_kind: string
+          worksheet_id: string
+        }
+        Update: {
+          captured_at?: string
+          identity_generation?: number | null
+          job_id?: string
+          lb_per_unit?: number | null
+          member_generation?: number | null
+          none_reason?: string | null
+          pack_generation?: number | null
+          per_unit?: string | null
+          product_form?: string | null
+          product_id?: string
+          product_name?: string
+          source?: string | null
+          unit_factors?: Json
+          value_basis?: Json | null
+          value_id?: string | null
+          value_reviewed_at?: string | null
+          value_reviewed_by?: string | null
+          weight_kind?: string
+          worksheet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_loader_worksheet_weights_worksheet_id_fkey"
+            columns: ["worksheet_id"]
+            isOneToOne: false
+            referencedRelation: "job_loader_worksheets"
             referencedColumns: ["id"]
           },
         ]
@@ -6173,6 +7275,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      job_product_epa: {
+        Row: {
+          epa_registration: string | null
+          job_id: string
+          not_recorded: boolean
+          product_id: string
+          recorded_at: string
+        }
+        Insert: {
+          epa_registration?: string | null
+          job_id: string
+          not_recorded?: boolean
+          product_id: string
+          recorded_at?: string
+        }
+        Update: {
+          epa_registration?: string | null
+          job_id?: string
+          not_recorded?: boolean
+          product_id?: string
+          recorded_at?: string
+        }
+        Relationships: []
       }
       job_tag_assignments: {
         Row: {
@@ -6491,6 +7617,47 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: false
             referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      label_draft_targets: {
+        Row: {
+          draft_id: string
+          epa_registration: string | null
+          product_epa_registration: string | null
+          product_id: string
+          product_label_fingerprint: string
+          proposed_values: Json
+          registration_version: number | null
+          updated_at: string
+        }
+        Insert: {
+          draft_id: string
+          epa_registration?: string | null
+          product_epa_registration?: string | null
+          product_id: string
+          product_label_fingerprint: string
+          proposed_values: Json
+          registration_version?: number | null
+          updated_at?: string
+        }
+        Update: {
+          draft_id?: string
+          epa_registration?: string | null
+          product_epa_registration?: string | null
+          product_id?: string
+          product_label_fingerprint?: string
+          proposed_values?: Json
+          registration_version?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "label_draft_targets_draft_id_fkey"
+            columns: ["draft_id"]
+            isOneToOne: true
+            referencedRelation: "product_label_drafts"
             referencedColumns: ["id"]
           },
         ]
@@ -7095,6 +8262,7 @@ export type Database = {
           order_id: string
           sort_order: number | null
           split_percentage: number
+          updated_at: string
         }
         Insert: {
           amount_cents: number
@@ -7106,6 +8274,7 @@ export type Database = {
           order_id: string
           sort_order?: number | null
           split_percentage: number
+          updated_at?: string
         }
         Update: {
           amount_cents?: number
@@ -7117,6 +8286,7 @@ export type Database = {
           order_id?: string
           sort_order?: number | null
           split_percentage?: number
+          updated_at?: string
         }
         Relationships: [
           {
@@ -7137,7 +8307,6 @@ export type Database = {
       }
       orders: {
         Row: {
-          row_version: number
           booking_draw: boolean
           commission_split: Json | null
           created_at: string
@@ -7157,6 +8326,7 @@ export type Database = {
           program_notes: string | null
           quote_id: string | null
           sales_tax: boolean
+          row_version: number
           salesman_id: string | null
           season: number | null
           status: string
@@ -7186,6 +8356,7 @@ export type Database = {
           program_notes?: string | null
           quote_id?: string | null
           sales_tax?: boolean
+          row_version?: number
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -7215,6 +8386,7 @@ export type Database = {
           program_notes?: string | null
           quote_id?: string | null
           sales_tax?: boolean
+          row_version?: number
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -7443,6 +8615,50 @@ export type Database = {
           },
         ]
       }
+      pricing_change_set_approvals: {
+        Row: {
+          acknowledgements: Json
+          approved_at: string
+          approved_by: string
+          change_set_id: string
+          request_fingerprint: string
+          source_file_name: string | null
+          source_file_sha256: string | null
+          updated_at: string
+          warning_codes: Json
+        }
+        Insert: {
+          acknowledgements: Json
+          approved_at?: string
+          approved_by: string
+          change_set_id: string
+          request_fingerprint: string
+          source_file_name?: string | null
+          source_file_sha256?: string | null
+          updated_at?: string
+          warning_codes: Json
+        }
+        Update: {
+          acknowledgements?: Json
+          approved_at?: string
+          approved_by?: string
+          change_set_id?: string
+          request_fingerprint?: string
+          source_file_name?: string | null
+          source_file_sha256?: string | null
+          updated_at?: string
+          warning_codes?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_change_set_approvals_change_set_id_fkey"
+            columns: ["change_set_id"]
+            isOneToOne: true
+            referencedRelation: "pricing_change_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pricing_change_set_preview_rows: {
         Row: {
           change_set_id: string
@@ -7522,6 +8738,7 @@ export type Database = {
           output_tier3_margin: number
           output_tier3_price_cents: number
           output_tier3_price_per_acre_cents: number | null
+          price_source: string | null
           pricing_mode: string
           product_id: string
         }
@@ -7551,6 +8768,7 @@ export type Database = {
           output_tier3_margin: number
           output_tier3_price_cents: number
           output_tier3_price_per_acre_cents?: number | null
+          price_source?: string | null
           pricing_mode: string
           product_id: string
         }
@@ -7580,6 +8798,7 @@ export type Database = {
           output_tier3_margin?: number
           output_tier3_price_cents?: number
           output_tier3_price_per_acre_cents?: number | null
+          price_source?: string | null
           pricing_mode?: string
           product_id?: string
         }
@@ -7603,6 +8822,38 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_change_set_warnings: {
+        Row: {
+          change_set_id: string
+          created_at: string
+          details: Json
+          product_id: string
+          warning_codes: string[]
+        }
+        Insert: {
+          change_set_id: string
+          created_at?: string
+          details: Json
+          product_id: string
+          warning_codes: string[]
+        }
+        Update: {
+          change_set_id?: string
+          created_at?: string
+          details?: Json
+          product_id?: string
+          warning_codes?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_change_set_warnings_change_set_id_fkey"
+            columns: ["change_set_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_change_sets"
             referencedColumns: ["id"]
           },
         ]
@@ -7973,6 +9224,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "product_change_history_parent_event_id_fkey"
+            columns: ["parent_event_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_events"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "product_change_history_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
@@ -7984,6 +9242,53 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_chemistry_events: {
+        Row: {
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          chemistry_version: number
+          event_type: string
+          evidence: string | null
+          id: number
+          parent_id: string
+          reason: string | null
+        }
+        Insert: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          chemistry_version: number
+          event_type: string
+          evidence?: string | null
+          id?: never
+          parent_id: string
+          reason?: string | null
+        }
+        Update: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          chemistry_version?: number
+          event_type?: string
+          evidence?: string | null
+          id?: never
+          parent_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_chemistry_events_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
             referencedColumns: ["id"]
           },
         ]
@@ -8203,6 +9508,33 @@ export type Database = {
           },
         ]
       }
+      product_crop_options: {
+        Row: {
+          code: string
+          created_at: string
+          is_active: boolean
+          label: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          is_active?: boolean
+          label: string
+          sort_order: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          is_active?: boolean
+          label?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       product_families: {
         Row: {
           active_ingredient: string | null
@@ -8236,32 +9568,64 @@ export type Database = {
         }
         Relationships: []
       }
+      product_form_units: {
+        Row: {
+          created_at: string
+          product_form: string
+          unit: string
+        }
+        Insert: {
+          created_at?: string
+          product_form: string
+          unit: string
+        }
+        Update: {
+          created_at?: string
+          product_form?: string
+          unit?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_form_units_unit_fkey"
+            columns: ["unit"]
+            isOneToOne: false
+            referencedRelation: "unit_conversions"
+            referencedColumns: ["unit"]
+          },
+        ]
+      }
       product_info_change_set_rows: {
         Row: {
           after_values: Json
           before_values: Json
+          change_reason: string | null
           change_set_id: string
           changes: Json
           expected_version: number
           output_fingerprint: string
+          price_source: string | null
           product_id: string
         }
         Insert: {
           after_values: Json
           before_values: Json
+          change_reason?: string | null
           change_set_id: string
           changes: Json
           expected_version: number
           output_fingerprint: string
+          price_source?: string | null
           product_id: string
         }
         Update: {
           after_values?: Json
           before_values?: Json
+          change_reason?: string | null
           change_set_id?: string
           changes?: Json
           expected_version?: number
           output_fingerprint?: string
+          price_source?: string | null
           product_id?: string
         }
         Relationships: [
@@ -8435,6 +9799,936 @@ export type Database = {
           },
         ]
       }
+      product_parent_brand_events: {
+        Row: {
+          after_values: Json
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          changed_by_name: string | null
+          event_type: string
+          id: number
+          parent_brand_id: string
+          parent_id: string
+          reason: string | null
+        }
+        Insert: {
+          after_values: Json
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          changed_by_name?: string | null
+          event_type: string
+          id?: never
+          parent_brand_id: string
+          parent_id: string
+          reason?: string | null
+        }
+        Update: {
+          after_values?: Json
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          changed_by_name?: string | null
+          event_type?: string
+          id?: never
+          parent_brand_id?: string
+          parent_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_brand_events_parent_brand_id_fkey"
+            columns: ["parent_brand_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_brand_events_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_brand_sources: {
+        Row: {
+          legacy_brand_id: string
+          legacy_row_version: number
+          mapped_at: string
+          mapped_by: string
+          parent_brand_id: string
+        }
+        Insert: {
+          legacy_brand_id: string
+          legacy_row_version: number
+          mapped_at?: string
+          mapped_by: string
+          parent_brand_id: string
+        }
+        Update: {
+          legacy_brand_id?: string
+          legacy_row_version?: number
+          mapped_at?: string
+          mapped_by?: string
+          parent_brand_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_brand_sources_legacy_brand_id_fkey"
+            columns: ["legacy_brand_id"]
+            isOneToOne: true
+            referencedRelation: "product_brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_brand_sources_parent_brand_id_fkey"
+            columns: ["parent_brand_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_brands: {
+        Row: {
+          brand_name: string
+          created_at: string
+          created_by: string
+          epa_registration: string | null
+          id: string
+          is_currently_sourced: boolean
+          is_rup: boolean | null
+          legacy_brand_ids: string[]
+          manufacturer: string | null
+          parent_id: string
+          row_version: number
+          signal_word: string | null
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          brand_name: string
+          created_at?: string
+          created_by: string
+          epa_registration?: string | null
+          id?: string
+          is_currently_sourced?: boolean
+          is_rup?: boolean | null
+          legacy_brand_ids?: string[]
+          manufacturer?: string | null
+          parent_id: string
+          row_version?: number
+          signal_word?: string | null
+          status?: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          brand_name?: string
+          created_at?: string
+          created_by?: string
+          epa_registration?: string | null
+          id?: string
+          is_currently_sourced?: boolean
+          is_rup?: boolean | null
+          legacy_brand_ids?: string[]
+          manufacturer?: string | null
+          parent_id?: string
+          row_version?: number
+          signal_word?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_brands_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_brands_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_brands_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_chemistry_state: {
+        Row: {
+          chemistry_version: number
+          parent_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          chemistry_version?: number
+          parent_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          chemistry_version?: number
+          parent_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_chemistry_state_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: true
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_copy_passes: {
+        Row: {
+          parent_event_id: number
+          product_id: string
+          txid: number
+        }
+        Insert: {
+          parent_event_id: number
+          product_id: string
+          txid: number
+        }
+        Update: {
+          parent_event_id?: number
+          product_id?: string
+          txid?: number
+        }
+        Relationships: []
+      }
+      product_parent_cost_reference: {
+        Row: {
+          parent_id: string
+          reference_product_id: string | null
+          row_version: number
+          set_at: string
+          set_by: string
+          updated_at: string
+        }
+        Insert: {
+          parent_id: string
+          reference_product_id?: string | null
+          row_version?: number
+          set_at?: string
+          set_by: string
+          updated_at?: string
+        }
+        Update: {
+          parent_id?: string
+          reference_product_id?: string | null
+          row_version?: number
+          set_at?: string
+          set_by?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_cost_reference_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: true
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_cost_reference_reference_product_id_fkey"
+            columns: ["reference_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_cost_reference_reference_product_id_fkey"
+            columns: ["reference_product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_density_state: {
+        Row: {
+          density_version: number
+          identity_generation: number
+          parent_id: string
+        }
+        Insert: {
+          density_version?: number
+          identity_generation?: number
+          parent_id: string
+        }
+        Update: {
+          density_version?: number
+          identity_generation?: number
+          parent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_density_state_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: true
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_density_values: {
+        Row: {
+          basis: Json
+          created_at: string
+          created_by: string | null
+          entered_unit: string
+          entered_value: number
+          evidence: string | null
+          id: string
+          lb_per_gal: number
+          parent_id: string
+          reason: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source: string
+          source_note: string | null
+          superseded_at: string | null
+        }
+        Insert: {
+          basis: Json
+          created_at?: string
+          created_by?: string | null
+          entered_unit: string
+          entered_value: number
+          evidence?: string | null
+          id?: string
+          lb_per_gal: number
+          parent_id: string
+          reason?: string | null
+          review_state: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source: string
+          source_note?: string | null
+          superseded_at?: string | null
+        }
+        Update: {
+          basis?: Json
+          created_at?: string
+          created_by?: string | null
+          entered_unit?: string
+          entered_value?: number
+          evidence?: string | null
+          id?: string
+          lb_per_gal?: number
+          parent_id?: string
+          reason?: string | null
+          review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source?: string
+          source_note?: string | null
+          superseded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_density_values_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_events: {
+        Row: {
+          affected: Json
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          changed_by_name: string | null
+          event_type: string
+          evidence: string | null
+          id: number
+          parent_id: string
+          reason: string | null
+        }
+        Insert: {
+          affected?: Json
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          changed_by_name?: string | null
+          event_type: string
+          evidence?: string | null
+          id?: never
+          parent_id: string
+          reason?: string | null
+        }
+        Update: {
+          affected?: Json
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          changed_by_name?: string | null
+          event_type?: string
+          evidence?: string | null
+          id?: never
+          parent_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_events_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_fertilizer_analysis: {
+        Row: {
+          basis: string
+          created_at: string
+          created_by: string
+          id: string
+          nutrient: string
+          parent_id: string
+          percent: number | null
+          percent_unknown: boolean
+          row_version: number
+          source: string
+          source_note: string | null
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          basis: string
+          created_at?: string
+          created_by: string
+          id?: string
+          nutrient: string
+          parent_id: string
+          percent?: number | null
+          percent_unknown?: boolean
+          row_version?: number
+          source: string
+          source_note?: string | null
+          status?: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          basis?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          nutrient?: string
+          parent_id?: string
+          percent?: number | null
+          percent_unknown?: boolean
+          row_version?: number
+          source?: string
+          source_note?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_fertilizer_analysis_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_ingredients: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          ingredient_id: string
+          parent_id: string
+          row_version: number
+          source: string
+          source_note: string | null
+          status: string
+          strength_basis: string
+          strength_unit: string
+          strength_unknown: boolean
+          strength_value: number | null
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          ingredient_id: string
+          parent_id: string
+          row_version?: number
+          source: string
+          source_note?: string | null
+          status?: string
+          strength_basis: string
+          strength_unit: string
+          strength_unknown?: boolean
+          strength_value?: number | null
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          ingredient_id?: string
+          parent_id?: string
+          row_version?: number
+          source?: string
+          source_note?: string | null
+          status?: string
+          strength_basis?: string
+          strength_unit?: string
+          strength_unknown?: boolean
+          strength_value?: number | null
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_ingredients_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "active_ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_ingredients_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_members: {
+        Row: {
+          added_at: string
+          added_by: string
+          fill_source_product_id: string | null
+          parent_id: string
+          product_id: string
+          size_role: string
+          updated_at: string
+        }
+        Insert: {
+          added_at?: string
+          added_by: string
+          fill_source_product_id?: string | null
+          parent_id: string
+          product_id: string
+          size_role?: string
+          updated_at?: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string
+          fill_source_product_id?: string | null
+          parent_id?: string
+          product_id?: string
+          size_role?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_members_fill_source_product_id_fkey"
+            columns: ["fill_source_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_members_fill_source_product_id_fkey"
+            columns: ["fill_source_product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_members_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_members_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_members_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_modes_of_action: {
+        Row: {
+          created_at: string
+          created_by: string
+          group_code: string
+          id: string
+          ingredient_id: string
+          parent_id: string
+          row_version: number
+          scheme: string
+          source: string
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          group_code: string
+          id?: string
+          ingredient_id: string
+          parent_id: string
+          row_version?: number
+          scheme: string
+          source?: string
+          status?: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          group_code?: string
+          id?: string
+          ingredient_id?: string
+          parent_id?: string
+          row_version?: number
+          scheme?: string
+          source?: string
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_modes_of_action_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "active_ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_modes_of_action_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_proposal_groups: {
+        Row: {
+          conflicts: Json
+          decided_at: string | null
+          decided_by: string | null
+          flags: Json
+          generic_epa_registration: string | null
+          group_fingerprint: string
+          id: string
+          identity_basis: string | null
+          members: Json
+          parent_id: string | null
+          product_form: string | null
+          proposal_id: string
+          reason: string | null
+          status: string
+          suggested_name: string
+          updated_at: string
+        }
+        Insert: {
+          conflicts?: Json
+          decided_at?: string | null
+          decided_by?: string | null
+          flags?: Json
+          generic_epa_registration?: string | null
+          group_fingerprint: string
+          id?: string
+          identity_basis?: string | null
+          members: Json
+          parent_id?: string | null
+          product_form?: string | null
+          proposal_id: string
+          reason?: string | null
+          status?: string
+          suggested_name: string
+          updated_at?: string
+        }
+        Update: {
+          conflicts?: Json
+          decided_at?: string | null
+          decided_by?: string | null
+          flags?: Json
+          generic_epa_registration?: string | null
+          group_fingerprint?: string
+          id?: string
+          identity_basis?: string | null
+          members?: Json
+          parent_id?: string | null
+          product_form?: string | null
+          proposal_id?: string
+          reason?: string | null
+          status?: string
+          suggested_name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_proposal_groups_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_parent_proposal_groups_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_proposals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parent_proposals: {
+        Row: {
+          built_at: string
+          built_by: string
+          id: string
+          proposal_version: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          built_at?: string
+          built_by: string
+          id?: string
+          proposal_version: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          built_at?: string
+          built_by?: string
+          id?: string
+          proposal_version?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      product_parent_rate_outcomes: {
+        Row: {
+          decided_at: string | null
+          decided_by: string | null
+          note: string | null
+          outcome: string | null
+          outcome_version: number
+          parent_id: string
+          updated_at: string
+        }
+        Insert: {
+          decided_at?: string | null
+          decided_by?: string | null
+          note?: string | null
+          outcome?: string | null
+          outcome_version?: number
+          parent_id: string
+          updated_at?: string
+        }
+        Update: {
+          decided_at?: string | null
+          decided_by?: string | null
+          note?: string | null
+          outcome?: string | null
+          outcome_version?: number
+          parent_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parent_rate_outcomes_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: true
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_parents: {
+        Row: {
+          category: string | null
+          created_at: string
+          created_by: string
+          formulation_type: string | null
+          generic_epa_registration: string | null
+          id: string
+          is_active: boolean
+          name: string
+          nickname: string | null
+          parent_version: number
+          product_form: string
+          rate_per_acre: number | null
+          rate_unit: string | null
+          safener: string | null
+          suggested_rate: string | null
+          updated_at: string
+          updated_by: string
+          use_timings: string[]
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          created_by: string
+          formulation_type?: string | null
+          generic_epa_registration?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          nickname?: string | null
+          parent_version?: number
+          product_form: string
+          rate_per_acre?: number | null
+          rate_unit?: string | null
+          safener?: string | null
+          suggested_rate?: string | null
+          updated_at?: string
+          updated_by: string
+          use_timings?: string[]
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          created_by?: string
+          formulation_type?: string | null
+          generic_epa_registration?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          nickname?: string | null
+          parent_version?: number
+          product_form?: string
+          rate_per_acre?: number | null
+          rate_unit?: string | null
+          safener?: string | null
+          suggested_rate?: string | null
+          updated_at?: string
+          updated_by?: string
+          use_timings?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_parents_category_fkey"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["name"]
+          },
+        ]
+      }
+      product_rate_correction_passes: {
+        Row: {
+          product_id: string
+          txid: number
+        }
+        Insert: {
+          product_id: string
+          txid: number
+        }
+        Update: {
+          product_id?: string
+          txid?: number
+        }
+        Relationships: []
+      }
+      product_rate_draft_events: {
+        Row: {
+          after_values: Json | null
+          before_values: Json | null
+          changed_at: string
+          changed_by: string
+          event_type: string
+          id: number
+          note_code: string | null
+          parent_id: string
+          rate_id: string | null
+          reason: string | null
+        }
+        Insert: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by: string
+          event_type: string
+          id?: never
+          note_code?: string | null
+          parent_id: string
+          rate_id?: string | null
+          reason?: string | null
+        }
+        Update: {
+          after_values?: Json | null
+          before_values?: Json | null
+          changed_at?: string
+          changed_by?: string
+          event_type?: string
+          id?: never
+          note_code?: string | null
+          parent_id?: string
+          rate_id?: string | null
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_rate_draft_events_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_rate_events: {
         Row: {
           after_values: Json | null
@@ -8477,6 +10771,13 @@ export type Database = {
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "product_rate_events_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
         ]
       }
       product_rate_lock: {
@@ -8505,6 +10806,222 @@ export type Database = {
           reason?: string | null
         }
         Relationships: []
+      }
+      product_rate_units: {
+        Row: {
+          code: string
+          factor: number
+          kind: string
+          label: string
+          legacy_spellings: string[]
+        }
+        Insert: {
+          code: string
+          factor: number
+          kind: string
+          label: string
+          legacy_spellings: string[]
+        }
+        Update: {
+          code?: string
+          factor?: number
+          kind?: string
+          label?: string
+          legacy_spellings?: string[]
+        }
+        Relationships: []
+      }
+      product_rates: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          basis: string
+          basis_confirmed: boolean
+          created_at: string
+          created_by: string
+          high: number | null
+          id: string
+          is_quoting_default: boolean
+          low: number | null
+          origin: string
+          over_label_reason: string | null
+          parent_id: string
+          recommended: number | null
+          row_version: number
+          source: string
+          source_text: string | null
+          status: string
+          unit: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          basis: string
+          basis_confirmed?: boolean
+          created_at?: string
+          created_by: string
+          high?: number | null
+          id?: string
+          is_quoting_default?: boolean
+          low?: number | null
+          origin: string
+          over_label_reason?: string | null
+          parent_id: string
+          recommended?: number | null
+          row_version?: number
+          source: string
+          source_text?: string | null
+          status?: string
+          unit: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          basis?: string
+          basis_confirmed?: boolean
+          created_at?: string
+          created_by?: string
+          high?: number | null
+          id?: string
+          is_quoting_default?: boolean
+          low?: number | null
+          origin?: string
+          over_label_reason?: string | null
+          parent_id?: string
+          recommended?: number | null
+          row_version?: number
+          source?: string
+          source_text?: string | null
+          status?: string
+          unit?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_rates_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "product_parents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_rates_unit_fkey"
+            columns: ["unit"]
+            isOneToOne: false
+            referencedRelation: "product_rate_units"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
+      product_size_net_weight_state: {
+        Row: {
+          member_generation: number
+          net_weight_version: number
+          pack_generation: number
+          product_id: string
+        }
+        Insert: {
+          member_generation?: number
+          net_weight_version?: number
+          pack_generation?: number
+          product_id: string
+        }
+        Update: {
+          member_generation?: number
+          net_weight_version?: number
+          pack_generation?: number
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_size_net_weight_state_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_size_net_weight_state_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_size_net_weight_values: {
+        Row: {
+          basis: Json
+          created_at: string
+          created_by: string | null
+          entered_value: number
+          evidence: string | null
+          id: string
+          net_lb: number
+          product_id: string
+          reason: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source: string
+          source_note: string | null
+          superseded_at: string | null
+        }
+        Insert: {
+          basis: Json
+          created_at?: string
+          created_by?: string | null
+          entered_value: number
+          evidence?: string | null
+          id?: string
+          net_lb: number
+          product_id: string
+          reason?: string | null
+          review_state: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source: string
+          source_note?: string | null
+          superseded_at?: string | null
+        }
+        Update: {
+          basis?: Json
+          created_at?: string
+          created_by?: string | null
+          entered_value?: number
+          evidence?: string | null
+          id?: string
+          net_lb?: number
+          product_id?: string
+          reason?: string | null
+          review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source?: string
+          source_note?: string | null
+          superseded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_size_net_weight_values_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_size_net_weight_values_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_supplier_links: {
         Row: {
@@ -8622,31 +11139,102 @@ export type Database = {
           category: string
           code: string
           created_at: string
+          created_by: string | null
           crop: string | null
           is_active: boolean
           label: string
+          option_version: number
           sort_order: number
           timing_code: string
+          updated_at: string
+          updated_by: string | null
         }
         Insert: {
           category: string
           code: string
           created_at?: string
+          created_by?: string | null
           crop?: string | null
           is_active?: boolean
           label: string
+          option_version?: number
           sort_order: number
           timing_code: string
+          updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           category?: string
           code?: string
           created_at?: string
+          created_by?: string | null
           crop?: string | null
           is_active?: boolean
           label?: string
+          option_version?: number
           sort_order?: number
           timing_code?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_use_timing_options_crop_fkey"
+            columns: ["crop"]
+            isOneToOne: false
+            referencedRelation: "product_crop_options"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
+      product_weight_events: {
+        Row: {
+          actor_kind: string
+          after_value: Json | null
+          before_value: Json | null
+          changed_at: string
+          changed_by: string | null
+          changed_by_name: string | null
+          event_type: string
+          evidence: string | null
+          id: number
+          parent_id: string | null
+          product_id: string | null
+          reason: string | null
+          subject_kind: string
+          value_id: string | null
+        }
+        Insert: {
+          actor_kind: string
+          after_value?: Json | null
+          before_value?: Json | null
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          event_type: string
+          evidence?: string | null
+          id?: never
+          parent_id?: string | null
+          product_id?: string | null
+          reason?: string | null
+          subject_kind: string
+          value_id?: string | null
+        }
+        Update: {
+          actor_kind?: string
+          after_value?: Json | null
+          before_value?: Json | null
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          event_type?: string
+          evidence?: string | null
+          id?: never
+          parent_id?: string | null
+          product_id?: string | null
+          reason?: string | null
+          subject_kind?: string
+          value_id?: string | null
         }
         Relationships: []
       }
@@ -8674,7 +11262,7 @@ export type Database = {
           phi_days: number | null
           pricing_version: number
           product_family_id: string | null
-          product_form: string | null
+          product_form: string
           product_name: string
           quoting_notes: string | null
           rate_per_acre: number | null
@@ -8725,7 +11313,7 @@ export type Database = {
           phi_days?: number | null
           pricing_version?: number
           product_family_id?: string | null
-          product_form?: string | null
+          product_form: string
           product_name: string
           quoting_notes?: string | null
           rate_per_acre?: number | null
@@ -8776,7 +11364,7 @@ export type Database = {
           phi_days?: number | null
           pricing_version?: number
           product_family_id?: string | null
-          product_form?: string | null
+          product_form?: string
           product_name?: string
           quoting_notes?: string | null
           rate_per_acre?: number | null
@@ -9301,6 +11889,84 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_price_changes: {
+        Row: {
+          changed_at: string
+          changed_by: string
+          grower_confirmed_at: string | null
+          grower_confirmed_by: string | null
+          id: number
+          new_price_cents: number
+          old_price_cents: number
+          product_id: string
+          quote_id: string
+          quote_item_id: string
+          sent_version: number | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by: string
+          grower_confirmed_at?: string | null
+          grower_confirmed_by?: string | null
+          id?: never
+          new_price_cents: number
+          old_price_cents: number
+          product_id: string
+          quote_id: string
+          quote_item_id: string
+          sent_version?: number | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string
+          grower_confirmed_at?: string | null
+          grower_confirmed_by?: string | null
+          id?: never
+          new_price_cents?: number
+          old_price_cents?: number
+          product_id?: string
+          quote_id?: string
+          quote_item_id?: string
+          sent_version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_price_changes_changed_by_fkey"
+            columns: ["changed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_price_changes_grower_confirmed_by_fkey"
+            columns: ["grower_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_price_changes_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_price_changes_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_price_changes_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -9985,6 +12651,81 @@ export type Database = {
           },
         ]
       }
+      retired_uncertain_requests: {
+        Row: {
+          reason: string
+          request_key: string
+          retired_at: string
+          retired_by: string
+        }
+        Insert: {
+          reason: string
+          request_key: string
+          retired_at?: string
+          retired_by: string
+        }
+        Update: {
+          reason?: string
+          request_key?: string
+          retired_at?: string
+          retired_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retired_uncertain_requests_retired_by_fkey"
+            columns: ["retired_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      return_credit_customer_claims: {
+        Row: {
+          created_at: string
+          customer_id: string
+          order_id: string
+          return_id: string
+          transaction_id: unknown
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          order_id: string
+          return_id: string
+          transaction_id?: unknown
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          order_id?: string
+          return_id?: string
+          transaction_id?: unknown
+        }
+        Relationships: [
+          {
+            foreignKeyName: "return_credit_customer_claims_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "return_credit_customer_claims_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "return_credit_customer_claims_return_id_fkey"
+            columns: ["return_id"]
+            isOneToOne: true
+            referencedRelation: "returns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       return_items: {
         Row: {
           condition: string
@@ -10190,6 +12931,8 @@ export type Database = {
       }
       rup_sales_records: {
         Row: {
+          brand_key: string | null
+          brand_name: string | null
           buyer_certification_expiry: string | null
           buyer_certification_number: string | null
           buyer_certification_type: string | null
@@ -10218,6 +12961,8 @@ export type Database = {
           voided_by: string | null
         }
         Insert: {
+          brand_key?: string | null
+          brand_name?: string | null
           buyer_certification_expiry?: string | null
           buyer_certification_number?: string | null
           buyer_certification_type?: string | null
@@ -10246,6 +12991,8 @@ export type Database = {
           voided_by?: string | null
         }
         Update: {
+          brand_key?: string | null
+          brand_name?: string | null
           buyer_certification_expiry?: string | null
           buyer_certification_number?: string | null
           buyer_certification_type?: string | null
@@ -11070,6 +13817,147 @@ export type Database = {
           },
         ]
       }
+      tote_fills: {
+        Row: {
+          bulk_after: number
+          bulk_before: number
+          bulk_ledger_rows: number
+          bulk_product_id: string
+          bulk_quantity: number
+          bulk_unit: string
+          created_at: string
+          gallons: number
+          id: string
+          in_transaction_id: string
+          out_transaction_id: string
+          performed_by: string
+          reason: string | null
+          reverses_fill_id: string | null
+          shortfall_quantity: number
+          tote_after: number
+          tote_before: number
+          tote_ledger_rows: number
+          tote_product_id: string
+          totes: number
+        }
+        Insert: {
+          bulk_after: number
+          bulk_before: number
+          bulk_ledger_rows: number
+          bulk_product_id: string
+          bulk_quantity: number
+          bulk_unit: string
+          created_at?: string
+          gallons: number
+          id?: string
+          in_transaction_id: string
+          out_transaction_id: string
+          performed_by: string
+          reason?: string | null
+          reverses_fill_id?: string | null
+          shortfall_quantity?: number
+          tote_after: number
+          tote_before: number
+          tote_ledger_rows: number
+          tote_product_id: string
+          totes: number
+        }
+        Update: {
+          bulk_after?: number
+          bulk_before?: number
+          bulk_ledger_rows?: number
+          bulk_product_id?: string
+          bulk_quantity?: number
+          bulk_unit?: string
+          created_at?: string
+          gallons?: number
+          id?: string
+          in_transaction_id?: string
+          out_transaction_id?: string
+          performed_by?: string
+          reason?: string | null
+          reverses_fill_id?: string | null
+          shortfall_quantity?: number
+          tote_after?: number
+          tote_before?: number
+          tote_ledger_rows?: number
+          tote_product_id?: string
+          totes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tote_fills_bulk_product_id_fkey"
+            columns: ["bulk_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_bulk_product_id_fkey"
+            columns: ["bulk_product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_in_transaction_id_fkey"
+            columns: ["in_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_out_transaction_id_fkey"
+            columns: ["out_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_performed_by_fkey"
+            columns: ["performed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_reverses_fill_id_fkey"
+            columns: ["reverses_fill_id"]
+            isOneToOne: true
+            referencedRelation: "tote_fills"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_tote_product_id_fkey"
+            columns: ["tote_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tote_fills_tote_product_id_fkey"
+            columns: ["tote_product_id"]
+            isOneToOne: false
+            referencedRelation: "view_unmigrated_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      uncertain_request_clear_check_key: {
+        Row: {
+          signing_key: string
+          singleton: boolean
+        }
+        Insert: {
+          signing_key: string
+          singleton?: boolean
+        }
+        Update: {
+          signing_key?: string
+          singleton?: boolean
+        }
+        Relationships: []
+      }
       unit_conversions: {
         Row: {
           factor_oz: number
@@ -11769,6 +14657,7 @@ export type Database = {
           invoice_date: string | null
           invoice_group_id: string | null
           invoice_number: string | null
+          // Manual catalog overlay: PostgREST computes this with invoice_postable_version(invoices_postable); it is not a physical view column.
           invoice_postable_version: string | null
           invoice_type: string | null
           is_quick_delivery: boolean | null
@@ -11805,10 +14694,138 @@ export type Database = {
           write_off_cents: number | null
         }
         Insert: {
-          [_ in never]: never
+          application_date?: string | null
+          application_service_id?: string | null
+          applicator_name?: string | null
+          balance_cents?: number | null
+          blend_ticket_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          credit_applied_cents?: number | null
+          crop_type?: string | null
+          customer_id?: string | null
+          deleted_at?: string | null
+          delivery_id?: string | null
+          diluent_rate_gpa?: number | null
+          discount_date?: string | null
+          discount_earned_cents?: number | null
+          due_date?: string | null
+          due_date_is_custom?: boolean | null
+          end_humidity_pct?: number | null
+          end_temp_f?: number | null
+          end_weather_source?: string | null
+          end_weather_time?: string | null
+          end_wind_direction?: string | null
+          end_wind_mph?: number | null
+          field_app_billing_set_id?: string | null
+          field_names?: string[] | null
+          footer_notes?: string | null
+          header_notes?: string | null
+          id?: string | null
+          internal_notes?: string | null
+          invoice_date?: string | null
+          invoice_group_id?: string | null
+          invoice_number?: string | null
+          invoice_type?: string | null
+          is_quick_delivery?: boolean | null
+          job_id?: string | null
+          order_id?: string | null
+          paid_amount_cents?: number | null
+          parent_invoice_id?: string | null
+          payment_terms?: string | null
+          posted_at?: string | null
+          posted_by?: string | null
+          prepay_applied_cents?: number | null
+          pricing_pending?: boolean | null
+          purchase_order_ref?: string | null
+          salesman_id?: string | null
+          season?: number | null
+          send_disposition?: string | null
+          start_humidity_pct?: number | null
+          start_temp_f?: number | null
+          start_weather_source?: string | null
+          start_weather_time?: string | null
+          start_wind_direction?: string | null
+          start_wind_mph?: number | null
+          status?: string | null
+          temperature_text?: string | null
+          total_acres?: number | null
+          total_amount_cents?: number | null
+          updated_at?: string | null
+          vehicle_name?: string | null
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+          weather_manual_override?: boolean | null
+          wind_direction?: string | null
+          write_off_cents?: number | null
         }
         Update: {
-          [_ in never]: never
+          application_date?: string | null
+          application_service_id?: string | null
+          applicator_name?: string | null
+          balance_cents?: number | null
+          blend_ticket_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          credit_applied_cents?: number | null
+          crop_type?: string | null
+          customer_id?: string | null
+          deleted_at?: string | null
+          delivery_id?: string | null
+          diluent_rate_gpa?: number | null
+          discount_date?: string | null
+          discount_earned_cents?: number | null
+          due_date?: string | null
+          due_date_is_custom?: boolean | null
+          end_humidity_pct?: number | null
+          end_temp_f?: number | null
+          end_weather_source?: string | null
+          end_weather_time?: string | null
+          end_wind_direction?: string | null
+          end_wind_mph?: number | null
+          field_app_billing_set_id?: string | null
+          field_names?: string[] | null
+          footer_notes?: string | null
+          header_notes?: string | null
+          id?: string | null
+          internal_notes?: string | null
+          invoice_date?: string | null
+          invoice_group_id?: string | null
+          invoice_number?: string | null
+          invoice_type?: string | null
+          is_quick_delivery?: boolean | null
+          job_id?: string | null
+          order_id?: string | null
+          paid_amount_cents?: number | null
+          parent_invoice_id?: string | null
+          payment_terms?: string | null
+          posted_at?: string | null
+          posted_by?: string | null
+          prepay_applied_cents?: number | null
+          pricing_pending?: boolean | null
+          purchase_order_ref?: string | null
+          salesman_id?: string | null
+          season?: number | null
+          send_disposition?: string | null
+          start_humidity_pct?: number | null
+          start_temp_f?: number | null
+          start_weather_source?: string | null
+          start_weather_time?: string | null
+          start_wind_direction?: string | null
+          start_wind_mph?: number | null
+          status?: string | null
+          temperature_text?: string | null
+          total_acres?: number | null
+          total_amount_cents?: number | null
+          updated_at?: string | null
+          vehicle_name?: string | null
+          void_reason?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+          weather_manual_override?: boolean | null
+          wind_direction?: string | null
+          write_off_cents?: number | null
         }
         Relationships: [
           {
@@ -11955,7 +14972,15 @@ export type Database = {
           unit_size?: string | null
           vendor?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "product_setup_category_fk"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["name"]
+          },
+        ]
       }
     }
     Functions: {
@@ -11996,6 +15021,33 @@ export type Database = {
               type: string
             }[]
           }
+      _active_ingredient_event: {
+        Args: {
+          p_after: Json
+          p_before: Json
+          p_evidence: string
+          p_ingredient_id: string
+          p_reason: string
+          p_type: string
+        }
+        Returns: number
+      }
+      _active_ingredient_values: {
+        Args: { p: Database["public"]["Tables"]["active_ingredients"]["Row"] }
+        Returns: Json
+      }
+      _admin_update_profile_replay_impl_20261015: {
+        Args: {
+          new_denied_pages?: string[]
+          new_full_name?: string
+          new_is_active?: boolean
+          new_phone?: string
+          new_role?: string
+          p_idempotency_key?: string
+          target_user_id: string
+        }
+        Returns: Json
+      }
       _allocated_cumulative_cents: {
         Args: { p_cumulative_quantity: number; p_order_item_id: string }
         Returns: number
@@ -12007,6 +15059,33 @@ export type Database = {
           p_quantity: number
         }
         Returns: number
+      }
+      _apply_chemistry_proposal: {
+        Args: { p_decision: string; p_proposal_id: string }
+        Returns: Json
+      }
+      _apply_parent_chemistry: {
+        Args: {
+          p_changes: Json
+          p_evidence: string
+          p_mode: string
+          p_parent_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _apply_parent_rates: {
+        Args: {
+          p_correction: boolean
+          p_expected_parent_version: number
+          p_expected_sizes: Json
+          p_parent_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+          p_reason: string
+          p_suggested_rate: string
+        }
+        Returns: Json
       }
       _apply_prepay_to_invoice_replay_impl_20261015: {
         Args: {
@@ -12027,6 +15106,22 @@ export type Database = {
         }
         Returns: Json
       }
+      _apply_product_setup_update: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
+      _apply_remaining_prepayments_replay_impl_20261015: {
+        Args: {
+          p_customer_id: string
+          p_idempotency_key?: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
       _apply_write_off_replay_impl_20261015: {
         Args: {
           p_amount_cents: number
@@ -12037,6 +15132,14 @@ export type Database = {
         }
         Returns: string
       }
+      _approve_product_parent_group: {
+        Args: {
+          p_entry: Json
+          p_locked: boolean
+          p_proposal: Database["public"]["Tables"]["product_parent_proposals"]["Row"]
+        }
+        Returns: Json
+      }
       _approve_return_intent_impl_20260812: {
         Args: {
           p_approved_by: string
@@ -12045,9 +15148,32 @@ export type Database = {
         }
         Returns: Json
       }
+      _approve_weight_item_ok: { Args: { p_item: Json }; Returns: boolean }
+      _approved_parent_lb_per_gal: {
+        Args: { p_parent_id: string }
+        Returns: Record<string, unknown>
+      }
       _assert_field_app_invoice_date_in_filed_season: {
         Args: { p_invoice_date: string; p_invoice_id: string }
         Returns: undefined
+      }
+      _assert_quote_prices_as_sent: {
+        Args: { p_quote_id: string }
+        Returns: undefined
+      }
+      _assign_job_applicator_replay_impl_20261015: {
+        Args: {
+          p_applicator_id?: string
+          p_idempotency_key?: string
+          p_job_id: string
+          p_license_override?: boolean
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _batch_apply_all_prepayments_replay_impl_20261015: {
+        Args: { p_idempotency_key?: string; p_performed_by?: string }
+        Returns: Json
       }
       _batch_apply_prepayments_impl: {
         Args: {
@@ -12062,6 +15188,40 @@ export type Database = {
           p_allocations: Json
           p_idempotency_key?: string
           p_performed_by: string
+        }
+        Returns: Json
+      }
+      _batch_approve_blend_tickets_replay_impl_20261015: {
+        Args: {
+          p_approved_by: string
+          p_idempotency_key?: string
+          p_ticket_ids: string[]
+        }
+        Returns: Json
+      }
+      _batch_cancel_deliveries_replay_impl_20261015: {
+        Args: {
+          p_cancel_reason?: string
+          p_delivery_ids: string[]
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: number
+      }
+      _batch_reject_blend_tickets_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_rejected_by: string
+          p_ticket_ids: string[]
+        }
+        Returns: Json
+      }
+      _batch_reschedule_deliveries_replay_impl_20261015: {
+        Args: {
+          p_delivery_ids: string[]
+          p_idempotency_key?: string
+          p_new_date: string
+          p_performed_by?: string
         }
         Returns: Json
       }
@@ -12083,6 +15243,18 @@ export type Database = {
         Args: { p_value: string }
         Returns: string
       }
+      _bill_split_line_shares: {
+        Args: { p_cents: number; p_order_item_id: string; p_units: number }
+        Returns: {
+          cents: number
+          customer_id: string
+          units: number
+        }[]
+      }
+      _bill_split_product_lines: {
+        Args: { p_invoice_id: string }
+        Returns: Json
+      }
       _bind_completed_lifecycle_idempotency: {
         Args: {
           p_contract: string
@@ -12097,6 +15269,32 @@ export type Database = {
       _bind_replay_receipt_20261015: {
         Args: { p_fingerprint: string; p_key: string; p_operation: string }
         Returns: undefined
+      }
+      _blend_quote_pick_valid_20261020: {
+        Args: {
+          p_customer_id: string
+          p_price_cents: number
+          p_product_id: string
+          p_section_id: string
+        }
+        Returns: boolean
+      }
+      _blend_tier_price_cents_20261020: {
+        Args: {
+          p_tier: number
+          p_tier1: number
+          p_tier2: number
+          p_tier3: number
+        }
+        Returns: number
+      }
+      _brand_largest_remainder: {
+        Args: { p_den: number; p_total: number; p_weights: number[] }
+        Returns: number[]
+      }
+      _bulk_create_label_drafts_replay_impl_20261015: {
+        Args: { p_drafts: Json; p_idempotency_key?: string }
+        Returns: Json
       }
       _bulk_import_order_below_cost_impl_20260810: {
         Args: {
@@ -12128,6 +15326,23 @@ export type Database = {
         Returns: Json
       }
       _can_see_field: { Args: { p_field_id: string }; Returns: boolean }
+      _cancel_cycle_count_replay_impl_20261015: {
+        Args: {
+          p_cycle_count_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _cancel_delivery_replay_impl_20261015: {
+        Args: {
+          p_cancel_reason: string
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
       _cancel_order_idem_impl_20260721: {
         Args: {
           p_idempotency_key?: string
@@ -12160,6 +15375,15 @@ export type Database = {
         }
         Returns: Json
       }
+      _cancel_purchase_order_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_po_id: string
+          p_reason?: string
+        }
+        Returns: Json
+      }
       _cancel_return_intent_impl_20260812: {
         Args: {
           p_idempotency_key?: string
@@ -12169,10 +15393,49 @@ export type Database = {
         }
         Returns: Json
       }
+      _cents_half_up: {
+        Args: { p_den: number; p_num: number }
+        Returns: string
+      }
       _check_credit_limit: {
         Args: { p_additional_cents?: number; p_customer_id: string }
         Returns: undefined
       }
+      _check_parent_chemistry: {
+        Args: { p_parent_id: string }
+        Returns: undefined
+      }
+      _chemistry_convert: {
+        Args: {
+          p_den: number
+          p_from_basis: string
+          p_ingredient_id: string
+          p_num: number
+          p_nutrient: string
+        }
+        Returns: Json
+      }
+      _chemistry_form_mass: {
+        Args: { p_basis: string; p_ingredient_id: string; p_value: number }
+        Returns: number
+      }
+      _chemistry_kept_modes: {
+        Args: { p_entry: Json; p_ingredient_id: string; p_parent_id: string }
+        Returns: string[]
+      }
+      _chemistry_nutrient: {
+        Args: { p_entry: Json; p_mode: string; p_nutrient: string }
+        Returns: Json
+      }
+      _chemistry_preview_fingerprint: {
+        Args: { p_changes: Json; p_parent_id: string }
+        Returns: string
+      }
+      _chemistry_strength: {
+        Args: { p_entry: Json; p_mode: string }
+        Returns: Json
+      }
+      _chemistry_uuid: { Args: { p: Json; p_label: string }; Returns: string }
       _claim_bound_lifecycle_idempotency: {
         Args: {
           p_contract: string
@@ -12183,8 +15446,51 @@ export type Database = {
         }
         Returns: Json
       }
+      _close_accounting_period_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_period_end: string
+        }
+        Returns: Json
+      }
+      _close_product_parent_proposal_if_done: {
+        Args: { p_proposal_id: string }
+        Returns: undefined
+      }
+      _close_quote_as_applied_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_quote_id: string
+        }
+        Returns: Json
+      }
+      _close_quote_as_short_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_quote_id: string
+        }
+        Returns: Json
+      }
       _close_undelivered_order_remainder_20260718: {
         Args: { p_actor: string; p_order_id: string }
+        Returns: Json
+      }
+      _commit_label_draft_replay_impl_20261015: {
+        Args: {
+          p_decision: string
+          p_draft_id: string
+          p_epa_registration?: string
+          p_force_overwrite?: boolean
+          p_idempotency_key?: string
+          p_max_label_rate?: number
+          p_max_label_rate_unit?: string
+          p_phi_days?: number
+          p_rei_hours?: number
+          p_signal_word?: string
+        }
         Returns: Json
       }
       _complete_cycle_count_impl: {
@@ -12229,6 +15535,22 @@ export type Database = {
         }
         Returns: Json
       }
+      _complete_delivery_evidence_impl_20270104: {
+        Args: {
+          p_completed_at?: string
+          p_delivery_id: string
+          p_email_receipt?: boolean
+          p_evidence?: string
+          p_evidence_ref?: string
+          p_idempotency_key?: string
+          p_issue_notes?: string
+          p_issue_type?: string
+          p_performed_by?: string
+          p_quantities?: Json
+          p_signed_by: string
+        }
+        Returns: Json
+      }
       _complete_delivery_period_preflight_impl: {
         Args: {
           p_completed_at?: string
@@ -12239,6 +15561,54 @@ export type Database = {
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string
+        }
+        Returns: Json
+      }
+      _complete_delivery_replay_impl_20261015: {
+        Args: {
+          p_completed_at?: string
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_issue_notes?: string
+          p_issue_type?: string
+          p_performed_by?: string
+          p_quantities?: Json
+          p_signed_by: string
+        }
+        Returns: Json
+      }
+      _complete_job_replay_impl_20261015: {
+        Args: {
+          p_applied_info: Json
+          p_idempotency_key?: string
+          p_job_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _confirm_delivery_replay_impl_20261015: {
+        Args: {
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _confirm_job_notification_sent_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_message?: string
+          p_notification_id: string
+          p_performed_by?: string
+          p_subject?: string
+        }
+        Returns: Json
+      }
+      _consolidate_draft_invoices_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_order_id: string
+          p_performed_by?: string
         }
         Returns: Json
       }
@@ -12259,6 +15629,62 @@ export type Database = {
         }
         Returns: Json
       }
+      _copy_parent_to_size: {
+        Args: {
+          p_epa: boolean
+          p_event_id: number
+          p_parent_id: string
+          p_product_id: string
+          p_rate_pass: boolean
+          p_rates: boolean
+        }
+        Returns: Json
+      }
+      _cost_step2_field_app_chemicals: {
+        Args: { p_chemicals: Json; p_invoice_id: string }
+        Returns: Json
+      }
+      _cost_step2_invoice_items: {
+        Args: { p_invoice: Json; p_items: Json }
+        Returns: Json
+      }
+      _cost_step2_job_chemicals: {
+        Args: { p_chemicals: Json; p_job_id: string }
+        Returns: Json
+      }
+      _cost_step2_product_cost_cents: {
+        Args: { p_product_id: string }
+        Returns: number
+      }
+      _cost_step2_snapshot_without_cost: {
+        Args: { p_value: Json }
+        Returns: Json
+      }
+      _cost_step2_try_uuid: { Args: { p_text: string }; Returns: string }
+      _create_app_record_from_bt_replay_impl_20261015: {
+        Args: {
+          p_blend_ticket_id: string
+          p_idempotency_key?: string
+          p_performed_by: string
+        }
+        Returns: string[]
+      }
+      _create_bill_split_delivery_invoices: {
+        Args: { p_actor: string; p_delivery_id: string; p_invoice_date: string }
+        Returns: string[]
+      }
+      _create_blend_ticket_replay_impl_20261015: {
+        Args: {
+          p_enqueue_ocr?: boolean
+          p_idempotency_key?: string
+          p_images?: Json
+          p_performed_by?: string
+          p_products?: Json
+          p_ticket_id: string
+          p_ticket_payload: Json
+        }
+        Returns: Json
+      }
       _create_commission_payment_intent_impl_20260809: {
         Args: {
           p_commission_ids: string[]
@@ -12271,6 +15697,20 @@ export type Database = {
         }
         Returns: string
       }
+      _create_delivery_with_items_replay_impl_20261015: {
+        Args: {
+          p_assigned_driver?: string
+          p_customer_id: string
+          p_delivery_address_id?: string
+          p_delivery_notes?: string
+          p_idempotency_key?: string
+          p_items: Json
+          p_order_id: string
+          p_scheduled_date: string
+          p_scheduled_time?: string
+        }
+        Returns: Json
+      }
       _create_direct_order_below_cost_impl_20260810: {
         Args: {
           p_customer_id: string
@@ -12281,6 +15721,28 @@ export type Database = {
           p_order_date: string
           p_order_name?: string
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _create_direct_order_replay_impl_20261015: {
+        Args: {
+          p_customer_id: string
+          p_customer_po_number?: string
+          p_idempotency_key?: string
+          p_items?: Json
+          p_notes?: string
+          p_order_date: string
+          p_order_name?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _create_followup_delivery_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_original_delivery_id: string
+          p_performed_by?: string
+          p_scheduled_date?: string
         }
         Returns: Json
       }
@@ -12333,6 +15795,50 @@ export type Database = {
         }
         Returns: string
       }
+      _create_job_from_quote_section_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_quote_id: string
+          p_section_id: string
+        }
+        Returns: Json
+      }
+      _create_label_draft_replay_impl_20261015: {
+        Args: {
+          p_confidence?: string
+          p_epa_registration?: string
+          p_idempotency_key?: string
+          p_max_label_rate?: number
+          p_max_label_rate_unit?: string
+          p_phi_days?: number
+          p_product_id: string
+          p_rei_hours?: number
+          p_signal_word?: string
+          p_source_note?: string
+          p_status?: string
+        }
+        Returns: string
+      }
+      _create_order_from_blend_ticket_replay_impl_20261015: {
+        Args: {
+          p_blend_ticket_id: string
+          p_idempotency_key?: string
+          p_notes?: string
+          p_order_date?: string
+          p_order_number: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _create_planned_holds_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_quote_id: string
+        }
+        Returns: Json
+      }
       _create_prepay_check_splits_replay_impl_20261015: {
         Args: {
           p_customer_id: string
@@ -12357,6 +15863,15 @@ export type Database = {
         }
         Returns: Json
       }
+      _create_quote_from_template_replay_impl_20261015: {
+        Args: {
+          p_customer_id: string
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_template_id: string
+        }
+        Returns: Json
+      }
       _create_quote_version_owner_impl: {
         Args: {
           p_idempotency_key?: string
@@ -12366,11 +15881,35 @@ export type Database = {
         }
         Returns: Json
       }
+      _create_rebate_claim_replay_impl_20261015: {
+        Args: {
+          p_claim_amount_cents: number
+          p_customer_id?: string
+          p_idempotency_key?: string
+          p_notes?: string
+          p_order_id?: string
+          p_product_id?: string
+          p_program_id: string
+          p_quantity: number
+        }
+        Returns: Json
+      }
       _create_return_intent_impl_20260812: {
         Args: { p_idempotency_key?: string; p_items?: Json; p_return: Json }
         Returns: Json
       }
       _create_rush_order_below_cost_impl_20260810: {
+        Args: {
+          p_customer_id: string
+          p_customer_po_number?: string
+          p_idempotency_key?: string
+          p_items?: Json
+          p_notes?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _create_rush_order_replay_impl_20261015: {
         Args: {
           p_customer_id: string
           p_customer_po_number?: string
@@ -12394,6 +15933,17 @@ export type Database = {
         Args: { p_customer_id: string }
         Returns: boolean
       }
+      _dashboard_summary_cost_impl_20261019: { Args: never; Returns: Json }
+      _decide_product_parent_group: {
+        Args: {
+          p_expected_proposal_version: number
+          p_group_fingerprint: string
+          p_group_id: string
+          p_reason: string
+          p_status: string
+        }
+        Returns: Json
+      }
       _delete_invoices_split_provenance_impl_20260719: {
         Args: {
           p_idempotency_key?: string
@@ -12411,9 +15961,96 @@ export type Database = {
         }
         Returns: Json
       }
+      _delete_purchase_order_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_po_id: string
+        }
+        Returns: Json
+      }
+      _delete_vendor_replay_impl_20261015: {
+        Args: { p_idempotency_key?: string; p_vendor_id: string }
+        Returns: Json
+      }
+      _delivery_brand_event: {
+        Args: {
+          p_after: Json
+          p_before: Json
+          p_delivery_id: string
+          p_details: Json
+          p_invoice_ids: string[]
+          p_reason: string
+          p_type: string
+        }
+        Returns: number
+      }
+      _delivery_brand_insert: {
+        Args: {
+          p_delivery_id: string
+          p_line_id: string
+          p_product_id: string
+          p_rows: Json
+        }
+        Returns: undefined
+      }
+      _delivery_brand_max_seq: {
+        Args: { p_delivery_id: string }
+        Returns: number
+      }
+      _delivery_brand_may_read: {
+        Args: { p_delivery_id: string }
+        Returns: boolean
+      }
+      _delivery_brand_resolve_picks: {
+        Args: { p_picks: Json; p_product_id: string }
+        Returns: Json
+      }
+      _delivery_brand_rows: {
+        Args: { p_delivery_id: string; p_line_ids?: string[] }
+        Returns: Json
+      }
+      _delivery_brands_on_complete: {
+        Args: { p_delivery_id: string; p_picks_confirmed: boolean }
+        Returns: number
+      }
       _delivery_invoice_overbilling: {
         Args: { p_invoice_id: string }
         Returns: string
+      }
+      _delivery_line_brand_list: {
+        Args: { p_product_id: string }
+        Returns: {
+          brand_id: string
+          brand_name: string
+          epa_registration: string
+          is_currently_sourced: boolean
+          is_rup: boolean
+          manufacturer: string
+          parent_id: string
+          row_version: number
+          signal_word: string
+          source: string
+        }[]
+      }
+      _dismiss_watchdog_flag_replay_impl_20261015: {
+        Args: {
+          p_flag_id: string
+          p_idempotency_key?: string
+          p_note?: string
+          p_performed_by?: string
+          p_resolution: string
+        }
+        Returns: Json
+      }
+      _dispatch_job_locations_replay_impl_20261015: {
+        Args: {
+          p_assignments: Json
+          p_idempotency_key?: string
+          p_license_override?: boolean
+          p_performed_by?: string
+        }
+        Returns: Json
       }
       _draw_down_quote_below_cost_impl_20260810: {
         Args: {
@@ -12442,6 +16079,42 @@ export type Database = {
         }
         Returns: Json
       }
+      _duplicate_quote_replay_impl_20261015: {
+        Args: {
+          p_below_cost_reason?: string
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_source_quote_id: string
+        }
+        Returns: Json
+      }
+      _edit_active_ingredient: {
+        Args: {
+          p_evidence: string
+          p_fields: Json
+          p_ingredient_id: string
+          p_preview: boolean
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _edit_delivery_replay_impl_20261015: {
+        Args: {
+          p_assigned_driver?: string
+          p_delivery_address_id?: string
+          p_delivery_id: string
+          p_delivery_notes?: string
+          p_delivery_window_end?: string
+          p_delivery_window_start?: string
+          p_idempotency_key?: string
+          p_items?: Json
+          p_performed_by?: string
+          p_priority?: string
+          p_scheduled_date?: string
+          p_scheduled_time?: string
+        }
+        Returns: Json
+      }
       _edit_prepay_credit_replay_impl_20261015: {
         Args: {
           p_bucket_label?: string
@@ -12454,11 +16127,129 @@ export type Database = {
         }
         Returns: Json
       }
-      _format_pricing_dollars: { Args: { p_cents: number }; Returns: string }
       _enqueue_delivery_receipt: {
         Args: { p_actor: string; p_delivery_id: string }
         Returns: undefined
       }
+      _epa_find_link: {
+        Args: { p_number: string; p_parent_id: string }
+        Returns: Record<string, unknown>
+      }
+      _epa_label_adjuvants_valid: { Args: { p: Json }; Returns: boolean }
+      _epa_label_date: { Args: { p: string }; Returns: string }
+      _epa_link_carries: {
+        Args: {
+          p_kind: string
+          p_link_id: string
+          p_number: string
+          p_parent_id: string
+        }
+        Returns: boolean
+      }
+      _epa_lookup_input: { Args: { p_result: Json }; Returns: Json }
+      _epa_lookup_shape_error: {
+        Args: { p_number: string; p_result: Json }
+        Returns: string
+      }
+      _epa_norm: { Args: { p_epa: string }; Returns: string }
+      _epa_proposal_items: {
+        Args: { p_input: Json; p_number: string; p_parent_id: string }
+        Returns: Json
+      }
+      _epa_registration_event: {
+        Args: {
+          p_affected: Json
+          p_after: Json
+          p_before: Json
+          p_number: string
+          p_reason: string
+          p_type: string
+        }
+        Returns: number
+      }
+      _epa_registration_facts: {
+        Args: { p: Json; p_create: boolean }
+        Returns: undefined
+      }
+      _epa_registration_insert: {
+        Args: { p_facts: Json; p_number: string }
+        Returns: {
+          cancelled_on: string | null
+          checked_at: string | null
+          created_at: string
+          created_by: string
+          epa_registration: string
+          label_accepted_on: string | null
+          label_adjuvants: Json | null
+          label_url: string | null
+          max_label_rate: number | null
+          max_label_rate_unit: string | null
+          phi_days: number | null
+          registration_status: string
+          registration_version: number
+          rei_hours: number | null
+          rup_status: string
+          signal_word: string | null
+          source: string | null
+          updated_at: string
+          updated_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "epa_registrations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      _epa_registration_lock: {
+        Args: { p_exclusive: boolean }
+        Returns: undefined
+      }
+      _epa_registration_seed_plan: {
+        Args: { p_rup_default: string }
+        Returns: Json
+      }
+      _epa_registration_target_table: {
+        Args: { p_target_table: string }
+        Returns: undefined
+      }
+      _epa_registration_unrecorded_posted_lines: {
+        Args: { p_number: string }
+        Returns: Json
+      }
+      _epa_registration_update: {
+        Args: { p_changes: Json; p_number: string }
+        Returns: {
+          cancelled_on: string | null
+          checked_at: string | null
+          created_at: string
+          created_by: string
+          epa_registration: string
+          label_accepted_on: string | null
+          label_adjuvants: Json | null
+          label_url: string | null
+          max_label_rate: number | null
+          max_label_rate_unit: string | null
+          phi_days: number | null
+          registration_status: string
+          registration_version: number
+          rei_hours: number | null
+          rup_status: string
+          signal_word: string | null
+          source: string | null
+          updated_at: string
+          updated_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "epa_registrations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      _epa_registrations_seeded: { Args: never; Returns: boolean }
+      _fix_delivery_plan: { Args: { p_delivery_id: string }; Returns: Json }
+      _format_pricing_dollars: { Args: { p_cents: number }; Returns: string }
       _format_pricing_margin_percent: {
         Args: { p_ratio: number }
         Returns: string
@@ -12471,6 +16262,28 @@ export type Database = {
           p_performed_by: string
         }
         Returns: Json
+      }
+      _get_bottom_line_pnl_cost_impl_20261019: {
+        Args: { p_end_date: string; p_start_date: string }
+        Returns: {
+          amount: number
+          line_item: string
+          pct_of_revenue: number
+        }[]
+      }
+      _get_chemical_history_cost_step2_impl: {
+        Args: { p_end_date: string; p_product_id: string; p_start_date: string }
+        Returns: {
+          customer_name: string
+          notes: string
+          quantity: number
+          reference_number: string
+          total_amount: number
+          transaction_date: string
+          transaction_type: string
+          unit: string
+          unit_price: number
+        }[]
       }
       _get_customer_statement_scoped_impl: {
         Args: {
@@ -12487,6 +16300,139 @@ export type Database = {
           transaction_type: string
         }[]
       }
+      _get_field_profitability_cost_impl_20261019: {
+        Args: { p_season?: string }
+        Returns: {
+          cost_cents: number
+          customer_id: string
+          customer_name: string
+          field_id: string
+          field_name: string
+          margin_cents: number
+          margin_per_acre_cents: number
+          revenue_cents: number
+          season: string
+          total_acres_applied: number
+        }[]
+      }
+      _get_gross_sales_report_cost_impl_20261019: {
+        Args: { p_end_date: string; p_group_by?: string; p_start_date: string }
+        Returns: {
+          gross_profit: number
+          group_name: string
+          margin_pct: number
+          order_count: number
+          total_cost: number
+          total_revenue: number
+          units_sold: number
+        }[]
+      }
+      _get_inventory_cost_report_cost_impl_20261019: {
+        Args: never
+        Returns: {
+          below_reorder: boolean
+          category: string
+          net_available: number
+          product_id: string
+          product_name: string
+          quantity_available: number
+          quantity_prebooked: number
+          reorder_point: number
+          sku: string
+          total_cost_value: number
+          unit_cost: number
+          vendor: string
+        }[]
+      }
+      _get_inventory_position_cost_impl_20261019: { Args: never; Returns: Json }
+      _get_profitability_report_cost_impl_20261019: {
+        Args: { p_end_date?: string; p_group_by: string; p_start_date?: string }
+        Returns: {
+          group_key: string
+          margin_pct: number
+          order_count: number
+          total_cost: number
+          total_profit: number
+          total_revenue: number
+          units_sold: number
+        }[]
+      }
+      _get_sales_detail_report_cost_impl_20261019: {
+        Args: {
+          p_category?: string
+          p_customer_ids?: string[]
+          p_end_date?: string
+          p_product_id?: string
+          p_sales_rep_id?: string
+          p_season?: number
+          p_start_date?: string
+        }
+        Returns: {
+          category: string
+          cost: number
+          customer_id: string
+          customer_name: string
+          invoice_number: string
+          margin_pct: number
+          order_date: string
+          order_number: string
+          product_id: string
+          product_name: string
+          profit: number
+          quantity: number
+          sales_rep_name: string
+          season: number
+          sku: string
+          total_price: number
+          unit: string
+          unit_price: number
+        }[]
+      }
+      _get_sales_summary_report_cost_impl_20261019: {
+        Args: {
+          p_category?: string
+          p_customer_ids?: string[]
+          p_end_date?: string
+          p_group_by?: string
+          p_product_id?: string
+          p_sales_rep_id?: string
+          p_season?: number
+          p_start_date?: string
+        }
+        Returns: {
+          group_id: string
+          group_key: string
+          line_count: number
+          margin_pct: number
+          order_count: number
+          total_cost: number
+          total_profit: number
+          total_quantity: number
+          total_revenue: number
+        }[]
+      }
+      _ingredient_cas_valid: { Args: { p_cas: string }; Returns: boolean }
+      _ingredient_mode_list: {
+        Args: { p_ingredient_id: string }
+        Returns: Json
+      }
+      _ingredient_mode_reach: {
+        Args: { p_ingredient_id: string }
+        Returns: Json
+      }
+      _ingredient_modes_input: {
+        Args: { p_label: string; p_modes: Json }
+        Returns: Json
+      }
+      _ingredient_usage_fingerprint: {
+        Args: { p_fields: Json; p_ingredient_id: string }
+        Returns: string
+      }
+      _ingredient_usage_parents: {
+        Args: { p_ingredient_id: string }
+        Returns: string[]
+      }
+      _ingredient_users: { Args: { p_ingredient_id: string }; Returns: Json }
       _insert_commissions_for_job: {
         Args: {
           p_commission_date?: string
@@ -12508,8 +16454,81 @@ export type Database = {
         }
         Returns: number
       }
+      _insert_parent_size: {
+        Args: {
+          p_key: string
+          p_parent: Database["public"]["Tables"]["product_parents"]["Row"]
+          p_size: Json
+        }
+        Returns: string
+      }
+      _invoice_brand_key: {
+        Args: { p_brand_name: string; p_epa_registration: string }
+        Returns: string
+      }
+      _invoice_brand_recopy: {
+        Args: { p_delivery_id: string }
+        Returns: number
+      }
+      _invoice_brand_recopy_invoice: {
+        Args: { p_invoice_id: string }
+        Returns: boolean
+      }
+      _invoice_brand_rup_facts: {
+        Args: {
+          p_brand_number: string
+          p_brand_signal_word: string
+          p_product_id: string
+        }
+        Returns: Record<string, unknown>
+      }
+      _invoice_line_brand_allocation: {
+        Args: { p_line_id: string }
+        Returns: Json
+      }
+      _invoice_line_brand_keys: {
+        Args: { p_brand_lines: Json }
+        Returns: {
+          brand_key: string
+          brand_name: string
+          epa_registration: string
+          first_index: number
+          signal_word: string
+          ticked: boolean
+        }[]
+      }
+      _invoice_line_brand_lines: {
+        Args: {
+          p_invoice_id: string
+          p_order_item_id: string
+          p_product_id: string
+        }
+        Returns: Json
+      }
+      _invoice_line_order_tier_20261026: {
+        Args: { p_order_item_id: string }
+        Returns: number
+      }
+      _invoice_line_rup_facts: {
+        Args: { p_line_number: string; p_product_id: string }
+        Returns: Record<string, unknown>
+      }
+      _invoice_post_content_version: {
+        Args: { p_invoice_id: string }
+        Returns: string
+      }
+      _invoice_post_version: { Args: { p_invoice_id: string }; Returns: string }
+      _is_accepted_delivery_evidence_object: {
+        Args: { p_bucket_id: string; p_name: string }
+        Returns: boolean
+      }
       _is_admin_override: { Args: never; Returns: boolean }
       _is_dispatched_to_me: { Args: { p_job_id: string }; Returns: boolean }
+      _is_job_applicator: { Args: { p_job_id: string }; Returns: boolean }
+      _is_my_application_field: {
+        Args: { p_field_id: string }
+        Returns: boolean
+      }
       _issue_return_credit_header_only_impl_20260825: {
         Args: {
           p_actor_id: string
@@ -12534,14 +16553,129 @@ export type Database = {
         }
         Returns: Json
       }
+      _job_epa_freeze: { Args: { p_job_id: string }; Returns: undefined }
+      _link_fields_to_parent_replay_impl_20261015: {
+        Args: {
+          p_child_ids: string[]
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_performed_by?: string
+        }
+        Returns: undefined
+      }
       _lock_accounting_months: {
         Args: { p_dates: string[]; p_exclusive?: boolean }
         Returns: undefined
+      }
+      _lock_ingredient_parents: {
+        Args: { p_parent_ids: string[] }
+        Returns: undefined
+      }
+      _lock_invoice_post_inputs: {
+        Args: { p_invoice_ids: string[] }
+        Returns: undefined
+      }
+      _lock_parent_chemistry: {
+        Args: { p_expected_version: number; p_parent_id: string }
+        Returns: number
+      }
+      _lock_product_parent: {
+        Args: { p_expected_version: number; p_parent_id: string }
+        Returns: string[]
+      }
+      _log_failed_notification_replay_impl_20261015: {
+        Args: {
+          p_entity_id?: string
+          p_entity_type?: string
+          p_error_message?: string
+          p_idempotency_key?: string
+          p_notification_type: string
+          p_payload?: Json
+        }
+        Returns: string
       }
       _lr_allocate_int: {
         Args: { p_total: number; p_weights: Json }
         Returns: Json
       }
+      _manual_inventory_add_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_location: string
+          p_min_stock_level?: number
+          p_notes?: string
+          p_performed_by?: string
+          p_product_id: string
+          p_quantity: number
+          p_reorder_point?: number
+          p_unit_cost?: number
+          p_unit_size?: string
+        }
+        Returns: Json
+      }
+      _mark_inventory_row_verified_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_inventory_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _match_quick_receive_items_cost_step2_impl: {
+        Args: { p_items: Json; p_vendor?: string }
+        Returns: Json
+      }
+      _move_group_brands: {
+        Args: {
+          p_differ: boolean
+          p_ids: string[]
+          p_parent_id: string
+          p_parent_name: string
+          p_picks: Json
+        }
+        Returns: undefined
+      }
+      _next_product_parent_event_id: { Args: never; Returns: number }
+      _normalize_epa_registration: { Args: { p: string }; Returns: string }
+      _normalized_category_timing: {
+        Args: { p_category: string }
+        Returns: Record<string, unknown>
+      }
+      _order_bill_split_has_payer: {
+        Args: { p_customer_id: string; p_order_id: string }
+        Returns: boolean
+      }
+      _order_has_bill_split: { Args: { p_order_id: string }; Returns: boolean }
+      _order_invoice_overbilling: {
+        Args: { p_order_id: string }
+        Returns: string
+      }
+      _order_line_price_tier_20261026: {
+        Args: { p_order_id: string; p_quote_item_id: string }
+        Returns: number
+      }
+      _oxide_factor: {
+        Args: { p_nutrient: string }
+        Returns: Record<string, unknown>
+      }
+      _parent_active_cost_rows: { Args: { p_parent_id: string }; Returns: Json }
+      _parent_brand_event: {
+        Args: {
+          p_after: Json
+          p_before: Json
+          p_brand_id: string
+          p_parent_id: string
+          p_reason: string
+          p_type: string
+        }
+        Returns: undefined
+      }
+      _parent_chemistry_epa_refusal: {
+        Args: { p_parent_id: string }
+        Returns: string
+      }
+      _parent_chemistry_values: { Args: { p_parent_id: string }; Returns: Json }
+      _parent_mode_groups: { Args: { p_parent_id: string }; Returns: Json }
       _parse_pricing_dollars: { Args: { p_value: string }; Returns: number }
       _parse_pricing_margin_percent: {
         Args: { p_value: string }
@@ -12602,6 +16736,35 @@ export type Database = {
         }
         Returns: Json
       }
+      _price_order_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_items?: Json
+          p_order_id: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _pricing_change_set_warning_inputs: {
+        Args: { p_change_set_id: string }
+        Returns: Json
+      }
+      _pricing_change_set_warning_set: {
+        Args: { p_change_set_id: string }
+        Returns: Json
+      }
+      _pricing_change_set_warnings: {
+        Args: { p_change_set_id: string }
+        Returns: {
+          details: Json
+          product_id: string
+          warning_codes: string[]
+        }[]
+      }
+      _product_active_review: {
+        Args: { p_product_ids: string[] }
+        Returns: Json
+      }
       _product_cost_basis_row_required: {
         Args: {
           p_effect: Json
@@ -12611,9 +16774,326 @@ export type Database = {
         }
         Returns: boolean
       }
+      _product_label_fingerprint: {
+        Args: { p_product_id: string }
+        Returns: string
+      }
+      _product_name_strength_tokens: {
+        Args: { p_name: string; p_size: number; p_unit: string }
+        Returns: string[]
+      }
+      _product_parent_base_name: { Args: { p_name: string }; Returns: string }
+      _product_parent_epa_correction_enabled: { Args: never; Returns: boolean }
+      _product_parent_event: {
+        Args: {
+          p_affected: Json
+          p_after: Json
+          p_before: Json
+          p_evidence: string
+          p_id: number
+          p_parent_id: string
+          p_reason: string
+          p_type: string
+        }
+        Returns: number
+      }
+      _product_parent_group_members: {
+        Args: { p_ids: string[] }
+        Returns: Json
+      }
+      _product_parent_group_shape: { Args: { p_ids: string[] }; Returns: Json }
+      _product_parent_grouping_open: { Args: never; Returns: boolean }
+      _product_parent_identity_after: {
+        Args: {
+          p_changes: Json
+          p_parent: Database["public"]["Tables"]["product_parents"]["Row"]
+        }
+        Returns: Json
+      }
+      _product_parent_identity_name: {
+        Args: { p_name: string }
+        Returns: string
+      }
+      _product_parent_loose_key: { Args: { p_base: string }; Returns: string }
+      _product_parent_read: { Args: { p_parent_ids: string[] }; Returns: Json }
+      _product_parent_reason: {
+        Args: { p_label: string; p_required: boolean; p_text: string }
+        Returns: string
+      }
+      _product_parent_refusal: {
+        Args: { p_column: string; p_parent_name: string }
+        Returns: string
+      }
+      _product_parent_replay: {
+        Args: { p_fp: string; p_key: string; p_scope: string }
+        Returns: Json
+      }
+      _product_parent_require_admin: { Args: never; Returns: string }
+      _product_parent_size_role: { Args: { p_size: Json }; Returns: string }
+      _product_parent_suggested_role: {
+        Args: { p_container_type: string; p_full_tote: boolean; p_name: string }
+        Returns: string
+      }
+      _product_parent_timings: {
+        Args: { p_category: string; p_codes: Json }
+        Returns: string[]
+      }
+      _product_parent_unit_refusal: {
+        Args: {
+          p_parent: Database["public"]["Tables"]["product_parents"]["Row"]
+          p_product_id: string
+          p_unit: string
+        }
+        Returns: string
+      }
+      _product_parent_values: {
+        Args: { p: Database["public"]["Tables"]["product_parents"]["Row"] }
+        Returns: Json
+      }
+      _product_rate_check_values: {
+        Args: {
+          p_basis: string
+          p_basis_confirmed: boolean
+          p_high: number
+          p_low: number
+          p_parent_id: string
+          p_reason: string
+          p_recommended: number
+          p_source: string
+          p_unit: string
+        }
+        Returns: Json
+      }
+      _product_rate_denominator: { Args: { p: string }; Returns: string }
+      _product_rate_derive_parent: {
+        Args: { p_actor: string; p_parent_id: string }
+        Returns: Json
+      }
+      _product_rate_epa_numbers: {
+        Args: { p_parent_id: string }
+        Returns: string[]
+      }
+      _product_rate_insert_derived: {
+        Args: {
+          p_actor: string
+          p_basis: string
+          p_basis_confirmed: boolean
+          p_default: boolean
+          p_high: number
+          p_low: number
+          p_origin: string
+          p_parent_id: string
+          p_recommended: number
+          p_source: string
+          p_source_text: string
+          p_unit: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          basis: string
+          basis_confirmed: boolean
+          created_at: string
+          created_by: string
+          high: number | null
+          id: string
+          is_quoting_default: boolean
+          low: number | null
+          origin: string
+          over_label_reason: string | null
+          parent_id: string
+          recommended: number | null
+          row_version: number
+          source: string
+          source_text: string | null
+          status: string
+          unit: string
+          updated_at: string
+          updated_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "product_rates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      _product_rate_label_check: { Args: { p_rate_id: string }; Returns: Json }
+      _product_rate_max_unit: {
+        Args: { p_kind: string; p_max_unit: string }
+        Returns: Json
+      }
+      _product_rate_note: {
+        Args: {
+          p_actor: string
+          p_code: string
+          p_detail: Json
+          p_parent_id: string
+          p_rate_id: string
+          p_text: string
+        }
+        Returns: Json
+      }
+      _product_rate_number_ok: { Args: { p: number }; Returns: boolean }
+      _product_rate_parse_text: {
+        Args: { p_form: string; p_text: string }
+        Returns: Json
+      }
+      _product_rate_review_approve: {
+        Args: {
+          p_actor: string
+          p_expected_row_version: number
+          p_rate_id: string
+        }
+        Returns: Json
+      }
+      _product_rate_review_lock: {
+        Args: { p_rate_id: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          basis: string
+          basis_confirmed: boolean
+          created_at: string
+          created_by: string
+          high: number | null
+          id: string
+          is_quoting_default: boolean
+          low: number | null
+          origin: string
+          over_label_reason: string | null
+          parent_id: string
+          recommended: number | null
+          row_version: number
+          source: string
+          source_text: string | null
+          status: string
+          unit: string
+          updated_at: string
+          updated_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "product_rates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      _product_rate_review_number: {
+        Args: { p_key: string; p_row: Json }
+        Returns: number
+      }
+      _product_rate_review_outcome: {
+        Args: {
+          p_actor: string
+          p_expected_version: number
+          p_note: string
+          p_outcome: string
+          p_parent_id: string
+        }
+        Returns: Json
+      }
+      _product_rate_review_reopen: {
+        Args: {
+          p_actor: string
+          p_expected_row_version: number
+          p_rate_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _product_rate_review_row_problems: {
+        Args: { p_form: string; p_parent_id: string }
+        Returns: string
+      }
+      _product_rate_review_run: {
+        Args: {
+          p_actor: string
+          p_key: string
+          p_outcomes: Json
+          p_rates: Json
+        }
+        Returns: Json
+      }
+      _product_rate_review_text: {
+        Args: { p_key: string; p_row: Json }
+        Returns: string
+      }
+      _product_rate_review_version: {
+        Args: { p_key: string; p_row: Json }
+        Returns: number
+      }
+      _product_rate_text_unit: {
+        Args: { p_form: string; p_word: string }
+        Returns: string
+      }
+      _product_rate_unit_fits: {
+        Args: { p_basis: string; p_form: string; p_kind: string }
+        Returns: boolean
+      }
+      _product_rate_unit_ok: {
+        Args: {
+          p_form: string
+          p_new_unit: string
+          p_old_unit: string
+          p_rate: number
+          p_stock_unit: string
+        }
+        Returns: boolean
+      }
+      _product_rate_value: { Args: { p_value: Json }; Returns: number }
+      _product_rate_value_ok: { Args: { p_value: Json }; Returns: boolean }
+      _product_setup_fingerprint: {
+        Args: { p: Database["public"]["Tables"]["products"]["Row"] }
+        Returns: string
+      }
+      _product_size_fingerprint: {
+        Args: { p_product_id: string }
+        Returns: string
+      }
+      _product_size_move_refusal: {
+        Args: { p_product_id: string; p_to_parent_id: string }
+        Returns: string
+      }
+      _product_size_values: { Args: { p_product_id: string }; Returns: Json }
+      _product_weight: {
+        Args: { p_product_id: string; p_units?: Json }
+        Returns: Json
+      }
+      _product_weight_event: {
+        Args: {
+          p_after: Json
+          p_before: Json
+          p_evidence: string
+          p_kind: string
+          p_parent_id: string
+          p_product_id: string
+          p_reason: string
+          p_type: string
+          p_value_id: string
+        }
+        Returns: number
+      }
+      _product_weight_trust_rank: {
+        Args: { p_source: string }
+        Returns: number
+      }
       _purchase_order_item_unit_cost_cents: {
         Args: { p_item: Json }
         Returns: number
+      }
+      _reactivate_vendor_replay_impl_20261015: {
+        Args: { p_idempotency_key?: string; p_vendor_id: string }
+        Returns: Json
+      }
+      _reassign_delivery_replay_impl_20261015: {
+        Args: {
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_new_driver: string
+          p_performed_by?: string
+        }
+        Returns: Json
       }
       _receive_return_impl_20260714: {
         Args: {
@@ -12643,6 +17123,44 @@ export type Database = {
         Args: { p_product_ids: string[] }
         Returns: undefined
       }
+      _reconcile_negative_inventory_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_inventory_id: string
+          p_new_quantity: number
+          p_performed_by?: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _record_job_post_notifications_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_job_id: string
+          p_message: string
+          p_performed_by?: string
+          p_subject: string
+        }
+        Returns: Json
+      }
+      _record_job_pre_notifications_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_job_id: string
+          p_message: string
+          p_performed_by?: string
+          p_subject: string
+        }
+        Returns: Json
+      }
+      _record_label_draft_target: {
+        Args: { p_draft_id: string }
+        Returns: undefined
+      }
+      _refuse_bill_split_change: {
+        Args: { p_order_id: string }
+        Returns: undefined
+      }
       _reject_return_intent_impl_20260812: {
         Args: {
           p_idempotency_key?: string
@@ -12651,11 +17169,29 @@ export type Database = {
         }
         Returns: Json
       }
+      _release_inventory_hold_replay_impl_20261015: {
+        Args: {
+          p_hold_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _reopen_accounting_period_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_period_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       _replay_fingerprint_20261015: {
         Args: { p_request: Json }
         Returns: string
       }
       _require_auth: { Args: never; Returns: string }
+      _resolve_active_ingredient: { Args: { p_entry: Json }; Returns: Json }
       _resolve_product_cost_basis_row: { Args: { p_row: Json }; Returns: Json }
       _restore_quote_version_below_cost_impl_20260810: {
         Args: {
@@ -12676,7 +17212,51 @@ export type Database = {
         }
         Returns: Json
       }
+      _retire_inventory_item_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_inventory_id: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _return_customer_is_split_payer: {
+        Args: { p_customer_id: string; p_order_id: string }
+        Returns: boolean
+      }
+      _return_customer_line_share: {
+        Args: {
+          p_customer_id: string
+          p_exclude_return_id: string
+          p_order_id: string
+          p_order_item_id: string
+        }
+        Returns: {
+          billed_cents: number
+          billed_qty: number
+          other_returned_cents: number
+          other_returned_qty: number
+          share_mode: boolean
+        }[]
+      }
+      _reverse_blend_ticket_approval_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_reason: string
+          p_ticket_id: string
+        }
+        Returns: Json
+      }
       _reverse_completed_cycle_count_impl: {
+        Args: {
+          p_cycle_count_id: string
+          p_idempotency_key?: string
+          p_reversed_by?: string
+        }
+        Returns: undefined
+      }
+      _reverse_completed_cycle_count_replay_impl_20261015: {
         Args: {
           p_cycle_count_id: string
           p_idempotency_key?: string
@@ -12711,7 +17291,91 @@ export type Database = {
         }
         Returns: Json
       }
+      _review_customer_fact_replay_impl_20261015: {
+        Args: {
+          p_fact_id: string
+          p_idempotency_key?: string
+          p_review_note?: string
+          p_verdict: string
+        }
+        Returns: Json
+      }
+      _rollover_quote_to_season_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_new_season: number
+          p_performed_by: string
+          p_quote_id: string
+        }
+        Returns: Json
+      }
+      _sales_line_payers: {
+        Args: { p_order_item_id: string }
+        Returns: {
+          bill_split: boolean
+          cost: number
+          customer_id: string
+          quantity: number
+          revenue: number
+        }[]
+      }
+      _save_blend_recipe_replay_impl_20261015: {
+        Args: {
+          p_crop_type?: string
+          p_description?: string
+          p_idempotency_key?: string
+          p_items: Json
+          p_name: string
+          p_recipe_id: string
+          p_recipe_type: string
+          p_timing?: string
+        }
+        Returns: Json
+      }
+      _save_blend_ticket_fields_replay_impl_20261015: {
+        Args: {
+          p_blend_ticket_id: string
+          p_fields: Json
+          p_idempotency_key?: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _save_blend_ticket_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_products: Json
+          p_ticket_id: string
+          p_ticket_payload: Json
+        }
+        Returns: Json
+      }
+      _save_field_app_invoice_cost_step2_impl: {
+        Args: {
+          p_application_service_id?: string
+          p_chemicals: Json
+          p_idempotency_key?: string
+          p_invoice: Json
+          p_invoice_id: string
+          p_locations: Json
+          p_performed_by: string
+        }
+        Returns: Json
+      }
       _save_field_app_invoice_impl_20260714: {
+        Args: {
+          p_application_service_id?: string
+          p_chemicals: Json
+          p_idempotency_key?: string
+          p_invoice: Json
+          p_invoice_id: string
+          p_locations: Json
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _save_field_app_invoice_replay_impl_20261015: {
         Args: {
           p_application_service_id?: string
           p_chemicals: Json
@@ -12737,7 +17401,55 @@ export type Database = {
         }
         Returns: Json
       }
+      _save_field_crop_history_replay_impl_20261015: {
+        Args: {
+          p_crop_type: string
+          p_field_id: string
+          p_harvest_date?: string
+          p_idempotency_key?: string
+          p_notes?: string
+          p_performed_by?: string
+          p_planting_date?: string
+          p_season: number
+          p_variety?: string
+          p_yield_per_acre?: number
+          p_yield_unit?: string
+        }
+        Returns: Json
+      }
+      _save_field_geometry_replay_impl_20261015: {
+        Args: {
+          p_boundary_geojson?: string
+          p_centroid_geojson?: string
+          p_field_id: string
+          p_idempotency_key?: string
+        }
+        Returns: undefined
+      }
+      _save_field_polygons_replay_impl_20261015: {
+        Args: {
+          p_field_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_polygons: Json
+        }
+        Returns: undefined
+      }
+      _save_field_replay_impl_20261015: {
+        Args: {
+          p_billing_defaults?: Json
+          p_field_id: string
+          p_field_payload: Json
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: string
+      }
       _save_invoice_below_cost_impl_20260810: {
+        Args: { p_idempotency_key?: string; p_invoice: Json; p_items?: Json }
+        Returns: string
+      }
+      _save_invoice_cost_step2_impl: {
         Args: { p_idempotency_key?: string; p_invoice: Json; p_items?: Json }
         Returns: string
       }
@@ -12760,6 +17472,30 @@ export type Database = {
       _save_invoice_split_provenance_impl_20260719: {
         Args: { p_idempotency_key?: string; p_invoice: Json; p_items?: Json }
         Returns: string
+      }
+      _save_job_cost_step2_impl: {
+        Args: {
+          p_chemicals: Json
+          p_fields: Json
+          p_idempotency_key?: string
+          p_job_id: string
+          p_job_payload: Json
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _save_parent_density_draft: {
+        Args: {
+          p_evidence: string
+          p_expected_version: number
+          p_parent_id: string
+          p_reason: string
+          p_source: string
+          p_source_note: string
+          p_unit: string
+          p_value: number
+        }
+        Returns: Json
       }
       _save_purchase_order_ascii_identity_impl: {
         Args: {
@@ -12798,6 +17534,36 @@ export type Database = {
           p_quote_id: string
           p_quote_payload: Json
           p_sections: Json
+        }
+        Returns: Json
+      }
+      _save_quote_template_replay_impl_20261015: {
+        Args: {
+          p_description?: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_quote_id: string
+          p_template_name: string
+        }
+        Returns: Json
+      }
+      _save_size_net_weight_draft: {
+        Args: {
+          p_evidence: string
+          p_expected_version: number
+          p_net_lb: number
+          p_product_id: string
+          p_reason: string
+          p_source: string
+          p_source_note: string
+        }
+        Returns: Json
+      }
+      _save_vendor_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_payload: Json
+          p_vendor_id: string
         }
         Returns: Json
       }
@@ -12974,13 +17740,95 @@ export type Database = {
         }
         Returns: Json
       }
+      _set_application_record_lots_replay_impl_20261015: {
+        Args: {
+          p_application_record_id: string
+          p_idempotency_key?: string
+          p_lots: Json
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _set_field_boundary_replay_impl_20261015: {
+        Args: {
+          p_boundary_geojson: string
+          p_field_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _set_field_override_acres_replay_impl_20261015: {
+        Args: {
+          p_field_id: string
+          p_idempotency_key?: string
+          p_override_acres: number
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _size_cost_per_base: {
+        Args: { p_current_cost: number; p_unit: string; p_unit_type: string }
+        Returns: Json
+      }
       _split_invoice_content_claim: {
         Args: { p_invoice_id: string }
+        Returns: Json
+      }
+      _start_and_complete_delivery_impl_20270104: {
+        Args: {
+          p_delivered_on: string
+          p_delivery_id: string
+          p_evidence?: string
+          p_evidence_ref?: string
+          p_idempotency_key?: string
+          p_issue_notes?: string
+          p_issue_type?: string
+          p_performed_by?: string
+          p_quantities?: Json
+          p_signed_by: string
+        }
+        Returns: Json
+      }
+      _start_job_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_job_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _submit_purchase_order_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_performed_by: string
+          p_po_id: string
+        }
+        Returns: Json
+      }
+      _supersede_customer_fact_replay_impl_20261015: {
+        Args: {
+          p_confidence: number
+          p_expires_at: string
+          p_fact_id: string
+          p_idempotency_key?: string
+          p_value_json: Json
+          p_value_text: string
+        }
         Returns: Json
       }
       _supplier_cost_basis_enabled_for_product: {
         Args: { p_product_id: string }
         Returns: boolean
+      }
+      _sync_invoice_line_brand_captures: {
+        Args: {
+          p_brand_lines: Json
+          p_line_id: string
+          p_product_id: string
+          p_source: string
+        }
+        Returns: undefined
       }
       _sync_job_holds: {
         Args: { p_actor: string; p_job_id: string }
@@ -12990,9 +17838,26 @@ export type Database = {
         Args: { p_actor: string; p_quote_id: string }
         Returns: number
       }
+      _sync_product_vendor_copy: {
+        Args: { p_product_id: string }
+        Returns: undefined
+      }
       _sync_quote_job_reservations: {
         Args: { p_actor: string; p_quote_id: string }
         Returns: undefined
+      }
+      _tote_fill_liquid_oz: { Args: { p_unit: string }; Returns: number }
+      _tote_fill_preview: {
+        Args: { p_tote_product_id: string; p_totes: number }
+        Returns: Json
+      }
+      _transfer_invoice_to_job_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_invoice_id: string
+          p_performed_by: string
+        }
+        Returns: Json
       }
       _transfer_job_to_invoice_intent_impl_20260908: {
         Args: {
@@ -13002,12 +17867,110 @@ export type Database = {
         }
         Returns: Json
       }
+      _transition_rebate_claim_replay_impl_20261015: {
+        Args: {
+          p_claim_id: string
+          p_idempotency_key?: string
+          p_manufacturer_ref?: string
+          p_new_status: string
+          p_paid_amount_cents?: number
+        }
+        Returns: Json
+      }
       _unapply_return_credit_guard_impl_20260826: {
         Args: {
           p_credit_memo_id: string
           p_idempotency_key?: string
           p_performed_by?: string
           p_reason: string
+        }
+        Returns: Json
+      }
+      _undispatch_job_locations_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_job_field_ids: string[]
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _unit_factor_oz: {
+        Args: { p_unit: string; p_unit_type: string }
+        Returns: number
+      }
+      _unlink_field_from_parent_replay_impl_20261015: {
+        Args: {
+          p_field_id: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+        }
+        Returns: undefined
+      }
+      _unpost_invoice_group_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_invoice_group_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _unpost_invoice_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_invoice_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _update_blend_ticket_billing_status_replay_impl_20261015: {
+        Args: {
+          p_blend_ticket_id: string
+          p_idempotency_key?: string
+          p_payment_status?: string
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
+      _update_field_app_applied_info_replay_impl_20261015: {
+        Args: {
+          p_applicator_name?: string
+          p_diluent_rate_gpa?: number
+          p_end_humidity_pct?: number
+          p_end_temp_f?: number
+          p_end_weather_source?: string
+          p_end_weather_time?: string
+          p_end_wind_direction?: string
+          p_end_wind_mph?: number
+          p_idempotency_key?: string
+          p_invoice_ids: string[]
+          p_performed_by?: string
+          p_start_humidity_pct?: number
+          p_start_temp_f?: number
+          p_start_weather_source?: string
+          p_start_weather_time?: string
+          p_start_wind_direction?: string
+          p_start_wind_mph?: number
+          p_temperature_text?: string
+          p_update_diluent?: boolean
+          p_update_weather?: boolean
+          p_weather_manual_override?: boolean
+          p_wind_direction?: string
+        }
+        Returns: Json
+      }
+      _update_field_app_invoice_billing_replay_impl_20261015: {
+        Args: {
+          p_discounts?: Json
+          p_due_date?: string
+          p_footer_notes?: string
+          p_header_notes?: string
+          p_idempotency_key?: string
+          p_internal_notes?: string
+          p_invoice_ids: string[]
+          p_payment_terms?: string
+          p_performed_by?: string
+          p_purchase_order_ref?: string
+          p_terms_by_invoice?: Json
         }
         Returns: Json
       }
@@ -13029,10 +17992,30 @@ export type Database = {
         }
         Returns: Json
       }
+      _update_order_items_replay_impl_20261015: {
+        Args: {
+          p_expected_row_version?: number
+          p_idempotency_key?: string
+          p_items: Json
+          p_order_id: string
+          p_performed_by: string
+        }
+        Returns: Json
+      }
+      _vendor_id_for_text: { Args: { p_text: string }; Returns: string }
       _void_commission_payment_intent_impl_20260809: {
         Args: {
           p_idempotency_key?: string
           p_payment_id: string
+          p_performed_by?: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _void_delivery_replay_impl_20261015: {
+        Args: {
+          p_delivery_id: string
+          p_idempotency_key?: string
           p_performed_by?: string
           p_reason: string
         }
@@ -13071,6 +18054,15 @@ export type Database = {
         }
         Returns: Json
       }
+      _void_order_replay_impl_20261015: {
+        Args: {
+          p_idempotency_key?: string
+          p_order_id: string
+          p_performed_by: string
+          p_reason?: string
+        }
+        Returns: Json
+      }
       _void_payment_replay_impl_20261015: {
         Args: {
           p_allocation_set_id: string
@@ -13081,6 +18073,83 @@ export type Database = {
         Returns: Json
       }
       _wake_delivery_receipt_worker: { Args: never; Returns: undefined }
+      _weight_unit_factors: { Args: never; Returns: Json }
+      _workbook_apply_items: {
+        Args: {
+          p_evidence: string
+          p_items: Json
+          p_parent_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      _workbook_ingredient_parent: {
+        Args: { p_parent_id: string; p_rows: Json }
+        Returns: Json
+      }
+      _workbook_ingredient_rows: { Args: { p_rows: Json }; Returns: Json }
+      _workbook_text: { Args: { p_key: string; p_row: Json }; Returns: string }
+      _workbook_version: {
+        Args: { p_key: string; p_row: Json }
+        Returns: number
+      }
+      _workbook_weight_row: { Args: { p_row: Json }; Returns: Json }
+      _workbook_weight_rows: { Args: { p_rows: Json }; Returns: Json }
+      _write_parent_density: {
+        Args: {
+          p_evidence: string
+          p_expected: number
+          p_mode: string
+          p_note: string
+          p_parent_id: string
+          p_reason: string
+          p_source: string
+          p_unit: string
+          p_value: number
+        }
+        Returns: Json
+      }
+      _write_product_rates: {
+        Args: {
+          p_product_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+          p_suggested_rate: string
+        }
+        Returns: Json
+      }
+      _write_size_net_weight: {
+        Args: {
+          p_evidence: string
+          p_expected: number
+          p_mode: string
+          p_net_lb: number
+          p_note: string
+          p_product_id: string
+          p_reason: string
+          p_source: string
+        }
+        Returns: Json
+      }
+      add_product_size: {
+        Args: {
+          p_expected_parent_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_size: Json
+        }
+        Returns: Json
+      }
+      add_use_timing_option: {
+        Args: {
+          p_category: string
+          p_crop: string
+          p_idempotency_key?: string
+          p_label: string
+          p_timing_code: string
+        }
+        Returns: Json
+      }
       adjust_inventory: {
         Args: {
           p_delta: number
@@ -13213,6 +18282,15 @@ export type Database = {
         }
         Returns: Json
       }
+      approve_product_parent_groups: {
+        Args: {
+          p_groups: Json
+          p_idempotency_key?: string
+          p_proposal_id: string
+          p_proposal_version: number
+        }
+        Returns: Json
+      }
       approve_return: {
         Args: {
           p_approved_by?: string
@@ -13228,6 +18306,10 @@ export type Database = {
           p_performed_by: string
           p_row_ids: string[]
         }
+        Returns: Json
+      }
+      approve_weights: {
+        Args: { p_idempotency_key?: string; p_items: Json }
         Returns: Json
       }
       assert_customer_balance_reconstructable_as_of: {
@@ -13247,6 +18329,20 @@ export type Database = {
           p_customer_ids: string[]
           p_idempotency_key?: string
           p_sales_rep_id: string
+        }
+        Returns: Json
+      }
+      assign_epa_registration: {
+        Args: {
+          p_expected_new_version: number
+          p_expected_target_fingerprint: string
+          p_idempotency_key?: string
+          p_label_draft_id?: string
+          p_new_number: string
+          p_new_registration: Json
+          p_reason: string
+          p_target_id: string
+          p_target_table: string
         }
         Returns: Json
       }
@@ -13319,6 +18415,10 @@ export type Database = {
           p_void_reason: string
         }
         Returns: number
+      }
+      build_product_parent_proposal: {
+        Args: { p_idempotency_key?: string }
+        Returns: Json
       }
       bulk_create_label_drafts: {
         Args: { p_drafts: Json; p_idempotency_key?: string }
@@ -13427,11 +18527,11 @@ export type Database = {
       }
       check_remainder_reminders: { Args: never; Returns: Json }
       check_unpriced_orders: { Args: never; Returns: Json }
-      cleanup_rate_limits: { Args: never; Returns: undefined }
       claim_delivery_receipts: {
         Args: { p_idempotency_key?: string; p_limit?: number }
         Returns: Json
       }
+      cleanup_rate_limits: { Args: never; Returns: undefined }
       close_accounting_period: {
         Args: {
           p_idempotency_key?: string
@@ -13440,12 +18540,16 @@ export type Database = {
         }
         Returns: Json
       }
-      close_purchase_order_short: {
+      close_delivery_receipt: {
         Args: {
+          p_delivery_id: string
           p_idempotency_key?: string
-          p_po_id: string
           p_reason: string
         }
+        Returns: Json
+      }
+      close_purchase_order_short: {
+        Args: { p_idempotency_key?: string; p_po_id: string; p_reason: string }
         Returns: Json
       }
       close_quote_as_applied: {
@@ -13487,6 +18591,19 @@ export type Database = {
         }
         Returns: Json
       }
+      commit_epa_proposal: {
+        Args: {
+          p_decisions: Json
+          p_expected_proposal_version: number
+          p_idempotency_key?: string
+          p_proposal_id: string
+        }
+        Returns: Json
+      }
+      commit_ingredients_tab: {
+        Args: { p_idempotency_key?: string; p_rows: Json }
+        Returns: Json
+      }
       commit_label_draft: {
         Args: {
           p_decision: string
@@ -13500,6 +18617,14 @@ export type Database = {
           p_rei_hours?: number
           p_signal_word?: string
         }
+        Returns: Json
+      }
+      commit_rate_review: {
+        Args: { p_idempotency_key?: string; p_outcomes: Json; p_rates: Json }
+        Returns: Json
+      }
+      commit_weights_tab: {
+        Args: { p_idempotency_key?: string; p_rows: Json }
         Returns: Json
       }
       complete_cycle_count: {
@@ -13623,6 +18748,66 @@ export type Database = {
           converted_value: number
         }[]
       }
+      correct_delivery_brands: {
+        Args: {
+          p_base_event_seq: number
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_lines: Json
+          p_reason: string
+        }
+        Returns: Json
+      }
+      correct_parent_chemistry: {
+        Args: {
+          p_changes: Json
+          p_evidence: string
+          p_expected_chemistry_version: number
+          p_expected_preview_fingerprint: string
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      correct_parent_density: {
+        Args: {
+          p_evidence: string
+          p_expected_density_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reason: string
+          p_source: string
+          p_source_note: string
+          p_unit: string
+          p_value: number
+        }
+        Returns: Json
+      }
+      correct_parent_rates: {
+        Args: {
+          p_expected_parent_version: number
+          p_expected_sizes: Json
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+          p_reason: string
+          p_suggested_rate: string
+        }
+        Returns: Json
+      }
+      correct_product_parent_identity: {
+        Args: {
+          p_changes: Json
+          p_evidence: string
+          p_expected_parent_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       correct_product_rates: {
         Args: {
           p_expected: Json
@@ -13634,6 +18819,19 @@ export type Database = {
           p_rate_unit: string
           p_reason: string
           p_suggested_rate: string
+        }
+        Returns: Json
+      }
+      correct_size_net_weight: {
+        Args: {
+          p_evidence: string
+          p_expected_version: number
+          p_idempotency_key?: string
+          p_net_lb: number
+          p_product_id: string
+          p_reason: string
+          p_source: string
+          p_source_note: string
         }
         Returns: Json
       }
@@ -13820,6 +19018,10 @@ export type Database = {
         }
         Returns: Json
       }
+      create_product_with_parent: {
+        Args: { p_idempotency_key?: string; p_parent: Json; p_size: Json }
+        Returns: Json
+      }
       create_quick_delivery: {
         Args: {
           p_customer_id: string
@@ -13907,7 +19109,20 @@ export type Database = {
         Returns: string
       }
       current_season: { Args: never; Returns: number }
+      customer_credit_exposure: {
+        Args: { p_customer_id: string }
+        Returns: Json
+      }
       dashboard_summary: { Args: never; Returns: Json }
+      delete_draft_product_rate: {
+        Args: {
+          p_expected_row_version: number
+          p_idempotency_key?: string
+          p_rate_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       delete_invoices: {
         Args: {
           p_idempotency_key?: string
@@ -13939,6 +19154,10 @@ export type Database = {
       }
       derive_customer_shares_from_fields: {
         Args: { p_applied_acres_map?: Json; p_field_ids: string[] }
+        Returns: Json
+      }
+      derive_draft_product_rates: {
+        Args: { p_idempotency_key?: string; p_parent_ids: string[] }
         Returns: Json
       }
       dismiss_watchdog_flag: {
@@ -14018,6 +19237,15 @@ export type Database = {
         }
         Returns: number
       }
+      fill_tote_from_bulk: {
+        Args: {
+          p_expected: Json
+          p_idempotency_key?: string
+          p_tote_product_id: string
+          p_totes: number
+        }
+        Returns: Json
+      }
       financial_dashboard_summary: { Args: never; Returns: Json }
       find_overlapping_fields: {
         Args: { p_boundary_geojson: string; p_customer_id?: string }
@@ -14034,6 +19262,15 @@ export type Database = {
           p_sent_to?: string
         }
         Returns: string
+      }
+      fix_delivery: {
+        Args: {
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_plan_token: string
+          p_reason: string
+        }
+        Returns: Json
       }
       generate_batch_statements: {
         Args: {
@@ -14060,6 +19297,7 @@ export type Database = {
         Returns: number
       }
       generate_ticket_number: { Args: never; Returns: string }
+      get_active_ingredient_worklist: { Args: never; Returns: Json }
       get_admin_cost_fields: {
         Args: { p_ids: string[]; p_table: string }
         Returns: Json
@@ -14085,17 +19323,17 @@ export type Database = {
       get_ar_aging: {
         Args: { p_as_of_date?: string }
         Returns: {
-          current_amount: number | null
+          current_amount: number
           customer_id: string
-          days_30: number | null
-          days_60: number | null
-          days_90: number | null
+          days_30: number
+          days_60: number
+          days_90: number
           farm_name: string
-          open_credit_cents: number | null
-          over_90: number | null
-          prepay_balance_cents: number | null
-          total_outstanding: number | null
-          unavailable_reason: string | null
+          open_credit_cents: number
+          over_90: number
+          prepay_balance_cents: number
+          total_outstanding: number
+          unavailable_reason: string
         }[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }
@@ -14103,18 +19341,20 @@ export type Database = {
         Args: { p_customer_ids: string[]; p_season: number }
         Returns: Json
       }
-      get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
       get_bill_split_payers: {
-        Args: {
-          p_invoice_id: string
-        }
+        Args: { p_invoice_id: string }
         Returns: {
-          farm_name: string | null
+          farm_name: string
           id: string
-          invoice_number: string | null
-          total_amount_cents: number | null
+          invoice_number: string
+          total_amount_cents: number
         }[]
       }
+      get_blend_ticket_weights: {
+        Args: { p_blend_ticket_id: string }
+        Returns: Json
+      }
+      get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
       get_bottom_line_pnl: {
         Args: { p_end_date: string; p_start_date: string }
         Returns: {
@@ -14150,11 +19390,11 @@ export type Database = {
           notes: string
           quantity: number
           reference_number: string
-          total_amount: number | null
+          total_amount: number
           transaction_date: string
           transaction_type: string
           unit: string
-          unit_price: number | null
+          unit_price: number
         }[]
       }
       get_commission_balance_report: {
@@ -14282,6 +19522,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_deliveries_missing_brands: {
+        Args: { p_from: string; p_to: string }
+        Returns: Json
+      }
       get_deliveries_page: {
         Args: {
           p_after_id?: string
@@ -14301,6 +19545,7 @@ export type Database = {
         }
         Returns: Json
       }
+      get_delivery_brands: { Args: { p_delivery_id: string }; Returns: Json }
       get_delivery_receipt_recipient: {
         Args: { p_delivery_id: string }
         Returns: Json
@@ -14326,6 +19571,9 @@ export type Database = {
         Args: { p_applicator_id?: string; p_crew_id?: string }
         Returns: Json[]
       }
+      get_duplicate_product_parents: { Args: never; Returns: Json }
+      get_epa_registrations: { Args: { p_numbers?: string[] }; Returns: Json }
+      get_epa_sales_to_check: { Args: never; Returns: Json }
       get_expiring_planned_holds: {
         Args: { p_days_ahead?: number; p_idempotency_key?: string }
         Returns: Json
@@ -14440,6 +19688,10 @@ export type Database = {
           units_sold: number
         }[]
       }
+      get_ingredient_mode_users: {
+        Args: { p_ingredient_id: string }
+        Returns: Json
+      }
       get_inventory_cost_report: {
         Args: never
         Returns: {
@@ -14506,6 +19758,10 @@ export type Database = {
       get_label_coverage_report: { Args: never; Returns: Json }
       get_last_charged_prices: {
         Args: { p_customer_id: string; p_product_ids: string[] }
+        Returns: Json
+      }
+      get_loader_worksheet_weights: {
+        Args: { p_job_ids?: string[]; p_worksheet_ids?: string[] }
         Returns: Json
       }
       get_logbook_by_applicator: {
@@ -14722,19 +19978,24 @@ export type Database = {
         }
         Returns: Json
       }
+      get_parent_active_costs: { Args: { p_parent_id: string }; Returns: Json }
+      get_parent_chemistry: { Args: { p_parent_id: string }; Returns: Json }
+      get_parent_draft_rates: { Args: { p_parent_id: string }; Returns: Json }
+      get_parent_mode_groups: { Args: { p_parent_id: string }; Returns: Json }
+      get_product_brands: { Args: { p_product_id: string }; Returns: Json }
       get_product_cost_basis_workspace: {
         Args: { p_product_id: string }
         Returns: Json
       }
+      get_product_grouping_open: { Args: never; Returns: boolean }
+      get_product_parents: { Args: { p_product_ids?: string[] }; Returns: Json }
       get_product_price_history: {
         Args: { p_product_id: string }
         Returns: Json
       }
-      get_product_setup_workbook: {
-        Args: never
-        Returns: Json
-      }
+      get_product_setup_workbook: { Args: never; Returns: Json }
       get_product_vendors: { Args: { p_product_id: string }; Returns: Json }
+      get_product_weights: { Args: { p_product_ids: string[] }; Returns: Json }
       get_profitability_report: {
         Args: { p_end_date?: string; p_group_by: string; p_start_date?: string }
         Returns: {
@@ -14750,12 +20011,17 @@ export type Database = {
       get_program_completion: { Args: { p_season?: number }; Returns: Json }
       get_quote_cost_alerts: {
         Args: { p_quote_id: string }
-        Returns: { below_cost: boolean; cost_rose: boolean; quote_item_id: string }[]
+        Returns: {
+          below_cost: boolean
+          cost_rose: boolean
+          quote_item_id: string
+        }[]
       }
       get_quote_versions: {
         Args: { p_quote_id: string }
         Returns: {
           id: string
+          // Manual catalog overlay: raw get_quote_versions outputs inherit nullable quote_versions columns.
           notes: string | null
           pdf_url: string | null
           quote_id: string
@@ -14767,6 +20033,7 @@ export type Database = {
           version_number: number
         }[]
       }
+      get_rate_review_workbook: { Args: never; Returns: Json }
       get_receiving_log: {
         Args: {
           p_condition?: string
@@ -14819,6 +20086,7 @@ export type Database = {
           p_start_date?: string
         }
         Returns: {
+          brand_name: string
           buyer_certification_expiry: string
           buyer_certification_number: string
           buyer_certification_type: string
@@ -14905,6 +20173,7 @@ export type Database = {
           season_b_val: number
         }[]
       }
+      get_setup_workbook_chemistry: { Args: never; Returns: Json }
       get_split_payer_return_orders: {
         Args: { p_customer_id: string }
         Returns: string[]
@@ -14924,6 +20193,8 @@ export type Database = {
       get_supplier_quote_sheet: { Args: { p_vendor_id: string }; Returns: Json }
       get_team_board_deliveries: { Args: never; Returns: Json }
       get_team_workload: { Args: never; Returns: Json }
+      get_typed_brands_for_review: { Args: never; Returns: Json }
+      get_vendor_link_proposals: { Args: never; Returns: Json }
       get_watchdog_flags: {
         Args: {
           p_flag_type?: string
@@ -14962,6 +20233,16 @@ export type Database = {
           secondary_text: string
         }[]
       }
+      hold_product_parent_group: {
+        Args: {
+          p_expected_proposal_version: number
+          p_group_fingerprint: string
+          p_group_id: string
+          p_idempotency_key?: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       increment_customer_prepay: {
         Args: {
           p_amount_cents: number
@@ -14971,7 +20252,9 @@ export type Database = {
         Returns: undefined
       }
       invoice_postable_version: {
-        Args: { "": Database["public"]["Views"]["invoices_postable"]["Row"] }
+        Args: {
+          p_invoice: Database["public"]["Views"]["invoices_postable"]["Row"]
+        }
         Returns: string
       }
       is_active_profile: { Args: never; Returns: boolean }
@@ -15104,6 +20387,20 @@ export type Database = {
       mark_overdue_invoices: { Args: never; Returns: Json }
       match_quick_receive_items: {
         Args: { p_items: Json; p_vendor?: string }
+        Returns: Json
+      }
+      move_product_size: {
+        Args: {
+          p_evidence: string
+          p_expected_from_version: number
+          p_expected_prices: Json
+          p_expected_size_fingerprint: string
+          p_expected_to_version: number
+          p_idempotency_key?: string
+          p_product_id: string
+          p_reason: string
+          p_to_parent_id: string
+        }
         Returns: Json
       }
       next_application_record_number: { Args: never; Returns: string }
@@ -15429,6 +20726,22 @@ export type Database = {
         }
         Returns: Json
       }
+      preview_active_ingredient_change: {
+        Args: { p_fields: Json; p_ingredient_id: string }
+        Returns: Json
+      }
+      preview_epa_assignment: {
+        Args: {
+          p_new_number: string
+          p_target_id: string
+          p_target_table: string
+        }
+        Returns: Json
+      }
+      preview_epa_registration_seed: {
+        Args: { p_rup_default: string }
+        Returns: Json
+      }
       preview_field_app_invoice_split: {
         Args: {
           p_application_service_id?: string
@@ -15454,7 +20767,45 @@ export type Database = {
           overdue_balance_cents: number
         }[]
       }
+      preview_fix_delivery: { Args: { p_delivery_id: string }; Returns: Json }
+      preview_ingredients_tab: { Args: { p_rows: Json }; Returns: Json }
+      preview_move_product_size: {
+        Args: { p_product_id: string; p_to_parent_id: string }
+        Returns: Json
+      }
+      preview_parent_chemistry_correction: {
+        Args: { p_changes: Json; p_parent_id: string }
+        Returns: Json
+      }
+      preview_parent_rates: {
+        Args: {
+          p_parent_id: string
+          p_rate_per_acre: number
+          p_rate_unit: string
+          p_suggested_rate: string
+        }
+        Returns: Json
+      }
+      preview_product_active_change: {
+        Args: { p_active: boolean; p_product_ids: string[] }
+        Returns: Json
+      }
       preview_product_cost_basis_changes: {
+        Args: {
+          p_export_id?: string
+          p_idempotency_key?: string
+          p_performed_by?: string
+          p_rows?: Json
+          p_source: string
+        }
+        Returns: Json
+      }
+      preview_product_import: { Args: { p_rows: Json }; Returns: Json }
+      preview_product_parent_identity_correction: {
+        Args: { p_changes: Json; p_parent_id: string }
+        Returns: Json
+      }
+      preview_product_pricing_changes: {
         Args: {
           p_export_id?: string
           p_idempotency_key?: string
@@ -15472,24 +20823,16 @@ export type Database = {
         }
         Returns: Json
       }
-      preview_product_pricing_changes: {
-        Args: {
-          p_export_id?: string
-          p_idempotency_key?: string
-          p_performed_by?: string
-          p_rows?: Json
-          p_source: string
-        }
+      preview_product_rates: { Args: { p_rows: Json }; Returns: Json }
+      preview_rate_review: {
+        Args: { p_outcomes: Json; p_rates: Json }
         Returns: Json
       }
-      preview_product_import: {
-        Args: { p_rows: Json }
+      preview_tote_fill: {
+        Args: { p_tote_product_id: string; p_totes: number }
         Returns: Json
       }
-      preview_product_rates: {
-        Args: { p_rows: Json }
-        Returns: Json
-      }
+      preview_weights_tab: { Args: { p_rows: Json }; Returns: Json }
       price_order: {
         Args: {
           p_idempotency_key?: string
@@ -15513,9 +20856,27 @@ export type Database = {
         }
         Returns: number
       }
+      promote_chemistry_proposal: {
+        Args: {
+          p_decision: string
+          p_expected_proposal_version: number
+          p_idempotency_key?: string
+          p_proposal_id: string
+        }
+        Returns: Json
+      }
       rate_unit_line_refusal: {
         Args: { p_check_characters: boolean; p_rate_unit: string }
         Returns: string
+      }
+      reactivate_active_ingredient: {
+        Args: {
+          p_expected_row_version: number
+          p_idempotency_key?: string
+          p_ingredient_id: string
+          p_reason: string
+        }
+        Returns: Json
       }
       reactivate_vendor: {
         Args: { p_idempotency_key?: string; p_vendor_id: string }
@@ -15562,6 +20923,14 @@ export type Database = {
         Returns: Json
       }
       reconcile_prepay_balances: { Args: never; Returns: Json }
+      record_epa_lookup: {
+        Args: {
+          p_idempotency_key?: string
+          p_lookup_id: string
+          p_result: Json
+        }
+        Returns: Json
+      }
       record_invoice_payment: {
         Args: {
           p_amount_cents: number
@@ -15610,6 +20979,25 @@ export type Database = {
           p_acre_divergence_threshold?: number
           p_job_id?: string
           p_rate_fallback_multiple?: number
+        }
+        Returns: Json
+      }
+      reject_epa_proposal: {
+        Args: {
+          p_expected_proposal_version: number
+          p_idempotency_key?: string
+          p_proposal_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      reject_product_parent_group: {
+        Args: {
+          p_expected_proposal_version: number
+          p_group_fingerprint: string
+          p_group_id: string
+          p_idempotency_key?: string
+          p_reason: string
         }
         Returns: Json
       }
@@ -15717,6 +21105,15 @@ export type Database = {
         }
         Returns: Json
       }
+      retire_active_ingredient: {
+        Args: {
+          p_expected_row_version: number
+          p_idempotency_key?: string
+          p_ingredient_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       retire_inventory_item: {
         Args: {
           p_idempotency_key?: string
@@ -15773,6 +21170,14 @@ export type Database = {
         }
         Returns: Json
       }
+      reverse_tote_fill: {
+        Args: {
+          p_fill_id: string
+          p_idempotency_key?: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       reverse_write_off: {
         Args: {
           p_idempotency_key?: string
@@ -15797,6 +21202,16 @@ export type Database = {
           p_idempotency_key?: string
           p_review_note?: string
           p_verdict: string
+        }
+        Returns: Json
+      }
+      review_typed_brand: {
+        Args: {
+          p_action: string
+          p_brand_id?: string
+          p_idempotency_key?: string
+          p_pick_id: string
+          p_reason?: string
         }
         Returns: Json
       }
@@ -15826,6 +21241,18 @@ export type Database = {
       safe_cents_qty: {
         Args: { p_cents: number; p_qty: number }
         Returns: number
+      }
+      save_active_ingredient: {
+        Args: {
+          p_evidence: string
+          p_expected_row_version: number
+          p_expected_usage_fingerprint: string
+          p_fields: Json
+          p_idempotency_key?: string
+          p_ingredient_id: string
+          p_reason: string
+        }
+        Returns: Json
       }
       save_blend_recipe: {
         Args: {
@@ -15866,6 +21293,23 @@ export type Database = {
           p_customer_payload: Json
           p_idempotency_key?: string
           p_performed_by: string
+        }
+        Returns: Json
+      }
+      save_draft_product_rate: {
+        Args: {
+          p_basis: string
+          p_expected_row_version: number
+          p_high: number
+          p_idempotency_key?: string
+          p_is_quoting_default: boolean
+          p_low: number
+          p_over_label_reason: string
+          p_parent_id: string
+          p_rate_id: string
+          p_recommended: number
+          p_source: string
+          p_unit: string
         }
         Returns: Json
       }
@@ -16004,8 +21448,35 @@ export type Database = {
         }
         Returns: Json
       }
+      search_active_ingredients: {
+        Args: { p_limit?: number; p_text: string }
+        Returns: Json
+      }
+      search_product_parents: {
+        Args: { p_active_only?: boolean; p_text: string }
+        Returns: Json
+      }
       season_end_date: { Args: { p_season: number }; Returns: string }
       season_start_date: { Args: { p_season: number }; Returns: string }
+      seed_epa_registrations: {
+        Args: {
+          p_expected_fingerprint: string
+          p_idempotency_key?: string
+          p_picks: Json
+          p_rup_default: string
+        }
+        Returns: Json
+      }
+      set_active_ingredient_modes: {
+        Args: {
+          p_expected_modes: Json
+          p_idempotency_key?: string
+          p_ingredient_id: string
+          p_modes: Json
+          p_reason: string
+        }
+        Returns: Json
+      }
       set_application_record_lots: {
         Args: {
           p_application_record_id: string
@@ -16021,6 +21492,26 @@ export type Database = {
           p_idempotency_key?: string
           p_performed_by: string
           p_quote_item_id: string
+        }
+        Returns: Json
+      }
+      set_delivery_brands: {
+        Args: {
+          p_base_event_seq: number
+          p_delivery_id: string
+          p_idempotency_key?: string
+          p_lines: Json
+        }
+        Returns: Json
+      }
+      set_epa_registration: {
+        Args: {
+          p_changes: Json
+          p_epa_registration: string
+          p_expected_version: number
+          p_idempotency_key?: string
+          p_label_draft_id?: string
+          p_reason: string
         }
         Returns: Json
       }
@@ -16042,10 +21533,58 @@ export type Database = {
         }
         Returns: Json
       }
+      set_parent_chemistry: {
+        Args: {
+          p_changes: Json
+          p_expected_chemistry_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+        }
+        Returns: Json
+      }
+      set_parent_cost_reference: {
+        Args: {
+          p_expected_row_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reference_product_id: string
+        }
+        Returns: Json
+      }
+      set_parent_density: {
+        Args: {
+          p_expected_density_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_source: string
+          p_source_note: string
+          p_unit: string
+          p_value: number
+        }
+        Returns: Json
+      }
+      set_parent_rates: {
+        Args: { p_idempotency_key?: string; p_rows: Json }
+        Returns: Json
+      }
+      set_primary_customer_contact: {
+        Args: { p_contact_id: string; p_customer_id: string }
+        Returns: Json
+      }
+      set_product_active: {
+        Args: {
+          p_active: boolean
+          p_idempotency_key?: string
+          p_product_ids: string[]
+          p_review_token: string
+        }
+        Returns: Json
+      }
       set_invoice_standing_discount: {
         Args: {
           p_idempotency_key: string
           p_invoice_id: string
+          // NULL removes the override and restores the customer's current rate.
           p_pct: number | null
         }
         Returns: Json
@@ -16065,20 +21604,6 @@ export type Database = {
           p_performed_by?: string
           p_reason?: string
         }
-        Returns: Json
-      }
-      set_purchase_order_item_costs: {
-        Args: {
-          p_idempotency_key?: string
-          p_items: Json
-          p_performed_by?: string
-          p_po_id: string
-          p_reason?: string
-        }
-        Returns: Json
-      }
-      set_primary_customer_contact: {
-        Args: { p_contact_id: string; p_customer_id: string }
         Returns: Json
       }
       set_product_phase3_metadata: {
@@ -16110,6 +21635,36 @@ export type Database = {
           p_idempotency_key?: string
           p_performed_by: string
           p_rows: Json
+        }
+        Returns: Json
+      }
+      set_purchase_order_item_costs: {
+        Args: {
+          p_idempotency_key?: string
+          p_items: Json
+          p_performed_by?: string
+          p_po_id: string
+          p_reason?: string
+        }
+        Returns: Json
+      }
+      set_size_net_weight: {
+        Args: {
+          p_expected_version: number
+          p_idempotency_key?: string
+          p_net_lb: number
+          p_product_id: string
+          p_source: string
+          p_source_note: string
+        }
+        Returns: Json
+      }
+      set_use_timing_option_active: {
+        Args: {
+          p_code: string
+          p_expected_option_version: number
+          p_idempotency_key?: string
+          p_is_active: boolean
         }
         Returns: Json
       }
@@ -16170,6 +21725,7 @@ export type Database = {
       }
       start_and_complete_delivery: {
         Args: {
+          p_brand_base_seq?: number
           p_delivered_on: string
           p_delivery_id: string
           p_evidence?: string
@@ -16180,6 +21736,14 @@ export type Database = {
           p_performed_by?: string
           p_quantities?: Json
           p_signed_by: string
+        }
+        Returns: Json
+      }
+      start_epa_lookup: {
+        Args: {
+          p_epa_registration: string
+          p_idempotency_key?: string
+          p_parent_id: string
         }
         Returns: Json
       }
@@ -16379,6 +21943,16 @@ export type Database = {
         }
         Returns: Json
       }
+      update_product_parent: {
+        Args: {
+          p_changes: Json
+          p_expected_parent_version: number
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       update_vendor_bill: {
         Args: {
           p_adjustment_cents: number
@@ -16390,6 +21964,24 @@ export type Database = {
           p_notes: string
           p_po_overage_reason?: string
           p_subtotal_cents: number
+        }
+        Returns: Json
+      }
+      upsert_parent_brand: {
+        Args: {
+          p_brand_id?: string
+          p_brand_name: string
+          p_epa_registration: string
+          p_expected_row_version?: number
+          p_idempotency_key?: string
+          p_is_currently_sourced: boolean
+          p_is_rup: boolean
+          p_manufacturer: string
+          p_parent_id: string
+          p_product_id: string
+          p_reason?: string
+          p_retire?: boolean
+          p_signal_word: string
         }
         Returns: Json
       }
@@ -16507,6 +22099,12 @@ export type Database = {
           p_reason: string
         }
         Returns: Json
+      }
+      worksheet_weight_is_valid: {
+        Args: {
+          r: Database["public"]["Tables"]["job_loader_worksheet_weights"]["Row"]
+        }
+        Returns: boolean
       }
     }
     Enums: {

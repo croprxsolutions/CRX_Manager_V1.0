@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `CANDIDATE_SNAPSHOT/supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `2a0980c05f230dbc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bb09d35ddd4d)
+
 ## 2026-11-12 — #1844: Mason owner-accepted 1 Sol finding(s) at `b9df7ab46525`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1844 at `b9df7ab46525` (base `9c63dfc52f9f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isFromScratchInvoice } from './invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isFromScratchInvoice } from './invoiceChargeLines';
 
 describe('isFromScratchInvoice', () => {
   it('is a misc_charge or chemical_sale with no order and no delivery', () => {
@@ -83,5 +83,48 @@ describe('invoiceMarginCents (billing plan M4a)', () => {
       { extended_cents: 6408, charge_type: 'sales_tax' as const },
     ];
     expect(invoiceMarginCents(lines, 90000)).toBe(100000 + 4500 - 3000 - 90000);
+  });
+});
+
+describe('invoiceBreakdown', () => {
+  const products = [
+    { extended_cents: 24740 },
+    { extended_cents: 26850, charge_type: null },
+    { extended_cents: 15070, product_id: 'p1' },
+  ];
+
+  it('splits products, charges, standing discount and tax', () => {
+    expect(
+      invoiceBreakdown([
+        ...products,
+        { extended_cents: 4500, charge_type: 'freight' },
+        { extended_cents: -2000, charge_type: 'standing_discount', description: 'Standing discount 3%' },
+        { extended_cents: 4323, charge_type: 'sales_tax', description: 'Sales tax 6.25%' },
+      ]),
+    ).toEqual({
+      productsCents: 66660,
+      charges: [{ label: 'Freight', cents: 4500 }],
+      discount: { label: 'Standing discount 3%', cents: -2000 },
+      tax: { label: 'Sales tax 6.25%', cents: 4323 },
+      totalCents: 73483,
+    });
+  });
+
+  it('products only: no charges, discount or tax', () => {
+    expect(invoiceBreakdown(products)).toEqual({ productsCents: 66660, charges: [], discount: null, tax: null, totalCents: 66660 });
+  });
+
+  it('groups charges by label and falls back to the type label', () => {
+    const b = invoiceBreakdown([
+      { extended_cents: 100, charge_type: 'freight' },
+      { extended_cents: 250, charge_type: 'freight' },
+      { extended_cents: 900, charge_type: 'service' },
+      { extended_cents: -50, charge_type: 'standing_discount' },
+      { extended_cents: 7, charge_type: 'sales_tax', description: '' },
+    ]);
+    expect(b.charges).toEqual([{ label: 'Freight', cents: 350 }, { label: 'Service', cents: 900 }]);
+    expect(b.discount).toEqual({ label: 'Standing discount', cents: -50 });
+    expect(b.tax).toEqual({ label: 'Sales tax', cents: 7 });
+    expect(b.totalCents).toBe(1207);
   });
 });

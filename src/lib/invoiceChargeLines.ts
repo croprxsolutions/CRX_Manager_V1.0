@@ -1,4 +1,7 @@
 import type { InvoiceChargeType, InvoiceType } from '../types';
+import { CHARGE_TYPE_LABELS } from '../../supabase/functions/_shared/pdf/invoiceBreakdown.ts';
+
+export { invoiceBreakdown } from '../../supabase/functions/_shared/pdf/invoiceBreakdown.ts';
 
 /**
  * Charge lines on invoices made from scratch (Goal 3; Mason, 2026-10-14 decision 6e and
@@ -25,9 +28,7 @@ export function invoiceMarginCents(lines: ReadonlyArray<{ extended_cents: number
 }
 
 export function chargeTypeLabel(type: InvoiceChargeType | null | undefined): string {
-  if (type === 'standing_discount') return 'Standing discount';
-  if (type === 'sales_tax') return 'Sales tax';
-  return CHARGE_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? '';
+  return (type && CHARGE_TYPE_LABELS[type]) || '';
 }
 
 /** A misc_charge or chemical_sale invoice with no order and no delivery behind it. */

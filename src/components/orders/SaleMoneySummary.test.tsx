@@ -17,6 +17,11 @@ describe('SaleMoneySummary', () => {
     expect(screen.queryByText('Profit · margin')).not.toBeInTheDocument();
   });
 
+  it('says under Balance due how many invoices there are and whether they are drafts', () => {
+    render(<SaleMoneySummary {...base} balanceNote="2 invoices, both drafts" />);
+    expect(screen.getByText('2 invoices, both drafts')).toBeInTheDocument();
+  });
+
   it('shows profit and margin only when asked', () => {
     render(<SaleMoneySummary {...base} showProfit profit={221.4} marginPct={16.6} />);
     expect(screen.getByText('Profit · margin')).toBeInTheDocument();

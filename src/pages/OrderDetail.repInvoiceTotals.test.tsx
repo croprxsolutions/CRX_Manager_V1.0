@@ -1,5 +1,5 @@
 /**
- * Non-admins only see invoices they created or are the salesman on (invoices RLS),
+ * Non-admins only see invoices they created or are the salesperson on (invoices RLS),
  * so the order's AR strip must never show a bare $0.00 that reads as "unbilled /
  * unpaid" when the office has in fact billed and collected it.
  */
@@ -74,10 +74,10 @@ const paidInvoice = {
   prepay_applied_cents: 0, balance_cents: 0, write_off_cents: 0,
 };
 
-function renderWith(role: string, invoices: unknown[]) {
+function renderWith(role: string, invoices: unknown[], status = orderData.status) {
   mockRole.current = role;
   mockFrom.mockImplementation((table: string) => {
-    if (table === 'orders') return buildChain({ data: orderData, error: null });
+    if (table === 'orders') return buildChain({ data: { ...orderData, status }, error: null });
     if (table === 'invoices') return buildChain({ data: invoices, error: null });
     return buildChain({ data: [], error: null });
   });
@@ -118,8 +118,27 @@ describe('OrderDetail AR strip for non-admins', () => {
     renderWith('sales_rep', [paidInvoice]);
     expect(await screen.findByText('Invoiced')).toBeInTheDocument();
     expect(screen.queryByText('Profit · margin')).not.toBeInTheDocument();
-    expect(screen.getByText(/include only the invoices you created or are the salesman on/)).toBeInTheDocument();
+    expect(screen.getByText(/include only the invoices you created or are the salesperson on/)).toBeInTheDocument();
     expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
+  });
+});
+
+describe('OrderDetail More actions for a sales rep', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(['confirmed', 'partially_fulfilled', 'fulfilled'])('a rep gets no cancel or void on a %s order', async (status) => {
+    renderWith('sales_rep', [], status);
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Record payment' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cancel order…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cancel remaining quantity…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Void order…' })).not.toBeInTheDocument();
+  });
+
+  it('an admin on the same confirmed order does get Cancel order…', async () => {
+    renderWith('admin', [], 'confirmed');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Cancel order…' })).toBeInTheDocument();
   });
 });
 

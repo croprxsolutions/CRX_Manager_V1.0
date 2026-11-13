@@ -65,6 +65,17 @@ describe('SaleInvoicesCard', () => {
     expect(screen.getByText('Posted')).toBeInTheDocument();
   });
 
+  it('keeps the invoice type when it is not a sale, and what has been paid', () => {
+    renderCard({ invoices: [
+      { ...invoices[0], status: 'posted', paid: 200, balance: 534.83 },
+      { id: 'cm-1', number: 'CM-0001', payerName: 'Maple Hollow Farms', status: 'posted', total: -150, balance: -150, typeLabel: 'Credit memo' },
+    ] });
+    const row = screen.getByRole('link', { name: /CS-2026-0005-1/ });
+    expect(within(row).getByText('Paid $200.00')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: /CM-0001/ })).getByText('Maple Hollow Farms · Credit memo')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: /CM-0001/ })).queryByText(/^Paid/)).not.toBeInTheDocument();
+  });
+
   it('with no invoices, explains when they are made', () => {
     renderCard({ invoices: [] });
     expect(screen.getByText('No invoices yet. Product invoices are made after delivery. Record advance payments as prepay.')).toBeInTheDocument();

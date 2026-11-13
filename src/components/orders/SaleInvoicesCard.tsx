@@ -15,6 +15,10 @@ export type SaleInvoice = {
   status: string;
   total: number;
   balance: number;
+  /** Shown when the invoice is not a plain sale, e.g. "Credit memo". */
+  typeLabel?: string;
+  /** Paid so far, prepay included. */
+  paid?: number;
 };
 
 interface Props {
@@ -64,14 +68,16 @@ export default function SaleInvoicesCard({
                   <Link to={`/invoices/${inv.id}`} className="flex min-h-14 items-center gap-3 rounded-lg px-3 py-3 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green">
                     <span className="flex min-w-0 flex-1 flex-col">
                       <strong className="font-semibold text-nav-dark">{inv.number}</strong>
-                      {inv.payerName && (
+                      {(inv.payerName || inv.typeLabel) && (
                         <span className="break-words text-sm text-secondary">
-                          {inv.sharePct != null ? `${inv.payerName} · ${inv.sharePct}%` : inv.payerName}
+                          {[inv.payerName && (inv.sharePct != null ? `${inv.payerName} · ${inv.sharePct}%` : inv.payerName), inv.typeLabel]
+                            .filter(Boolean).join(' · ')}
                         </span>
                       )}
                     </span>
                     <span className="flex flex-none flex-col items-end gap-1">
                       <strong className="tabular-nums text-nav-dark">{fmt(inv.total)}</strong>
+                      {(inv.paid ?? 0) > 0 && <span className="text-xs tabular-nums text-crx-green">Paid {fmt(inv.paid!)}</span>}
                       {!isDraft(inv.status) && inv.balance !== inv.total && (
                         <span className={`text-xs tabular-nums ${inv.balance > 0 ? 'text-red-600' : 'text-crx-green'}`}>{fmt(inv.balance)} due</span>
                       )}

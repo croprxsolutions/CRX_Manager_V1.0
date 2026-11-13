@@ -282,6 +282,7 @@ describe('OrderDetail', () => {
     renderOrderDetail();
     fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel order…' }));
+    expect(await screen.findByRole('heading', { name: 'Cancel this order?' })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel Order' }));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('cancel_order', {
@@ -331,7 +332,7 @@ describe('OrderDetail', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Cancel remaining quantity…' }));
 
-    expect(await screen.findByRole('heading', { name: 'Cancel Remaining Quantity' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cancel the rest of this order?' })).toBeInTheDocument();
     expect(screen.getByText(/Completed deliveries and their invoices stay intact/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Remaining' }));
 
@@ -512,6 +513,8 @@ describe('OrderDetail', () => {
       renderOrderDetail();
       fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
       expect(screen.getByRole('menuitem', { name: 'Void order…' }).className).toMatch(/text-red/);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Void order…' }));
+      expect(await screen.findByRole('heading', { name: 'Void this order?' })).toBeInTheDocument();
       expect(screen.queryByRole('menuitem', { name: 'Cancel order…' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Schedule delivery/i })).not.toBeInTheDocument();
     });
@@ -538,6 +541,7 @@ describe('OrderDetail', () => {
       });
       mockSale({ invoices: [draft(1), draft(2)] });
       renderOrderDetail();
+      expect(await screen.findByText('2 invoices, both drafts')).toBeInTheDocument();
       fireEvent.click(await screen.findByRole('button', { name: 'Post 2 drafts…' }));
       expect(mockRpc.mock.calls.some(([name]) => name === 'post_invoice')).toBe(false);
       expect(screen.getByRole('dialog', { name: 'Post 2 drafts on this sale?' })).toBeInTheDocument();

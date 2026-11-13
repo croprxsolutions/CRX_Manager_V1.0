@@ -9,6 +9,8 @@ interface Props {
   invoiced: number | null;
   paid: number | null;
   balanceDue: number | null;
+  /** Under Balance due, e.g. "2 invoices, both drafts". */
+  balanceNote?: string;
   writtenOff?: number;
   profit?: number | null;
   marginPct?: number | null;
@@ -28,7 +30,7 @@ function Tile({ label, value, sub, valueClass = 'text-nav-dark' }: { label: stri
 
 /** One money summary for a sale: what it sold, what was invoiced, paid and still due. */
 export default function SaleMoneySummary({
-  saleTotal, invoiced, paid, balanceDue, writtenOff = 0, profit, marginPct, showProfit, invoiceNote,
+  saleTotal, invoiced, paid, balanceDue, balanceNote, writtenOff = 0, profit, marginPct, showProfit, invoiceNote,
 }: Props) {
   return (
     <Card padding={false}>
@@ -37,7 +39,7 @@ export default function SaleMoneySummary({
         {invoiced !== null && (<>
           <Tile label="Invoiced" value={fmt(invoiced)} sub="With freight, discount and tax" />
           <Tile label="Paid" value={fmt(paid ?? 0)} valueClass="text-crx-green" />
-          <Tile label="Balance due" value={fmt(Math.max(0, balanceDue ?? 0))}
+          <Tile label="Balance due" value={fmt(Math.max(0, balanceDue ?? 0))} sub={balanceNote}
             valueClass={(balanceDue ?? 0) > 0 ? 'text-red-600' : 'text-crx-green'} />
           {writtenOff > 0 && <Tile label="Written off" value={fmt(writtenOff)} valueClass="text-amber-600" />}
         </>)}

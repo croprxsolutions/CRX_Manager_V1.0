@@ -1402,7 +1402,18 @@ export default function OrderDetail() {
     status: inv.status,
     total: inv.total_amount_cents / 100,
     balance: inv.balance_cents / 100,
+    paid: ((inv.paid_amount_cents || 0) + (inv.prepay_applied_cents || 0)) / 100,
+    typeLabel: inv.invoice_type && inv.invoice_type !== 'chemical_sale'
+      ? inv.invoice_type.charAt(0).toUpperCase() + inv.invoice_type.slice(1).replace(/_/g, ' ')
+      : undefined,
   }));
+  // Under Balance due: how many invoices and whether they are drafts, e.g. "2 invoices, both drafts".
+  const draftCount = invoices.filter((inv) => inv.status === 'draft' || inv.status === 'unposted').length;
+  const invCount = invoices.length;
+  const balanceNote = invCount === 0 ? undefined : `${invCount} invoice${invCount === 1 ? '' : 's'}, ${
+    draftCount === 0 ? (invCount === 1 ? 'posted' : 'all posted')
+      : draftCount === invCount ? (invCount === 1 ? 'a draft' : invCount === 2 ? 'both drafts' : 'all drafts')
+        : `${draftCount} draft${draftCount === 1 ? '' : 's'}`}`;
   const canSetSalesTax = (isAdmin || (role === 'sales_rep' && order.salesman_id === profile?.id))
     && order.status !== 'cancelled' && order.status !== 'voided';
   const standingDiscount = Number(customer?.standing_discount_pct ?? 0);
@@ -1491,7 +1502,7 @@ export default function OrderDetail() {
         <div className="flex flex-wrap items-center gap-2">
           {editing ? (
             <>
-              <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => {
+              <Button variant="ghost" className="min-h-11 md:min-h-0" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => {
                 const loaded = loadedDraftRef.current;
                 setEditItems(loaded.items.map((i) => ({ ...i })));
                 setEditRowVersion(loaded.rowVersion);
@@ -1501,7 +1512,7 @@ export default function OrderDetail() {
               }}>
                 Cancel
               </Button>
-              <Button icon={<Save className="w-4 h-4" />} onClick={handleSaveEdits} loading={saving}>
+              <Button className="min-h-11 md:min-h-0" icon={<Save className="w-4 h-4" />} onClick={handleSaveEdits} loading={saving}>
                 Save changes
               </Button>
             </>
@@ -1515,6 +1526,7 @@ export default function OrderDetail() {
               {canEdit && (
                 <Button
                   variant="secondary"
+                  className="min-h-11 md:min-h-0"
                   icon={<Pencil className="w-4 h-4" />}
                   showChevron={false}
                   // Wait for the planned toggle's reload, or the editor would open on the pre-toggle version.
@@ -1536,6 +1548,7 @@ export default function OrderDetail() {
               {hasAllocations && order.status === 'fulfilled' && !hasActiveInvoice && !hasPendingDelivery && (<span className="inline-flex items-center">
                 <Button
                   variant="secondary"
+                  className="min-h-11 md:min-h-0"
                   icon={<FileText className="w-4 h-4" />}
                   showChevron={false}
                   onClick={handleCreateInvoice}
@@ -1550,6 +1563,7 @@ export default function OrderDetail() {
               </span>)}
               {order.status !== 'cancelled' && order.status !== 'fulfilled' && (<span className="inline-flex items-center">
                 <Button
+                  className="min-h-11 md:min-h-0"
                   icon={<Truck className="w-4 h-4" />}
                   onClick={() => navigate(`/deliveries/new?order=${order.id}`)}
                 >
@@ -1663,13 +1677,14 @@ export default function OrderDetail() {
       })()}
 
       {/* AR derived from linked invoices (single source of truth). Non-admins only see invoices they
-          created or are the salesman on (invoices RLS), so for them these totals can be partial or
+          created or are the salesperson on (invoices RLS), so for them these totals can be partial or
           empty even when the order is billed and paid — never show a bare $0.00. */}
       <SaleMoneySummary
         saleTotal={order.total_price}
         invoiced={!isAdmin && invoices.length === 0 ? null : totalInvoiced}
         paid={totalPaid}
         balanceDue={balanceDue}
+        balanceNote={balanceNote}
         writtenOff={writeOff}
         // Cost is admin-only (Mason, 2026-10-15): no profit/margin for reps or field staff.
         showProfit={isAdmin}
@@ -1677,12 +1692,12 @@ export default function OrderDetail() {
         marginPct={order.total_margin_pct}
         invoiceNote={isAdmin ? null : invoices.length === 0
           ? "You can't view any invoices for this order. Ask the office whether it has been billed or paid."
-          : 'These totals include only the invoices you created or are the salesman on. The office sees the full amounts.'}
+          : 'These totals include only the invoices you created or are the salesperson on. The office sees the full amounts.'}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start">
-        {/* The rail comes first, so below xl it sits above Products. */}
-        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start xl:col-start-2 xl:row-start-1 xl:grid-cols-1">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* The rail comes first, so below lg it sits above Products. */}
+        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
           <SaleInvoicesCard
             invoices={saleInvoices}
             canPost={canPostInvoices}
@@ -1772,7 +1787,7 @@ export default function OrderDetail() {
           </Card>
         </div>
 
-        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
+        <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
           <Card padding={false}>
             <section aria-labelledby="products-title">
               <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 pb-3">
@@ -1786,6 +1801,8 @@ export default function OrderDetail() {
                   </span>
                 )}
               </div>
+              {/* A narrow main column at xl scrolls the table, never the page. */}
+              <div className="xl:overflow-x-auto">
               <table className="block w-full text-sm xl:table">
                 <thead className="hidden bg-cream/60 xl:table-header-group">
                   <tr>
@@ -1976,6 +1993,7 @@ export default function OrderDetail() {
                   </tfoot>
                 )}
               </table>
+              </div>
             </section>
           </Card>
 
@@ -2133,7 +2151,7 @@ export default function OrderDetail() {
       </div>
 
       {/* Void Order Modal */}
-      <Modal open={voidModalOpen} onClose={() => { setVoidModalOpen(false); setVoidReason(''); }} title="Void Order">
+      <Modal open={voidModalOpen} onClose={() => { setVoidModalOpen(false); setVoidReason(''); }} title="Void this order?">
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-3 bg-red-50 rounded-lg border border-red-200">
             <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
@@ -2268,7 +2286,7 @@ export default function OrderDetail() {
         open={statusConfirmOpen}
         onClose={() => setStatusConfirmOpen(false)}
         onConfirm={executeStatusChange}
-        title={order?.status === 'partially_fulfilled' ? 'Cancel Remaining Quantity' : 'Cancel Order'}
+        title={order?.status === 'partially_fulfilled' ? 'Cancel the rest of this order?' : 'Cancel this order?'}
         message={
           order?.status === 'partially_fulfilled'
             ? 'Cancel only the undelivered remainder? Completed deliveries and their invoices stay intact, undelivered inventory is released, and pending commissions are recalculated to delivered profit. Paid or batched commissions must be voided first. This cannot be undone.'

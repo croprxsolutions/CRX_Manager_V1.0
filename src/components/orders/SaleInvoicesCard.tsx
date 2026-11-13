@@ -33,6 +33,7 @@ interface Props {
 
 const isDraft = (s: string) => s === 'draft' || s === 'unposted';
 /** The sale's billed total in whole cents: voided and cancelled invoices bill nothing. */
+// eslint-disable-next-line react-refresh/only-export-components
 export const activeTotalCents = (invoices: { status: string; total: number }[]) =>
   invoices.filter((i) => i.status !== 'voided' && i.status !== 'cancelled').reduce((sum, i) => sum + Math.round(i.total * 100), 0);
 

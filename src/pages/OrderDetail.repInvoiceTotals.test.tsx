@@ -4,8 +4,8 @@
  * unpaid" when the office has in fact billed and collected it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 const { mockFrom, mockRole, mockToast } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
@@ -153,6 +153,35 @@ describe('OrderDetail draft invoice actions', () => {
     renderWith('admin', [draft(1), draft(2)]);
     expect(await screen.findByRole('button', { name: 'Post 2 drafts…' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Consolidate drafts/ })).not.toBeInTheDocument();
+  });
+
+  // The page is reused across /orders/:id, so a Post drafts dialog opened on one sale must not stay open on the next.
+  it('closes the Post drafts dialog when the page moves to another sale', async () => {
+    let saleId = 'ord-123';
+    const draft = (n: number) => ({ ...paidInvoice, id: `inv-${saleId}-${n}`, order_id: saleId, invoice_number: `CS-000${n}`,
+      status: 'draft', paid_amount_cents: 0, balance_cents: 50000 });
+    mockRole.current = 'admin';
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'orders') return buildChain({ data: { ...orderData, id: saleId, order_number: saleId === 'ord-123' ? 'ORD-0099' : 'ORD-0100' }, error: null });
+      if (table === 'invoices') return buildChain({ data: [draft(1), draft(2)], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    let go: (to: string) => void = () => {};
+    function GoTo() { go = useNavigate(); return null; }
+    render(
+      <MemoryRouter initialEntries={['/orders/ord-123']}>
+        <GoTo />
+        <Routes>
+          <Route path="/orders/:id" element={<OrderDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 drafts…' }));
+    expect(screen.getByRole('dialog', { name: 'Post 2 drafts on this sale?' })).toBeInTheDocument();
+    saleId = 'ord-456';
+    act(() => go('/orders/ord-456'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'ORD-0100' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
 

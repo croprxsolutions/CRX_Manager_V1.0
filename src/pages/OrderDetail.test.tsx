@@ -574,6 +574,23 @@ describe('OrderDetail', () => {
       expect(screen.queryByText(/Standing discount/)).not.toBeInTheDocument();
     });
 
+    it.each([
+      [999, '99% delivered'],
+      [1000, 'All delivered'],
+    ])('with %i of 1,000 units delivered the Products header reads %s', async (delivered, label) => {
+      const line = { id: 'l1', order_id: 'ord-123', product_name: 'Glyphosate', total_units_needed: 1000, quantity_delivered: delivered,
+        price_per_unit: 1, total_price: 1000, section_name: null };
+      mockFrom.mockImplementation((table: string) => answerChain((calls) => {
+        if (table === 'orders') return { data: saleOrder, error: null };
+        if (table === 'customers' && calls.includes('maybeSingle')) return { data: { id: 'cust-1', farm_name: 'Maple Hollow Farms' }, error: null };
+        if (table === 'order_items') return { data: [line], error: null, count: 1 } as { data: unknown; error: unknown };
+        return { data: [], error: null, count: 0 } as { data: unknown; error: unknown };
+      }));
+      renderOrderDetail();
+      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect(screen.queryByText(delivered < 1000 ? 'All delivered' : /% delivered/)).not.toBeInTheDocument();
+    });
+
     it('Who pays opens Split by line in one click', async () => {
       const line = { id: 'l1', order_id: 'ord-123', product_name: 'Glyphosate', total_units_needed: 4, quantity_delivered: 0, price_per_unit: 10, total_price: 40, section_name: null };
       mockFrom.mockImplementation((table: string) => answerChain((calls) => {

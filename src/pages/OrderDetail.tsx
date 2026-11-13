@@ -1428,7 +1428,9 @@ export default function OrderDetail() {
   // Delivered share of the products, by dollar value.
   const orderedValue = items.reduce((sum, i) => sum + i.total_units_needed * i.price_per_unit, 0);
   const deliveredValue = items.reduce((sum, i) => sum + Math.min(i.quantity_delivered, i.total_units_needed) * i.price_per_unit, 0);
-  const deliveredPct = orderedValue > 0 ? Math.min(100, Math.round((deliveredValue / orderedValue) * 100)) : null;
+  // "All delivered" only when every line is; a rounded percent caps at 99 while anything remains.
+  const allDelivered = items.every((i) => i.quantity_delivered >= i.total_units_needed);
+  const deliveredPct = orderedValue > 0 ? (allDelivered ? 100 : Math.min(99, Math.round((deliveredValue / orderedValue) * 100))) : null;
   const showSectionNames = sections.length > 1 || sections[0] !== 'General';
   const pill = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium';
   const lineInput = 'w-full xl:w-24 px-2 py-1 min-h-11 md:min-h-0 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
@@ -1700,7 +1702,9 @@ export default function OrderDetail() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:grid-cols-[minmax(0,1fr)_380px]">
         {/* The rail comes first, so below lg it sits above Products. */}
         <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
+          {/* Keyed by sale: the page is reused across /orders/:id, so a dialog opened on one sale must not stay open on the next. */}
           <SaleInvoicesCard
+            key={order.id}
             invoices={saleInvoices}
             canPost={canPostInvoices}
             onPostAll={handlePostAllDrafts}

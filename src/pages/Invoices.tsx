@@ -84,7 +84,7 @@ const statusBadge = (status: InvoiceStatus) => {
     unposted: { variant: 'warning', label: 'Unposted' },
     posted: { variant: 'success', label: 'Posted' },
     paid: { variant: 'info', label: 'Paid' },
-    overdue: { variant: 'error', label: 'Overdue' },
+    overdue: { variant: 'warning', label: 'Overdue' },
     voided: { variant: 'error', label: 'Voided' },
     cancelled: { variant: 'default', label: 'Cancelled' },
   };
@@ -95,10 +95,6 @@ const statusBadge = (status: InvoiceStatus) => {
 const typeLabel = (t: string) => ({ chemical_sale: 'Chemical', field_application: 'Application', misc_charge: 'Misc' }[t] || t);
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-// Any selected split-group member posts its whole group (buildInvoicePostTargets), so the confirm says so.
-const SPLIT_POST_NOTE =
-  'These include a split sale, so every invoice in that split posts together. If one changed since you opened this list, none of its split posts and you will be told.';
 
 
 type InvoiceShareRow = { customer?: { farm_name: string }; split_percentage: number; acres: number; amount_cents: number; price_per_acre_cents: number | null; pricing_note: string | null };
@@ -369,8 +365,7 @@ export default function Invoices() {
   }, [visibleSelectableKey, selected]);
 
   const selectedPostable = selectedInvoices.filter((i) => ['draft', 'unposted'].includes(i.status));
-  const scope = describeInvoicePostScope(selectedPostable);
-  const basePostConfirmation = selectedPostable.some((i) => i.invoice_group_id) ? { ...scope, message: SPLIT_POST_NOTE } : scope;
+  const basePostConfirmation = describeInvoicePostScope(selectedPostable);
   // The list shows open invoices from every season, and the server does not check the
   // season when posting, so the confirm names any selected invoice not from this season.
   const selectedOtherSeasonPostable = selectedPostable.filter((i) => !isCurrentSeason(i.season));

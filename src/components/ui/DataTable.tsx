@@ -163,9 +163,9 @@ export default function DataTable<T extends Record<string, any>>({
   return (
     <div>
       {(searchable || filters || sortableColumns.length > 0) && (
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 mb-4">
           {searchable && (
-            // sm:min-w-56: wide filter rows wrap instead of squeezing the search box; self-start keeps its icon centred.
+            // sm:min-w-56 + the row's sm:flex-wrap: wide filters drop to their own line instead of squeezing the search box; self-start keeps its icon centred.
             <div className="relative flex-1 sm:min-w-56 sm:self-start">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input

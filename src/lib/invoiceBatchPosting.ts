@@ -41,12 +41,14 @@ export function describeInvoicePostScope(invoices: BatchPostInvoice[]): {
 } {
   if (invoices.some((invoice) => Boolean(invoice.invoice_group_id))) {
     return {
-      message: `Post ${invoices.length} selected invoice(s)? Selecting any split invoice posts every current invoice in that split group, including members outside current filters. If any invoice changed since this list loaded, it is not posted, and neither is any invoice in its split group; the others still post. Reload and check those before posting them. The full posting scope will be locked into AR.`,
-      confirmLabel: 'Post selected + full split groups',
+      message:
+        'These include a split sale, so every invoice in that split posts together, even ones your filters hide. If one changed since you opened this list, none of its split posts and you will be told. The other invoices still post.',
+      confirmLabel: `Post ${invoices.length} invoice${invoices.length === 1 ? '' : 's'}`,
     };
   }
   return {
-    message: `Post ${invoices.length} selected invoice(s)? Posting locks them into AR.`,
+    // The confirm's title already asks "Post n invoices?", so the body does not repeat it.
+    message: 'Posting locks them into AR.',
     confirmLabel: `Post ${invoices.length}`,
   };
 }

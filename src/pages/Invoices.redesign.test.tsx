@@ -51,6 +51,7 @@ const ROWS = [
   invoice({ invoice_number: 'CS-POSTED', status: 'posted' }),
   invoice({ invoice_number: 'CS-VOIDED', status: 'voided', balance_cents: 0 }),
   invoice({ invoice_number: 'CS-PAID', status: 'paid', balance_cents: 0 }),
+  invoice({ invoice_number: 'CS-OVERDUE', status: 'overdue' }),
   invoice({ invoice_number: 'CS-SPLIT-1', status: 'draft', invoice_group_id: 'grp-1' }),
   invoice({ invoice_number: 'CS-SPLIT-2', status: 'draft', invoice_group_id: 'grp-1', customer: { farm_name: 'Cedar Ridge Ag' } }),
 ];
@@ -188,7 +189,8 @@ describe('Invoices list redesign', () => {
       fireEvent.click(within(bar()).getByRole('button', { name: 'Post 2 invoices…' }));
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText('Post 2 invoices?')).toBeInTheDocument();
-      expect(within(dialog).getByText('Post 2 selected invoice(s)? Posting locks them into AR.')).toBeInTheDocument();
+      expect(within(dialog).getByText('Posting locks them into AR.')).toBeInTheDocument();
+      expect(within(dialog).queryByText(/selected invoice\(s\)\?/)).not.toBeInTheDocument();
       // Cancel is the safe button and comes first; nothing posts.
       const buttons = within(dialog).getAllByRole('button').map((b) => b.textContent);
       expect(buttons.indexOf('Cancel')).toBeLessThan(buttons.indexOf('Post 2'));
@@ -203,9 +205,11 @@ describe('Invoices list redesign', () => {
       const dialog = await screen.findByRole('dialog');
       expect(within(dialog).getByText('Post 2 invoices?')).toBeInTheDocument();
       expect(within(dialog).getByText(
-        'These include a split sale, so every invoice in that split posts together. If one changed since you opened this list, none of its split posts and you will be told.',
+        'These include a split sale, so every invoice in that split posts together, even ones your filters hide. If one changed since you opened this list, none of its split posts and you will be told. The other invoices still post.',
       )).toBeInTheDocument();
-      expect(within(dialog).getByRole('button', { name: 'Post selected + full split groups' })).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Post 2 invoices' })).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(H.rpc).not.toHaveBeenCalled();
     });
   });
 
@@ -229,9 +233,15 @@ describe('Invoices list redesign', () => {
       expect(underNumber).toBeTruthy();
     });
 
+    it('Overdue is amber and Voided stays red', async () => {
+      await renderList();
+      expect(within(rowOf('CS-OVERDUE')).getByText('Overdue').className).toContain('bg-amber-100');
+      expect(within(rowOf('CS-VOIDED')).getByText('Voided').className).toContain('bg-red-100');
+    });
+
     it('shows how many invoices are in view', async () => {
       await renderList();
-      expect(screen.getByText('7 invoices')).toBeInTheDocument();
+      expect(screen.getByText('8 invoices')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Show invoices ready to post' }));
       expect(screen.getByText('4 invoices')).toBeInTheDocument();
     });

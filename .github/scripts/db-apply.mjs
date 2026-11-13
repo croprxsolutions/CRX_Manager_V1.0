@@ -152,14 +152,18 @@ export function fileProblems(stem, buf, { forRun = true } = {}) {
 // newer than everything already on the base branch (the target applies all of those). onMain: files that
 // are already on main, byte for byte (a back-merge into staging); those may be older, since main's own
 // check passed them and staging applies them out of order on purpose.
-export function stampProblems({ added, base, head, changed = [], onMain = [] }) {
+export function stampProblems({ added, base, head, changed = [], onMain = [], mainFiles = [] }) {
   const stamp = (f) => f.slice(0, 14);
   const baseMax = base.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
+  // Into staging, also newer than main's newest: a hotfix can reach main (and live) before the back-merge, and a
+  // staging migration stamped below it would be refused on release day (Luna, #1838 fixes).
+  const mainMax = mainFiles.filter((f) => NAME.test(f.replace(/\.sql$/, ''))).map(stamp).sort().at(-1) ?? '';
   const problems = changed.map((f) => `${f}: an existing migration was edited, renamed or deleted; applied migrations never change (add a new one instead)`);
   for (const f of added) {
     if (!NAME.test(f.replace(/\.sql$/, '')) || !realStamp(stamp(f))) { problems.push(`${f}: name must be <14-digit stamp with a real date and time>_<lower_snake>.sql`); continue; }
     if (head.filter((h) => stamp(h) === stamp(f)).length > 1) problems.push(`${f}: shares its stamp with another migration`);
     if (stamp(f) <= baseMax && !onMain.includes(f)) problems.push(`${f}: stamp is not newer than ${baseMax}, the newest migration already on the base branch (npm run next-migration-stamp)`);
+    else if (mainMax && stamp(f) <= mainMax && !onMain.includes(f)) problems.push(`${f}: stamp is not newer than ${mainMax}, the newest migration on main (a hotfix went live first; npm run next-migration-stamp)`);
   }
   return problems;
 }
@@ -414,6 +418,7 @@ const commands = {
       changed: diff('MDT'),
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),
+      mainFiles: mainRef ? names(git('ls-tree', '--name-only', `${mainRef}:supabase/migrations`)) : [],
     });
     // The baseline high-water and the one-shot list decide what runs: they move only on purpose.
     const show = (ref, file) => { try { return JSON.parse(execFileSync('git', ['show', `${ref}:${file}`], { encoding: 'utf8' })); } catch { return null; } };

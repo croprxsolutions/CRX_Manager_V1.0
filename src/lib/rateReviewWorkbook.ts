@@ -218,15 +218,16 @@ function readRows<H extends string>(sheet: Worksheet | undefined, name: string, 
   const rows: Array<SheetRow<H>> = [];
   if (sheet.rowCount > MAX_SHEET_ROWS) throw new PricingWorkbookFormatError(`The ${name} sheet has more than ${MAX_SHEET_ROWS} rows. Download a fresh rate review workbook.`);
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
-    collectRowProblem(problems, () => {
-      const row = { sheetRow: rowNumber } as SheetRow<H>;
-      headers.forEach((header, index) => {
+    const row = { sheetRow: rowNumber } as SheetRow<H>;
+    const problemCount = problems.length;
+    headers.forEach((header, index) => {
+      collectRowProblem(problems, () => {
         const cell = sheet.getCell(rowNumber, index + 1);
         if (isFormulaValue(cell.value)) throw new PricingWorkbookFormatError(`${name} row ${rowNumber}, ${header} has a formula. Type the value instead.`);
         (row as Record<H, string>)[header] = cellValueToText(cell.value, `${name} row ${rowNumber}, ${header}`).trim();
       });
-      rows.push(row);
     });
+    if (problems.length === problemCount) rows.push(row);
   }
   return rows;
 }

@@ -1,11 +1,74 @@
-import { Plus, X } from 'lucide-react';
+import { AlertTriangle, Plus, X } from 'lucide-react';
+import {
+  cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations, type RegistrationCheck,
+} from '../../lib/epaRegistrationStatus';
 import {
   isBrandedLine, OTHER_BRAND,
   type DeliveryBrandLine, type DeliveryBrands, type DraftLines, type DraftPick,
 } from '../../lib/deliveryBrands';
 import type { DeliveryBrandsState } from './useDeliveryBrands';
+import { useBrandCancellations } from './useBrandCancellations';
 
 const EMPTY_PICK: DraftPick = { brandId: '', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '' };
+/** Grand plan §8 (#1849): a loud red note beside the pick when its EPA number is stored as cancelled; never blocks. */
+function CancelledNote({ label, epa, cancelled, testId }: { label: string; epa: string | null | undefined; cancelled: CancelledRegistrations; testId: string }) {
+  const key = normalizeEpaRegistration(epa);
+  if (!key || !cancelled.has(key)) return null;
+  return (
+    <div role="alert" data-testid={testId} className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <p><span className="font-semibold">Cancelled EPA registration.</span> {label}: EPA Reg. No. {key}, {cancelledOnText(cancelled.get(key))}.
+        {' '}The delivery is not blocked. Check the registration with EPA before applying it.</p>
+    </div>
+  );
+}
+
+/**
+ * The name and EPA numbers of the brand a row picks: typed from the jug, or the listed brand's current number plus
+ * the number recorded on its saved pick, which can differ once the brand record changes.
+ */
+function pickedBrands(line: DeliveryBrandLine, row: DraftPick): { name: string; epa: string | null }[] {
+  if (row.brandId === OTHER_BRAND) return [{ name: row.typedName.trim() || 'Typed brand', epa: row.typedEpa }];
+  if (!row.brandId) return [];
+  const listed = line.brand_list.filter((b) => b.brand_id === row.brandId).map((b) => ({ name: b.brand_name, epa: b.epa_registration }));
+  const saved = line.picks.filter((p) => (p.parent_brand_id ?? p.legacy_brand_id) === row.brandId)
+    .map((p) => ({ name: p.brand_name, epa: p.epa_registration }));
+  const all = [...listed, ...saved];
+  return all.filter((b, i) => all.findIndex((o) => normalizeEpaRegistration(o.epa) === normalizeEpaRegistration(b.epa)) === i);
+}
+
+/** Notes the picker shows above its lines: still checking, could not check, and cancelled products on lines it does not show. */
+function RegistrationNotices({ check, hidden, productNumbers, cancelled }: {
+  check: RegistrationCheck; hidden: DeliveryBrandLine[]; productNumbers: Map<string, string | null>; cancelled: CancelledRegistrations;
+}) {
+  return (
+    <>
+      {check === 'checking' && <li role="status" className="text-xs text-secondary">Checking EPA registration status…</li>}
+      {check === 'incomplete' && (
+        <li role="status" data-testid="registration-check-failed" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          Could not check whether these EPA registrations are cancelled. Reload the page to try again. The delivery can still be completed.
+        </li>
+      )}
+      {hidden.map((line) => (
+        <li key={line.delivery_item_id}>
+          <CancelledNote label={line.product_name || 'Unknown product'} epa={productNumbers.get(line.product_id)} cancelled={cancelled} testId="cancelled-registration-product" />
+        </li>
+      ))}
+    </>
+  );
+}
+
+/** A number per brands reply, so each reload (a new reply object) checks the registrations again (Sol r2). */
+const versions = new WeakMap<DeliveryBrands, number>();
+let lastVersion = 0;
+function brandsVersion(brands: DeliveryBrands): number {
+  const known = versions.get(brands);
+  if (known !== undefined) return known;
+  versions.set(brands, ++lastVersion);
+  return lastVersion;
+}
+
 const FIELD_CLASS = 'min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-nav-dark focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green disabled:bg-gray-50';
 
 interface DeliveryBrandPickerProps {
@@ -26,10 +89,20 @@ interface DeliveryBrandPickerProps {
  */
 export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled, fullQuantity, showLine = isBrandedLine }: DeliveryBrandPickerProps) {
   const lines = brands.lines.filter(showLine);
-  if (lines.length === 0) return null;
+  // Every line's product is checked, so a cancelled product on a line with no brand list still warns (Sol r1).
+  const registrations = useBrandCancellations(brands.lines, drafts, brands.delivery_id, String(brandsVersion(brands)));
+  const { cancelled, productNumbers, check } = registrations;
+  const isCancelled = (epa: string | null | undefined) => cancelled.has(normalizeEpaRegistration(epa) ?? '');
+  const hidden = brands.lines.filter((l) => !showLine(l) && isCancelled(productNumbers.get(l.product_id)));
+  if (lines.length === 0 && hidden.length === 0 && check === 'complete') return null;
+  const optionText = (b: { brand_name: string; epa_registration: string | null }) => {
+    const key = normalizeEpaRegistration(b.epa_registration);
+    return `${b.brand_name}${key ? ` · EPA ${b.epa_registration}` : ''}${key && cancelled.has(key) ? ' · CANCELLED' : ''}`;
+  };
 
   return (
     <ul className="space-y-4">
+      <RegistrationNotices check={check} hidden={hidden} productNumbers={productNumbers} cancelled={cancelled} />
       {lines.map((line) => {
         const draft = drafts[line.delivery_item_id] ?? [];
         const rows = draft.length > 0 ? draft : [EMPTY_PICK];
@@ -56,6 +129,7 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
         return (
           <li key={line.delivery_item_id} className="rounded-xl border border-gray-200 bg-white p-3">
             <p className="font-medium text-nav-dark">{product}</p>
+            <CancelledNote label={product} epa={productNumbers.get(line.product_id)} cancelled={cancelled} testId="cancelled-registration-product" />
             {draft.length === 0 && <p className="text-sm text-amber-700">No brand picked yet.</p>}
             <div className="mt-2 space-y-3">
               {rows.map((row, index) => {
@@ -66,6 +140,7 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                   ? line.picks.find((p) => (p.parent_brand_id ?? p.legacy_brand_id) === row.brandId)?.brand_name ?? 'Saved brand'
                   : null;
                 const label = `Brand for ${product}${rows.length > 1 ? ` (${index + 1})` : ''}`;
+                const picked = pickedBrands(line, row);
                 return (
                   <div key={index} className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -80,12 +155,12 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                         {savedName && <option value={row.brandId}>{savedName} (no longer listed)</option>}
                         {current.length > 0 && (
                           <optgroup label="Currently bought">
-                            {current.map((b) => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}{b.epa_registration ? ` · EPA ${b.epa_registration}` : ''}</option>)}
+                            {current.map((b) => <option key={b.brand_id} value={b.brand_id}>{optionText(b)}</option>)}
                           </optgroup>
                         )}
                         {oldStock.length > 0 && (
                           <optgroup label="Not currently bought (old stock)">
-                            {oldStock.map((b) => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}{b.epa_registration ? ` · EPA ${b.epa_registration}` : ''}</option>)}
+                            {oldStock.map((b) => <option key={b.brand_id} value={b.brand_id}>{optionText(b)}</option>)}
                           </optgroup>
                         )}
                         <option value={OTHER_BRAND}>Other brand…</option>
@@ -102,6 +177,7 @@ export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled
                         </button>
                       )}
                     </div>
+                    {picked.map((b) => <CancelledNote key={`${b.name}|${b.epa}`} label={b.name} epa={b.epa} cancelled={cancelled} testId="cancelled-registration-pick" />)}
                     {row.brandId === OTHER_BRAND && (
                       <div className="grid gap-2 sm:grid-cols-3">
                         <input className={FIELD_CLASS} aria-label={`Brand name on the jug for ${label}`} placeholder="Brand name on the jug" maxLength={200}
@@ -154,7 +230,11 @@ export function DeliveryBrandsPanel({ state, busy }: { state: DeliveryBrandsStat
       </p>
     );
   }
-  if (!brands || !brands.lines.some(isBrandedLine)) return null;
+  if (!brands) return null;
+  if (!brands.lines.some(isBrandedLine)) {
+    // Nothing to pick, but a cancelled product registration still shows (Sol r1).
+    return <DeliveryBrandPicker brands={brands} drafts={drafts} onChange={setLineDraft} disabled fullQuantity={(line) => line.quantity} />;
+  }
   return (
     <section aria-label="Brands delivered" className="space-y-3">
       <h2 className="font-heading text-xl font-bold text-nav-dark">Brands delivered</h2>

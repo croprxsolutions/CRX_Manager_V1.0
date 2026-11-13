@@ -149,9 +149,14 @@ function AffixField({ label, id, before, after, ...props }: InputHTMLAttributes<
     <div className="w-full">
       <label htmlFor={id} className="mb-1 block text-sm font-medium text-secondary">{label}</label>
       <div className="flex rounded-lg border border-gray-300 bg-white transition-colors focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20 has-[:disabled]:bg-gray-50 has-[:disabled]:opacity-50">
-        {before && <span className="flex items-center pl-3 text-sm text-secondary">{before}</span>}
-        <input id={id} className="min-h-11 min-w-0 flex-1 rounded-lg bg-transparent px-3 py-2.5 text-right text-sm text-nav-dark focus:outline-none md:min-h-0" {...props} />
-        {after && <span className="flex items-center whitespace-nowrap rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">{after}</span>}
+        {before && <span id={`${id}-before`} className="flex items-center pl-3 text-sm text-secondary">{before}</span>}
+        <input
+          id={id}
+          aria-describedby={[before && `${id}-before`, after && `${id}-after`].filter(Boolean).join(' ') || undefined}
+          className="min-h-11 min-w-0 flex-1 rounded-lg bg-transparent px-3 py-2.5 text-right text-sm text-nav-dark focus:outline-none md:min-h-0"
+          {...props}
+        />
+        {after && <span id={`${id}-after`} className="flex items-center whitespace-nowrap rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">{after}</span>}
       </div>
     </div>
   );

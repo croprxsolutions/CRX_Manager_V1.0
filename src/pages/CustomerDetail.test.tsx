@@ -1384,6 +1384,7 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
     renderDetail();
     const input = await screen.findByLabelText('Standing discount');
     expect(input).toHaveValue(3);
+    expect(input).toHaveAccessibleDescription('%');
     expect(screen.getByRole('button', { name: 'Save discount' })).toBeDisabled();
     fireEvent.change(input, { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));

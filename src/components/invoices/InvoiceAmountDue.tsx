@@ -5,9 +5,9 @@ import type { InvoiceBreakdown } from '../../lib/invoiceChargeLines';
 
 interface Props {
   breakdown: InvoiceBreakdown;
-  /** The invoice's own total (total_amount_cents); the breakdown rows show only when they add up to it, as on the PDF. */
+  /** The invoice's own total (total_amount_cents); the breakdown rows show only when saved and adding up to it, as on the PDF. */
   totalCents: number;
-  /** Unsaved edits: the saved total stays until Save. */
+  /** Unsaved edits on a saved invoice: the saved total stays until Save, with no rows (unsaved rows would read as saved). */
   dirty?: boolean;
   /** The first row: "Products", or "Subtotal" on a field application (its fee is not a product). */
   firstLabel?: 'Products' | 'Subtotal';
@@ -37,7 +37,7 @@ export default function InvoiceAmountDue({
   breakdown, totalCents, dirty = false, firstLabel = 'Products', writtenOffCents = 0, paidCents, prepayCents, balanceCents, admin, discountControl,
 }: Props) {
   const { productsCents, charges, discount, tax } = breakdown;
-  const showRows = breakdown.totalCents === totalCents;
+  const showRows = !dirty && breakdown.totalCents === totalCents;
   return (
     <Card>
       <section aria-labelledby="invoice-amount-due" className="space-y-3 text-sm">

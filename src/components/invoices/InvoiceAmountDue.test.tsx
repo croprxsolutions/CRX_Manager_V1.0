@@ -62,6 +62,17 @@ describe('InvoiceAmountDue', () => {
     expect(card).not.toHaveTextContent('$834.83');
   });
 
+  // Sol MED: unsaved rows that happen to add up to the saved total would read as saved ($90 + $20 beside a saved $110).
+  it('while there are unsaved edits, shows no rows even when they add up to the saved total', () => {
+    render(<InvoiceAmountDue {...base} dirty />);
+    const card = screen.getByRole('region', { name: 'Amount due' });
+    expect(within(card).getByText('Invoice total').parentElement).toHaveTextContent('$734.83');
+    expect(within(card).getByText('Totals update when you save')).toBeInTheDocument();
+    for (const row of ['Products', 'Freight', 'Standing discount 3%', 'Sales tax 6.25%']) {
+      expect(within(card).queryByText(row)).not.toBeInTheDocument();
+    }
+  });
+
   it('with no unsaved edits there is no save note', () => {
     render(<InvoiceAmountDue {...base} />);
     expect(screen.queryByText('Totals update when you save')).not.toBeInTheDocument();

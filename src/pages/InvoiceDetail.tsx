@@ -33,7 +33,7 @@ import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, Invoice
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt, formatCentsMinus } from '../lib/money';
-import { invoiceStatusBadge, statusLabel } from '../lib/statusLabel';
+import { formatSharePct, invoiceStatusBadge, statusLabel } from '../lib/statusLabel';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { withBelowCostReason } from '../lib/belowCostApproval';
@@ -2056,7 +2056,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const typeLabel = ((t) => t.charAt(0).toUpperCase() + t.slice(1))((invoice.invoice_type || '').replace(/_/g, ' '));
   const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const subtitle = [
-    thisPayer && billSplitPayers.length > 1 ? `${thisPayer.customer_name} pays ${thisPayer.split_percentage}%` : customerName,
+    thisPayer && billSplitPayers.length > 1 ? `${thisPayer.customer_name} pays ${formatSharePct(thisPayer.split_percentage)}` : customerName,
     typeLabel,
     invoice.invoice_date && shortDate(new Date(invoice.invoice_date.split('T')[0] + 'T00:00:00')),
     invoice.posted_at && `Posted ${shortDate(new Date(invoice.posted_at))}`,

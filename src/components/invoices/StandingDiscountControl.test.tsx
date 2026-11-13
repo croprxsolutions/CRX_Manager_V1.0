@@ -51,6 +51,11 @@ describe('StandingDiscountControl (billing plan M4b)', () => {
     })));
   });
 
+  it('tells a screen reader the rate is a percent', async () => {
+    render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
+    expect(await screen.findByLabelText('Standing discount for this sale')).toHaveAccessibleDescription('%');
+  });
+
   it('is locked while the invoice has unsaved changes', async () => {
     render(<StandingDiscountControl invoiceId="inv-1" disabled onChanged={vi.fn()} />);
     expect(await screen.findByLabelText('Standing discount for this sale')).toBeDisabled();

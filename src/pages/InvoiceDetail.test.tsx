@@ -127,13 +127,18 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 // The real line and detail guards; only PDF output and the acres read are stubbed.
-vi.mock('../lib/invoicePdf', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/invoicePdf')>()),
-  downloadInvoicePdf: vi.fn(),
-  generateInvoicePdf: vi.fn(),
-  deriveFieldAppAppliedAcres: vi.fn(),
-  groupReturnCreditDisplayItems: vi.fn((_invoiceType: string, items: unknown[]) => items),
-}));
+vi.mock('../lib/invoicePdf', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/invoicePdf')>();
+  return {
+    ...actual,
+    // The real reader by default; a test can return a share with more decimals than the reader gives.
+    loadBillSplitPayers: vi.fn(actual.loadBillSplitPayers),
+    downloadInvoicePdf: vi.fn(),
+    generateInvoicePdf: vi.fn(),
+    deriveFieldAppAppliedAcres: vi.fn(),
+    groupReturnCreditDisplayItems: vi.fn((_invoiceType: string, items: unknown[]) => items),
+  };
+});
 vi.mock('../lib/emailService', () => ({
   sendEmail: vi.fn(),
   buildEmailHtml: vi.fn(() => '<p>test</p>'),
@@ -169,6 +174,7 @@ vi.mock('../components/invoices/InvoicePrintDialog', () => ({
 }));
 
 import InvoiceDetail from './InvoiceDetail';
+import { loadBillSplitPayers } from '../lib/invoicePdf';
 
 function renderInvoiceDetail(id = 'inv-123') {
   return render(
@@ -1916,6 +1922,39 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     });
   });
 
+  it('Amount due drops its rows while a saved invoice has unsaved edits, even when they still add up', async () => {
+    const productLine = {
+      id: 'item-1', product_id: 'prod-1', order_item_id: 'oi-1', product: { product_name: 'Roundup' }, description: 'Roundup',
+      quantity: 100, unit_price_cents: 1237, extended_cents: 123700, cost_cents: 900, sort_order: 0,
+    };
+    setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1', delivery_id: 'del-1', total_amount_cents: 123700, balance_cents: 123700 }, [productLine]);
+    renderInvoiceDetail('inv-scratch');
+    const due = await screen.findByRole('region', { name: 'Amount due' });
+    await waitFor(() => expect(within(due).getByText('Products')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: 'PO-9' } });
+    expect(within(due).getByText('Totals update when you save')).toBeInTheDocument();
+    expect(within(due).queryByText('Products')).not.toBeInTheDocument();
+    expect(within(due).getByText('Invoice total').parentElement).toHaveTextContent('$1,237.00');
+  });
+
+  it('on a new invoice Amount due shows its live rows and no save note', async () => {
+    render(
+      <MemoryRouter initialEntries={['/invoices/new']}>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetail routeArea="chemical" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Add charge' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'service' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
+    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
+    const due = screen.getByRole('region', { name: 'Amount due' });
+    expect(due.textContent).toMatch(/\$40\.50Invoice total\$40\.50/);
+    expect(within(due).queryByText('Totals update when you save')).not.toBeInTheDocument();
+  });
+
   it('refuses to save a chemical sale charge until staff pick its type', async () => {
     setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1', delivery_id: 'del-1' });
     mockIntentAwareRpc({ data: 'inv-scratch', error: null });
@@ -2468,5 +2507,28 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     const whoPays = screen.getByRole('region', { name: 'Who pays' });
     expect(within(whoPays).getByRole('link', { name: 'INV-0500-2' })).toHaveAttribute('href', '/invoices/inv-124');
     expect(within(whoPays).getByText(/this invoice/)).toBeInTheDocument();
+  });
+
+  it('a split payer subtitle rounds the share as the payer table does, never 33.333333%', async () => {
+    const grouped = { ...draft, order_id: null, delivery_id: 'del-1', invoice_group_id: 'grp-1', customer: { farm_name: 'Maple Hollow Farms' } };
+    let reads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') {
+        reads += 1;
+        return buildChain({ data: reads === 3 ? ['inv-123', 'inv-124', 'inv-125'].map((id) => ({ id, invoice_post_version: 'v1' })) : grouped, error: null });
+      }
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    const payer = (n: number, name: string, pct: number) => ({
+      invoice_id: `inv-12${n}`, invoice_number: `INV-0500-${n - 2}`, customer_name: name, split_percentage: pct, acres: null, amount_cents: 2000,
+    });
+    vi.mocked(loadBillSplitPayers).mockResolvedValueOnce([
+      payer(3, 'Maple Hollow Farms', 33.333333), payer(4, 'Cedar Ridge Ag', 33.333333), payer(5, 'Birch Lane Farms', 33.333334),
+    ]);
+    renderInvoiceDetail();
+    expect(await screen.findByText('Split invoice 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText(/Maple Hollow Farms pays 33\.33%/)).toBeInTheDocument();
+    expect(screen.queryByText(/33\.333/)).not.toBeInTheDocument();
   });
 });

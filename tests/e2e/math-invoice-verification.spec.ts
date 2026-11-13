@@ -439,8 +439,16 @@ test.describe('Invoice Math Verification', () => {
     if (tfootCents !== null && lineCount > 0) {
       assertCentsEqual(tfootCents, lines.totalCents, 2,
         `Lines card total ($${(tfootCents / 100).toFixed(2)}) should match the sum of its lines ($${(lines.totalCents / 100).toFixed(2)})`);
-      assertCentsEqual(subtotal, lines.totalCents, 2,
-        `Amount due Invoice total ($${(subtotal / 100).toFixed(2)}) should match the sum of the lines ($${(lines.totalCents / 100).toFixed(2)})`);
+      const label = ((await page.locator('section[aria-labelledby="invoice-lines-title"]')
+        .getByText(/^(Invoice|Lines) total$/).first().textContent()) ?? '').trim();
+      if (label === 'Invoice total') {
+        assertCentsEqual(subtotal, lines.totalCents, 2,
+          `Amount due Invoice total ($${(subtotal / 100).toFixed(2)}) should match the sum of the lines ($${(lines.totalCents / 100).toFixed(2)})`);
+      } else {
+        // A voided invoice (or any whose lines differ from the saved total) says Lines total: check it really differs.
+        expect(label).toBe('Lines total');
+        expect(tfootCents, `Lines total ($${(tfootCents / 100).toFixed(2)}) should differ from the saved Invoice total`).not.toBe(subtotal);
+      }
     }
   });
 

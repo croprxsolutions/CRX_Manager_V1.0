@@ -86,11 +86,12 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
               max={100}
               step={0.01}
               value={draft}
+              aria-describedby={`${inputId}-unit`}
               disabled={locked}
               onChange={(e) => setDraft(e.target.value)}
               className="block min-h-11 w-full min-w-0 rounded-l-lg border-0 px-3 py-2 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:opacity-50 md:min-h-0"
             />
-            <span aria-hidden="true" className="px-3 text-sm text-secondary">%</span>
+            <span id={`${inputId}-unit`} className="px-3 text-sm text-secondary">%</span>
           </span>
         </div>
         <Button variant="secondary" size="sm" className="min-h-11 md:min-h-0" showChevron={false} loading={saving}

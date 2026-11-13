@@ -84,6 +84,8 @@ describe('InvoiceActionsBar', () => {
     const { rerender } = render(<InvoiceActionsBar save={act()} print={act()} post={{ ...act(), dirty: true }} />);
     const hint = screen.getByText('Save your changes first');
     expect(screen.getByRole('button', { name: 'Post invoice…' })).toHaveAttribute('aria-describedby', hint.id);
+    // At every width, not only on a phone: a disabled button's title shows only on hover (Sol MED).
+    expect(hint.className).not.toMatch(/(^|\s)([\w-]+:)?hidden(\s|$)/);
     rerender(<InvoiceActionsBar save={act()} print={act()} post={{ ...act(), dirty: false }} />);
     expect(screen.queryByText('Save your changes first')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Post invoice…' })).not.toHaveAttribute('aria-describedby');

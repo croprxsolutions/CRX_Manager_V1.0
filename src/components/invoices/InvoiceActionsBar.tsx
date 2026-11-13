@@ -69,8 +69,9 @@ function PostButton({ post, hintId, className }: { post: NonNullable<Props['post
         aria-describedby={post.dirty ? hintId : undefined}>
         Post invoice…
       </Button>
-      {/* The title is no help on a phone: say it on screen there (hidden from md, where the title shows). */}
-      {post.dirty && <p id={hintId} className="order-first w-full text-center text-xs text-amber-800 md:hidden">Save your changes first</p>}
+      {/* Said on screen at every width: a title only shows on hover. Its own line above the buttons; from md,
+          w-0 + min-w-full keeps it from widening the bar beside the page heading. */}
+      {post.dirty && <p id={hintId} className="order-first w-full text-center text-xs text-amber-800 md:w-0 md:min-w-full md:text-right">Save your changes first</p>}
     </>
   );
 }

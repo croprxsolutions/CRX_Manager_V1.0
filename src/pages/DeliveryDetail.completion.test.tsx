@@ -10,8 +10,9 @@
  *   - SIGNATURE_IMAGE_MISSING retires the key, so the next tap is a fresh attempt;
  *   - a lost reply on a delivery that turns out completed is resent IDENTICALLY (same key, same
  *     args) and then runs the normal success path (receipt email included).
- *   - the "Invoices for this delivery" card: always there once completed, one link per invoice,
- *     the empty state (Create invoice… for an admin only), and it fills without a reload.
+ *   - the "Invoices on this sale" card: always there once completed, one link per invoice (this
+ *     delivery's tagged), the empty states (Create invoice… for an admin only; billed outside CRX),
+ *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -334,8 +335,12 @@ const INVOICE_ROWS = [
   { id: 'inv-1', invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', status: 'draft', total_amount_cents: 73483, order_id: ORDER_ID, delivery_id: 'del-1', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Maple Hollow Farms' } },
   { id: 'inv-2', invoice_number: 'CS-2026-0005-2', invoice_date: '2026-11-06', status: 'posted', total_amount_cents: 68701, order_id: ORDER_ID, delivery_id: 'del-1', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Cedar Ridge Ag' } },
 ];
+// An invoice for another delivery on the same sale.
+const OTHER_DELIVERY_INVOICE = { id: 'inv-9', invoice_number: 'CS-2026-0004', invoice_date: '2026-11-01', status: 'posted', total_amount_cents: 10000, order_id: ORDER_ID, delivery_id: 'del-0', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Maple Hollow Farms' } };
 const EMPTY_TEXT = 'No invoice yet. This delivery is complete but nothing has been billed.';
-const emptyText = (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === EMPTY_TEXT;
+const REP_EMPTY_TEXT = 'No invoices you can see for this delivery. Ask the office whether it has been billed.';
+const paragraph = (text: string) => (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === text;
+const emptyText = paragraph(EMPTY_TEXT);
 
 function useCompletedDeliveryOnOrder(invoices: unknown[]) {
   tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', order_id: ORDER_ID }];
@@ -347,10 +352,11 @@ function invoicesCard() {
   return document.getElementById('delivery-invoices') as HTMLElement;
 }
 
-describe('Invoices for this delivery card', () => {
+describe('Invoices on this sale card', () => {
   it('lists each invoice as one link: number, Bill to, total and a title-case status', async () => {
     useCompletedDeliveryOnOrder(INVOICE_ROWS);
     await renderPage();
+    expect(await screen.findByRole('heading', { name: 'Invoices on this sale' })).toBeInTheDocument();
     const first = await screen.findByRole('link', { name: /CS-2026-0005-1/ });
     expect(first).toHaveAttribute('href', '/invoices/inv-1');
     expect(first).toHaveTextContent('Maple Hollow Farms');
@@ -364,6 +370,30 @@ describe('Invoices for this delivery card', () => {
     expect(invoicesCard()).not.toHaveTextContent(EMPTY_TEXT);
   });
 
+  it('tags only this delivery\'s invoices with "This delivery"', async () => {
+    useCompletedDeliveryOnOrder([...INVOICE_ROWS, OTHER_DELIVERY_INVOICE]);
+    await renderPage();
+    expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveTextContent('This delivery');
+    expect(screen.getByRole('link', { name: /CS-2026-0005-2/ })).toHaveTextContent('This delivery');
+    expect(screen.getByRole('link', { name: /CS-2026-0004/ })).not.toHaveTextContent('This delivery');
+  });
+
+  it('with only another delivery\'s invoice, an admin still sees the empty text and Create invoice…', async () => {
+    useCompletedDeliveryOnOrder([OTHER_DELIVERY_INVOICE]);
+    await renderPage();
+    await screen.findByText(emptyText);
+    expect(screen.getByRole('button', { name: 'Create invoice…' })).toBeInTheDocument();
+  });
+
+  it('billed outside CRX: shows the stored reason, no empty text and no button', async () => {
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph('Billed outside CRX. Billed in the old system by the office'));
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
+  });
+
   it('with no invoice, an admin sees the empty text and Create invoice… opens the existing confirm', async () => {
     useCompletedDeliveryOnOrder([]);
     await renderPage();
@@ -372,11 +402,12 @@ describe('Invoices for this delivery card', () => {
     expect(await screen.findByText('Create a draft invoice for completed delivery DEL-1?')).toBeInTheDocument();
   });
 
-  it('with no invoice, a sales rep sees the same text without the button', async () => {
+  it('with no invoice, a sales rep is told none he can see, without the button', async () => {
     setRole('sales_rep');
     useCompletedDeliveryOnOrder([]);
     await renderPage();
-    await screen.findByText(emptyText);
+    await screen.findByText(paragraph(REP_EMPTY_TEXT));
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
   });
 

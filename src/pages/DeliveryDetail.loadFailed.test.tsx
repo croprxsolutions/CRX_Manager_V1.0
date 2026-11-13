@@ -154,7 +154,7 @@ describe('Delivery Detail load failures', () => {
     expect(await screen.findByText('This delivery could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('Delivery not found')).not.toBeInTheDocument();
     expect(screen.queryByText('DEL-1')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
 
     failing.clear();
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));

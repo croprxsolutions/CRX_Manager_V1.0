@@ -2541,10 +2541,14 @@ export default function DeliveryDetail() {
       {showInvoicesCard && (
         <DeliveryInvoicesCard
           invoices={relatedInvoices}
-          unbilled={delivery.status === 'completed' && !hasActiveRelatedInvoice}
-          createInvoice={canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null}
-          creating={creatingInvoice}
-          onCreate={() => setCreateInvoiceConfirmOpen(true)}
+          deliveryId={delivery.id}
+          unbilled={delivery.status === 'completed' && !hasActiveRelatedInvoice ? {
+            isAdmin,
+            billedOutsideCrxReason,
+            createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
+            creating: creatingInvoice,
+            onCreate: () => setCreateInvoiceConfirmOpen(true),
+          } : null}
         />
       )}
 
@@ -3172,19 +3176,17 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
 const titleCase = (status: string) => status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
 
 /**
- * The delivery's invoices (all invoices on its sale, as the thread above shows), one link per row.
- * Once completed it never disappears: with nothing billing this delivery it says so, and an admin
- * gets Create invoice… (or the disabled split-billing button with its reason) as before.
+ * Every invoice on the delivery's sale (as the thread above shows), one link per row; this
+ * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
+ * nothing billing this delivery it says so (see UnbilledNote).
  */
-function DeliveryInvoicesCard({ invoices, unbilled, createInvoice, creating, onCreate }: {
+function DeliveryInvoicesCard({ invoices, deliveryId, unbilled }: {
   invoices: RelatedInvoice[];
-  unbilled: boolean;
-  createInvoice: 'offer' | 'split' | null;
-  creating: boolean;
-  onCreate: () => void;
+  deliveryId: string;
+  unbilled: UnbilledNoteProps | null;
 }) {
   return (
-    <SectionCard id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Invoices for this delivery">
+    <SectionCard id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Invoices on this sale">
       <div className="px-4 py-3 md:px-5">
         {invoices.length > 0 && (
           <>
@@ -3192,42 +3194,72 @@ function DeliveryInvoicesCard({ invoices, unbilled, createInvoice, creating, onC
               <span>Invoice</span><span>Bill to</span><span className="text-right">Total</span><span>Status</span><span />
             </div>
             <ul className="divide-y divide-gray-100 border-t border-gray-100">
-              {invoices.map((inv) => <InvoiceRow key={inv.id} invoice={inv} />)}
+              {invoices.map((inv) => <InvoiceRow key={inv.id} invoice={inv} thisDelivery={inv.delivery_id === deliveryId} />)}
             </ul>
           </>
         )}
-        {unbilled && (
-          <div className={`flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900 ${invoices.length > 0 ? 'mt-3' : ''}`}>
-            <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-            <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
-            {createInvoice === 'offer' && (
-              <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
-                Create invoice…
-              </Button>
-            )}
-            {/* H5: the server would refuse this one. Show it disabled with the reason. */}
-            {createInvoice === 'split' && (
-              <span className="flex items-center gap-1">
-                <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
-                <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
-              </span>
-            )}
-          </div>
-        )}
+        {unbilled && <div className={invoices.length > 0 ? 'mt-3' : ''}><UnbilledNote {...unbilled} /></div>}
       </div>
     </SectionCard>
   );
 }
 
+interface UnbilledNoteProps {
+  isAdmin: boolean;
+  billedOutsideCrxReason: string | null;
+  createInvoice: 'offer' | 'split' | null;
+  creating: boolean;
+  onCreate: () => void;
+}
+
+/**
+ * A completed delivery with no active CRX invoice. Billed outside CRX: the stored reason. Otherwise
+ * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
+ * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
+ */
+function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+  if (billedOutsideCrxReason !== null) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3 text-sm text-nav-dark">
+        <FileText className="mt-0.5 h-[18px] w-[18px] shrink-0 text-secondary" aria-hidden="true" />
+        <p className="min-w-0 flex-1"><strong>Billed outside CRX.</strong> {billedOutsideCrxReason}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+      <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+      {isAdmin
+        ? <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
+        : <p className="min-w-0 flex-1"><strong>No invoices you can see for this delivery.</strong> Ask the office whether it has been billed.</p>}
+      {createInvoice === 'offer' && (
+        <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
+          Create invoice…
+        </Button>
+      )}
+      {/* H5: the server would refuse this one. Show it disabled with the reason. */}
+      {createInvoice === 'split' && (
+        <span className="flex items-center gap-1">
+          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
+          <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** One invoice: a single link. Phone and tablet stack it; xl and up line it up as a table row. */
-function InvoiceRow({ invoice }: { invoice: RelatedInvoice }) {
+function InvoiceRow({ invoice, thisDelivery }: { invoice: RelatedInvoice; thisDelivery: boolean }) {
   return (
     <li>
       <Link
         to={`/invoices/${invoice.id}`}
         className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-lg px-3 py-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_7rem_6.5rem_1rem]"
       >
-        <span className="order-1 truncate font-semibold text-crx-green xl:order-none">{invoice.invoice_number}</span>
+        <span className="order-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 xl:order-none">
+          <span className="truncate font-semibold text-crx-green">{invoice.invoice_number}</span>
+          {thisDelivery && <span className="shrink-0 rounded-full bg-crx-green-light px-2 py-0.5 text-xs font-medium text-crx-green">This delivery</span>}
+        </span>
         <span className="order-3 truncate text-secondary xl:order-none xl:text-nav-dark">{invoice.bill_to ?? ''}</span>
         <span className="order-2 text-right font-semibold tabular-nums text-nav-dark xl:order-none">{fmtCents(invoice.total_amount_cents)}</span>
         <span className="order-4 justify-self-end xl:order-none xl:justify-self-start">

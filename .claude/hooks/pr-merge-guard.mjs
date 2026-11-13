@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -141,6 +141,14 @@ if (/set_auto_merge$/i.test(toolName) && toolInput.enabled !== false) {
 if (typeof toolInput.command === "string" && /\bapi\s+graphql\b|\/graphql\b/i.test(toolInput.command) && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
   deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app; the GraphQL enablePullRequestAutoMerge mutation is refused for agents.");
 }
+// Agents never approve a pull request (#1838 HIGH 2): the GitHub review tools and any shell or API spelling.
+{
+  // The review's event, not words in its body (Luna); a tool with no event field is checked by its whole input.
+  const approval = /pull_request_review/i.test(toolName) && (typeof toolInput.event === "string" ? /^\s*APPROVE\s*$/i.test(toolInput.event) : /"event"\s*:\s*"APPROVE"/i.test(JSON.stringify(toolInput)))
+    ? prApprovalProblem("review event=APPROVE")
+    : null;
+  if (approval) deny(`PR MERGE GATE: ${approval}.`);
+}
 if (GITHUB_MERGE_TOOL.test(toolName)) {
   requests.push(mcpMergeRequest(toolInput));
 } else if (typeof toolInput.command === "string" && toolInput.command) {
@@ -175,6 +183,8 @@ function collectMergeRequests(scanned) {
   // `--admin` had been carried off into a segment containing no `gh` at all
   // (Codex sol, 2026-09-08, SEC-001).
   for (const segment of splitCommandSegments(scanned)) {
+    const approval = prApprovalProblem(segment);
+    if (approval) deny(`PR MERGE GATE: ${approval}.`);
     // The mergePullRequest mutation is denied by NAME, whatever transport
     // carries it — `gh api graphql`, curl, Invoke-RestMethod, a fetch in a node
     // one-liner. Until 2026-09-01 only the `gh api graphql` spelling was caught
@@ -491,7 +501,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "number,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -513,6 +523,10 @@ function gateRequest(request) {
   if (base === "staging") {
     const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
+    const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
+    if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
+    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
+    if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
   }
 
   // ── no merging over an unresolved objection ────────────────────────────────

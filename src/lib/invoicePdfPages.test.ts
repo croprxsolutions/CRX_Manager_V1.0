@@ -33,7 +33,7 @@ describe('invoice PDF page breaks (real jsPDF)', () => {
       invoice_number: `CS-2026-0005-${i + 1}`,
     }));
     const data: InvoicePdfData = {
-      invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', due_date: '2026-12-06', invoice_type: 'chemical_sale', status: 'draft',
+      invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', due_date: '2026-12-06', invoice_type: 'chemical_sale', status: 'posted', // posted: a draft prints no pay note
       customer_name: 'Maple Hollow Farms', items: [
         { description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 },
       ],

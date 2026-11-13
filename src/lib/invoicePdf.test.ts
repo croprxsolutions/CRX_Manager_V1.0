@@ -1021,6 +1021,26 @@ describe('invoice PDF in the quote style', () => {
       ['Cedar Ridge Ag', 'CS-2026-0005-2', '50%', '$687.01'],
       ['Delivery total', '', '100%', '$1,421.84'],
     ]);
+    // Attack MED-1: one percentage was false on line-level splits and dollar shares, so the sentences name no number.
+    expect(texts()).toContain("This invoice bills this payer's part of the delivery.");
+    expect(texts()).toContain("Quantities are this payer's part of each line");
+    expect(texts().filter((t) => typeof t === 'string' && /bills \d|payer's \d/.test(t))).toEqual([]);
+  });
+
+  // Attack LOW-2: the pay note asks for money only on an invoice that is owed: posted or overdue, balance above 0.
+  it.each([
+    ['posted', true], ['overdue', true],
+    ['draft', false], ['unposted', false], ['voided', false], ['paid', false], ['cancelled', false],
+  ])('a %s invoice with a balance prints the pay note: %s', async (status, prints) => {
+    await generateInvoicePdf({ ...split(), status });
+    expect(texts().includes('Please pay by 04/01/2026.')).toBe(prints);
+    expect(texts().some((t) => typeof t === 'string' && t.startsWith('Make checks payable'))).toBe(prints);
+    expect(valueAfter('Balance due')).toBe('$629.83');
+  });
+
+  it('a posted invoice with nothing owed prints no pay note', async () => {
+    await generateInvoicePdf({ ...split(), status: 'posted', balance_cents: 0 });
+    expect(texts()).not.toContain('Please pay by 04/01/2026.');
   });
 
   it('hides who pays when shares are switched off', async () => {

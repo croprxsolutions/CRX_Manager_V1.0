@@ -962,7 +962,8 @@ function drawBillTo(p: Page): void {
     const forX = Q_MARGIN_X + contentWidth(p) / 2 + 12;
     drawLabel(doc, 'FOR', forX, top);
     doc.setFont('helvetica', 'normal');
-    doc.text(`This invoice bills ${fmtShare(payer.split_percentage)} of the delivery.`, forX, top + 13);
+    // No percentage: a payer can own whole lines, and freight, discount and tax land per payer (attack MED-1).
+    doc.text("This invoice bills this payer's part of the delivery.", forX, top + 13);
     y = Math.max(y, top + 13);
   }
   p.y = y + 8;
@@ -1067,7 +1068,7 @@ function drawProductsTitle(p: Page): void {
   p.y += 16;
   if (p.y + 70 > p.bottom) newPage(p);
   const payer = thisPayer(p);
-  drawSectionTitle(p, 'PRODUCTS AND CHARGES', payer ? `Quantities are this payer's ${fmtShare(payer.split_percentage)}` : '');
+  drawSectionTitle(p, 'PRODUCTS AND CHARGES', payer ? "Quantities are this payer's part of each line" : '');
 }
 
 function drawHeaderNotes(p: Page): void {
@@ -1354,9 +1355,9 @@ function drawWhoPays(p: Page, payers: InvoicePdfShare[]): void {
     { left: Q_MARGIN_X, right: p.pageW - Q_MARGIN_X - width });
 }
 
-/** "Please pay by <due date>." and how to pay, while anything is owed. */
+/** "Please pay by <due date>." and how to pay, while a posted or overdue invoice is owed (not on a draft, attack LOW-2). */
 function drawPayNote(p: Page): void {
-  if (p.data.balance_cents <= 0) return;
+  if (!['posted', 'overdue'].includes(p.data.status) || p.data.balance_cents <= 0) return;
   const lead = p.data.due_date ? `Please pay by ${fmtDate(p.data.due_date)}.` : 'Payment is due on receipt.';
   p.y += 16;
   drawBoxedNote(p, `Make checks payable to ${COMPANY_LEGAL_NAME} and write the invoice number on the check.`, lead);

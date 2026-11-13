@@ -59,8 +59,10 @@ export function registrationCheck(productLoaded: boolean, brands: BrandListState
  * Loads the cancelled set for these numbers. A failed read, or none within CHECK_TIMEOUT_MS, is
  * `failed`, never "none cancelled"; a late reply still lands. An answer for other numbers is never used.
  */
-export function useCancelledRegistrations(numbers: (string | null | undefined)[]): { cancelled: CancelledRegistrations; lookup: LookupState } {
-  const key = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
+export function useCancelledRegistrations(numbers: (string | null | undefined)[], refresh = ''): { cancelled: CancelledRegistrations; lookup: LookupState } {
+  const wanted = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
+  // A new `refresh` value asks again for the same numbers (a screen reload).
+  const key = refresh ? `${wanted}#${refresh}` : wanted;
   const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; lookup: LookupState }>(
     { key: '', cancelled: new Map(), lookup: 'done' },
   );
@@ -68,7 +70,7 @@ export function useCancelledRegistrations(numbers: (string | null | undefined)[]
     let active = true;
     // Each request starts as "checking", so an earlier answer for the same numbers is never reused.
     setState({ key, cancelled: new Map(), lookup: 'checking' });
-    getCancelledRegistrations(key ? key.split('|') : [])
+    getCancelledRegistrations(wanted ? wanted.split('|') : [])
       .then((cancelled) => { if (active) setState({ key, cancelled, lookup: 'done' }); })
       .catch((err: unknown) => {
         if (!active) return;
@@ -79,7 +81,7 @@ export function useCancelledRegistrations(numbers: (string | null | undefined)[]
       if (active) setState((prev) => (prev.key === key && prev.lookup !== 'checking' ? prev : { key, cancelled: new Map(), lookup: 'failed' }));
     }, CHECK_TIMEOUT_MS);
     return () => { active = false; clearTimeout(timer); };
-  }, [key]);
+  }, [key, wanted]);
   return state.key === key ? state : { cancelled: new Map(), lookup: 'checking' };
 }
 

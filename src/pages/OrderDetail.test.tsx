@@ -87,8 +87,52 @@ vi.mock('../lib/dateUtils', () => ({
 }));
 vi.mock('../components/team/QuickTaskModal', () => ({ default: () => null }));
 vi.mock('../components/team/RelatedNotes', () => ({ default: () => null }));
+vi.mock('../components/customers/CustomerSearchPicker', () => ({
+  default: ({ onSelect, ariaLabel }: { onSelect: (c: { id: string; farm_name: string }) => void; ariaLabel: string }) => (
+    <button type="button" aria-label={ariaLabel} onClick={() => onSelect({ id: 'cust-2', farm_name: 'Cedar Ridge Ag' })}>pick</button>
+  ),
+}));
 
 import OrderDetail from './OrderDetail';
+import { checkMutationResult } from '../lib/db';
+
+// A query whose answer depends on what was asked (an insert, a delete or a read), decided when it is awaited.
+function answerChain(answer: (calls: string[]) => { data: unknown; error: unknown }): Record<string, unknown> {
+  const calls: string[] = [];
+  const self: Record<string, unknown> = {};
+  for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'range', 'maybeSingle', 'single']) {
+    self[m] = () => { calls.push(m); return self; };
+  }
+  self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise.resolve().then(() => answer(calls)).then(ok, bad);
+  return self;
+}
+
+const shareOrder = {
+  row_version: 1, id: 'ord-123', order_number: 'ORD-0099', status: 'confirmed', customer_id: 'cust-1',
+  order_date: '2026-03-15', total_price: 1333.2, notes: '', created_at: '2026-03-15T00:00:00Z',
+};
+const cedarShare = { id: 's1', order_id: 'ord-123', customer_id: 'cust-2', customer_name: 'Cedar Ridge Ag', split_percentage: 35, sort_order: 1 };
+
+// The order with a saved card in `db.shares`: an insert adds Cedar Ridge Ag, a delete removes it.
+function mockShareOrder(db: { shares: unknown[] }) {
+  mockFrom.mockImplementation((table: string) => answerChain((calls) => {
+    if (table === 'orders') return { data: shareOrder, error: null };
+    if (table === 'customers' && calls.includes('maybeSingle')) return { data: { id: 'cust-1', farm_name: 'Maple Hollow Farms' }, error: null };
+    if (table === 'order_shares') {
+      if (calls.includes('insert')) { db.shares = [cedarShare]; return { data: [cedarShare], error: null }; }
+      if (calls.includes('delete')) { db.shares = []; return { data: [cedarShare], error: null }; }
+      return { data: db.shares, error: null };
+    }
+    return { data: [], error: null };
+  }));
+}
+
+async function addCedarAt35() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Add a payer' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Bill split customer' }));
+  fireEvent.change(screen.getByLabelText('Share'), { target: { value: '35' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add payer' }));
+}
 
 function renderOrderDetail(id = 'ord-123') {
   return render(
@@ -381,5 +425,37 @@ describe('OrderDetail', () => {
       expect.stringContaining('Wait a moment and try again'),
     );
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('RETURN_CREDIT_SOURCE_CONCURRENT'));
+  });
+
+  it('an added payer shows without a reload', async () => {
+    const db = { shares: [] as unknown[] };
+    mockShareOrder(db);
+    renderOrderDetail();
+    await addCedarAt35();
+    expect(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' })).toBeInTheDocument();
+    expect(screen.getByText('2 payers · 100%')).toBeInTheDocument();
+  });
+
+  // Staging (13 Nov): the share was saved but the card showed it only after a reload. A reply that fails after the
+  // row is written (a 500 or a dropped connection) skipped the reload, so the card kept the list from before.
+  it('an added payer shows even when the save reply fails after the row is written', async () => {
+    const db = { shares: [] as unknown[] };
+    mockShareOrder(db);
+    vi.mocked(checkMutationResult).mockImplementationOnce(() => { throw new Error('upstream 500'); });
+    renderOrderDetail();
+    await addCedarAt35();
+    expect(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' })).toBeInTheDocument();
+    expect(mockToast).toHaveBeenCalledWith('error', 'upstream 500');
+  });
+
+  it('a removed payer goes without a reload, even when the reply fails after the row is deleted', async () => {
+    const db = { shares: [cedarShare] as unknown[] };
+    mockShareOrder(db);
+    vi.mocked(checkMutationResult).mockImplementationOnce(() => { throw new Error('upstream 500'); });
+    renderOrderDetail();
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove payer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove Cedar Ridge Ag' })).not.toBeInTheDocument());
+    expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === 'Maple Hollow Farms pays 100%')).toBeInTheDocument();
   });
 });

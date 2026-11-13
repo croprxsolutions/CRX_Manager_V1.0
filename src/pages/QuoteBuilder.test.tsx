@@ -5765,6 +5765,30 @@ describe('QuoteBuilder', () => {
       },
     );
 
+    // Changing a value and typing the old one back left Save on (Taha): clean means "same as saved".
+    it('an edit changed back to the saved value turns Save draft off again', async () => {
+      serveLines();
+      await loaded();
+      const save = () => screen.getByRole('button', { name: 'Save draft' });
+      const note = await screen.findByLabelText('Note at the bottom of the quote');
+      const savedNote = (note as HTMLTextAreaElement).value;
+      const savedPrice = (priceInputs()[0] as HTMLInputElement).value;
+
+      fireEvent.change(note, { target: { value: `${savedNote} extra` } });
+      await waitFor(() => expect(save()).toBeEnabled());
+      fireEvent.change(note, { target: { value: savedNote } });
+      await waitFor(() => expect(save()).toBeDisabled());
+
+      fireEvent.change(priceInputs()[0], { target: { value: '9' } });
+      fireEvent.blur(priceInputs()[0]);
+      await waitFor(() => expect(save()).toBeEnabled());
+      fireEvent.change(priceInputs()[0], { target: { value: savedPrice } });
+      fireEvent.blur(priceInputs()[0]);
+      await waitFor(() => expect(save()).toBeDisabled());
+      expect(save()).toHaveAttribute('title', 'No changes to save');
+      expect(screen.queryByText(/unsaved changes/i)).not.toBeInTheDocument();
+    });
+
     it('a failed save keeps Save draft enabled, so the user can retry without another edit', async () => {
       mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
         ? { data: null, error: { message: 'connection reset' } }

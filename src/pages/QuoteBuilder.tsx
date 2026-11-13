@@ -933,16 +933,35 @@ export default function QuoteBuilder() {
   const canRevert = isEditing && isAdmin && ['accepted', 'declined', 'expired', 'cancelled'].includes(currentStatus);
   const revertLabel = currentStatus === 'accepted' ? 'Un-accept' : 'Reopen';
 
-  // Mark dirty whenever user changes form data (after initial load)
+  // The form compared as one value, so an edit typed back to what was saved makes the quote clean
+  // again (Save turns off, no "Unsaved changes") instead of staying changed.
+  const formSnapshot = useMemo(
+    () => JSON.stringify([customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]),
+    [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned],
+  );
+  const cleanSnapshotRef = useRef('');
+
+  // Whatever is on screen when the quote turns clean (loaded, saved, reverted) is "no changes".
+  // Declared before the check below so it runs first in the same commit.
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    if (suppressDirtyUntilReloadSettlesRef.current) return;
-    if (skipNextDirtyRef.current) {
-      skipNextDirtyRef.current = false;
+    if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the quote turns clean, not on every edit
+  }, [isDirty]);
+
+  // Dirty = the form differs from the last clean state (after initial load)
+  useEffect(() => {
+    // Changes the page makes itself while loading are the saved state.
+    if (!initialLoadDone.current || suppressDirtyUntilReloadSettlesRef.current) {
+      cleanSnapshotRef.current = formSnapshot;
       return;
     }
-    setIsDirty(true);
-  }, [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+      return;
+    }
+    setIsDirty(formSnapshot !== cleanSnapshotRef.current);
+  }, [formSnapshot, isDirty]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that

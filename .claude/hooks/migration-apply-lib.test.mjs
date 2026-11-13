@@ -1634,7 +1634,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
-    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
+    state: "OPEN", isCrossRepository: false, baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
     author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
@@ -1835,6 +1835,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { headRefName: "release/next" }, stagingBehind: "3\n" }), "does not contain staging's tip", "a release head behind staging is refused");
   refused(gate({ pr: { headRefName: "release/next" }, stagingTip: new Error("HTTP 502") }), "does not contain staging's tip", "an unreadable staging tip fails closed");
   ok(gate({ stagingBehind: "3\n" }).ok === true, "a hotfix doesn't need staging's tip");
+  refused(gate({ pr: { isCrossRepository: true } }), "comes from a fork", "a fork's branch is refused");
+  refused(gate({ pr: { isCrossRepository: undefined } }), "comes from a fork", "an unknown origin is refused");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
   // The name alone is not enough: main's release guard must have passed on this head.

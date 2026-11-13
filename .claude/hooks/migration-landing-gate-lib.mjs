@@ -205,7 +205,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let pr;
   try {
     pr = JSON.parse(gh(["pr", "view", branch, "--json",
-      "number,url,state,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
+      "number,url,state,isCrossRepository,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not find or read the open pull request for branch "${branch}" (${error?.message || error}).`);
@@ -221,6 +221,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   // Into main, only the weekly release (release/next) and a hotfix are applied live before their merge
   // (Mason's Decision A, 2026-11-12: his agents apply a release's migrations from the release PR, in stamp
   // order). Any other branch into main is not allowed at all.
+  // #1838 LOW 1: a fork's release/next or hotfix/<name> is not this repository's.
+  if (pr?.isCrossRepository !== false) return refuse(`${number} comes from a fork, or GitHub didn't say it doesn't; only this repository's branches are applied live.`);
   const headRef = String(pr?.headRefName || "");
   if (headRef !== "release/next" && !/^hotfix\/[^/]+$/.test(headRef)) {
     return refuse(`${number} is not the release PR (release/next) or a hotfix/<name> PR. Into main, only those are applied live before their merge; feature work goes to staging (ship.md › Staging).`);

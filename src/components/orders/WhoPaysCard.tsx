@@ -153,7 +153,7 @@ export default function WhoPaysCard({
               </div>
               <label className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-sm font-medium text-secondary">Share</span>
-                <span className="flex h-10 overflow-hidden rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
+                <span className="flex h-11 overflow-hidden md:h-10 rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
                   <input type="number" aria-label="Share" value={pct} onChange={(e) => setPct(e.target.value)} min="0.01" max="100" step="0.01" disabled={saving}
                     className="w-full min-w-0 px-2.5 text-right text-sm tabular-nums outline-none" />
                   <span aria-hidden="true" className="flex items-center border-l border-gray-200 bg-cream px-2.5 text-sm text-secondary">%</span>
@@ -168,8 +168,8 @@ export default function WhoPaysCard({
               </>
             )}
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" disabled={saving} onClick={() => setOpenedAt(null)}>Cancel</Button>
-              <Button icon={<Check className="h-4 w-4" />} loading={saving} disabled={!picked || !(typed > 0)} onClick={() => void submit()}>
+              <Button variant="secondary" className="min-h-11 md:min-h-0" disabled={saving} onClick={() => setOpenedAt(null)}>Cancel</Button>
+              <Button className="min-h-11 md:min-h-0" icon={<Check className="h-4 w-4" />} loading={saving} disabled={!picked || !(typed > 0)} onClick={() => void submit()}>
                 Add payer
               </Button>
             </div>
@@ -183,7 +183,7 @@ export default function WhoPaysCard({
             {someLinesOwnSplit && <p className="text-sm text-secondary">Lines with their own payers are split below.</p>}
             {editable && (
               <>
-                <Button variant="secondary" className="self-start" icon={<Plus className="h-4 w-4" />} disabled={saving} onClick={openAdd}>Add a payer</Button>
+                <Button variant="secondary" className="min-h-11 self-start md:min-h-0" icon={<Plus className="h-4 w-4" />} disabled={saving} onClick={openAdd}>Add a payer</Button>
                 <p className="text-sm text-secondary">Split the whole sale by percent. You can also give one line its own payers.</p>
               </>
             )}
@@ -193,7 +193,7 @@ export default function WhoPaysCard({
             {bar(saved)}
             <div>{list(saved, editable)}</div>
             {editable && (
-              <Button variant="ghost" size="sm" className="self-start text-crx-green" icon={<Plus className="h-4 w-4" />} disabled={saving} onClick={openAdd}>
+              <Button variant="ghost" size="sm" className="min-h-11 self-start text-crx-green md:min-h-0" icon={<Plus className="h-4 w-4" />} disabled={saving} onClick={openAdd}>
                 Add a payer
               </Button>
             )}
@@ -206,7 +206,7 @@ export default function WhoPaysCard({
 
         {lineSplit && (
           <details open={someLinesOwnSplit || undefined} className="border-t border-gray-100 pt-3">
-            <summary className="cursor-pointer text-sm font-medium text-crx-green">Split by line</summary>
+            <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-crx-green md:min-h-0 md:py-0">Split by line</summary>
             {lineSplit}
           </details>
         )}

@@ -1352,7 +1352,7 @@ export default function OrderDetail() {
     const named = n ? `${n} ` : '';
     if (splitLock.kind === 'delivery') {
       const d = deliveries.find((x) => x.delivery_number === splitLock.number);
-      return { text: `Delivery ${named}is complete and billed. To change who pays, void its invoices first.`, href: d && `/deliveries/${d.id}`, linkLabel: n };
+      return { text: `Delivery ${named}is complete and billed. To change who pays, void its invoices or the delivery first.`, href: d && `/deliveries/${d.id}`, linkLabel: n };
     }
     const inv = invoices.find((x) => x.invoice_number === splitLock.number);
     const href = inv && `/invoices/${inv.id}`;

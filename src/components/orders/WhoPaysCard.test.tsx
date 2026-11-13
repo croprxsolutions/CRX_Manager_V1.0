@@ -35,8 +35,8 @@ describe('WhoPaysCard', () => {
   });
 
   it('locked card explains why and hides editing', () => {
-    render(<WhoPaysCard {...base} lock={{ text: 'Delivery DEL-00005 is complete and billed. To change who pays, void its invoices first.' }} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Locked. Delivery DEL-00005 is complete and billed. To change who pays, void its invoices first.');
+    render(<WhoPaysCard {...base} lock={{ text: 'Delivery DEL-00005 is complete and billed. To change who pays, void its invoices or the delivery first.' }} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Locked. Delivery DEL-00005 is complete and billed. To change who pays, void its invoices or the delivery first.');
     expect(screen.queryByRole('button', { name: 'Add a payer' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument();
   });

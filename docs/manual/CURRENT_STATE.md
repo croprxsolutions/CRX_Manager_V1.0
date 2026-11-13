@@ -284,10 +284,13 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
-- **Live Edge Function versions, read 2026-11-10 6:40 AM Central:** `create-user` v28, `setup-blend-tickets-storage` v22,
-  `process-blend-ticket` v31, `process-document` v24, `send-email` v30, `reset-user-password` v19, `epa-lookup` v9,
-  `customer-document-files` v6, `send-delivery-receipts` v3, all ACTIVE. Supabase's counter runs ahead of some numbers
-  recorded below (for example `send-email` "v28" on 2026-11-06 is live v30, last updated 10:22 AM that day); each
+- **Live Edge Function versions, read 2026-11-13 Central:** `create-user` v28, `setup-blend-tickets-storage` v22,
+  `process-blend-ticket` v31, `process-document` v24, `send-email` v31, `reset-user-password` v19, `epa-lookup` v10,
+  `customer-document-files` v6, `send-delivery-receipts` v4, all ACTIVE. Since the 2026-11-10 read, three moved:
+  `epa-lookup` v9 → v10 (last updated 2026-11-12 11:21 AM Central, the day DM-4 part 2, PR #1836, merged), and
+  `send-email` v30 → v31 and `send-delivery-receipts` v3 → v4 (both 2026-11-12 4:59 PM Central, the redeploys B-3,
+  PR #1848, called for); their files were not compared with the repo. Supabase's counter runs ahead of some numbers
+  recorded below (for example `send-email` "v28" on 2026-11-06 was live v30, last updated 10:22 AM that day); each
   function's last update matches a deploy recorded here except `process-blend-ticket`, next.
 - **2026-11-08 7:37 PM Central (KI-32, PR #1657), recorded 2026-11-10:** `process-blend-ticket` was redeployed so the
   scanner matches every active product. Live v31's files (`index.ts`, `guards.ts`, `_shared/` `auth.ts`, `cors.ts`,

@@ -59,6 +59,22 @@ function eq(a, b, m) { assert.equal(a, b, m); pass++; }
   ok(!blocked("gh api repos/o/r/pulls -f base=staging -f head=claude/x -f title=t"), "raw REST create into staging allowed");
   ok(!blocked(`gh pr create --base main --title "cd into test folder" --fill`, "hotfix/x"), "quoted 'cd' in a title is not a folder change");
   ok(blocked("gh pr create --base main --head hotfix/a/b --fill"), "hotfix name must be one segment, as CI requires");
+  // Luna r2
+  ok(blocked("gh pr create --base production --fill"), "a base other than staging/main blocked");
+  ok(blocked("gh pr edit 12 --base production"), "retarget onto another branch blocked");
+  ok(blocked("gh pr create --base $BASE --fill"), "shell-expanded base blocked");
+  ok(blocked("gh pr create --base main --head hotfix/$NAME --fill"), "shell-expanded head blocked");
+  ok(blocked("gh pr create --base staging --base main --fill"), "repeated --base: last value (main) wins");
+  ok(!blocked("gh pr create --base main --base staging --fill"), "repeated --base: last value (staging) wins");
+  ok(blocked("gh api repos/o/r/pulls --field=base=main -f head=claude/x"), "--field=base=main blocked");
+  ok(blocked("gh api repos/o/r/pulls -F base=main"), "-F base=main blocked");
+  ok(blocked("gh api repos/o/r/pulls --raw-field base=production"), "raw-field into another branch blocked");
+  ok(blocked("gh api repos/o/r/pulls --input body.json"), "--input body cannot be checked, blocked");
+  ok(blocked(`gh api graphql -f query='mutation { createPullRequest(input: {}) { clientMutationId } }'`), "GraphQL createPullRequest blocked");
+  ok(!blocked("gh api repos/o/r/pulls/12"), "reading a PR via api allowed");
+  ok(!blocked("gh pr create --help"), "--help allowed");
+  ok(!blocked("echo gh pr create --base main"), "echo of the text is not a PR");
+  ok(blocked("GH_REPO=o/r gh pr create --base main --fill"), "env assignment before gh still checked");
 }
 
 // ── direct dangerous-command patterns (unchanged behavior) ────────────────

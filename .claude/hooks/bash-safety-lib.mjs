@@ -516,22 +516,27 @@ const FOLDER_CHANGE_HEADS = new Set(["cd", "pushd", "set-location", "sl", "chdir
 function unquoteWord(word) {
   return String(word).replace(/^["']|["']$/g, "");
 }
+// The LAST value wins, as it does for gh when a flag repeats.
 function prFlagValue(args, long, short) {
+  let value = null;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === long || arg === short) return args[index + 1] ?? "";
-    if (arg.startsWith(`${long}=`)) return arg.slice(long.length + 1);
-    if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) return arg.slice(short.length).replace(/^=/, "");
+    if (arg === long || arg === short) value = args[index + 1] ?? "";
+    else if (arg.startsWith(`${long}=`)) value = arg.slice(long.length + 1);
+    else if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) value = arg.slice(short.length).replace(/^=/, "");
   }
-  return null;
+  return value;
 }
+const branchName = (value) => String(value).replace(/^refs\/heads\//, "");
+// A REST field naming the PR's base: `-f base=x`, `--field=base=x`, `-fbase=x`.
+const REST_BASE_FIELD_RE = /^(?:--(?:raw-)?field=|-[fF])?base=(.*)$/;
 function currentGitBranch(cwd) {
   const result = spawnSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 5_000 });
   return result.status === 0 ? result.stdout.trim() : "";
 }
 export function checkPrBase(cmd, cwd, branchOf = currentGitBranch) {
   const text = String(cmd || "");
-  if (!/\b(?:pr|pulls)\b/.test(text)) return null;
+  if (!/\b(?:pr|pulls)\b|createPullRequest|baseRefName/i.test(text)) return null;
   let commands = [text];
   try {
     const nested = expandNestedCommands(text);
@@ -551,31 +556,44 @@ function checkPrBaseText(text, cwd, branchOf) {
   for (const segment of splitShellSegments(text)) {
     const words = splitShellWords(segment.trim()).map(unquoteWord);
     if (FOLDER_CHANGE_HEADS.has(String(words[0] || "").toLowerCase())) { changesFolder = true; continue; }
-    const ghIndex = words.findIndex((word) => /^gh(?:\.exe|\.cmd)?$/i.test(word.split(/[\\/]/).pop()));
-    if (ghIndex < 0) continue;
-    // `gh api repos/o/r/pulls -f base=main`: the REST create call, same rule.
-    if (words[ghIndex + 1] === "api" && words.some((word) => /\/pulls(?:\/\d+)?\/?$/.test(word)) &&
-      words.some((word) => /^base=(?:refs\/heads\/)?main$/.test(word))) {
-      return "Blocked a raw `gh api …/pulls` call aimed at `main`. Use `gh pr create --base staging` (a hotfix: `--base main --head hotfix/<name>`).";
+    // Only the segment's command word counts (after `A=b` assignments), so
+    // `echo gh pr create` is text, not a PR.
+    let ghIndex = 0;
+    while (ghIndex < words.length && /^[A-Za-z_]\w*=/.test(words[ghIndex])) ghIndex += 1;
+    if (!/^gh(?:\.exe|\.cmd)?$/i.test(String(words[ghIndex] || "").split(/[\\/]/).pop())) continue;
+    if (words[ghIndex + 1] === "api") {
+      if (/createPullRequest|baseRefName/i.test(segment)) {
+        return "Blocked a GraphQL call that opens a PR or sets its target branch: that branch cannot be checked here. Use `gh pr create --base staging`.";
+      }
+      if (!words.some((word) => /\/pulls(?:\/\d+)?\/?$/.test(word))) continue;
+      const bases = words.map((word) => REST_BASE_FIELD_RE.exec(word)?.[1]).filter((value) => value !== undefined);
+      if (words.some((word) => word === "--input" || word.startsWith("--input=")) || bases.some((value) => branchName(value) !== "staging")) {
+        return "Blocked a raw `gh api …/pulls` call that sets a PR's target branch to something other than `staging`. Use `gh pr create --base staging` (a hotfix: `--base main --head hotfix/<name>`).";
+      }
+      continue;
     }
     const prIndex = words.indexOf("pr", ghIndex + 1);
     if (prIndex < 0) continue;
     const sub = words[prIndex + 1];
     if (!["create", "new", "edit"].includes(sub)) continue;
     const args = words.slice(prIndex + 2);
+    if (args.includes("--help") || args.includes("-h")) continue;
     const base = prFlagValue(args, "--base", "-B");
-    const toMain = base !== null && base.replace(/^refs\/heads\//, "") === "main";
+    // A shell-expanded value (`$BASE`) is not "staging" or "main", so it is refused below.
+    if (base !== null && branchName(base) === "staging") continue;
     if (sub === "edit") {
-      if (toMain) return "Blocked moving a PR onto `main`. Staging-first: feature PRs target `staging`; only `hotfix/<name>` and `release/next` go into `main` (AGENTS.md, ship.md › Staging).";
-      continue;
+      if (base === null) continue;
+      return "Blocked moving a PR onto a branch other than `staging`. Staging-first: feature PRs target `staging`; a hotfix opens straight into `main` from `hotfix/<name>` (AGENTS.md, ship.md › Staging).";
     }
     if (base === null || base === "") {
       return "Blocked `gh pr create` with no `--base`: GitHub's default branch is `main`, so it would open into `main`. Add `--base staging` (a hotfix uses `--base main --head hotfix/<name>`).";
     }
-    if (!toMain) continue;
+    if (branchName(base) !== "main") {
+      return `Blocked a PR into \`${base}\`. Staging-first: PRs open into \`staging\`, or into \`main\` from a \`hotfix/<name>\` branch.`;
+    }
     const explicitHead = prFlagValue(args, "--head", "-H");
     const head = explicitHead !== null ? explicitHead.replace(/^[^:]+:/, "") : (changesFolder ? "" : branchOf(cwd));
-    if (!MAIN_PR_HEAD_RE.test(head)) {
+    if (!MAIN_PR_HEAD_RE.test(head) || /[$`%]/.test(head)) {
       return `Blocked a PR into \`main\` from \`${head || "an unknown branch"}\`. Staging-first: feature PRs use \`--base staging\`; only a \`hotfix/<name>\` branch cut from \`main\` (or the bot's \`release/next\`) opens into \`main\`, and Taha or Mason merges it.`;
     }
   }

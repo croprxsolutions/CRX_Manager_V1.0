@@ -59,6 +59,16 @@ function RegistrationNotices({ check, hidden, productNumbers, cancelled }: {
   );
 }
 
+/** A number per brands reply, so each reload (a new reply object) checks the registrations again (Sol r2). */
+const versions = new WeakMap<DeliveryBrands, number>();
+let lastVersion = 0;
+function brandsVersion(brands: DeliveryBrands): number {
+  const known = versions.get(brands);
+  if (known !== undefined) return known;
+  versions.set(brands, ++lastVersion);
+  return lastVersion;
+}
+
 const FIELD_CLASS = 'min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-base text-nav-dark focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green disabled:bg-gray-50';
 
 interface DeliveryBrandPickerProps {
@@ -80,7 +90,7 @@ interface DeliveryBrandPickerProps {
 export default function DeliveryBrandPicker({ brands, drafts, onChange, disabled, fullQuantity, showLine = isBrandedLine }: DeliveryBrandPickerProps) {
   const lines = brands.lines.filter(showLine);
   // Every line's product is checked, so a cancelled product on a line with no brand list still warns (Sol r1).
-  const registrations = useBrandCancellations(brands.lines, drafts);
+  const registrations = useBrandCancellations(brands.lines, drafts, brands.delivery_id, String(brandsVersion(brands)));
   const { cancelled, productNumbers, check } = registrations;
   const isCancelled = (epa: string | null | undefined) => cancelled.has(normalizeEpaRegistration(epa) ?? '');
   const hidden = brands.lines.filter((l) => !showLine(l) && isCancelled(productNumbers.get(l.product_id)));

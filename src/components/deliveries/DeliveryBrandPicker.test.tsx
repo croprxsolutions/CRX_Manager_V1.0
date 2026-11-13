@@ -163,6 +163,29 @@ describe('DeliveryBrandPicker cancelled-registration warning (#1849)', () => {
     expect((await screen.findByText(/Checking EPA registration status/))).toBeTruthy();
   });
 
+  it('a brand reload rereads the product number and its status (Sol r2)', async () => {
+    const pick = { L1: [{ brandId: 'b2', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '' }] };
+    const props = { disabled: false, fullQuantity: (l: { quantity: number }) => l.quantity, onChange: () => undefined, drafts: pick };
+    const { rerender } = render(<DeliveryBrandPicker brands={brands} {...props} />);
+    await waitFor(() => expect(db.rpc).toHaveBeenCalled());
+    expect(screen.queryByTestId('cancelled-registration-product')).toBeNull();
+    db.products.mockResolvedValue({ data: [{ id: 'P1', epa_registration: '777-1' }, { id: 'P2', epa_registration: null }], error: null });
+    db.rpc.mockResolvedValue({ data: [cancelled('777-1', '2026-11-01')], error: null });
+    rerender(<DeliveryBrandPicker brands={{ ...brands }} {...props} />);
+    expect((await screen.findByTestId('cancelled-registration-product')).textContent).toContain('777-1');
+  });
+
+  it('a warning once shown stays when a later lookup fails (Sol r2, Mason 2026-11-12)', async () => {
+    const pick = { L1: [{ brandId: 'b1', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '' }] };
+    const props = { disabled: false, fullQuantity: (l: { quantity: number }) => l.quantity, onChange: () => undefined, drafts: pick };
+    const { rerender } = render(<DeliveryBrandPicker brands={brands} {...props} />);
+    await screen.findByTestId('cancelled-registration-pick');
+    db.rpc.mockResolvedValue({ data: null, error: new Error('offline') });
+    rerender(<DeliveryBrandPicker brands={{ ...brands }} {...props} />);
+    await screen.findByTestId('registration-check-failed');
+    expect(screen.getByTestId('cancelled-registration-pick').textContent).toContain('524-475');
+  });
+
   it('says it could not check when the lookup never answers', async () => {
     vi.useFakeTimers();
     db.rpc.mockImplementation(() => new Promise(() => undefined));

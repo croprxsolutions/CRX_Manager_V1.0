@@ -1262,6 +1262,7 @@ export default function Invoices() {
       {showBatchPrintDialog && <InvoicePrintDialog
         open={showBatchPrintDialog}
         onClose={() => setShowBatchPrintDialog(false)}
+        invoiceNumbers={selectedInvoices.map((i) => i.invoice_number)}
         invoiceType={anySelectedIsFieldApp ? 'field_application' : 'chemical_sale'}
         hasShares={anySelectedHasShares}
         // Mason, 9 Nov: a Bill Split payer's invoice shows every payer, so the table is on unless unticked.

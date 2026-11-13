@@ -59,6 +59,7 @@ import {
   serializeGuardrailMode,
   type GuardrailMode,
 } from '../lib/labelGuardrailSetting';
+import { centsTimesQuantity, formatCents } from '../lib/money';
 import type { Profile, AppSetting, UserRole } from '../types';
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -67,6 +68,9 @@ const ROLE_LABELS: Record<UserRole, string> = {
   driver: 'Driver',
   applicator: 'Applicator',
 };
+
+// The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20261231120000).
+const SALES_TAX_RATE_PATTERN = /^[0-9]{1,2}(\.[0-9]{1,3})?$/;
 
 const FIELD_CLASS =
   'h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm text-nav-dark placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500';
@@ -545,10 +549,9 @@ export default function SettingsPage() {
     setSavingDefaults(false);
   };
 
-  // The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20261231120000).
   const saveSalesTax = async () => {
     const rate = salesTaxRate.trim();
-    if (!/^[0-9]{1,2}(\.[0-9]{1,3})?$/.test(rate)) {
+    if (!SALES_TAX_RATE_PATTERN.test(rate)) {
       toast('error', 'Enter the sales tax rate as a percentage from 0 to 99.999, for example 6.25.');
       return;
     }
@@ -1098,6 +1101,55 @@ export default function SettingsPage() {
       <>
       <SettingsSection id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
         <SubPart
+          title="Sales tax"
+          help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
+          dirty={isDirty('salesTax')}
+          saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
+        >
+          <Row label="Sales tax rate" htmlFor="sales-tax-rate">
+            <span className="inline-flex rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
+              <input
+                id="sales-tax-rate"
+                type="text"
+                inputMode="decimal"
+                value={salesTaxRate}
+                disabled={savingSalesTax}
+                onChange={(e) => setSalesTaxRate(e.target.value)}
+                className="h-9 min-h-11 w-24 rounded-l-lg bg-transparent px-3 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:text-gray-500 md:min-h-0"
+              />
+              <span className="flex items-center rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">%</span>
+            </span>
+            {/* What the typed rate means before it is saved: tax on $100.00, rounded to the cent as the server rounds it. */}
+            {SALES_TAX_RATE_PATTERN.test(salesTaxRate.trim()) && (
+              <p className="rounded-lg bg-cream px-3 py-1.5 text-[13px] text-secondary">
+                Example: a $100.00 taxed sale adds <strong className="font-semibold text-nav-dark">{formatCents(centsTimesQuantity(100, salesTaxRate.trim()))}</strong>
+              </p>
+            )}
+          </Row>
+        </SubPart>
+
+        {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
+        <SubPart
+          title="Automatic invoice drafts"
+          help="Drafts only, never posted on their own. A draft waits in Ready to Post on the Office Cockpit for someone to check and post. If pricing can't be worked out, the job still completes and the office is told to bill it by hand."
+          dirty={isDirty('autoDraft')}
+          saveButton={<SaveButton label="Save invoice drafts" dirty={isDirty('autoDraft')} saving={savingAutoDraft} onClick={saveAutoDraft} />}
+        >
+          <Row label="When a job is completed" htmlFor="auto-draft-enabled">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                id="auto-draft-enabled"
+                type="checkbox"
+                checked={autoDraftEnabled}
+                onChange={(e) => setAutoDraftEnabled(e.target.checked)}
+                className={CHECK_CLASS}
+              />
+              Create a draft invoice
+            </label>
+          </Row>
+        </SubPart>
+
+        <SubPart
           title="Fuel surcharge"
           help="Off by default. Added to field-application invoices only when it is on and you enter your own rate; CropRX never sets one for you."
           dirty={isDirty('fuel')}
@@ -1157,27 +1209,6 @@ export default function SettingsPage() {
           </Row>
         </SubPart>
 
-        {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
-        <SubPart
-          title="Automatic invoice drafts"
-          help="Drafts only, never posted on their own. A draft waits in Ready to Post on the Office Cockpit for someone to check and post. If pricing can't be worked out, the job still completes and the office is told to bill it by hand."
-          dirty={isDirty('autoDraft')}
-          saveButton={<SaveButton label="Save invoice drafts" dirty={isDirty('autoDraft')} saving={savingAutoDraft} onClick={saveAutoDraft} />}
-        >
-          <Row label="When a job is completed" htmlFor="auto-draft-enabled">
-            <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
-                id="auto-draft-enabled"
-                type="checkbox"
-                checked={autoDraftEnabled}
-                onChange={(e) => setAutoDraftEnabled(e.target.checked)}
-                className={CHECK_CLASS}
-              />
-              Create a draft invoice
-            </label>
-          </Row>
-        </SubPart>
-
         <SubPart
           title="Reminders and quote defaults"
           help="Quotes valid for sets where a quote’s “Pick a date” expiry starts (quotes still default to season end). New customers start on the Default price tier."
@@ -1223,26 +1254,6 @@ export default function SettingsPage() {
               <option value="2">Tier 2</option>
               <option value="3">Tier 3</option>
             </select>
-          </Row>
-        </SubPart>
-
-        <SubPart
-          title="Sales tax"
-          help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
-          dirty={isDirty('salesTax')}
-          saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
-        >
-          <Row label="Sales tax rate" htmlFor="sales-tax-rate">
-            <input
-              id="sales-tax-rate"
-              type="text"
-              inputMode="decimal"
-              value={salesTaxRate}
-              disabled={savingSalesTax}
-              onChange={(e) => setSalesTaxRate(e.target.value)}
-              className={`${FIELD_CLASS} w-24`}
-            />
-            <span className="text-[13px] text-secondary">%</span>
           </Row>
         </SubPart>
       </SettingsSection>

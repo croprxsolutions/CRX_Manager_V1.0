@@ -61,6 +61,16 @@ const LIVE_FUNCTIONS = new Set(LIVE_PG_PROC_NAMES_CSV.split(','));
 const QUEUED_MIGRATION_FUNCTIONS: Record<string, string> = {};
 const QUEUED_FUNCTIONS = new Set(Object.keys(QUEUED_MIGRATION_FUNCTIONS));
 
+// Staging-first release flow (Mason approved 2026-11-10): the staging DB job applies every checked-in migration when
+// a PR merges into staging, so a PR into staging (or a push to it) may call an RPC that a checked-in migration creates.
+// Into main (and in a local run) the live rule stands: the release PR can't merge until the function is live and the
+// snapshot above is regenerated, so production never gets a caller before its function.
+const RPC_GATE_TARGET = process.env.GITHUB_BASE_REF || process.env.GITHUB_REF_NAME || '';
+
+function rpcCallAllowed(rpc: string, live: Set<string>, fromMigrations: Set<string>, target: string): boolean {
+  return live.has(rpc) || (target === 'staging' && fromMigrations.has(rpc));
+}
+
 // -------------------------------------------------------------------------
 // Fixture-array extraction from sibling test files (source text, not import)
 // -------------------------------------------------------------------------
@@ -69,6 +79,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 function sourceOf(file: string): string {
   return readFileSync(join(HERE, file), 'utf8');
+}
+
+/** Every function a checked-in migration creates (lower case). */
+function migrationCreatedFunctions(): Set<string> {
+  const migrationsDir = join(HERE, '..', '..', 'supabase', 'migrations');
+  return new Set(readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).flatMap((f) =>
+    [...readFileSync(join(migrationsDir, f), 'utf8').matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?(\w+)"?\s*\(/gi)]
+      .map((m) => m[1].toLowerCase())));
 }
 
 /** Find every literal `.rpc('name')` call in production source files. */
@@ -378,11 +396,29 @@ describe('Live pg_proc snapshot integrity', () => {
     }
   });
 
-  it('every literal production RPC call exists live or in a verified queued migration', () => {
+  it('every literal production RPC call exists live (into staging: or in a checked-in migration)', () => {
     const calls = productionRpcCalls();
     expect(calls.length).toBeGreaterThanOrEqual(200); // vacuous-pass guard
-    expect(calls.filter((rpc) => !LIVE_FUNCTIONS.has(rpc) && !QUEUED_FUNCTIONS.has(rpc))).toEqual([]);
+    const fromMigrations = migrationCreatedFunctions();
+    const live = new Set([...LIVE_FUNCTIONS, ...QUEUED_FUNCTIONS]);
+    expect(calls.filter((rpc) => !rpcCallAllowed(rpc, live, fromMigrations, RPC_GATE_TARGET))).toEqual([]);
   }, 20_000);
+
+  it('into staging, allows an RPC a checked-in migration creates; into main, only a live one', () => {
+    const live = new Set(['get_x']);
+    const fromMigrations = new Set(['set_new_thing']);
+    expect(rpcCallAllowed('get_x', live, fromMigrations, 'main')).toBe(true);
+    expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'main')).toBe(false);
+    expect(rpcCallAllowed('set_new_thing', live, fromMigrations, '')).toBe(false);
+    expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'staging')).toBe(true);
+    expect(rpcCallAllowed('no_such_rpc', live, fromMigrations, 'staging')).toBe(false);
+  });
+
+  it('reads the functions every checked-in migration creates', () => {
+    const created = migrationCreatedFunctions();
+    expect(created.has('save_invoice')).toBe(true);
+    expect(created.size).toBeGreaterThan(500);
+  });
 
   it('does not commit queued RPC exceptions', () => {
     // A non-empty map is only safe as a short-lived local bridge while testing

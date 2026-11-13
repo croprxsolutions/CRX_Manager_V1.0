@@ -1632,7 +1632,9 @@
     "invoice_line_rup_captures",
     "invoice_line_share_snapshots",
     "invoice_line_shares",
+    "invoice_sales_tax_rates",
     "invoice_shares",
+    "invoice_standing_discount_rates",
     "job_applied_record_crew",
     "job_attachments",
     "job_chemicals",
@@ -2579,7 +2581,9 @@
         "freight",
         "application_fee",
         "service",
-        "other"
+        "other",
+        "standing_discount",
+        "sales_tax"
       ],
       "constraints": [
         "invoice_items_charge_type_check"
@@ -4792,7 +4796,7 @@
     {
       "table": "invoice_items",
       "constraint": "invoice_items_charge_line_shape_chk",
-      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (unit_price_cents > 0) AND (extended_cents = unit_price_cents))))",
+      "def": "CHECK (((charge_type IS NULL) OR ((product_id IS NULL) AND (order_item_id IS NULL) AND (return_credit_source_item_id IS NULL) AND (description ~ '[^[:space:]]'::text) AND (quantity = (1)::numeric) AND (cost_cents = 0) AND (is_application_fee IS NOT TRUE) AND (extended_cents = unit_price_cents) AND\nCASE\n    WHEN (charge_type = 'standing_discount'::text) THEN (unit_price_cents < 0)\n    ELSE (unit_price_cents > 0)\nEND)))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
@@ -6438,6 +6442,12 @@
       "constraint": "write_offs_amount_cents_check",
       "def": "CHECK ((amount_cents > 0))",
       "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "app_settings",
+      "constraint": "app_settings_sales_tax_rate_chk",
+      "def": "CHECK (((setting_key <> 'sales_tax_rate'::text) OR (setting_value ~ '^[0-9]{1,2}(\\.[0-9]{1,3})?$'::text)))",
+      "reason": "regex on one setting key — not an IN-list; hooks do NOT validate this constraint"
     }
   ],
   "not_null_columns": {
@@ -6984,7 +6994,8 @@
         "updated_at",
         "prepay_balance_cents",
         "crops",
-        "row_version"
+        "row_version",
+        "standing_discount_pct"
       ]
     },
     "cycle_count_items": {
@@ -7584,6 +7595,15 @@
         "created_at"
       ]
     },
+    "invoice_sales_tax_rates": {
+      "no_default": [
+        "invoice_id",
+        "rate_pct"
+      ],
+      "with_default": [
+        "set_at"
+      ]
+    },
     "invoice_shares": {
       "no_default": [
         "invoice_id",
@@ -7595,6 +7615,15 @@
       "with_default": [
         "id",
         "created_at"
+      ]
+    },
+    "invoice_standing_discount_rates": {
+      "no_default": [
+        "invoice_id",
+        "rate_pct"
+      ],
+      "with_default": [
+        "set_at"
       ]
     },
     "invoices": {
@@ -8023,7 +8052,8 @@
         "is_planned",
         "booking_draw",
         "pricing_status",
-        "row_version"
+        "row_version",
+        "sales_tax"
       ]
     },
     "payments": {
@@ -9979,7 +10009,8 @@
       "finance_charge_grace_days",
       "default_application_service_id",
       "crops",
-      "row_version"
+      "row_version",
+      "standing_discount_pct"
     ],
     "cycle_count_items": [
       "id",
@@ -10659,6 +10690,11 @@
       "created_by",
       "created_at"
     ],
+    "invoice_sales_tax_rates": [
+      "invoice_id",
+      "rate_pct",
+      "set_at"
+    ],
     "invoice_shares": [
       "id",
       "invoice_id",
@@ -10672,6 +10708,12 @@
       "created_at",
       "price_per_acre_cents",
       "pricing_note"
+    ],
+    "invoice_standing_discount_rates": [
+      "invoice_id",
+      "rate_pct",
+      "set_by",
+      "set_at"
     ],
     "invoices": [
       "id",
@@ -11195,7 +11237,8 @@
       "pricing_reminder_sent_at",
       "pricing_escalation_sent_at",
       "needs_split_billing",
-      "row_version"
+      "row_version",
+      "sales_tax"
     ],
     "payments": [
       "id",

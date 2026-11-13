@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-13 for the live ledger only (latest row `20261113011216`); KI-30 EPA numbers retain 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-13 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805) | 97 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md)) | 99 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -657,7 +657,9 @@ Revenue counts posted/overdue/paid invoices by invoice date; commissions count e
 date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
 (only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
 `get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Mason decided 2026-11-10 (To-Do decision 15,
-DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Not built yet. First in the sweep's fix order.
+DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Refined 2026-11-13 (DECISION_LOG,
+"Split by share billed"): a partly billed order counts only the share of its commission matching the share billed in
+that period, so checking that an invoice exists is not enough. Not built yet. First in the sweep's fix order.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
 **MED (latent) · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2) · unassigned**
@@ -716,6 +718,25 @@ Since `20261029160000_cap_order_invoices_at_delivered`, order invoices may bill 
 `create_invoice_from_order` refuses any order with an active delivery. Together these leave it unable to bill any
 product line (delivery-first billing, by design). Fix: retire the function or document that it bills non-product
 charges only.
+
+### KI-154 — A commission can be paid out before the customer has paid
+**MED · OPEN · money/commissions · found 2026-11-11 ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 2) · unassigned**
+The 2026-11-09 decision (CRX Notes, "commission after discount") says commission is paid only after the customer pays.
+`_create_commission_payment_intent_impl_20260809` (newest body in `20261204100000_ki18_batch1_chicago_today.sql`)
+checks only that each selected commission is still `pending` and that the payout balances; it never looks at the
+order's invoices or payments. Also unsettled: how partial deliveries, partial payments, corrections, cancellations and
+credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
+is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
+same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
+
+### KI-155 — The cut-over plan has two finish lines and no rules for opening-balance exceptions
+**MED · OPEN · launch/money · found 2026-11-11 ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 6) · Mason + agents**
+Newer direction: chemical-sale trials from 2026-12-15, field invoicing before February, opening balances instead of a
+full Chem Man import, accounting summaries until the accountant picks the QuickBooks approach. Older plans still say
+all billing moves January 1 with an automatic QuickBooks Desktop connection. The opening-balance method does not yet
+say how to carry old overdue amounts and their aging, customer credits, later checks paying old invoices, returns
+against Chem Man sales, work entered during the handover, and which system bills each trial sale (so it is billed
+once). Fix later: one current cut-over procedure (To-Do 16.3, 16.4) that covers these, rehearsed and reconciled.
 
 ## Inventory and deliveries
 
@@ -887,7 +908,9 @@ the route wrapper `src/components/ProductDetailRoute.tsx` shows "Product not fou
 ### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
 **LOW · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
 The value bug itself is fixed (closed list, item 21). What remains is D12 item 7: label the Inventory page card and the
-Reports Inventory Cost total as a value at price-list cost, not a book or accounting value.
+Reports Inventory Cost total as a value at price-list cost, not a book or accounting value. The same applies to margin
+and profit figures built on the saved pricing cost: label them "margin at saved pricing cost", since that cost is not
+necessarily what the supplier bill said ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 7).
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
 **MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**

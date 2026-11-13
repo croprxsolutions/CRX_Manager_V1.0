@@ -547,4 +547,15 @@ describe('product setup and import refusals (20261107090000)', () => {
     expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
       .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
   });
+
+  it('explains the sales tax box refusals (billing plan M4a)', () => {
+    expect(sanitizeError('SALES_TAX_NOT_ALLOWED: only an admin or the sale\'s own rep can change its sales tax'))
+      .toBe("Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved");
+    expect(sanitizeError('SALES_TAX_RATE_MISSING: set the sales tax rate in Settings first'))
+      .toBe('Set the sales tax rate in Settings first. No changes were saved');
+    expect(sanitizeError('SALES_TAX_STALE: this draft\'s sales tax is out of date; save it again, then post'))
+      .toBe("This draft's sales tax is out of date. Save it again, then post");
+    expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
+      .toBe("This sale is cancelled or voided, so its sales tax can't change");
+  });
 });

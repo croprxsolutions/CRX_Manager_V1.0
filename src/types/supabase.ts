@@ -2428,6 +2428,7 @@ export type Database = {
           row_version: number
           shipping_address: string | null
           soybean_acres: number | null
+          standing_discount_pct: number
           state: string | null
           total_acres: number | null
           updated_at: string
@@ -2462,6 +2463,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -2496,6 +2498,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -5007,6 +5010,68 @@ export type Database = {
           },
         ]
       }
+      invoice_sales_tax_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_sales_tax_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_standing_discount_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+          set_by: string | null
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_standing_discount_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_standing_discount_rates_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices: {
         Row: {
           application_date: string | null
@@ -7091,6 +7156,7 @@ export type Database = {
           pricing_status: string
           program_notes: string | null
           quote_id: string | null
+          sales_tax: boolean
           salesman_id: string | null
           season: number | null
           status: string
@@ -7119,6 +7185,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -7147,6 +7214,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -15971,6 +16039,22 @@ export type Database = {
           p_idempotency_key?: string
           p_override_acres: number
           p_performed_by?: string
+        }
+        Returns: Json
+      }
+      set_invoice_standing_discount: {
+        Args: {
+          p_idempotency_key: string
+          p_invoice_id: string
+          p_pct: number | null
+        }
+        Returns: Json
+      }
+      set_order_sales_tax: {
+        Args: {
+          p_idempotency_key: string
+          p_order_id: string
+          p_sales_tax: boolean
         }
         Returns: Json
       }

@@ -2,7 +2,7 @@
 // Self-test for next-migration-stamp's choice logic with fixture stamp lists.
 // Run: node scripts/next-migration-stamp.test.mjs
 import assert from "node:assert/strict";
-import { laterStamps, nextStamp, stampOf } from "./next-migration-stamp.mjs";
+import { laterStamps, nextStamp, stampOf, hotfixStamp } from "./next-migration-stamp.mjs";
 
 const NOW = new Date("2026-11-02T12:00:30Z");
 const fixture = [
@@ -45,4 +45,13 @@ assert.deepEqual(laterStamps(fixture, "20261102180000"), []);
 // A stamp only in worktrees names one of them.
 assert.deepEqual(laterStamps([{ stamp: "20261103000000", source: "worktree C:/b" }, { stamp: "20261103000000", source: "worktree C:/a" }], "20261102000000"), ["20261103000000 (worktree C:/a, +1 more)"]);
 
+
+// #1838 HIGH 1: a hotfix stamp sits just above main's newest (and live's), below the oldest one waiting on staging.
+assert.equal(hotfixStamp({ mainTop: "20270109100000" }), "20270109100100");
+assert.equal(hotfixStamp({ mainTop: "20270109100000", live: "20270109120000" }), "20270109120100");
+assert.equal(hotfixStamp({ mainTop: "20270109100000", taken: new Set(["20270109100100"]) }), "20270109100200");
+assert.equal(hotfixStamp({ mainTop: "20270109100000", ceiling: "20270110000000" }), "20270109100100");
+assert.throws(() => hotfixStamp({ mainTop: "20270109100000", ceiling: "20270109100001" }), /no free stamp/);
+assert.equal(hotfixStamp({ mainTop: "20270109105930" }), "20270109110000");
+assert.equal(hotfixStamp({ mainTop: "20270109100030", ceiling: "20270109100100" }), "20270109100031", "a free second when no whole minute fits");
 console.log("next-migration-stamp tests passed");

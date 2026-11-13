@@ -250,6 +250,11 @@ export default function CustomerDetail() {
   // of the form.
   const [crops, setCrops] = useState<CropValue[]>([]);
   const [cropSaving, setCropSaving] = useState<CropValue | null>(null);
+  // The standing discount (billing plan M4b) saves on its own, as crops do: save_customer doesn't carry it.
+  // null = not being edited (the field shows the saved rate).
+  const [discountDraft, setDiscountDraft] = useState<string | null>(null);
+  const [discountSaving, setDiscountSaving] = useState(false);
+  useEffect(() => { setDiscountDraft(null); }, [id]);
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
@@ -276,6 +281,8 @@ export default function CustomerDetail() {
   const applyingDefaultTierRef = useRef(false);
   // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
   const loadedCustomerRef = useRef<typeof customer | null>(null);
+  // Set by a standing discount save on a clean form: the next customer change is that save, not an edit.
+  const keepCleanAfterDiscountRef = useRef(false);
   const loadedAddressesRef = useRef<typeof addresses | null>(null);
   const suppressDirtyUntilReloadSettlesRef = useRef(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
@@ -427,6 +434,10 @@ export default function CustomerDetail() {
     }
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    if (keepCleanAfterDiscountRef.current) {
+      keepCleanAfterDiscountRef.current = false;
+      loadedCustomerRef.current = customer;
+    }
     if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
     setIsDirty(true);
   }, [customer, addresses]);
@@ -1248,6 +1259,60 @@ export default function CustomerDetail() {
     }
   };
 
+  const saveStandingDiscount = async () => {
+    if (!id || isNew || discountDraft === null || discountSaving) return;
+    const text = discountDraft.trim();
+    const pct = Number(text);
+    // The database rule: 0 to 100, at most two decimals (customers_standing_discount_pct_range, numeric(5,2)).
+    if (!/^[0-9]{1,3}(\.[0-9]{1,2})?$/.test(text) || pct > 100) {
+      toast('error', 'Enter a standing discount from 0 to 100%, with at most two decimals.');
+      return;
+    }
+    setDiscountSaving(true);
+    try {
+      const previousRowVersion = customerRowVersionRef.current;
+      const result = await supabase
+        .from('customers')
+        .update({ standing_discount_pct: pct })
+        .eq('id', id)
+        .select('*');
+      checkMutationResult(result, 'update customer standing discount');
+      // The page moved to another customer meanwhile: nothing here may land on that one.
+      if (currentIdRef.current !== id) return;
+      const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
+      const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
+      customerRowVersionRef.current = rowVersionResult.rowVersion;
+      // Saved: an otherwise untouched form stays clean (no unsaved-changes prompt on leaving). The dirty
+      // check below adopts the committed customer as the loaded copy, after the update (StrictMode-safe).
+      keepCleanAfterDiscountRef.current = !isDirty;
+      setCustomer((c) => ({ ...c, standing_discount_pct: pct }));
+      setDiscountDraft(null);
+      if (rowVersionResult.kind === 'recovery') {
+        // Same as a crop change: committed, but another edit may have landed at the same time.
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', 'The standing discount was saved, but another customer edit may have completed at the same time. Your current edits were kept; reload before saving other customer changes.');
+      } else {
+        toast('success', `Standing discount set to ${pct}%. New sales use it; existing invoices keep their rate.`);
+      }
+      // The rate is saved: a failed activity entry must not read as a failed save.
+      if (profile?.id) {
+        void Promise.resolve(logActivity({
+          event: 'customer_updated',
+          description: `Standing discount set to ${pct}%`,
+          performedBy: profile.id,
+          entityType: 'customer',
+          customerId: id,
+        })).catch(() => {});
+      }
+    } catch (error: unknown) {
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerDetail.saveStandingDiscount' } });
+      toast('error', sanitizeError(error));
+    } finally {
+      setDiscountSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
   }
@@ -1431,9 +1496,40 @@ export default function CustomerDetail() {
                   update('credit_limit_cents', cents);
                 }}
               />
+              {!isNew && (
+                <div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Input
+                        label="Standing discount (%)"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        disabled={!isAdmin || discountSaving}
+                        value={discountDraft ?? String(customer.standing_discount_pct ?? 0)}
+                        onChange={(e) => setDiscountDraft(e.target.value)}
+                      />
+                    </div>
+                    {isAdmin && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        showChevron={false}
+                        loading={discountSaving}
+                        disabled={discountDraft === null || Number(discountDraft) === Number(customer.standing_discount_pct ?? 0)}
+                        onClick={saveStandingDiscount}
+                      >
+                        Save discount
+                      </Button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-secondary">Off product lines on new chemical sales, before tax.</p>
+                </div>
+              )}
               {!isAdmin && (
                 <p className="text-xs text-secondary sm:col-span-2">
-                  Only an admin can change a customer&apos;s price tier and credit limit.
+                  Only an admin can change a customer&apos;s price tier, credit limit and standing discount.
                 </p>
               )}
               <Input

@@ -30,7 +30,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
@@ -51,6 +51,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
+import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -1225,7 +1226,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           footer_notes: invoice.footer_notes || null,
         };
 
-        const itemsPayload = items.map((it, idx) => ({
+        // The discount and tax lines are the database's (rebuilt at commit, dropped if the type changes): never sent back.
+        const itemsPayload = items.filter((it) => !isComputedChargeLine(it.charge_type)).map((it, idx) => ({
           // Existing generated lines carry their server identity back to the
           // writer so it can preserve immutable order-line and historical-cost
           // lineage while rebuilding a draft invoice. New manual lines omit id.
@@ -2021,6 +2023,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const canEdit = isAdminOrRep;
   const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
+  // The standing discount (M4b) and sales tax (M4a) lines are the database's own: shown, never edited or removed here.
+  const rowEditable = (item: LineItem) => editable && !isComputedChargeLine(item.charge_type);
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
   // - Split invoice (Codex r5 P2): chemical items store PER-UNIT cost, but the header
@@ -2472,10 +2476,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-secondary">Margin</span>
-                  <span className={totalCents - totalCostCents > 0 ? 'text-crx-green' : 'text-red-600'}>
-                    {fmt(totalCents - totalCostCents)}
+                  <span className={invoiceMarginCents(items, totalCostCents) > 0 ? 'text-crx-green' : 'text-red-600'}>
+                    {fmt(invoiceMarginCents(items, totalCostCents))}
                   </span>
                 </div>
+              </>
+            )}
+            {/* The office's discount on this sale (billing plan M4b): admin, chemical-sale draft. */}
+            {isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' && (
+              <>
+                <hr className="border-gray-100" />
+                <StandingDiscountControl
+                  invoiceId={invoice.id}
+                  disabled={hasUnsavedChanges}
+                  onChanged={() => fetchInvoice(invoice.id as string)}
+                />
               </>
             )}
             {!isNew && (
@@ -2581,7 +2596,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {displayItems.map((item, idx) => (
                   <tr key={idx} className="group">
                     <td className="py-2 pr-4">
-                      {editable && (item.charge_type || (takesCharges && !item.product_id)) ? (
+                      {rowEditable(item) && (item.charge_type || (takesCharges && !item.product_id)) ? (
                         <div className="flex flex-col gap-1 sm:flex-row">
                           <select
                             aria-label="Charge type"
@@ -2624,7 +2639,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                     {showVendors && (
                       <td className="py-2 pr-4 text-secondary">
                         {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
-                        {editable && item.order_item_id && item.quantity > 0 ? (
+                        {rowEditable(item) && item.order_item_id && item.quantity > 0 ? (
                           <VendorSelect
                             label={`Vendor for ${item.product_name || item.description || 'line'}`}
                             value={item.vendor}
@@ -2636,7 +2651,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       </td>
                     )}
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
+                      {rowEditable(item) && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
                           type="number"
                           value={item.quantity}
@@ -2650,7 +2665,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       )}
                     </td>
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id ? (
+                      {rowEditable(item) && !item.billing_line_id ? (
                         <input
                           type="number"
                           value={(item.unit_price_cents / 100).toFixed(2)}
@@ -2682,7 +2697,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       <td className="py-2 pr-4 text-secondary">{item.tote_number || '-'}</td>
                     )}
                     <td className="py-2">
-                      {editable && !item.billing_line_id && (
+                      {rowEditable(item) && !item.billing_line_id && (
                         <button
                           onClick={() => removeItem(idx)}
                           className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"

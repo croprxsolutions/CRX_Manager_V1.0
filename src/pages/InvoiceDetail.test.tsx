@@ -2395,6 +2395,10 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(within(worked).queryAllByRole('spinbutton')).toHaveLength(0);
       expect(within(worked).queryAllByRole('textbox')).toHaveLength(0);
       expect(within(worked).queryAllByRole('button')).toHaveLength(0);
+      // Every line's amount is tagged, so the e2e math checks can add products, charges and worked-out lines.
+      const amounts = within(lines).getAllByTestId('invoice-line-amount');
+      expect(amounts.map((el) => el.getAttribute('data-kind'))).toEqual(['product', 'charge', 'worked', 'worked']);
+      expect(amounts[1]).toHaveAttribute('data-cents', '4500');
     });
 
     it('a from-scratch misc charge invoice shows only Charges', async () => {

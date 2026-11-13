@@ -26,6 +26,7 @@ import {
   assertCentsEqual as _assertCentsEqual,
   collectConsoleErrors,
 } from './utils/golive-helpers';
+import { amountDueCents, invoiceLineAmounts } from '../utils/invoice-lines';
 
 test.describe.serial('Stream 4 — Financials', () => {
   let page: Page;
@@ -132,8 +133,20 @@ test.describe.serial('Stream 4 — Financials', () => {
     // We should still be on an invoice detail page from FIN3
     await assertNoCriticalErrors(page);
 
+    // Every line the invoice shows (product rows, Charges, and the "Worked out for you" discount and tax) must
+    // add up to Amount due's "Invoice total", as the old all-lines table did to "Subtotal" (Billing UI, Nov 13).
+    const allLines = await invoiceLineAmounts(page);
+    const invoiceTotal = await amountDueCents(page, 'Invoice total');
+    if (invoiceTotal !== null && allLines.products.length + allLines.charges.length + allLines.worked.length > 0) {
+      const totalDiff = Math.abs(allLines.totalCents - invoiceTotal);
+      expect(totalDiff,
+        `Products + charges + worked-out lines ${allLines.totalCents} ($${(allLines.totalCents / 100).toFixed(2)}) ` +
+        `does not match Invoice total ${invoiceTotal} ($${(invoiceTotal / 100).toFixed(2)}), diff=${totalDiff} cents`,
+      ).toBeLessThanOrEqual(2);
+    }
+
     // Find the line items table: the product table in "What this invoice bills". The Who pays table in the
-    // rail comes first in the DOM, so scope to the lines card (Billing UI, Nov 13).
+    // rail comes first in the DOM, so scope to the lines card.
     const lineItemsTable = page.locator('section[aria-labelledby="invoice-lines-title"] table').first();
     const isVisible = await lineItemsTable.isVisible({ timeout: 5000 }).catch(() => false);
 
@@ -194,14 +207,9 @@ test.describe.serial('Stream 4 — Financials', () => {
       return;
     }
 
-    // Compare with the subtotal from the summary card: the table holds the product lines, so it adds up to
-    // "Products" in Amount due (charges, discount and tax are listed below the table)
-    const productsRow = page.locator('section[aria-labelledby="invoice-amount-due"]')
-      .getByText('Products', { exact: true }).locator('..');
-    const subtotalText = await productsRow.isVisible({ timeout: 3000 }).catch(() => false)
-      ? ((await productsRow.textContent()) ?? '').replace('Products', '')
-      : '';
-    const subtotalCents = parseDollars(subtotalText);
+    // Extra check: the table holds the product lines, so it adds up to "Products" in Amount due
+    // (charges, discount and tax are listed below the table and checked above)
+    const subtotalCents = (await amountDueCents(page, 'Products')) ?? 0;
 
     if (subtotalCents > 0) {
       const diff = Math.abs(sumCents - subtotalCents);

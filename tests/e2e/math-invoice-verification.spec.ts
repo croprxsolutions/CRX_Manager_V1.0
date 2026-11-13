@@ -12,6 +12,7 @@ import {
   assertCentsEqual,
   waitForPageStable,
 } from './utils/math-helpers';
+import { amountDueCents, invoiceLineAmounts, linesCardTotalCents } from './utils/invoice-lines';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -39,10 +40,22 @@ async function invoiceSummaryVal(page: Page, label: string): Promise<number> {
   return parseDollars(await valEl.textContent());
 }
 
-/** The closing "Invoice total" amount of the "What this invoice bills" card. */
-function linesCardTotal(page: Page) {
-  return page.locator('section[aria-labelledby="invoice-lines-title"]')
-    .getByText('Invoice total', { exact: true }).locator('..').locator('.tabular-nums').first();
+/** Every line the invoice shows (product rows, Charges, and the "Worked out for you" discount and tax) must add
+ *  up to Amount due's "Invoice total", as the old all-lines table did to "Subtotal". The product table must also
+ *  add up to Amount due's "Products" (`productSum` is the table's own sum). Billing UI, Nov 13. */
+async function assertLinesAddUp(page: Page, productSum: number) {
+  const lines = await invoiceLineAmounts(page);
+  const lineCount = lines.products.length + lines.charges.length + lines.worked.length;
+  const total = await amountDueCents(page, 'Invoice total');
+  if (total !== null && lineCount > 0) {
+    assertCentsEqual(lines.totalCents, total, 2,
+      `Products + charges + worked-out lines ($${(lines.totalCents / 100).toFixed(2)}) should match Invoice total ($${(total / 100).toFixed(2)})`);
+  }
+  const products = await amountDueCents(page, 'Products');
+  if (products !== null && lines.products.length > 0) {
+    assertCentsEqual(productSum, products, 2,
+      `Sum of product rows ($${(productSum / 100).toFixed(2)}) should match Products ($${(products / 100).toFixed(2)})`);
+  }
 }
 
 interface InvoiceLineItem {
@@ -193,20 +206,14 @@ test.describe('Invoice Math Verification', () => {
     test.skip(items.length === 0, 'No line items');
 
     const recalcSum = items.reduce((s, it) => s + it.extendedCents, 0);
-    const displayedSubtotal = await invoiceSummaryVal(page, 'Products');
+    // Every line (products, charges, discount, tax) = Invoice total; product rows = Products.
+    await assertLinesAddUp(page, recalcSum);
 
-    if (displayedSubtotal > 0) {
-      assertCentsEqual(recalcSum, displayedSubtotal, 2,
-        `Sum of extended ($${(recalcSum / 100).toFixed(2)}) should match Subtotal ($${(displayedSubtotal / 100).toFixed(2)})`);
-    }
-
-    // Also verify the lines card's closing total (no table footer any more): products, charges, discount
-    // and tax together, so it must equal Amount due's "Invoice total".
-    const tfootTotal = linesCardTotal(page);
-    const tfootVisible = await tfootTotal.isVisible({ timeout: 2000 }).catch(() => false);
-    if (tfootVisible) {
-      const tfootCents = parseDollars(await tfootTotal.textContent());
-      assertCentsEqual(tfootCents, await invoiceSummaryVal(page, 'Invoice total'), 2, 'Lines card total should match the Amount due total');
+    // Also verify the lines card's closing total (the old table footer) against the lines above it.
+    const footerCents = await linesCardTotalCents(page);
+    if (footerCents !== null) {
+      const lines = await invoiceLineAmounts(page);
+      assertCentsEqual(footerCents, lines.totalCents, 2, 'Lines card total should match the sum of its lines');
     }
   });
 
@@ -216,10 +223,10 @@ test.describe('Invoice Math Verification', () => {
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
     const items = await extractLineItems(page);
     const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-    const subtotal = await invoiceSummaryVal(page, 'Products');
+    const subtotal = await invoiceSummaryVal(page, 'Invoice total');
 
-    if (items.length > 0 && subtotal > 0) {
-      assertCentsEqual(lineSum, subtotal, 2);
+    if (items.length > 0 && subtotal !== 0) {
+      await assertLinesAddUp(page, lineSum);
     } else {
       // Just verify the page loaded with a valid structure
       const h1 = page.locator('h1').first();
@@ -387,9 +394,8 @@ test.describe('Invoice Math Verification', () => {
       }
 
       const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-      const subtotal = await invoiceSummaryVal(page, 'Products');
-      if (subtotal > 0 && items.length > 0) {
-        assertCentsEqual(lineSum, subtotal, 2);
+      if (items.length > 0) {
+        await assertLinesAddUp(page, lineSum);
       }
     } else {
       test.skip(true, 'No CS- invoices in data');
@@ -423,15 +429,18 @@ test.describe('Invoice Math Verification', () => {
     const inv = await goToInvoice(page, 0);
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
 
+    // The lines card closes with its own "Invoice total" row (there is no table footer any more). Both totals
+    // render the same figure, so check each against the lines on screen instead of against each other.
+    const lines = await invoiceLineAmounts(page);
+    const lineCount = lines.products.length + lines.charges.length + lines.worked.length;
+    const tfootCents = await linesCardTotalCents(page);
     const subtotal = await invoiceSummaryVal(page, 'Invoice total');
-    // The lines card closes with its own "Invoice total" row (there is no table footer any more).
-    const tfootTotal = linesCardTotal(page);
-    const tfootVisible = await tfootTotal.isVisible({ timeout: 3000 }).catch(() => false);
 
-    if (tfootVisible && subtotal > 0) {
-      const tfootCents = parseDollars(await tfootTotal.textContent());
-      assertCentsEqual(tfootCents, subtotal, 2,
-        `Table footer ($${(tfootCents / 100).toFixed(2)}) should match Summary Subtotal ($${(subtotal / 100).toFixed(2)})`);
+    if (tfootCents !== null && lineCount > 0) {
+      assertCentsEqual(tfootCents, lines.totalCents, 2,
+        `Lines card total ($${(tfootCents / 100).toFixed(2)}) should match the sum of its lines ($${(lines.totalCents / 100).toFixed(2)})`);
+      assertCentsEqual(subtotal, lines.totalCents, 2,
+        `Amount due Invoice total ($${(subtotal / 100).toFixed(2)}) should match the sum of the lines ($${(lines.totalCents / 100).toFixed(2)})`);
     }
   });
 
@@ -505,10 +514,7 @@ test.describe('Invoice Math Verification', () => {
 
         // Verify sum
         const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-        const subtotal = await invoiceSummaryVal(page, 'Products');
-        if (subtotal > 0) {
-          assertCentsEqual(lineSum, subtotal, 2);
-        }
+        await assertLinesAddUp(page, lineSum);
         found = true;
         break;
       }

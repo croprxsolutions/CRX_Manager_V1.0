@@ -2623,7 +2623,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           </td>
                         )}
                         <td className="col-start-2 row-start-1 flex items-start justify-end gap-2 sm:col-start-3 xl:table-cell xl:px-5 xl:py-3 xl:text-right xl:align-top">
-                          <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                          <span data-testid="invoice-line-amount" data-kind="product" className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
                           {rowEditable(item) && !item.billing_line_id && (
                             <button
                               type="button"
@@ -2690,6 +2690,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           {!item.billing_line_id ? (
                             <input
                               type="number"
+                              // The box holds the unit price; the line's total (quantity 1 for a typed charge) is on data-cents.
+                              data-testid="invoice-line-amount" data-kind="charge" data-cents={item.extended_cents}
                               aria-label={`Amount for ${item.description || 'charge'}`}
                               value={(item.unit_price_cents / 100).toFixed(2)}
                               onChange={(e) => changePrice(idx, e.target.value)}
@@ -2698,7 +2700,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                               className={chargeInput}
                             />
                           ) : (
-                            <span className="tabular-nums">{formatCentsMinus(item.extended_cents)}</span>
+                            <span data-testid="invoice-line-amount" data-kind="charge" className="tabular-nums">{formatCentsMinus(item.extended_cents)}</span>
                           )}
                           {!item.billing_line_id && (
                             <button
@@ -2717,7 +2719,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                             <span className="font-medium text-nav-dark">{chargeTypeLabel(item.charge_type) || 'Charge'}</span>
                             {item.description && <span className="ml-1.5 text-secondary">{item.description}</span>}
                           </span>
-                          <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                          <span data-testid="invoice-line-amount" data-kind="charge" className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
                         </div>
                       )}
                       {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
@@ -2746,7 +2748,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         </span>
                       </span>
                     </span>
-                    <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                    <span data-testid="invoice-line-amount" data-kind="worked" className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
                   </li>
                 ))}
               </ul>

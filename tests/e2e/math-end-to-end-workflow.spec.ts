@@ -14,6 +14,7 @@ import {
   waitForPageStable,
   assertCentsEqual,
 } from './utils/math-helpers';
+import { amountDueCents, invoiceLineAmounts, linesCardTotalCents } from './utils/invoice-lines';
 
 // Shared state across serial tests
 const state = {
@@ -401,29 +402,28 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         }
       }
 
-      // Get displayed subtotal from the summary card: "Products" in Amount due is the sum of the product lines
-      const subtotalLabel = page.locator('section[aria-labelledby="invoice-amount-due"]').getByText('Products', { exact: true }).first();
-      const subtotalVisible = await subtotalLabel.isVisible({ timeout: 3000 }).catch(() => false);
-      if (subtotalVisible && lineItems.length > 0) {
-        const subtotalParent = subtotalLabel.locator('..');
-        const subtotalVal = subtotalParent.locator('.tabular-nums').first();
-        const displayedSubtotal = parseDollars(await subtotalVal.textContent());
-
-        // Verify sum of extended = displayed subtotal
-        assertCentsEqual(recalcSubtotal, displayedSubtotal, 2,
-          `Sum of line items ($${(recalcSubtotal / 100).toFixed(2)}) should match subtotal ($${(displayedSubtotal / 100).toFixed(2)})`);
-        state.invoiceTotalCents = displayedSubtotal;
+      // Every line the invoice shows (product rows, Charges, and the "Worked out for you" discount and tax)
+      // must add up to Amount due's "Invoice total", as the old all-lines table did to "Subtotal".
+      const allLines = await invoiceLineAmounts(page);
+      const invoiceTotal = await amountDueCents(page, 'Invoice total');
+      if (invoiceTotal !== null && lineItems.length > 0) {
+        assertCentsEqual(allLines.totalCents, invoiceTotal, 2,
+          `Products + charges + worked-out lines ($${(allLines.totalCents / 100).toFixed(2)}) should match Invoice total ($${(invoiceTotal / 100).toFixed(2)})`);
+        state.invoiceTotalCents = invoiceTotal;
       }
 
-      // The lines card ends with "Invoice total" (no table footer any more): it must match Amount due's total
-      const linesTotal = linesCard.getByText('Invoice total', { exact: true }).locator('..').locator('.tabular-nums').first();
-      const amountDueTotal = page.locator('section[aria-labelledby="invoice-amount-due"]')
-        .getByText('Invoice total', { exact: true }).locator('..').locator('.tabular-nums').first();
-      const tfootVisible = await linesTotal.isVisible({ timeout: 2000 }).catch(() => false);
-      if (tfootVisible && recalcSubtotal > 0) {
-        const tfootCents = parseDollars(await linesTotal.textContent());
-        assertCentsEqual(tfootCents, parseDollars(await amountDueTotal.textContent()), 2,
-          'Lines card total should match the Amount due total');
+      // Extra check: the product rows add up to "Products" in Amount due
+      const displayedProducts = await amountDueCents(page, 'Products');
+      if (displayedProducts !== null && lineItems.length > 0) {
+        assertCentsEqual(recalcSubtotal, displayedProducts, 2,
+          `Sum of product lines ($${(recalcSubtotal / 100).toFixed(2)}) should match Products ($${(displayedProducts / 100).toFixed(2)})`);
+      }
+
+      // The lines card ends with "Invoice total" (the old table footer): it must match the lines above it
+      const footerCents = await linesCardTotalCents(page);
+      if (footerCents !== null && recalcSubtotal > 0) {
+        assertCentsEqual(footerCents, allLines.totalCents, 2,
+          'Lines card total should match the sum of its lines');
       }
     }
 

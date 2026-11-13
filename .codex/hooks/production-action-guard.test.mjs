@@ -98,8 +98,14 @@ const requirementJson = ({ files = ["docs/readme.md"], statuses = [], head = "f"
   files: { totalCount: files.length, nodes: files.map((p) => ({ path: p })) },
   commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
 } } } });
+// Staging-first: a merge into staging asks GitHub for main's commits staging lacks. Fixtures answer
+// "main is inside staging" (the normal state) unless a test answers that call itself (mainCompare).
+const MAIN_INSIDE_STAGING = JSON.stringify({ status: "identical", ahead_by: 0, commits: [] });
+const isMainCompare = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args?.[1] ?? ""));
+const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
-  options?.rawThreads ? options : { ...options, runGh: withThreadDefault(options?.runGh) },
+  { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare)))(
+    options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh)) },
 );
 
 const projectRoot = process.cwd();
@@ -571,7 +577,7 @@ try {
   // exact-SHA Sol proof even when nothing in the diff is risky. Everything else
   // about this PR is merge-ready, so the missing proof is the only reason to deny.
   const ordinaryPrJson = JSON.stringify({
-    baseRefName: "main", baseRefOid: ordinary.base, headRefName: "feature/test", headRefOid: ordinary.sha,
+    baseRefName: "staging", baseRefOid: ordinary.base, headRefName: "feature/test", headRefOid: ordinary.sha,
     reviewDecision: "APPROVED", mergeStateStatus: "CLEAN",
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: ordinary.sha }, submittedAt: "2026-09-26T12:00:00Z" }],
     statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
@@ -1609,7 +1615,7 @@ try {
     { __typename: "StatusContext", state: "SUCCESS", context: "Vercel" },
   ];
   const mainPr = {
-    baseRefName: "main",
+    baseRefName: "staging",
     // GitHub's CURRENT base tip. Here it equals local origin/main, the ordinary case.
     baseRefOid: risky.base,
     headRefName: "feature/test",
@@ -1838,8 +1844,8 @@ try {
     runGh: () => featurePrJson,
   }).blocked, false, "gh PR merge to a non-production base is allowed");
 
-  // staging gets every main gate (Mason on #1363, 2026-11-04: "yes with the guard
-  // updates first"); a migration still lands only through a PR into main.
+  // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: a migration
+  // lands through staging too, and an agent never merges into main or the back-merge.
   {
     const stagingPrJson = JSON.stringify({ ...mainPr, baseRefName: "staging" });
     const ghFor = (files) => (args) => (args[0] === "api" && String(args[1]).includes("/compare/")
@@ -1854,9 +1860,49 @@ try {
     writeProof(risky.repo, valid);
     assert.equal(merge(ghFor(appFile)).blocked, false, "with the Sol proof, a merge into staging lands");
     assert.equal(merge(ghFor(appFile), "").blocked, true, "a merge into staging must pin the head, as into main");
-    const migration = merge(ghFor([{ filename: "supabase/migrations/20261107000000_x.sql", status: "added" }]));
-    assert.equal(migration.blocked, true, "a migration cannot merge into staging");
-    assert.match(migration.reason, /into main/, "...and the denial says where it goes instead");
+    assert.equal(merge(ghFor([{ filename: "supabase/migrations/20261107000000_x.sql", status: "added" }])).blocked, false,
+      "a migration merges into staging with its Sol proof; the staging database job applies it after the merge");
+    const intoMain = (head) => evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
+      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+        : JSON.stringify({ ...mainPr, baseRefName: "main", headRefName: head })),
+    });
+    for (const head of ["feature/test", "release/next", "hotfix/cents"]) {
+      const denied = intoMain(head);
+      assert.equal(denied.blocked, true, `an agent never merges into main, even with every proof (${head})`);
+      assert.match(denied.reason, /Taha or Mason merges them/, "...and the denial says who does");
+    }
+    const backMerge = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --merge${PIN}` }, repoDir: risky.repo, nowMs: now,
+      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+        : JSON.stringify({ ...mainPr, baseRefName: "staging", headRefName: "main" })),
+    });
+    assert.equal(backMerge.blocked, true, "an agent never merges the back-merge (main into staging)");
+    assert.match(backMerge.reason, /back-merge/, "...and the denial names it");
+    // The same back-merge under another branch name: main is ahead of staging and the PR carries one of those commits.
+    const disguised = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
+      rawMainCompare: true,
+      runGh: (args) => {
+        // staging...main: main has one commit staging lacks; head...main: the head holds it (identical).
+        if (args[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args[1]))) {
+          return String(args[1]).includes(`/compare/${mainPr.headRefOid}...`) || String(args[1]).includes(`/compare/${risky.sha}...`)
+            ? JSON.stringify({ status: "identical", ahead_by: 0, commits: [] })
+            : JSON.stringify({ status: "ahead", ahead_by: 1, commits: ["f".repeat(40)] });
+        }
+        return args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+          : JSON.stringify({ ...mainPr, baseRefName: "staging", headRefName: "backmerge/x" });
+      },
+    });
+    assert.equal(disguised.blocked, true, "a PR into staging carrying main's commits that staging lacks is refused");
+    assert.match(disguised.reason, /back-merge/, "...as a back-merge under another name");
+    const failClosed = evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` }, repoDir: risky.repo, nowMs: now,
+      mainCompare: "not json",
+      runGh: (args) => (args[0] === "api" ? JSON.stringify({ status: "ahead", ahead_by: 1, head: risky.sha, files: appFile })
+        : JSON.stringify({ ...mainPr, baseRefName: "staging" })),
+    });
+    assert.equal(failClosed.blocked, true, "an unreadable main-versus-staging answer refuses (fail closed)");
     assert.equal(merge(() => { throw new Error("offline"); }).blocked, true, "an unreadable staging PR is denied (fail closed)");
   }
 
@@ -3827,7 +3873,7 @@ try {
     PIN = ` --match-head-commit ${stale.sha}`; // this fixture's head
 
     const prAt = (baseRefOid) => JSON.stringify({
-      baseRefName: "main",
+      baseRefName: "staging",
       baseRefOid,
       headRefName: "feature/test",
       headRefOid: stale.sha,
@@ -3891,7 +3937,7 @@ try {
       repoDir: stale.repo,
       nowMs: now,
       runGh: () => JSON.stringify({
-        baseRefName: "main",
+        baseRefName: "staging",
         baseRefOid: githubBase,
         headRefName: "feature/test",
         headRefOid: updatedHead,
@@ -3923,7 +3969,7 @@ try {
 
     // Missing baseRefOid entirely (old gh, changed API shape) must fail closed.
     const noBaseOid = mergeWith(JSON.stringify({
-      baseRefName: "main",
+      baseRefName: "staging",
       headRefName: "feature/test",
       headRefOid: stale.sha,
       reviewDecision: "APPROVED",
@@ -3975,7 +4021,7 @@ try {
       repoDir: stale.repo,
       nowMs: now,
       runGh: () => JSON.stringify({
-        baseRefName: "main",
+        baseRefName: "staging",
         baseRefOid: githubBase,
         headRefName: "feature/test",
         headRefOid: updatedHead,

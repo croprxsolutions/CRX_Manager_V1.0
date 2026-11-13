@@ -15,6 +15,7 @@
 // rule had come to refuse only reads that named it (`grep`, `git log -- <path>`).
 
 import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 
 // computedJavaScriptScriptArgument (below) recognises a JavaScript runtime whose
@@ -500,10 +501,68 @@ export function readPackageScripts(cwd) {
   }
 }
 
+// Staging-first (Mason, 2026-11-13): feature PRs target `staging`; only
+// `hotfix/<name>` (and the bot's `release/next`) go into `main`. GitHub's default
+// branch is still `main` (its scheduled release jobs need that), so a `gh pr
+// create` with no base would land on `main` too. The "Release flow guard (main)"
+// CI check stops such a PR merging; this stops it being opened.
+// shortcut: a `gh pr create` hidden inside `bash -c "…"` or a raw `gh api …/pulls`
+// call is not parsed here; CI's release-flow guard still fails it. Extend if seen.
+const MAIN_PR_HEAD_RE = /^(?:hotfix\/.+|release\/next)$/;
+function unquoteWord(word) {
+  return String(word).replace(/^["']|["']$/g, "");
+}
+function prFlagValue(args, long, short) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === long || arg === short) return args[index + 1] ?? "";
+    if (arg.startsWith(`${long}=`)) return arg.slice(long.length + 1);
+    if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) return arg.slice(short.length);
+  }
+  return null;
+}
+function currentGitBranch(cwd) {
+  const result = spawnSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 5_000 });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+export function checkPrBase(cmd, cwd, branchOf = currentGitBranch) {
+  const text = String(cmd || "");
+  if (!/\bpr\b/.test(text)) return null;
+  const changesFolder = /(?:^|[\s;&|(])(?:cd|pushd|Set-Location|sl)\s/i.test(text);
+  for (const segment of splitShellSegments(text)) {
+    const words = splitShellWords(segment.trim()).map(unquoteWord);
+    const ghIndex = words.findIndex((word) => /^gh(?:\.exe|\.cmd)?$/i.test(word.split(/[\\/]/).pop()));
+    if (ghIndex < 0) continue;
+    const prIndex = words.indexOf("pr", ghIndex + 1);
+    if (prIndex < 0) continue;
+    const sub = words[prIndex + 1];
+    if (!["create", "new", "edit"].includes(sub)) continue;
+    const args = words.slice(prIndex + 2);
+    const base = prFlagValue(args, "--base", "-B");
+    const toMain = base !== null && base.replace(/^refs\/heads\//, "") === "main";
+    if (sub === "edit") {
+      if (toMain) return "Blocked moving a PR onto `main`. Staging-first: feature PRs target `staging`; only `hotfix/<name>` and `release/next` go into `main` (AGENTS.md, ship.md › Staging).";
+      continue;
+    }
+    if (base === null || base === "") {
+      return "Blocked `gh pr create` with no `--base`: GitHub's default branch is `main`, so it would open into `main`. Add `--base staging` (a hotfix uses `--base main --head hotfix/<name>`).";
+    }
+    if (!toMain) continue;
+    const explicitHead = prFlagValue(args, "--head", "-H");
+    const head = explicitHead !== null ? explicitHead.replace(/^[^:]+:/, "") : (changesFolder ? "" : branchOf(cwd));
+    if (!MAIN_PR_HEAD_RE.test(head)) {
+      return `Blocked a PR into \`main\` from \`${head || "an unknown branch"}\`. Staging-first: feature PRs use \`--base staging\`; only a \`hotfix/<name>\` branch cut from \`main\` (or the bot's \`release/next\`) opens into \`main\`, and Taha or Mason merges it.`;
+    }
+  }
+  return null;
+}
+
 // The full command check used by both hooks: literal command text first, then
 // (only if clean) every `npm run X` target's resolved script body, recursively.
 // Returns the first matching reason, or null.
 export function checkCommandDeep(cmd, cwd) {
+  const prBase = checkPrBase(cmd, cwd);
+  if (prBase) return prBase;
   const direct = checkDangerousCommand(cmd);
   if (direct) return direct;
 

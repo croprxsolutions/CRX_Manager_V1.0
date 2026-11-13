@@ -20,12 +20,37 @@ import {
   splitShellWords,
   resolveNpmScriptChain,
   readPackageScripts,
+  checkPrBase,
 } from "./bash-safety-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
 function ok(c, m) { assert.ok(c, m); pass++; }
 function eq(a, b, m) { assert.equal(a, b, m); pass++; }
+
+// ── staging-first: PRs open into staging; only hotfix/ and release/next into main ──
+{
+  const on = (branch) => () => branch;
+  const blocked = (cmd, branch = "claude/feature") => checkPrBase(cmd, ".", on(branch));
+  ok(!blocked("gh pr create --base staging --title x --body y"), "PR into staging allowed");
+  ok(!blocked("gh pr create --base=staging --fill"), "--base=staging allowed");
+  ok(!blocked("gh pr create -B staging --fill"), "-B staging allowed");
+  ok(blocked("gh pr create --fill"), "no --base blocked (GitHub default is main)");
+  ok(blocked("gh pr create --base main --fill"), "feature branch into main blocked");
+  ok(blocked("gh.exe -R croprxsolutions/CRX_Manager_V1.0 pr create -B main --fill"), "gh.exe -R spelling into main blocked");
+  ok(blocked("gh pr create --base 'main' --fill"), "quoted main blocked");
+  ok(blocked("git push -u origin x && gh pr create --base main --fill"), "second segment checked");
+  ok(!blocked("gh pr create --base main --fill", "hotfix/restamp"), "hotfix branch into main allowed");
+  ok(!blocked("gh pr create --base main --head hotfix/restamp --fill"), "explicit hotfix head allowed");
+  ok(blocked("gh pr create --base main --head claude/feature --fill", "hotfix/x"), "explicit feature head into main blocked");
+  ok(blocked("cd ../other && gh pr create --base main --fill", "hotfix/x"), "after cd the checkout's branch is not trusted");
+  ok(blocked("gh pr edit 12 --base main"), "retarget onto main blocked");
+  ok(!blocked("gh pr edit 12 --base staging"), "retarget onto staging allowed");
+  ok(!blocked("gh pr edit 12 --title x"), "edit without base allowed");
+  ok(!blocked("gh pr view 12 --json baseRefName"), "other pr subcommands untouched");
+  ok(!blocked("rg -n 'gh pr create --base main' docs"), "searching for the text is not a PR");
+  ok(checkCommandDeep("gh pr create --base main --head claude/x --fill", "."), "wired into checkCommandDeep");
+}
 
 // ── direct dangerous-command patterns (unchanged behavior) ────────────────
 ok(checkDangerousCommand("git push --force origin main"), "force push blocked");

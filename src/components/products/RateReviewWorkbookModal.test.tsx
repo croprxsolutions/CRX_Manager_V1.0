@@ -146,6 +146,36 @@ describe('RateReviewWorkbookModal', () => {
     expect(screen.getByRole('button', { name: 'Upload and preview' })).toBeEnabled();
   });
 
+  it('keeps the original key for a hand check when the old save clears storage and the remounted replay loses its reply', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    let finishOld!: (receipt: unknown) => void;
+    let loseReplay!: (error: Error) => void;
+    H.commit.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { loseReplay = reject; }));
+    const first = await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    const name = 'crx:pending-retry:rate-review:u1';
+    const original = JSON.parse(sessionStorage.getItem(name)!);
+    first.unmount();
+    const restored = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(2));
+    expect(H.commit.mock.calls[1][1]).toBe(original.key);
+    await act(async () => finishOld({ rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] }));
+    expect(sessionStorage.getItem(name)).toBeNull();
+    await act(async () => loseReplay(new TypeError('Failed to fetch')));
+    expect(await screen.findByRole('button', { name: 'I checked the fresh workbook' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeDisabled();
+    expect(JSON.parse(sessionStorage.getItem(name)!)).toMatchObject({ key: original.key, request: original.request, needsCheck: true });
+    expect(H.toast).not.toHaveBeenCalledWith('success', expect.any(String));
+    restored.unmount();
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(await screen.findByRole('button', { name: 'I checked the fresh workbook' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeDisabled();
+    expect(H.commit).toHaveBeenCalledTimes(2);
+  });
+
   it.each(['success', 'definitive refusal'] as const)('keeps a newer unanswered request when the old Confirm ends in %s', async (ending) => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     const receipt = { rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] };
@@ -234,6 +264,22 @@ describe('RateReviewWorkbookModal', () => {
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('nothing was sent')));
     expect(H.commit).not.toHaveBeenCalled();
     storage.mockRestore();
+  });
+
+  it('refuses the first send when its written retry record cannot be read back', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    await uploadFile();
+    const write = sessionStorage.setItem.bind(sessionStorage);
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      write(key, key === 'crx:pending-retry:rate-review:u1' ? '{"damaged":true}' : value);
+    });
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+      await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('nothing was sent')));
+      expect(H.commit).not.toHaveBeenCalled();
+    } finally {
+      storage.mockRestore();
+    }
   });
 
   it('stores the exact upload and preview before the first RPC dispatch', async () => {

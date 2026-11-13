@@ -320,13 +320,13 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     }
   };
 
-  const handleRetryProblem = (problem: string, kept: PendingRetry<PendingRateReview> | null) => {
-    if (pending && !kept) {
+  const handleRetryProblem = (problem: string, kept: PendingRetry<PendingRateReview> | null, original = pending) => {
+    if (original && !kept) {
       // An older mounted instance may have settled and removed storage. Absence alone cannot prove the result here.
       // Keep the exact old key and request for a hand check, including across another navigation when storage works.
-      if (savePendingRetry(pendingName, pending.key, pending.request)) markPendingRetryForCheck(pendingName);
-      setPending({ ...pending, expired: true, needsCheck: true });
-    } else setPending(kept?.request.actorId === profileId ? kept : pending);
+      if (savePendingRetry(pendingName, original.key, original.request)) markPendingRetryForCheck(pendingName);
+      setPending({ ...original, expired: true, needsCheck: true });
+    } else setPending(kept?.request.actorId === profileId ? kept : original);
     toast('error', problem);
   };
 
@@ -345,7 +345,12 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       toast('error', 'This browser could not keep the retry record, so nothing was sent. Allow site storage or review a smaller file.');
       return;
     }
-    setPending(loadPendingRetry(pendingName, isPendingRateReview));
+    const sent = loadPendingRetry(pendingName, isPendingRateReview);
+    if (!sent || sent.key !== key || JSON.stringify(sent.request) !== JSON.stringify(request)) {
+      toast('error', 'This browser could not read back the retry record, so nothing was sent. Download a fresh workbook and try again.');
+      return;
+    }
+    setPending(sent);
     setBusy(true);
     try {
       const receipt = await commitRateReview(request.upload, key);
@@ -371,7 +376,11 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       } else {
         markPendingIfMatching(pendingName, key, request,
           raw.startsWith('IDEMPOTENCY_') || !!(kept && isRateReviewRefusal(error)));
-        updateCurrent(epoch, () => setPending(loadPendingRetry(pendingName, isPendingRateReview)));
+        updateCurrent(epoch, () => {
+          const remaining = loadPendingRetry(pendingName, isPendingRateReview);
+          if (!remaining) handleRetryProblem('The earlier retry record is unavailable. Check a fresh workbook, then clear this reminder.', remaining, sent);
+          else setPending(remaining);
+        });
       }
     } finally {
       updateCurrent(epoch, () => setBusy(false));

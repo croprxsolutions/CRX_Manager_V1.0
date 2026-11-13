@@ -19322,19 +19322,35 @@ export type Database = {
       }
       get_ar_aging: {
         Args: { p_as_of_date?: string }
-        Returns: {
-          current_amount: number
-          customer_id: string
-          days_30: number
-          days_60: number
-          days_90: number
-          farm_name: string
-          open_credit_cents: number
-          over_90: number
-          prepay_balance_cents: number
-          total_outstanding: number
-          unavailable_reason: string
-        }[]
+        // Manual semantic overlay: KI-95 emits a complete priced row or a flagged all-NULL balance row.
+        Returns: (
+          | {
+              current_amount: number
+              customer_id: string
+              days_30: number
+              days_60: number
+              days_90: number
+              farm_name: string
+              open_credit_cents: number
+              over_90: number
+              prepay_balance_cents: number
+              total_outstanding: number
+              unavailable_reason: null
+            }
+          | {
+              current_amount: null
+              customer_id: string
+              days_30: null
+              days_60: null
+              days_90: null
+              farm_name: string
+              open_credit_cents: null
+              over_90: null
+              prepay_balance_cents: null
+              total_outstanding: null
+              unavailable_reason: string
+            }
+        )[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }
       get_batch_year_end_summaries: {
@@ -19390,11 +19406,12 @@ export type Database = {
           notes: string
           quantity: number
           reference_number: string
-          total_amount: number
+          // Manual semantic overlay: non-admin Purchase rows hide purchase cost (20261019230000).
+          total_amount: number | null
           transaction_date: string
           transaction_type: string
           unit: string
-          unit_price: number
+          unit_price: number | null
         }[]
       }
       get_commission_balance_report: {
@@ -19431,18 +19448,33 @@ export type Database = {
       }
       get_customer_balance_listing: {
         Args: { p_as_of_date: string }
-        Returns: {
-          customer_id: string
-          farm_name: string
-          invoice_count: number
-          oldest_unpaid_date: string
-          open_credit: number
-          outstanding_balance: number
-          prepay_applied: number
-          total_invoiced: number
-          total_paid: number
-          unavailable_reason: string
-        }[]
+        // Manual semantic overlay: KI-95 emits a balance row or a flagged all-NULL row.
+        Returns: (
+          | {
+              customer_id: string
+              farm_name: string
+              invoice_count: number
+              oldest_unpaid_date: string | null
+              open_credit: number
+              outstanding_balance: number
+              prepay_applied: number
+              total_invoiced: number
+              total_paid: number
+              unavailable_reason: null
+            }
+          | {
+              customer_id: string
+              farm_name: string
+              invoice_count: null
+              oldest_unpaid_date: null
+              open_credit: null
+              outstanding_balance: null
+              prepay_applied: null
+              total_invoiced: null
+              total_paid: null
+              unavailable_reason: string
+            }
+        )[]
       }
       get_customer_delivery_remainders: {
         Args: { p_customer_id?: string }

@@ -16,4 +16,11 @@ Three semantic type adjustments are documented at their declarations; they come 
 - get_quote_versions preserves nullable raw outputs notes, pdf_url, restore_trusted_at, and sent_method: the live quote_versions columns are nullable and the function returns those raw columns.
 - set_invoice_standing_discount.p_pct accepts null; 20261231110000_standing_grower_discount.sql deletes the per-invoice override on that path and restores the customer's rate.
 
+Additional raw RPC nullability is retained where the checked-in SQL proves it:
+- get_ar_aging and get_customer_balance_listing return flagged customers with NULL balance fields, and normal rows with NULL unavailable_reason (20261104120000_balance_reports_flag_unrebuildable_customers.sql). The customer-balance screen now narrows those rows before rendering amounts.
+- get_chemical_history returns NULL unit_price and total_amount for non-admin Purchase rows (20261019230000_cost_margin_admin_only_screens_step2.sql).
+- The get_bill_split_payers fields narrowed from the older nullable snapshot remain non-null after source review: invoice_number and total_amount_cents are NOT NULL invoice columns, while farm_name is reached through invoices.customer_id's NOT NULL foreign key to customers.id and customers.farm_name is NOT NULL.
+
+The live registry intentionally describes production metadata. Staging-only M4 CHECK values and orders.sales_tax remain explicit, source-verified overlays in the TypeScript schema/test fixtures until M4 is applied live. The M4 migration files expand the invoice_items CHECKs before writing their computed lines; the app passes those lines through save_invoice, and no TypeScript direct table write sends either M4 charge_type. The status-enum hook also skips a table whose migration alters its CHECK constraint. The registry remains a live production inventory, not a staging migration target.
+
 The refresh also removed old applied migrations from the awaiting-type set, emptied the no-longer-needed migration-only idempotency bucket, pruned 23 exemptions that the refreshed mutator inventory no longer uses, and advanced the live function fixture. The five newly visible private helpers remain narrowly exempted with current catalog ACL evidence.

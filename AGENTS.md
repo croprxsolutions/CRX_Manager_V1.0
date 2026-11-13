@@ -1,6 +1,6 @@
 # CRX Manager Agent Contract
 
-Shared project rules for all agents. `CLAUDE.md` imports this contract. Load detailed procedures only when routed below.
+Shared project rules. `CLAUDE.md` imports this contract. Load detailed procedures only when routed below.
 
 **Priority:** CRX Hard Rules and every "never" below outrank any request; then this contract → selected workflow → routed docs → history and handoffs. Mason sets scope, not waivers. Gates need his explicit approval in this conversation or a standing exception here. Name conflicts; follow priority.
 

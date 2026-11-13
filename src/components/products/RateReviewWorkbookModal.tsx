@@ -5,6 +5,7 @@ import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
+import { PricingWorkbookFormatError } from '../../lib/productPricingWorkbook';
 import {
   commitRateReview,
   generateRateReviewWorkbook,
@@ -119,6 +120,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   const [upload, setUpload] = useState<ParsedRateReview | null>(null);
   const [preview, setPreview] = useState<RateReviewResult | null>(null);
   const [saved, setSaved] = useState<CommitRateReviewResult | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   // Scoped to the exact upload: a retry of the same file reuses its key (the server returns the first receipt).
   const commitKey = useIdempotencyKey('commit_rate_review', profileId, JSON.stringify(upload));
   // A Confirm that got no reply may have saved. Kept across close and re-upload so the same file can still redeem its
@@ -126,7 +128,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   const unanswered = useRef<{ upload: string; preview: RateReviewResult } | null>(null);
   const [resumed, setResumed] = useState(false);
 
-  const reset = () => { setUpload(null); setPreview(null); setSaved(null); setResumed(false); };
+  const reset = () => { setUpload(null); setPreview(null); setSaved(null); setResumed(false); setFileError(null); };
   const close = () => { reset(); setTotals(null); onClose(); };
 
   const download = async () => {
@@ -166,7 +168,8 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
         setResumed(true);
       } else if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      if (error instanceof PricingWorkbookFormatError) setFileError(error.message);
+      else toast('error', sanitizeError(error));
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -234,6 +237,13 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
             onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} />
         </div>
         {totals && <Totals totals={totals} />}
+
+        {fileError && (
+          <div role="alert" className="space-y-2 text-red-700">
+            <p>Nothing was saved. Fix these problems in the file and upload it again.</p>
+            <p className="max-h-72 overflow-auto whitespace-pre-line">{fileError}</p>
+          </div>
+        )}
 
         {nothingEdited && <p className="text-secondary">No edits in this file. Change a rate, decision or outcome, then upload it again.</p>}
 

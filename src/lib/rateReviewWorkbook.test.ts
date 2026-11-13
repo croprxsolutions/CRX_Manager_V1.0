@@ -89,6 +89,20 @@ describe('rate review workbook', () => {
     await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', 'approved'))).rejects.toThrow('outcome must be');
   });
 
+  it('reports every bad row across both sheets before returning any upload', async () => {
+    const parsed = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');
+      set(wb, 'Draft Rates', 2, 'rate_id', R2);
+      set(wb, 'Draft Rates', 3, 'low', { formula: '1+1', result: 2 });
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Nope');
+      set(wb, 'Draft Rates', 4, 'low', '1');
+    });
+    await expect(parsed).rejects.toThrow('Rate Outcomes row 2 (Atrazine 4L): outcome must be');
+    await expect(parsed).rejects.toThrow('Draft Rates row 2 is damaged');
+    await expect(parsed).rejects.toThrow('Draft Rates row 3, low has a formula');
+    await expect(parsed).rejects.toThrow('Draft Rates row 4: type a parent name exactly');
+  });
+
   it('refuses a file with a downloaded row deleted, and a new rate for a name two parents share', async () => {
     await expect(roundTrip((wb) => {
       set(wb, 'Draft Rates', 2, 'decision', 'approve');

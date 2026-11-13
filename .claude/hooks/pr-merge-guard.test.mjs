@@ -333,6 +333,24 @@ r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { enabled: f
 ok(r.status === 0 && r.decision === null, "agent turning auto-merge OFF passes");
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_1\"}) { clientMutationId } }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL enablePullRequestAutoMerge denied");
+// Agents never approve a pull request (#1838 HIGH 2): CODEOWNERS names the account they share.
+for (const command of [
+  "gh pr review 5 --approve",
+  "gh pr review 5 -a -b 'ok'",
+  "gh pr review --approve=true 5",
+  "gh api repos/o/r/pulls/5/reviews -f event=APPROVE",
+  "gh api graphql -f query='mutation { addPullRequestReview(input:{pullRequestId:\"P\", event: APPROVE}) { clientMutationId } }'",
+  "bash -c 'gh pr review 5 --approve'",
+]) {
+  r = runHook({ tool_name: "Bash", tool_input: { command } });
+  ok(r.decision?.permissionDecision === "deny" && /never approves/.test(r.decision?.permissionDecisionReason), `approval denied: ${command}`);
+}
+r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "APPROVE" } });
+ok(r.decision?.permissionDecision === "deny", "the GitHub review tool's APPROVE is denied");
+for (const command of ["gh pr review 5 --comment -b 'see the note'", "gh pr review 5 -r -b 'needs a test'", "gh pr view 5 --json reviewDecision"]) {
+  r = runHook({ tool_name: "Bash", tool_input: { command } });
+  ok(r.status === 0 && r.decision === null, `a non-approving review call passes: ${command}`);
+}
 r = runHook({ tool_name: "Bash", tool_input: { command: "rg enablePullRequestAutoMerge docs/" } });
 ok(r.status === 0 && r.decision === null, "searching for the mutation name is not a GraphQL call");
 r = runHook({ tool_name: "Bash", tool_input: { command: "rg -n 'graphql|enablePullRequestAutoMerge' .claude/hooks/pr-merge-guard.mjs" } });
@@ -617,7 +635,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/import \{ agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.

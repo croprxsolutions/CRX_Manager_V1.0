@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  agentMergeProblem, mainCommitsInPrOnGitHub,
+  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -118,6 +118,11 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
   }
   assert.match(mainCommitsInPrOnGitHub({ stagingSha: "short", headSha: HEAD, repo: "o/r", gh: () => "{}" }), /unusable base commit/, "a bad staging sha fails closed");
   assert.ok(mainCommitsInPrOnGitHub({ stagingSha: STAGING, headSha: "short", repo: "o/r", gh: () => "{}" }), "a bad head sha fails closed");
+});
+
+check("agents never approve a pull request (#1838 HIGH 2)", () => {
+  for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE"]) assert.ok(prApprovalProblem(t), t);
+  for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

@@ -143,6 +143,22 @@ export function evaluateLandingGate({
   }
 }
 
+// Mason's agents, 2026-11-12 (#1838 HIGH 1): a hotfix migration applied live with a stamp above a migration that
+// is waiting on staging for the release makes that one older than live's newest, so live's ordering guard refuses
+// it on release day. Only waiting migrations stamped above main's newest count: one stamped below it is already
+// out of order and needs its own restamp. null when the hotfix stamp is fine, otherwise why not.
+// RELEASE_FLOW switched on (Taha, 13 Nov 2026, 05:16:22 UTC).
+export const RELEASE_FLOW_ON_AT = "2026-11-13T05:16:22Z";
+
+export function hotfixStampProblem({ stamp, mainFiles, stagingFiles }) {
+  const stampOf = (f) => (/^(\d{14})_/.exec(String(f)) || [])[1];
+  const onMain = new Set(mainFiles);
+  const mainTop = mainFiles.map(stampOf).filter(Boolean).sort().pop() || "";
+  const waiting = stagingFiles.filter((f) => !onMain.has(f)).map(stampOf).filter((s) => s && s > mainTop).sort();
+  if (!waiting.length || stamp < waiting[0]) return null;
+  return `its stamp ${stamp} is not below ${waiting[0]}, a migration waiting on staging for the release, so live would refuse that one on release day. Restamp this hotfix between main's newest (${mainTop}) and ${waiting[0]}: node scripts/next-migration-stamp.mjs --hotfix`;
+}
+
 function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessionId }) {
   const OUT = (error) => error?.constructor?.name === "OutOfTime";
 
@@ -209,6 +225,19 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (headRef !== "release/next" && !/^hotfix\/[^/]+$/.test(headRef)) {
     return refuse(`${number} is not the release PR (release/next) or a hotfix/<name> PR. Into main, only those are applied live before their merge; feature work goes to staging (ship.md › Staging).`);
   }
+  if (headRef !== "release/next") {
+    let trees;
+    try {
+      const names = (branch) => String(gh(["api", `repos/{owner}/{repo}/git/trees/${branch}:supabase/migrations`, "--jq", "if .truncated then error(\"truncated\") else .tree[].path end"])).split(/\r?\n/).filter(Boolean);
+      trees = { mainFiles: names("main"), stagingFiles: names("staging") };
+    } catch (error) {
+      if (OUT(error)) throw error;
+      return refuse(`could not list the migrations on main and staging to check this hotfix's stamp against the release (${error?.message || error}); fail closed.`);
+    }
+    if (!trees.mainFiles.length || !trees.stagingFiles.length) return refuse("GitHub listed no migrations on main or staging (fail closed).");
+    const stampProblem = hotfixStampProblem({ stamp: stem.slice(0, 14), ...trees });
+    if (stampProblem) return refuse(`${number}: ${stampProblem}`);
+  }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }
@@ -226,6 +255,24 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   const guard = (newestCheckRollup(pr?.statusCheckRollup) || []).filter((c) => c?.__typename === "CheckRun" && c?.workflowName === "Release flow" && c?.name === "Release flow guard (main)");
   if (!guard.length || !guard.every((c) => String(c.status || "").toUpperCase() === "COMPLETED" && String(c.conclusion || "").toUpperCase() === "SUCCESS")) {
     return refuse(`${number} has no green "Release flow guard (main)" check, so it is not proven to carry only what it should. Wait for it, or fix what it reports.`);
+  }
+  // Sol, #1838: before switch-on the guard passed without checking anything, so only a run finished after it counts.
+  if (!guard.every((c) => Date.parse(String(c.completedAt || "")) > Date.parse(RELEASE_FLOW_ON_AT))) {
+    return refuse(`${number}'s "Release flow guard (main)" result is from before the release flow was switched on (${RELEASE_FLOW_ON_AT}), when it checked nothing. Re-run that check, then retry.`);
+  }
+  // #1838 HIGH 2: GitHub runs the PR's own copy of the workflows, so a PR that changes .github/workflows could
+  // change (or imitate) the guard it is judged by. Its migrations wait until that change has been reviewed onto main.
+  let workflowsHere;
+  let workflowsOnMain;
+  try {
+    workflowsHere = String(git(["rev-parse", "HEAD:.github/workflows"])).trim();
+    workflowsOnMain = String(gh(["api", "repos/{owner}/{repo}/git/trees/main:.github", "--jq", '.tree[] | select(.path == "workflows") | .sha'])).trim();
+  } catch (error) {
+    if (OUT(error)) throw error;
+    return refuse(`could not compare ${number}'s .github/workflows with main's (${error?.message || error}); fail closed.`);
+  }
+  if (!/^[0-9a-f]{40}$/i.test(workflowsHere) || workflowsHere !== workflowsOnMain) {
+    return refuse(`${number} changes .github/workflows, the checks it is judged by, so its migrations are not applied by an agent. Taha or Mason reviews that change onto main first (or applies by hand).`);
   }
   // A money PR needs a completed CodeRabbit review of its head before it merges
   // (Mason, 2026-10-21), so it needs one before its migration applies too —

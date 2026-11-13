@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -1289,6 +1289,9 @@ export function evaluateProductionAction({
     }
     return { blocked: false };
   }
+  // Agents never approve a pull request (#1838 HIGH 2).
+  const approval = prApprovalProblem(command);
+  if (approval) return denied(`CODEX PRODUCTION GATE: ${approval}.`);
   // A command handed to another program as one argument — `bash -c "…"`,
   // `cmd /c "…"`, `pwsh -Command "…"`, `pwsh -EncodedCommand …`, `eval`,
   // `Invoke-Expression`, `Start-Process`, a `&{ … }` block — is one word to every

@@ -159,6 +159,14 @@ function writeProof(repo, proof) {
   writeFileSync(proofPath(repo), `${JSON.stringify(proof)}\n`, "utf8");
 }
 
+// Agents never approve a pull request (#1838 HIGH 2).
+for (const command of ["gh pr review 5 --approve", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE", "bash -c 'gh pr review 5 -a'"]) {
+  const r = evaluateProductionAction({ toolName: "Bash", toolInput: { command } });
+  assert.equal(r.blocked, true, command);
+  assert.match(r.reason, /never approves/, command);
+}
+assert.equal(evaluateProductionAction({ toolName: "Bash", toolInput: { command: "gh pr review 5 --comment -b note" } }).blocked, false);
+
 function evaluatePush(repo, nowMs = Date.now(), command = "git push origin HEAD:main") {
   return evaluateProductionAction({
     toolName: "PowerShell",

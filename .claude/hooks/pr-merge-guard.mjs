@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -141,6 +141,13 @@ if (/set_auto_merge$/i.test(toolName) && toolInput.enabled !== false) {
 if (typeof toolInput.command === "string" && /\bapi\s+graphql\b|\/graphql\b/i.test(toolInput.command) && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
   deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app; the GraphQL enablePullRequestAutoMerge mutation is refused for agents.");
 }
+// Agents never approve a pull request (#1838 HIGH 2): the GitHub review tools and any shell or API spelling.
+{
+  const approval = /pull_request_review/i.test(toolName) && /APPROVE/.test(JSON.stringify(toolInput))
+    ? prApprovalProblem("review APPROVE")
+    : null;
+  if (approval) deny(`PR MERGE GATE: ${approval}.`);
+}
 if (GITHUB_MERGE_TOOL.test(toolName)) {
   requests.push(mcpMergeRequest(toolInput));
 } else if (typeof toolInput.command === "string" && toolInput.command) {
@@ -175,6 +182,8 @@ function collectMergeRequests(scanned) {
   // `--admin` had been carried off into a segment containing no `gh` at all
   // (Codex sol, 2026-09-08, SEC-001).
   for (const segment of splitCommandSegments(scanned)) {
+    const approval = prApprovalProblem(segment);
+    if (approval) deny(`PR MERGE GATE: ${approval}.`);
     // The mergePullRequest mutation is denied by NAME, whatever transport
     // carries it — `gh api graphql`, curl, Invoke-RestMethod, a fetch in a node
     // one-liner. Until 2026-09-01 only the `gh api graphql` spelling was caught

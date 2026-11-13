@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Usage: npm run next-migration-stamp -- [--live <14-digit version>] [--gap-minutes <n>]
+//        node scripts/next-migration-stamp.mjs --hotfix [--live <14-digit version>]   (a hotfix/<name> migration)
 //        node scripts/next-migration-stamp.mjs --later-than <14-digit stamp>   (lists stamps above it)
 // Prints a migration version stamp (YYYYMMDDHHMMSS, UTC) above every stamp in
 // origin/main, every local worktree and every open PR, plus the live high-water when
@@ -36,6 +37,19 @@ export function nextStamp(seen, { gapMinutes = 60, now = new Date() } = {}) {
   return { stamp, top };
 }
 
+// A hotfix migration goes live before the migrations waiting on staging for the release, so its stamp sits just
+// above main's newest (and live's) and below the oldest waiting one stamped above main; otherwise live refuses that
+// one on release day (#1838 HIGH 1). taken: every stamp seen anywhere, so the pick collides with none.
+export function hotfixStamp({ mainTop, live = "", ceiling = "", taken = new Set() }) {
+  const floor = [mainTop, live].filter(Boolean).sort().pop() || "00000000000000";
+  let d = new Date(Math.floor(toDate(floor).getTime() / 60_000) * 60_000 + 60_000);
+  while (taken.has(toStamp(d))) d = new Date(d.getTime() + 60_000);
+  const stamp = toStamp(d);
+  if (stamp <= floor) throw new Error(`computed ${stamp} is not above ${floor}`);
+  if (ceiling && stamp >= ceiling) throw new Error(`no free stamp between ${floor} and ${ceiling} (the oldest migration waiting on staging); ask Taha or Mason`);
+  return stamp;
+}
+
 // Stamps above `stamp`, lowest first, one line each: origin/main and open PRs first, then a worktree.
 export function laterStamps(seen, stamp) {
   const by = new Map();
@@ -60,8 +74,14 @@ function collect() {
   const seen = [];
   const add = (path, source) => { const stamp = stampOf(path); if (stamp) seen.push({ stamp, source }); };
 
-  run("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
-  for (const p of run("git", ["ls-tree", "-r", "--name-only", "origin/main", `${DIR}/`]).split("\n")) add(p.trim(), "origin/main");
+  run("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/staging:refs/remotes/origin/staging"]);
+  const mainFiles = run("git", ["ls-tree", "-r", "--name-only", "origin/main", `${DIR}/`]).split("\n").map((p) => p.trim()).filter(Boolean);
+  for (const p of mainFiles) add(p, "origin/main");
+  const onMain = new Set(mainFiles);
+  const waiting = [];
+  for (const p of run("git", ["ls-tree", "-r", "--name-only", "origin/staging", `${DIR}/`]).split("\n").map((x) => x.trim())) {
+    if (p && !onMain.has(p)) { add(p, "origin/staging"); const st = stampOf(p); if (st) waiting.push(st); }
+  }
 
   for (const wt of parseWorktreePorcelain(run("git", ["worktree", "list", "--porcelain"]))) {
     const dir = join(wt.path, DIR);
@@ -78,7 +98,8 @@ function collect() {
       : (pr.files ?? []).map((f) => f.path);
     for (const p of paths) if (p.startsWith(`${DIR}/`)) add(p, `open PR #${pr.number}`);
   }
-  return { seen, prCount: prs.length };
+  const mainTop = mainFiles.map(stampOf).filter(Boolean).sort().pop() ?? "";
+  return { seen, prCount: prs.length, mainTop, waiting };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -97,17 +118,27 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     }
     process.exit(0);
   }
+  const hotfix = args[0] === "--hotfix";
+  if (hotfix) args.shift();
   const flags = Object.create(null);
   for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1] ?? "";
   const live = flags["--live"];
   const gap = flags["--gap-minutes"] ?? "60";
   const known = Object.keys(flags).every((k) => k === "--live" || k === "--gap-minutes");
   if (!known || (live !== undefined && !/^\d{14}$/.test(live)) || !/^[1-9]\d*$/.test(gap)) {
-    console.error("usage: npm run next-migration-stamp -- [--live <14-digit version>] [--gap-minutes <n>]");
+    console.error("usage: npm run next-migration-stamp -- [--hotfix] [--live <14-digit version>] [--gap-minutes <n>]");
     process.exit(2);
   }
   try {
-    const { seen, prCount } = collect();
+    const { seen, prCount, mainTop, waiting } = collect();
+    if (hotfix) {
+      const ceiling = waiting.filter((w) => w > mainTop).sort()[0] ?? "";
+      const stamp = hotfixStamp({ mainTop, live, ceiling, taken: new Set(seen.map((x) => x.stamp)) });
+      console.error(`hotfix: above main's newest ${mainTop}${live ? ` and live ${live}` : ""}${ceiling ? `, below ${ceiling} (waiting on staging)` : ""}`);
+      if (!live) console.error("note: live high-water not checked; pass --live <version> when the migration will be applied");
+      console.log(stamp);
+      process.exit(0);
+    }
     if (live) seen.push({ stamp: live, source: "live high-water (--live)" });
     const { stamp, top } = nextStamp(seen, { gapMinutes: Number(gap) });
     console.error(`checked ${seen.length} stamps (origin/main, local worktrees, ${prCount} open PRs${live ? ", live" : ""}); highest ${top.stamp} from ${top.source}`);

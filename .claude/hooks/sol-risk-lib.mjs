@@ -180,6 +180,20 @@ export function mainCommitsInPrOnGitHub({ stagingSha, headSha, repo, gh }) {
     : null;
 }
 
+// #1838 HIGH 2 (Mason's agents, 2026-11-12): CODEOWNERS names masonwells1, the account the agents share, so an
+// agent's approving review would count as a code owner's on a .github/ change (the release guard included).
+// Agents never approve a pull request; Taha or Mason does, by hand. null when the text approves nothing.
+export function prApprovalProblem(text) {
+  const t = String(text || "");
+  const ghReview = /\bpr\s+review\b/i.exec(t);
+  const cliApprove = ghReview && /\bgh(?:\.exe)?\b/i.test(t) &&
+    t.slice(ghReview.index).split(/\s+/).some((w) => /^--approve(?:=|$)/i.test(w) || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
+  const apiApprove = /\bAPPROVE\b/.test(t) && /review/i.test(t);
+  return cliApprove || apiApprove
+    ? "an agent never approves a pull request: CODEOWNERS names masonwells1, the account the agents share, so an agent's approval would count as a code owner's review (for example on a change to the release guard). Leave approvals to Taha or Mason, by hand"
+    : null;
+}
+
 // null when an agent may merge this PR (its other gates still apply).
 export function agentMergeProblem(base, headRef) {
   if (base === "main") {

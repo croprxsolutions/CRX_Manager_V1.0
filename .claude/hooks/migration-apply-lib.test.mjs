@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
@@ -1658,13 +1658,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
-    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false } = {}) => evaluateLandingGate({
+    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
+    trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40) } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
       if (key in git) { if (git[key] instanceof Error) throw git[key]; return git[key]; }
       if (key === "rev-parse HEAD") return `${HEAD_SHA}\n`;
       if (key === "rev-parse --abbrev-ref HEAD") return "claude/feature\n";
+      if (key === "rev-parse HEAD:.github/workflows") return `${workflowsHead}\n`;
       if (key.startsWith("show HEAD:")) return SQL;
       if (key.startsWith("status --porcelain")) return "";
       // git's shared folder: this fixture is its own main checkout.
@@ -1696,6 +1699,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: threadsHead,
           reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
+      }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/git/trees/main:.github") {
+        if (workflowsMain instanceof Error) throw workflowsMain;
+        return `${workflowsMain}\n`;
+      }
+      // The hotfix stamp check lists the migrations on main and staging (#1838 HIGH 1).
+      const tree = /^repos\/\{owner\}\/\{repo\}\/git\/trees\/(main|staging):supabase\/migrations$/.exec(String(args[1]));
+      if (args[0] === "api" && tree) {
+        if (treesError) throw treesError;
+        return trees[tree[1]].join("\n") + "\n";
       }
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
@@ -1779,6 +1792,35 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { baseRefName: "staging" } }), "staging database job applies it after the merge", "a PR into staging is never applied live before its merge");
   for (const head of ["claude/feature", "main", "hotfix/a/b", "release/next2", "release/other", ""]) {
     refused(gate({ pr: { headRefName: head } }), "is not the release PR (release/next) or a hotfix/<name> PR", `into main, only the release PR and a hotfix are applied live first (${head || "no head"})`);
+  }
+  // #1838 HIGH 1 (Mason's agents, 2026-11-12): a hotfix stamped above a migration waiting on staging would make live
+  // refuse that one on release day.
+  {
+    const main = ["20270109100000_on_main.sql"];
+    const staging = [...main, "20261231110000_m4b_old.sql", "20270110100000_waiting.sql"];
+    ok(hotfixStampProblem({ stamp: "20270109110000", mainFiles: main, stagingFiles: staging }) === null, "a hotfix between main's newest and the waiting migration is fine");
+    ok(/20270110100000/.test(hotfixStampProblem({ stamp: "20270110100000", mainFiles: main, stagingFiles: staging })), "a hotfix at the waiting stamp is refused");
+    ok(/next-migration-stamp\.mjs --hotfix/.test(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: staging })), "a hotfix above it is refused, with the fix");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: [...main, "20261231110000_m4b_old.sql"] }) === null,
+      "a waiting migration below main's newest (already out of order, restamped on its own) doesn't count");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: main }) === null, "nothing waiting: anything goes");
+  }
+  const waitingTrees = { main: ["20260801000000_x.sql"], staging: ["20260801000000_x.sql", "20260810000000_waiting.sql"] };
+  refused(gate({ trees: waitingTrees }), "a migration waiting on staging", "a hotfix stamped above a waiting staging migration is refused");
+  ok(gate({ trees: { ...waitingTrees, staging: [...waitingTrees.staging.slice(0, 1), "20260901000000_later.sql"] } }).ok === true, "a hotfix below the waiting one passes");
+  refused(gate({ treesError: new Error("HTTP 502") }), "could not list the migrations", "an unreadable listing fails closed");
+  refused(gate({ trees: { main: [], staging: [] } }), "listed no migrations", "an empty listing fails closed");
+  ok(gate({ trees: waitingTrees, pr: { headRefName: "release/next" } }).ok === true, "the release PR carries the waiting migrations itself: no stamp check");
+  // #1838 HIGH 2: a PR that changes .github/workflows is judged by its own copy of the guard.
+  refused(gate({ workflowsHead: "b".repeat(40) }), "changes .github/workflows", "a PR with its own workflows is refused");
+  refused(gate({ workflowsHead: "b".repeat(40), pr: { headRefName: "release/next" } }), "changes .github/workflows", "a release with a workflow change is refused too");
+  refused(gate({ workflowsMain: new Error("HTTP 502") }), "could not compare", "an unreadable main tree fails closed");
+  refused(gate({ workflowsHead: "" }), "changes .github/workflows", "no workflows tree at HEAD is refused");
+  // Sol (#1838): a guard result from before switch-on checked nothing.
+  {
+    const old = "2026-11-12T10:00:00Z";
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old, completedAt: old }] } }),
+      "from before the release flow was switched on", "a pre-switch-on guard result is refused");
   }
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");

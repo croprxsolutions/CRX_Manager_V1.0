@@ -4,8 +4,9 @@ import { ChevronRight, Send } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
+import Badge from '../ui/Badge';
 import { formatUSD as fmt } from '../../lib/money';
-import { statusLabel } from '../../lib/statusLabel';
+import { formatSharePct, invoiceStatusBadge } from '../../lib/statusLabel';
 
 export type SaleInvoice = {
   id: string;
@@ -31,11 +32,6 @@ interface Props {
 }
 
 const isDraft = (s: string) => s === 'draft' || s === 'unposted';
-const pillClass = (s: string) =>
-  s === 'posted' || s === 'paid' ? 'bg-emerald-100 text-emerald-800'
-    : isDraft(s) ? 'bg-gray-100 text-gray-700'
-      : s === 'voided' || s === 'cancelled' || s === 'overdue' ? 'bg-red-100 text-red-800'
-        : 'bg-amber-100 text-amber-800';
 
 /** The sale's invoices, one row per invoice and payer, with a checked "post the drafts" action. */
 export default function SaleInvoicesCard({
@@ -70,7 +66,7 @@ export default function SaleInvoicesCard({
                       <strong className="font-semibold text-nav-dark">{inv.number}</strong>
                       {(inv.payerName || inv.typeLabel) && (
                         <span className="break-words text-sm text-secondary">
-                          {[inv.payerName && (inv.sharePct != null ? `${inv.payerName} · ${inv.sharePct}%` : inv.payerName), inv.typeLabel]
+                          {[inv.payerName && (inv.sharePct != null ? `${inv.payerName} · ${formatSharePct(inv.sharePct)}` : inv.payerName), inv.typeLabel]
                             .filter(Boolean).join(' · ')}
                         </span>
                       )}
@@ -81,7 +77,7 @@ export default function SaleInvoicesCard({
                       {!isDraft(inv.status) && inv.balance !== inv.total && (
                         <span className={`text-xs tabular-nums ${inv.balance > 0 ? 'text-red-600' : 'text-crx-green'}`}>{fmt(inv.balance)} due</span>
                       )}
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${pillClass(inv.status)}`}>{statusLabel(inv.status)}</span>
+                      <Badge variant={invoiceStatusBadge(inv.status).variant} normalCase>{invoiceStatusBadge(inv.status).label}</Badge>
                     </span>
                     <ChevronRight className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
                   </Link>

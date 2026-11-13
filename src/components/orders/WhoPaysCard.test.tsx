@@ -28,6 +28,20 @@ describe('WhoPaysCard', () => {
     expect(screen.getByRole('img', { name: 'Maple Hollow Farms 65 percent, Cedar Ridge Ag 35 percent' })).toBeInTheDocument();
   });
 
+  it('three payers with 60-character names: every row keeps its percent and the bar names them all', () => {
+    const main = 'Maple Hollow Farms and Sons Agricultural Partnership Limited'.padEnd(60, 'x').slice(0, 60);
+    const second = 'Cedar Ridge Ag Cooperative of the Northern River Valley Group'.padEnd(60, 'x').slice(0, 60);
+    const third = 'Maple Hollow Farms North Unit Irrigated Acres Holding Company'.padEnd(60, 'x').slice(0, 60);
+    expect([main, second, third].map((n) => n.length)).toEqual([60, 60, 60]);
+    render(<WhoPaysCard {...base} mainCustomerName={main}
+      shares={[{ id: 's1', customerName: second, pct: 33.33 }, { id: 's2', customerName: third, pct: 33.33 }]} />);
+    expect(screen.getByText('3 payers · 100%')).toBeInTheDocument();
+    expect(within(row(main)).getByText('33.34%')).toBeInTheDocument();
+    expect(within(row(second)).getByText('33.33%')).toBeInTheDocument();
+    expect(within(row(third)).getByText('33.33%')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: `${main} 33.34 percent, ${second} 33.33 percent, ${third} 33.33 percent` })).toBeInTheDocument();
+  });
+
   it('one payer reads as 100%', () => {
     render(<WhoPaysCard {...base} shares={[]} />);
     expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === 'Maple Hollow Farms pays 100%')).toBeInTheDocument();

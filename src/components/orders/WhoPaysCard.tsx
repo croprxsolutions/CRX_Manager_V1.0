@@ -6,6 +6,7 @@ import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { formatUSD as fmt } from '../../lib/money';
 import { sharesLeft } from '../../lib/billSplitLock';
+import { formatSharePct } from '../../lib/statusLabel';
 
 /** A card payer. `amount` is their live share of the products in dollars, when the page has it exactly. */
 export type WhoPaysShare = { id: string; customerName: string; pct: number; amount?: number };
@@ -59,7 +60,7 @@ function PayerList({ rows, describe, saving, onRemove }: {
             <span className="block break-words font-medium text-nav-dark">{r.name}</span>
             {describe(r) && <span className="block text-xs text-secondary">{describe(r)}</span>}
           </span>
-          <strong className="tabular-nums">{r.pct}%</strong>
+          <strong className="tabular-nums">{formatSharePct(r.pct)}</strong>
           {onRemove && r.shareId ? (
             <button type="button" aria-label={`Remove ${r.name}`} disabled={saving}
               onClick={() => onRemove(r.shareId!)}

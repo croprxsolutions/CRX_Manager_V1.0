@@ -76,6 +76,22 @@ describe('SaleInvoicesCard', () => {
     expect(within(screen.getByRole('link', { name: /CM-0001/ })).queryByText(/^Paid/)).not.toBeInTheDocument();
   });
 
+  it('status pills follow the shared invoice palette: Paid darker than Posted, Overdue amber', () => {
+    renderCard({ invoices: [
+      { ...invoices[0], status: 'paid', balance: 0 },
+      { ...invoices[1], status: 'posted' },
+      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Maple Hollow Farms', status: 'overdue', total: 10, balance: 10 },
+    ] });
+    expect(screen.getByText('Paid').className).toContain('bg-emerald-200');
+    expect(screen.getByText('Posted').className).toContain('bg-emerald-100');
+    expect(screen.getByText('Overdue').className).toContain('bg-amber-100');
+  });
+
+  it('keeps a share to two decimals', () => {
+    renderCard({ invoices: [{ ...invoices[0], sharePct: 33.333333 }] });
+    expect(screen.getByText('Maple Hollow Farms · 33.33%')).toBeInTheDocument();
+  });
+
   it('with no invoices, explains when they are made', () => {
     renderCard({ invoices: [] });
     expect(screen.getByText('No invoices yet. Product invoices are made after delivery. Record advance payments as prepay.')).toBeInTheDocument();

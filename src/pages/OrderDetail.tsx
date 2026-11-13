@@ -2048,7 +2048,7 @@ export default function OrderDetail() {
                           <span className="text-xs text-secondary">{fmt(it.total_price)}</span>
                           {/* Not while the split details failed to load: the line's existing fields are unknown. */}
                           {canEdit && !isOpen && !allocLoadFailed && (
-                            <Button variant="ghost" size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false}
+                            <Button variant="ghost" size="sm" className="min-h-11 md:min-h-0" icon={<Plus className="w-4 h-4" />} showChevron={false}
                               onClick={() => { setAllocEditorItemId(it.id); setNewAllocFieldId(''); setNewAllocAcres(''); }}>
                               Field
                             </Button>
@@ -2064,7 +2064,8 @@ export default function OrderDetail() {
                               <div key={a.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
                                 <span className="text-nav-dark">{fld?.field_name || 'Field'} — {Number(a.acres)} ac</span>
                                 {canEdit && (
-                                  <button onClick={() => handleRemoveAllocation(a.id)} className="text-red-400 hover:text-red-600 disabled:opacity-50" disabled={savingAlloc}>
+                                  <button type="button" aria-label={`Remove ${fld?.field_name || 'field'}`} onClick={() => handleRemoveAllocation(a.id)} disabled={savingAlloc}
+                                    className="inline-flex h-11 w-11 flex-none items-center justify-center text-red-400 hover:text-red-600 disabled:opacity-50 md:h-auto md:w-auto">
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
@@ -2084,7 +2085,7 @@ export default function OrderDetail() {
                                 const f = allocFields.find((x) => x.id === e.target.value);
                                 if (f && f.total_acres != null) setNewAllocAcres(String(f.total_acres));
                               }}
-                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green">
+                              className="min-h-11 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green md:min-h-0">
                               <option value="">Select field...</option>
                               {allocFields.filter((f) => !used.has(f.id)).map((f) => (
                                 <option key={f.id} value={f.id}>{f.field_name}{f.total_acres != null ? ` (${f.total_acres} ac)` : ' (no acres on file)'}</option>
@@ -2095,11 +2096,11 @@ export default function OrderDetail() {
                             <label className="text-[11px] font-medium text-secondary mb-1 block">Acres</label>
                             <input type="number" value={newAllocAcres} onChange={(e) => setNewAllocAcres(e.target.value)}
                               min="0.01" step="0.01" placeholder="acres"
-                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+                              className="min-h-11 md:min-h-0 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
                           </div>
                           <div className="sm:col-span-3 flex items-center justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setAllocEditorItemId(null)}>Cancel</Button>
-                            <Button size="sm" loading={savingAlloc} disabled={!newAllocFieldId || !newAllocAcres}
+                            <Button variant="ghost" size="sm" className="min-h-11 md:min-h-0" onClick={() => setAllocEditorItemId(null)}>Cancel</Button>
+                            <Button size="sm" className="min-h-11 md:min-h-0" loading={savingAlloc} disabled={!newAllocFieldId || !newAllocAcres}
                               onClick={() => handleAddAllocation(it.id)}>Add</Button>
                           </div>
                         </div>

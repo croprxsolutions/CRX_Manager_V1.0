@@ -419,7 +419,7 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
           `Sum of product lines ($${(recalcSubtotal / 100).toFixed(2)}) should match Products ($${(displayedProducts / 100).toFixed(2)})`);
       }
 
-      // The lines card ends with "Invoice total" (the old table footer): it must match the lines above it
+      // The lines card ends with "Invoice total" ("Lines total" when it differs from the saved total; the old table footer): it must match the lines above it
       const footerCents = await linesCardTotalCents(page);
       if (footerCents !== null && recalcSubtotal > 0) {
         assertCentsEqual(footerCents, allLines.totalCents, 2,

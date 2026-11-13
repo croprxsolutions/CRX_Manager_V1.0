@@ -2044,6 +2044,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
   // Amount due: the lines' own sum, split into products, charges, discount and tax (display only).
   const breakdown = invoiceBreakdown(items);
+  // The total Amount due shows: the saved total, as the PDF prints it; a new invoice has none yet, so its lines add up.
+  const amountDueTotalCents = isNew ? breakdown.totalCents : invoice.total_amount_cents || 0;
   const marginCents = invoiceMarginCents(items, totalCostCents);
   const marginBaseCents = marginCents + totalCostCents;
   const marginPct = marginBaseCents > 0 ? (marginCents / marginBaseCents) * 100 : null;
@@ -2222,8 +2224,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           <fieldset disabled={postFlowBusy} className="order-1 m-0 min-w-0 border-0 p-0 md:order-none">
             <InvoiceAmountDue
               breakdown={breakdown}
-              // The saved total, as the PDF prints it; a new invoice has none yet, so its lines add up.
-              totalCents={isNew ? breakdown.totalCents : invoice.total_amount_cents || 0}
+              totalCents={amountDueTotalCents}
               dirty={hasUnsavedChanges}
               firstLabel={invoice.invoice_type === 'field_application' ? 'Subtotal' : 'Products'}
               writtenOffCents={(invoice as { write_off_cents?: number | null }).write_off_cents || 0}
@@ -2514,7 +2515,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             <h2 id="invoice-lines-title" className="font-heading text-xl font-semibold text-nav-dark">What this invoice bills</h2>
             {thisPayer && billSplitPayers.length > 1 && (
               <p className="mt-0.5 text-sm text-secondary">
-                This payer&apos;s {thisPayer.split_percentage}% of {thisDelivery ? `delivery ${thisDelivery.delivery_number}` : 'the delivery'}
+                {/* No percentage: a payer can own whole lines or a dollar share, so one number would be false (attack MED-1). */}
+                This payer&apos;s part of {thisDelivery ? `delivery ${thisDelivery.delivery_number}` : 'the delivery'}
               </p>
             )}
           </div>
@@ -2751,8 +2753,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             </section>
           )}
 
+          {/* "Invoice total" only when the lines add up to Amount due's total; a voided invoice keeps its lines
+              under a $0.00 total, so its line sum is "Lines total" there (attack MED-2). */}
           <div className="flex justify-between gap-3 border-t border-gray-200 px-5 py-4 text-base font-semibold text-nav-dark">
-            <span>Invoice total</span>
+            <span>{breakdown.totalCents === amountDueTotalCents ? 'Invoice total' : 'Lines total'}</span>
             <span className="tabular-nums">{formatCentsMinus(breakdown.totalCents)}</span>
           </div>
         </section>

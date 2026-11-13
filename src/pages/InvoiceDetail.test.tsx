@@ -2411,6 +2411,26 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(within(lines).queryByRole('region', { name: 'Worked out for you' })).not.toBeInTheDocument();
     });
 
+    // Attack MED-2: a voided invoice keeps its lines under a $0.00 saved total; the two cards must not both say "Invoice total".
+    it('a voided invoice labels its line sum Lines total, and Amount due keeps the saved $0.00 Invoice total', async () => {
+      const voidedLines = [{ ...lines[0], quantity: 1, unit_price_cents: 216515, extended_cents: 216515 }];
+      load({ ...draft, status: 'voided', total_amount_cents: 0, balance_cents: 0 }, voidedLines);
+      renderInvoiceDetail();
+      const linesCard = await screen.findByRole('region', { name: 'What this invoice bills' });
+      expect(within(linesCard).getByText('Lines total').parentElement).toHaveTextContent(/^Lines total\$2,165\.15$/);
+      expect(within(linesCard).queryByText('Invoice total')).not.toBeInTheDocument();
+      const due = screen.getByRole('region', { name: 'Amount due' });
+      expect(within(due).getByText('Invoice total').parentElement).toHaveTextContent(/^Invoice total\$0\.00$/);
+    });
+
+    it('an invoice whose lines add up to its saved total ends the lines card with Invoice total', async () => {
+      load(posted);
+      renderInvoiceDetail();
+      const linesCard = await screen.findByRole('region', { name: 'What this invoice bills' });
+      expect(within(linesCard).getByText('Invoice total').parentElement).toHaveTextContent(/^Invoice total\$20\.00$/);
+      expect(within(linesCard).queryByText('Lines total')).not.toBeInTheDocument();
+    });
+
     it('a per-line split invoice keeps its read-only note in the lines card', async () => {
       load({ ...posted, field_app_billing_set_id: 'set-1' });
       renderInvoiceDetail();
@@ -2441,6 +2461,10 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     renderInvoiceDetail();
     expect(await screen.findByText('Split invoice 1 of 2')).toBeInTheDocument();
     expect(screen.getByText(/Maple Hollow Farms pays 50%/)).toBeInTheDocument();
+    // Attack MED-1: the lines card names this payer's part with no percentage (a payer can own whole lines).
+    const linesCard = screen.getByRole('region', { name: 'What this invoice bills' });
+    expect(within(linesCard).getByText("This payer's part of the delivery")).toBeInTheDocument();
+    expect(within(linesCard).queryByText(/% of/)).not.toBeInTheDocument();
     const whoPays = screen.getByRole('region', { name: 'Who pays' });
     expect(within(whoPays).getByRole('link', { name: 'INV-0500-2' })).toHaveAttribute('href', '/invoices/inv-124');
     expect(within(whoPays).getByText(/this invoice/)).toBeInTheDocument();

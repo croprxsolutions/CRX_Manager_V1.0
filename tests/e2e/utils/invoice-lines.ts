@@ -39,9 +39,13 @@ export async function amountDueCents(page: Page, label: string): Promise<number 
   return parseDollars(await row.locator('..').locator('.tabular-nums').first().textContent());
 }
 
-/** The closing "Invoice total" of the lines card, in cents; null when absent. */
+/**
+ * The closing total of the lines card, in cents; null when absent. It reads "Invoice total" when the lines add up
+ * to Amount due's total and "Lines total" when they don't (a voided invoice), so both labels are read and every
+ * caller still checks it against the lines above it.
+ */
 export async function linesCardTotalCents(page: Page): Promise<number | null> {
-  const row = page.locator('section[aria-labelledby="invoice-lines-title"]').getByText('Invoice total', { exact: true }).first();
+  const row = page.locator('section[aria-labelledby="invoice-lines-title"]').getByText(/^(Invoice|Lines) total$/).first();
   if (!(await row.isVisible({ timeout: 2000 }).catch(() => false))) return null;
   return parseDollars(await row.locator('..').locator('.tabular-nums').first().textContent());
 }

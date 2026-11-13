@@ -429,8 +429,8 @@ test.describe('Invoice Math Verification', () => {
     const inv = await goToInvoice(page, 0);
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
 
-    // The lines card closes with its own "Invoice total" row (there is no table footer any more). Both totals
-    // render the same figure, so check each against the lines on screen instead of against each other.
+    // The lines card closes with its own total row, "Invoice total" or "Lines total" when the lines differ from the
+    // saved total (there is no table footer any more). Check each total against the lines on screen.
     const lines = await invoiceLineAmounts(page);
     const lineCount = lines.products.length + lines.charges.length + lines.worked.length;
     const tfootCents = await linesCardTotalCents(page);

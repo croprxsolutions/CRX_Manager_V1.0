@@ -116,6 +116,12 @@ describe('InvoicePrintDialog', () => {
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('Download PDF and Cancel reach 44px below md', () => {
+    render(<InvoicePrintDialog {...defaultProps} />);
+    expect(screen.getByRole('button', { name: /download pdf/i })).toHaveClass('min-h-11', 'md:min-h-0');
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toHaveClass('min-h-11', 'md:min-h-0');
+  });
+
   it('disables Download PDF button when loading', () => {
     render(<InvoicePrintDialog {...defaultProps} loading={true} />);
     expect(screen.getByRole('button', { name: /download pdf/i })).toBeDisabled();

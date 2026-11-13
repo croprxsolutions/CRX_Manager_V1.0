@@ -140,6 +140,7 @@ export default function InvoicePrintDialog({
         <div className="flex flex-col-reverse gap-2 pt-2 md:flex-row md:justify-end md:gap-3">
           <Button variant="ghost" className="min-h-11 md:min-h-0" onClick={onClose}>Cancel</Button>
           <Button
+            className="min-h-11 md:min-h-0"
             icon={<Printer className="w-4 h-4" />}
             onClick={handlePrint}
             loading={loading}

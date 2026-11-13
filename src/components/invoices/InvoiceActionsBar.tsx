@@ -35,14 +35,18 @@ const subscribePhone = (onChange: () => void) => {
 };
 const isPhoneNow = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
 
-/**
- * The invoice's actions: one main button per status (Post, else Record payment, else Apply credit, else Save on a
- * new invoice), Save, Print and Email beside it, and the rest under More. Below md it is a bar above the bottom nav.
- */
-export default function InvoiceActionsBar({ save, post, print, email, transfer, recordPayment, applyCredit, writeOff, unpost, voidInvoice }: Props) {
-  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
-  const hintId = useId();
-  const main = post ? 'post' : recordPayment ? 'recordPayment' : applyCredit ? 'applyCredit' : save ? 'save' : null;
+type MainAction = 'post' | 'recordPayment' | 'applyCredit' | 'save' | null;
+
+/** One main button per status: Post, else Record payment, else Apply credit, else Save on a new invoice. */
+function mainActionOf({ post, recordPayment, applyCredit, save }: Props): MainAction {
+  if (post) return 'post';
+  if (recordPayment) return 'recordPayment';
+  if (applyCredit) return 'applyCredit';
+  return save ? 'save' : null;
+}
+
+/** What goes under More: Email too below md, and Apply credit unless it is the main button. */
+function moreItems({ email, transfer, applyCredit, writeOff, unpost, voidInvoice }: Props, isPhone: boolean, main: MainAction) {
   const more: ActionMenuItem[] = [];
   const add = (id: string, label: string, a: InvoiceAction | undefined, node: ReactNode, danger = false) => {
     if (a) more.push({ id, label, icon: node, onAction: a.onClick, disabled: a.disabled || a.loading, danger });
@@ -53,6 +57,34 @@ export default function InvoiceActionsBar({ save, post, print, email, transfer, 
   add('write-off', 'Write off…', writeOff, <X className="h-4 w-4" />);
   add('unpost', 'Unpost…', unpost, <RotateCcw className="h-4 w-4" />);
   add('void', 'Void invoice…', voidInvoice, <X className="h-4 w-4" />, true);
+  return more;
+}
+
+function PostButton({ post, hintId, className }: { post: NonNullable<Props['post']>; hintId: string; className: string }) {
+  return (
+    <>
+      <Button className={className} icon={<Send className="h-4 w-4" />} showChevron={false}
+        onClick={post.onClick} loading={post.loading} disabled={post.disabled || post.dirty}
+        title={post.dirty ? 'Save your changes first' : undefined}
+        aria-describedby={post.dirty ? hintId : undefined}>
+        Post invoice…
+      </Button>
+      {/* The title is no help on a phone: say it on screen there (hidden from md, where the title shows). */}
+      {post.dirty && <p id={hintId} className="order-first w-full text-center text-xs text-amber-800 md:hidden">Save your changes first</p>}
+    </>
+  );
+}
+
+/**
+ * The invoice's actions: one main button per status (Post, else Record payment, else Apply credit, else Save on a
+ * new invoice), Save, Print and Email beside it, and the rest under More. Below md it is a bar above the bottom nav.
+ */
+export default function InvoiceActionsBar(props: Props) {
+  const { save, post, print, email, recordPayment, applyCredit } = props;
+  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
+  const hintId = useId();
+  const main = mainActionOf(props);
+  const more = moreItems(props, isPhone, main);
 
   // Tighter below md, so Save, Print and More share one row at 360 px.
   const secondary = 'min-h-11 flex-1 whitespace-nowrap max-md:gap-1.5! max-md:px-3! md:min-h-0 md:flex-none';
@@ -71,16 +103,7 @@ export default function InvoiceActionsBar({ save, post, print, email, transfer, 
       {print && btn(print, 'Print…', <Printer className="h-4 w-4" />)}
       {email && !isPhone && btn(email, 'Email', <Mail className="h-4 w-4" />)}
       {more.length > 0 && <ActionMenu label="More actions" items={more} />}
-      {post && (
-        <Button className={primary} icon={<Send className="h-4 w-4" />} showChevron={false}
-          onClick={post.onClick} loading={post.loading} disabled={post.disabled || post.dirty}
-          title={post.dirty ? 'Save your changes first' : undefined}
-          aria-describedby={post.dirty ? hintId : undefined}>
-          Post invoice…
-        </Button>
-      )}
-      {/* The title is no help on a phone: say it on screen there (hidden from md, where the title shows). */}
-      {post?.dirty && <p id={hintId} className="order-first w-full text-center text-xs text-amber-800 md:hidden">Save your changes first</p>}
+      {post && <PostButton post={post} hintId={hintId} className={primary} />}
       {main === 'recordPayment' && recordPayment && btn(recordPayment, 'Record payment', <DollarSign className="h-4 w-4" />, { variant: 'primary', className: primary })}
       {main === 'applyCredit' && applyCredit && btn(applyCredit, 'Apply credit…', <Receipt className="h-4 w-4" />, { variant: 'primary', className: primary })}
     </div>

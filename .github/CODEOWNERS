@@ -1,3 +1,5 @@
-# Changes to CI, the release flow and these rules need a code owner's review once
-# "Require review from Code Owners" is on for main and staging (Mason's point 5, 2026-11-03).
-/.github/ @masonwells1 @TahaKhanAbdalli
+# Changes to CI, the release flow and these rules need a code owner's review ("Require review from Code Owners"
+# is on for main and staging; Mason's point 5, 2026-11-03).
+# Only Taha's account is listed (13 Nov 2026, #1838 review): masonwells1 is the account Mason's agents share, so an
+# approval from it can't show a person looked. For a .github/ change, Taha approves (Mason asks him).
+/.github/ @TahaKhanAbdalli

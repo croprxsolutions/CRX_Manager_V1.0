@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -22,6 +22,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
   const [rate, setRate] = useState<{ pct: number; office: boolean } | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const inputId = useId();
   // The invoice on screen now: a reply for another invoice (the page moved on) is dropped.
   const currentIdRef = useRef(invoiceId);
 
@@ -75,20 +76,24 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
   return (
     <div className="space-y-2">
       <div className="flex items-end gap-2">
-        <label className="flex-1 text-sm text-secondary">
-          Standing discount for this sale (%)
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.01}
-            value={draft}
-            disabled={locked}
-            onChange={(e) => setDraft(e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:opacity-50"
-          />
-        </label>
-        <Button variant="secondary" size="sm" showChevron={false} loading={saving}
+        <div className="flex-1">
+          <label htmlFor={inputId} className="text-sm font-medium text-nav-dark">Standing discount for this sale</label>
+          <span className="mt-1 flex items-center rounded-lg border border-gray-200 focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
+            <input
+              id={inputId}
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={draft}
+              disabled={locked}
+              onChange={(e) => setDraft(e.target.value)}
+              className="block min-h-11 w-full min-w-0 rounded-l-lg border-0 px-3 py-2 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:opacity-50 md:min-h-0"
+            />
+            <span aria-hidden="true" className="px-3 text-sm text-secondary">%</span>
+          </span>
+        </div>
+        <Button variant="secondary" size="sm" className="min-h-11 md:min-h-0" showChevron={false} loading={saving}
           disabled={locked || draft.trim() === '' || Number(draft) === rate.pct}
           onClick={() => apply(Number(draft))}>
           Apply
@@ -99,7 +104,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
           : rate.office ? 'Set for this sale.' : "The customer's rate when this sale was drafted."}
       </p>
       {rate.office && (
-        <Button variant="ghost" size="sm" showChevron={false} disabled={locked} onClick={() => apply(null)}>
+        <Button variant="ghost" size="sm" className="min-h-11 md:min-h-0" showChevron={false} disabled={locked} onClick={() => apply(null)}>
           Use the customer&apos;s rate
         </Button>
       )}

@@ -1,7 +1,7 @@
 import type { InvoiceChargeType, InvoiceType } from '../types';
 import { CHARGE_TYPE_LABELS } from '../../supabase/functions/_shared/pdf/invoiceBreakdown.ts';
 
-export { invoiceBreakdown } from '../../supabase/functions/_shared/pdf/invoiceBreakdown.ts';
+export { invoiceBreakdown, type InvoiceBreakdown } from '../../supabase/functions/_shared/pdf/invoiceBreakdown.ts';
 
 /**
  * Charge lines on invoices made from scratch (Goal 3; Mason, 2026-10-14 decision 6e and

@@ -1,7 +1,7 @@
 /**
  * InvoiceDetail.test.tsx — Tests for the invoice detail/edit page
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { sanitizeError } from '../lib/errorSanitizer';
@@ -88,8 +88,10 @@ vi.mock('../lib/db', () => ({
 
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockCaptureException } }));
 
+// Admin unless a test says otherwise (the action parity tests also run as a sales rep).
+const { authRole } = vi.hoisted(() => ({ authRole: { value: 'admin' } }));
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ profile: { id: 'user-1', role: 'admin', full_name: 'Test Admin' }, role: 'admin' }),
+  useAuth: () => ({ profile: { id: 'user-1', role: authRole.value, full_name: 'Test Admin' }, role: authRole.value }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -160,7 +162,7 @@ vi.mock('../hooks/useUnsavedChanges', () => ({
     return { state: 'unblocked', reset: vi.fn(), proceed: vi.fn() };
   },
 }));
-vi.mock('../components/invoices/WriteOffModal', () => ({ default: () => null }));
+vi.mock('../components/invoices/WriteOffModal', () => ({ default: ({ open }: { open: boolean }) => (open ? <div>Write-off form</div> : null) }));
 // Open, it offers one button that prints with default options, so Print can be driven end to end.
 vi.mock('../components/invoices/InvoicePrintDialog', () => ({
   default: ({ open, onPrint }: { open: boolean; onPrint: (options: Record<string, never>) => void }) => (open ? <button type="button" onClick={() => onPrint({})}>Print with defaults</button> : null),
@@ -176,6 +178,12 @@ function renderInvoiceDetail(id = 'inv-123') {
       </Routes>
     </MemoryRouter>,
   );
+}
+
+// Apply credit sits in More for an admin (Record payment is the main button there).
+function openApplyCreditFromMore() {
+  fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Apply credit…' }));
 }
 
 function mockIntentAwareRpc(result: { data: unknown; error: unknown }) {
@@ -230,14 +238,14 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Credit' }));
+    openApplyCreditFromMore();
     await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply Credit' }).slice(-1)[0]);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'network response lost after commit'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Apply Credit Memo' })).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Credit' }));
+    openApplyCreditFromMore();
     await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
     expect(screen.getByLabelText('Credit Memo')).toBeDisabled();
     expect(screen.getByLabelText('Amount to apply ($)')).toBeDisabled();
@@ -267,7 +275,7 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Credit' }));
+    openApplyCreditFromMore();
     const dialog = await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Apply Credit' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'AMOUNT_EXCEEDS_CREDIT'));
@@ -291,7 +299,7 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
-    fireEvent.click(screen.getByRole('button', { name: 'Apply Credit' }));
+    openApplyCreditFromMore();
     const dialog = await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply Credit' }).slice(-1)[0]);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled());
@@ -344,7 +352,7 @@ describe('InvoiceDetail', () => {
     renderInvoiceDetail('inv-reconcile');
     const poInput = await screen.findByPlaceholderText('Customer PO #');
     fireEvent.change(poInput, { target: { value: 'UNSAVED-SECOND-INTENT' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(screen.getByPlaceholderText('Customer PO #')).toHaveValue('COMMITTED-PO'));
     expect(invoiceCalls).toBeGreaterThanOrEqual(4);
@@ -378,8 +386,8 @@ describe('InvoiceDetail', () => {
     });
 
     renderInvoiceDetail('inv-product-error');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     fireEvent.change(screen.getByPlaceholderText('Search products by name or SKU...'), { target: { value: 'at' } });
 
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to search Products'));
@@ -404,8 +412,8 @@ describe('InvoiceDetail', () => {
     });
 
     renderInvoiceDetail('inv-product-race');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     const input = screen.getByPlaceholderText('Search products by name or SKU...');
     fireEvent.change(input, { target: { value: 'old' } });
     await waitFor(() => expect(mockFrom.mock.calls.filter(([name]) => name === 'products')).toHaveLength(1));
@@ -421,7 +429,7 @@ describe('InvoiceDetail', () => {
     await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
     expect(screen.getAllByText('Latest Product').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     expect(screen.queryByText('Stale Product')).not.toBeInTheDocument();
   });
 
@@ -443,8 +451,8 @@ describe('InvoiceDetail', () => {
     });
 
     renderInvoiceDetail('inv-product-clear');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     const input = screen.getByPlaceholderText('Search products by name or SKU...');
     fireEvent.change(input, { target: { value: 'old' } });
     await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('products'));
@@ -479,8 +487,8 @@ describe('InvoiceDetail', () => {
     });
 
     renderInvoiceDetail('inv-product-between-searches');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     const input = screen.getByPlaceholderText('Search products by name or SKU...');
     fireEvent.change(input, { target: { value: 'old' } });
     expect(await screen.findByText('Product ID: product-old-complete-uuid')).toBeInTheDocument();
@@ -556,9 +564,9 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail(invoice.id);
     await waitFor(() => expect(screen.getAllByText('CM-RETURN-1').length).toBeGreaterThan(0));
-    const totalCostLabel = screen.getByText('Total Cost');
-    expect(totalCostLabel.parentElement).toHaveTextContent('-$2.51');
-    expect(totalCostLabel.parentElement).not.toHaveTextContent('-$2.52');
+    const totalCostLabel = screen.getByText('Cost');
+    expect(totalCostLabel).toHaveTextContent('−$2.51');
+    expect(totalCostLabel).not.toHaveTextContent('−$2.52');
   });
 
   it('keeps a manual posted credit on its ordinary line-derived cost display', async () => {
@@ -587,9 +595,9 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail(invoice.id);
     await waitFor(() => expect(screen.getAllByText('CM-MANUAL-1').length).toBeGreaterThan(0));
-    const totalCostLabel = screen.getByText('Total Cost');
-    expect(totalCostLabel.parentElement).toHaveTextContent('-$2.52');
-    expect(totalCostLabel.parentElement).not.toHaveTextContent('-$9.99');
+    const totalCostLabel = screen.getByText('Cost');
+    expect(totalCostLabel).toHaveTextContent('−$2.52');
+    expect(totalCostLabel).not.toHaveTextContent('−$9.99');
   });
 
   it('keeps the established zero fallback for a split invoice with no stored cost', async () => {
@@ -619,9 +627,9 @@ describe('InvoiceDetail', () => {
 
     renderInvoiceDetail(invoice.id);
     await waitFor(() => expect(screen.getAllByText('INV-SPLIT-NULL').length).toBeGreaterThan(0));
-    const totalCostLabel = screen.getByText('Total Cost');
-    expect(totalCostLabel.parentElement).toHaveTextContent('$0.00');
-    expect(totalCostLabel.parentElement).not.toHaveTextContent('$2.52');
+    const totalCostLabel = screen.getByText('Cost');
+    expect(totalCostLabel).toHaveTextContent('$0.00');
+    expect(totalCostLabel).not.toHaveTextContent('$2.52');
   });
 });
 
@@ -649,7 +657,7 @@ describe('InvoiceDetail — cutover refusal retries', () => {
       : { data: null, error: null }));
     renderInvoiceDetail('inv-cutover');
     await screen.findByText('INV-CUTOVER', { selector: 'h1' });
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice saved'));
     const calls = mockRpc.mock.calls.filter(([name]) => name === 'save_invoice');
     expect(calls).toHaveLength(2);
@@ -667,11 +675,11 @@ describe('InvoiceDetail — cutover refusal retries', () => {
       : { data: null, error: null }));
     renderInvoiceDetail('inv-cutover');
     await screen.findByText('INV-CUTOVER', { selector: 'h1' });
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error',
       'No invoice was changed. An invoice update is finishing; wait a moment, then try Save again'));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_invoice')).toHaveLength(3);
-    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Invoice saved'));
     const calls = mockRpc.mock.calls.filter(([name]) => name === 'save_invoice');
     expect(calls).toHaveLength(4);
@@ -697,7 +705,7 @@ describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => 
 
   async function submitPayment() {
     renderInvoiceDetail('inv-pay');
-    fireEvent.click(await screen.findByRole('button', { name: /Record Payment/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Record payment' }));
     const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
     fireEvent.change(within(dialog).getByLabelText('Reference # (optional)'), { target: { value: '1234' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /Record Payment/ }));
@@ -764,12 +772,12 @@ describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => 
     await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Cancel/ })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole('button', { name: /^Cancel/ }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Record Payment' })).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Record Payment/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeDisabled();
 
     await act(async () => { save.finish({ data: null, error: { message: 'Failed to fetch' } }); await save.heldSave; });
-    await waitFor(() => expect(screen.getByRole('button', { name: /Record Payment/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Record payment' })).toBeEnabled());
     mockRpc.mockImplementation(() => Promise.resolve({ data: paid, error: null }));
-    fireEvent.click(screen.getByRole('button', { name: /Record Payment/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
     const reopened = await screen.findByRole('dialog', { name: 'Record Payment' });
     fireEvent.click(within(reopened).getByRole('button', { name: /Record Payment/ }));
 
@@ -819,7 +827,7 @@ describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => 
           </Routes>
         </MemoryRouter>,
       );
-      fireEvent.click(await screen.findByRole('button', { name: /Record Payment/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Record payment' }));
       const dialog = await screen.findByRole('dialog', { name: 'Record Payment' });
       fireEvent.change(within(dialog).getByLabelText('Reference # (optional)'), { target: { value: '1234' } });
       fireEvent.click(within(dialog).getByRole('button', { name: /Record Payment/ }));
@@ -865,10 +873,10 @@ describe('InvoiceDetail — Record Payment duplicate and retry warnings', () => 
 
     it('a save that finishes after the move reports itself and leaves the next invoice alone', async () => {
       const save = await moveDuringSave();
-      expect(screen.getByRole('button', { name: /Record Payment/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Record payment' })).toBeDisabled();
       await act(async () => { save.finish({ data: paid, error: null }); await save.heldSave; });
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Payment of $500.00 recorded'));
-      await waitFor(() => expect(screen.getByRole('button', { name: /Record Payment/ })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Record payment' })).toBeEnabled());
       expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0);
     });
 
@@ -946,7 +954,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     setupInvoice('draft');
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Payment terms' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Net 60' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Custom date…' })).toBeInTheDocument();
   });
@@ -956,7 +964,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     mockIntentAwareRpc({ data: null, error: null });
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.objectContaining({
         p_invoice: expect.objectContaining({ payment_terms: 'Net 30' }),
@@ -971,8 +979,8 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     mockIntentAwareRpc({ data: null, error: null });
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Payment Terms' }), { target: { value: 'Customer default' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payment terms' }), { target: { value: 'Customer default' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.objectContaining({
         p_invoice: expect.objectContaining({ payment_terms: null }),
@@ -987,9 +995,9 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     mockIntentAwareRpc({ data: null, error: null });
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Payment Terms' }), { target: { value: 'Custom date…' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Payment terms' }), { target: { value: 'Custom date…' } });
     fireEvent.change(document.querySelector('#custom-due-date') as HTMLInputElement, { target: { value: '2026-03-30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('already this invoice')));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
@@ -999,7 +1007,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     mockIntentAwareRpc({ data: null, error: null });
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.objectContaining({
         p_invoice: expect.objectContaining({ payment_terms: 'Due 45 days after invoice', due_date: '2026-05-01' }),
@@ -1011,7 +1019,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     setupInvoice('draft', 'Net 30', '2026-04-14');
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toHaveValue('Net 30');
+    expect(screen.getByRole('combobox', { name: 'Payment terms' })).toHaveValue('Net 30');
     expect(document.querySelector('#custom-due-date')).not.toBeInTheDocument();
   });
 
@@ -1020,9 +1028,9 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     mockIntentAwareRpc({ data: null, error: null });
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toHaveValue('Customer default');
+    expect(screen.getByRole('combobox', { name: 'Payment terms' })).toHaveValue('Customer default');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.objectContaining({
         p_invoice: expect.objectContaining({ payment_terms: null, due_date: null }),
@@ -1093,13 +1101,13 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
     await waitFor(() => {
       expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0);
-      expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toHaveValue('Net 30');
+      expect(screen.getByRole('combobox', { name: 'Payment terms' })).toHaveValue('Net 30');
     });
 
     resolveCustomerTerms({ data: { payment_terms: 'Net 60' }, error: null });
     await waitFor(() => {
       expect(screen.getAllByText('INV-B').length).toBeGreaterThan(0);
-      expect(screen.getByRole('combobox', { name: 'Payment Terms' })).toHaveValue('Net 30');
+      expect(screen.getByRole('combobox', { name: 'Payment terms' })).toHaveValue('Net 30');
     });
     expect(screen.queryByText('INV-A')).not.toBeInTheDocument();
   });
@@ -1108,7 +1116,7 @@ describe('InvoiceDetail — chemical-sale payment terms', () => {
     setupInvoice(status, 'Net 30', '2026-04-14');
     renderInvoiceDetail('inv-terms');
     await waitFor(() => expect(screen.getAllByText('INV-TERMS').length).toBeGreaterThan(0));
-    expect(screen.queryByRole('combobox', { name: 'Payment Terms' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Payment terms' })).not.toBeInTheDocument();
     expect(screen.getByText(/Net 30/)).toBeInTheDocument();
   });
 });
@@ -1300,8 +1308,8 @@ describe('InvoiceDetail — Phase 1 group-aware Post routing', () => {
     mockRpc.mockResolvedValue({ data: null, error: null });
     renderInvoiceDetail();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Void' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Void' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Void Invoice' }));
 
     await waitFor(() => {
@@ -1325,8 +1333,8 @@ describe('InvoiceDetail — Phase 1 group-aware Post routing', () => {
     });
     renderInvoiceDetail();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Void' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Void' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Void Invoice' }));
 
     await waitFor(() => {
@@ -1487,7 +1495,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', "Could not load this customer's price tier. The product was not added; try again."));
     expect(lookup.byIdCalls).toBe(1);
     expect(mockCaptureException).toHaveBeenCalledWith(failure, TIER_SENTRY_CONTEXT);
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
     const savedItems = await saveAndReadItems();
     expect(savedItems).toHaveLength(0);
   });
@@ -1529,7 +1537,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     expect(lookup.byIdCalls).toBe(2);
     lookupA.reject(new Error('unexpected client error'));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockCaptureException).not.toHaveBeenCalledWith(expect.anything(), TIER_SENTRY_CONTEXT);
 
@@ -1562,7 +1570,7 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     fireEvent.click(screen.getByText('Product ID: product-tier-uuid'));
 
     expect(lookup.byIdCalls).toBe(1);
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
 
     pending.resolve({ data: { assigned_tier: 3 }, error: null });
     await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
@@ -1602,18 +1610,18 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     );
     await pickTieredProduct();
     expect(lookup.byIdCalls).toBe(1);
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
 
     lookup.switchToInvoiceB();
     fireEvent.click(screen.getByRole('link', { name: 'Invoice B' }));
     await waitFor(() => expect(screen.getAllByText('INV-TIER-B').length).toBeGreaterThan(0));
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
 
     await pickTieredProduct();
     expect(lookup.byIdCalls).toBe(2);
     lookupA.resolve({ data: { assigned_tier: 2 }, error: null });
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
 
     lookupB.resolve({ data: { assigned_tier: 3 }, error: null });
     await waitFor(() => expect(screen.queryByPlaceholderText('Search products by name or SKU...')).not.toBeInTheDocument());
@@ -1628,11 +1636,11 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
     const pending = buildDeferredChain();
     setup({ listed: [], byId: () => pending.chain });
     await addTieredProduct();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     pending.resolve({ data: { assigned_tier: 3 }, error: null });
     await act(async () => { await Promise.resolve(); });
 
@@ -1697,16 +1705,16 @@ describe('InvoiceDetail — a product added on this screen is priced at the cust
   }
 
   async function pickTieredProduct() {
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument());
     if (!screen.queryByPlaceholderText('Search products by name or SKU...')) {
-      fireEvent.click(screen.getByRole('button', { name: 'Add Product' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Add product' }));
     }
     fireEvent.change(screen.getByPlaceholderText('Search products by name or SKU...'), { target: { value: 'tiered' } });
     fireEvent.click(await screen.findByText('Product ID: product-tier-uuid'));
   }
 
   async function saveAndReadItems() {
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
     const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
     return saveCall?.[1].p_items as Array<{ product_id: string; unit_price_cents: number }>;
@@ -1759,10 +1767,10 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
         </Routes>
       </MemoryRouter>,
     );
-    const typeSelect = await screen.findByDisplayValue('Misc Charge');
+    const typeSelect = await screen.findByDisplayValue('Misc charge');
     expect(typeSelect).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Add Charge' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add Product' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Add charge' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add product' })).toBeNull();
   });
 
   it('offers Add Charge instead of Add Product, and saves a typed charge with no product or cost', async () => {
@@ -1771,13 +1779,13 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    expect(screen.queryByRole('button', { name: 'Add Product' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    expect(screen.queryByRole('button', { name: 'Add product' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'service' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
-    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
     fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
@@ -1798,8 +1806,8 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
-    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
     const amount = within(row).getByRole('spinbutton') as HTMLInputElement;
     fireEvent.change(amount, { target: { value: '-100.00' } });
 
@@ -1814,9 +1822,9 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'freight' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Add a description to every charge.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
@@ -1827,12 +1835,12 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     expect(screen.getByRole('combobox', { name: 'Charge type' })).toHaveValue('');
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
-    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
     fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
@@ -1846,7 +1854,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('cannot carry products')));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
@@ -1861,7 +1869,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'other' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
       expect(saveCall?.[1].p_items).toEqual([expect.objectContaining({
@@ -1874,8 +1882,8 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     setupInvoice({ invoice_type: 'chemical_sale', order_id: 'ord-1' });
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
-    expect(screen.getByRole('button', { name: 'Add Product' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Charge' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add product' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add charge' })).toBeInTheDocument();
   });
 
   it('saves a freight charge beside the delivered product line on a chemical sale (billing plan M1)', async () => {
@@ -1888,13 +1896,13 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'freight' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
-    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
     expect(within(row).getAllByRole('spinbutton')).toHaveLength(1);
     fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
@@ -1914,11 +1922,11 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     renderInvoiceDetail('inv-scratch');
     await waitFor(() => expect(screen.getAllByText('INV-SCRATCH').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Charge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
-    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('tr')!;
+    const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
     fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
   });
@@ -1965,7 +1973,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
   async function openLoaded() {
     renderInvoiceDetail();
     await waitFor(() => expect(screen.getAllByText('INV-0200').length).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Post$/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Post invoice…' })).toBeEnabled());
   }
 
   it('posts with the version this screen loaded', async () => {
@@ -1975,7 +1983,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
       return Promise.resolve({ data: null, error: null });
     });
     await openLoaded();
-    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Post Invoice' }));
     await waitFor(() => expect(posted).toHaveBeenCalledWith(expect.objectContaining({
       p_invoice_id: 'inv-123',
@@ -1987,13 +1995,13 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     await openLoaded();
     expect(unsavedGuardCalls[unsavedGuardCalls.length - 1]).toBe(false);
     fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: 'PO-77' } });
-    const post = screen.getByRole('button', { name: /^Post$/ });
+    const post = screen.getByRole('button', { name: 'Post invoice…' });
     expect(post).toBeDisabled();
-    expect(screen.getByText(/Save your changes before posting/)).toBeInTheDocument();
+    expect(post).toHaveAttribute('title', 'Save your changes first');
     expect(unsavedGuardCalls[unsavedGuardCalls.length - 1]).toBe(true);
     // Undoing the edit is not an unsaved change.
     fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: '' } });
-    expect(screen.getByRole('button', { name: /^Post$/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Post invoice…' })).toBeEnabled();
     expect(unsavedGuardCalls[unsavedGuardCalls.length - 1]).toBe(false);
   });
 
@@ -2005,10 +2013,10 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     });
     await openLoaded();
     expect(screen.getByPlaceholderText('Customer PO #')).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Post Invoice' }));
     await waitFor(() => expect(screen.getByPlaceholderText('Customer PO #')).toBeDisabled());
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
     finish({ data: null, error: null });
     await waitFor(() => expect(screen.getByPlaceholderText('Customer PO #')).toBeEnabled());
   });
@@ -2022,7 +2030,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     });
     await openLoaded();
     const readsBefore = invoiceReads;
-    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Post Invoice' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('was changed after this screen loaded it')));
     await waitFor(() => expect(invoiceReads).toBeGreaterThan(readsBefore));
@@ -2047,7 +2055,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
         return chain;
       });
       await openLoaded();
-      fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('license check could not be run, so nothing was posted')));
       expect(screen.queryByRole('button', { name: 'Post Invoice' })).not.toBeInTheDocument();
       expect(mockRpc).not.toHaveBeenCalledWith('post_invoice', expect.anything());
@@ -2079,7 +2087,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     });
     await openLoaded();
     loaded = true;
-    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('license check could not be run, so nothing was posted')));
     expect(screen.queryByRole('button', { name: 'Post Invoice' })).not.toBeInTheDocument();
   });
@@ -2092,7 +2100,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     mockFrom.mockImplementation((table: string) => (table === 'customers' && loaded ? answer() : base(table)));
     await openLoaded();
     loaded = true;
-    fireEvent.click(screen.getByRole('button', { name: /^Print$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Print…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
   }
 
@@ -2116,7 +2124,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
 
   it('still opens the confirm when the RUP check reads cleanly', async () => {
     await openLoaded();
-    fireEvent.click(screen.getByRole('button', { name: /^Post$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
     expect(await screen.findByRole('button', { name: 'Post Invoice' })).toBeInTheDocument();
   });
 });
@@ -2230,22 +2238,207 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
 
   it('shows the discount and tax lines read-only and saves the draft', async () => {
     renderInvoiceDetail('inv-disc');
-    await waitFor(() => expect(screen.getByText('Standing discount 3%')).toBeInTheDocument());
-    expect(screen.getByText('Sales tax 6.25%')).toBeInTheDocument();
+    const worked = await screen.findByRole('region', { name: 'Worked out for you' });
+    expect(within(worked).getByText('Standing discount 3%')).toBeInTheDocument();
+    expect(within(worked).getByText('Sales tax 6.25%')).toBeInTheDocument();
     // An admin on a chemical-sale draft can change this sale's discount (billing plan M4b).
-    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Standing discount for this sale')).toBeInTheDocument();
     // Price boxes for the product and the freight, none for the discount or tax line.
     const prices = screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value);
     expect(prices).toContain('100.00');
     expect(prices).toContain('45.00');
     expect(prices).not.toContain('-30.00');
     expect(prices).not.toContain('64.08');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('amount above $0.00'));
     // The database owns those lines (and drops them when the type changes): the editor never sends them back.
     const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
     const sent = (saveCall?.[1].p_items as Array<{ charge_type: string | null }>).map((it) => it.charge_type);
     expect(sent).toEqual([null, 'freight']);
+  });
+});
+
+// Billing UI (Nov 13): the page shows one main action per status and puts the rest under More.
+// Who may do what is today's, line for line: each case below is the toolbar as it was before the redesign.
+describe('InvoiceDetail — one main action per status, same actions and people as before', () => {
+  const draft = {
+    id: 'inv-123', invoice_number: 'INV-0500', status: 'draft', invoice_type: 'chemical_sale',
+    customer_id: 'cust-1', order_id: 'ord-1', total_amount_cents: 2000, balance_cents: 2000,
+    paid_amount_cents: 0, prepay_applied_cents: 0, invoice_date: '2026-03-15', due_date: null,
+    created_at: '2026-03-15T00:00:00Z', invoice_group_id: null, invoice_post_version: 'v1:loaded',
+  };
+  const posted = { ...draft, status: 'posted' };
+  const lines = [{ id: 'it-1', order_item_id: 'oi-1', product_id: 'p-1', product: { product_name: 'Herbicide' }, description: 'Herbicide', quantity: 2, unit_price_cents: 1000, extended_cents: 2000, sort_order: 0, charge_type: null }];
+
+  function load(invoice: Record<string, unknown>, items: unknown[] = lines) {
+    let reads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      // Preflight and full read return the row; later reads (siblings, credit memos) return none.
+      if (table === 'invoices') return buildChain({ data: ++reads <= 2 ? invoice : [], error: null });
+      if (table === 'invoice_items') return buildChain({ data: items, error: null });
+      return buildChain({ data: [], error: null });
+    });
+  }
+  const names = () => screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') || b.textContent);
+  const openMore = () => fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+  const menuNames = () => screen.getAllByRole('menuitem').map((el) => el.textContent);
+  const isPrimary = (el: HTMLElement) => el.className.includes('bg-crx-green');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intentKeys.clear();
+    nextIntentKey.value = 0;
+    authRole.value = 'admin';
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+  });
+  afterEach(() => { authRole.value = 'admin'; });
+
+  for (const role of ['admin', 'sales_rep']) {
+    it(`draft, ${role}: Save changes, Print…, and Post invoice… as the main button, which waits for Save`, async () => {
+      authRole.value = role;
+      load(draft);
+      renderInvoiceDetail();
+      const post = await screen.findByRole('button', { name: 'Post invoice…' });
+      await waitFor(() => expect(post).toBeEnabled());
+      expect(isPrimary(post)).toBe(true);
+      expect(names()).toEqual(expect.arrayContaining(['Save changes', 'Print…']));
+      for (const absent of ['More actions', 'Email', 'Record payment', 'Apply credit…']) expect(names()).not.toContain(absent);
+      fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: 'PO-77' } });
+      expect(post).toBeDisabled();
+      expect(post).toHaveAttribute('title', 'Save your changes first');
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+      fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: '' } });
+      fireEvent.click(post);
+      expect(await screen.findByRole('dialog', { name: 'Post Invoice' })).toBeInTheDocument();
+    });
+  }
+
+  it('posted, admin: Print…, Email, More (Apply credit…, Write off…, Unpost…, red Void invoice…), Record payment as the main button', async () => {
+    load(posted);
+    renderInvoiceDetail();
+    const pay = await screen.findByRole('button', { name: 'Record payment' });
+    expect(isPrimary(pay)).toBe(true);
+    expect(names()).toEqual(expect.arrayContaining(['Print…', 'Email', 'More actions']));
+    for (const absent of ['Save changes', 'Post invoice…']) expect(names()).not.toContain(absent);
+    openMore();
+    expect(menuNames()).toEqual(['Apply credit…', 'Write off…', 'Unpost…', 'Void invoice…']);
+    expect(screen.getByRole('menuitem', { name: 'Void invoice…' }).className).toContain('text-red-700');
+
+    // Each opens what the old button opened.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Write off…' }));
+    expect(await screen.findByText('Write-off form')).toBeInTheDocument();
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unpost…' }));
+    expect(await screen.findByRole('dialog', { name: 'Unpost Invoice' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Apply credit…' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', 'This customer has no available credit memos to apply'));
+    fireEvent.click(pay);
+    expect(await screen.findByRole('dialog', { name: 'Record Payment' })).toBeInTheDocument();
+  });
+
+  it('the Void dialog confirms with the red danger button', async () => {
+    load(posted);
+    renderInvoiceDetail();
+    await screen.findByRole('button', { name: 'Record payment' });
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Void Invoice' });
+    expect(within(dialog).getByRole('button', { name: 'Void Invoice' }).className).toContain('bg-red-600');
+  });
+
+  it('posted, sales rep: Print…, More with only Unpost…, Apply credit… as the main button; no cost or margin', async () => {
+    authRole.value = 'sales_rep';
+    load(posted);
+    renderInvoiceDetail();
+    const apply = await screen.findByRole('button', { name: 'Apply credit…' });
+    expect(isPrimary(apply)).toBe(true);
+    expect(names()).toEqual(expect.arrayContaining(['Print…', 'More actions']));
+    for (const absent of ['Email', 'Record payment', 'Save changes', 'Post invoice…']) expect(names()).not.toContain(absent);
+    openMore();
+    expect(menuNames()).toEqual(['Unpost…']);
+    expect(screen.queryByText('Cost')).not.toBeInTheDocument();
+    expect(screen.queryByText('Margin')).not.toBeInTheDocument();
+  });
+
+  it('field-application draft from a job: Transfer to scheduling… sits in More and opens the same confirm', async () => {
+    load({ ...draft, invoice_type: 'field_application', job_id: 'job-1', order_id: null });
+    renderInvoiceDetail();
+    await screen.findByRole('button', { name: 'Post invoice…' });
+    expect(names()).toContain('Email');
+    openMore();
+    expect(menuNames()).toEqual(['Transfer to scheduling…']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Transfer to scheduling…' }));
+    expect(await screen.findByRole('dialog', { name: 'Transfer to Scheduling' })).toBeInTheDocument();
+  });
+
+  describe('what this invoice bills', () => {
+    const withCharges = [
+      ...lines,
+      { id: 'it-2', order_item_id: null, product_id: null, description: 'Delivery to home farm', quantity: 1, unit_price_cents: 4500, extended_cents: 4500, sort_order: 1, charge_type: 'freight' },
+      { id: 'it-3', order_item_id: null, product_id: null, description: 'Standing discount 3%', quantity: 1, unit_price_cents: -60, extended_cents: -60, sort_order: 2, charge_type: 'standing_discount' },
+      { id: 'it-4', order_item_id: null, product_id: null, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 403, extended_cents: 403, sort_order: 3, charge_type: 'sales_tax' },
+    ];
+
+    it('shows the remove button for each line without hovering, and the worked-out lines with no inputs', async () => {
+      load(draft, withCharges);
+      renderInvoiceDetail();
+      const remove = await screen.findByRole('button', { name: 'Remove Herbicide' });
+      expect(remove.className).not.toContain('opacity-0');
+      const lines = screen.getByRole('region', { name: 'What this invoice bills' });
+      expect(within(lines).getByRole('heading', { name: 'Charges' })).toBeInTheDocument();
+      const worked = within(lines).getByRole('region', { name: 'Worked out for you' });
+      expect(within(worked).getByText('Standing discount 3%')).toBeInTheDocument();
+      expect(within(worked).getByText('Sales tax 6.25%')).toBeInTheDocument();
+      expect(within(worked).queryAllByRole('spinbutton')).toHaveLength(0);
+      expect(within(worked).queryAllByRole('textbox')).toHaveLength(0);
+      expect(within(worked).queryAllByRole('button')).toHaveLength(0);
+    });
+
+    it('a from-scratch misc charge invoice shows only Charges', async () => {
+      load({ ...draft, invoice_type: 'misc_charge', order_id: null, delivery_id: null }, [withCharges[1]]);
+      renderInvoiceDetail();
+      const lines = await screen.findByRole('region', { name: 'What this invoice bills' });
+      expect(within(lines).getByRole('heading', { name: 'Charges' })).toBeInTheDocument();
+      expect(within(lines).queryByRole('button', { name: 'Add product' })).not.toBeInTheDocument();
+      expect(within(lines).queryByRole('columnheader', { name: 'Product' })).not.toBeInTheDocument();
+      expect(within(lines).queryByRole('region', { name: 'Worked out for you' })).not.toBeInTheDocument();
+    });
+
+    it('a per-line split invoice keeps its read-only note in the lines card', async () => {
+      load({ ...posted, field_app_billing_set_id: 'set-1' });
+      renderInvoiceDetail();
+      const lines = await screen.findByRole('region', { name: 'What this invoice bills' });
+      expect(within(lines).getByText(/per-line split invoice is managed from the Split Billing editor/)).toBeInTheDocument();
+      expect(within(lines).queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument();
+    });
+  });
+
+  it('a Bill Split payer invoice says which split it is and who pays what', async () => {
+    const grouped = { ...draft, order_id: null, delivery_id: 'del-1', invoice_group_id: 'grp-1', customer: { farm_name: 'Maple Hollow Farms' } };
+    let reads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      // Preflight, full read, the group's versions (a list), then the order lookup for the payer shares.
+      if (table === 'invoices') {
+        reads += 1;
+        return buildChain({ data: reads === 3 ? [{ id: 'inv-123', invoice_post_version: 'v1' }, { id: 'inv-124', invoice_post_version: 'v1' }] : grouped, error: null });
+      }
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_bill_split_payers'
+      ? { data: [
+        { id: 'inv-123', invoice_number: 'INV-0500-1', total_amount_cents: 2000, farm_name: 'Maple Hollow Farms' },
+        { id: 'inv-124', invoice_number: 'INV-0500-2', total_amount_cents: 2000, farm_name: 'Cedar Ridge Ag' },
+      ], error: null, count: 2 }
+      : { data: null, error: null }));
+    renderInvoiceDetail();
+    expect(await screen.findByText('Split invoice 1 of 2')).toBeInTheDocument();
+    expect(screen.getByText(/Maple Hollow Farms pays 50%/)).toBeInTheDocument();
+    const whoPays = screen.getByRole('region', { name: 'Who pays' });
+    expect(within(whoPays).getByRole('link', { name: 'INV-0500-2' })).toHaveAttribute('href', '/invoices/inv-124');
+    expect(within(whoPays).getByText(/this invoice/)).toBeInTheDocument();
   });
 });

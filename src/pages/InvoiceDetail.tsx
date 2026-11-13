@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Save, Send, Ban, Plus, Trash2, Search, DollarSign, FileText, Printer, Truck, Mail, RotateCcw, AlertTriangle,
+  Ban, Plus, Trash2, Search, FileText, Truck, Mail, RotateCcw, AlertTriangle, ShoppingCart, ChevronRight, Lock,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -30,9 +30,10 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
-import { formatCents as fmt } from '../lib/money';
+import { formatCents as fmt, formatCentsMinus } from '../lib/money';
+import { statusLabel } from '../lib/statusLabel';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { withBelowCostReason } from '../lib/belowCostApproval';
@@ -52,6 +53,9 @@ import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLo
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
 import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
+import InvoiceAmountDue from '../components/invoices/InvoiceAmountDue';
+import InvoicePayersTable from '../components/invoices/InvoicePayersTable';
+import InvoiceActionsBar from '../components/invoices/InvoiceActionsBar';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -319,7 +323,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   );
 
   // Parent order context
-  const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string } | null>(null);
+  const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string; status?: string } | null>(null);
 
   // Related deliveries (cross-link via shared order)
   const [relatedDeliveries, setRelatedDeliveries] = useState<Array<{
@@ -328,7 +332,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   }>>([]);
 
   // Sibling invoices + quote context for transaction thread
-  const [siblingInvoices, setSiblingInvoices] = useState<{ id: string; invoice_number: string }[]>([]);
+  const [siblingInvoices, setSiblingInvoices] = useState<{ id: string; invoice_number: string; status?: string }[]>([]);
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
 
   // Post loading
@@ -721,7 +725,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       const [orderRes, delRes, invRes] = await Promise.all([
         supabase
           .from('orders')
-          .select('id, order_number, quote_id')
+          .select('id, order_number, quote_id, status')
           .eq('id', data.order_id)
           .maybeSingle(),
         // PR-07 follow-up: dropped driver FK embed; resolve via post-fetch below.
@@ -732,13 +736,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           .order('scheduled_date', { ascending: false }),
         supabase
           .from('invoices')
-          .select('id, invoice_number')
+          .select('id, invoice_number, status')
           .eq('order_id', data.order_id)
           .not('status', 'in', '("voided","cancelled")')
           .order('invoice_number'),
       ]);
       if (isStale()) return;
-      setParentOrder(orderRes.data as { id: string; order_number: string } | null);
+      setParentOrder(orderRes.data as { id: string; order_number: string; status?: string } | null);
 
       // PR-07 follow-up: resolve driver names via profile_public_view.
       const delDriverIds = [...new Set(
@@ -765,7 +769,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         }))
       );
       setSiblingInvoices((invRes.data || []).map((i: Record<string, unknown>) => ({
-        id: i.id as string, invoice_number: i.invoice_number as string,
+        id: i.id as string, invoice_number: i.invoice_number as string, status: i.status as string | undefined,
       })));
 
       // Fetch quote context via parent order
@@ -2015,7 +2019,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     });
   };
 
-  const totalCents = items.reduce((s, i) => s + i.extended_cents, 0);
   // Split-billing invoices are managed only from the Split Billing editor; keep this
   // generic page strictly read-only for them so a save can't cascade away their line
   // shares (Codex P1 #6). Paired with the hard guard in handleSave.
@@ -2048,6 +2051,54 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     ? items
     : groupReturnCreditDisplayItems(invoice.invoice_type, items);
 
+  // Amount due: the lines' own sum, split into products, charges, discount and tax (display only).
+  const breakdown = invoiceBreakdown(items);
+  const marginCents = invoiceMarginCents(items, totalCostCents);
+  const marginBaseCents = marginCents + totalCostCents;
+  const marginPct = marginBaseCents > 0 ? (marginCents / marginBaseCents) * 100 : null;
+  // Bill Split: which payer this invoice is, and the delivery it splits.
+  const thisPayerIndex = billSplitPayers.findIndex((p) => p.invoice_id === id);
+  const thisPayer = thisPayerIndex >= 0 ? billSplitPayers[thisPayerIndex] : undefined;
+  const thisDelivery = relatedDeliveries.find((d) => d.id === invoice.delivery_id);
+  const typeLabel = ((t) => t.charAt(0).toUpperCase() + t.slice(1))((invoice.invoice_type || '').replace(/_/g, ' '));
+  const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const subtitle = [
+    thisPayer && billSplitPayers.length > 1 ? `${thisPayer.customer_name} pays ${thisPayer.split_percentage}%` : customerName,
+    typeLabel,
+    invoice.invoice_date && shortDate(new Date(invoice.invoice_date.split('T')[0] + 'T00:00:00')),
+    invoice.posted_at && `Posted ${shortDate(new Date(invoice.posted_at))}`,
+  ].filter(Boolean).join(' · ');
+  // The lines in three groups, each keeping its index into items (displayItems is items while editable).
+  const lineRows = displayItems.map((item, idx) => ({ item, idx }));
+  const workedRows = lineRows.filter(({ item }) => isComputedChargeLine(item.charge_type));
+  const chargeRows = lineRows.filter(({ item }) => !isComputedChargeLine(item.charge_type)
+    && (item.charge_type || (takesCharges && !item.product_id)));
+  const productRows = lineRows.filter((row) => !workedRows.includes(row) && !chargeRows.includes(row));
+  const hasTotes = displayItems.some((i) => i.tote_number);
+  const changePrice = (idx: number, value: string) => {
+    const cents = parseDollarsToCentsSigned(value);
+    // null = a third decimal digit. Refuse the keystroke; never store
+    // a $0 unit price that only the below-cost prompt would question.
+    if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
+    // The unsigned parser flips "-100" to +$100, which would bill a credit
+    // as a charge (Sol, PR #983). Refuse a negative price instead.
+    if (cents < 0) { toast('error', NEGATIVE_PRICE_MESSAGE); return; }
+    updateItem(idx, 'unit_price_cents', cents);
+  };
+  const priceSourcePill = (item: LineItem) => (
+    item.price_source === 'quoted' ? <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700" title={item.quoted_price_cents != null ? `Program price: ${fmt(item.quoted_price_cents)}` : undefined}>Quoted price</span>
+      : item.price_source === 'tier' ? <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600" title="Using customer tier pricing">Tier price</span>
+        : item.price_source === 'manual' ? <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700" title="Manually set price">Manual price</span>
+          : null
+  );
+  const lineLabel = (text: string) => <span aria-hidden="true" className="text-sm text-secondary xl:hidden">{text}</span>;
+  const focusRing = 'focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+  const fieldInput = `mt-1 w-full min-h-11 px-3 py-2 text-sm border border-gray-200 rounded-lg md:min-h-0 ${focusRing}`;
+  const lineInput = `w-full min-h-11 px-2 py-1 text-sm border border-gray-200 rounded-lg md:min-h-0 xl:w-24 ${focusRing}`;
+  const chargeInput = `min-w-0 min-h-11 px-2 py-1 text-sm border border-gray-200 rounded-lg md:min-h-0 ${focusRing}`;
+  const removeButton = 'inline-flex h-11 w-11 flex-none items-center justify-center rounded-lg text-secondary hover:bg-red-50 hover:text-red-600 md:h-8 md:w-8';
+  const relatedRow = 'flex min-h-14 items-center gap-3 rounded-lg px-3 py-3 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green';
+
   // Customer filtered list
   const filteredCustomers = customerSearch.length >= 1
     ? customers.filter((c) =>
@@ -2068,12 +2119,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-32 md:pb-0">
       {/* Header */}
       <Breadcrumbs items={[
         { label: 'Invoices', href: '/invoices' },
         ...(parentOrder ? [{ label: parentOrder.order_number, href: `/orders/${parentOrder.id}` }] : []),
-        { label: isNew ? 'New Invoice' : invoice.invoice_number || 'Invoice' },
+        { label: isNew ? 'New invoice' : invoice.invoice_number || 'Invoice' },
       ]} />
       {!isNew && (
         <TransactionThread
@@ -2087,175 +2138,79 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           currentEntityId={id}
         />
       )}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <div>
-            <h1 className="text-xl font-semibold font-heading text-nav-dark">
-              {isNew ? 'New Invoice' : invoice.invoice_number}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-heading text-2xl font-semibold text-nav-dark md:text-3xl">
+              {isNew ? 'New invoice' : invoice.invoice_number}
             </h1>
-            {!isNew && (
-              <div className="flex items-center gap-2 mt-1">
-                {statusBadge(invoice.status as InvoiceStatus)}
-                {invoice.posted_at && (
-                  <span className="text-xs text-secondary">
-                    Posted {new Date(invoice.posted_at).toLocaleDateString()}
-                  </span>
-                )}
-                {invoice.invoice_group_id && (
-                  <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
-                    Split Invoice Group
-                  </span>
-                )}
-              </div>
+            {!isNew && statusBadge(invoice.status as InvoiceStatus)}
+            {!isNew && invoice.invoice_group_id && (
+              <span className="text-sm text-secondary">
+                {thisPayerIndex >= 0 ? `Split invoice ${thisPayerIndex + 1} of ${billSplitPayers.length}` : 'Split invoice'}
+              </span>
             )}
           </div>
+          {subtitle && <p className="mt-1 text-sm text-secondary">{subtitle}</p>}
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {editable && (
-            <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={addingProduct || postFlowBusy}>
-              Save
-            </Button>
-          )}
-          {isSplitInvoice && (
-            <span className="inline-flex items-center text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-md">
-              Read-only — this per-line split invoice is managed from the Split Billing editor.
-            </span>
-          )}
-          <GuardrailBanner warning={creditWarning} onDismiss={dismissCreditWarning} />
-          {!isNew && editable && isAdminOrRep && (
-            <Button
-              variant="secondary"
-              icon={<Send className="w-4 h-4" />}
-              onClick={openPostConfirm}
-              loading={postFlowBusy}
-              disabled={hasUnsavedChanges}
-              title={hasUnsavedChanges ? UNSAVED_POST_MESSAGE : undefined}
-              aria-describedby={hasUnsavedChanges ? 'invoice-unsaved-post-note' : undefined}
-            >
-              Post
-            </Button>
-          )}
-          {!isNew && editable && isAdminOrRep && hasUnsavedChanges && (
-            <span
-              id="invoice-unsaved-post-note"
-              className="inline-flex items-center text-xs bg-amber-50 text-amber-700 px-2.5 py-1 rounded-md"
-            >
-              {UNSAVED_POST_MESSAGE}
-            </span>
-          )}
-          {/* #27: reverse Transfer to Scheduling — only for an editable (draft/unposted)
-              field invoice that came from a job. Pushes the invoice back to the job. */}
-          {!isNew && editable && invoice.invoice_type === 'field_application' && invoice.job_id && (
-            <Button
-              variant="secondary"
-              icon={<RotateCcw className="w-4 h-4" />}
-              onClick={() => setShowTransferToSchedulingModal(true)}
-              loading={transferringToScheduling}
-              disabled={transferringToScheduling}
-              showChevron={false}
-            >
-              Transfer to Scheduling
-            </Button>
-          )}
-          {!isNew && (
-            <Button
-              variant="secondary"
-              icon={<Printer className="w-4 h-4" />}
-              onClick={() => setShowPrintDialog(true)}
-              showChevron={false}
-            >
-              Print
-            </Button>
-          )}
-          {/* Email gate:
-                • Chemical-sale invoices keep the existing policy — posted + admin only.
-                • #31 field-application parity: a transferred field invoice opens HERE
-                  (it has job_id but no field_app_locations), and ChemMan emails the bill
-                  from the field-app screens for unposted invoices and by sales reps too.
-                  So for invoice_type='field_application' surface Email on any saved,
-                  non-terminal invoice (draft/unposted/posted/overdue/paid) for admin +
-                  sales rep — matching the field-app editor/list Email actions. */}
-          {!isNew && (
+        {/* Every action keeps today's condition and handler; the bar only groups them. */}
+        <InvoiceActionsBar
+          save={editable ? { onClick: handleSave, loading: saving, disabled: addingProduct || postFlowBusy } : undefined}
+          post={!isNew && editable && isAdminOrRep
+            ? { onClick: () => void openPostConfirm(), loading: postFlowBusy, dirty: hasUnsavedChanges }
+            : undefined}
+          // #27: reverse Transfer to Scheduling — only for an editable (draft/unposted) field invoice that came
+          // from a job. Pushes the invoice back to the job.
+          transfer={!isNew && editable && invoice.invoice_type === 'field_application' && invoice.job_id
+            ? { onClick: () => setShowTransferToSchedulingModal(true), loading: transferringToScheduling, disabled: transferringToScheduling }
+            : undefined}
+          print={!isNew ? { onClick: () => setShowPrintDialog(true) } : undefined}
+          // Email gate:
+          //   • Chemical-sale invoices keep the existing policy — posted + admin only.
+          //   • #31 field-application parity: a transferred field invoice opens HERE (it has job_id but no
+          //     field_app_locations), and ChemMan emails the bill from the field-app screens for unposted invoices
+          //     and by sales reps too. So for invoice_type='field_application' surface Email on any saved,
+          //     non-terminal invoice (draft/unposted/posted/overdue/paid) for admin + sales rep — matching the
+          //     field-app editor/list Email actions.
+          email={!isNew && (
             invoice.invoice_type === 'field_application'
               ? !['voided', 'cancelled'].includes(invoice.status || '')
               : (invoice.status === 'posted' && isAdmin)
-          ) && (
-            <Button
-              variant="secondary"
-              icon={<Mail className="w-4 h-4" />}
-              onClick={() => handleEmailInvoice()}
-              loading={emailing}
-              showChevron={false}
-            >
-              Email
-            </Button>
-          )}
-          {/* U1 (#41): posted OR overdue — an overdue invoice is the one a check most
-              often arrives for; allocate_payment and apply_write_off both accept it. */}
-          {!isNew && (invoice.status === 'posted' || invoice.status === 'overdue') && isAdmin && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<DollarSign className="w-4 h-4" />}
-                disabled={payingInvoice}
-                onClick={() => {
-                  // The retry key stays across opens: an earlier attempt's outcome may be unknown.
-                  setPayAmount(((invoice.balance_cents || 0) / 100).toFixed(2));
-                  setShowPayModal(true);
-                }}
-              >
-                Record Payment
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowWriteOff(true)}
-                showChevron={false}
-              >
-                Write Off
-              </Button>
-            </>
-          )}
-          {/* Apply Credit (credit-memo apply, 2026-07-10): admin+sales_rep, on a posted/overdue
-              non-credit invoice that still owes — put an available same-customer credit memo
-              against it. */}
-          {!isNew && invoice.invoice_type !== 'credit_memo'
+          ) ? { onClick: () => void handleEmailInvoice(), loading: emailing } : undefined}
+          // U1 (#41): posted OR overdue — an overdue invoice is the one a check most often arrives for;
+          // allocate_payment and apply_write_off both accept it.
+          recordPayment={!isNew && (invoice.status === 'posted' || invoice.status === 'overdue') && isAdmin ? {
+            disabled: payingInvoice,
+            onClick: () => {
+              // The retry key stays across opens: an earlier attempt's outcome may be unknown.
+              setPayAmount(((invoice.balance_cents || 0) / 100).toFixed(2));
+              setShowPayModal(true);
+            },
+          } : undefined}
+          writeOff={!isNew && (invoice.status === 'posted' || invoice.status === 'overdue') && isAdmin
+            ? { onClick: () => setShowWriteOff(true) }
+            : undefined}
+          // Apply Credit (credit-memo apply, 2026-07-10): admin+sales_rep, on a posted/overdue non-credit invoice
+          // that still owes — put an available same-customer credit memo against it.
+          applyCredit={!isNew && invoice.invoice_type !== 'credit_memo'
             && (invoice.status === 'posted' || invoice.status === 'overdue')
-            && (invoice.balance_cents || 0) > 0 && isAdminOrRep && (
-              <Button
-                variant="secondary"
-                icon={<RotateCcw className="w-4 h-4" />}
-                onClick={openApplyCredit}
-                showChevron={false}
-              >
-                Apply Credit
-              </Button>
-          )}
-          {/* #28/U16b: Unpost — reverse a posting on a field-application or chemical-sale
-              invoice back to the Unposted list. Posted/overdue only; the RPC refuses one
-              with payments/prepay or in a closed period.
-              U16b: explicitly gated to admin/sales_rep, matching the RPC. (Void stays
-              admin-only below.) */}
-          {!isNew && (invoice.invoice_type === 'field_application' || invoice.invoice_type === 'chemical_sale')
-            && (invoice.status === 'posted' || invoice.status === 'overdue') && isAdminOrRep && (
-              <Button
-                variant="secondary"
-                icon={<RotateCcw className="w-4 h-4" />}
-                onClick={() => setShowUnpostModal(true)}
-                loading={unposting}
-                disabled={unposting}
-                showChevron={false}
-              >
-                Unpost
-              </Button>
-          )}
-          {!isNew && invoice.status === 'posted' && isAdmin && (
-              <Button variant="ghost" icon={<Ban className="w-4 h-4" />} onClick={() => { voidIdem.resetKey(); setShowVoidModal(true); }}>
-                Void
-              </Button>
-          )}
-        </div>
+            && (invoice.balance_cents || 0) > 0 && isAdminOrRep
+            ? { onClick: () => void openApplyCredit() }
+            : undefined}
+          // #28/U16b: Unpost — reverse a posting on a field-application or chemical-sale invoice back to the
+          // Unposted list. Posted/overdue only; the RPC refuses one with payments/prepay or in a closed period.
+          // U16b: explicitly gated to admin/sales_rep, matching the RPC. (Void stays admin-only below.)
+          unpost={!isNew && (invoice.invoice_type === 'field_application' || invoice.invoice_type === 'chemical_sale')
+            && (invoice.status === 'posted' || invoice.status === 'overdue') && isAdminOrRep
+            ? { onClick: () => setShowUnpostModal(true), loading: unposting, disabled: unposting }
+            : undefined}
+          voidInvoice={!isNew && invoice.status === 'posted' && isAdmin
+            ? { onClick: () => { voidIdem.resetKey(); setShowVoidModal(true); } }
+            : undefined}
+        />
       </div>
+
+      <GuardrailBanner warning={creditWarning} onDismiss={dismissCreditWarning} />
 
       {/* §2 Watchdog — inline advisory flags for this invoice (double-bill) and its
           source job (acre/rate/REI). Auto-refreshes the source job's flags on open. */}
@@ -2267,23 +2222,106 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         />
       )}
 
-      {/* A disabled fieldset locks every input and button in the invoice info and lines while
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* The rail comes first, so below lg it sits above the details, as on the sale page. */}
+        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
+          {/* A disabled fieldset locks the discount control while Post runs; it draws nothing itself. */}
+          <fieldset disabled={postFlowBusy} className="m-0 min-w-0 border-0 p-0">
+            <InvoiceAmountDue
+              breakdown={breakdown}
+              paidCents={isNew ? null : invoice.paid_amount_cents || 0}
+              prepayCents={invoice.prepay_applied_cents || 0}
+              balanceCents={invoice.balance_cents || 0}
+              // Cost is admin-only (Mason, 2026-10-15).
+              admin={isAdmin ? { costCents: totalCostCents, marginCents, marginPct } : null}
+              discountControl={
+                // The office's discount on this sale (billing plan M4b): admin, chemical-sale draft.
+                isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' ? (
+                  <StandingDiscountControl
+                    invoiceId={invoice.id}
+                    disabled={hasUnsavedChanges}
+                    onChanged={() => fetchInvoice(invoice.id as string)}
+                  />
+                ) : undefined
+              }
+            />
+          </fieldset>
+          {(billSplitPayers.length > 1 || parentOrder || relatedDeliveries.length > 0) && (
+            <div className="grid min-w-0 gap-4">
+              {billSplitPayers.length > 1 && (
+                <InvoicePayersTable
+                  rows={billSplitPayers.map((payer) => ({
+                    payerName: payer.customer_name,
+                    invoiceId: payer.invoice_id,
+                    invoiceNumber: payer.invoice_number ?? '',
+                    pct: payer.split_percentage,
+                    totalCents: payer.amount_cents,
+                    status: payer.invoice_id === id ? invoice.status : siblingInvoices.find((s) => s.id === payer.invoice_id)?.status,
+                    isThis: payer.invoice_id === id,
+                  }))}
+                  saleHref={parentOrder ? `/orders/${parentOrder.id}` : undefined}
+                  saleNumber={parentOrder?.order_number}
+                />
+              )}
+              {(parentOrder || relatedDeliveries.length > 0) && (
+                <Card padding={false}>
+                  <section aria-labelledby="invoice-related-title">
+                    <h2 id="invoice-related-title" className="px-5 pt-5 pb-2 font-heading text-xl font-semibold text-nav-dark">Related</h2>
+                    <ul className="px-2 pb-2">
+                      {parentOrder && (
+                        <li className="border-t border-gray-100">
+                          <Link to={`/orders/${parentOrder.id}`} className={relatedRow}>
+                            <ShoppingCart className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                            <span className="min-w-0 flex-1 font-semibold text-nav-dark">Sale {parentOrder.order_number}</span>
+                            {parentOrder.status && (
+                              <Badge variant={statusToBadgeVariant[parentOrder.status] || 'default'}>{statusLabel(parentOrder.status)}</Badge>
+                            )}
+                            <ChevronRight className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                          </Link>
+                        </li>
+                      )}
+                      {/* Related deliveries (cross-link via shared order) */}
+                      {relatedDeliveries.map((del) => (
+                        <li key={del.id} className="border-t border-gray-100">
+                          <Link to={`/deliveries/${del.id}`} className={relatedRow}>
+                            <Truck className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="font-semibold text-nav-dark">Delivery {del.delivery_number}</span>
+                              <span className="text-xs text-secondary">
+                                {parseLocalDate(del.scheduled_date).toLocaleDateString()} · {del.driver_name || 'Unassigned'}
+                              </span>
+                            </span>
+                            <Badge variant={statusToBadgeVariant[del.status] || 'default'}>{statusLabel(del.status)}</Badge>
+                            <ChevronRight className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 space-y-4">
+      {/* A disabled fieldset locks every input and button in the invoice details and lines while
           Post runs; it draws nothing itself. */}
       <fieldset disabled={postFlowBusy} className="m-0 min-w-0 space-y-4 border-0 p-0">
-      {/* Invoice Info */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Card className="md:col-span-2">
-          <h2 className="text-sm font-semibold text-nav-dark mb-4">Invoice Details</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <Card>
+        <section aria-labelledby="invoice-details-title">
+          <h2 id="invoice-details-title" className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* Customer — read-only on the segregated field route (Codex): a field
                  invoice's customer is job-derived and mirrored in the share ledger;
                  it can't be changed here (save_invoice also locks it server-side). */}
-            <div className="col-span-2 relative">
-              <label className="text-sm font-medium text-nav-dark">Customer *</label>
+            <div className="relative sm:col-span-2">
+              <label htmlFor="invoice-bill-to" className="text-sm font-medium text-nav-dark">Bill to</label>
               {editable && routeArea !== 'field' ? (
                 <div className="relative mt-1">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
+                    id="invoice-bill-to"
                     type="text"
                     placeholder="Search customers..."
                     value={customerSearch || customerName}
@@ -2293,14 +2331,14 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       setShowCustomerDrop(true);
                     }}
                     onFocus={() => setShowCustomerDrop(true)}
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                    className={`${fieldInput} pl-9`}
                   />
                   {showCustomerDrop && filteredCustomers.length > 0 && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-auto">
                       {filteredCustomers.map((c) => (
                         <button
                           key={c.id}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                          className="w-full min-h-11 text-left px-3 py-2 text-sm hover:bg-gray-50 md:min-h-0"
                           onClick={() => {
                             setInvoice((prev) => ({ ...prev, customer_id: c.id }));
                             setCustomerName(c.farm_name);
@@ -2317,91 +2355,31 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               ) : (
                 <p className="mt-1 text-sm text-nav-dark">{customerName}</p>
               )}
-            </div>
-
-            {/* Type — locked to a read-only label on the segregated field route
-                 (Codex P2): a field invoice must not be reclassified to Chemical
-                 Sales from the field-invoices area. A new misc-charge entry is
-                 locked in the selector below. */}
-            <div>
-              <label className="text-sm font-medium text-nav-dark">Invoice Type</label>
-              {editable && routeArea !== 'field' ? (
-                <select
-                  value={invoice.invoice_type || 'chemical_sale'}
-                  onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_type: e.target.value as InvoiceType }))}
-                  disabled={isInvoiceTypeLocked}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="chemical_sale">Chemical Sale</option>
-                  {/* field_application is NOT selectable here — this editable
-                      selector only renders on the chemical route (the field route
-                      is read-only), and a chemical invoice must not be reclassified
-                      into the segregated field area (Codex). Field invoices are
-                      created from jobs / the field-app editor, never here. */}
-                  <option value="misc_charge">Misc Charge</option>
-                </select>
-              ) : (
-                <p className="mt-1 text-sm capitalize">{(invoice.invoice_type || '').replace(/_/g, ' ')}</p>
-              )}
-              {isInvoiceTypeLocked && (
-                <p className="mt-1 text-sm text-gray-500">Locked — orderless Misc Charges cannot be reclassified</p>
+              {billSplitPayers.length > 1 && (
+                <p className="mt-1 text-xs text-secondary">Set by the sale&apos;s split. Change who pays on the sale.</p>
               )}
             </div>
 
             {/* Date */}
             <div>
-              <label className="text-sm font-medium text-nav-dark">Invoice Date</label>
+              <label htmlFor="invoice-date" className="text-sm font-medium text-nav-dark">Invoice date</label>
               {editable ? (
                 <input
+                  id="invoice-date"
                   type="date"
                   value={invoice.invoice_date?.split('T')[0] || ''}
                   onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_date: e.target.value }))}
                   max={latestInvoiceDate()}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                  className={fieldInput}
                 />
               ) : (
                 <p className="mt-1 text-sm">{invoice.invoice_date ? new Date(invoice.invoice_date + 'T00:00:00').toLocaleDateString() : '-'}</p>
               )}
             </div>
 
-            {/* Salesman */}
-            <div>
-              <label className="text-sm font-medium text-nav-dark">Salesman</label>
-              {editable ? (
-                <select
-                  value={invoice.salesman_id || ''}
-                  onChange={(e) => setInvoice((prev) => ({ ...prev, salesman_id: e.target.value || null }))}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                >
-                  <option value="">No Salesman</option>
-                  {salespeople.map((s) => (
-                    <option key={s.id} value={s.id}>{s.full_name}</option>
-                  ))}
-                </select>
-              ) : (
-                <p className="mt-1 text-sm">{(invoice as unknown as { salesman?: { full_name: string } }).salesman?.full_name || '-'}</p>
-              )}
-            </div>
-
-            {/* PO Ref */}
-            <div>
-              <label className="text-sm font-medium text-nav-dark">PO Reference</label>
-              {editable ? (
-                <input
-                  type="text"
-                  value={invoice.purchase_order_ref || ''}
-                  onChange={(e) => setInvoice((prev) => ({ ...prev, purchase_order_ref: e.target.value }))}
-                  placeholder="Customer PO #"
-                  className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                />
-              ) : (
-                <p className="mt-1 text-sm">{invoice.purchase_order_ref || '-'}</p>
-              )}
-            </div>
-
             {/* Payment terms — follows the field-application invoice picker. */}
             <div>
-              <label htmlFor="payment-terms" className="text-sm font-medium text-nav-dark">Payment Terms</label>
+              <label htmlFor="payment-terms" className="text-sm font-medium text-nav-dark">Payment terms</label>
               {editable ? (
                 <>
                   <select
@@ -2411,7 +2389,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       setPaymentTerms(e.target.value);
                       if (e.target.value !== 'Custom date…') setCustomDueDate('');
                     }}
-                    className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                    className={fieldInput}
                   >
                     <option value="Customer default">Customer default</option>
                     <option value="Net 30">Net 30</option>
@@ -2427,182 +2405,270 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                     <input
                       id="custom-due-date"
                       type="date"
+                      aria-label="Custom due date"
                       value={customDueDate}
                       onChange={(e) => setCustomDueDate(e.target.value)}
                       required
-                      className="mt-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                      className={`${fieldInput} mt-2`}
                     />
                   )}
                 </>
               ) : (
                 <p className="mt-1 text-sm">
                   {invoice.payment_terms || 'Customer default'}
-                  {invoice.due_date ? ` · Due ${new Date(invoice.due_date + 'T00:00:00').toLocaleDateString()}` : ''}
+                  {invoice.due_date ? ` · due ${new Date(invoice.due_date + 'T00:00:00').toLocaleDateString()}` : ''}
                 </p>
               )}
             </div>
 
+            {/* Salesperson */}
+            <div>
+              <label htmlFor="invoice-salesperson" className="text-sm font-medium text-nav-dark">Salesperson</label>
+              {editable ? (
+                <select
+                  id="invoice-salesperson"
+                  value={invoice.salesman_id || ''}
+                  onChange={(e) => setInvoice((prev) => ({ ...prev, salesman_id: e.target.value || null }))}
+                  className={fieldInput}
+                >
+                  <option value="">No salesperson</option>
+                  {salespeople.map((s) => (
+                    <option key={s.id} value={s.id}>{s.full_name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="mt-1 text-sm">{(invoice as unknown as { salesman?: { full_name: string } }).salesman?.full_name || '-'}</p>
+              )}
+            </div>
+
+            {/* PO Ref */}
+            <div>
+              <label htmlFor="invoice-po" className="text-sm font-medium text-nav-dark">Customer PO #</label>
+              {editable ? (
+                <input
+                  id="invoice-po"
+                  type="text"
+                  value={invoice.purchase_order_ref || ''}
+                  onChange={(e) => setInvoice((prev) => ({ ...prev, purchase_order_ref: e.target.value }))}
+                  placeholder="Customer PO #"
+                  className={fieldInput}
+                />
+              ) : (
+                <p className="mt-1 text-sm">{invoice.purchase_order_ref || '-'}</p>
+              )}
+            </div>
+
+            {/* Type — locked to a read-only label on the segregated field route
+                 (Codex P2): a field invoice must not be reclassified to Chemical
+                 Sales from the field-invoices area. A new misc-charge entry is
+                 locked in the selector below. */}
+            <div>
+              <label htmlFor="invoice-type" className="text-sm font-medium text-nav-dark">Invoice type</label>
+              {editable && routeArea !== 'field' ? (
+                <select
+                  id="invoice-type"
+                  value={invoice.invoice_type || 'chemical_sale'}
+                  onChange={(e) => setInvoice((prev) => ({ ...prev, invoice_type: e.target.value as InvoiceType }))}
+                  disabled={isInvoiceTypeLocked}
+                  className={fieldInput}
+                >
+                  <option value="chemical_sale">Chemical sale</option>
+                  {/* field_application is NOT selectable here — this editable
+                      selector only renders on the chemical route (the field route
+                      is read-only), and a chemical invoice must not be reclassified
+                      into the segregated field area (Codex). Field invoices are
+                      created from jobs / the field-app editor, never here. */}
+                  <option value="misc_charge">Misc charge</option>
+                </select>
+              ) : (
+                <p className="mt-1 text-sm">{typeLabel}</p>
+              )}
+              {isInvoiceTypeLocked && (
+                <p className="mt-1 text-sm text-gray-500">Locked: orderless misc charges cannot be reclassified</p>
+              )}
+            </div>
+
             {/* Notes */}
-            <div className="col-span-2">
-              <label className="text-sm font-medium text-nav-dark">Notes</label>
+            <div className="sm:col-span-2">
+              <label htmlFor="invoice-notes" className="text-sm font-medium text-nav-dark">Notes on the invoice</label>
               {editable ? (
                 <textarea
+                  id="invoice-notes"
                   value={invoice.header_notes || ''}
                   onChange={(e) => setInvoice((prev) => ({ ...prev, header_notes: e.target.value }))}
                   rows={2}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                  className={fieldInput}
                 />
               ) : (
                 <p className="mt-1 text-sm text-secondary">{invoice.header_notes || '-'}</p>
               )}
             </div>
           </div>
-        </Card>
+        </section>
+      </Card>
 
-        {/* Financial Summary */}
-        <Card>
-          <h2 className="text-sm font-semibold text-nav-dark mb-4">Summary</h2>
-          <div className="space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-secondary">Subtotal</span>
-              <span className="font-medium">{fmt(totalCents)}</span>
-            </div>
-            {/* Cost is admin-only (Mason, 2026-10-15). */}
-            {isAdmin && (
-              <>
-                <div className="flex justify-between text-sm">
-                  <span className="text-secondary">Total Cost</span>
-                  <span className="text-secondary">{fmt(totalCostCents)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-secondary">Margin</span>
-                  <span className={invoiceMarginCents(items, totalCostCents) > 0 ? 'text-crx-green' : 'text-red-600'}>
-                    {fmt(invoiceMarginCents(items, totalCostCents))}
-                  </span>
-                </div>
-              </>
+      {/* What this invoice bills: products, then the charges staff add, then the lines the database works out. */}
+      <Card padding={false}>
+        <section aria-labelledby="invoice-lines-title">
+          <div className="px-5 pt-5 pb-3">
+            <h2 id="invoice-lines-title" className="font-heading text-xl font-semibold text-nav-dark">What this invoice bills</h2>
+            {thisPayer && billSplitPayers.length > 1 && (
+              <p className="mt-0.5 text-sm text-secondary">
+                This payer&apos;s {thisPayer.split_percentage}% of {thisDelivery ? `delivery ${thisDelivery.delivery_number}` : 'the delivery'}
+              </p>
             )}
-            {/* The office's discount on this sale (billing plan M4b): admin, chemical-sale draft. */}
-            {isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' && (
-              <>
-                <hr className="border-gray-100" />
-                <StandingDiscountControl
-                  invoiceId={invoice.id}
-                  disabled={hasUnsavedChanges}
-                  onChanged={() => fetchInvoice(invoice.id as string)}
-                />
-              </>
-            )}
-            {!isNew && (
-              <>
-                <hr className="border-gray-100" />
-                <div className="flex justify-between text-sm">
-                  <span className="text-secondary">Paid</span>
-                  <span className="text-crx-green">{fmt(invoice.paid_amount_cents || 0)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-secondary">Prepay Applied</span>
-                  <span>{fmt(invoice.prepay_applied_cents || 0)}</span>
-                </div>
-                <hr className="border-gray-100" />
-                <div className="flex justify-between text-sm font-semibold">
-                  <span>Balance Due</span>
-                  <span className={(invoice.balance_cents || 0) > 0 ? 'text-red-600' : 'text-crx-green'}>
-                    {fmt(invoice.balance_cents || 0)}
-                  </span>
-                </div>
-              </>
-            )}
-            <div className="flex justify-between text-sm">
-              <span className="text-secondary">Items</span>
-              <span>{items.length}</span>
-            </div>
           </div>
-        </Card>
-      </div>
+          {/* Split-billing invoices are managed only from the Split Billing editor (see isSplitInvoice). */}
+          {isSplitInvoice && (
+            <p className="mx-5 mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Read-only: this per-line split invoice is managed from the Split Billing editor.
+            </p>
+          )}
+          {editable && isFromScratch && (
+            <p className="px-5 pb-3 text-xs text-secondary">
+              This invoice has no order or delivery, so it takes charges only (freight, application fee, service or other). Sell product through an order or a quick delivery.
+            </p>
+          )}
 
-      {billSplitPayers.length > 1 && (
-        <Card>
-          <h2 className="text-sm font-semibold text-nav-dark mb-1">Bill Split</h2>
-          <p className="text-xs text-secondary mb-3">The payers on this delivery</p>
-          <div className="space-y-2">
-            {billSplitPayers.map((payer) => (
-              <div key={payer.invoice_id} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0">
-                  <span className="font-medium text-nav-dark">{payer.customer_name}</span>
-                  {payer.invoice_id === id ? (
-                    <span className="ml-2 text-xs text-secondary">{payer.invoice_number} (this invoice)</span>
-                  ) : (
-                    <Link to={`/invoices/${payer.invoice_id}`} className="ml-2 text-xs text-crx-green hover:underline">{payer.invoice_number}</Link>
-                  )}
-                </span>
-                <span className="shrink-0 tabular-nums">
-                  <span className="text-secondary mr-3">{payer.split_percentage}%</span>
-                  <span className="font-semibold">{fmt(payer.amount_cents)}</span>
-                </span>
+          {(!isFromScratch || productRows.length > 0) && (
+            productRows.length === 0 ? (displayItems.length === 0 && (
+              <div className="border-t border-gray-100 px-5 py-8 text-center text-secondary">
+                <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No line items yet. Add products to this invoice.</p>
               </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Line Items */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-nav-dark">Line Items</h2>
-          {editable && (
-            <div className="flex gap-2">
-              {!isFromScratch && (
-                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => setShowProductModal(true)}>
-                  Add Product
-                </Button>
-              )}
-              {takesCharges && (
-                <Button size="sm" icon={<Plus className="w-4 h-4" />} onClick={addChargeLine}>
-                  Add Charge
-                </Button>
-              )}
+            )) : (
+              <table className="block w-full text-sm xl:table">
+                <thead className="hidden xl:table-header-group">
+                  <tr className="border-y border-gray-100 bg-gray-50 text-left text-xs text-secondary">
+                    <th className="px-5 py-2 font-medium">Product</th>
+                    {showVendors && <th className="px-3 py-2 font-medium">Vendor</th>}
+                    <th className="px-3 py-2 font-medium">Qty</th>
+                    <th className="px-3 py-2 font-medium">Unit price</th>
+                    {hasTotes && <th className="px-3 py-2 font-medium">Tote #</th>}
+                    <th className="px-5 py-2 text-right font-medium">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="block xl:table-row-group">
+                  {productRows.map(({ item, idx }) => {
+                    const name = item.product_name || item.description;
+                    return (
+                      <tr key={idx} className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-gray-100 px-5 py-4 sm:grid-cols-3 xl:table-row xl:p-0">
+                        <td className="col-start-1 row-start-1 min-w-0 sm:col-span-2 xl:table-cell xl:px-5 xl:py-3 xl:align-top">
+                          <div className="font-medium text-nav-dark">{name}</div>
+                          {(item.unit_size || (!rowEditable(item) && item.price_source)) && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-secondary">
+                              {item.unit_size && <span>{item.unit_size}</span>}
+                              {!rowEditable(item) && priceSourcePill(item)}
+                            </div>
+                          )}
+                          {/* Brand PR B-3: the delivered brands, read-only (as of the last save). */}
+                          {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
+                            <div key={note} className="text-xs text-secondary">{note}</div>
+                          ))}
+                        </td>
+                        {showVendors && (
+                          <td className="order-last col-span-2 flex flex-col gap-1 text-secondary sm:col-span-1 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
+                            {lineLabel('Vendor')}
+                            {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
+                            {rowEditable(item) && item.order_item_id && item.quantity > 0 ? (
+                              <VendorSelect
+                                label={`Vendor for ${item.product_name || item.description || 'line'}`}
+                                value={item.vendor}
+                                vendors={vendorNames}
+                                disabled={saving}
+                                onChange={(vendor) => updateItem(idx, 'vendor', vendor)}
+                              />
+                            ) : (item.vendor || '-')}
+                          </td>
+                        )}
+                        <td className="flex flex-col gap-1 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
+                          {lineLabel('Qty')}
+                          {rowEditable(item) && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
+                            <input
+                              type="number"
+                              aria-label={`Quantity for ${name || 'line'}`}
+                              value={item.quantity}
+                              onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value) || 0)}
+                              min={0}
+                              step={0.01}
+                              className={lineInput}
+                            />
+                          ) : (
+                            <span className="tabular-nums">{item.quantity}</span>
+                          )}
+                        </td>
+                        <td className="flex flex-col gap-1 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
+                          {lineLabel('Unit price')}
+                          {rowEditable(item) && !item.billing_line_id ? (
+                            <input
+                              type="number"
+                              aria-label={`Unit price for ${name || 'line'}`}
+                              value={(item.unit_price_cents / 100).toFixed(2)}
+                              onChange={(e) => changePrice(idx, e.target.value)}
+                              min={0}
+                              step={0.01}
+                              className={lineInput.replace('xl:w-24', 'xl:w-28')}
+                            />
+                          ) : (
+                            <span className="tabular-nums">{formatCentsMinus(item.unit_price_cents)}</span>
+                          )}
+                        </td>
+                        {hasTotes && (
+                          <td className="order-last col-span-2 text-secondary sm:col-span-3 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
+                            <span className="xl:hidden">Tote # </span>{item.tote_number || '-'}
+                          </td>
+                        )}
+                        <td className="col-start-2 row-start-1 flex items-start justify-end gap-2 sm:col-start-3 xl:table-cell xl:px-5 xl:py-3 xl:text-right xl:align-top">
+                          <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                          {rowEditable(item) && !item.billing_line_id && (
+                            <button
+                              type="button"
+                              onClick={() => removeItem(idx)}
+                              aria-label={`Remove ${name || 'line'}`}
+                              className={removeButton}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )
+          )}
+          {editable && !isFromScratch && (
+            <div className="px-5 pt-3 pb-4">
+              <Button variant="secondary" className="min-h-11 md:min-h-0" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={() => setShowProductModal(true)}>
+                Add product
+              </Button>
             </div>
           )}
-        </div>
-        {editable && isFromScratch && (
-          <p className="-mt-2 mb-4 text-xs text-secondary">
-            This invoice has no order or delivery, so it takes charges only (freight, application fee, service or other). Sell product through an order or a quick delivery.
-          </p>
-        )}
 
-        {displayItems.length === 0 ? (
-          <div className="text-center py-8 text-secondary">
-            <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">{isFromScratch ? 'No charges yet. Add a charge to this invoice.' : 'No line items yet. Add products to this invoice.'}</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-secondary border-b border-gray-100">
-                  <th className="pb-2 pr-4">{isFromScratch ? 'Charge' : 'Product'}</th>
-                  {showVendors && <th className="pb-2 pr-4">Vendor</th>}
-                  <th className="pb-2 pr-4 w-24">Qty</th>
-                  <th className="pb-2 pr-4 w-28">{isFromScratch ? 'Amount' : 'Unit Price'}</th>
-                  <th className="pb-2 pr-4 w-28">Extended</th>
-                  {displayItems.some((i) => i.tote_number) && (
-                    <th className="pb-2 pr-4">Tote #</th>
-                  )}
-                  <th className="pb-2 w-10"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {displayItems.map((item, idx) => (
-                  <tr key={idx} className="group">
-                    <td className="py-2 pr-4">
-                      {rowEditable(item) && (item.charge_type || (takesCharges && !item.product_id)) ? (
-                        <div className="flex flex-col gap-1 sm:flex-row">
+          {(chargeRows.length > 0 || (editable && takesCharges)) && (
+            <div className="border-t border-gray-100 px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary">Charges</h3>
+                {editable && takesCharges && (
+                  <Button variant="ghost" size="sm" className="min-h-11 text-crx-green md:min-h-0" icon={<Plus className="w-4 h-4" />} showChevron={false} onClick={addChargeLine}>
+                    Add charge
+                  </Button>
+                )}
+              </div>
+              {chargeRows.length === 0 ? (isFromScratch && (
+                <p className="mt-2 text-sm text-secondary">No charges yet. Add a charge to this invoice.</p>
+              )) : (
+                <ul className="mt-2 divide-y divide-gray-100">
+                  {chargeRows.map(({ item, idx }) => (
+                    <li key={idx} className="py-3">
+                      {rowEditable(item) ? (
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_8rem_auto] sm:items-center">
                           <select
                             aria-label="Charge type"
                             value={item.charge_type ?? ''}
                             onChange={(e) => updateItem(idx, 'charge_type', (e.target.value || null) as InvoiceChargeType | null)}
-                            className="px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green"
+                            className={`${chargeInput} col-span-2 sm:col-span-1`}
                           >
                             {!item.charge_type && <option value="">Pick a type</option>}
                             {CHARGE_TYPE_OPTIONS.map((option) => (
@@ -2615,119 +2681,86 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                             placeholder="Description"
                             value={item.description}
                             onChange={(e) => updateItem(idx, 'description', e.target.value)}
-                            className="min-w-0 flex-1 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green"
+                            className={`${chargeInput} col-span-2 sm:col-span-1`}
                           />
-                        </div>
-                      ) : item.charge_type ? (
-                        <>
-                          <div className="font-medium text-nav-dark">{item.description}</div>
-                          <div className="text-xs text-secondary">{chargeTypeLabel(item.charge_type)}</div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="font-medium text-nav-dark">{item.product_name || item.description}</div>
-                          {item.unit_size && (
-                            <div className="text-xs text-secondary">{item.unit_size}</div>
+                          {!item.billing_line_id ? (
+                            <input
+                              type="number"
+                              aria-label={`Amount for ${item.description || 'charge'}`}
+                              value={(item.unit_price_cents / 100).toFixed(2)}
+                              onChange={(e) => changePrice(idx, e.target.value)}
+                              min={0}
+                              step={0.01}
+                              className={chargeInput}
+                            />
+                          ) : (
+                            <span className="tabular-nums">{formatCentsMinus(item.extended_cents)}</span>
                           )}
-                        </>
+                          {!item.billing_line_id && (
+                            <button
+                              type="button"
+                              onClick={() => removeItem(idx)}
+                              aria-label={`Remove ${item.description || 'charge'}`}
+                              className={removeButton}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-3 text-sm">
+                          <span className="min-w-0">
+                            <span className="font-medium text-nav-dark">{chargeTypeLabel(item.charge_type) || 'Charge'}</span>
+                            {item.description && <span className="ml-1.5 text-secondary">{item.description}</span>}
+                          </span>
+                          <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                        </div>
                       )}
-                      {/* Brand PR B-3: the delivered brands, read-only (as of the last save). */}
                       {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
                         <div key={note} className="text-xs text-secondary">{note}</div>
                       ))}
-                    </td>
-                    {showVendors && (
-                      <td className="py-2 pr-4 text-secondary">
-                        {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
-                        {rowEditable(item) && item.order_item_id && item.quantity > 0 ? (
-                          <VendorSelect
-                            label={`Vendor for ${item.product_name || item.description || 'line'}`}
-                            value={item.vendor}
-                            vendors={vendorNames}
-                            disabled={saving}
-                            onChange={(vendor) => updateItem(idx, 'vendor', vendor)}
-                          />
-                        ) : (item.vendor || '-')}
-                      </td>
-                    )}
-                    <td className="py-2 pr-4">
-                      {rowEditable(item) && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value) || 0)}
-                          min={0}
-                          step={0.01}
-                          className="w-24 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green"
-                        />
-                      ) : (
-                        item.quantity
-                      )}
-                    </td>
-                    <td className="py-2 pr-4">
-                      {rowEditable(item) && !item.billing_line_id ? (
-                        <input
-                          type="number"
-                          value={(item.unit_price_cents / 100).toFixed(2)}
-                          onChange={(e) => {
-                            const cents = parseDollarsToCentsSigned(e.target.value);
-                            // null = a third decimal digit. Refuse the keystroke; never store
-                            // a $0 unit price that only the below-cost prompt would question.
-                            if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
-                            // The unsigned parser flips "-100" to +$100, which would bill a credit
-                            // as a charge (Sol, PR #983). Refuse a negative price instead.
-                            if (cents < 0) { toast('error', NEGATIVE_PRICE_MESSAGE); return; }
-                            updateItem(idx, 'unit_price_cents', cents);
-                          }}
-                          min={0}
-                          step={0.01}
-                          className="w-28 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green"
-                        />
-                      ) : (
-                        <span className="flex items-center gap-1">
-                          {fmt(item.unit_price_cents)}
-                          {item.price_source === 'quoted' && <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700" title={item.quoted_price_cents != null ? `Program price: ${fmt(item.quoted_price_cents)}` : undefined}>Quoted</span>}
-                          {item.price_source === 'tier' && <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600" title="Using customer tier pricing">Tier</span>}
-                          {item.price_source === 'manual' && <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-700" title="Manually set price">Manual</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* The standing discount (M4b) and sales tax (M4a) lines are the database's own: shown, never edited or removed here. */}
+          {workedRows.length > 0 && (
+            <section aria-labelledby="invoice-worked-out-title" className="border-t border-gray-100 px-5 py-4">
+              <h3 id="invoice-worked-out-title" className="text-xs font-semibold uppercase tracking-wide text-secondary">Worked out for you</h3>
+              <ul className="mt-2 divide-y divide-gray-100">
+                {workedRows.map(({ item, idx }) => (
+                  <li key={idx} className="flex items-start justify-between gap-3 py-3 text-sm">
+                    <span className="flex min-w-0 items-start gap-2">
+                      <Lock className="mt-0.5 h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                      <span>
+                        <span className="font-medium text-nav-dark">{item.description}</span>{' '}
+                        <span className="text-secondary">
+                          {item.charge_type === 'sales_tax' ? 'on products and charges after discount' : 'off products, before tax'}
                         </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4 font-medium">{fmt(item.extended_cents)}</td>
-                    {displayItems.some((i) => i.tote_number) && (
-                      <td className="py-2 pr-4 text-secondary">{item.tote_number || '-'}</td>
-                    )}
-                    <td className="py-2">
-                      {rowEditable(item) && !item.billing_line_id && (
-                        <button
-                          onClick={() => removeItem(idx)}
-                          className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                      </span>
+                    </span>
+                    <span className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                  </li>
                 ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-gray-200 font-semibold">
-                  <td className="pt-3" colSpan={(displayItems.some((i) => i.tote_number) ? 4 : 3) + (showVendors ? 1 : 0)}>
-                    Total
-                  </td>
-                  <td className="pt-3">{fmt(totalCents)}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
+              </ul>
+            </section>
+          )}
+
+          <div className="flex justify-between gap-3 border-t border-gray-200 px-5 py-4 text-base font-semibold text-nav-dark">
+            <span>Invoice total</span>
+            <span className="tabular-nums">{formatCentsMinus(breakdown.totalCents)}</span>
           </div>
-        )}
+        </section>
       </Card>
       </fieldset>
 
       {/* Write-Offs */}
       {writeOffs.length > 0 && (
         <Card>
-          <h3 className="text-sm font-semibold text-nav-dark mb-3">Write-Offs</h3>
+          <h3 className="text-sm font-semibold text-nav-dark mb-3">Write-offs</h3>
           <div className="divide-y divide-gray-50">
             {writeOffs.map((wo) => (
               <div key={wo.id} className="py-2 flex items-center justify-between gap-4">
@@ -2742,7 +2775,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   isAdmin && (
                     <button
                       onClick={() => { setReverseWoTarget(wo); setShowReverseWoModal(true); }}
-                      className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-medium shrink-0"
+                      className="flex min-h-11 items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-medium shrink-0 md:min-h-0"
                     >
                       <RotateCcw className="w-3 h-3" />
                       Reverse
@@ -2760,58 +2793,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         <Card>
           <div className="flex items-center gap-2 text-red-600">
             <Ban className="w-4 h-4" />
-            <span className="text-sm font-medium">Void Reason:</span>
+            <span className="text-sm font-medium">Void reason:</span>
             <span className="text-sm">{invoice.void_reason}</span>
           </div>
         </Card>
       )}
-
-      {/* Related Deliveries (cross-link via shared order) */}
-      {relatedDeliveries.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <Truck className="w-5 h-5 text-crx-green" />
-            <h3 className="font-semibold text-nav-dark">Related Deliveries</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Delivery #</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Date</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Status</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Driver</th>
-                </tr>
-              </thead>
-              <tbody>
-                {relatedDeliveries.map((del) => (
-                  <tr key={del.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => navigate(`/deliveries/${del.id}`)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        {del.delivery_number}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-secondary">
-                      {parseLocalDate(del.scheduled_date).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={statusToBadgeVariant[del.status] || 'default'} size="sm">
-                        {del.status.replace('_', ' ')}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2 text-secondary">
-                      {del.driver_name || 'Unassigned'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+        </div>
+      </div>
 
       {/* Product Search Modal */}
       {/* Closing the picker cancels a pending add, so a late tier answer cannot add the product. */}
@@ -2866,7 +2854,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           />
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setShowVoidModal(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleVoid} loading={voiding}>
+            <Button variant="danger" onClick={handleVoid} loading={voiding}>
               Void Invoice
             </Button>
           </div>

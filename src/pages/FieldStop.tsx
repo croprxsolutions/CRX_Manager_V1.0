@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   MapPin, PlayCircle, WifiOff, Minus, Plus, AlertTriangle, ChevronRight,
-  Camera, CheckCircle2, ClipboardCheck, FileText,
+  Camera, CheckCircle2, ClipboardCheck, Receipt,
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
@@ -122,7 +122,8 @@ export default function FieldStop() {
   const [emailOnComplete, setEmailOnComplete] = useState(true);
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
-  const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
+  // What the completion response said about billing, for the Done step (the same data the toasts use).
+  const [doneBilling, setDoneBilling] = useState<DoneBillingResult | null>(null);
   // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
   const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
   // Tied to the stop that raised it: on another stop it never shows, so its Complete anyway cannot act there.
@@ -515,7 +516,8 @@ export default function FieldStop() {
       const plural = billSplit.numbers.length > 1;
       // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
       const stillOnStop = activeStopIdRef.current === id;
-      if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
+      const autoNumber = autoInvoice?.auto_invoice?.invoice_number;
+      if (stillOnStop) setDoneBilling({ numbers: autoNumber ? [autoNumber] : billSplit.numbers, failed: billSplit.failed });
       if (billSplit.failed) {
         toast('warning', forThisStop(billSplitFailedMessage(profile.role)));
       } else toast('success', invoiceNum
@@ -826,7 +828,13 @@ export default function FieldStop() {
             </div>
           )}
 
-          <p className="text-sm text-secondary mt-3 text-center">Inventory will be deducted and a draft invoice created.</p>
+          <div className="mt-3 flex gap-2.5 rounded-xl border border-gray-200 bg-white px-3.5 py-3">
+            <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-crx-green" aria-hidden="true" />
+            <p className="text-sm text-secondary">
+              <strong className="block text-base text-nav-dark">What happens next</strong>
+              Stock comes off the truck. The office gets a draft invoice to check. You don&apos;t need to do anything about billing.
+            </p>
+          </div>
 
           <MainAction disabled={completing} onClick={requestComplete}>
             <ClipboardCheck className="w-6 h-6" aria-hidden="true" /> {completing ? 'Completing…' : 'Complete Delivery'}
@@ -840,12 +848,8 @@ export default function FieldStop() {
             <CheckCircle2 className="w-14 h-14 text-crx-green mx-auto mb-3" aria-hidden="true" />
             <p className="font-heading text-2xl font-bold text-nav-dark">Delivery complete</p>
             <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
-            {autoInvoiceNumber && (
-              <p className="inline-flex items-center gap-1 text-sm text-nav-dark mt-3">
-                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice{autoInvoiceNumber.includes(',') ? 's' : ''} {autoInvoiceNumber} created
-              </p>
-            )}
           </div>
+          <DoneBilling billing={doneBilling} />
           <MainAction onClick={() => navigate('/my-route')}>
             Next Stop <ChevronRight className="w-6 h-6" aria-hidden="true" />
           </MainAction>
@@ -885,6 +889,28 @@ const STEPPER_BUTTON = 'flex h-12 w-12 items-center justify-center rounded-xl bg
 const CHECKBOX = 'h-5 w-5 shrink-0 rounded border-gray-300 text-crx-green';
 const TEXT_INPUT = 'h-12 w-full rounded-xl border border-gray-300 px-3 text-base text-nav-dark placeholder:text-gray-500';
 const SECONDARY_BUTTON = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white font-semibold text-nav-dark active:scale-[0.99] disabled:opacity-50';
+
+interface DoneBillingResult { numbers: string[]; failed: boolean }
+
+/** The Done step's billing line: the invoice numbers, or that the office will finish a failed Bill Split. */
+function DoneBilling({ billing }: { billing: DoneBillingResult | null }) {
+  if (billing?.failed) {
+    return (
+      <div role="status" className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+        <AlertTriangle className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+        <p><strong>The office will finish billing.</strong> The invoices for this delivery could not be made automatically. The office has been told. Nothing for you to do.</p>
+      </div>
+    );
+  }
+  const numbers = billing?.numbers ?? [];
+  if (numbers.length === 0) return null;
+  return (
+    <div role="status" className="mt-3 flex items-start gap-2.5 rounded-xl border border-crx-green/25 bg-crx-green-light px-3 py-2.5 text-sm text-crx-green-hover">
+      <Receipt className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+      <p><strong>Billing done.</strong> The office has {numbers.length} draft invoice{numbers.length > 1 ? 's' : ''} for this delivery ({numbers.join(', ')}).</p>
+    </div>
+  );
+}
 
 /** The one main button of a step: full width, 56px, pinned above the phone's bottom navigation. */
 function MainAction({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {

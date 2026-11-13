@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 const { updateServiceWorker, registerOptions } = vi.hoisted(() => ({
@@ -19,11 +19,17 @@ vi.mock('virtual:pwa-register/react', () => ({
 import UpdatePrompt from './UpdatePrompt';
 
 describe('UpdatePrompt', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    updateServiceWorker.mockClear();
+  });
+
   it('shows a prominent update action above the mobile bottom navigation', async () => {
     window.innerWidth = 375;
     render(<UpdatePrompt />);
 
-    const updateButton = await screen.findByRole('button', { name: 'Update now' });
+    expect(await screen.findByText('A new version of CRX is ready')).toBeInTheDocument();
+    const updateButton = await screen.findByRole('button', { name: 'Reload' });
     const prompt = screen.getByTestId('update-prompt');
 
     expect(updateButton).toHaveClass('min-h-11', 'bg-crx-green');
@@ -34,6 +40,31 @@ describe('UpdatePrompt', () => {
 
     fireEvent.click(updateButton);
     expect(updateServiceWorker).toHaveBeenCalledWith(true);
+  });
+
+  it('Later hides it, and it stays hidden after a remount in the same session', async () => {
+    const first = render(<UpdatePrompt />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+    expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('crx-update-later')).not.toBeNull();
+    expect(updateServiceWorker).not.toHaveBeenCalled();
+
+    first.unmount();
+    render(<UpdatePrompt />);
+    expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
+  });
+
+  it('still shows and still hides on Later when session storage throws', async () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+    try {
+      render(<UpdatePrompt />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+      expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
   });
 
   // Sentry CRX-MANAGER-1G: a rejected hourly update check surfaced as an unhandled rejection.

@@ -34,7 +34,7 @@ describe('UpdatePrompt', () => {
 
     expect(updateButton).toHaveClass('min-h-11', 'bg-crx-green');
     expect(prompt).toHaveClass(
-      'bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]',
+      'bottom-[calc(3.5rem+max(1rem,var(--page-bar-h,0px))+env(safe-area-inset-bottom)+0.75rem)]',
       'md:bottom-4'
     );
 

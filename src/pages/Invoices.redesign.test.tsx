@@ -193,7 +193,22 @@ describe('Invoices list redesign', () => {
       expect(within(dialog).queryByText(/selected invoice\(s\)\?/)).not.toBeInTheDocument();
       // Cancel is the safe button and comes first; nothing posts.
       const buttons = within(dialog).getAllByRole('button').map((b) => b.textContent);
-      expect(buttons.indexOf('Cancel')).toBeLessThan(buttons.indexOf('Post 2'));
+      expect(buttons.indexOf('Post 2 invoices')).toBeGreaterThan(-1);
+      expect(buttons.indexOf('Cancel')).toBeLessThan(buttons.indexOf('Post 2 invoices'));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(H.rpc).not.toHaveBeenCalled();
+    });
+
+    it('one ticked member of a 3-invoice split counts all 3 in the bar, the title and the button', async () => {
+      H.from.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices'
+        ? [...ROWS, invoice({ invoice_number: 'CS-SPLIT-3', status: 'draft', invoice_group_id: 'grp-1' })]
+        : []));
+      await renderList();
+      tick('CS-SPLIT-1');
+      fireEvent.click(within(bar()).getByRole('button', { name: 'Post 3 invoices…' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('Post 3 invoices?')).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Post 3 invoices' })).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
       expect(H.rpc).not.toHaveBeenCalled();
     });

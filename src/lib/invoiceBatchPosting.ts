@@ -35,22 +35,27 @@ export interface InvoicePostTarget {
   invoiceGroupId?: string;
 }
 
-export function describeInvoicePostScope(invoices: BatchPostInvoice[]): {
-  message: string;
-  confirmLabel: string;
-} {
+/**
+ * The post confirm for a selection. `count` is how many invoices actually post: each plain invoice, plus every
+ * loaded member of each selected split group (the group posts together, even members not ticked).
+ */
+export function describeInvoicePostScope(
+  invoices: BatchPostInvoice[],
+  loadedRows: readonly BatchPostInvoice[] = invoices,
+): { message: string; confirmLabel: string; count: number } {
+  const count = buildInvoicePostTargets(invoices, loadedRows)
+    .reduce((n, t) => n + (t.invoiceGroupId ? Object.keys(t.loadedVersions).length : 1), 0);
+  const confirmLabel = `Post ${count} invoice${count === 1 ? '' : 's'}`;
   if (invoices.some((invoice) => Boolean(invoice.invoice_group_id))) {
     return {
       message:
         'These include a split sale, so every invoice in that split posts together, even ones your filters hide. If one changed since you opened this list, none of its split posts and you will be told. The other invoices still post.',
-      confirmLabel: `Post ${invoices.length} invoice${invoices.length === 1 ? '' : 's'}`,
+      confirmLabel,
+      count,
     };
   }
-  return {
-    // The confirm's title already asks "Post n invoices?", so the body does not repeat it.
-    message: 'Posting locks them into AR.',
-    confirmLabel: `Post ${invoices.length}`,
-  };
+  // The confirm's title already asks "Post n invoices?", so the body does not repeat it.
+  return { message: 'Posting locks them into AR.', confirmLabel, count };
 }
 
 /**

@@ -133,7 +133,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText(/not from this season/)).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1 invoice' }));
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'NEW-DRAFT', p_expected_version: 'v1:NEW-DRAFT' });
   });
@@ -204,7 +204,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     expect(screen.getByRole('button', { name: 'Post 1 invoice…' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1 invoice' }));
     await waitFor(() => expect(postedIds()).toHaveLength(1));
     expect(postedIds()).toEqual(['NEW-UNPOSTED']);
   });
@@ -273,7 +273,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     tickRow('NEW-DRAFT');
     fireEvent.click(screen.getByRole('button', { name: 'Post 2 invoices…' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 2' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 2 invoices' }));
 
     await waitFor(() => expect(postedIds()).toHaveLength(2));
     // The reload has landed: OLD-DRAFT is back on screen and NEW-DRAFT is gone.

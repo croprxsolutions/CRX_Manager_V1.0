@@ -42,11 +42,14 @@ export default function UpdatePrompt() {
 
   if (!visible) return null;
 
+  // Below md it sits above the bottom nav, and above a page's fixed action bar when there is one
+  // (the bar publishes --page-bar-h, see usePageBarHeight), so it never covers Post and the like.
+
   return (
     <div
       role="status"
       data-testid="update-prompt"
-      className="fixed inset-x-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)] z-40 flex items-center gap-3 rounded-xl bg-nav-dark px-3.5 py-3 text-white shadow-xl md:inset-x-auto md:bottom-4 md:left-1/2 md:w-full md:max-w-md md:-translate-x-1/2"
+      className="fixed inset-x-3 bottom-[calc(3.5rem+max(1rem,var(--page-bar-h,0px))+env(safe-area-inset-bottom)+0.75rem)] z-40 flex items-center gap-3 rounded-xl bg-nav-dark px-3.5 py-3 text-white shadow-xl md:inset-x-auto md:bottom-4 md:left-1/2 md:w-full md:max-w-md md:-translate-x-1/2"
     >
       <RefreshCw className="h-[18px] w-[18px] shrink-0 text-[#7fd1a8]" aria-hidden="true" />
       <span className="min-w-0 flex-1 text-sm">

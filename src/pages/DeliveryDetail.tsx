@@ -43,7 +43,8 @@ import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_O
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
-import { formatCents as fmtCents } from '../lib/money';
+import { formatCentsMinus } from '../lib/money';
+import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -2105,13 +2106,6 @@ export default function DeliveryDetail() {
                 Take Delivery
               </Button>
             )}
-            {isAdmin && delivery?.status === 'completed' && billedOutsideCrxReason !== null && (
-              <div className="flex items-center gap-1 text-sm text-secondary">
-                <FileText className="w-4 h-4" />
-                <span>Billed outside CRX</span>
-                <HelpTip text={billedOutsideCrxReason} />
-              </div>
-            )}
             <Button
               variant="secondary"
               size="sm"
@@ -3114,9 +3108,9 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title="Create Invoice"
-        message={`Create a draft invoice for completed delivery ${delivery.delivery_number}?`}
-        confirmLabel="Create Invoice"
+        title="Create an invoice for this delivery?"
+        message={`This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
+        confirmLabel="Create invoice"
         variant="info"
         loading={creatingInvoice}
       />
@@ -3173,8 +3167,6 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
   };
 }
 
-const titleCase = (status: string) => status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
-
 /**
  * Every invoice on the delivery's sale (as the thread above shows), one link per row; this
  * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
@@ -3213,12 +3205,13 @@ interface UnbilledNoteProps {
 }
 
 /**
- * A completed delivery with no active CRX invoice. Billed outside CRX: the stored reason. Otherwise
+ * A completed delivery with no active CRX invoice. Billed outside CRX: the stored reason (admins only). Otherwise
  * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
  * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
  */
 function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
-  if (billedOutsideCrxReason !== null) {
+  // The stored reason is admin-only, as before this card; others get the plain empty text below.
+  if (isAdmin && billedOutsideCrxReason !== null) {
     return (
       <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3 text-sm text-nav-dark">
         <FileText className="mt-0.5 h-[18px] w-[18px] shrink-0 text-secondary" aria-hidden="true" />
@@ -3261,9 +3254,9 @@ function InvoiceRow({ invoice, thisDelivery }: { invoice: RelatedInvoice; thisDe
           {thisDelivery && <span className="shrink-0 rounded-full bg-crx-green-light px-2 py-0.5 text-xs font-medium text-crx-green">This delivery</span>}
         </span>
         <span className="order-3 truncate text-secondary xl:order-none xl:text-nav-dark">{invoice.bill_to ?? ''}</span>
-        <span className="order-2 text-right font-semibold tabular-nums text-nav-dark xl:order-none">{fmtCents(invoice.total_amount_cents)}</span>
+        <span className="order-2 text-right font-semibold tabular-nums text-nav-dark xl:order-none">{formatCentsMinus(invoice.total_amount_cents)}</span>
         <span className="order-4 justify-self-end xl:order-none xl:justify-self-start">
-          <Badge variant={statusToBadgeVariant[invoice.status] || 'default'} size="sm">{titleCase(invoice.status)}</Badge>
+          <Badge variant={invoiceStatusBadge(invoice.status).variant} size="sm" normalCase>{invoiceStatusBadge(invoice.status).label}</Badge>
         </span>
         <ChevronRight className="hidden h-4 w-4 text-secondary xl:block" aria-hidden="true" />
       </Link>

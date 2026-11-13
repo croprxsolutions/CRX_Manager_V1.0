@@ -34,7 +34,9 @@ import {
   mapInvoicePdfItem,
   type InvoicePdfData,
 } from '../lib/invoicePdf';
-import { formatCents as fmt } from '../lib/money';
+import { formatCents, formatCentsMinus as fmt } from '../lib/money';
+import { invoiceStatusBadge } from '../lib/statusLabel';
+import { publishPageBarHeight } from '../lib/pageBar';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE } from '../lib/costFields';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import { isCurrentSeason, openOrInSeasonFilter, otherSeasonLabels } from '../lib/invoiceSeasonWindow';
@@ -79,17 +81,8 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const statusBadge = (status: InvoiceStatus) => {
-  const map: Record<InvoiceStatus, { variant: 'default' | 'warning' | 'success' | 'error' | 'info'; label: string }> = {
-    draft: { variant: 'default', label: 'Draft' },
-    unposted: { variant: 'warning', label: 'Unposted' },
-    posted: { variant: 'success', label: 'Posted' },
-    paid: { variant: 'info', label: 'Paid' },
-    overdue: { variant: 'warning', label: 'Overdue' },
-    voided: { variant: 'error', label: 'Voided' },
-    cancelled: { variant: 'default', label: 'Cancelled' },
-  };
-  const s = map[status] || { variant: 'default' as const, label: status };
-  return <Badge variant={s.variant}>{s.label}</Badge>;
+  const s = invoiceStatusBadge(status);
+  return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
 };
 
 const typeLabel = (t: string) => ({ chemical_sale: 'Chemical', field_application: 'Application', misc_charge: 'Misc' }[t] || t);
@@ -365,7 +358,8 @@ export default function Invoices() {
   }, [visibleSelectableKey, selected]);
 
   const selectedPostable = selectedInvoices.filter((i) => ['draft', 'unposted'].includes(i.status));
-  const basePostConfirmation = describeInvoicePostScope(selectedPostable);
+  // Counts every loaded member of a selected split: the whole split posts together.
+  const basePostConfirmation = describeInvoicePostScope(selectedPostable, invoices);
   // The list shows open invoices from every season, and the server does not check the
   // season when posting, so the confirm names any selected invoice not from this season.
   const selectedOtherSeasonPostable = selectedPostable.filter((i) => !isCurrentSeason(i.season));
@@ -711,8 +705,8 @@ export default function Invoices() {
             return map[String(v)] || String(v || '-');
           }},
           { header: 'Date', key: 'invoice_date', format: (v) => v ? new Date(String(v)).toLocaleDateString() : '-' },
-          { header: 'Total', key: 'total_amount_cents', align: 'right', format: (v) => fmt(Number(v) || 0) },
-          { header: 'Balance', key: 'balance_cents', align: 'right', format: (v) => fmt(Number(v) || 0) },
+          { header: 'Total', key: 'total_amount_cents', align: 'right', format: (v) => formatCents(Number(v) || 0) },
+          { header: 'Balance', key: 'balance_cents', align: 'right', format: (v) => formatCents(Number(v) || 0) },
           { header: 'Status', key: 'status' },
         ],
         data: rows as unknown as Record<string, unknown>[],
@@ -982,6 +976,8 @@ export default function Invoices() {
   // One selection bar (the Quotes list's dark bar). Below md it sits above the bottom nav: Post first, then Print and More.
   const selectionBar = selectedCount > 0 && (
     <div
+      // Below md the bar is fixed above the bottom nav; the update notice sits above it.
+      ref={publishPageBarHeight}
       role="toolbar"
       aria-label={`${plural(selectedCount, 'invoice')} selected`}
       className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-nav-dark px-3 py-2.5 text-white max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:mb-0 max-md:rounded-none max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:p-3 max-md:text-nav-dark max-md:shadow-lg"
@@ -1019,7 +1015,7 @@ export default function Invoices() {
           onClick={() => setShowPostModal(true)}
           loading={posting}
         >
-          Post {plural(selectedPostable.length, 'invoice')}…
+          Post {plural(basePostConfirmation.count, 'invoice')}…
         </Button>
       )}
     </div>
@@ -1213,7 +1209,7 @@ export default function Invoices() {
         open={showPostModal}
         onClose={() => setShowPostModal(false)}
         onConfirm={handleBatchPost}
-        title={`Post ${plural(selectedPostable.length, 'invoice')}?`}
+        title={`Post ${plural(basePostConfirmation.count, 'invoice')}?`}
         message={postConfirmation.message}
         confirmLabel={postConfirmation.confirmLabel}
         variant="info"

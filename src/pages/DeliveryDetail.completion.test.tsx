@@ -15,7 +15,7 @@
  *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const SIGNATURE_DATA_URL = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`;
@@ -394,12 +394,33 @@ describe('Invoices on this sale card', () => {
     expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
   });
 
+  it('billed outside CRX: an admin sees the stored reason once (no second header note)', async () => {
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph('Billed outside CRX. Billed in the old system by the office'));
+    expect(screen.getAllByText(/Billed outside CRX/)).toHaveLength(1);
+  });
+
+  it('billed outside CRX: a sales rep gets the plain empty text, not the stored reason', async () => {
+    setRole('sales_rep');
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph(REP_EMPTY_TEXT));
+    expect(screen.queryByText(/Billed outside CRX/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Billed in the old system/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
+  });
+
   it('with no invoice, an admin sees the empty text and Create invoice… opens the existing confirm', async () => {
     useCompletedDeliveryOnOrder([]);
     await renderPage();
     await screen.findByText(emptyText);
     fireEvent.click(screen.getByRole('button', { name: 'Create invoice…' }));
-    expect(await screen.findByText('Create a draft invoice for completed delivery DEL-1?')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Create an invoice for this delivery?' });
+    expect(within(dialog).getByText('This makes a draft invoice for completed delivery DEL-1.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
   });
 
   it('with no invoice, a sales rep is told none he can see, without the button', async () => {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem,
+  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem, releaseFreezeProblem,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -123,6 +123,18 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
 check("agents never approve a pull request (#1838 HIGH 2)", () => {
   for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE"]) assert.ok(prApprovalProblem(t), t);
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
+});
+
+check("staging merges wait while the release is being applied (#1838 MED 2)", () => {
+  const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
+  const list = /pulls\?base=main&state=open/;
+  const comments = /issues\/77\/comments/;
+  assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[]"]]) }), null, "no release PR open");
+  assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "Staging proof: x\nlooks good"]]) }), null, "release open, nothing applied yet");
+  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "note\nApplied live: 20270110100000_x"]]) }), /#77.*being applied live/);
+  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, new Error("HTTP 502")]]) }), /fail closed/);
+  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, new Error("HTTP 502")]]) }), /fail closed/);
+  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "{}"]]) }), /unexpected/);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

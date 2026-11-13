@@ -635,7 +635,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.

@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -715,6 +715,8 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   if (base === "staging") {
     const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, headSha: pullRequest.headRefOid, repo: request.repo, gh: (args) => runGh(args, repoDir) });
     if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
+    const frozen = releaseFreezeProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
   }
   // Main's PR #560 migrated this gate from "no approval" to "an active
   // objection", matching the Claude side. Taking main's predicate: the denial

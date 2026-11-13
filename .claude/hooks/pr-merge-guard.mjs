@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { agentMergeProblem, prApprovalProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -522,6 +522,8 @@ function gateRequest(request) {
   if (base === "staging") {
     const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
+    const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
+    if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
   }
 
   // ── no merging over an unresolved objection ────────────────────────────────

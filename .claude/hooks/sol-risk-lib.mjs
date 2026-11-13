@@ -194,6 +194,34 @@ export function prApprovalProblem(text) {
     : null;
 }
 
+// #1838 MED 2 (Mason's agents): once a release migration is applied live ("Applied live:" on the open release PR),
+// a staging merge moves release/next under the remaining applies, so staging merges wait until the release merges.
+// null when no release is being applied; otherwise why the merge waits. Never throws; an unreadable answer refuses.
+export function releaseFreezeProblem({ repo, gh }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
+  let numbers;
+  try {
+    numbers = JSON.parse(String(gh(["api", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '[.[] | select(.head.ref == "release/next") | .number]'])));
+  } catch (error) {
+    return `the open release PR could not be read (${show(error)}), so a release being applied can't be ruled out (fail closed)`;
+  }
+  if (!Array.isArray(numbers)) return "GitHub's list of open PRs into main was unexpected (fail closed)";
+  for (const n of numbers) {
+    let bodies;
+    try {
+      bodies = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[].body"]));
+    } catch (error) {
+      return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
+    }
+    if (/^\s*Applied live:/m.test(bodies)) {
+      return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
+    }
+  }
+  return null;
+}
+
 // null when an agent may merge this PR (its other gates still apply).
 export function agentMergeProblem(base, headRef) {
   if (base === "main") {

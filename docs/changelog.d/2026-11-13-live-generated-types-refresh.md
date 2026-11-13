@@ -24,3 +24,8 @@ Additional raw RPC nullability is retained where the checked-in SQL proves it:
 The live registry intentionally describes production metadata. Staging-only M4 CHECK values and orders.sales_tax remain explicit, source-verified overlays in the TypeScript schema/test fixtures until M4 is applied live. The M4 migration files expand the invoice_items CHECKs before writing their computed lines; the app passes those lines through save_invoice, and no TypeScript direct table write sends either M4 charge_type. The status-enum hook also skips a table whose migration alters its CHECK constraint. The registry remains a live production inventory, not a staging migration target.
 
 The refresh also removed old applied migrations from the awaiting-type set, emptied the no-longer-needed migration-only idempotency bucket, pruned 23 exemptions that the refreshed mutator inventory no longer uses, and advanced the live function fixture. The five newly visible private helpers remain narrowly exempted with current catalog ACL evidence.
+# Final local verification and delivery hold
+
+The final frozen code at `f5327f19` passed 600 test files and 8,243 tests, with 123 skips. The semantic type-drift and compliance rechecks are clean; focused report coverage, typecheck, lint, build, code-health and documentation checks passed. The commit-scoped Luna review of the nullable-contract correction was clean, following the prior full-branch review and documented live-registry refutation.
+
+This unit remains unpublished. `Reports.tsx` is a Sol-required path; no Sol proof is claimed. The inherited billing rollout blocker recorded in #1868 must be resolved before final protected delivery. No PR merge, database apply or production deployment occurred.

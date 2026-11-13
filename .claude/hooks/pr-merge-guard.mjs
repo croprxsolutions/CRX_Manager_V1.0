@@ -66,7 +66,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
@@ -491,7 +491,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -507,9 +507,12 @@ function gateRequest(request) {
   }
   // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
   if (!GATED_MERGE_BASES.includes(base)) return;
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
+  const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
+  if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const migration = stagingMigrationOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
-    if (migration) deny(`PR MERGE GATE: this merge into staging is refused: ${migration}.`);
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
+    if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
   }
 
   // ── no merging over an unresolved objection ────────────────────────────────
@@ -678,7 +681,7 @@ function gateRequest(request) {
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
-    `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
+    `  2. \`git fetch origin\` and merge the PR's base into the branch if the head does not contain it (origin/staging for a PR into staging, never main; GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
     `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of origin/main...HEAD and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +

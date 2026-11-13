@@ -617,17 +617,21 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
-  // staging gets every main gate, and refuses a migration (Mason on #1363, 2026-11-04).
+  ok(/import \{ agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
+  // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
+  // or the back-merge, and a migration may go into staging.
   ok(/if \(!GATED_MERGE_BASES\.includes\(base\)\) return;/.test(gateRequestSource), "only main and staging merges are gated, from the shared list");
-  ok(/if \(base === "staging"\) \{\s*const migration = stagingMigrationOnGitHub\(\{ baseSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(migration\) deny\(/.test(gateRequestSource),
-    "a merge into staging is refused when GitHub's comparison carries a migration, spending the hard-gate budget");
-  ok(gateRequestSource.indexOf("stagingMigrationOnGitHub(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
-    "the staging migration refusal runs before any allow point");
+  ok(/const notAgents = agentMergeProblem\(base, String\(pr\.headRefName \|\| ""\)\);\s*if \(notAgents\) deny\(/.test(gateRequestSource),
+    "a merge into main, or of the back-merge, is refused for every agent");
+  ok(/headRefName,headRefOid/.test(gateRequestSource), "the guard reads the PR's head branch name to spot the back-merge");
+  ok(gateRequestSource.indexOf("agentMergeProblem(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
+    "the main and back-merge refusal runs before any allow point");
+  ok(!/stagingMigration/.test(guardSource), "no migration refusal for staging is left");
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
   // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
   // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
-  ok(/"baseRefName,baseRefOid,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
+  ok(/"baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
   ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
     "a PR without a usable Follow-ups section is denied");
   ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),

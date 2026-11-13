@@ -8,6 +8,7 @@ import IngredientReviewModal from './IngredientReviewModal';
 import ChemistryEntryModal from './ChemistryEntryModal';
 import ChemistryCorrectionModal from './ChemistryCorrectionModal';
 import ChemistryActiveCosts from './ChemistryActiveCosts';
+import EpaLookupPanel from './EpaLookupPanel';
 import { ChemistryLists, PendingSavesNotice } from './ChemistryParts';
 import { errorOf, type ReplacePrefill, type SaveOutcome } from './chemistryFormHelpers';
 import type { ParentChemistry } from '../../types';
@@ -63,7 +64,7 @@ function ChemistryForms({ form, chem, profileId, onClose, onFinished, onReviewCl
 
 /**
  * DM-1: a parent's ingredients, modes of action and fertilizer analysis, shared by every size. Everyone signed in
- * reads it; admins enter, correct, review the ingredient list and see cost per lb of active (admin only).
+ * reads it; admins enter, correct, review the ingredient list, see cost per lb of active and run EPA lookups (DM-4).
  */
 export default function ProductChemistrySection({ parentId, parentVersion, refreshKey, isAdmin, profileId, busy }: {
   parentId: string; parentVersion: number; isAdmin: boolean; profileId: string;
@@ -78,6 +79,7 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
   const [pendingTick, setPendingTick] = useState(0);
   const [waiting, setWaiting] = useState<number | null>(null);
   const tokens = useRef(0);
+  const gateSeq = useRef(0);
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   const forKey = JSON.stringify([parentId, parentVersion, refreshKey, attempt]);
   const state = loaded?.forKey === forKey ? loaded : null;
@@ -108,6 +110,17 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
     if (outcome !== 'refused') { setForm(null); reload(); }
   };
   const chem = state?.status === 'loaded' ? state.chem : null;
+  // A recorded EPA lookup can change whether chemistry may be typed. Re-read in place: a full reload would unmount
+  // the lookup panel and stop a Look up all that is still running.
+  const refreshGate = () => {
+    const at = forKey;
+    const seq = ++gateSeq.current;
+    fetchParentChemistry(parentId).then((next) => {
+      // Only the newest re-read lands: an older, slower reply never restores a stale gate.
+      if (seq !== gateSeq.current) return;
+      setLoaded((prev) => (prev?.forKey === at ? { forKey: at, status: 'loaded', chem: next } : prev));
+    }).catch((error: unknown) => { Sentry.captureException(errorOf(error), { extra: { context: 'get_parent_chemistry refresh' } }); });
+  };
 
   return (
     <Card data-testid="product-chemistry">
@@ -120,6 +133,10 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
         {chem && (
           <ChemistryBody chem={chem} isAdmin={isAdmin} busy={busy} profileId={profileId} reloadKey={forKey} pending={pending}
             onPendingSettled={(outcome) => finished(outcome === 'uncertain' ? 'uncertain' : 'saved')} onCostSettled={() => setPendingTick((n) => n + 1)} />
+        )}
+        {chem && isAdmin && (
+          <EpaLookupPanel key={parentId} parentId={parentId} profileId={profileId} reloadKey={forKey} epaRefusal={chem.epa_refusal}
+            locked={busy || pending.length > 0} onCommitted={reload} onLookupRecorded={refreshGate} />
         )}
       </div>
       {form && <ChemistryForms form={form} chem={chem} profileId={profileId} onClose={() => setForm(null)} onFinished={finished} onReviewClosed={() => { setForm(null); reload(); }} open={open} />}

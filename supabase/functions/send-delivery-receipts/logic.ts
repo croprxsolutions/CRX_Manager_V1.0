@@ -3,6 +3,7 @@
 // Every attempt for one receipt sends the identical request under the provider key delivery-receipt/<queue id>,
 // so a retry after a lost answer is answered by Resend (its 24-hour duplicate guard) instead of emailing twice.
 import { buildDeliveryReceiptHtml } from "../_shared/deliveryReceiptHtml.ts";
+import type { ReceiptBrandInfo } from "../_shared/brandNotes.ts";
 
 export interface FrozenReceipt {
   delivery_number: string;
@@ -10,7 +11,8 @@ export interface FrozenReceipt {
   signed_by: string | null;
   contact_name: string | null;
   is_partial: boolean;
-  lines: { name: string; qty: number }[];
+  // Brand keys (Brand PR B-3, 20270109100000) are absent on a receipt queued before it, which prints as before.
+  lines: ({ name: string; qty: number } & ReceiptBrandInfo)[];
 }
 
 export interface ReceiptClaim {

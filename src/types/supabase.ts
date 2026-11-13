@@ -13513,6 +13513,7 @@ export type Database = {
       }
       complete_delivery: {
         Args: {
+          p_brand_base_seq?: number
           p_completed_at?: string
           p_delivery_id: string
           p_email_receipt?: boolean

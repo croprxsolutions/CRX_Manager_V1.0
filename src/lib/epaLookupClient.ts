@@ -93,3 +93,35 @@ export async function lookupEpaRegistration(
   }
   return data;
 }
+
+/** What `record_epa_lookup` saved for one lookup (DM-4). */
+export interface EpaRecordOutcome {
+  lookup_id: string;
+  outcome: 'proposal' | 'failure';
+  proposal_id?: string;
+  failure_id?: string;
+  reason?: string;
+}
+
+/**
+ * DM-4: runs a lookup that `start_epa_lookup` began. Only the lookup ID is sent: the Edge Function asks EPA about the
+ * number stored on the lookup and records the answer itself, so the browser never supplies EPA's answer (D-Z).
+ * Returns null if `shouldCancel` cancelled the wait; throws an Error with a user-facing message.
+ */
+export async function runRecordedEpaLookup(
+  lookupId: string,
+  shouldCancel: () => boolean = () => false,
+): Promise<EpaRecordOutcome | null> {
+  const slotReady = await waitForEpaRequestSlot(shouldCancel);
+  if (!slotReady) return null;
+  const { data, error } = await supabase.functions.invoke<{ record?: unknown; error?: unknown }>('epa-lookup', {
+    body: { lookupId },
+  });
+  if (error) throw new Error(await epaFunctionErrorMessage(error));
+  if (data && typeof data.error === 'string') throw new Error(data.error);
+  const record = data?.record as Partial<EpaRecordOutcome> | undefined;
+  if (!record || record.lookup_id !== lookupId || (record.outcome !== 'proposal' && record.outcome !== 'failure')) {
+    throw new Error('EPA lookup returned an invalid response. Reload to see whether it was saved.');
+  }
+  return record as EpaRecordOutcome;
+}

@@ -9,7 +9,8 @@
  * backfill, grants, the invoice line's brand snapshot and number, the re-copy after an admin correction, per-brand
  * restricted-use records under each brand's number with exact cents, the frozen posted line, each brand problem
  * (no record, listed), two payers' exact shares, the mixed-record guard, unbranded lines unchanged, and typed-brand
- * review leaving out voided and cancelled deliveries.
+ * review leaving out voided and cancelled deliveries. Then applies the B-3 follow-up 20270109100000 and proves #1833
+ * (a numberless product no longer keeps a reviewed brand listed) and the receipt snapshot's brands (cases 27, 28).
  *
  * Run: node scripts/smoke/prove-invoice-brands-real-schema.mjs   (needs Docker)
  * Prints INVOICE_BRANDS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container (with a bb_snap
@@ -31,7 +32,8 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270106110000_invoice_brands_rup.sql');
-const FOLLOW_UPS = [];
+// B-3 (20270109100000): applied by cases 27 and 28 after every B-1b case.
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270109100000_delivery_receipt_brands.sql')];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([
@@ -880,6 +882,89 @@ async function main() {
   assert.ok(reasons(L31).includes('Bravo:not_reviewed'), `listed not reviewed: ${reasons(L31)}`);
   raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
   console.log('[prover] case 26: a brand on a size whose own number is not reviewed is listed not reviewed');
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // B-3 follow-up 20270109100000 (#1833 and the receipt snapshot's brands), applied on top of the cases above.
+  // ---------------------------------------------------------------------------------------------------------------
+  // 27 (#1833). The product has no EPA number; a typed brand's number had no registration when it was captured
+  //     (unknown), and is reviewed No afterwards. Before the follow-up it stays listed not reviewed; after, it clears.
+  raw(`UPDATE public.products SET epa_registration = NULL WHERE id = '${PR}';`);
+  mkDelivery(40, [[PR, 2]]);
+  set(D(40), [{ delivery_item_id: DI(40, 0), picks: [typed('Foxtrot', 2, '100-9')] }], 'b1b-k40');
+  complete(D(40), { [DI(40, 0)]: 2 }, 'b1b-c40');
+  const L40 = invLine(40);
+  postAndGen(invOf(L40), 'b1b-g40');
+  raw(`INSERT INTO public.epa_registrations (epa_registration, rup_status, signal_word, created_by, updated_by)
+       VALUES ('100-9', 'no', 'Caution', '${ADMIN}', '${ADMIN}');`);
+  assert.ok(reasons(L40).includes('Foxtrot:not_reviewed'), `before the follow-up the brand stays listed: ${reasons(L40)}`);
+
+  // Receipt snapshot before the follow-up: no brand keys. A no-proof completion queues no receipt, so the prover
+  // completes (with or without a brand seq) and then queues the receipt as the completion would, as the owner.
+  const receipt = (d, key, seq = 'NULL') => {
+    ok(ADMIN, `SELECT public.complete_delivery(p_delivery_id => '${d}',
+      p_signed_by => '${NO_PROOF}', p_performed_by => '${ADMIN}', p_quantities => NULL, p_idempotency_key => ${q(key)},
+      p_evidence => 'no_proof', p_evidence_ref => '[PROVER] no proof on the stop', p_email_receipt => false,
+      p_brand_base_seq => ${seq})::text;`);
+    psql(`SELECT public._enqueue_delivery_receipt('${d}', '${ADMIN}');`);
+  };
+  const receiptLines = (d) => JSON.parse(scalar(`SELECT (receipt -> 'lines')::text FROM public.delivery_receipt_queue WHERE delivery_id = '${d}';`));
+  mkDelivery(41, [[PR, 2]]);
+  set(D(41), [{ delivery_item_id: DI(41, 0), picks: [pick(ALPHA, 2)] }], 'b1b-k41');
+  receipt(D(41), 'b1b-c41');
+  assert.deepEqual(receiptLines(D(41)), [{ name: '[PROVER] Grouped 2.5', qty: 2 }], 'before the follow-up: lines as today');
+
+  const FOLLOW_UP = path.join(MIGRATIONS, '20270109100000_delivery_receipt_brands.sql');
+  stageText('follow-up.sql', lf(FOLLOW_UP));
+  r = docker([...psqlArgs(), '-f', '/tmp/follow-up.sql'], { allowFailure: true });
+  assert.match(`${r.stdout}\n${r.stderr}`, /DELIVERY_RECEIPT_BRANDS_NOT_IN_TRANSACTION/);
+  r = apply('follow-up.sql'); assert.equal(r.status, 0, r.output);
+  r = apply('follow-up.sql'); assert.notEqual(r.status, 0); assert.match(r.output, /DELIVERY_RECEIPT_BRANDS_PREFLIGHT: this file was already applied/);
+  for (const sig of ['public._enqueue_delivery_receipt(uuid,uuid)', 'public.get_epa_sales_to_check()']) {
+    const row = scalar(`SELECT pg_get_userbyid(p.proowner) || '|' || has_function_privilege('authenticated', p.oid, 'EXECUTE') || '|'
+      || has_function_privilege('anon', p.oid, 'EXECUTE') || '|' || has_function_privilege('service_role', p.oid, 'EXECUTE') || '|'
+      || (p.prosecdef AND p.proconfig @> ARRAY['search_path=public, pg_temp']) FROM pg_proc p WHERE p.oid = '${sig}'::regprocedure;`);
+    assert.equal(row, sig.includes('get_epa') ? 'postgres|true|false|false|true' :'postgres|false|false|false|true', sig);
+  }
+  assert.deepEqual(reasons(L40), [], `#1833: a numberless product no longer keeps a reviewed brand listed: ${reasons(L40)}`);
+  raw(`UPDATE public.products SET epa_registration = '999-9' WHERE id = '${PR}';`);
+  assert.ok(reasons(L31).includes('Bravo:not_reviewed'), `a numbered product not reviewed still lists its brand (case 26 kept): ${reasons(L31)}`);
+  raw(`UPDATE public.products SET epa_registration = '500-1' WHERE id = '${PR}';`);
+  console.log('[prover] case 27 (#1833): outside a transaction the follow-up refuses; it applies once and a second run refuses; grants and owners unchanged; a brand reviewed No under a product with no EPA number leaves Sales to check, and a numbered product not reviewed still lists its brand');
+
+  // 28. The receipt snapshot's brands: matching picks with amounts; a split that does not add up names the brands
+  //     without amounts; a branded line with no pick says not recorded; an unbranded line is unchanged.
+  mkDelivery(42, [[PR, 5], [PR, 4], [PR, 2], [PX, 3]]);
+  set(D(42), [{ delivery_item_id: DI(42, 0), picks: [pick(BRAVO, 3), pick(ALPHA, 2)] },
+    { delivery_item_id: DI(42, 1), picks: [pick(ALPHA, 1), typed('Golf <b>&', 2)] }], 'b1b-k42');
+  receipt(D(42), 'b1b-c42', maxSeq(D(42)));
+  const name = '[PROVER] Grouped 2.5';
+  const lines42 = receiptLines(D(42));
+  const byQty = Object.fromEntries(lines42.map((l) => [l.qty, l]));
+  assert.equal(lines42.length, 4);
+  assert.deepEqual(byQty[5], { name, qty: 5, brands: [
+    { name: 'Alpha', epa_registration: '100-1', quantity: 2 }, { name: 'Bravo', epa_registration: '100-2', quantity: 3 }] });
+  assert.deepEqual(byQty[4], { name, qty: 4, brand_picked_quantity: 3, brands: [
+    { name: 'Alpha', epa_registration: '100-1' }, { name: 'Golf <b>&', epa_registration: null }] });
+  assert.deepEqual(byQty[2], { name, qty: 2, brand_recorded: false });
+  assert.deepEqual(byQty[3], { name: '[PROVER] Restricted, no brands', qty: 3 });
+  // A completion from an out-of-date screen (picks_confirmed false) never sends a brand to the customer.
+  mkDelivery(43, [[PR, 2], [PR, 1]]);
+  set(D(43), [{ delivery_item_id: DI(43, 0), picks: [pick(ALPHA, 2)] }], 'b1b-k43');
+  receipt(D(43), 'b1b-c43', 0);
+  assert.deepEqual(receiptLines(D(43)), [{ name, qty: 2 }, { name, qty: 1 }], 'unconfirmed: lines as today');
+  // A delivery completed with nothing confirmed (no seq, the deployed app before B-2) still prints its brands.
+  mkDelivery(44, [[PR, 2]]);
+  set(D(44), [{ delivery_item_id: DI(44, 0), picks: [pick(ALPHA, 2)] }], 'b1b-k44');
+  receipt(D(44), 'b1b-c44');
+  assert.deepEqual(receiptLines(D(44)), [{ name, qty: 2, brands: [{ name: 'Alpha', epa_registration: '100-1', quantity: 2 }] }]);
+  // A delivery completed before B-1a (no 'completed' event) re-queued: lines as today.
+  mkDelivery(45, [[PR, 2]]);
+  receipt(D(45), 'b1b-c45');
+  raw(`SET session_replication_role = replica; DELETE FROM public.delivery_brand_events WHERE delivery_id = '${D(45)}';
+       DELETE FROM public.delivery_receipt_queue WHERE delivery_id = '${D(45)}'; SET session_replication_role = origin;`);
+  psql(`SELECT public._enqueue_delivery_receipt('${D(45)}', '${ADMIN}');`);
+  assert.deepEqual(receiptLines(D(45)), [{ name, qty: 2 }], 'no completed event: lines as today');
+  console.log('[prover] case 28: the receipt snapshot carries matching brands with amounts, a split that does not add up without amounts, not recorded for a branded line with no pick, nothing for an unbranded line, nothing for a completion from an out-of-date screen or one completed before brand capture');
 
   console.log('INVOICE_BRANDS_PROOF_PASS');
 }

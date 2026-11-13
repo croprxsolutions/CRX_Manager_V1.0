@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, FileText, Check, Send, Ban, Printer, Mail, Zap, Trash2, Download, PanelRightOpen, ChevronRight } from 'lucide-react';
+import { Plus, Check, Send, Ban, Printer, Mail, Zap, Trash2, PanelRightOpen, Users, X } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
 import DataTable, { type Column } from '../components/ui/DataTable';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -91,14 +92,13 @@ const statusBadge = (status: InvoiceStatus) => {
   return <Badge variant={s.variant}>{s.label}</Badge>;
 };
 
-const typeBadge = (t: string) => {
-  const map: Record<string, string> = {
-    chemical_sale: 'Chemical',
-    field_application: 'Application',
-    misc_charge: 'Misc',
-  };
-  return <Badge variant="info">{map[t] || t}</Badge>;
-};
+const typeLabel = (t: string) => ({ chemical_sale: 'Chemical', field_application: 'Application', misc_charge: 'Misc' }[t] || t);
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Any selected split-group member posts its whole group (buildInvoicePostTargets), so the confirm says so.
+const SPLIT_POST_NOTE =
+  'These include a split sale, so every invoice in that split posts together. If one changed since you opened this list, none of its split posts and you will be told.';
 
 
 type InvoiceShareRow = { customer?: { farm_name: string }; split_percentage: number; acres: number; amount_cents: number; price_per_acre_cents: number | null; pricing_note: string | null };
@@ -347,8 +347,8 @@ export default function Invoices() {
   // filters and the search box — AND showing a checkbox. A ticked row that a filter
   // hides, that is no longer loaded (deleted elsewhere, or past the row cap), or whose
   // status lost its checkbox is never posted, voided, printed, deleted or counted.
-  const visibleSelectable = applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, null, 'asc')
-    .filter((i) => SELECTABLE_STATUSES.includes(i.status));
+  const visibleRows = applyTableSearchSort(filtered, SEARCH_KEYS, tableSearch, null, 'asc');
+  const visibleSelectable = visibleRows.filter((i) => SELECTABLE_STATUSES.includes(i.status));
   const selectedInvoices = visibleSelectable.filter((i) => selected.has(i.id));
 
   // Drop ticked rows as soon as they leave the screen (a filter or search hides them,
@@ -369,7 +369,8 @@ export default function Invoices() {
   }, [visibleSelectableKey, selected]);
 
   const selectedPostable = selectedInvoices.filter((i) => ['draft', 'unposted'].includes(i.status));
-  const basePostConfirmation = describeInvoicePostScope(selectedPostable);
+  const scope = describeInvoicePostScope(selectedPostable);
+  const basePostConfirmation = selectedPostable.some((i) => i.invoice_group_id) ? { ...scope, message: SPLIT_POST_NOTE } : scope;
   // The list shows open invoices from every season, and the server does not check the
   // season when posting, so the confirm names any selected invoice not from this season.
   const selectedOtherSeasonPostable = selectedPostable.filter((i) => !isCurrentSeason(i.season));
@@ -780,9 +781,17 @@ export default function Invoices() {
     />
   );
 
-  // Phone layout of one invoice: the same values and formatting as the table's columns.
+  const splitMark = (row: InvoiceRow) =>
+    row.invoice_group_id ? (
+      <span className="flex items-center gap-1 text-xs text-secondary">
+        <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        Split invoice
+      </span>
+    ) : null;
+
+  // Phone layout of one invoice (InvoicesPhone boards): the same values and formatting as the table's columns.
   const invoiceMobileRow = (row: InvoiceRow) => (
-    <div className="flex items-center gap-1 px-4 py-2">
+    <div className={`flex items-start gap-1 px-4 py-2 ${selected.has(row.id) ? 'bg-crx-green-tint' : ''}`}>
       {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
       {SELECTABLE_STATUSES.includes(row.status)
         ? <label className="-ml-3 flex h-11 w-11 shrink-0 items-center justify-center">{selectBox(row)}</label>
@@ -790,36 +799,34 @@ export default function Invoices() {
       <button
         type="button"
         onClick={() => navigate(`/invoices/${row.id}`)}
-        className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left"
+        className="flex min-h-11 min-w-0 flex-1 items-start gap-3 py-1.5 text-left"
       >
         <span className="min-w-0 flex-1 space-y-0.5">
-          <span className="flex items-baseline justify-between gap-2">
-            <span className="flex items-center gap-1.5 text-sm text-secondary">
-              <span>{row.invoice_number}</span>
-              {row.is_quick_delivery && <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="Quick Delivery" />}
-            </span>
-            <span className="shrink-0 font-heading text-lg font-bold text-nav-dark">{fmt(row.total_amount_cents)}</span>
+          <span className="block break-words font-semibold leading-snug text-nav-dark">{row.customer_name}</span>
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-secondary">
+            <span>{row.invoice_number}</span>
+            {row.is_quick_delivery && <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-label="Quick Delivery" />}
+            <span aria-hidden="true">·</span>
+            <span>{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
+            <SeasonTag season={row.season} />
           </span>
-          <span className="line-clamp-2 break-words font-heading text-lg font-bold leading-snug text-nav-dark">{row.customer_name}</span>
-          <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-secondary">
-            <span className="flex flex-wrap items-center gap-1.5">
-              <span>{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
-              <SeasonTag season={row.season} />
-            </span>
+          {splitMark(row)}
+          <span className="flex flex-wrap items-center gap-x-2 text-xs text-secondary">
+            <span>{typeLabel(row.invoice_type)}</span>
             <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
               Balance {fmt(row.balance_cents)}
             </span>
           </span>
-          <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
-            {statusBadge(row.status)}
-            {typeBadge(row.invoice_type)}
-          </span>
         </span>
-        <ChevronRight className="w-5 h-5 shrink-0 text-gray-400" aria-hidden="true" />
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <span className="font-semibold tabular-nums text-nav-dark">{fmt(row.total_amount_cents)}</span>
+          {statusBadge(row.status)}
+        </span>
       </button>
     </div>
   );
 
+  const xlOnly = 'hidden xl:table-cell';
   const columns: Column<InvoiceRow>[] = [
     {
       key: 'id',
@@ -829,39 +836,27 @@ export default function Invoices() {
     },
     {
       key: 'invoice_number',
-      header: 'Invoice #',
+      header: 'Invoice',
       sortable: true,
       render: (row) => (
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-crx-green shrink-0" />
-          <span className="whitespace-nowrap font-medium text-nav-dark">{row.invoice_number}</span>
-          {row.is_quick_delivery && (
-            <span title="Quick Delivery"><Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" /></span>
-          )}
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <span className="whitespace-nowrap font-medium text-crx-green">{row.invoice_number}</span>
+            {row.is_quick_delivery && (
+              <span title="Quick Delivery"><Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" /></span>
+            )}
+          </div>
+          {/* Below xl the Bill to column is hidden, so the customer shows here. */}
+          <div className="text-nav-dark xl:hidden">{row.customer_name}</div>
+          {splitMark(row)}
         </div>
       ),
     },
     {
-      key: 'order_number',
-      header: 'Order #',
-      sortable: true,
-      render: (row) =>
-        row.order_number && row.order_id ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); navigate(`/orders/${row.order_id}`); }}
-            className="whitespace-nowrap text-crx-green hover:underline font-medium"
-            title="Open the source order"
-          >
-            {row.order_number}
-          </button>
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
-    },
-    {
       key: 'customer_name',
-      header: 'Customer',
+      header: 'Bill to',
       sortable: true,
+      className: xlOnly,
       render: (row) => (
         <div className="flex items-center gap-1.5">
           <button
@@ -869,7 +864,7 @@ export default function Invoices() {
               e.stopPropagation();
               navigate(`/customers/${row.customer_id}`);
             }}
-            className="text-crx-green hover:underline"
+            className="font-medium text-nav-dark hover:text-crx-green hover:underline"
           >
             {row.customer_name}
           </button>
@@ -887,10 +882,29 @@ export default function Invoices() {
       ),
     },
     {
+      key: 'order_number',
+      header: 'Sale',
+      sortable: true,
+      className: xlOnly,
+      render: (row) =>
+        row.order_number && row.order_id ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); navigate(`/orders/${row.order_id}`); }}
+            className="whitespace-nowrap text-crx-green hover:underline font-medium"
+            title="Open the source order"
+          >
+            {row.order_number}
+          </button>
+        ) : (
+          <span className="text-gray-400">—</span>
+        ),
+    },
+    {
       key: 'invoice_type',
       header: 'Type',
       sortable: true,
-      render: (row) => typeBadge(row.invoice_type),
+      className: xlOnly,
+      render: (row) => typeLabel(row.invoice_type),
     },
     {
       key: 'invoice_date',
@@ -898,7 +912,7 @@ export default function Invoices() {
       sortable: true,
       render: (row) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span>{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
+          <span className="whitespace-nowrap">{new Date(row.invoice_date + 'T00:00:00').toLocaleDateString()}</span>
           <SeasonTag season={row.season} />
         </div>
       ),
@@ -907,14 +921,14 @@ export default function Invoices() {
       key: 'total_amount_cents',
       header: 'Total',
       sortable: true,
-      render: (row) => <span className="font-medium">{fmt(row.total_amount_cents)}</span>,
+      render: (row) => <span className="whitespace-nowrap font-medium tabular-nums">{fmt(row.total_amount_cents)}</span>,
     },
     {
       key: 'balance_cents',
       header: 'Balance',
       sortable: true,
       render: (row) => (
-        <span className={row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}>
+        <span className={`whitespace-nowrap tabular-nums ${row.balance_cents > 0 ? 'text-red-600 font-semibold' : 'text-crx-green'}`}>
           {fmt(row.balance_cents)}
         </span>
       ),
@@ -927,7 +941,8 @@ export default function Invoices() {
     },
     {
       key: 'salesman_name',
-      header: 'Salesman',
+      header: 'Salesperson',
+      className: xlOnly,
       render: (row) => row.salesman_name || '-',
     },
   ];
@@ -951,68 +966,80 @@ export default function Invoices() {
     );
   }
 
+  const readyOn = statusFilter === 'ready_to_post';
+  const selectedCount = selectedInvoices.length;
+  // Email, Void and Delete stay admin only, each counted as before; Post and Print stay admin or sales rep.
+  const moreItems: ActionMenuItem[] = [];
+  if (isAdmin && selectedEmailable.length > 0) {
+    moreItems.push({ id: 'email', label: `Email ${selectedEmailable.length}…`, icon: <Mail className="h-4 w-4" />, onAction: () => setShowEmailModal(true), disabled: emailing });
+  }
+  if (isAdmin && selectedVoidable.length > 0) {
+    moreItems.push({ id: 'void', label: `Void ${selectedVoidable.length}…`, icon: <Ban className="h-4 w-4" />, onAction: () => setShowVoidModal(true), danger: true });
+  }
+  if (isAdmin && selectedDeletable.length > 0) {
+    moreItems.push({ id: 'delete', label: `Delete ${selectedDeletable.length}…`, icon: <Trash2 className="h-4 w-4" />, onAction: () => setShowDeleteModal(true), danger: true });
+  }
+  const pill = (on: boolean) =>
+    `inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+      on ? 'border-crx-green/40 bg-crx-green-tint text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:border-gray-400'
+    }`;
+
+  // One selection bar (the Quotes list's dark bar). Below md it sits above the bottom nav: Post first, then Print and More.
+  const selectionBar = selectedCount > 0 && (
+    <div
+      role="toolbar"
+      aria-label={`${plural(selectedCount, 'invoice')} selected`}
+      className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-nav-dark px-3 py-2.5 text-white max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(3.5rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:mb-0 max-md:rounded-none max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:p-3 max-md:text-nav-dark max-md:shadow-lg"
+    >
+      <strong className="mr-auto font-semibold">{selectedCount} selected</strong>
+      <button
+        type="button"
+        aria-label="Clear selection"
+        onClick={() => setSelected(new Set())}
+        className="rounded-lg px-2 text-sm font-medium text-crx-green md:order-last md:p-1.5 md:text-white/80 md:hover:text-white"
+      >
+        <span className="md:hidden">Clear</span>
+        <X className="hidden h-5 w-5 md:block" aria-hidden="true" />
+      </button>
+      {canPostInvoices && (
+        <Button
+          variant="secondary"
+          className="max-md:order-2 max-md:min-h-11 max-md:flex-1 md:h-10"
+          icon={<Printer className="w-4 h-4" />}
+          onClick={() => setShowBatchPrintDialog(true)}
+          loading={printing}
+        >
+          Print {selectedCount}…
+        </Button>
+      )}
+      {moreItems.length > 0 && (
+        <div className="max-md:order-2 max-md:flex-1 [&>button]:w-full">
+          <ActionMenu label="More" items={moreItems} trigger={{ text: 'More', variant: 'secondary' }} />
+        </div>
+      )}
+      {canPostInvoices && selectedPostable.length > 0 && (
+        <Button
+          className="max-md:order-1 max-md:min-h-11 max-md:w-full md:h-10"
+          icon={<Send className="w-4 h-4" />}
+          onClick={() => setShowPostModal(true)}
+          loading={posting}
+        >
+          Post {plural(selectedPostable.length, 'invoice')}…
+        </Button>
+      )}
+    </div>
+  );
+
   return (
-    <div className="phone-touch space-y-4">
+    <div className={`phone-touch space-y-4 ${selectedCount > 0 ? 'max-md:pb-48' : ''}`}>
       <PageHeader
-        title="Customer"
-        accent="Invoices"
+        title="Invoices"
         large
         subtitle="Post, print and follow up on every bill sent to customers."
         actions={
           <div className="flex gap-2 flex-wrap justify-end">
-            {selectedInvoices.length > 0 && canPostInvoices && (
-              <>
-                {selectedPostable.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    icon={<Send className="w-4 h-4" />}
-                    onClick={() => setShowPostModal(true)}
-                    loading={posting}
-                  >
-                    Post {selectedPostable.length} Selected
-                  </Button>
-                )}
-                {isAdmin && selectedVoidable.length > 0 && (
-                  <Button
-                    variant="danger"
-                    icon={<Ban className="w-4 h-4" />}
-                    onClick={() => setShowVoidModal(true)}
-                  >
-                    Void {selectedVoidable.length} Selected
-                  </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  icon={<Printer className="w-4 h-4" />}
-                  onClick={() => setShowBatchPrintDialog(true)}
-                  loading={printing}
-                >
-                  Print {selectedInvoices.length} Selected
-                </Button>
-                {isAdmin && selectedEmailable.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    icon={<Mail className="w-4 h-4" />}
-                    onClick={() => setShowEmailModal(true)}
-                    loading={emailing}
-                  >
-                    Email {selectedEmailable.length} Selected
-                  </Button>
-                )}
-                {isAdmin && selectedDeletable.length > 0 && (
-                  <Button
-                    variant="danger"
-                    icon={<Trash2 className="w-4 h-4" />}
-                    onClick={() => setShowDeleteModal(true)}
-                  >
-                    Delete {selectedDeletable.length}
-                  </Button>
-                )}
-              </>
-            )}
             <Button
               variant="secondary"
-              size="sm"
               onClick={() =>
                 exportToCSV(
                   filtered as unknown as Record<string, unknown>[],
@@ -1033,61 +1060,50 @@ export default function Invoices() {
             </Button>
             <Button
               variant="secondary"
-              size="sm"
-              icon={<Download className="w-4 h-4" />}
+              icon={<Printer className="w-4 h-4" />}
               onClick={handleExportPDF}
               loading={exportingPdf}
+              title="Download the invoices in view as a PDF list"
             >
-              Download PDF
+              List PDF
             </Button>
             <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={() => navigate('/invoices/new?type=misc_charge')}>
-              Misc Charge
+              Misc charge
             </Button>
           </div>
         }
       />
 
-      {/* Summary: one compact card; on a phone each figure is a label-left row. */}
+      {/* Summary: Ready to post is a toggle for the Ready to post filter. */}
       <div className="space-y-2">
-        <Card padding={false} className="grid grid-cols-1 overflow-hidden divide-y divide-gray-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <Card padding={false} className="grid grid-cols-1 overflow-hidden divide-y divide-gray-100 tabular-nums sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <button
             type="button"
-            className={`w-full text-left transition-colors hover:bg-cream-dark/60 ${statusFilter === 'ready_to_post' ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : ''}`}
-            onClick={() => setStatusFilter('ready_to_post')}
+            aria-pressed={readyOn}
             aria-label="Show invoices ready to post"
+            onClick={() => setStatusFilter(readyOn ? '' : 'ready_to_post')}
+            className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors ${readyOn ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : 'hover:bg-cream-dark/60'}`}
           >
-            <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
-              <div className="flex shrink-0 items-center gap-2 sm:mb-1">
-                <FileText className="w-4 h-4 text-amber-600" aria-hidden="true" />
-                <span className="text-sm font-semibold text-nav-dark">Unposted</span>
-              </div>
-              <div className="text-right sm:text-left">
-                <p className="font-heading text-2xl font-bold leading-tight text-amber-600">{loadError ? '—' : unpostedCount}</p>
-                <p className="text-xs text-secondary">invoices awaiting review</p>
-              </div>
-            </div>
+            <span className="text-sm text-secondary">Ready to post</span>
+            <span className="font-heading text-2xl font-bold leading-tight text-nav-dark">{loadError ? '—' : unpostedCount}</span>
+            <span className="text-xs text-secondary">Draft and unposted. Tap to show them.</span>
+            {readyOn && (
+              <span className="flex items-center gap-1 text-xs font-semibold text-amber-800">
+                Showing these <Check className="h-3 w-3" aria-hidden="true" />
+              </span>
+            )}
           </button>
-          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
-            <div className="flex shrink-0 items-center gap-2 sm:mb-1">
-              <Check className="w-4 h-4 text-crx-green" aria-hidden="true" />
-              <span className="text-sm font-semibold text-nav-dark">Posted Total</span>
-            </div>
-            <div className="text-right sm:text-left">
-              <p className="font-heading text-2xl font-bold leading-tight text-crx-green">{loadError ? '—' : fmt(postedTotal)}</p>
-              <p className="text-xs text-secondary">
-                {loadError ? 'Could not be loaded' : `${postedLikeInvoices.length} posted invoices (including overdue)`}
-              </p>
-            </div>
+          <div className="flex flex-col gap-0.5 px-4 py-3">
+            <span className="text-sm text-secondary">Posted total</span>
+            <span className="font-heading text-2xl font-bold leading-tight text-nav-dark">{loadError ? '—' : fmt(postedTotal)}</span>
+            <span className="text-xs text-secondary">
+              {loadError ? 'Could not be loaded' : `${plural(postedLikeInvoices.length, 'posted invoice')}, overdue included`}
+            </span>
           </div>
-          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:block">
-            <div className="flex shrink-0 items-center gap-2 sm:mb-1">
-              <Ban className="w-4 h-4 text-red-600" aria-hidden="true" />
-              <span className="text-sm font-semibold text-nav-dark">Outstanding</span>
-            </div>
-            <div className="text-right sm:text-left">
-              <p className="font-heading text-2xl font-bold leading-tight text-red-600">{loadError ? '—' : fmt(outstandingBalance)}</p>
-              <p className="text-xs text-secondary">unpaid balance on posted and overdue invoices</p>
-            </div>
+          <div className="flex flex-col gap-0.5 px-4 py-3">
+            <span className="text-sm text-secondary">Outstanding</span>
+            <span className="font-heading text-2xl font-bold leading-tight text-nav-dark">{loadError ? '—' : fmt(outstandingBalance)}</span>
+            <span className="text-xs text-secondary">Unpaid on posted and overdue</span>
           </div>
         </Card>
         <p className="text-xs text-secondary">
@@ -1104,7 +1120,7 @@ export default function Invoices() {
             columns={columns}
             mobileRow={invoiceMobileRow}
             searchable
-            searchPlaceholder="Search invoices..."
+            searchPlaceholder="Search invoice, customer or salesperson"
             searchKeys={SEARCH_KEYS}
             searchValue={tableSearch}
             onSearchChange={setTableSearch}
@@ -1119,8 +1135,15 @@ export default function Invoices() {
             loading={loading}
             loadError={loadError}
             onRetry={() => { void fetchInvoices(); }}
+            belowFilters={selectionBar}
             filters={
               <div className="flex flex-wrap gap-2 items-center">
+                {readyOn && (
+                  <button type="button" aria-label="Remove filter: Ready to post" onClick={() => setStatusFilter('')} className={pill(true)}>
+                    Ready to post
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as InvoiceStatusFilter)}
@@ -1145,24 +1168,15 @@ export default function Invoices() {
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={() => setQuickDeliveryOnly((v) => !v)}
-                  className={`flex items-center gap-1 px-3 py-2 text-sm border rounded-lg transition-colors ${
-                    quickDeliveryOnly
-                      ? 'border-amber-400 bg-amber-50 text-amber-700'
-                      : 'border-gray-200 text-secondary hover:border-gray-300'
-                  }`}
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  Quick Deliveries
+                <button type="button" aria-pressed={quickDeliveryOnly} onClick={() => setQuickDeliveryOnly((v) => !v)} className={pill(quickDeliveryOnly)}>
+                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  Quick deliveries
                 </button>
                 <button
+                  type="button"
+                  aria-pressed={balanceOnly}
                   onClick={() => setBalanceOnly((v) => !v)}
-                  className={`flex items-center gap-1 px-3 py-2 text-sm border rounded-lg transition-colors ${
-                    balanceOnly
-                      ? 'border-crx-green/50 bg-crx-green-tint text-crx-green'
-                      : 'border-gray-200 text-secondary hover:border-gray-300'
-                  }`}
+                  className={pill(balanceOnly)}
                   title="Show only invoices with money still owed"
                 >
                   Has a balance
@@ -1172,7 +1186,7 @@ export default function Invoices() {
                     type="button"
                     onClick={toggleAll}
                     disabled={toggleAllDisabled}
-                    className="text-xs text-crx-green hover:underline ml-2 disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+                    className="text-sm font-medium text-crx-green hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
                     title={
                       toggleAllClears
                         ? 'Clears every selected invoice.'
@@ -1184,15 +1198,7 @@ export default function Invoices() {
                     {toggleAllClears ? 'Deselect All' : 'Select All'}
                   </button>
                 )}
-                {selectedInvoices.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelected(new Set())}
-                    className="text-xs text-secondary hover:underline ml-2"
-                  >
-                    Clear selection
-                  </button>
-                )}
+                {!loadError && <span className="text-sm text-secondary">{plural(visibleRows.length, 'invoice')}</span>}
               </div>
             }
           />
@@ -1212,7 +1218,7 @@ export default function Invoices() {
         open={showPostModal}
         onClose={() => setShowPostModal(false)}
         onConfirm={handleBatchPost}
-        title="Post Selected Invoices"
+        title={`Post ${plural(selectedPostable.length, 'invoice')}?`}
         message={postConfirmation.message}
         confirmLabel={postConfirmation.confirmLabel}
         variant="info"

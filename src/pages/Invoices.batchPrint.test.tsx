@@ -90,7 +90,7 @@ async function printSelected() {
   render(<MemoryRouter><Invoices /></MemoryRouter>);
   expect(await screen.findByText('CS-1001')).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole('checkbox')[0]);
-  fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
 }
 
@@ -128,7 +128,7 @@ describe('Invoices — Print Selected', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
-    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
     await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
     // Mason, 9 Nov (A): every payer's invoice shows every payer, so batch print ticks the table by default.
@@ -150,7 +150,7 @@ describe('Invoices — Print Selected', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
-    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
     await screen.findByRole('button', { name: 'Print with defaults' });
     expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
   });
@@ -166,7 +166,7 @@ describe('Invoices — Print Selected', () => {
       expect(await screen.findByText('CS-1001')).toBeInTheDocument();
       H.failing.set(table, mode);
       fireEvent.click(screen.getAllByRole('checkbox')[0]);
-      fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
       await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Could not load the invoice details')));
       expect(H.printed).not.toHaveBeenCalled();

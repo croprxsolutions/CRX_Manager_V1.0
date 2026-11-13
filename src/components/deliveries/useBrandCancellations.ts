@@ -89,7 +89,7 @@ export function useBrandCancellations(lines: DeliveryBrandLine[], drafts: DraftL
   const typed = useCancelledRegistrations(lines.flatMap((l) => (drafts[l.delivery_item_id] ?? [])
     .filter((d) => d.brandId === OTHER_BRAND)
     .map((d) => normalizeEpaRegistration(d.typedEpa))
-    .filter((n): n is string => n !== null && EPA_FORMAT.test(n))));
+    .filter((n): n is string => n !== null && EPA_FORMAT.test(n))), refresh);
   return {
     productNumbers: products.numbers,
     cancelled: useSticky(scope, new Map([...listed.cancelled, ...typed.cancelled])),

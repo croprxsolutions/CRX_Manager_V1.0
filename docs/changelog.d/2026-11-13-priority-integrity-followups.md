@@ -1,0 +1,13 @@
+## 2026-11-13 - Prepare purchase-order, delivery-brand, photo and rate-history corrections
+
+Candidate only; no live apply, merge or deployment. Covers focused follow-ups from #1804, #1846, #1698, #1722 and #1816. Completed-delivery corrections retain an unchanged typed brand's server-owned office review even when its quantity changes. Automatic rate-outcome clearance records System instead of the last editor. Rate reasons share deterministic boundary trimming and a native constraint. Closed purchase-order and delivery-photo protections are strengthened without changing their current app workflows.
+
+Mason chose no repeat office review for amount-only changes and accurate System attribution on 2026-11-13. Existing historical rows are not rewritten. The dependent brand-confirmation screen is a separate delivery unit. No permissions are added for app users.
+
+Observed in an owned network-disabled database rebuilt from the real schema: candidate install/rollback, actual closed-short PO creation/receipt/reversal and retry, brand review/correction/confirmation, unchanged historical review provenance and event IDs, denied caller/stale/changed-request cases, photo ownership/folder checks and the preserved no-auth limit, every supported blank-reason character through actual delete/reopen RPCs, the 500-character boundary, direct constraint refusal, valid/invalid existing-reason apply checks, and signed-in versus automatic rate-event attribution. The existing completion-evidence smoke test ended `SMOKE_PASS_ROLLBACK` with candidate installed; all changes rolled back. Full reviews and final delivery checks remain required.
+
+Remaining larger-issue work is named in the behavior contract. System attribution changes the stored audit event; there is no rate-draft-event history screen today.
+
+Read-only live-ledger recheck on 2026-11-13 (America/Chicago): latest rows are `20261113011216 / 20270109100000_delivery_receipt_brands`, `20261112230412 / 20270108100000_ingredient_modes_of_action`, and `20261112185506 / 20270107100000_epa_long_name_keeps_cas_match`. The Current State and Known Issues freshness lines are updated for that ledger read only; no other section or Edge Function version is re-certified.
+
+Fresh read-only invariant capture found five existing cost-review keys stale after the applied receipt-brand helper change. Re-read its explicit receipt fields and unchanged private grants, then re-keyed those exact existing signatures with the canonical tool and dated evidence; the full 32-predicate captured set now adjudicates PASS. No exemption or predicate is widened. The candidate's later dependency-key changes still require the normal post-apply inspection and re-key; the current entries describe current live functions only.

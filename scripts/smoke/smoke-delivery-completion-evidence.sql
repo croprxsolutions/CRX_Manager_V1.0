@@ -233,9 +233,14 @@ BEGIN
   -- Another delivery's row, even with its file stored in THIS delivery's folder, does not count
   -- (only the photo's own delivery id refuses this one).
   INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos', 'delivery-photos/' || v_del[2] || '/x3.jpg', v_driver::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
+  -- Build a legacy malformed row through the accepted no-auth setup; completion still runs as the driver.
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[3], 'delivery-photos/' || v_del[2] || '/x3.jpg', 'x', v_driver, 'Signed paper delivery ticket', 2)
   RETURNING id INTO v_photo;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_driver::text, true);
   BEGIN
     PERFORM public.complete_delivery(v_del[2], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_prefix || 'b-other-row', NULL, 'paper_ticket', v_photo::text);
     RAISE EXCEPTION 'SMOKE_FAIL: b. another delivery''s ticket photo was accepted (file in this folder)';
@@ -244,9 +249,13 @@ BEGIN
     IF v_err NOT LIKE 'PAPER_TICKET_PHOTO_MISSING%' THEN RAISE EXCEPTION 'SMOKE_FAIL: b. other-delivery row: expected PAPER_TICKET_PHOTO_MISSING, got %', v_err; END IF;
   END;
   -- This delivery's row pointing at a file in another delivery's folder does not count.
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
   INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
   VALUES (v_del[2], 'delivery-photos/' || v_del[3] || '/t3.jpg', 'x', v_driver, 'Signed paper delivery ticket', 0)
   RETURNING id INTO v_photo;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_driver::text, true);
   BEGIN
     PERFORM public.complete_delivery(v_del[2], '[SMOKE] Signer', v_driver, NULL, NULL, NULL, v_prefix || 'b-foreign', NULL, 'paper_ticket', v_photo::text);
     RAISE EXCEPTION 'SMOKE_FAIL: b. a ticket photo from another delivery''s folder was accepted';

@@ -261,8 +261,11 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }
   try {
     const mergeBase = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".merge_base_commit.sha"])).trim();
     if (!/^[0-9a-f]{40}$/i.test(mergeBase)) return "the PR's merge-base could not be read (fail closed)";
-    const tree = (sha) => String(gh(["api", `${repoPath}/contents?ref=${sha}`, "--jq", '.[] | select(.path == ".github") | .sha'])).trim();
-    treesDiffer = tree(headSha) !== tree(mergeBase);
+    // The git trees API, not the contents listing: that one stops at 1,000 root entries (Sol, 13 Nov).
+    const tree = (sha) => String(gh(["api", `${repoPath}/git/trees/${sha}`, "--jq", 'if .truncated then error("truncated") else (.tree[] | select(.path == ".github" and .type == "tree") | .sha) end'])).trim();
+    const [atHead, atBase] = [tree(headSha), tree(mergeBase)];
+    if (!atHead && !atBase) return "the PR's .github/ folder was not found on either side (fail closed)";
+    treesDiffer = atHead !== atBase;
   } catch (error) {
     return `the PR's .github/ folder could not be compared (${show(error)}) (fail closed)`;
   }

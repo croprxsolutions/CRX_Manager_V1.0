@@ -157,7 +157,7 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
     const a = args.join(" ");
     if (/pulls\/5\/files/.test(a)) { if (files instanceof Error) throw files; return files; }
     if (/compare\/b{40}\.\.\.a{40}/.test(a)) return "c".repeat(40);
-    if (/contents\?ref=/.test(a)) return "t".repeat(40);
+    if (/git\/trees\//.test(a)) return "t".repeat(40);
     if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; assert.ok(a.includes("application/vnd.github.raw")); return sql; }
     throw new Error(`unexpected ${a}`);
   };
@@ -181,8 +181,8 @@ check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", ()
     const a = args.join(" ");
     if (/pulls\/5\/files/.test(a)) return files;
     if (/compare\/b{40}\.\.\.a{40}/.test(a)) { if (trees.base instanceof Error) throw trees.base; return trees.base ?? "c".repeat(40); }
-    if (/contents\?ref=a{40}/.test(a)) return trees.head ?? "t".repeat(40);
-    if (/contents\?ref=c{40}/.test(a)) { if (trees.old instanceof Error) throw trees.old; return trees.old ?? "t".repeat(40); }
+    if (/git\/trees\/a{40}/.test(a)) { assert.ok(a.includes("truncated")); return trees.head ?? "t".repeat(40); }
+    if (/git\/trees\/c{40}/.test(a)) { if (trees.old instanceof Error) throw trees.old; return trees.old ?? "t".repeat(40); }
     throw new Error(`unexpected ${a}`);
   };
   const run = (files, trees) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, trees), number: 5, headSha: "a".repeat(40), baseSha: "b".repeat(40) });
@@ -195,7 +195,8 @@ check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", ()
   assert.match(run("modified\tsrc/a.ts\t\n", { head: "d".repeat(40) }), /changes \.github\/.*Taha merges it/, "a change the capped list missed");
   assert.match(run("", { head: "", old: "t".repeat(40) }), /changes \.github\//, "deleting the whole folder");
   assert.match(run("", { head: "d".repeat(40), old: "" }), /changes \.github\//, "adding the folder");
-  assert.equal(run("", { head: "", old: "" }), null, "no .github/ on either side");
+  assert.match(run("", { head: "", old: "" }), /not found on either side.*fail closed/, "a missing folder on both sides fails closed");
+  assert.match(run("", { old: new Error("truncated") }), /could not be compared.*fail closed/, "a truncated tree fails closed");
   assert.match(run("", { base: "nope" }), /merge-base could not be read.*fail closed/);
   assert.match(run("", { base: new Error("HTTP 502") }), /could not be compared.*fail closed/);
   assert.match(run("", { old: new Error("HTTP 404") }), /could not be compared.*fail closed/);

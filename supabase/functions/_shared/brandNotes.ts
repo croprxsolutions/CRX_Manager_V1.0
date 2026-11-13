@@ -146,9 +146,10 @@ export function invoiceBrandNotes(brandLines: unknown, billedQuantity: number | 
   const shown = hideAmounts ? picks.filter((e, i) => picks.findIndex((p) => p.brand_key === e.brand_key) === i) : picks;
   const notes = shown.map((e) =>
     `Brand: ${brandLabel(e.brand_name, e.epa_registration)}${hideAmounts ? '' : ` - ${fmtBrandQty(e.quantity)}${onTheLoad ? ' on the load' : ''}`}`);
-  if (entries.some((e) => !isPick(e))) notes.push('Brand not recorded');
+  const hasUnrecorded = entries.some((e) => !isPick(e));
+  if (hasUnrecorded) notes.push('Brand not recorded');
   const mismatch = brandSplitMismatch(entries);
   if (mismatch) notes.push(mismatchNote(mismatch));
-  else if (hideAmounts) notes.push('Full-load brand amounts are on the delivery receipt.');
+  else if (hideAmounts && !hasUnrecorded) notes.push('Full-load brand amounts are on the delivery receipt.');
   return notes;
 }

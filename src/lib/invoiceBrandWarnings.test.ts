@@ -69,6 +69,11 @@ describe('invoice brand notes (paper)', () => {
   });
   it('no-brand trip entry prints not recorded', () => {
     expect(invoiceBrandNotes([e({ brand_key: 'n:', brand_name: null, quantity: 5 })], 5)).toEqual(['Brand not recorded']);
+    expect(invoiceBrandNotes([e({ brand_key: 'n:', brand_name: null, quantity: 5 })], 3)).toEqual(['Brand not recorded']);
+    expect(invoiceBrandNotes([
+      e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 5 }),
+      e({ brand_key: 'n:', brand_name: null, quantity: 2, line_delivered: 2, delivery_item_id: 'di2' }),
+    ], 3)).toEqual(['Brand: Alpha (EPA 1-1)', 'Brand not recorded']);
   });
   it('hides whole-load amounts on an ordinary partial invoice, but keeps them on a Bill Split payer', () => {
     const bl = [e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 2 }), e({ brand_name: 'Beta', epa_registration: '2-2', quantity: 3 })];

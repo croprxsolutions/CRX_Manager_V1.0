@@ -50,6 +50,15 @@ function eq(a, b, m) { assert.equal(a, b, m); pass++; }
   ok(!blocked("gh pr view 12 --json baseRefName"), "other pr subcommands untouched");
   ok(!blocked("rg -n 'gh pr create --base main' docs"), "searching for the text is not a PR");
   ok(checkCommandDeep("gh pr create --base main --head claude/x --fill", "."), "wired into checkCommandDeep");
+  // Luna round 1 on this guard.
+  ok(blocked("gh pr create -B=main --head claude/feature --fill"), "-B=main spelling blocked");
+  ok(blocked("gh pr edit 12 -B=main"), "-B=main retarget blocked");
+  ok(blocked(`bash -c 'gh pr create --base main --head claude/feature --fill'`), "PR nested in bash -c blocked");
+  ok(blocked(`pwsh -Command "gh pr create --fill"`), "no-base PR nested in pwsh blocked");
+  ok(blocked("gh api repos/o/r/pulls -f base=main -f head=claude/x -f title=t"), "raw REST create into main blocked");
+  ok(!blocked("gh api repos/o/r/pulls -f base=staging -f head=claude/x -f title=t"), "raw REST create into staging allowed");
+  ok(!blocked(`gh pr create --base main --title "cd into test folder" --fill`, "hotfix/x"), "quoted 'cd' in a title is not a folder change");
+  ok(blocked("gh pr create --base main --head hotfix/a/b --fill"), "hotfix name must be one segment, as CI requires");
 }
 
 // ── direct dangerous-command patterns (unchanged behavior) ────────────────

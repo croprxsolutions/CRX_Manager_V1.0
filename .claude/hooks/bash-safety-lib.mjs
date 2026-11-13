@@ -17,6 +17,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { expandNestedCommands } from "./codex-push-lib.mjs";
 
 // computedJavaScriptScriptArgument (below) recognises a JavaScript runtime whose
 // SCRIPT argument cannot be read from the text (`node "$F"`). Nothing refuses on
@@ -506,9 +507,12 @@ export function readPackageScripts(cwd) {
 // branch is still `main` (its scheduled release jobs need that), so a `gh pr
 // create` with no base would land on `main` too. The "Release flow guard (main)"
 // CI check stops such a PR merging; this stops it being opened.
-// shortcut: a `gh pr create` hidden inside `bash -c "…"` or a raw `gh api …/pulls`
-// call is not parsed here; CI's release-flow guard still fails it. Extend if seen.
-const MAIN_PR_HEAD_RE = /^(?:hotfix\/.+|release\/next)$/;
+// Nested commands (`bash -c "…"`, `pwsh -Command …`) are unwrapped as the merge
+// guard does. A hotfix's ancestry is not checked here: CI's hotfix gate refuses a
+// `hotfix/` PR that lacks `main` or carries `staging` work (release-flow.mjs).
+// Same head rule as CI's isReleaseOrHotfixHead (.github/scripts/release-flow.mjs).
+const MAIN_PR_HEAD_RE = /^(?:release\/next|hotfix\/[^/]+)$/;
+const FOLDER_CHANGE_HEADS = new Set(["cd", "pushd", "set-location", "sl", "chdir"]);
 function unquoteWord(word) {
   return String(word).replace(/^["']|["']$/g, "");
 }
@@ -517,7 +521,7 @@ function prFlagValue(args, long, short) {
     const arg = args[index];
     if (arg === long || arg === short) return args[index + 1] ?? "";
     if (arg.startsWith(`${long}=`)) return arg.slice(long.length + 1);
-    if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) return arg.slice(short.length);
+    if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) return arg.slice(short.length).replace(/^=/, "");
   }
   return null;
 }
@@ -527,12 +531,33 @@ function currentGitBranch(cwd) {
 }
 export function checkPrBase(cmd, cwd, branchOf = currentGitBranch) {
   const text = String(cmd || "");
-  if (!/\bpr\b/.test(text)) return null;
-  const changesFolder = /(?:^|[\s;&|(])(?:cd|pushd|Set-Location|sl)\s/i.test(text);
+  if (!/\b(?:pr|pulls)\b/.test(text)) return null;
+  let commands = [text];
+  try {
+    const nested = expandNestedCommands(text);
+    if (nested.tooDeep) return "Blocked: commands nested too deeply to check for a PR into `main`. Run `gh pr create --base staging …` as its own plain command.";
+    commands = [text, ...nested.commands];
+  } catch {
+    return "Blocked: could not unwrap the commands nested in this one to check for a PR into `main`. Run `gh pr create --base staging …` as its own plain command.";
+  }
+  for (const command of commands) {
+    const reason = checkPrBaseText(command, cwd, branchOf);
+    if (reason) return reason;
+  }
+  return null;
+}
+function checkPrBaseText(text, cwd, branchOf) {
+  let changesFolder = false;
   for (const segment of splitShellSegments(text)) {
     const words = splitShellWords(segment.trim()).map(unquoteWord);
+    if (FOLDER_CHANGE_HEADS.has(String(words[0] || "").toLowerCase())) { changesFolder = true; continue; }
     const ghIndex = words.findIndex((word) => /^gh(?:\.exe|\.cmd)?$/i.test(word.split(/[\\/]/).pop()));
     if (ghIndex < 0) continue;
+    // `gh api repos/o/r/pulls -f base=main`: the REST create call, same rule.
+    if (words[ghIndex + 1] === "api" && words.some((word) => /\/pulls(?:\/\d+)?\/?$/.test(word)) &&
+      words.some((word) => /^base=(?:refs\/heads\/)?main$/.test(word))) {
+      return "Blocked a raw `gh api …/pulls` call aimed at `main`. Use `gh pr create --base staging` (a hotfix: `--base main --head hotfix/<name>`).";
+    }
     const prIndex = words.indexOf("pr", ghIndex + 1);
     if (prIndex < 0) continue;
     const sub = words[prIndex + 1];

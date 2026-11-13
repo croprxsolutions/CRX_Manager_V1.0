@@ -252,7 +252,15 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         if (!/^[0-9a-f]{40}$/i.test(dirSha)) throw new Error(`no supabase/migrations directory on ${branch}`);
         return String(gh(["api", `repos/{owner}/{repo}/git/trees/${dirSha}`, "--jq", "if .truncated then error(\"truncated\") else .tree[].path end"])).split(/\r?\n/).filter(Boolean);
       };
-      trees = { mainFiles: names("main"), stagingFiles: names("staging") };
+      // Migrations in open PRs into staging wait for the release too (Sol): one GraphQL read for all of them.
+      const open = JSON.parse(String(gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f",
+        "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(baseRefName:\"staging\",states:OPEN,first:100){totalCount nodes{files(first:100){totalCount nodes{path}}}}}}"])));
+      const prs = open?.data?.repository?.pullRequests;
+      if (!Array.isArray(prs?.nodes) || prs.totalCount > prs.nodes.length || prs.nodes.some((n) => !Array.isArray(n?.files?.nodes) || n.files.totalCount > n.files.nodes.length)) {
+        throw new Error("the open staging PRs' files were cut short or unreadable");
+      }
+      const pending = prs.nodes.flatMap((n) => n.files.nodes.map((f) => String(f?.path ?? ""))).filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map((f) => f.split("/").pop());
+      trees = { mainFiles: names("main"), stagingFiles: [...names("staging"), ...pending] };
     } catch (error) {
       if (OUT(error)) throw error;
       return refuse(`could not list the migrations on main and staging to check this hotfix's stamp against the release (${error?.message || error}); fail closed.`);

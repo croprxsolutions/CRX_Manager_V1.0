@@ -84,8 +84,10 @@ assert.match(teammateCommentsDenial("X", "7", [{ login: "tahakhanabdalli", url: 
 {
   const page = (nodes) => ({ pageInfo: { hasPreviousPage: false }, nodes });
   const pr = (body) => ({ author: { login: "masonwells1" }, comments: page([{ author: { __typename: "User", login: "TahaKhanAbdalli" }, url: "u", body }]), reviews: page([]), reviewThreads: page([]) });
-  assert.equal(unansweredTeammateComments(pr("Ready to merge: abcdef1234")).comments.length, 0, "the go-ahead line needs no answer");
+  assert.equal(unansweredTeammateComments(pr("Ready to merge: abcdef123456")).comments.length, 0, "the go-ahead line needs no answer");
   assert.equal(unansweredTeammateComments(pr("Ready to merge: abcdef1234\nbut check X")).comments.length, 1, "anything more is a real comment");
+  const other = { ...pr("Ready to merge: abcdef123456"), comments: page([{ author: { __typename: "User", login: "someone" }, url: "u", body: "Ready to merge: abcdef123456" }]) };
+  assert.equal(unansweredTeammateComments(other).comments.length, 1, "only Taha's go-ahead is exempt");
 }
 
 console.log("teammate-comments-lib tests passed");

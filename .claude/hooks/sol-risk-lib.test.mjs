@@ -126,7 +126,8 @@ check("agents never approve a pull request (#1838 HIGH 2)", () => {
   for (const t of ["gh api repos/o/r/pulls/5/reviews", "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body=note",
     "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body='Please do not APPROVE this yet'"]) assert.equal(prApprovalProblem(t), null, t);
   for (const t of ["curl -d @body.json https://api.github.com/repos/o/r/pulls/5/reviews", "gh api graphql -F query=@/tmp/approve.graphql",
-    "curl --data-binary @q.json https://api.github.com/graphql"]) assert.ok(prApprovalProblem(t), t);
+    "curl --data-binary @q.json https://api.github.com/graphql",
+    "gh api repos/o/r/pulls/5/reviews -X POST --input review.json # event=COMMENT"]) assert.ok(prApprovalProblem(t), t);
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
@@ -134,16 +135,16 @@ check("staging merges wait while the release is being applied (#1838 MED 2)", ()
   const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
   const list = /pulls\?base=main&state=open/;
   const comments = /issues\/77\/comments/;
-  const HEAD = "abcdef1".padEnd(40, "0");
+  const HEAD = "abcdef123456".padEnd(40, "0");
   const open = `77 ${HEAD}`;
   const c = (login, body) => JSON.stringify({ login, at: "2026-11-19T09:00:00Z", body });
   const run = (answers) => releaseFreezeProblem({ repo: "o/r", gh: gh(answers) });
   assert.equal(run([[list, ""]]), null, "no release PR open");
   assert.equal(run([[list, open], [comments, c("someone", "Staging proof: x")]]), null, "release open, nothing applied yet");
   assert.match(run([[list, open], [comments, c("masonwells1", "note\nApplied live: 20270110100000_x")]]), /#77.*being applied live/);
-  assert.match(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef1")]]), /#77/, "Taha's go-ahead for the current head starts the freeze, with no expiry");
-  assert.equal(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: 1234567")]]), null, "a go-ahead for an older head freezes nothing");
-  assert.equal(run([[list, open], [comments, c("stranger", "Ready to merge: abcdef1") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
+  assert.match(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef123456")]]), /#77/, "Taha's go-ahead for the current head starts the freeze, with no expiry");
+  assert.equal(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: 123456789abc")]]), null, "a go-ahead for an older head freezes nothing");
+  assert.equal(run([[list, open], [comments, c("stranger", "Ready to merge: abcdef123456") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
   assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
   assert.match(run([[list, open], [comments, new Error("HTTP 502")]]), /fail closed/);
   assert.match(run([[list, "77"]]), /fail closed/);

@@ -198,7 +198,9 @@ export function prApprovalProblem(text) {
     /\b(?:addPullRequestReview|submitPullRequestReview)\b/.test(t) ||
     // A GraphQL request whose body or query comes from a file can't be read here, so it may approve (Sol).
     (/graphql/i.test(t) && /(?:query=@|--input\b|(?:-d|--data(?:-binary|-raw)?)\s*@|-T\b|--upload-file\b)/i.test(t));
-  const visibleSafeEvent = /\bevent\W{0,6}(?:COMMENT|REQUEST_CHANGES)\b/i.test(t) && !apiApprove;
+  // A body from a file (--input, -d @file) can't be read here, so no text in the command makes it safe (Sol).
+  const fileBody = /(?:^|\s)(?:--input|-T|--upload-file)\b|(?:^|\s)(?:-d|--data(?:-binary|-raw|-urlencode)?)\s*@|=@/i.test(t);
+  const visibleSafeEvent = !fileBody && /\bevent\W{0,6}(?:COMMENT|REQUEST_CHANGES)\b/i.test(t) && !apiApprove;
   return cliApprove || apiApprove || (reviewWrite && !visibleSafeEvent)
     ? "an agent never approves a pull request: CODEOWNERS names masonwells1, the account the agents share, so an agent's approval would count as a code owner's review (for example on a change to the release guard). Leave approvals to Taha or Mason, by hand"
     : null;
@@ -232,7 +234,7 @@ export function releaseFreezeProblem({ repo, gh }) {
     // release merges, closes or moves (no expiry: a failed "Applied live:" post must not end it; Sol). "Applied live:"
     // (agents' account or Taha) follows each apply. Anyone else's text freezes nothing (Luna, Sol).
     const by = (c, ...logins) => logins.includes(String(c?.login ?? "").toLowerCase());
-    const go = (c) => /^\s*Ready to merge:\s*([0-9a-f]{7,40})\s*$/i.exec(String(c?.body ?? ""));
+    const go = (c) => /^\s*Ready to merge:\s*([0-9a-f]{12,40})\s*$/i.exec(String(c?.body ?? ""));
     const applying = comments.some((c) =>
       (by(c, "masonwells1", "tahakhanabdalli") && /^\s*Applied live:/im.test(String(c?.body ?? ""))) ||
       (by(c, "tahakhanabdalli") && go(c) && String(sha).toLowerCase().startsWith(go(c)[1].toLowerCase())));

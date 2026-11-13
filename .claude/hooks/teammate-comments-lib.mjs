@@ -32,12 +32,12 @@ query($owner:String!, $name:String!, $number:Int!) {
 }`;
 
 // Taha's one-line "Ready to merge: <sha>" (the live-apply gate's go-ahead, #1838) asks nothing, so it needs no answer.
-export const READY_TO_MERGE_LINE = /^\s*Ready to merge:\s*([0-9a-f]{7,40})\s*$/i;
+export const READY_TO_MERGE_LINE = /^\s*Ready to merge:\s*([0-9a-f]{12,40})\s*$/i;
 function humanComment(node) {
   if (node?.author?.__typename !== "User") return null;
   const login = String(node.author.login ?? "").trim().toLowerCase();
   const body = String(node.body ?? "");
-  if (READY_TO_MERGE_LINE.test(body)) return null;
+  if (login === "tahakhanabdalli" && READY_TO_MERGE_LINE.test(body)) return null;
   return login && body.trim() ? { login, body, url: String(node.url ?? "") } : null;
 }
 

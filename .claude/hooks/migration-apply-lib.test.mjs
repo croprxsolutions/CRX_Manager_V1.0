@@ -1662,7 +1662,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
-    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0" } = {}) => evaluateLandingGate({
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1677,6 +1677,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /pullRequests\(baseRefName:\\?"staging/.test(String(a)))) {
+        if (openStaging instanceof Error) throw openStaging;
+        return JSON.stringify({ data: { repository: { pullRequests: { totalCount: openStaging.length, nodes: openStaging.map((paths) => ({ files: { totalCount: paths.length, nodes: paths.map((p) => ({ path: p })) } })) } } } });
+      }
       // The REST file list the requirement read always makes (rename sources).
       if (args[0] === "api" && String(args[1]).includes("/files?per_page")) {
         assert.ok(String(args[1]).startsWith(`repos/{owner}/{repo}/pulls/${pr.number ?? 900}/files`));
@@ -1822,6 +1826,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ trees: waitingTrees }), "a migration waiting on staging", "a hotfix stamped above a waiting staging migration is refused");
   ok(gate({ trees: { ...waitingTrees, staging: [...waitingTrees.staging.slice(0, 1), "20260901000000_later.sql"] } }).ok === true, "a hotfix below the waiting one passes");
   refused(gate({ treesError: new Error("HTTP 502") }), "could not list the migrations", "an unreadable listing fails closed");
+  refused(gate({ openStaging: [["supabase/migrations/20260810000000_pending.sql"]] }), "a migration waiting on staging", "a migration in an open staging PR counts (Sol)");
+  refused(gate({ openStaging: new Error("HTTP 502") }), "could not list the migrations", "unreadable open staging PRs fail closed");
   refused(gate({ trees: { main: [], staging: [] } }), "listed no migrations", "an empty listing fails closed");
   ok(gate({ trees: waitingTrees, pr: { headRefName: "release/next" } }).ok === true, "the release PR carries the waiting migrations itself: no stamp check");
   // #1838 HIGH 2: a PR that changes .github/workflows is judged by its own copy of the guard.
@@ -1846,12 +1852,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { isCrossRepository: undefined } }), "comes from a fork", "an unknown origin is refused");
   // #1838, Taha's choice (13 Nov): an agent applies only within 30 minutes of Taha's "Ready to merge: <head>".
   {
-    const t = (over = {}) => ({ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 7)}`, createdAt: new Date().toISOString(), ...over });
+    const t = (over = {}) => ({ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString(), ...over });
     const now = Date.now();
     ok(readyToMergeProblem({ comments: [t()], head: HEAD_SHA, now }) === null, "Taha's fresh go-ahead for this head");
     ok(readyToMergeProblem({ comments: [t({ author: { login: "masonwells1" } })], head: HEAD_SHA, now }), "the shared account doesn't count");
     ok(readyToMergeProblem({ comments: [t({ createdAt: new Date(now - 31 * 60_000).toISOString() })], head: HEAD_SHA, now }), "older than 30 minutes doesn't count");
-    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge: 1234567" })], head: HEAD_SHA, now }), "another head doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge: 123456789abc" })], head: HEAD_SHA, now }), "another head doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: `Ready to merge: ${HEAD_SHA.slice(0, 7)}` })], head: HEAD_SHA, now }), "seven characters are too few to name a head (Sol)");
     ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge soon" })], head: HEAD_SHA, now }), "free text doesn't count");
     ok(readyToMergeProblem({ comments: undefined, head: HEAD_SHA, now }), "no comment list fails closed");
   }

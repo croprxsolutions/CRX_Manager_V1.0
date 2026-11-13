@@ -18,7 +18,7 @@ workflows and reports that do not define their numbers the same way.
 | # | Finding | Priority | Tracked in |
 |---|---|---|---|
 | 1 | Reports answer "what did we sell / bill / collect / earn" on different bases: booked orders called revenue, P&L commissions by order date, Monthly Summary reading the old payments table, past-month AR showing today's AR | HIGH | KI-125, KI-129, KI-130, KI-133 |
-| 2 | Commissions need one lifecycle: when calculated, when they count in profit, when payable. Payout does not check the customer has paid; return clawback unbuilt; partial billing across months unspecified | HIGH | KI-13, KI-125 (split by share billed, decided 2026-11-13), KI-154, To-Do 8.3 |
+| 2 | Commissions need one lifecycle: when calculated, when they count in profit, when payable. Payout does not check the customer has paid; return clawback unbuilt; partial billing across months unspecified | HIGH | KI-13, KI-125 (split by share billed, decided 2026-11-13), KI-154 (profit when invoiced, payable when paid, pro rata; decided 2026-11-13), To-Do 8.3 |
 | 3 | Stock count applied movement during the count twice | HIGH | KI-134 — **closed 2026-11-11 (PR #1775)** |
 | 4a | A partly received PO could not be closed short | HIGH | KI-142 — **closed 2026-11-11 (PRs #1798, #1807)** |
 | 4b | Receiving adds the typed number without checking the purchase unit matches the stock unit | HIGH | KI-136 |

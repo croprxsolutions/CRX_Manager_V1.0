@@ -725,8 +725,9 @@ The 2026-11-09 decision (CRX Notes, "commission after discount") says commission
 `_create_commission_payment_intent_impl_20260809` (newest body in `20261204100000_ki18_batch1_chicago_today.sql`)
 checks only that each selected commission is still `pending` and that the payout balances; it never looks at the
 order's invoices or payments. Also unsettled: how partial deliveries, partial payments, corrections, cancellations and
-credits move a commission (returns are KI-13). Fix later: define when a commission is calculated, when it counts in
-profit (KI-125) and when it becomes payable, and enforce the payable rule in the payout function.
+credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
+is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
+same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
 
 ### KI-155 — The cut-over plan has two finish lines and no rules for opening-balance exceptions
 **MED · OPEN · launch/money · found 2026-11-11 ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 6) · Mason + agents**

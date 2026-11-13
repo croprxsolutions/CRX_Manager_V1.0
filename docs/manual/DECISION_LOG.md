@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
+
+**Decision (Mason, in session, 2026-11-13: "ok make sure that is in our docs", accepting the recommendation of: profit report = invoiced, rep's payout = customer paid, and a partial customer payment releases the matching share of commission).** Three rules: (1) a commission counts against profit (Bottom Line P&L, Monthly Summary) in the period its sale is invoiced, split by the share billed (entry below); (2) a commission becomes payable to the rep only once the customer has paid for that sale (confirms the 2026-11-09 decision in CRX Notes, "commission after discount"); (3) a partial customer payment makes the same share of that sale's commission payable; the rest waits for the rest of the money.
+**Why:** revenue is reported when invoiced, so counting commission on a paid basis would put the sale and its commission in different months; paying the rep only from collected money means a written-off bill never pays commission and nothing has to be clawed back.
+**What this forbids/implies:** the payout must check customer payment per sale and limit each commission to the paid share (not built: KI-154, To-Do 8.5); the P&L must not switch commissions to a paid basis. Returns and credits still claw back under KI-13.
+
 ## 2026-11-13 — A partly billed sale's commission is split by the share billed in each period (KI-125)
 
 **Decision (Mason, in session, 2026-11-13: "Split by share billed").** Refines 2026-11-10 (To-Do decision 15): when an order is billed across more than one period, Bottom Line P&L and Monthly Summary subtract only the share of its commission that matches the share of the order billed in that period (a quarter billed in December puts a quarter of the commission in December).

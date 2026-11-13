@@ -272,7 +272,7 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }
   let rows;
   try {
     rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
-      .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
+      .split(/\r?\n/).filter(Boolean).map((line) => { const r = line.split("\t"); return r.length === 2 ? [...r, ""] : r; });
   } catch (error) {
     return `the PR's files could not be read (${show(error)}) (fail closed)`;
   }

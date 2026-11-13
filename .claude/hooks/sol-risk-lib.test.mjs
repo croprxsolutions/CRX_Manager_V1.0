@@ -191,6 +191,8 @@ check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", ()
   assert.match(run("renamed\tdocs/old.yml\t.github/workflows/ci.yml\n"), /\.github\/workflows\/ci\.yml/, "a move out of .github/ counts");
   assert.match(run("modified\tsrc/a.ts\t\nadded\t.github/scripts/x.mjs\t\n"), /\.github\/scripts\/x\.mjs/, "one .github file among others");
   assert.equal(run("modified\tsrc/.github-like.ts\t\nmodified\tdocs/github/a.md\t\n"), null, "only the top-level .github/ folder");
+  assert.equal(run("modified\tsrc/a.ts"), null, "trimmed output (no trailing tab) still parses");
+  assert.match(run("modified\t.github/x.yml"), /\.github\/x\.yml/, "trimmed output still sees .github/");
   // The file list is capped and not bound to the head, so the .github/ tree at the head is compared with the merge-base's.
   assert.match(run("modified\tsrc/a.ts\t\n", { head: "d".repeat(40) }), /changes \.github\/.*Taha merges it/, "a change the capped list missed");
   assert.match(run("", { head: "", old: "t".repeat(40) }), /changes \.github\//, "deleting the whole folder");

@@ -68,7 +68,7 @@ const isPendingRateReview = (value: unknown): value is PendingRateReview => {
 };
 const retryProblem = (pending: PendingRetry<PendingRateReview> | null, kept: PendingRetry<PendingRateReview> | null,
   actorId: string, upload: ParsedRateReview): string | null => {
-  if (pending && !kept) return 'The earlier retry record is unavailable. Check a fresh download before another review.';
+  if (pending && !kept) return 'The earlier retry record is unavailable. No new request was sent. Check a fresh workbook, then clear this reminder.';
   if (kept && (kept.request.actorId !== actorId || JSON.stringify(kept.request.upload) !== JSON.stringify(upload))) {
     return 'An earlier rate review is still unresolved. Finish or check it before another upload.';
   }
@@ -169,7 +169,7 @@ function ReviewPreview({ upload, preview, saved, pending, busy, profileId, onPre
       </h3>
       {!preview && !saved && <Button variant="secondary" onClick={onPreview} loading={busy}>Preview again</Button>}
       {pending && !saved && (
-        <p className="text-amber-800">Your earlier Confirm got no reply. This preview is from that Confirm, {new Date(pending.sentAt).toLocaleString()}; it may no longer describe the current database. {pending.expired ? 'The retry window has passed. Download a fresh workbook and check these rows before clearing this reminder.' : 'Confirm again to request the original result with the same key.'}</p>
+        <p className="text-amber-800">Your earlier Confirm got no reply. This preview may no longer describe the current database. {pending.needsCheck ? 'The saved retry cannot be used safely. Download a fresh workbook and check these rows before clearing this reminder.' : pending.expired ? 'The retry window has passed. Download a fresh workbook and check these rows before clearing this reminder.' : `This preview is from ${new Date(pending.sentAt).toLocaleString()}. Confirm again to request the original result with the same key.`}</p>
       )}
       {shown && <PreviewDetail shown={shown} upload={upload} />}
       {shown && shown.changes.length === 0 && shown.problems.length === 0 && (
@@ -311,14 +311,23 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     }
   };
 
+  const handleRetryProblem = (problem: string, kept: PendingRetry<PendingRateReview> | null) => {
+    if (pending && !kept) {
+      // An older mounted instance may have settled and removed storage. Absence alone cannot prove the result here.
+      // Keep the exact old key and request for a hand check, including across another navigation when storage works.
+      if (savePendingRetry(pendingName, pending.key, pending.request)) markPendingRetryForCheck(pendingName);
+      setPending({ ...pending, expired: true, needsCheck: true });
+    } else setPending(kept?.request.actorId === profileId ? kept : pending);
+    toast('error', problem);
+  };
+
   const confirm = async () => {
     if (!upload || !preview || !profileId) return;
     const epoch = view.current.epoch;
     const kept = loadPendingRetry(pendingName, isPendingRateReview);
     const problem = retryProblem(pending, kept, profileId, upload);
     if (problem) {
-      setPending(kept?.request.actorId === profileId ? kept : pending);
-      toast('error', problem);
+      handleRetryProblem(problem, kept);
       return;
     }
     const key = kept?.key ?? commitKey.getKey();

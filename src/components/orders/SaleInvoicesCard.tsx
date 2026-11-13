@@ -32,6 +32,9 @@ interface Props {
 }
 
 const isDraft = (s: string) => s === 'draft' || s === 'unposted';
+/** The sale's billed total in whole cents: voided and cancelled invoices bill nothing. */
+export const activeTotalCents = (invoices: { status: string; total: number }[]) =>
+  invoices.filter((i) => i.status !== 'voided' && i.status !== 'cancelled').reduce((sum, i) => sum + Math.round(i.total * 100), 0);
 
 /** The sale's invoices, one row per invoice and payer, with a checked "post the drafts" action. */
 export default function SaleInvoicesCard({
@@ -87,7 +90,7 @@ export default function SaleInvoicesCard({
             {invoices.length > 1 && (
               <div className="mx-5 flex justify-between border-t border-gray-100 py-4 font-semibold text-nav-dark">
                 <span>Total</span>
-                <span className="tabular-nums">{fmt(invoices.reduce((sum, i) => sum + i.total, 0))}</span>
+                <span className="tabular-nums">{fmt(activeTotalCents(invoices) / 100)}</span>
               </div>
             )}
           </>

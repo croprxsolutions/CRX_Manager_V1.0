@@ -534,6 +534,16 @@ describe('OrderDetail', () => {
       expect(screen.queryByText(/Product invoices are created after delivery/)).not.toBeInTheDocument();
     });
 
+    it('leaves voided invoices out of the Balance due note', async () => {
+      const inv = (n: number, status: string) => ({
+        id: `inv-${n}`, invoice_number: `INV-${n}`, invoice_group_id: null, invoice_post_version: `v1:inv-${n}`, customer_id: 'cust-1',
+        status, invoice_type: 'chemical_sale', total_amount_cents: 25000, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 25000,
+      });
+      mockSale({ invoices: [inv(1, 'draft'), inv(2, 'voided')] });
+      renderOrderDetail();
+      expect(await screen.findByText('1 invoice, a draft')).toBeInTheDocument();
+    });
+
     it('asks before posting all drafts, then posts them', async () => {
       const draft = (n: number) => ({
         id: `inv-${n}`, invoice_number: `INV-${n}`, invoice_group_id: null, invoice_post_version: `v1:inv-${n}`, customer_id: 'cust-1',

@@ -1408,8 +1408,10 @@ export default function OrderDetail() {
       : undefined,
   }));
   // Under Balance due: how many invoices and whether they are drafts, e.g. "2 invoices, both drafts".
-  const draftCount = invoices.filter((inv) => inv.status === 'draft' || inv.status === 'unposted').length;
-  const invCount = invoices.length;
+  // Voided and cancelled invoices owe nothing, so they are left out of the note.
+  const owingInvoices = invoices.filter((inv) => inv.status !== 'voided' && inv.status !== 'cancelled');
+  const draftCount = owingInvoices.filter((inv) => inv.status === 'draft' || inv.status === 'unposted').length;
+  const invCount = owingInvoices.length;
   const balanceNote = invCount === 0 ? undefined : `${invCount} invoice${invCount === 1 ? '' : 's'}, ${
     draftCount === 0 ? (invCount === 1 ? 'posted' : 'all posted')
       : draftCount === invCount ? (invCount === 1 ? 'a draft' : invCount === 2 ? 'both drafts' : 'all drafts')
@@ -2079,7 +2081,7 @@ export default function OrderDetail() {
                         <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
                           <div className="sm:col-span-2">
                             <label className="text-[11px] font-medium text-secondary mb-1 block">Field</label>
-                            <select value={newAllocFieldId}
+                            <select value={newAllocFieldId} disabled={savingAlloc}
                               onChange={(e) => {
                                 setNewAllocFieldId(e.target.value);
                                 const f = allocFields.find((x) => x.id === e.target.value);
@@ -2094,7 +2096,7 @@ export default function OrderDetail() {
                           </div>
                           <div>
                             <label className="text-[11px] font-medium text-secondary mb-1 block">Acres</label>
-                            <input type="number" value={newAllocAcres} onChange={(e) => setNewAllocAcres(e.target.value)}
+                            <input type="number" value={newAllocAcres} onChange={(e) => setNewAllocAcres(e.target.value)} disabled={savingAlloc}
                               min="0.01" step="0.01" placeholder="acres"
                               className="min-h-11 md:min-h-0 w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
                           </div>

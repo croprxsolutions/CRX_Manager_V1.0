@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import SaleInvoicesCard from './SaleInvoicesCard';
+import SaleInvoicesCard, { activeTotalCents } from './SaleInvoicesCard';
 
 const invoices = [
   { id: 'inv-1', number: 'CS-2026-0005-1', payerName: 'Maple Hollow Farms', sharePct: 50, status: 'draft', total: 734.83, balance: 734.83 },
@@ -29,6 +29,16 @@ describe('SaleInvoicesCard', () => {
     expect(screen.queryByText('draft')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /CS-2026-0005-2/ })).toHaveAttribute('href', '/invoices/inv-2');
     expect(screen.getByText('$1,421.84')).toBeInTheDocument();
+  });
+
+  it('leaves voided and cancelled invoices out of the total, adding whole cents', () => {
+    renderCard({ invoices: [
+      { ...invoices[0], status: 'voided' },
+      { ...invoices[1], status: 'posted' },
+      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Pine Flats', status: 'draft', total: 687.01, balance: 687.01 },
+    ] });
+    expect(screen.getByText('$1,374.02')).toBeInTheDocument();
+    expect(activeTotalCents([{ status: 'draft', total: 0.1 }, { status: 'draft', total: 0.2 }, { status: 'cancelled', total: 5 }])).toBe(30);
   });
 
   it('asks before posting the drafts, listing each one', async () => {

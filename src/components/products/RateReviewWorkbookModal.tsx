@@ -66,6 +66,17 @@ const isPendingRateReview = (value: unknown): value is PendingRateReview => {
     && Array.isArray(previewRates) && previewRates.every((row) => isStoredPreviewRow(row, rates.length))
     && Array.isArray(previewOutcomes) && previewOutcomes.every((row) => isStoredPreviewRow(row, outcomes.length));
 };
+const pendingMatchesSentIntent = (name: string, key: string, request: PendingRateReview) => {
+  const current = loadPendingRetry(name, isPendingRateReview);
+  return current?.key === key && current.request.actorId === request.actorId
+    && JSON.stringify(current.request) === JSON.stringify(request);
+};
+const clearPendingIfMatching = (name: string, key: string, request: PendingRateReview) => {
+  if (pendingMatchesSentIntent(name, key, request)) clearPendingRetry(name);
+};
+const markPendingIfMatching = (name: string, key: string, request: PendingRateReview, needsCheck: boolean) => {
+  if (needsCheck && pendingMatchesSentIntent(name, key, request)) markPendingRetryForCheck(name);
+};
 const retryProblem = (pending: PendingRetry<PendingRateReview> | null, kept: PendingRetry<PendingRateReview> | null,
   actorId: string, upload: ParsedRateReview): string | null => {
   if (pending && !kept) return 'The earlier retry record is unavailable. No new request was sent. Check a fresh workbook, then clear this reminder.';
@@ -275,9 +286,10 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
 
   const readFile = async (file: File) => {
     const epoch = view.current.epoch;
+    // The File object is already captured; allow choosing this same file again after navigation or a profile change.
+    if (fileRef.current) fileRef.current.value = '';
     if (!profileId || pending || loadPendingRetry(pendingName, isPendingRateReview)) {
       toast('error', !profileId ? 'Wait for your profile to load before uploading.' : 'Finish or check the earlier unanswered rate review before uploading another file.');
-      if (fileRef.current) fileRef.current.value = '';
       return;
     }
     reset();
@@ -291,10 +303,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     } catch (error) {
       if (isCurrent(epoch)) toast('error', sanitizeError(error));
     } finally {
-      if (isCurrent(epoch)) {
-        setBusy(false);
-        if (fileRef.current) fileRef.current.value = '';
-      }
+      if (isCurrent(epoch)) setBusy(false);
     }
   };
 
@@ -341,7 +350,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     try {
       const receipt = await commitRateReview(request.upload, key);
       commitKey.resetKey();
-      clearPendingRetry(pendingName);
+      clearPendingIfMatching(pendingName, key, request);
       updateCurrent(epoch, () => {
         setPending(null);
         setSaved(receipt);
@@ -353,14 +362,15 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       const raw = String((error as { message?: unknown } | null)?.message ?? '');
       // A refusal after any earlier unanswered send cannot prove the earlier send failed; keep its original receipt key.
       if (!kept && isRateReviewRefusal(error)) {
-        clearPendingRetry(pendingName);
+        clearPendingIfMatching(pendingName, key, request);
         commitKey.resetKey();
         updateCurrent(epoch, () => {
           setPending(null);
           setPreview(null);
         });
       } else {
-        if (raw.startsWith('IDEMPOTENCY_') || (kept && isRateReviewRefusal(error))) markPendingRetryForCheck(pendingName);
+        markPendingIfMatching(pendingName, key, request,
+          raw.startsWith('IDEMPOTENCY_') || !!(kept && isRateReviewRefusal(error)));
         updateCurrent(epoch, () => setPending(loadPendingRetry(pendingName, isPendingRateReview)));
       }
     } finally {

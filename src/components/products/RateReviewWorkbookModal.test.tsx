@@ -146,6 +146,37 @@ describe('RateReviewWorkbookModal', () => {
     expect(screen.getByRole('button', { name: 'Upload and preview' })).toBeEnabled();
   });
 
+  it.each(['success', 'definitive refusal'] as const)('keeps a newer unanswered request when the old Confirm ends in %s', async (ending) => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    const receipt = { rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] };
+    let finishOld!: () => void;
+    H.commit.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finishOld = () => ending === 'success' ? resolve(receipt) : reject(new Error('RATE_REVIEW_REFUSED: nothing was saved'));
+    })).mockRejectedValueOnce(new Error('RATE_REVIEW_REFUSED: check the earlier result'))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const first = await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    const oldKey = JSON.parse(sessionStorage.getItem('crx:pending-retry:rate-review:u1')!).key;
+    first.unmount();
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    expect(await screen.findByRole('button', { name: 'I checked the fresh workbook' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
+    const file = new File(['next'], 'next-review.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+    fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(3));
+    const newer = sessionStorage.getItem('crx:pending-retry:rate-review:u1');
+    expect(newer).not.toBeNull();
+    expect(JSON.parse(newer!).key).not.toBe(oldKey);
+    await act(async () => finishOld());
+    expect(sessionStorage.getItem('crx:pending-retry:rate-review:u1')).toBe(newer);
+    expect(H.commit).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the uncertain intent for a hand check when a later replay is refused', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     H.commit.mockRejectedValueOnce(new TypeError('Failed to fetch'))

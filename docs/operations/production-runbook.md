@@ -91,13 +91,15 @@ serving; `captureEdgeException` then logs the same tag instead of reporting.
 **Alternative — git revert via a PR** (direct pushes to `main` are impossible — the
 `protect-main` ruleset rejects them for everyone):
 ```bash
-git checkout -b revert/<short-name> origin/main
+git fetch origin
+git checkout -b hotfix/revert-<short-name> origin/main
 git revert <bad-commit-sha>
-git push -u origin revert/<short-name>
-gh pr create --fill
+git push -u origin hotfix/revert-<short-name>
+gh pr create --base main --fill
 ```
-The revert PR then lands through the normal protected path (`.claude/commands/ship.md`
-Step 8; `--auto` is refused by the merge gates). The merge to `main` auto-deploys the revert via Vercel. (The Vercel dashboard
+Since the staging-first release flow (13 Nov 2026), only `release/next` and `hotfix/<name>` branches may open a
+PR into `main`, and Taha or Mason merges them ("Create a merge commit"), never an agent. The revert then reaches
+`staging` through the back-merge the release bot opens. The merge to `main` auto-deploys the revert via Vercel. (The Vercel dashboard
 rollback above is faster — prefer it mid-incident.)
 
 ### 3.2 Rolling back a database migration

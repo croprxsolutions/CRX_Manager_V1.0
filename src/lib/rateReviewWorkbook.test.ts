@@ -89,6 +89,46 @@ describe('rate review workbook', () => {
     await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', 'approved'))).rejects.toThrow('outcome must be');
   });
 
+  it('binds each visible outcome parent name to its hidden download name', async () => {
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'parent_name', 'Another parent')))
+      .rejects.toThrow('Rate Outcomes row 2: the parent name no longer matches the download (expected "Atrazine 4L")');
+    const spaced = { ...exported, parents: [{ ...exported.parents[0], parent_name: ' Atrazine 4L ' }] };
+    expect(await roundTrip(undefined, spaced)).toEqual({ rates: [], outcomes: [], recorded: {} });
+  });
+
+  it('identifies an older CRX workbook separately from an unknown file', async () => {
+    await expect(roundTrip((wb) => { wb.getWorksheet('_crx_manifest')!.getCell(1, 2).value = 'crx-rate-review-v1'; }))
+      .rejects.toThrow('different version');
+    await expect(roundTrip((wb) => { wb.getWorksheet('_crx_manifest')!.getCell(1, 2).value = 'other-file'; }))
+      .rejects.toThrow('not a CRX rate review workbook');
+  });
+
+  it('reconfirms a recorded outcome with its note only when a rate on that parent was edited', async () => {
+    const decided: RateReviewWorkbook = { ...exported, parents: [{ ...exported.parents[0], outcome: 'approved_default', outcome_note: 'reviewed' }] };
+    const editRate = (wb: Wb) => set(wb, 'Draft Rates', 2, 'recommended', '14');
+    const ordinary = await roundTrip(editRate, decided);
+    expect(ordinary.outcomes).toEqual([]);
+    expect(ordinary.recorded[P1]).toBe('approved_default');
+    const renewed = await roundTrip((wb) => { editRate(wb); set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes'); }, decided);
+    expect(renewed.outcomes).toEqual([{ sheetRow: 2, parent_name: 'Atrazine 4L', parent_id: P1,
+      expected_outcome_version: 2, outcome: 'approved_default', note: 'reviewed' }]);
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes'), decided))
+      .rejects.toThrow('Reconfirm needs an edited Draft Rates row');
+  });
+
+  it('refuses conflicting or empty Reconfirm instructions by outcome row', async () => {
+    const decided: RateReviewWorkbook = { ...exported, parents: [{ ...exported.parents[0], outcome: 'approved_default', outcome_note: 'reviewed' }] };
+    await expect(roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'recommended', '14');
+      set(wb, 'Rate Outcomes', 2, 'note', 'changed');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes');
+    }, decided)).rejects.toThrow('Rate Outcomes row 2: Reconfirm needs an unchanged recorded outcome and note');
+    await expect(roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'recommended', '14');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes');
+    })).rejects.toThrow('Rate Outcomes row 2: Reconfirm needs an unchanged recorded outcome and note');
+  });
+
   it('refuses a file with a downloaded row deleted, and a new rate for a name two parents share', async () => {
     await expect(roundTrip((wb) => {
       set(wb, 'Draft Rates', 2, 'decision', 'approve');

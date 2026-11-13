@@ -1,10 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import Button from '../ui/Button';
+import ConfirmModal from '../ui/ConfirmModal';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
+import { isDefinitiveRpcRejection } from '../../lib/idempotency';
+import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePendingRetry, type PendingRetry } from '../../lib/pendingRetry';
 import {
   commitRateReview,
   generateRateReviewWorkbook,
@@ -20,6 +23,30 @@ import type { CommitRateReviewResult, RateReviewResult, RateReviewWorkbook } fro
 
 const ACTION_WORDS: Record<string, string> = { save: 'save values', approve: 'approve', reopen: 'send back to draft', delete: 'delete' };
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+type PendingRateReview = { actorId: string; upload: ParsedRateReview; preview: RateReviewResult };
+const isPendingRateReview = (value: unknown): value is PendingRateReview => {
+  if (!value || typeof value !== 'object') return false;
+  const request = value as Partial<PendingRateReview>;
+  return typeof request.actorId === 'string' && !!request.upload && Array.isArray(request.upload.rates)
+    && Array.isArray(request.upload.outcomes) && !!request.upload.recorded
+    && typeof request.upload.recorded === 'object' && !!request.preview && Array.isArray(request.preview.rates)
+    && Array.isArray(request.preview.outcomes)
+    && [...request.preview.rates, ...request.preview.outcomes].every((row) => row && typeof row.index === 'number' && typeof row.status === 'string');
+};
+const retryProblem = (pending: PendingRetry<PendingRateReview> | null, kept: PendingRetry<PendingRateReview> | null,
+  actorId: string, upload: ParsedRateReview): string | null => {
+  if (pending && !kept) return 'The earlier retry record is unavailable. Check a fresh download before another review.';
+  if (kept && (kept.request.actorId !== actorId || JSON.stringify(kept.request.upload) !== JSON.stringify(upload))) {
+    return 'An earlier rate review is still unresolved. Finish or check it before another upload.';
+  }
+  if (kept?.expired) return 'This retry is past its safe window. Check a fresh download before starting another review.';
+  return null;
+};
+const isRateReviewRefusal = (error: unknown) => {
+  const raw = String((error as { message?: unknown } | null)?.message ?? '');
+  return !raw.startsWith('IDEMPOTENCY_') && (isDefinitiveRpcRejection(error)
+    || /^(RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|AUTH_REQUIRED)/.test(raw));
+};
 
 /** What a preview shows: changes, problems, and whether Confirm may run. */
 function previewRows(upload: ParsedRateReview, preview: RateReviewResult) {
@@ -83,10 +110,45 @@ function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateRevi
       )}
       {shown.cleared.length > 0 && (
         <p className="text-amber-800">
-          These rate changes clear the recorded outcome of {shown.cleared.join(', ')}. Set it again on Rate Outcomes once its rates are approved.
+          These rate changes clear the recorded outcome of {shown.cleared.join(', ')}. To keep an outcome that still fits the edited rates, mark Reconfirm yes on Rate Outcomes in this workbook and upload again. Otherwise set it later after the rates are approved.
         </p>
       )}
     </>
+  );
+}
+
+function ReviewPreview({ upload, preview, saved, pending, busy, profileId, onPreview, onConfirm, onClear }: {
+  upload: ParsedRateReview;
+  preview: RateReviewResult | null;
+  saved: CommitRateReviewResult | null;
+  pending: PendingRetry<PendingRateReview> | null;
+  busy: boolean;
+  profileId: string;
+  onPreview: () => void;
+  onConfirm: () => void;
+  onClear: () => void;
+}) {
+  const shown = preview ? previewRows(upload, preview) : null;
+  return (
+    <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rate review preview">
+      <h3 className="font-semibold text-nav-dark">
+        Preview: {count(upload.rates.length, 'edited rate', 'edited rates')}, {count(upload.outcomes.length, 'edited outcome', 'edited outcomes')}
+      </h3>
+      {!preview && !saved && <Button variant="secondary" onClick={onPreview} loading={busy}>Preview again</Button>}
+      {pending && !saved && (
+        <p className="text-amber-800">Your earlier Confirm got no reply. This preview is from that Confirm, {new Date(pending.sentAt).toLocaleString()}; it may no longer describe the current database. {pending.expired ? 'The retry window has passed. Download a fresh workbook and check these rows before clearing this reminder.' : 'Confirm again to request the original result with the same key.'}</p>
+      )}
+      {shown && <PreviewDetail shown={shown} upload={upload} />}
+      {shown && shown.changes.length === 0 && shown.problems.length === 0 && (
+        <p className="text-secondary">Everything in this file already matches the database. Nothing to save.</p>
+      )}
+      {saved
+        ? <p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
+        : shown && <Button onClick={onConfirm} loading={busy} disabled={shown.blocked || !!pending?.expired || !profileId}>
+          Confirm rate review ({count(shown.changes.length, 'change', 'changes')})
+        </Button>}
+      {pending?.expired && <Button variant="secondary" onClick={onClear}>I checked the fresh workbook</Button>}
+    </section>
   );
 }
 
@@ -119,22 +181,46 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   const [upload, setUpload] = useState<ParsedRateReview | null>(null);
   const [preview, setPreview] = useState<RateReviewResult | null>(null);
   const [saved, setSaved] = useState<CommitRateReviewResult | null>(null);
+  const [actorId, setActorId] = useState(profileId);
+  const [pending, setPending] = useState<PendingRetry<PendingRateReview> | null>(null);
+  const [clearingPending, setClearingPending] = useState(false);
+  const pendingName = `rate-review:${profileId}`;
+  // A request started for one actor/opening must never paint its result onto a later actor/opening.
+  const view = useRef({ profileId, open, epoch: 0 });
+  if (view.current.profileId !== profileId || view.current.open !== open) {
+    view.current = { profileId, open, epoch: view.current.epoch + 1 };
+  }
+  const isCurrent = (epoch: number) => view.current.epoch === epoch && view.current.open;
+  const updateCurrent = (epoch: number, update: () => void) => { if (isCurrent(epoch)) update(); };
   // Scoped to the exact upload: a retry of the same file reuses its key (the server returns the first receipt).
   const commitKey = useIdempotencyKey('commit_rate_review', profileId, JSON.stringify(upload));
-  // A Confirm that got no reply may have saved. Kept across close and re-upload so the same file can still redeem its
-  // receipt: a fresh preview would call the saved rows stale and block Confirm.
-  const unanswered = useRef<{ upload: string; preview: RateReviewResult } | null>(null);
-  const [resumed, setResumed] = useState(false);
 
-  const reset = () => { setUpload(null); setPreview(null); setSaved(null); setResumed(false); };
+  // shortcut: sessionStorage survives navigation/reload in this tab, but closing the tab ends recovery; use a server receipt lookup if recovery must cross tabs.
+  useEffect(() => {
+    if (!open) return;
+    const kept = profileId ? loadPendingRetry(pendingName, isPendingRateReview) : null;
+    setActorId(profileId);
+    setPending(kept?.request.actorId === profileId ? kept : null);
+    setUpload(kept?.request.actorId === profileId ? kept.request.upload : null);
+    setPreview(kept?.request.actorId === profileId ? kept.request.preview : null);
+    setSaved(null);
+    setBusy(false);
+    setClearingPending(false);
+  }, [open, pendingName, profileId]);
+  useEffect(() => () => { view.current.epoch += 1; }, []);
+
+  const reset = () => { setUpload(null); setPreview(null); setSaved(null); };
   const close = () => { reset(); setTotals(null); onClose(); };
 
   const download = async () => {
+    const epoch = view.current.epoch;
     setBusy(true);
     try {
       const exported = await loadRateReviewWorkbook();
+      if (!isCurrent(epoch)) return;
       setTotals(exported.totals);
       const blob = await generateRateReviewWorkbook(exported);
+      if (!isCurrent(epoch)) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -142,76 +228,115 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      if (isCurrent(epoch)) toast('error', sanitizeError(error));
     } finally {
-      setBusy(false);
+      if (isCurrent(epoch)) setBusy(false);
     }
   };
 
-  const runPreview = async (parsed: ParsedRateReview) => {
-    setPreview(null);
-    setResumed(false);
-    setPreview(await previewRateReview(parsed));
+  const runPreview = async (parsed: ParsedRateReview, epoch: number) => {
+    if (isCurrent(epoch)) setPreview(null);
+    const result = await previewRateReview(parsed);
+    if (isCurrent(epoch)) setPreview(result);
   };
 
   const readFile = async (file: File) => {
+    const epoch = view.current.epoch;
+    if (!profileId || pending || loadPendingRetry(pendingName, isPendingRateReview)) {
+      toast('error', !profileId ? 'Wait for your profile to load before uploading.' : 'Finish or check the earlier unanswered rate review before uploading another file.');
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     reset();
     setTotals(null); // they described the last download, not necessarily this file
     setBusy(true);
     try {
       const parsed = await parseRateReviewWorkbook(await file.arrayBuffer());
+      if (!isCurrent(epoch)) return;
       setUpload(parsed);
-      if (unanswered.current?.upload === JSON.stringify([profileId, parsed])) {
-        setPreview(unanswered.current.preview);
-        setResumed(true);
-      } else if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed);
+      if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed, epoch);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      if (isCurrent(epoch)) toast('error', sanitizeError(error));
     } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
+      if (isCurrent(epoch)) {
+        setBusy(false);
+        if (fileRef.current) fileRef.current.value = '';
+      }
     }
   };
 
   const retryPreview = async () => {
     if (!upload) return;
+    const epoch = view.current.epoch;
     setBusy(true);
     try {
-      await runPreview(upload);
+      await runPreview(upload, epoch);
     } catch (error) {
-      toast('error', sanitizeError(error));
+      if (isCurrent(epoch)) toast('error', sanitizeError(error));
     } finally {
-      setBusy(false);
+      if (isCurrent(epoch)) setBusy(false);
     }
   };
 
   const confirm = async () => {
-    if (!upload || !preview) return;
+    if (!upload || !preview || !profileId) return;
+    const epoch = view.current.epoch;
+    const kept = loadPendingRetry(pendingName, isPendingRateReview);
+    const problem = retryProblem(pending, kept, profileId, upload);
+    if (problem) {
+      setPending(kept?.request.actorId === profileId ? kept : pending);
+      toast('error', problem);
+      return;
+    }
+    const key = kept?.key ?? commitKey.getKey();
+    const request = kept?.request ?? { actorId: profileId, upload, preview };
+    if (!savePendingRetry(pendingName, key, request)) {
+      toast('error', 'This browser could not keep the retry record, so nothing was sent. Allow site storage or review a smaller file.');
+      return;
+    }
+    setPending(loadPendingRetry(pendingName, isPendingRateReview));
     setBusy(true);
     try {
-      const receipt = await commitRateReview(upload, commitKey.getKey());
+      const receipt = await commitRateReview(request.upload, key);
       commitKey.resetKey();
-      unanswered.current = null;
-      setSaved(receipt);
-      setTotals(null); // stale now; the success line asks for a fresh download
-      toast('success', `Saved ${count(receipt.rates_changed, 'rate', 'rates')} and ${count(receipt.outcomes_changed, 'outcome', 'outcomes')}`);
+      clearPendingRetry(pendingName);
+      updateCurrent(epoch, () => {
+        setPending(null);
+        setSaved(receipt);
+        setTotals(null); // stale now; the success line asks for a fresh download
+        toast('success', `Saved ${count(receipt.rates_changed, 'rate', 'rates')} and ${count(receipt.outcomes_changed, 'outcome', 'outcomes')}`);
+      });
     } catch (error) {
-      toast('error', sanitizeError(error));
+      updateCurrent(epoch, () => toast('error', sanitizeError(error)));
       const raw = String((error as { message?: unknown } | null)?.message ?? '');
-      // A database refusal (nothing saved) drops the preview so the next try checks again. Any other failure may be a
-      // lost reply to a save that went through: keep the preview so Confirm retries with the same key and gets the receipt.
-      if (/RATE_REVIEW_|PRODUCT_RATE|ADMIN_REQUIRED|IDEMPOTENCY_/.test(raw)) {
-        unanswered.current = null;
-        setResumed(false);
-        setPreview(null);
-      } else unanswered.current = { upload: JSON.stringify([profileId, upload]), preview };
+      // A refusal after any earlier unanswered send cannot prove the earlier send failed; keep its original receipt key.
+      if (!kept && isRateReviewRefusal(error)) {
+        clearPendingRetry(pendingName);
+        commitKey.resetKey();
+        updateCurrent(epoch, () => {
+          setPending(null);
+          setPreview(null);
+        });
+      } else {
+        if (raw.startsWith('IDEMPOTENCY_') || (kept && isRateReviewRefusal(error))) markPendingRetryForCheck(pendingName);
+        updateCurrent(epoch, () => setPending(loadPendingRetry(pendingName, isPendingRateReview)));
+      }
     } finally {
-      setBusy(false);
+      updateCurrent(epoch, () => setBusy(false));
     }
   };
 
-  const shown = upload && preview ? previewRows(upload, preview) : null;
+  const clearCheckedPending = () => {
+    clearPendingRetry(pendingName);
+    setPending(null);
+    setClearingPending(false);
+    commitKey.resetKey();
+    reset();
+  };
+
   const nothingEdited = upload && upload.rates.length + upload.outcomes.length === 0;
+
+  if (actorId !== profileId) return <Modal open={open} onClose={onClose} title="Rate review">Loading rate review…</Modal>;
 
   return (
     <Modal open={open} onClose={close} closeDisabled={busy} title="Rate review" size="large"
@@ -226,7 +351,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
           <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={() => void download()} loading={busy}>
             Download rate review workbook
           </Button>
-          <Button variant="secondary" icon={<Upload className="w-4 h-4" />} onClick={() => fileRef.current?.click()} disabled={busy}>
+          <Button variant="secondary" icon={<Upload className="w-4 h-4" />} onClick={() => fileRef.current?.click()} disabled={busy || !!pending || !profileId}>
             Upload and preview
           </Button>
           <input ref={fileRef} type="file" className="hidden" aria-label="Rate review workbook file"
@@ -237,31 +362,13 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
 
         {nothingEdited && <p className="text-secondary">No edits in this file. Change a rate, decision or outcome, then upload it again.</p>}
 
-        {upload && !nothingEdited && (
-          <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Rate review preview">
-            <h3 className="font-semibold text-nav-dark">
-              Preview: {count(upload.rates.length, 'edited rate', 'edited rates')}, {count(upload.outcomes.length, 'edited outcome', 'edited outcomes')}
-            </h3>
-            {!preview && !saved && (
-              <Button variant="secondary" onClick={() => void retryPreview()} loading={busy}>Preview again</Button>
-            )}
-            {resumed && !saved && (
-              <p className="text-amber-800">Your last Confirm of this file got no reply, so it may already be saved. Confirm again to get its result; it will not save twice.</p>
-            )}
-            {shown && <PreviewDetail shown={shown} upload={upload} />}
-            {shown && shown.changes.length === 0 && shown.problems.length === 0 && (
-              <p className="text-secondary">Everything in this file already matches the database. Nothing to save.</p>
-            )}
-            {saved
-              ? <p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
-              : shown && (
-                <Button onClick={() => void confirm()} loading={busy} disabled={shown.blocked}>
-                  Confirm rate review ({count(shown.changes.length, 'change', 'changes')})
-                </Button>
-              )}
-          </section>
-        )}
+        {upload && !nothingEdited && <ReviewPreview upload={upload} preview={preview} saved={saved} pending={pending}
+          busy={busy} profileId={profileId} onPreview={() => void retryPreview()} onConfirm={() => void confirm()}
+          onClear={() => setClearingPending(true)} />}
       </div>
+      <ConfirmModal open={clearingPending} onClose={() => setClearingPending(false)} onConfirm={clearCheckedPending}
+        title="Clear unanswered rate review?" message="Only clear this reminder after comparing its rows with a fresh workbook. The old receipt can no longer be recovered here."
+        confirmLabel="I checked; clear reminder" variant="warning" />
     </Modal>
   );
 }

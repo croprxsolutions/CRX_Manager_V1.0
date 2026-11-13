@@ -25,6 +25,8 @@ import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRej
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
+import { loadDeliveryBrandInfo } from '../lib/deliveryBrandPaper';
+import { receiptBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail } from '../lib/emailService';
@@ -1455,9 +1457,11 @@ export default function DeliveryDetail() {
     }
     setSendingEmail(true);
     try {
+      // The current picks, so a brand corrected after completion shows (Brand PR B-3).
+      const brandInfo = await loadDeliveryBrandInfo(delivery.id);
       const deliveredLines = items
         .filter((item) => (item.quantity_delivered ?? item.quantity) > 0)
-        .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity }));
+        .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity, ...brandInfo.get(item.id) }));
 
       // A delivery recorded without proof has no customer signer to show (its signer is office text).
       const html = buildDeliveryReceiptHtml({
@@ -2168,6 +2172,15 @@ export default function DeliveryDetail() {
                     // Fall back to no signature in PDF
                   }
                 }
+                // Brand PR B-3: the brands under each line, from the current picks.
+                let brandInfo;
+                try {
+                  brandInfo = await loadDeliveryBrandInfo(delivery.id);
+                } catch (err) {
+                  Sentry.captureException(toSentryError(err), { extra: { context: 'delivery_pdf_brands', deliveryId: delivery.id } });
+                  toast('error', 'The delivered brands could not be loaded. Try printing again.');
+                  return;
+                }
                 downloadDeliveryPdf({
                   delivery_number: delivery.delivery_number,
                   order_number: parentOrder?.order_number || '-',
@@ -2190,6 +2203,7 @@ export default function DeliveryDetail() {
                     quantity_delivered: delivery.status === 'completed' ? i.quantity_delivered : undefined,
                     unit_size: i.unit_size || '-',
                     tote_number: i.tote_number || undefined,
+                    brand_notes: receiptBrandNotes({ ...brandInfo.get(i.id), qty: i.quantity_delivered ?? i.quantity }),
                   })),
                 });
               }

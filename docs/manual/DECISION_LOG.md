@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `CANDIDATE_SNAPSHOT/supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `2a0980c05f230dbc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bb09d35ddd4d)
+
 ## 2026-11-12 — #1844: Mason owner-accepted 1 Sol finding(s) at `b9df7ab46525`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1844 at `b9df7ab46525` (base `9c63dfc52f9f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -21,6 +27,21 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, 2026-11-12, in chat: "Yes, keep it").** On PR #1844, once the product page has shown a cancelled EPA registration (the product's own number or a brand's), that warning and the brand row's mark stay until the page is reloaded or another product is opened, even if a later check fails or no longer covers that number. A failed or unfinished check adds the "could not check" notice beside the red warning; it never replaces it.
 **Why:** the warning exists to warn loudly (selling is never blocked), so information already confirmed must not disappear because a later read failed. Sol rounds 1, 2 and 4 each found a new case in how the banner handled checks that failed or had not finished.
 **What this forbids/implies:** `useStickyCancellations` in `src/lib/epaRegistrationStatus.ts` keeps each shown cancellation per product for the page session. Clearing a shown warning before reload needs a new Mason decision.
+## 2026-11-12 — #1848: Mason owner-accepted 3 Sol finding(s) at `07f3fca34460`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `07f3fca34460` (base `9c63dfc52f9f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `730738816390b32f` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bd909543f1b3)
+- Finding 2 (HIGH) at `src/lib/invoiceBrandWarnings.ts:85`, text sha256 `6212d3b8de7535b8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 4632ae22123b)
+- Finding 3 (HIGH) at `src/lib/invoiceBrandWarnings.ts:61`, text sha256 `02703d0f85ba3885` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9676e1c15a8a)
+
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `3657639bbb62`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `3657639bbb62` (base `f52b9a05acec`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/lib/invoiceBrandWarnings.ts:85`, text sha256 `d04464577f300d52` (the wording stays with the proof, not here)
+  Mason's reason: deliveries are not in use yet and Sales to check still lists the line (ref 3747e8e82666)
 ## 2026-11-12 — #1840: Mason owner-accepted 1 Sol finding(s) at `de529580591b`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1840 at `de529580591b` (base `8b6c3281c24c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

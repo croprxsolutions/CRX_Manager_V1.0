@@ -248,8 +248,8 @@ export function releaseFreezeProblem({ repo, gh }) {
 // #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into
 // staging it would merge unflagged and first meet his approval on release day, holding the whole release; so an
 // agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
-// Also (Taha, 13 Nov; replaces GitHub's code-owner review on .github/): a PR that adds, changes, deletes or
-// renames anything under .github/ (the release guard and workflows) is Taha's to merge, never an agent's.
+// Also (Taha, 13 Nov; on top of GitHub's code-owner review of .github/, which stays on as the guard agents can't
+// edit): a PR that adds, changes, deletes or renames anything under .github/ is Taha's to merge, never an agent's.
 export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";

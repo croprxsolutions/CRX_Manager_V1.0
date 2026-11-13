@@ -248,7 +248,7 @@ Feature work lands in `staging`; `main` takes only the weekly release and hotfix
 - **Enforced around the release (#1838 review, 13 Nov):**
   - Agents never approve a pull request (both guards refuse it): CODEOWNERS names the account they share, so an agent's approval would look like Mason's.
   - An agent doesn't merge a destructive migration (DELETE/TRUNCATE/DROP of data) into `staging`; Taha or Mason does, and Mason approves that exact file before release day.
-  - An agent doesn't merge a PR that adds, changes, deletes or renames anything under `.github/` (the release guard and workflows) into `staging`; Taha does (Taha, 13 Nov). This replaced GitHub's code-owner review, which made Taha's own `.github/` PRs wait for Mason.
+  - An agent doesn't merge a PR that adds, changes, deletes or renames anything under `.github/` (the release guard and workflows) into `staging`; Taha does (Taha, 13 Nov). GitHub's code-owner review of `.github/` stays on as the server-side guard; for his own `.github/` PRs Taha turns it off for that merge and straight back on (an author can't approve their own PR).
   - Once `Applied live:` is on the open release PR, merges into `staging` wait until the release merges. A hotfix merged into `main`, or a `held-off` label change, also moves `release/next`; Taha and Mason avoid both until the release has merged.
   - The apply gate refuses a release or hotfix whose `.github/workflows` differs from `main`'s, a release head that no longer contains staging's tip, a guard result from before switch-on, and a fork's branch.
   - A hotfix may carry nothing staging has that main hasn't released, even under new commit ids; a deliberate backport needs Taha's `hotfix-backport` label.

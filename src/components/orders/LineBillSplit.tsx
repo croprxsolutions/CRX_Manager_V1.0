@@ -25,13 +25,15 @@ interface Props {
   locked: boolean;
   /** Reloads the order; the editor stays locked until it resolves, so the next add checks the new shares. */
   onChanged: () => void | Promise<unknown>;
+  /** Show the lines at once, with no "Split by line" button (the Who pays card already has one). */
+  startOpen?: boolean;
 }
 
 /** A line's own payers, overriding the Bill Split card for that line (billing plan M2). */
-export default function LineBillSplit({ items, lineShares, hasCard, mainCustomerName, canEdit, locked, onChanged }: Props) {
+export default function LineBillSplit({ items, lineShares, hasCard, mainCustomerName, canEdit, locked, onChanged, startOpen = false }: Props) {
   const { toast } = useToast();
   const [openItemId, setOpenItemId] = useState<string | null>(null);
-  const [showList, setShowList] = useState(false);
+  const [showList, setShowList] = useState(startOpen);
   const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
   const [pct, setPct] = useState('');
   const [saving, setSaving] = useState(false);

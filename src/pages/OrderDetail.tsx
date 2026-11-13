@@ -3,9 +3,10 @@
  * GAP FIX #13: Edit Orders After Creation
  * AR derived from linked invoices (single source of truth).
  */
-import { useEffect, useState , useCallback, useMemo, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Truck, Pencil, Save, X, Trash2, FileText, Plus, AlertTriangle, MessageSquarePlus, Printer, ClipboardList, DollarSign } from 'lucide-react';
+import { Fragment, useEffect, useState , useCallback, useMemo, useRef } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Button as RACButton, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
+import { Truck, Pencil, Save, X, Trash2, FileText, Plus, AlertTriangle, MessageSquarePlus, Printer, ClipboardList, DollarSign, ChevronDown, ChevronRight } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
@@ -19,6 +20,11 @@ import { LoadFailedState } from '../components/ui/EmptyState';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import LineBillSplit, { type LineShare } from '../components/orders/LineBillSplit';
 import WhoPaysCard from '../components/orders/WhoPaysCard';
+import SaleMoneySummary from '../components/orders/SaleMoneySummary';
+import SaleInvoicesCard from '../components/orders/SaleInvoicesCard';
+import ActionMenu from '../components/ui/ActionMenu';
+import Switch from '../components/ui/Switch';
+import { statusLabel } from '../lib/statusLabel';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
@@ -106,6 +112,9 @@ export default function OrderDetail() {
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
+  // Display only: the sale's salesperson and the sales tax rate from Settings. A failed read leaves them out.
+  const [salesmanName, setSalesmanName] = useState<string | null>(null);
+  const [salesTaxRate, setSalesTaxRate] = useState<string | null>(null);
 
   // Parent quote for transaction thread
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
@@ -267,17 +276,19 @@ export default function OrderDetail() {
             .filter(Boolean) as string[]
         )];
         const deliveryDriverMap: Record<string, string> = {};
-        if (deliveryDriverIds.length > 0) {
-          // Driver names are display only: a lookup that fails or throws leaves them blank
-          // rather than failing the whole order.
+        const profileIds = [...new Set([...deliveryDriverIds, orderData.salesman_id].filter(Boolean) as string[])];
+        if (profileIds.length > 0) {
+          // Driver and salesperson names are display only: a lookup that fails or throws leaves them
+          // blank rather than failing the whole order.
           const { data: driverData } = await Promise.resolve(supabase
             .from('profile_public_view')
             .select('id, full_name')
-            .in('id', deliveryDriverIds))
+            .in('id', profileIds))
             .catch(() => ({ data: null }));
           (Array.isArray(driverData) ? driverData : []).forEach((p: { id: string | null; full_name: string | null }) => { if (p.id) deliveryDriverMap[p.id] = p.full_name ?? ''; });
         }
         if (isStale()) return false;
+        setSalesmanName(orderData.salesman_id ? deliveryDriverMap[orderData.salesman_id] || null : null);
         setDeliveries(
           deliveryData.map((d: Delivery) => ({
             ...d,
@@ -405,6 +416,15 @@ export default function OrderDetail() {
       return failLoad(err);
     }
   }, [id, toast, isAdmin]);
+
+  // The rate as SettingsPage reads it (app_settings.sales_tax_rate), for the Billing card's sub-line.
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(supabase.from('app_settings').select('setting_value').eq('setting_key', 'sales_tax_rate').maybeSingle())
+      .then(({ data }) => { if (live) setSalesTaxRate((data as { setting_value?: string } | null)?.setting_value || null); })
+      .catch(() => { /* display only */ });
+    return () => { live = false; };
+  }, []);
 
   const retryLoad = () => {
     setLoadFailed(false);
@@ -1361,6 +1381,52 @@ export default function OrderDetail() {
       : { text: `Draft invoice ${named}bills this sale to one customer. To change who pays, remove that draft first.`, href, linkLabel: n };
   })();
 
+  const canPostInvoices = role === 'admin' || role === 'sales_rep';
+  // Who each invoice bills, and the payer's share of the card when every line follows it.
+  const payerName = (customerId: string) =>
+    (customerId === order.customer_id ? customer?.farm_name : undefined)
+    ?? shares.find((sh) => sh.customer_id === customerId)?.customer_name
+    ?? lineShares.find((ls) => ls.customer_id === customerId)?.customer?.farm_name
+    ?? custNames[customerId] ?? '';
+  const cardSharePct = (customerId: string) => {
+    const own = shares.filter((sh) => sh.customer_id === customerId).map((sh) => sh.split_percentage);
+    const left = customerId === order.customer_id ? sharesLeft(shares.map((sh) => sh.split_percentage)) : 0;
+    return Math.round(own.reduce((a, p) => a + p, left) * 100) / 100;
+  };
+  const showSharePct = shares.length > 0 && linesWithOwnSplit.size === 0 && !hasAllocations;
+  const saleInvoices = invoices.map((inv) => ({
+    id: inv.id,
+    number: inv.invoice_number,
+    payerName: payerName(inv.customer_id),
+    sharePct: showSharePct && inv.invoice_group_id ? cardSharePct(inv.customer_id) : undefined,
+    status: inv.status,
+    total: inv.total_amount_cents / 100,
+    balance: inv.balance_cents / 100,
+  }));
+  const canSetSalesTax = (isAdmin || (role === 'sales_rep' && order.salesman_id === profile?.id))
+    && order.status !== 'cancelled' && order.status !== 'voided';
+  const standingDiscount = Number(customer?.standing_discount_pct ?? 0);
+  const subtitle = [
+    customer?.farm_name || 'Unknown customer',
+    order.customer_po_number && `PO ${order.customer_po_number}`,
+    `Ordered ${new Date(order.order_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`,
+    salesmanName && `Sales: ${salesmanName}`,
+  ].filter(Boolean).join(' · ');
+  // Delivered share of the products, by dollar value.
+  const orderedValue = items.reduce((sum, i) => sum + i.total_units_needed * i.price_per_unit, 0);
+  const deliveredValue = items.reduce((sum, i) => sum + Math.min(i.quantity_delivered, i.total_units_needed) * i.price_per_unit, 0);
+  const deliveredPct = orderedValue > 0 ? Math.min(100, Math.round((deliveredValue / orderedValue) * 100)) : null;
+  const showSectionNames = sections.length > 1 || sections[0] !== 'General';
+  const pill = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium';
+  const lineInput = 'w-full xl:w-24 px-2 py-1 min-h-11 md:min-h-0 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+  // Below xl a line is a card: a two-column grid when reading, stacked fields when editing.
+  const rowClass = editing
+    ? 'flex flex-col gap-2 border-t border-gray-100 px-5 py-3 xl:table-row xl:p-0'
+    : 'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t border-gray-100 px-5 py-3 xl:table-row xl:p-0';
+  const cell = 'xl:table-cell xl:px-3 xl:py-3 xl:align-top';
+  const editCell = editing ? `flex items-center justify-between gap-3 ${cell}` : `hidden ${cell}`;
+  const mobileLabel = (text: string) => <span aria-hidden="true" className="text-sm text-secondary xl:hidden">{text}</span>;
+
   return (
     <div className="space-y-4">
       <Breadcrumbs items={[
@@ -1390,9 +1456,39 @@ export default function OrderDetail() {
         currentEntity="order"
         currentEntityId={order.id}
       />
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <h2 className="text-xl font-semibold font-heading text-nav-dark">{order?.order_number || 'Order'}</h2>
-        <div className="flex gap-2 flex-wrap">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-heading text-2xl font-semibold text-nav-dark md:text-3xl">{order.order_number}</h1>
+            <span className={`${pill} ${order.status === 'cancelled' || order.status === 'voided' ? 'bg-red-100 text-red-800' : order.status === 'partially_fulfilled' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+              {statusLabel(order.status)}
+            </span>
+            <MenuTrigger>
+              <RACButton
+                isDisabled={togglingPlanned}
+                className={`${pill} min-h-11 border border-gray-300 bg-white text-nav-dark hover:bg-gray-50 data-[disabled]:opacity-50 md:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green`}
+              >
+                {togglingPlanned ? '...' : order.is_planned ? 'Planned' : 'Committed'}
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </RACButton>
+              <Popover placement="bottom start" className="min-w-48 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg outline-none">
+                <Menu className="outline-none" onAction={() => void handleTogglePlanned()}>
+                  <MenuItem id="toggle" className="cursor-pointer rounded-md px-2.5 py-3 text-sm text-nav-dark outline-none data-[focused]:bg-crx-green-tint data-[hovered]:bg-crx-green-tint md:py-2.5">
+                    {order.is_planned ? 'Mark as committed' : 'Mark as planned'}
+                  </MenuItem>
+                </Menu>
+              </Popover>
+            </MenuTrigger>
+            {order.needs_split_billing && (
+              <span className={`${pill} bg-amber-100 text-amber-800`} title="This delivered order has field allocations, so its auto-invoice was skipped. Use Create split invoices to bill it.">
+                Needs split billing
+              </span>
+            )}
+          </div>
+          {order.order_name && <p className="mt-0.5 text-base font-medium text-nav-dark">{order.order_name}</p>}
+          <p className="mt-1 text-sm text-secondary">{subtitle}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           {editing ? (
             <>
               <Button variant="ghost" icon={<X className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => {
@@ -1406,11 +1502,16 @@ export default function OrderDetail() {
                 Cancel
               </Button>
               <Button icon={<Save className="w-4 h-4" />} onClick={handleSaveEdits} loading={saving}>
-                Save Changes
+                Save changes
               </Button>
             </>
           ) : (
             <>
+              {order.booking_draw && (role === 'admin' || role === 'sales_rep') && order.status !== 'cancelled' && order.status !== 'voided' && (
+                <span className="text-xs text-secondary" title="This order was created by a booking draw-down. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw again.">
+                  Booking draw — items locked
+                </span>
+              )}
               {canEdit && (
                 <Button
                   variant="secondary"
@@ -1420,18 +1521,8 @@ export default function OrderDetail() {
                   disabled={togglingPlanned}
                   onClick={() => { setEditing(true); }}
                 >
-                  Edit Order
+                  Edit order
                 </Button>
-              )}
-              {order.booking_draw && (role === 'admin' || role === 'sales_rep') && order.status !== 'cancelled' && order.status !== 'voided' && (
-                <span className="text-xs text-secondary self-center" title="This order was created by a booking draw-down. Its items mirror the booking ledger, so they can't be edited here — void or cancel the order to return quantity to the booking, then draw again.">
-                  Booking draw — items locked
-                </span>
-              )}
-              {order.status !== 'fulfilled' && order.status !== 'cancelled' && order.status !== 'voided' && (
-                <span className="text-xs text-secondary self-center">
-                  Product invoices are created after delivery. Record advance payments as prepay.
-                </span>
               )}
               {/* U7 SAFE-SCOPE: a delivered field/acre-allocated order that should be split-billed
                   per owner (complete_delivery skipped the mono-bill auto-draft to avoid over-billing
@@ -1442,7 +1533,7 @@ export default function OrderDetail() {
                   fulfilled allocated order whose split group was later VOIDED (flag already cleared,
                   hasActiveInvoice now false) can be RE-billed here — Codex R2 P2. The
                   needs_split_billing flag remains as the Orders-list queue badge/filter. */}
-              {hasAllocations && order.status === 'fulfilled' && !hasActiveInvoice && !hasPendingDelivery && (<>
+              {hasAllocations && order.status === 'fulfilled' && !hasActiveInvoice && !hasPendingDelivery && (<span className="inline-flex items-center">
                 <Button
                   variant="secondary"
                   icon={<FileText className="w-4 h-4" />}
@@ -1450,48 +1541,51 @@ export default function OrderDetail() {
                   onClick={handleCreateInvoice}
                   loading={creatingInvoice}
                 >
-                  Create Split Invoices
+                  Create split invoices
                 </Button>
                 <HelpTip
                   text="This order has field/acre allocations, so its auto-invoice was skipped on delivery to avoid over-billing. Generates one draft invoice per field owner, split by acres — nothing is sent to the customer yet."
                   className="ml-1"
                 />
-              </>)}
-              {order.status !== 'cancelled' && order.status !== 'fulfilled' && (<>
+              </span>)}
+              {order.status !== 'cancelled' && order.status !== 'fulfilled' && (<span className="inline-flex items-center">
                 <Button
                   icon={<Truck className="w-4 h-4" />}
                   onClick={() => navigate(`/deliveries/new?order=${order.id}`)}
                 >
-                  Schedule Delivery
+                  Schedule delivery
                 </Button>
                 <HelpTip text="Creates a new delivery from this order's items. The driver will see it on their dashboard and can start it when ready." className="ml-1" />
-              </>)}
-              <Button
-                variant="secondary"
-                icon={<Printer className="w-4 h-4" />}
-                showChevron={false}
-                onClick={handlePrintSummary}
-                loading={printingSummary}
-              >
-                Print Summary
-              </Button>
-              <Button
-                variant="secondary"
-                icon={<ClipboardList className="w-4 h-4" />}
-                showChevron={false}
-                onClick={handlePrintPickList}
-                loading={printingPickList}
-              >
-                Print Pick List
-              </Button>
-              <Button
-                variant="secondary"
-                icon={<MessageSquarePlus className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setQuickTaskOpen(true)}
-              >
-                Create Task
-              </Button>
+              </span>)}
+              <ActionMenu
+                label="Print"
+                trigger={{ text: 'Print', variant: 'secondary', icon: <Printer className="h-4 w-4" aria-hidden="true" /> }}
+                items={[
+                  { id: 'summary', label: 'Order summary PDF', icon: <Printer className="h-4 w-4" />, disabled: printingSummary, onAction: () => void handlePrintSummary() },
+                  { id: 'pick', label: 'Pick list PDF', icon: <ClipboardList className="h-4 w-4" />, disabled: printingPickList, onAction: () => void handlePrintPickList() },
+                ]}
+              />
+              <ActionMenu
+                label="More actions"
+                items={[
+                  { id: 'task', label: 'Create task', icon: <MessageSquarePlus className="h-4 w-4" />, onAction: () => setQuickTaskOpen(true) },
+                  { id: 'payment', label: 'Record payment', icon: <DollarSign className="h-4 w-4" />, onAction: () => navigate('/payments') },
+                  // #67: the only manual order-status transition the handler allows is → cancelled;
+                  // fulfilled/partially_fulfilled are auto-derived when deliveries complete.
+                  ...(isAdmin && (order.status === 'confirmed' || order.status === 'partially_fulfilled') ? [{
+                    id: 'cancel', danger: true, icon: <X className="h-4 w-4" />,
+                    label: order.status === 'partially_fulfilled' ? 'Cancel remaining quantity…' : 'Cancel order…',
+                    // F1: no per-open reset. cancel_order takes only
+                    // (p_order_id, p_performed_by, p_idempotency_key) — nothing varies
+                    // between attempts, so reopening this dialog is the SAME intent and a
+                    // fresh key would let an ambiguous first attempt cancel twice.
+                    onAction: () => { setPendingStatus('cancelled'); setStatusConfirmOpen(true); },
+                  }] : []),
+                  ...(isAdmin && order.status === 'fulfilled' ? [{
+                    id: 'void', danger: true, icon: <X className="h-4 w-4" />, label: 'Void order…', onAction: () => setVoidModalOpen(true),
+                  }] : []),
+                ]}
+              />
             </>
           )}
         </div>
@@ -1568,458 +1662,304 @@ export default function OrderDetail() {
         );
       })()}
 
-      <Card>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold font-heading text-nav-dark">
-              {order.order_number}
-            </h2>
-            {order.order_name && (
-              <p className="text-base font-medium text-nav-dark mt-0.5">{order.order_name}</p>
-            )}
-            <p className="text-sm text-secondary mt-1">
-              {customer?.farm_name || 'Unknown Customer'}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* #67: the only manual order-status transition the handler allows is
-                → cancelled; fulfilled/partially_fulfilled are auto-derived when
-                deliveries complete. So this is a plain Cancel Order action, not a
-                dropdown of choices that always fail. */}
-            {isAdmin && (order.status === 'confirmed' || order.status === 'partially_fulfilled') && (
-              <button
-                // F1: no per-open reset. cancel_order takes only
-                // (p_order_id, p_performed_by, p_idempotency_key) — nothing varies
-                // between attempts, so reopening this dialog is the SAME intent and a
-                // fresh key would let an ambiguous first attempt cancel twice.
-                onClick={() => { setPendingStatus('cancelled'); setStatusConfirmOpen(true); }}
-                className="text-xs text-red-500 hover:text-red-700 underline"
-              >
-                {order.status === 'partially_fulfilled' ? 'Cancel Remaining Quantity' : 'Cancel Order'}
-              </button>
-            )}
-            {isAdmin && order.status === 'fulfilled' && (
-              <button
-                onClick={() => setVoidModalOpen(true)}
-                className="text-xs text-red-500 hover:text-red-700 underline font-medium"
-              >
-                Void Order
-              </button>
-            )}
-            <button
-              onClick={handleTogglePlanned}
-              disabled={togglingPlanned}
-              title={order.is_planned ? 'Click to mark as Committed' : 'Click to mark as Planned'}
-              className="cursor-pointer disabled:opacity-50"
-            >
-              <Badge variant={order.is_planned ? 'warning' : 'success'} size="md">
-                {togglingPlanned ? '...' : order.is_planned ? 'Planned' : 'Committed'}
-              </Badge>
-            </button>
-            <Badge variant={statusToBadgeVariant[order.status] || 'default'} size="md">
-              {order.status.replace('_', ' ')}
-            </Badge>
-            {order.needs_split_billing && (
-              <span title="This delivered order has field/acre allocations — auto-invoice was skipped; use Create Split Invoices below to bill it.">
-                <Badge variant="warning" size="md">
-                  Needs split billing
-                </Badge>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
-          <div>
-            <p className="text-xs text-secondary">Order Date</p>
-            <p className="text-sm font-medium text-nav-dark">
-              {new Date(order.order_date + 'T00:00:00').toLocaleDateString()}
-            </p>
-          </div>
-          {order.customer_po_number && (
-            <div>
-              <p className="text-xs text-secondary">Customer PO#</p>
-              <p className="text-sm font-medium text-nav-dark">
-                {order.customer_po_number}
-              </p>
-            </div>
-          )}
-          <div>
-            <p className="text-xs text-secondary">Total Price</p>
-            <p className="text-sm font-medium text-nav-dark">{fmt(order.total_price)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-secondary" id="order-sales-tax-label">Sales tax</p>
-            <label className="mt-1 inline-flex items-center gap-2 text-sm font-medium text-nav-dark">
-              <input
-                type="checkbox"
-                aria-labelledby="order-sales-tax-label"
-                checked={!!order.sales_tax}
-                disabled={savingSalesTax || !(isAdmin || (role === 'sales_rep' && order.salesman_id === profile?.id))
-                  || order.status === 'cancelled' || order.status === 'voided'}
-                onChange={handleToggleSalesTax}
-                className="h-5 w-5 rounded border-gray-300 text-crx-green focus:ring-crx-green disabled:opacity-50"
-              />
-              {order.sales_tax ? 'Taxed' : 'Not taxed'}
-            </label>
-          </div>
-          {/* Cost is admin-only (Mason, 2026-10-15): no profit/margin for reps or field staff. */}
-          {isAdmin && (<>
-            <div>
-              <p className="text-xs text-secondary">Profit</p>
-              <p className="text-sm font-medium text-crx-green">{order.total_profit == null ? '—' : fmt(order.total_profit)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-secondary">Margin</p>
-              <p className="text-sm font-medium text-nav-dark">
-                {order.total_margin_pct == null ? '—' : `${order.total_margin_pct.toFixed(1)}%`}
-              </p>
-            </div>
-          </>)}
-        </div>
-
-        {/* AR summary — derived from linked invoices (single source of truth).
-            Non-admins only see invoices they created or are the salesman on
-            (invoices RLS), so for them these totals can be partial or empty
-            even when the order is billed and paid — never show a bare $0.00. */}
-        {!isAdmin && invoices.length === 0 ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-4 pt-4 border-t border-gray-100">
-            <p className="text-sm text-secondary">
-              You can&apos;t view any invoices for this order. Ask the office whether it has been billed or paid.
-            </p>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/payments')}>
-              Record Payment →
-            </Button>
-          </div>
-        ) : (<>
-        {!isAdmin && (
-          <p className="text-xs text-secondary mt-4 pt-4 border-t border-gray-100">
-            Totals below include only the invoices you created or are the salesman on. The office sees the full amounts.
-          </p>
-        )}
-        <div className={`grid grid-cols-2 sm:grid-cols-4 gap-4 ${isAdmin ? 'mt-4 pt-4 border-t border-gray-100' : 'mt-2'}`}>
-          <div>
-            <p className="text-xs text-secondary">Total Invoiced</p>
-            <p className="text-sm font-medium text-nav-dark">{fmt(totalInvoiced)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-secondary">Amount Paid</p>
-            <p className="text-sm font-medium text-crx-green">{fmt(totalPaid)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-secondary">Balance Due</p>
-            <p className={`text-sm font-semibold ${balanceDue > 0 ? 'text-red-600' : 'text-crx-green'}`}>
-              {fmt(Math.max(0, balanceDue))}
-            </p>
-          </div>
-          {writeOffCents > 0 && (
-            <div>
-              <p className="text-xs text-secondary">Written Off</p>
-              <p className="text-sm font-medium text-amber-600">{fmt(writeOff)}</p>
-            </div>
-          )}
-          <div className="flex items-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/payments')}
-            >
-              Record Payment →
-            </Button>
-          </div>
-        </div>
-        </>)}
-      </Card>
-
-      {order.notes && (
-        <Card>
-          <div className="flex items-start gap-3">
-            <FileText className="w-4 h-4 text-secondary mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs text-secondary font-medium mb-1">Order Notes <HelpTip text="Notes about this order that carry through to the load sheet and delivery. Use for special instructions like 'Call before delivering'." className="ml-1" /></p>
-              <p className="text-sm text-nav-dark whitespace-pre-wrap">{order.notes}</p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Related Notes */}
-      <RelatedNotes
-        entityType={'order' as LinkedEntityType}
-        entityId={id!}
-        onCreateTask={() => setQuickTaskOpen(true)}
+      {/* AR derived from linked invoices (single source of truth). Non-admins only see invoices they
+          created or are the salesman on (invoices RLS), so for them these totals can be partial or
+          empty even when the order is billed and paid — never show a bare $0.00. */}
+      <SaleMoneySummary
+        saleTotal={order.total_price}
+        invoiced={!isAdmin && invoices.length === 0 ? null : totalInvoiced}
+        paid={totalPaid}
+        balanceDue={balanceDue}
+        writtenOff={writeOff}
+        // Cost is admin-only (Mason, 2026-10-15): no profit/margin for reps or field staff.
+        showProfit={isAdmin}
+        profit={order.total_profit}
+        marginPct={order.total_margin_pct}
+        invoiceNote={isAdmin ? null : invoices.length === 0
+          ? "You can't view any invoices for this order. Ask the office whether it has been billed or paid."
+          : 'These totals include only the invoices you created or are the salesman on. The office sees the full amounts.'}
       />
 
-      {/* Linked Deliveries */}
-      {deliveries.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <Truck className="w-5 h-5 text-crx-green" />
-            <h3 className="font-semibold text-nav-dark">Linked Deliveries</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Delivery #</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Status</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Driver</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Scheduled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deliveries.map((del) => (
-                  <tr key={del.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => navigate(`/deliveries/${del.id}`)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        {del.delivery_number}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={statusToBadgeVariant[del.status] || 'default'} size="sm">
-                        {del.status.replace('_', ' ')}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2 text-secondary">
-                      {del.driver_name || 'Unassigned'}
-                    </td>
-                    <td className="px-4 py-2 text-secondary">
-                      {parseLocalDate(del.scheduled_date).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start">
+        {/* The rail comes first, so below xl it sits above Products. */}
+        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start xl:col-start-2 xl:row-start-1 xl:grid-cols-1">
+          <SaleInvoicesCard
+            invoices={saleInvoices}
+            canPost={canPostInvoices}
+            onPostAll={handlePostAllDrafts}
+            posting={postingAll}
+            emptyText={isAdmin ? undefined : 'No invoices you can view on this sale.'}
+          />
 
-      {/* Linked Invoices */}
-      {invoices.length > 0 && (
-        <Card>
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-crx-green" />
-              <h3 className="font-semibold text-nav-dark">Linked Invoices</h3>
-            </div>
-            {(role === 'admin' || role === 'sales_rep') && (
-              <div className="flex items-center gap-2">
-                {invoices.some((i) => i.status === 'draft' || i.status === 'unposted') && (
-                  <Button variant="secondary" size="sm" showChevron={false} onClick={handlePostAllDrafts} loading={postingAll}>
-                    Post all drafts
-                  </Button>
+          {/* Who pays (the Bill Split card) */}
+          {(shares.length > 0 || lineShares.length > 0 || canEditSplit) && (
+            <WhoPaysCard
+              mainCustomerName={customer?.farm_name || 'The main customer'}
+              // Live, not the amount saved when the share was added: it follows price edits and line splits.
+              // A share held by the main customer folds into the main row in cardLive, so it is worked out from its percent.
+              shares={shares.map((sh) => ({
+                id: sh.id,
+                customerName: sh.customer_name,
+                pct: sh.split_percentage,
+                amount: sh.customer_id === order.customer_id ? undefined : (cardLive.get(sh.customer_id) ?? 0) / 100,
+              }))}
+              productsTotal={[...cardLive.values()].reduce((a, c) => a + c, 0) / 100}
+              lock={splitLockNote}
+              fieldSplitBills={hasAllocations}
+              canEdit={canEditSplit}
+              saving={savingShares}
+              onAdd={handleAddShare}
+              onRemove={(shareId) => void handleRemoveShare(shareId)}
+              picked={newShareCustomerId ? { id: newShareCustomerId, name: newShareCustomerName } : null}
+              someLinesOwnSplit={linesWithOwnSplit.size > 0}
+              customerPicker={
+                <CustomerSearchPicker
+                  value={newShareCustomerId}
+                  selectedLabel={newShareCustomerName}
+                  onSelect={(c) => {
+                    setNewShareCustomerId(c?.id ?? '');
+                    setNewShareCustomerName(c?.farm_name ?? '');
+                  }}
+                  excludeIds={shares.map((s) => s.customer_id)}
+                  placeholder="Search customer..."
+                  ariaLabel="Bill split customer"
+                  disabled={savingShares}
+                  // A 44px touch target below md.
+                  className="[&_input]:min-h-11 md:[&_input]:min-h-0"
+                />
+              }
+              // Not when the field split failed to load: its lines would show an editor whose shares don't bill.
+              lineSplit={!hasAllocations && !allocLoadFailed && items.length > 0 && (lineShares.length > 0 || (canEditSplit && !sharesLocked)) ? (
+                <LineBillSplit
+                  items={items}
+                  lineShares={lineShares}
+                  hasCard={shares.length > 0}
+                  mainCustomerName={customer?.farm_name || 'the main customer'}
+                  canEdit={canEditSplit}
+                  locked={sharesLocked}
+                  onChanged={() => fetchOrder()}
+                  // The card's "Split by line" disclosure is the one click.
+                  startOpen
+                />
+              ) : undefined}
+            />
+          )}
+
+          <Card>
+            <section aria-labelledby="billing-title" className="flex flex-col gap-2">
+              <h2 id="billing-title" className="font-heading text-xl font-semibold text-nav-dark">Billing</h2>
+              {/* The sales tax switch (billing plan M4a): an admin or the sale's own rep. The database applies it
+                  to the sale's draft invoices; posted ones keep their tax. */}
+              <Switch
+                label="Charge sales tax"
+                description={`${salesTaxRate ? `${salesTaxRate}%, set` : 'Set'} in Settings › Billing. Posted invoices keep the tax they had.`}
+                isSelected={!!order.sales_tax}
+                isDisabled={savingSalesTax || !canSetSalesTax}
+                onChange={() => void handleToggleSalesTax()}
+              />
+              {standingDiscount > 0 && customer && (
+                <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-sm font-medium text-nav-dark">Standing discount {standingDiscount}%</span>
+                    <span className="text-sm text-secondary">{customer.farm_name}&apos;s rate, off products before tax</span>
+                  </span>
+                  <Link to={`/customers/${customer.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-crx-green underline hover:text-crx-green-hover md:min-h-0">
+                    Customer
+                  </Link>
+                </div>
+              )}
+            </section>
+          </Card>
+        </div>
+
+        <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-1">
+          <Card padding={false}>
+            <section aria-labelledby="products-title">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 pb-3">
+                <h2 id="products-title" className="font-heading text-xl font-semibold text-nav-dark">Products</h2>
+                {!editing && deliveredPct !== null && (
+                  <span className="flex items-center gap-2 text-sm font-medium text-crx-green">
+                    <span role="img" aria-label={`${deliveredPct} percent delivered`} className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-gray-100 md:block">
+                      <span className="block h-full rounded-full bg-crx-green" style={{ width: `${deliveredPct}%` }} />
+                    </span>
+                    {deliveredPct === 100 ? 'All delivered' : `${deliveredPct}% delivered`}
+                  </span>
                 )}
               </div>
-            )}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Invoice #</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Type</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Status</th>
-                  <th className="px-4 py-2 text-right font-medium text-secondary">Total</th>
-                  <th className="px-4 py-2 text-right font-medium text-secondary">Paid</th>
-                  <th className="px-4 py-2 text-right font-medium text-secondary">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((inv) => (
-                  <tr key={inv.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => navigate(`/invoices/${inv.id}`)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        {inv.invoice_number}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-secondary capitalize">
-                      {inv.invoice_type.replace('_', ' ')}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={inv.status === 'posted' ? 'success' : inv.status === 'draft' || inv.status === 'unposted' ? 'default' : inv.status === 'voided' || inv.status === 'cancelled' ? 'error' : 'warning'} size="sm">
-                        {inv.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono">{fmt(inv.total_amount_cents / 100)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-crx-green">
-                      {fmt((inv.paid_amount_cents + inv.prepay_applied_cents) / 100)}
-                    </td>
-                    <td className={`px-4 py-2 text-right font-mono font-semibold ${inv.balance_cents > 0 ? 'text-red-600' : 'text-crx-green'}`}>
-                      {fmt(inv.balance_cents / 100)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {sections.map((section) => (
-        <Card key={section} padding={false}>
-          <div className="p-5">
-            <CardHeader title={section} />
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Product</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Vendor</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Price/Unit</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Units Needed</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Delivered</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Remaining</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary w-40">Progress <HelpTip text="Shows how much of the order has been delivered, weighted by dollar value. 100% means all items are fully delivered." className="ml-1" /></th>
-                    {editing && <th className="px-4 py-3 w-10"></th>}
+              <table className="block w-full text-sm xl:table">
+                <thead className="hidden bg-cream/60 xl:table-header-group">
+                  <tr>
+                    <th scope="col" className="px-5 py-2.5 text-left font-medium text-secondary">Product</th>
+                    <th scope="col" className="px-3 py-2.5 text-left font-medium text-secondary">Vendor</th>
+                    <th scope="col" className="px-3 py-2.5 text-right font-medium text-secondary">Price</th>
+                    <th scope="col" className="px-3 py-2.5 text-right font-medium text-secondary">Ordered</th>
+                    <th scope="col" className="px-3 py-2.5 text-right font-medium text-secondary">Delivered</th>
+                    <th scope="col" className="px-3 py-2.5 text-right font-medium text-secondary">Left</th>
+                    <th scope="col" className="px-5 py-2.5 text-right font-medium text-secondary">Line total</th>
+                    {editing && <th scope="col" className="w-10"><span className="sr-only">Remove</span></th>}
                   </tr>
                 </thead>
-                <tbody>
-                  {displayItems
-                    .filter((i) => (i.section_name || 'General') === section)
-                    .map((item) => {
-                      const units = item.total_units_needed;
-                      const ppu = item.price_per_unit;
-                      const pct =
-                        units > 0
-                          ? Math.round((item.quantity_delivered / units) * 100)
-                          : 0;
-                      return (
-                        <tr key={item.id} className="border-b border-gray-50">
-                          <td className="px-4 py-3 font-medium text-nav-dark">
-                            {item.product_name}
-                          </td>
-                          <td className="px-4 py-3 text-secondary">
-                            {item.vendor || '-'}
-                          </td>
-                          <td className="px-4 py-3 font-mono">
-                            {editing ? (
-                              <input
-                                type="number"
-                                value={ppu}
-                                disabled={saving}
-                                onChange={(e) => updateEditItem(item.id, 'price_per_unit', Number(e.target.value))}
-                                className="w-24 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                                step="0.01"
-                              />
-                            ) : (
-                              fmt(ppu)
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {editing ? (
-                              <input
-                                type="number"
-                                value={units}
-                                disabled={saving}
-                                onChange={(e) => updateEditItem(item.id, 'total_units_needed', Number(e.target.value))}
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                              />
-                            ) : (
-                              units
-                            )}
-                          </td>
-                          <td className="px-4 py-3">{item.quantity_delivered}</td>
-                          <td className="px-4 py-3">{units - item.quantity_delivered}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-crx-green rounded-full transition-all"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-secondary w-8">{pct}%</span>
-                            </div>
-                          </td>
-                          {editing && (
-                            <td className="px-4 py-3">
-                              <button
-                                onClick={() => handleDeleteItem(item.id)}
-                                disabled={saving}
-                                className="text-red-400 hover:text-red-600"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          )}
+                <tbody className="block xl:table-row-group">
+                  {sections.map((section) => (
+                    <Fragment key={section}>
+                      {showSectionNames && (
+                        <tr className="block border-t border-gray-100 xl:table-row">
+                          <th scope="colgroup" colSpan={editing ? 8 : 7} className="block px-5 pt-3 pb-1 text-left text-xs font-semibold uppercase tracking-wide text-secondary xl:table-cell">
+                            {section}
+                          </th>
                         </tr>
-                      );
-                    })}
+                      )}
+                      {displayItems
+                        .filter((i) => (i.section_name || 'General') === section)
+                        .map((item) => {
+                          const units = item.total_units_needed;
+                          const ppu = item.price_per_unit;
+                          const left = units - item.quantity_delivered;
+                          const name = item.product_name || 'Line';
+                          const lineTotal = editing || item.total_price == null ? exactRound2([ppu, units]) : item.total_price;
+                          return (
+                            <tr key={item.id} className={rowClass}>
+                              <td className={`min-w-0 ${cell} xl:pl-5`}>
+                                <span className="block break-words font-medium text-nav-dark">{item.product_name}</span>
+                                {(item.unit_size || item.vendor) && (
+                                  <span className="block text-xs text-secondary">
+                                    {item.unit_size}
+                                    {item.vendor && <span className="xl:hidden">{item.unit_size ? ' · ' : ''}{item.vendor}</span>}
+                                  </span>
+                                )}
+                                {!editing && (
+                                  <span className="mt-1 block text-sm text-secondary xl:hidden">
+                                    {`${units} at ${fmt(ppu)} · ${item.quantity_delivered} delivered`}
+                                  </span>
+                                )}
+                              </td>
+                              <td className={`hidden text-secondary ${cell}`}>{item.vendor || '-'}</td>
+                              <td className={`${editCell} xl:text-right tabular-nums`}>
+                                {editing ? (<>
+                                  {mobileLabel('Price')}
+                                  <input
+                                    type="number"
+                                    aria-label={`Price for ${name}`}
+                                    value={ppu}
+                                    disabled={saving}
+                                    onChange={(e) => updateEditItem(item.id, 'price_per_unit', Number(e.target.value))}
+                                    className={`${lineInput} max-w-32`}
+                                    step="0.01"
+                                  />
+                                </>) : fmt(ppu)}
+                              </td>
+                              <td className={`${editCell} xl:text-right tabular-nums`}>
+                                {editing ? (<>
+                                  {mobileLabel('Ordered')}
+                                  <input
+                                    type="number"
+                                    aria-label={`Quantity for ${name}`}
+                                    value={units}
+                                    disabled={saving}
+                                    onChange={(e) => updateEditItem(item.id, 'total_units_needed', Number(e.target.value))}
+                                    className={`${lineInput} max-w-32`}
+                                  />
+                                </>) : units}
+                              </td>
+                              <td className={`hidden xl:text-right tabular-nums ${cell}`}>{item.quantity_delivered}</td>
+                              <td className={`hidden xl:text-right tabular-nums ${cell}`}>{left === 0 ? '—' : left}</td>
+                              <td className={`${editing ? 'flex justify-between gap-3' : 'text-right'} font-semibold tabular-nums text-nav-dark ${cell} xl:pr-5 xl:text-right`}>
+                                {editing && mobileLabel('Line total')}
+                                {fmt(lineTotal)}
+                              </td>
+                              {editing && (
+                                <td className={`${cell} self-end`}>
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove ${name}`}
+                                    onClick={() => handleDeleteItem(item.id)}
+                                    disabled={saving}
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-red-400 hover:text-red-600 md:h-9 md:w-9"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                    </Fragment>
+                  ))}
                 </tbody>
-                {editing && (
-                  <tfoot>
+                {editing ? (
+                  <tfoot className="block xl:table-footer-group">
                     {/* New items being added */}
                     {newItems.map((ni) => (
-                      <tr key={ni._tempKey} className="border-b border-green-100 bg-green-50/40">
-                        <td className="px-4 py-3 font-medium text-nav-dark">
+                      <tr key={ni._tempKey} className={`${rowClass} bg-green-50/40`}>
+                        <td className={`${cell} xl:pl-5 font-medium text-nav-dark`}>
                           <div className="flex items-center gap-1">
                             <Plus className="w-3 h-3 text-crx-green" />
                             {ni.product_name}
                             <span className="text-xs text-crx-green font-normal">(new)</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-secondary">-</td>
-                        <td className="px-4 py-3 font-mono">
+                        <td className={`hidden text-secondary ${cell}`}>-</td>
+                        <td className={`${editCell} xl:text-right`}>
+                          {mobileLabel('Price')}
                           <input
                             type="number"
+                            aria-label={`Price for ${ni.product_name}`}
                             value={ni.price_per_unit}
                             disabled={saving}
                             onChange={(e) => updateNewItem(ni._tempKey, 'price_per_unit', Number(e.target.value))}
-                            className="w-24 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                            className={`${lineInput} max-w-32`}
                             step="0.01"
                           />
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={`${editCell} xl:text-right`}>
+                          {mobileLabel('Ordered')}
                           <input
                             type="number"
+                            aria-label={`Quantity for ${ni.product_name}`}
                             value={ni.total_units_needed || ''}
                             disabled={saving}
                             onChange={(e) => updateNewItem(ni._tempKey, 'total_units_needed', Number(e.target.value))}
-                            className="w-20 px-2 py-1 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+                            className={`${lineInput} max-w-32`}
                             placeholder="Qty"
                           />
                         </td>
-                        <td className="px-4 py-3 text-secondary">0</td>
-                        <td className="px-4 py-3 text-secondary">{ni.total_units_needed || 0}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-xs text-secondary">—</span>
+                        <td className={`hidden xl:text-right text-secondary ${cell}`}>0</td>
+                        <td className={`hidden xl:text-right text-secondary ${cell}`}>{ni.total_units_needed || 0}</td>
+                        <td className={`flex justify-between gap-3 font-semibold tabular-nums text-nav-dark ${cell} xl:pr-5 xl:text-right`}>
+                          {mobileLabel('Line total')}
+                          {fmt(exactRound2([ni.price_per_unit, ni.total_units_needed]))}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={`${cell} self-end`}>
                           <button
+                            type="button"
+                            aria-label={`Remove ${ni.product_name}`}
                             onClick={() => removeNewItem(ni._tempKey)}
                             disabled={saving}
-                            className="text-red-400 hover:text-red-600"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-red-400 hover:text-red-600 md:h-9 md:w-9"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
                     ))}
-                    {/* Add Product button */}
-                    <tr className="border-t border-dashed border-gray-300">
-                      <td colSpan={8} className="px-4 py-2">
+                    {/* Add product button */}
+                    <tr className="block border-t border-dashed border-gray-300 xl:table-row">
+                      <td colSpan={8} className="block px-5 py-2 xl:table-cell">
                         <button
                           type="button"
                           onClick={() => { setShowProductModal(true); setProductSearch(''); }}
                           disabled={saving}
-                          className="flex items-center gap-2 text-sm text-crx-green hover:text-crx-green/80 font-medium transition-colors"
+                          className="flex min-h-11 items-center gap-2 text-sm text-crx-green hover:text-crx-green/80 font-medium transition-colors md:min-h-0"
                         >
                           <Plus className="w-4 h-4" />
-                          Add Product
+                          Add product
                         </button>
                       </td>
                     </tr>
                     {/* New total */}
-                    <tr className="border-t border-gray-200">
-                      <td colSpan={2} className="px-4 py-3 font-medium text-nav-dark">
-                        New Total:
-                      </td>
-                      <td colSpan={6} className="px-4 py-3 font-semibold text-nav-dark">
+                    <tr className="flex justify-between border-t border-gray-200 px-5 py-4 font-semibold text-nav-dark xl:table-row xl:p-0">
+                      <td colSpan={6} className="xl:table-cell xl:px-5 xl:py-4">New total</td>
+                      <td colSpan={2} className="tabular-nums xl:table-cell xl:px-5 xl:py-4 xl:text-right">
                         {/* Each line as the order functions store it, exact to the cent (To-Do 1.7). */}
                         {fmt(
                           [...editItems, ...newItems].reduce((cents, i) => cents + Math.round(exactRound2([i.price_per_unit, i.total_units_needed]) * 100), 0) / 100
@@ -2027,171 +1967,170 @@ export default function OrderDetail() {
                       </td>
                     </tr>
                   </tfoot>
+                ) : (
+                  <tfoot className="block xl:table-footer-group">
+                    <tr className="flex justify-between border-t border-gray-100 px-5 py-4 font-semibold text-nav-dark xl:table-row xl:p-0">
+                      <td colSpan={6} className="xl:table-cell xl:px-5 xl:py-4">Products total</td>
+                      <td className="tabular-nums xl:table-cell xl:px-5 xl:py-4 xl:text-right">{fmt(order.total_price)}</td>
+                    </tr>
+                  </tfoot>
                 )}
               </table>
-            </div>
-          </div>
-        </Card>
-      ))}
+            </section>
+          </Card>
 
-      {/* Who pays (the Bill Split card) */}
-      {(shares.length > 0 || lineShares.length > 0 || canEditSplit) && (
-        <WhoPaysCard
-          mainCustomerName={customer?.farm_name || 'The main customer'}
-          // Live, not the amount saved when the share was added: it follows price edits and line splits.
-          // A share held by the main customer folds into the main row in cardLive, so it is worked out from its percent.
-          shares={shares.map((sh) => ({
-            id: sh.id,
-            customerName: sh.customer_name,
-            pct: sh.split_percentage,
-            amount: sh.customer_id === order.customer_id ? undefined : (cardLive.get(sh.customer_id) ?? 0) / 100,
-          }))}
-          productsTotal={[...cardLive.values()].reduce((a, c) => a + c, 0) / 100}
-          lock={splitLockNote}
-          fieldSplitBills={hasAllocations}
-          canEdit={canEditSplit}
-          saving={savingShares}
-          onAdd={handleAddShare}
-          onRemove={(shareId) => void handleRemoveShare(shareId)}
-          picked={newShareCustomerId ? { id: newShareCustomerId, name: newShareCustomerName } : null}
-          someLinesOwnSplit={linesWithOwnSplit.size > 0}
-          customerPicker={
-            <CustomerSearchPicker
-              value={newShareCustomerId}
-              selectedLabel={newShareCustomerName}
-              onSelect={(c) => {
-                setNewShareCustomerId(c?.id ?? '');
-                setNewShareCustomerName(c?.farm_name ?? '');
-              }}
-              excludeIds={shares.map((s) => s.customer_id)}
-              placeholder="Search customer..."
-              ariaLabel="Bill split customer"
-              disabled={savingShares}
-            />
-          }
-          // Not when the field split failed to load: its lines would show an editor whose shares don't bill.
-          lineSplit={!hasAllocations && !allocLoadFailed && items.length > 0 && (lineShares.length > 0 || (canEditSplit && !sharesLocked)) ? (
-            <LineBillSplit
-              items={items}
-              lineShares={lineShares}
-              hasCard={shares.length > 0}
-              mainCustomerName={customer?.farm_name || 'the main customer'}
-              canEdit={canEditSplit}
-              locked={sharesLocked}
-              onChanged={() => fetchOrder()}
-            />
-          ) : undefined}
-        />
-      )}
+          {deliveries.length > 0 && (
+            <Card padding={false}>
+              <section aria-labelledby="deliveries-title">
+                <h2 id="deliveries-title" className="px-5 pt-5 pb-3 font-heading text-xl font-semibold text-nav-dark">Deliveries</h2>
+                <ul className="px-2 pb-2">
+                  {deliveries.map((del) => (
+                    <li key={del.id} className="border-t border-gray-100">
+                      <Link to={`/deliveries/${del.id}`} className="flex min-h-14 items-center gap-3 rounded-lg px-3 py-3 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green">
+                        <Truck className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <strong className="font-semibold text-nav-dark">{del.delivery_number}</strong>
+                          <span className="text-sm text-secondary">
+                            {parseLocalDate(del.scheduled_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {del.driver_name || 'Unassigned'}
+                          </span>
+                        </span>
+                        <Badge variant={statusToBadgeVariant[del.status] || 'default'} size="sm" normalCase>
+                          {statusLabel(del.status)}
+                        </Badge>
+                        <ChevronRight className="h-4 w-4 flex-none text-secondary" aria-hidden="true" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </Card>
+          )}
 
-      {/* Field / Acre Split (multi-field split invoicing) */}
-      {(hasAllocations || canEdit) && (
-        <Card>
-          <div className="flex items-center gap-2 mb-1">
-            <ClipboardList className="w-5 h-5 text-crx-green" />
-            <h3 className="font-semibold text-nav-dark">Field / Acre Split</h3>
-            <HelpTip text="Spread an order line across multiple fields by acres. When you create the invoice, each field's owner(s) get billed their acre-weighted share — one invoice per customer. A line with no fields is billed normally to this order's customer." />
-          </div>
-          <p className="text-xs text-secondary mb-3">
-            Optional. Assign fields + acres to a line to split its invoice across the fields' owners by acres.
-            {allocLoadFailed
-              ? <span className="text-red-600"> Field details failed to load — refresh to try again.</span>
-              : allocFields.length === 0 && <span className="text-amber-600"> No active fields are set up yet.</span>}
-          </p>
+          {/* Split by field (multi-field split invoicing) */}
+          {(hasAllocations || canEdit) && (
+            <Card>
+              <h2 className="mb-1 font-heading text-xl font-semibold text-nav-dark">Split by field</h2>
+              <p className="text-sm text-secondary mb-3">
+                Bill a line to the owners of the fields it went on, by acres. When a sale uses it, it decides who pays instead of Who pays.
+                {allocLoadFailed
+                  ? <span className="text-red-600"> Field details failed to load — refresh to try again.</span>
+                  : allocFields.length === 0 && <span className="text-amber-600"> No active fields are set up yet.</span>}
+              </p>
 
-          <div className="space-y-3">
-            {items.map((it) => {
-              const lineAllocs = allocations.filter((a) => a.order_item_id === it.id);
-              const used = new Set(lineAllocs.map((a) => a.field_id));
-              const isOpen = allocEditorItemId === it.id;
-              return (
-                <div key={it.id} className="border border-gray-100 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-nav-dark">{it.product_name || 'Line'}</div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-secondary">{fmt(it.total_price)}</span>
-                      {/* Not while the split details failed to load: the line's existing fields are unknown. */}
-                      {canEdit && !isOpen && !allocLoadFailed && (
-                        <Button variant="ghost" size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false}
-                          onClick={() => { setAllocEditorItemId(it.id); setNewAllocFieldId(''); setNewAllocAcres(''); }}>
-                          Field
-                        </Button>
+              <div className="space-y-3">
+                {items.map((it) => {
+                  const lineAllocs = allocations.filter((a) => a.order_item_id === it.id);
+                  const used = new Set(lineAllocs.map((a) => a.field_id));
+                  const isOpen = allocEditorItemId === it.id;
+                  return (
+                    <div key={it.id} className="border border-gray-100 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium text-nav-dark">{it.product_name || 'Line'}</div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-secondary">{fmt(it.total_price)}</span>
+                          {/* Not while the split details failed to load: the line's existing fields are unknown. */}
+                          {canEdit && !isOpen && !allocLoadFailed && (
+                            <Button variant="ghost" size="sm" icon={<Plus className="w-4 h-4" />} showChevron={false}
+                              onClick={() => { setAllocEditorItemId(it.id); setNewAllocFieldId(''); setNewAllocAcres(''); }}>
+                              Field
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {lineAllocs.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {lineAllocs.map((a) => {
+                            const fld = allocFields.find((f) => f.id === a.field_id);
+                            return (
+                              <div key={a.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
+                                <span className="text-nav-dark">{fld?.field_name || 'Field'} — {Number(a.acres)} ac</span>
+                                {canEdit && (
+                                  <button onClick={() => handleRemoveAllocation(a.id)} className="text-red-400 hover:text-red-600 disabled:opacity-50" disabled={savingAlloc}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {isOpen && (
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                          <div className="sm:col-span-2">
+                            <label className="text-[11px] font-medium text-secondary mb-1 block">Field</label>
+                            <select value={newAllocFieldId}
+                              onChange={(e) => {
+                                setNewAllocFieldId(e.target.value);
+                                const f = allocFields.find((x) => x.id === e.target.value);
+                                if (f && f.total_acres != null) setNewAllocAcres(String(f.total_acres));
+                              }}
+                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green">
+                              <option value="">Select field...</option>
+                              {allocFields.filter((f) => !used.has(f.id)).map((f) => (
+                                <option key={f.id} value={f.id}>{f.field_name}{f.total_acres != null ? ` (${f.total_acres} ac)` : ' (no acres on file)'}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-medium text-secondary mb-1 block">Acres</label>
+                            <input type="number" value={newAllocAcres} onChange={(e) => setNewAllocAcres(e.target.value)}
+                              min="0.01" step="0.01" placeholder="acres"
+                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
+                          </div>
+                          <div className="sm:col-span-3 flex items-center justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => setAllocEditorItemId(null)}>Cancel</Button>
+                            <Button size="sm" loading={savingAlloc} disabled={!newAllocFieldId || !newAllocAcres}
+                              onClick={() => handleAddAllocation(it.id)}>Add</Button>
+                          </div>
+                        </div>
                       )}
                     </div>
+                  );
+                })}
+              </div>
+
+              {splitPreview && splitPreview.length > 0 && (
+                <div className="mt-4 border-t border-gray-100 pt-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <DollarSign className="w-4 h-4 text-crx-green" />
+                    <span className="text-xs font-semibold text-nav-dark">Projected split (approx.) — one invoice per customer</span>
                   </div>
-
-                  {lineAllocs.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {lineAllocs.map((a) => {
-                        const fld = allocFields.find((f) => f.id === a.field_id);
-                        return (
-                          <div key={a.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
-                            <span className="text-nav-dark">{fld?.field_name || 'Field'} — {Number(a.acres)} ac</span>
-                            {canEdit && (
-                              <button onClick={() => handleRemoveAllocation(a.id)} className="text-red-400 hover:text-red-600 disabled:opacity-50" disabled={savingAlloc}>
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {isOpen && (
-                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
-                      <div className="sm:col-span-2">
-                        <label className="text-[11px] font-medium text-secondary mb-1 block">Field</label>
-                        <select value={newAllocFieldId}
-                          onChange={(e) => {
-                            setNewAllocFieldId(e.target.value);
-                            const f = allocFields.find((x) => x.id === e.target.value);
-                            if (f && f.total_acres != null) setNewAllocAcres(String(f.total_acres));
-                          }}
-                          className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green">
-                          <option value="">Select field...</option>
-                          {allocFields.filter((f) => !used.has(f.id)).map((f) => (
-                            <option key={f.id} value={f.id}>{f.field_name}{f.total_acres != null ? ` (${f.total_acres} ac)` : ' (no acres on file)'}</option>
-                          ))}
-                        </select>
+                  <div className="space-y-1">
+                    {splitPreview.map((p) => (
+                      <div key={p.customer_id} className="flex items-center justify-between text-xs px-2 py-1 bg-green-50 rounded">
+                        <span className="text-nav-dark">{p.name}</span>
+                        <span className="font-semibold text-crx-green">{fmt(p.amount)}</span>
                       </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-secondary mb-1 block">Acres</label>
-                        <input type="number" value={newAllocAcres} onChange={(e) => setNewAllocAcres(e.target.value)}
-                          min="0.01" step="0.01" placeholder="acres"
-                          className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green" />
-                      </div>
-                      <div className="sm:col-span-3 flex items-center justify-end gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setAllocEditorItemId(null)}>Cancel</Button>
-                        <Button size="sm" loading={savingAlloc} disabled={!newAllocFieldId || !newAllocAcres}
-                          onClick={() => handleAddAllocation(it.id)}>Add</Button>
-                      </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-secondary mt-2">Exact penny amounts are computed when you create the invoice.</p>
                 </div>
-              );
-            })}
-          </div>
-
-          {splitPreview && splitPreview.length > 0 && (
-            <div className="mt-4 border-t border-gray-100 pt-3">
-              <div className="flex items-center gap-2 mb-2">
-                <DollarSign className="w-4 h-4 text-crx-green" />
-                <span className="text-xs font-semibold text-nav-dark">Projected split (approx.) — one invoice per customer</span>
-              </div>
-              <div className="space-y-1">
-                {splitPreview.map((p) => (
-                  <div key={p.customer_id} className="flex items-center justify-between text-xs px-2 py-1 bg-green-50 rounded">
-                    <span className="text-nav-dark">{p.name}</span>
-                    <span className="font-semibold text-crx-green">{fmt(p.amount)}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-secondary mt-2">Exact penny amounts are computed when you create the invoice.</p>
-            </div>
+              )}
+            </Card>
           )}
-        </Card>
-      )}
+
+          {order.notes && (
+            <Card>
+              <div className="flex items-start gap-3">
+                <FileText className="w-4 h-4 text-secondary mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs text-secondary font-medium mb-1">Order notes <HelpTip text="Notes about this order that carry through to the load sheet and delivery. Use for special instructions like 'Call before delivering'." className="ml-1" /></p>
+                  <p className="text-sm text-nav-dark whitespace-pre-wrap">{order.notes}</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Related Notes */}
+          <RelatedNotes
+            entityType={'order' as LinkedEntityType}
+            entityId={id!}
+            onCreateTask={() => setQuickTaskOpen(true)}
+          />
+        </div>
+      </div>
 
       {/* Void Order Modal */}
       <Modal open={voidModalOpen} onClose={() => { setVoidModalOpen(false); setVoidReason(''); }} title="Void Order">

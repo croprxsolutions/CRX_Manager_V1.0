@@ -278,8 +278,8 @@ describe('OrderDetail add-product catalog', () => {
 
   async function openCatalog() {
     renderOrder();
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Add Product/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add product/ }));
   }
 
   it('reads the whole catalog page by page', async () => {
@@ -316,10 +316,10 @@ describe('OrderDetail add-product catalog', () => {
       return Promise.resolve({ data: name === 'get_admin_cost_fields' ? {} : null, error: null });
     });
     renderOrder();
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
     fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Add Product/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add product/ }));
     expect(await screen.findByText('Fungicide Z')).toBeInTheDocument();
 
     releaseOld();

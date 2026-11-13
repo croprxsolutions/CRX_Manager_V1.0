@@ -155,7 +155,7 @@ describe('OrderDetail Create Invoice follows the real field split', () => {
     tables.singles.orders = ORDER;
     await clickCreateInvoice(false);
     expect(screen.queryByRole('button', { name: /^Create.*Invoice/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/Product invoices are created after delivery.*prepay/i)).toBeInTheDocument();
+    expect(screen.getByText(/Product invoices are made after delivery.*prepay/i)).toBeInTheDocument();
     expect(invoiceRpcCalls()).toEqual([]);
   });
 });

@@ -96,16 +96,18 @@ describe('CorrectBrandsModal', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('do not add up to the 5 delivered')));
     expect(correctDeliveryBrands).not.toHaveBeenCalled();
   });
-  it('confirming as they are never re-sends a typed brand that was already reviewed', async () => {
-    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', review_state: 'added' as const };
+  it.each(['added', 'dismissed'] as const)('confirms a typed brand with office review %s without sending review authority', async (review_state) => {
+    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', epa_registration: '100-997', manufacturer: 'Maker', review_state, review_reason: 'Office checked', reviewed_by: 'reviewer' };
     getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], picks: [typed] }] }));
     correctDeliveryBrands.mockReset();
+    correctDeliveryBrands.mockResolvedValue({ delivery_id: 'D1', event_seq: 8, invoice_ids: [], picks: [] });
     toast.mockReset();
     render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} />);
     await screen.findByLabelText('Brand for Glyphosate');
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Checked' } });
     fireEvent.click(screen.getByText('Save correction'));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith('info', expect.stringContaining('already reviewed')));
-    expect(correctDeliveryBrands).not.toHaveBeenCalled();
+    await waitFor(() => expect(correctDeliveryBrands).toHaveBeenCalled());
+    expect(correctDeliveryBrands.mock.calls[0].slice(0, 4)).toEqual(['D1', [{ delivery_item_id: 'L1', picks: [{ typed_name: 'Credit', typed_epa: '100-997', typed_manufacturer: 'Maker', quantity: 10 }] }], 'Checked', 7]);
+    expect(toast).toHaveBeenCalledWith('success', 'Brands confirmed as they are.');
   });
 });

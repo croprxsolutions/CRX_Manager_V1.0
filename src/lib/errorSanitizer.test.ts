@@ -9,6 +9,13 @@ describe('sanitizeError', () => {
       .toBe('Atrazine 4L: order ORD-42; purchase order PO-9');
   });
 
+  it('turns a crop + timing refusal into plain words (USE-1)', () => {
+    expect(sanitizeError({ message: 'USE_TIMING_PAIR_TWICE: "Post-Emerge Wheet" and "Post-Emerge Wheat" are the same crop and timing; keep one.' }))
+      .toBe('Nothing was saved. "Post-Emerge Wheet" and "Post-Emerge Wheat" are the same crop and timing; keep one.');
+    expect(sanitizeError(new Error('USE_TIMING_LABEL_TAKEN: "Post-Emergence" is already a choice')))
+      .toBe('Nothing was saved. "Post-Emergence" is already a choice');
+  });
+
   it('uses a safe fallback when an active-status refusal has no detail', () => {
     expect(sanitizeError('PRODUCT_INACTIVE:   '))
       .toBe('This product is turned off. Ask an admin to reactivate it.');
@@ -148,6 +155,16 @@ describe('sanitizeError', () => {
   it('tells the user a completed delivery is voided, not cancelled', () => {
     expect(sanitizeError('DELIVERY_COMPLETED_USE_VOID: a completed delivery cannot be cancelled; an admin must void it instead'))
       .toBe('Nothing was changed. This delivery is already completed, so it cannot be cancelled. An admin can void it instead');
+  });
+
+  it('explains an order line with no unit (KI-76)', () => {
+    expect(sanitizeError("ORDER_LINE_UNIT_MISSING: order SO-1 has a line with no unit (Roundup). Set each line's unit on the order, then create the invoice again"))
+      .toBe("Nothing was billed. A line on this order has no unit. Set each line's unit on the order before billing it");
+  });
+
+  it('explains an invoice line with no unit at posting (KI-76)', () => {
+    expect(sanitizeError('INVOICE_LINE_UNIT_MISSING: invoice INV-1 has a line with no unit (Roundup). Set the unit on the product, save the draft invoice, then post it again'))
+      .toBe('Nothing was posted. A line on this invoice has no unit. Set the unit on the product, save the draft invoice, then post it again');
   });
 
   it('explains an incomplete order invoice line separately from the delivered cap', () => {
@@ -529,5 +546,16 @@ describe('product setup and import refusals (20261107090000)', () => {
   it('keeps the server text, which names the products', () => {
     expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
       .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
+  });
+
+  it('explains the sales tax box refusals (billing plan M4a)', () => {
+    expect(sanitizeError('SALES_TAX_NOT_ALLOWED: only an admin or the sale\'s own rep can change its sales tax'))
+      .toBe("Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved");
+    expect(sanitizeError('SALES_TAX_RATE_MISSING: set the sales tax rate in Settings first'))
+      .toBe('Set the sales tax rate in Settings first. No changes were saved');
+    expect(sanitizeError('SALES_TAX_STALE: this draft\'s sales tax is out of date; save it again, then post'))
+      .toBe("This draft's sales tax is out of date. Save it again, then post");
+    expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
+      .toBe("This sale is cancelled or voided, so its sales tax can't change");
   });
 });

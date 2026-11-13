@@ -146,6 +146,7 @@ is there.
 | 0 | `LUNA RESULT: CLEAN` | Luna read the whole diff and found nothing |
 | 1 | `LUNA RESULT: FINDINGS <n>` | Luna's findings are printed above that line |
 | 1 | `LUNA RESULT: STOPPED` | Third round on a hook change (`.claude/hooks/`, `.codex/hooks/`): Codex was not called. Drop the carve-out or hand the decision to Mason; do not rerun |
+| 1 | `LUNA RESULT: STOPPED after 6 whole-branch Luna rounds` | Seventh whole-branch round on this branch: the design keeps drawing findings and Codex was not called. Do ONE of: (a) simplify, run a fresh "attack this plan for simplicity" session; (b) merge or rebase onto current main and re-plan; (c) change approach, ask Mason the business rule behind the mechanism. Then rerun with `--after-simplify`, `--after-rebase` or `--after-new-approach` and a one-line reason: that buys 6 more rounds and is recorded. Never pass the flag without doing the step |
 | 2 | `LUNA RESULT: DID NOT RUN` | **Not a review and not a clean result.** The `Why:` line says what broke |
 
 **Exit 2 is a broken run, never a verdict:** a refused or substituted model (the script names it and

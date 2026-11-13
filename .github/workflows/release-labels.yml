@@ -1,0 +1,88 @@
+# Release labels (Taha, 2026-11-10): on-staging is added when a PR merges into staging;
+# verified-on-staging needs a "Staging proof: <link>" line and held-off a "Held off: <reason>" line,
+# or the bot removes them with a comment. Rules live in .github/scripts/release-flow.mjs.
+# Inert until the repository variable RELEASE_FLOW is "on": no labels, comments or release PR refreshes.
+name: Release labels
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [closed, labeled, unlabeled, edited]
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+# unlabeled/edited and comment edits only refresh the release gate, which re-reads labels and proof.
+
+permissions: {}
+
+jobs:
+  labels:
+    name: Release labels
+    # Fork PRs get a read-only token; labels are only managed on this repository's branches.
+    if: >-
+      vars.RELEASE_FLOW == 'on' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      ((github.event.action == 'closed' && github.event.pull_request.merged) ||
+       github.event.action == 'edited' ||
+       ((github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
+        contains(fromJSON('["on-staging","verified-on-staging","held-off"]'), github.event.label.name)))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      ACTION: ${{ github.event.action }}
+    steps:
+      # The rules come from main's copy of the script: main changes only through reviewed releases,
+      # so no PR (squash, merge or rebase) can run its own version with this job's token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - id: script
+        run: |
+          if [ -f .github/scripts/release-flow.mjs ]; then
+            cp .github/scripts/release-flow.mjs "$RUNNER_TEMP/release-flow.mjs"
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No release flow script on main yet (it arrives with the first release)."
+          fi
+      - if: steps.script.outputs.ok && (github.event.action == 'closed' || github.event.action == 'labeled')
+        run: |
+          if [ "$ACTION" = "closed" ]; then node "$RUNNER_TEMP/release-flow.mjs" mark-on-staging
+          else node "$RUNNER_TEMP/release-flow.mjs" check-label; fi
+      # A label change can turn the release gate green or red: refresh an open release PR.
+      - name: Refresh the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # release-pr.yml is on main (#1787): a failed refresh fails here, so a stale gate status is seen.
+        run: gh workflow run release-pr.yml --ref main -f create=false
+
+  refresh-on-comment:
+    # A comment or review that mentions a proof or held-off line (added, edited or deleted) can
+    # change the release gate: let it re-read. Other comments don't dispatch anything.
+    name: Refresh release gate
+    if: >-
+      vars.RELEASE_FLOW == 'on' &&
+      github.event_name != 'pull_request' &&
+      (github.event.issue.pull_request || github.event.pull_request) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association) &&
+      (contains(github.event.comment.body, 'roof:') || contains(github.event.comment.body, 'eld off:') ||
+       contains(github.event.changes.body.from, 'roof:') || contains(github.event.changes.body.from, 'eld off:') ||
+       contains(github.event.review.body, 'roof:') || contains(github.event.review.body, 'eld off:'))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: gh workflow run release-pr.yml --ref main -f create=false

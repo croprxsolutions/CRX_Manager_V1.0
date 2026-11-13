@@ -34,6 +34,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import type { Order } from '../types';
 import { getSeasonDates } from '../utils/season';
+import { toSentryError } from '../lib/sentryError';
 
 type OrderWithFulfillment = OrderListRow;
 
@@ -331,7 +332,7 @@ export default function Orders() {
       await downloadBatchOrderSummaryPdf(dataList);
       toast('success', `Downloaded ${dataList.length} order summary PDF(s)`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'bulk_print_summaries' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'bulk_print_summaries' } });
       toast('error', sanitizeError(err));
     }
     setPrintingSummary(false);
@@ -448,7 +449,7 @@ export default function Orders() {
       await downloadBatchPickListPdf(dataList);
       toast('success', `Downloaded ${dataList.length} pick list PDF(s)`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'bulk_print_pick_lists' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'bulk_print_pick_lists' } });
       toast('error', sanitizeError(err));
     }
     setPrintingPickList(false);
@@ -603,7 +604,8 @@ export default function Orders() {
     },
     {
       key: 'fulfillment_pct',
-      header: (<span className="flex items-center">Fulfillment<HelpTip text="Fulfillment shows delivery progress. Invoiced shows billing progress. Both are weighted by dollar value." className="ml-1" /></span>),
+      header: 'Fulfillment',
+      headerExtra: <HelpTip text="Fulfillment shows delivery progress. Invoiced shows billing progress. Both are weighted by dollar value." className="ml-1" />,
       sortable: true,
       render: (row) => (
         <div className="flex items-center gap-2">

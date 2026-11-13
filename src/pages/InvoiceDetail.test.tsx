@@ -2195,3 +2195,57 @@ describe('InvoiceDetail — Email reads the billed customer by id', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Customer does not have an email address on file'));
   });
 });
+
+describe('InvoiceDetail — standing discount and sales tax lines (billing plan M4b, M4a)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    intentKeys.clear();
+    nextIntentKey.value = 0;
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: null }));
+    const invoice = {
+      id: 'inv-disc', invoice_number: 'INV-DISC', invoice_type: 'chemical_sale', status: 'draft',
+      customer_id: 'cust-1', order_id: 'ord-1', invoice_date: '2026-03-15', due_date: null, payment_terms: null,
+      total_amount_cents: 101700, balance_cents: 101700, header_notes: '', footer_notes: '', created_at: '2026-03-15T00:00:00Z',
+    };
+    const lines = [
+      { id: 'l1', order_item_id: 'oi-1', product_id: 'p1', product: { product_name: 'Herbicide' }, description: 'Herbicide',
+        quantity: 10, unit_price_cents: 10000, extended_cents: 100000, sort_order: 1, charge_type: null },
+      { id: 'l2', order_item_id: null, product_id: null, description: 'Freight', quantity: 1, unit_price_cents: 4500,
+        extended_cents: 4500, sort_order: 2, charge_type: 'freight' },
+      { id: 'l3', order_item_id: null, product_id: null, description: 'Standing discount 3%', quantity: 1, unit_price_cents: -3000,
+        extended_cents: -3000, sort_order: 3, charge_type: 'standing_discount' },
+      { id: 'l4', order_item_id: null, product_id: null, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 6408,
+        extended_cents: 6408, sort_order: 4, charge_type: 'sales_tax' },
+    ];
+    let invoiceCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') {
+        invoiceCalls += 1;
+        return buildChain({ data: invoiceCalls <= 2 ? invoice : [], error: null });
+      }
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+  });
+
+  it('shows the discount and tax lines read-only and saves the draft', async () => {
+    renderInvoiceDetail('inv-disc');
+    await waitFor(() => expect(screen.getByText('Standing discount 3%')).toBeInTheDocument());
+    expect(screen.getByText('Sales tax 6.25%')).toBeInTheDocument();
+    // An admin on a chemical-sale draft can change this sale's discount (billing plan M4b).
+    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toBeInTheDocument();
+    // Price boxes for the product and the freight, none for the discount or tax line.
+    const prices = screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value);
+    expect(prices).toContain('100.00');
+    expect(prices).toContain('45.00');
+    expect(prices).not.toContain('-30.00');
+    expect(prices).not.toContain('64.08');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_invoice', expect.anything()));
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('amount above $0.00'));
+    // The database owns those lines (and drops them when the type changes): the editor never sends them back.
+    const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
+    const sent = (saveCall?.[1].p_items as Array<{ charge_type: string | null }>).map((it) => it.charge_type);
+    expect(sent).toEqual([null, 'freight']);
+  });
+});

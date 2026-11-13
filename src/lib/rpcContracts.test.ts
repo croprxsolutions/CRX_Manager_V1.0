@@ -2820,6 +2820,13 @@ function registryMigrationHighWater(): string {
 // _insert_parent_size body). Clear them on the same type-regeneration rule.
 // 20261204100000 and 20261204110000 (KI-18, PR #1579) joined them the same day: applied live, and
 // their files reached main just after that refresh had already moved the boundary past them.
+// 20261231200000, 20261231210000 and 20261231220000 (REG-1 Step 2, #1746) were added on 2026-11-10:
+// all three applied live and the registry refresh after it moved the boundary past them.
+// 20261231110000 (M4b standing discount, #1752) and 20261231120000 (M4a sales tax, #1767) were added on
+// 2026-11-11 when staging took main: both are local candidates, not applied live, and main's REG-1 refresh
+// had moved the boundary to 20261231220000, past them.
+// 20270103190000 (sales tax rep fix, #1809) joined them on 2026-11-12 in the back-merge: staging-only, not
+// applied live, and main's registry refresh had moved the boundary to 20270106110000, past it.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2863,6 +2870,20 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261209100000',
   '20261210100000',
   '20261211100000',
+  '20261215100000',
+  '20261215110000',
+  '20261222100000',
+  '20261229110000',
+  '20261231110000',
+  '20261231120000',
+  '20261231200000',
+  '20261231210000',
+  '20261231220000',
+  '20270103160000',
+  '20270103190000',
+  '20270104110000',
+  '20270105110000',
+  '20270106110000',
 ]);
 
 /**
@@ -3111,9 +3132,45 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'save_active_ingredient',
   'set_parent_chemistry',
   'set_parent_cost_reference',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): admin-only registration writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  'seed_epa_registrations',
+  'set_epa_registration',
   // 20261221100000 (KI-25 follow-up, local candidate): office pause/close of a queued customer receipt; requires
   // p_idempotency_key, checked with check_idempotency_intent, saved and bound. Prune once the generated types carry it.
   'close_delivery_receipt',
+  // 20261229120000 (USE-1, local candidate): admin-only use-timing option writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'add_use_timing_option',
+  'set_use_timing_option_active',
+  // 20261229110000 (RT-1, local candidate): admin-only draft rate writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'delete_draft_product_rate',
+  'derive_draft_product_rates',
+  'save_draft_product_rate',
+  // 20270103160000 (DM-1b, local candidate): admin-only setup workbook writers; each replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry them.
+  'commit_ingredients_tab',
+  'commit_weights_tab',
+  'promote_chemistry_proposal',
+  // 20270104120000 (Brand PR B part B-1a, local candidate): delivery brand writers; each requires p_idempotency_key and
+  // replays through _product_parent_replay, then saves its receipt. Prune once the generated types carry them.
+  'correct_delivery_brands',
+  'review_typed_brand',
+  'set_delivery_brands',
+  // 20270105110000 (DM-4, local candidate): EPA auto-fill writers; start, commit and reject replay through
+  // _product_parent_replay, record_epa_lookup (service role only) through check_idempotency; each saves its
+  // receipt. Prune once the generated types carry them.
+  'commit_epa_proposal',
+  'record_epa_lookup',
+  'reject_epa_proposal',
+  'start_epa_lookup',
+  // 20270108100000 (MOA-1, local candidate): admin-only ingredient group writer; replays through
+  // _product_parent_replay and saves its receipt on every path. Prune once the generated types carry it.
+  'set_active_ingredient_modes',
+  // 20270104110000 (RT-3, local candidate): admin-only rate review commit; replays through _product_parent_replay
+  // and saves its receipt. Prune once the generated types carry it.
+  'commit_rate_review',
 
   // Wave A drafts are parked under scripts/.staging-migrations and therefore
   // intentionally absent from the active migration inventory. Restore their
@@ -3144,6 +3201,28 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  // M4a sales tax (local candidate 20261231120000): trigger function, never an RPC.
+  _sales_tax_record_rate_20261231:
+    'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4b standing discount (local candidate 20261231110000): trigger functions and their recompute helper, never RPCs.
+  _recompute_standing_discount_20261231:
+    'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _standing_discount_after_line_change_20261231:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on invoice_items (INSERT/UPDATE/DELETE): calls _recompute_standing_discount_20261231, a no-op when the line is right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_after_invoice_change_20261231:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on invoices (UPDATE OF customer_id, status, invoice_type): calls _recompute_standing_discount_20261231, a no-op when the line is right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_record_rate_20261231:
+    'AFTER INSERT / UPDATE OF customer_id, invoice_type row trigger on invoices: records a chemical sale\'s rate once (ON CONFLICT DO NOTHING) and drops a draft\'s copied rate on a customer change, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  _standing_discount_before_fingerprint_20261231:
+    'BEFORE INSERT/UPDATE row trigger on split_invoice_provenance: recomputes the draft\'s discount line before its fingerprint is taken, a no-op when right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // REG-1 Step 2 (20261231210000, applied live 2026-11-10): trigger functions, never called as RPCs. Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _capture_invoice_line_rup:
+    'AFTER INSERT/UPDATE row trigger on invoice_items (after the seed only; re-captures only on a product or saved-number change): upserts the line\'s one capture row keyed by invoice_item_id, so a replayed save rewrites the same row; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
+  _void_rup_records_off_posted:
+    'deferred AFTER UPDATE constraint trigger on invoices (status or deleted_at change): voids only still-active restricted-use records of an invoice that is no longer posted, paid or overdue, or is deleted, so a replay finds none and writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
+  // KI-07 (local candidate 20261222100000): trigger function, never called as an RPC.
+  _record_customer_document_restore:
+    'AFTER UPDATE OF deleted_at row trigger on customer_documents, firing only when a removed row becomes live: inserts one restore record; a replayed restore matches no removed row, so it writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE (incl. service_role) is revoked',
   guard_invoice_terminal_order:
     'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
   _create_bill_split_delivery_invoices:
@@ -3202,6 +3281,16 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // 20261210100000 (REG-1 step 1, local candidate): private helper. Prune once applied and the types carry it.
   _record_label_draft_target:
     'internal REG-1 helper (20261210100000): called only by the two label-draft create bodies after their own replay check; every API-role EXECUTE is revoked',
+  // 20261231200000 (REG-1 step 2, applied live 2026-11-10): private helpers.
+  // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.
+  _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  // 20270106110000 (Brand PR B part B-1b, local candidate): private helpers. Prune once applied and the types carry them.
+  _delivery_brand_event_recopy: 'B-1b trigger function (20270106110000): deferred constraint trigger on delivery_brand_events, re-copies brand snapshots onto open draft invoices when the writing transaction commits; runs only as a trigger, every API-role EXECUTE is revoked',
+  _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
+  _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
+  _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:
@@ -3234,6 +3323,33 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'admin read-only preview (DM-1, 20261209100000): runs the real edit inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
   preview_parent_chemistry_correction:
     'admin read-only preview (DM-1, 20261209100000): runs the real correction inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20270103160000 (DM-1b, local candidate): private helpers and dry-run previews. Prune once applied
+  // and the registry high-water moves past it.
+  _workbook_weight_row: 'internal DM-1b helper (20270103160000): rehearses one Weights-tab row through the DM-2 draft helper inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_weight_rows: 'internal DM-1b helper (20270103160000): evaluates the Weights-tab rows (each rehearsal rolled back) for the preview and for commit_weights_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_ingredient_parent: 'internal DM-1b helper (20270103160000): rehearses the Ingredients-tab rows of one parent through _apply_parent_chemistry inside a subtransaction it always rolls back; every API-role EXECUTE is revoked',
+  _workbook_ingredient_rows: 'internal DM-1b helper (20270103160000): groups the Ingredients-tab rows by parent (each rehearsal rolled back) for the preview and for commit_ingredients_tab after its replay check; every API-role EXECUTE is revoked',
+  _workbook_apply_items: 'internal DM-1b helper (20270103160000): applies a change list through _apply_parent_chemistry, called only inside a rolled-back rehearsal or by promote_chemistry_proposal after its replay check; every API-role EXECUTE is revoked',
+  _apply_chemistry_proposal: 'internal DM-1b helper (20270103160000): applies one locked proposal, called only by promote_chemistry_proposal after its replay check; a decided proposal is refused; every API-role EXECUTE is revoked',
+  preview_weights_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each row inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  preview_ingredients_tab:
+    'admin read-only preview (DM-1b, 20270103160000): rehearses each parent inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20270104110000 (RT-3, local candidate): private helpers, the clear trigger and the dry-run preview. Prune once
+  // applied and the registry high-water moves past it.
+  _product_rate_review_approve: 'internal RT-3 helper (20270104110000): approves one locked draft, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_reopen: 'internal RT-3 helper (20270104110000): sends one locked approved row back to draft, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_outcome: 'internal RT-3 helper (20270104110000): sets or clears one parent outcome at its expected version, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
+  _product_rate_review_run: 'internal RT-3 helper (20270104110000): runs one whole review upload, called only by commit_rate_review after its replay check (child RT-1 writers get keys derived from the commit key) or by preview_rate_review, which always rolls back; every API-role EXECUTE is revoked',
+  _product_rates_clear_outcome:
+    'AFTER row trigger on product_rates (RT-3): any rate change makes the parent undecided and moves its outcome version; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  preview_rate_review:
+    'admin read-only preview (RT-3, 20270104110000): runs the whole upload inside a subtransaction it always rolls back (CRX_PREVIEW_ROLLBACK), so nothing is ever kept and no key is needed',
+  // 20261229110000 (RT-1, local candidate): private helpers behind derive_draft_product_rates. Prune once applied
+  // and the registry high-water moves past it.
+  _product_rate_derive_parent: 'internal RT-1 helper (20261229110000): derives one parent, called only by derive_draft_product_rates after its replay check; every API-role EXECUTE is revoked',
+  _product_rate_insert_derived: 'internal RT-1 helper (20261229110000): inserts one derived draft row inside the calling keyed writer; every API-role EXECUTE is revoked',
+  _product_rate_note: 'internal RT-1 helper (20261229110000): appends one derive note event inside the calling keyed writer; every API-role EXECUTE is revoked',
   return_net_weight_to_draft:
     'AFTER UPDATE row trigger on products pack columns (DM-2): fires only when a watched value really changes, so a replayed edit with the same values does nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   return_density_to_draft:
@@ -3455,7 +3571,8 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       const current = functions.get(rpc);
       return generatedNames.has(rpc)
         || !/p_idempotency_key\s+text/i.test(current?.definition || '')
-        || !bodyUsesIdempotency(current?.body || '');
+        // A wrapper counts only when it forwards the key to a body that really uses it.
+        || !usesIdempotencyThroughDelegates(current?.body || '');
     });
     expect(stale).toEqual([]);
   });
@@ -3531,7 +3648,7 @@ describe('Idempotency coverage drift (generated-types driven, fail-closed)', () 
       .filter((rpc) => {
         if (rpc in IDEMPOTENCY_BODY_EXEMPT) return false;
         const body = functions.get(rpc)?.body || latestFunctionBody(rpc) || '';
-        return !bodyUsesIdempotency(body);
+        return !usesIdempotencyThroughDelegates(body);
       })
       .sort();
 

@@ -29,6 +29,7 @@ import { blockedUnitSaveMessage, rateUnitOptionsForProduct, type UnitLoadState }
 import type { ProductSearchResult, UnitConversion } from '../types';
 import { requireGroupVersions } from '../lib/invoicePostVersion';
 import { groupVersionsFromRows } from '../lib/invoiceBatchPosting';
+import { toSentryError } from '../lib/sentryError';
 
 /**
  * Per-line split-billing EDITOR (flag-gated, OFF by default).
@@ -326,7 +327,7 @@ export default function FieldAppSplitInvoiceEditor() {
           // picker stays 'pending' forever and a save would keep telling the operator to "try
           // again in a moment" for a request that is never coming back.
           setUnitLoad('failed');
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'load_field_app_split_invoice_pickers' } });
+          Sentry.captureException(toSentryError(err), { extra: { context: 'load_field_app_split_invoice_pickers' } });
           toast('error', sanitizeError(err));
         }
       }

@@ -24,8 +24,10 @@ import {
   type ProductBrandInput,
 } from '../../lib/productBrands';
 import { sanitizeError } from '../../lib/errorSanitizer';
+import { cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations } from '../../lib/epaRegistrationStatus';
 import { Sentry } from '../../lib/sentry';
 import type { BrandSignalWord, EpaLookupResult, ProductBrand } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 const NAME_MAX_LENGTH = 200;
 
@@ -36,6 +38,10 @@ interface ProductBrandsSectionProps {
   isAdmin: boolean;
   /** The signed-in user's profile id; only needed for admin edits. */
   userId: string | null;
+  /** Registrations stored as cancelled (the product page reads them); each brand row on one is marked. */
+  cancelled?: CancelledRegistrations;
+  /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
+  onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
 }
 
 interface BrandDraft {
@@ -128,7 +134,7 @@ function isClearRefusal(err: unknown): boolean {
   ].some((code) => hasRpcCode(err, code));
 }
 
-export default function ProductBrandsSection({ productId, productName, isAdmin, userId }: ProductBrandsSectionProps) {
+export default function ProductBrandsSection({ productId, productName, isAdmin, userId, cancelled, onBrandsChange }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
   // A grouped size shows and edits its parent's list (PAR-2); null while the size has its own list.
@@ -136,6 +142,10 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const onBrandsChangeRef = useLatestRef(onBrandsChange);
+  useEffect(() => {
+    onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
+  }, [productId, brands, loading, loadError, onBrandsChangeRef]);
 
   const [draft, setDraft] = useState<BrandDraft | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -193,7 +203,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       })
       .catch((err: unknown) => {
         if (!active) return;
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'list_product_brands' } });
         setLoadError(sanitizeError(err));
       })
       .finally(() => { if (active) setLoading(false); });
@@ -253,7 +263,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       else if (!result.found) toast('warning', `EPA did not find registration ${regNumber}.`);
     } catch (err) {
       if (isStale()) return;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'edge_function', action: 'epa_lookup' },
       });
       toast('error', err instanceof Error ? err.message : 'EPA lookup failed. Please try again.');
@@ -309,7 +319,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCreateUncertain(false);
       setDraft(null);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'upsert_product_brand' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'upsert_product_brand' } });
       // An edit needs no lock: a changed resubmit after a lost-but-committed edit fails BRAND_CHANGED.
       if (!draft.brandId && !isClearRefusal(err)) setCreateUncertain(true);
       if (hasRpcCode(err, RpcErrorCodes.BRAND_CHANGED) || hasRpcCode(err, RpcErrorCodes.PRODUCT_BRANDS_PARENT_CHANGED)
@@ -348,7 +358,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCopySelected(new Set(rows.filter((brand) => brand.is_currently_sourced).map((brand) => brand.id)));
     } catch (err) {
       if (seq !== copySourceSeq.current) return;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'list_product_brands_copy' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'list_product_brands_copy' } });
       setCopyLoadError(sanitizeError(err));
     } finally {
       if (seq === copySourceSeq.current) setCopyLoading(false);
@@ -400,7 +410,7 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
       setCopyOpen(false);
     } catch (err) {
       if (attempt) unsettledCopies.current.set(attempt.scope, attempt.name);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'copy_product_brands' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'copy_product_brands' } });
       toast('error', `Copied ${copiedIds.size} of ${chosen.length}. ${productBrandErrorMessage(err)}`);
     } finally {
       if (copiedIds.size > 0) {
@@ -491,6 +501,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                   <td className="py-2 pr-3">
                     <div>{brand.epa_registration ?? <span className="text-secondary">None</span>}</div>
                     <EpaLabelLink epaRegistration={brand.epa_registration} />
+                    {(() => {
+                      const key = normalizeEpaRegistration(brand.epa_registration);
+                      return key && cancelled?.has(key) ? (
+                        <Badge variant="error" size="sm">{cancelledOnText(cancelled.get(key))}</Badge>
+                      ) : null;
+                    })()}
                   </td>
                   <td className="py-2 pr-3">{brand.manufacturer ?? '—'}</td>
                   <td className="py-2 pr-3">{rupLabel(brand.is_rup)}</td>

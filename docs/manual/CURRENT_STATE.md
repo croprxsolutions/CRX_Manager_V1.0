@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-09 (America/Chicago), for the live ledger only (latest live row `20261109123130`); quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
+**Last verified:** 2026-11-11 (America/Chicago), for the live ledger (latest live row `20261111140313`) and Edge Function versions; quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
@@ -284,6 +284,17 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
+- **Live Edge Function versions, read 2026-11-10 6:40 AM Central:** `create-user` v28, `setup-blend-tickets-storage` v22,
+  `process-blend-ticket` v31, `process-document` v24, `send-email` v30, `reset-user-password` v19, `epa-lookup` v9,
+  `customer-document-files` v6, `send-delivery-receipts` v3, all ACTIVE. Supabase's counter runs ahead of some numbers
+  recorded below (for example `send-email` "v28" on 2026-11-06 is live v30, last updated 10:22 AM that day); each
+  function's last update matches a deploy recorded here except `process-blend-ticket`, next.
+- **2026-11-08 7:37 PM Central (KI-32, PR #1657), recorded 2026-11-10:** `process-blend-ticket` was redeployed so the
+  scanner matches every active product. Live v31's files (`index.ts`, `guards.ts`, `_shared/` `auth.ts`, `cors.ts`,
+  `sentry.ts`) match `main` byte for byte, apart from line endings (downloaded 2026-11-10). An earlier upload that
+  evening had a damaged `_shared/cors.ts` and was replaced within about 15 minutes.
+- **2026-11-09 (PR #1663):** `customer-document-files` Edge Function deployed to v6 (admins can download removed
+  documents to check before restoring); verified ACTIVE, byte-identical to the PR, caller path exercised by Mason.
 - **2026-11-08 evening Central (KI-25, PR #1647):** the new `send-delivery-receipts` Edge Function was deployed live as
   v1 with `verify_jwt` off on Mason's in-chat approval ("ok deploy it"), through the Supabase connector with main's
   `index.ts`, `logic.ts` and `_shared/` `sentry.ts`, `deliveryReceiptHtml.ts`. The downloaded live copy matches main
@@ -571,7 +582,8 @@ Grouped, one-liner summary of what is LIVE in production today (see
 - **Field Mode:** `/my-route` driver workspace for applicators/drivers.
 - **EPA label lookup + data quality:** Wave 1 per-product "Look up EPA"
   lookup, admin `/label-data-quality` bulk EPA registration-number
-  check-and-fix tool.
+  check-and-fix tool, and its read-only "Brands in product names" check
+  (CLN-3, 2026-11-09): bracketed brands in a name versus the brand list.
 - **Lot capture/trace:** lot numbers captured and traceable through the
   chemical supply chain.
 - **PDF outputs:** invoices, statements, quotes, and delivery slips.

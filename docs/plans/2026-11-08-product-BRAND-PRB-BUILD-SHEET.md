@@ -2,7 +2,9 @@
 
 **Status (2026-11-08, reworked 2026-11-09 after an independent review):** this is a plan only. **Question 5 answered (Mason, 2026-11-09: "do not be strict on RUP license don't ever block just warn"): a brand problem never stops a delivery or an invoice; it warns and is listed for the office.** Sections 3, 4, 5, 7, 9 and 10 were rewritten to that rule; the brand-required switch is removed. No code and no migration have been written. It was written on 2026-11-08 against `main` (`4504e3e6a`) and the live database, using read-only SQL only. For building, this sheet replaces "PR B" in `docs/plans/2026-10-22-product-brands-step1-PLAN.md` (sections 4, 5, 7 and 8). Where the two differ, this sheet wins, and section 2 lists each difference. A reference like "step 1 §4" means that plan.
 
-**Cannot start yet.** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
+**Re-check 2026-11-10 (night):** the PAR-2 precondition is met on live, and REG-1 step 2 was rebuilt as #1746 with a different design (section 13). Mason answered Questions 8 and 9 the same night. **Section 14 is the current design and wins over sections 3 to 7 wherever they differ**; read section 14 first.
+
+**Cannot start yet (2026-11-08 text, kept for history).** The grand plan (`docs/plans/2026-10-29-product-GRAND-PLAN.md`, Stage 3 and overlap 13) says PR B is built only after the PAR-1/PAR-2 brand move is live and verified. Today it is not: the grouping switch is off and no parent or brand exists (section 1). PR B also has to be built on top of REG-1 step 2 (REG-DB), because both rewrite the same invoice and RUP functions. Section 9 has the full list.
 
 **Words used here.**
 - **Brand list:** the brands a size may be filled with. For a grouped size with the grouping switch on, this is its parent's `product_parent_brands` (active rows). Otherwise it is the size's own legacy `product_brands`. This is exactly what `get_product_brands` returns today.
@@ -657,3 +659,465 @@ A brand corrected after the invoice was sent follows REG-1: void and reissue the
 
 **Luna round 26** (head `91cf0b6b4`): no BLOCKER or HIGH; 1 MED, **fixed**.
 - MED, a picked brand with no EPA number appeared on no list until its invoice posted: Deliveries missing brands also lists current picks with no EPA number (4.H).
+
+---
+
+## 13. Re-check against live and `main` (2026-11-10 night, before any code)
+
+Checked read-only on live (counts and function bodies only) and on `main` at `69774ac6e`. No code or migration was written.
+
+### 13.1 Precondition: PAR-1/PAR-2 brand move: **met**
+
+| Fact | Live, 2026-11-10 |
+|---|---|
+| `_product_parent_grouping_open()` body | `SELECT true` (switched on, `20261229100000`, #1712) |
+| `product_parents` / `product_parent_members` | 456 / 593 |
+| `product_parent_brands` | 200 (135 active) |
+| `product_brands` (legacy, ungrouped sizes) | 162 |
+| Grouping batches | recorded on #1708 |
+
+### 13.2 REG-1 step 2 as built (#1746, `20261231200000`/`210000`/`220000`): **differs from what this sheet assumed**
+
+Live has `invoice_line_rup_captures` and the unique index `rup_sales_records_one_active_per_line`; `epa_registrations` has 0 rows (seed not run); `rup_sales_records` has 0 rows. Contract: `docs/plans/2026-11-10-reg1-step2-record-line-link-CONTRACT.md`.
+
+| This sheet assumed (REG-DB, #1688) | #1746 as built | Kind |
+|---|---|---|
+| A record carries the line's **sold number**; PR B feeds it each brand's number (4.D, 4.E) | **The number is the product's own** (Mason's #1688 decision, kept in #1746; `_invoice_line_rup_facts`: "The number is the product's own") | **Business rule: Question 8** |
+| Records grouped by `(invoice, product, sold number, signal word)`; a split line gives one record per brand (4.E) | **At most one active record per invoice line** (`UNIQUE (invoice_item_id) WHERE voided_at IS NULL`, plus a guard trigger on `rup_sales_records`) | **Business rule: Question 9** |
+| `_capture_invoice_line_sale` helper and capture columns on `invoice_items` (`sale_facts_source` etc.) | Neither exists. Capture is a private table `invoice_line_rup_captures`, written by the AFTER trigger `trg_zz_capture_invoice_line_rup` at every line save | Engineering: 4.D rewritten after the answers |
+| Record when captured `yes` **or** registration `yes` at posting | Captured at save; any Yes (product tick, product's number, line's number) makes it restricted use; a Yes always wins | Engineering: PR B follows #1746 per brand |
+| Posting refusals `INVOICE_LINE_NOT_CAPTURED`, `INVOICE_LINE_RUP_NO_EPA`, `INVOICE_LINE_NO_REGISTRATION` to be replaced for branded lines | None of them exist; a missing number never blocks; gaps go to `get_epa_sales_to_check()` ("Sales to check") | Engineering: simpler; the RUP brand gaps list may fold into Sales to check |
+| Field-application invoices out of scope | Field-application invoices now get records (Mason, 2026-11-10); return credits never do; voiding an invoice voids its records | Engineering: scope note in section 8 |
+
+### 13.3 Questions for Mason (NEEDS MASON - DECISION REQUIRED)
+
+**Question 8. Which EPA number goes on a restricted-use record when the driver recorded the brand?**
+Your REG-1 rule (2026-11-09, kept 2026-11-10) is "the product's own number". Brand PR B exists to record the brand that actually went off the truck, for example a Liberty-brand jug delivered against the generic glufosinate. If the record keeps the generic's number, recording the brand changes the paperwork but not the restricted-use record.
+- **Recommended: the delivered brand's number** when the driver recorded a brand that has a number; the product's own number in every other case, exactly as today.
+- Alternative: always the product's own number, with the brand name added to the record as a note.
+
+**Question 9. One invoice line, two brands delivered (a split): how many restricted-use records?**
+#1746 allows exactly one active record per invoice line (that rule ended eight rounds of Sol findings about matching records to lines).
+- **Recommended: one record per brand on that line** (two brands, two records, each pointing at the same line and naming its brand). The one-record rule becomes "one per line per brand"; a line with no brand recorded keeps one record as today.
+- Alternative: split the invoice line into one line per brand when the invoice is made. Simpler records, but it changes how invoices look and touches invoice amounts.
+
+**Question 9 answered (Mason, 2026-11-10): "One record per brand".** A line delivered as two brands gets two records, each pointing at that line and naming its brand; #1746's one-active-record-per-line rule becomes one per line per brand. Invoice lines are not split.
+
+**Question 8 answered (Mason, 2026-11-10): "The brands own number".** Section 14 applies both answers. After the rewrite the sheet gets a fresh independent review before B-1 is built.
+
+---
+
+## 14. Design on REG-1 as built (#1746), with Mason's answers to Questions 8 and 9 (2026-11-10)
+
+**This section wins over sections 3 to 7.** Rule: only what #1746, Questions 8 and 9, or the section 14 reviews (14.8) changed is rewritten here; every other rule in sections 3 to 7 (picks, stale-save guards, `edit_delivery` carry-over, completion warnings, correction, typed-brand review, payer-group allocation, receipts, screens) stands, except the lines struck in 14.7.
+
+### 14.1 The two answers
+
+- **Question 8, "The brands own number":** a brand entry with an EPA number is captured and recorded under **that number**. A line with no brand recorded (`[]`, or a no-brand trip entry) and a brand entry with no number use the product's own number exactly as #1746 does.
+- **Question 9, "One record per brand":** a line with brand entries gets **one record per brand**, all naming the same `invoice_item_id`. Two trips of the same brand (same name and same EPA number) on one line merge into that brand's one record; if the brand's number changed between trips, each number gets its own record, so no record ever carries a number that was not on the jug. A line with `brand_lines` NULL or `[]` keeps #1746's one record per line. Invoice lines are never split.
+
+### 14.2 Split B-1 into two database PRs, and the order
+
+Engineering choice, to keep each Sol review small. Neither changes an amount.
+- **B-1a (delivery side):** `delivery_item_brands`, `delivery_brand_events`, `_delivery_line_brand_list`, `set_delivery_brands`, `edit_delivery` carry-over, the completion rule (4.C steps 1 to 5 and the `p_brand_base_seq` check), `correct_delivery_brands` (picks only), `review_typed_brand`, `get_delivery_brands`, `get_typed_brands_for_review`, `get_deliveries_missing_brands`. The receipt snapshot (3.5) moved to B-3 (15.10, Sol round 2). It re-issues no invoice or RUP function.
+- **B-1b (invoice and RUP side):** everything in 14.4. It re-issues none of B-1a's functions: the re-copy hangs off `delivery_brand_events` (14.4).
+- **Order:** B-1a live → the REG-1 fix in 14.6 live → the REG-1 seed run (Mason) → B-1b live (its preflight refuses before the seed, 14.4) → B-2 and B-3. Before the seed, #1746 records nothing per line and by Mason's 2026-11-10 decision no sales are made, so nothing branded is posted before B-1b.
+
+### 14.3 What changes from sections 3 to 7
+
+| Section | Old rule (REG-DB, never built) | Now |
+|---|---|---|
+| 3.1 picks | Sale facts captured on each pick at completion | **Removed.** REG-1 captures at invoice-line save. A pick keeps only its snapshot (name, EPA number, manufacturer, signal word from the brand row, amount). 4.C step 6 is deleted. |
+| 3.1 `brand_lines` entries | carry `rup_status`, `signal_word`, `facts_source` | Carry `brand_name`, `epa_registration`, `manufacturer`, `signal_word`, `delivered_quantity`, `typed`, `pick_ids`, `completed_at` only. |
+| 3.1 `[]` | "keeps no EPA number, never the generic's" | Q8: the line keeps the product's own number and is recorded per line like any REG-1 line. |
+| 3.1 two brands, one number | one record, names joined | One record per brand (Q9); `brand_key` tells them apart (14.4). |
+| 3.1 `brand_lines` grant | revoke the column grant | #1746 already revoked app-role writes on `invoice_items`. `service_role` keeps its writes; the trigger sets `brand_lines` on every insert and update (14.4), so no role can set it by hand. |
+| 3.3 locking and `BRAND_LINES_STALE` | posting holds each delivery row `FOR SHARE` and refuses a stale draft | **Both removed.** Posting takes no delivery lock and never refuses over brands (Q5): it records from the stored `brand_lines`. A posted line whose stored brands differ from the current picks is listed `brand_lines_stale` on Sales to check. Delivery-side writers keep today's order (delivery row, then invoice lines; completion's order since `20261215110000`); posting keeps #1746's (invoice and lines, then the shared registration lock). Posting never waits on a delivery row, so the two orders cannot form a cycle. |
+| 4.D writing `brand_lines` | through REG-DB's `_capture_invoice_line_sale` | A trigger (14.4) on every insert and update; delivery-side changes reach existing drafts through an event trigger (14.4). |
+| 4.D the line's own number | sold number = brand's number; NULL for a split | Exactly one entry with a number: the line's `epa_registration` is that number. Anything else (several entries, `[]`, a no-brand or no-number entry): the product's own number, set by the trigger even if the line held a brand number before. |
+| 4.D `save_invoice` | quantity change keeps the pick's copied capture | `save_invoice` deletes and re-inserts lines, so #1746 captures them again as of that save (accepted by Mason for lines, `20261231210000:30`); the per-brand capture inherits the same accepted rule. A Yes at posting still wins. |
+| 4.E which entries get a record | captured `yes` or registration `yes` at posting | #1746's rule per brand: any Yes at save (the product's tick, the product's number, the brand's number) records; a Yes always wins; a Yes at posting wins. |
+| 4.E grouping | `(invoice, product, sold number, signal word)` | Struck. One record per line per brand. |
+| 4.E brand problems | no record, separate gaps list | **Q6 problems (no record for the line, listed):** non-empty entries that do not add up to delivered; billed above delivered. **Not problems (Q8):** `[]`, a no-brand trip entry, a no-number brand: recorded under the product's own number, and listed for follow-up. |
+| 4.E allocation | as written | Unchanged (payer groups, trip order, quantity at `numeric(12,4)`, cents round down then largest leftover). Each record holds its brand's share of its line. |
+| 4.F correction facts | a same-brand pick copies the old pick's facts; `corrected:<date>` | Struck: picks hold no facts. A corrected draft line is captured again by the re-copy, as any save. |
+| 4.F correction vs posting | posting waits on the delivery row `FOR SHARE` | Posting no longer locks the delivery, so the correction locks the invoices instead: after the delivery row, it takes every linked invoice row `FOR UPDATE` in `id` order and then re-reads their status, refusing with `INVOICE_POSTED` as before. `post_invoice` holds the invoice row `FOR UPDATE` until it commits (`20261022022000:459`), so a posting either commits first (the re-read sees it and refuses) or waits for the correction (and then posts the re-copied lines). Order: correction = delivery, then invoices; posting = invoice, never the delivery; no cycle. A draft created after the re-read keeps the picks it saw; if those are older, it is listed `brand_lines_stale` after posting and never refused (Q5). |
+| 4.H `get_rup_brand_gaps` | a new admin list | Folded into REG-1's `get_epa_sales_to_check()` (re-issued) as reasons: `brand_split_mismatch`, `billed_above_delivered`, `brand_not_recorded`, `brand_no_epa_number`, `brand_lines_stale`, `payer_split_changed`, and per-brand `restricted_use_to_record` / `not_reviewed`. |
+| 4.H, P16a, P36d "product changed after delivery" | listed, warned | Struck: `save_invoice` refuses a product change on an order-linked line with quantity above zero (`GENERATED_INVOICE_LINEAGE_IDENTITY_IMMUTABLE`, `20261118110000:200-214`). |
+
+### 14.4 B-1b database pieces
+
+- **`invoice_items.brand_lines jsonb`** (NULL by default).
+- **Trigger `trg_fill_invoice_line_zbrands`** (BEFORE INSERT OR UPDATE, `SECURITY DEFINER`, `SET search_path = public, pg_temp`, named to fire after `trg_fill_invoice_line_epa` and before `trg_refuse_posted_invoice_child_write`): on an invoice that is `posted`, `overdue` or `paid`, it sets `NEW.brand_lines := OLD.brand_lines` and leaves the number alone, so cost, tote and return-credit updates on posted lines still pass the posted-child guard. Otherwise, on every insert and update, it recomputes `brand_lines` from the current picks by 4.D's rules (which picks; `[]` vs NULL from the completion event) and sets the line's number per 14.3. A line with no `order_item_id` gets NULL. Because it recomputes on every write, `save_invoice`'s re-insert and its id-restore update both end with fresh values.
+- **Re-copy on pick changes:** an AFTER INSERT trigger on `delivery_brand_events` (every brand writer, completion included, writes one event after its picks) touches the delivery's lines on `draft` and `unposted` invoices (this delivery's invoices, and order-level invoices covering its order lines), so the trigger above recomputes them. The order-level touch goes through `guard_terminal_order_invoice_items` (`orders FOR UPDATE NOWAIT`); an `ORDER_LIFECYCLE_BUSY_RETRY` there is retryable, and B-2's screens retry it once.
+- **Backfill at apply:** the migration touches every `draft`/`unposted` line with an `order_item_id` once, so lines made between B-1a and B-1b get their brands.
+- **`invoice_line_brand_rup_captures`** (private, like `invoice_line_rup_captures`: owner `postgres`, RLS on, every grant revoked; its admin policy only states intent, as #1746's does): `invoice_item_id` (FK `ON DELETE CASCADE ON UPDATE CASCADE`), `brand_key text NOT NULL`, `brand_name`, `epa_registration`, `rup_status`, `signal_word`, `source`, `captured_at`; primary key `(invoice_item_id, brand_key)`. `brand_key` = `lower(brand_name) || '|' || coalesce(normalized snapshot number, '')`, or `'~none|'` for a no-brand entry, never NULL. `captured_at` changes on every re-capture, as in #1746.
+- **`_invoice_brand_rup_facts(product, brand number, brand signal word)`:** #1746's rule with the brand's number in place of the line's; Yes when the product's tick, the product's number's registration or the brand number's registration says Yes; the captured number is the brand's (or the product's when the brand has none); the signal word is the captured number's registration's (the brand's number, or the product's when the brand has none, as `_invoice_line_rup_facts` does), else the brand snapshot's, else the product's.
+- **`_capture_invoice_line_rup` re-issued:** the brand capture runs **before** #1746's early return, keyed by the brand set: brands no longer on the line are deleted, new ones captured, kept ones keep their row (a Yes always wins). Before the seed nothing is captured.
+- **`generate_rup_sales_records` re-issued, three branches per line:** `brand_lines` NULL or `[]` → #1746's per-line path; non-empty with no Q6 problem → one record per brand captured Yes, with its allocated quantity and cents, `brand_name`, `brand_key`, the brand's number and signal word; non-empty with a Q6 problem → no record. The posting-time capture of missing rows and the Yes-at-posting upgrade run per brand too.
+- **`rup_sales_records`:** add `brand_name text`, `brand_key text`. Replace `rup_sales_records_one_active_per_line` with a unique active index on `(invoice_item_id, coalesce(brand_key, ''))`, and extend `trg_rup_sales_record_line` so a line's active records are either one with `brand_key` NULL or any number with it set, never both.
+- **`_epa_registration_unrecorded_posted_lines` re-issued** per brand (a brand number turning Yes lists the split lines it sits on, and a line counts as recorded only when that brand has its record; the product's number lists each brand too, and a line whose brands do not reconcile is listed once under any number it carries, Sol r3), and **`get_epa_sales_to_check()`** with the reasons in 14.3. Every line-level brand reason is listed, restricted or not (Mason, 2026-11-11, "always show", after Sol r5; this replaces the earlier may-owe filter). A brand ticked restricted use on its own row counts as Yes for its sale, as the product's tick does, read live when the sale is captured (Mason, 2026-11-11, after Sol r4); so does the brand an admin linked a typed pick to. A brand line whose capture is unknown is listed `not_reviewed` when either its own number or the product's number is not reviewed (Codex, PR #1825).
+- **`get_rup_sales_register`** is `RETURNS TABLE` (`20261014220000:100-107`): adding `brand_name` is a DROP and CREATE with its grants and the frontend type.
+- **Seed:** B-1b's preflight refuses unless `_epa_registrations_seeded()`, so the pre-seed path never meets a branded line. Brand numbers not in the seed (typed ones) stay `not_reviewed` until someone adds a registration.
+
+### 14.5 Prover cases changed (section 7)
+
+- P12, P19, P20: per-brand records follow #1746; a split line gives two records on one line; two trips of one brand give one record; a brand record carries its brand's signal word.
+- P21: entries not adding up and billed above delivered give no record and are listed; `[]`, a no-brand trip and a no-number brand are recorded under the product's own number and listed.
+- P15, P23: completion, the partial trim, `set_delivery_brands`, `edit_delivery` and a correction re-copy open drafts through the event trigger; a posted order-level invoice is left alone and a later trip's completion (tote copy) still succeeds.
+- P32 replaced: posting a draft whose brands changed after the office loaded it is refused only by the existing `INVOICE_CHANGED_SINCE_LOADED`; a posted line made stale later is listed `brand_lines_stale`. Completion and posting of one draft, run together in both orders with a registration edit waiting, never deadlock.
+- New: `save_invoice` with a price change on an order-linked branded line, after the seed: `brand_lines` and the captures survive the id restore. A `service_role` write of `brand_lines` is overwritten. A line can never hold a per-line and a per-brand record at once. B-1b's apply refuses before the seed.
+- Removed: captured facts on picks, `BRAND_LINES_STALE`, `INVOICE_LINE_RUP_NO_EPA`, `INVOICE_LINE_NO_REGISTRATION`, `get_rup_brand_gaps`, "product changed after delivery".
+
+### 14.6 REG-1 bug found by this review (fix before the seed runs)
+
+`_save_invoice_scoped_impl` re-inserts lines, then moves each kept order-linked line back to its old id (`UPDATE invoice_items SET id = preserved.source_item_id`, `20261118110000:276`). #1746's capture trigger has already captured the re-inserted id, and `invoice_line_rup_captures.invoice_item_id` is `ON UPDATE NO ACTION` (checked on live 2026-11-10). So after the seed, re-saving such a line should fail with a foreign-key error. #1746's prover case 14 re-saves lines without an `order_item_id`, so it never reached this path. Not yet reproduced. Proposed fix, a small migration of its own before the seed: make that foreign key `ON UPDATE CASCADE`, plus a prover case re-saving an order-linked line after the seed.
+
+### 14.7 Struck from sections 3 to 7
+
+3.1's `[]` "never the generic's number" and its joined-name records; 3.3's posting delivery lock, staleness check and `BRAND_LINES_STALE`; 4.C step 6; 4.D's `brand_pick` and `sale_facts_source` rules; 4.E's grouping key; 4.F's fact copying and `corrected:<date>`; 4.H's `get_rup_brand_gaps`; P6's "no EPA number"; P16's "client write refused" (now overwritten); P16a and P36d's product-change cases; P32 and P36b's `BRAND_LINES_STALE`.
+
+### 14.8 Review of section 14 (2026-11-10)
+
+**Luna round 1** (head `14c9fac5e`): 1 HIGH, 1 MED, 1 LOW.
+- HIGH, lines made between B-1a and B-1b keep NULL brands: **fixed**, backfill at apply plus the seed-first order (14.2, 14.4).
+- MED, an admin read policy without a grant cannot work: **refuted**; deliberately the same as #1746's private capture table, whose policy only states intent and which no app role reads.
+- LOW, no `updated_at` on the capture table: **refuted**; `captured_at` is rewritten on every re-capture, as in #1746, and is the only time that matters.
+
+**Independent Opus review** (same head, read against the migrations): 2 BLOCKER, 6 HIGH, 8 MED, 6 LOW.
+- BLOCKER, the trigger fired only on insert or product change, so drafts were never re-copied: **fixed**, recompute on every write plus the event trigger (14.4).
+- BLOCKER, `save_invoice` lost brands and, after the seed, fails on the id restore: **fixed** for B-1b (recompute on every write; `ON UPDATE CASCADE`); the existing #1746 half is 14.6.
+- HIGH, recomputing a posted line would trip the posted-child guard: **fixed**, posted lines keep `OLD.brand_lines`.
+- HIGH, posting's delivery lock made a three-way deadlock with a waiting registration edit; HIGH, completion locks the delivery first; HIGH, `BRAND_LINES_STALE` blocks posting against Q5: **fixed together** by removing posting's delivery lock and staleness refusal (14.3).
+- HIGH, NULL `brand_key` for a no-brand entry: **fixed**, sentinel key (14.4).
+- HIGH, generator paths could record a problem line or double-record: **fixed**, three branches plus a record guard (14.4).
+- MED: stale brand number on a split (fixed, 14.3); generic's signal word on a brand record (fixed, `_invoice_brand_rup_facts`); brand capture skipped by the early return (fixed); pre-seed path (fixed, seed first); unrecorded-lines list per brand (fixed); leftover rules (struck, 14.7); `service_role` overwrite and `SECURITY DEFINER` trigger (fixed); `save_invoice` re-capture (stated as #1746's accepted rule).
+- LOW: product-change cases unreachable (struck); `get_rup_sales_register` DROP and CREATE (stated); order busy retry (stated); seed and typed numbers (stated); which PR adds the posting lock (moot, removed). `BRAND_PICKS_CHANGED` on completion and an internal error failing a Bill Split completion: **refuted**; Mason's Q5 record keeps `BRAND_PICKS_CHANGED` as data protection, and an internal error is not a brand problem.
+
+**Luna round 2** (head `33d1d6c1a`): no BLOCKER or HIGH; 2 MED.
+- MED, a brand whose number changed between trips gets two keys: **kept by design and stated** (14.1): one record per number, so a record never carries a number that was not delivered.
+- MED, `brand_lines` had no signal word for the brand snapshot fallback: **fixed**, picks and entries carry the brand row's `signal_word` (14.3).
+
+**Codex GitHub review** (heads `14c9fac5e`, `33d1d6c1a`): 3 P2.
+- P2, NULL `brand_key` for a no-brand entry: **already fixed** by the `'~none|'` sentinel (14.4).
+- P2, removing posting's delivery lock left a correction able to race a posting: **fixed**, the correction locks the linked invoices and re-reads them (14.3, 4.F row).
+- P2, a no-number brand's signal word skipped the product number's registration: **fixed**, the signal word follows the captured number (14.4).
+
+---
+
+## 15. Behavior contract for B-1a as built (2026-11-11, `plan-contract`)
+
+Read on `main` `eda8b1597` and live (read-only) on 2026-11-11. Section 14 and the rules of sections 3 and 4 that it keeps still hold. This section records only how B-1a meets them against the live code, and where the build departs from the sheet's mechanism (never its behaviour).
+
+### 15.1 Facts (live, 2026-11-11)
+
+- Preconditions met: `_product_parent_grouping_open()` is `SELECT true`; `epa_registration_seed_run` has its row (seeded 2026-11-11 15:14 UTC, 347 registrations); the `invoice_line_rup_captures` foreign key is `ON UPDATE CASCADE` (`20270102160000`, 14.6).
+- Completion chain: `complete_delivery` → `_complete_delivery_replay_impl_20261015` (authorization, replay, period check) → `_complete_delivery_period_preflight_impl` → `_complete_delivery_aggregate_impl` (1,075 characters; the **only** caller of `_complete_delivery_authorized_impl`) → `_complete_delivery_authorized_impl`. `start_and_complete_delivery` and `process_offline_action` both call `complete_delivery(`. A replay returns inside `_complete_delivery_replay_impl_20261015` and never reaches the aggregate step.
+- `edit_delivery` (wrapper with bound receipt) → `_edit_delivery_replay_impl_20261015`, which re-creates lines only when `p_items` is given and the delivery is `scheduled`, and refuses any delivery that is not `scheduled` or `in_progress`.
+- `_enqueue_delivery_receipt` is called only by `complete_delivery`; the receipt body is a snapshot.
+- `delivery_items` has no `(id, delivery_id, product_id)` unique; `product_parent_brands` has no `(parent_id, id)` unique; `product_brands` has `(product_id, id)`. Admins can `UPDATE delivery_items` directly (`del_items_update`).
+- `_product_parent_replay(key, scope, fingerprint)` (PAR-1, reused by REG-1's `set_epa_registration`) serialises a key, refuses a key used by another operation (`IDEMPOTENCY_CROSS_OP_KEY_REUSE`, from `check_idempotency`), and refuses a different actor or payload (`IDEMPOTENCY_PAYLOAD_MISMATCH`).
+
+### 15.2 Mechanism choices (engineering; behaviour unchanged)
+
+1. **Where the completion rule runs:** `_complete_delivery_aggregate_impl` is re-issued with the same signature and grants. It checks the brand base `seq`, calls `_complete_delivery_authorized_impl` unchanged, then runs the completion rule (4.C steps 1, 2 and 5) and writes the `completed` event. The 28,953-character body is **not** re-issued. The rule now runs after the tote copy and invoice drafting rather than before; that order no longer matters, because 14.3 removed capture at completion and B-1b re-copies drafts off the `completed` event. **Except split drafts (B-1b H1, 2026-11-11):** Bill Split and landlord auto-split drafts are written inside the body, before the rule, and are never re-copied (their stored provenance claim must keep matching). B-1b therefore re-issues this aggregate step once more to name the delivery being completed in the transaction-local setting `crx.brand_completing_delivery` while the body runs; the reader (16.2.1) reads that delivery as the rule will leave it, so every line written during a completion holds the final brands. A brand error fails the whole completion, because the rule is outside the Bill Split `EXCEPTION` block (P26).
+2. **`p_brand_base_seq`:** `complete_delivery` and `start_and_complete_delivery` are renamed to `_complete_delivery_evidence_impl_20270104` and `_start_and_complete_delivery_impl_20270104` (EXECUTE revoked from every app role) and replaced by thin wrappers with one trailing `p_brand_base_seq bigint DEFAULT NULL` and the same grants. A non-NULL value travels down in the transaction-local setting `crx.brand_base_seq`. The aggregate step (fresh completions only, delivery row already locked) compares it with the delivery's highest event `seq` other than `line_removed` (0 when none; an office `reviewed` event counts, Luna round 4) and clears the setting. It **never refuses**: equal records `picks_confirmed: true`; stale or not a plain number completes against the current picks and records `picks_confirmed: false` (reviewer round 1, 15.10); no value sent (today's app) records `picks_confirmed: null`, which the office list does not flag. The `seq` is **not** part of the fingerprint: a same-key retry is the same completion, so a committed one replays and an uncommitted one is checked again on retry.
+3. **Retry safety:** the three new writers use `_product_parent_replay` plus `save_idempotency` (the REG-1 pattern) instead of the bound-receipt trigger, so the receipt-binding trigger on `idempotency_keys` is not recreated. The guarantees are the same: key required, cross-operation reuse refused, another actor or payload refused, and authorization before the lookup.
+4. **`edit_delivery`:** only the thin wrapper is re-issued. On a fresh call it copies the current picks before the body runs. When the body reports `items_changed`, it re-inserts the picks of each new line whose `order_item_id`, `product_id`, `quantity` and `unit_size` equal an old line with picks, when exactly one old line and one new line share those four values (otherwise those picks are dropped and listed, never guessed), copying each pick with its entry and review history, writes one `edited` event, and adds `brand_picks_kept` and `brand_lines_dropped` to the result and to the saved receipt, so a replay returns the same answer.
+5. **Integrity by key:** `delivery_item_brands (delivery_item_id, delivery_id, product_id)` references `delivery_items (id, delivery_id, product_id)` `ON DELETE CASCADE` (new unique), so a direct admin update of a picked line's product is refused; parent picks reference `product_parent_brands (parent_id, id)` (new unique); legacy picks reference `product_brands (product_id, id)`.
+6. **No registration lock** on delivery-side writers (14.3: they keep today's order, delivery row then invoices).
+
+### 15.3 Rules that always hold
+
+- Only `SECURITY DEFINER` functions write picks or events. App roles get `SELECT` only, under the delivery read rule (admin, sales rep, or the delivery's assigned driver). Events are append-only (update, delete and truncate refused).
+- Every brand writer holds the delivery row `FOR UPDATE` before reading the highest `seq` and writing its event, so `seq` order is commit order for each delivery. The one exception is the line-delete trigger: its `line_removed` event takes no delivery lock (Mason, 2026-11-11, DECISION_LOG), so it can commit out of `seq` order; `line_removed` events never count toward the stale-save base.
+- Nothing about brands refuses a completion (Q5), a stale `seq` included; `BRAND_PICKS_CHANGED` refuses only a brand save or correction.
+- A listed pick's snapshot comes from the brand row; a typed pick's from its typed values. A correction never overwrites a pick: it supersedes it.
+- No amount, quantity, cost, stock or invoice row changes in B-1a. The only invoice reads are the correction's posted check.
+
+### 15.4 Who may act
+
+| Action | Who | Server check |
+|---|---|---|
+| `set_delivery_brands` | active admin, sales rep, or the assigned driver | delivery `scheduled` or `in_progress`, else `DELIVERY_BRANDS_LOCKED`; each line on the delivery; a listed brand on the line's list (3.2) |
+| completion rule | whoever may complete (unchanged) | runs inside completion |
+| `correct_delivery_brands` | active admin | delivery `completed`; reason required; each named line's picks add up to delivered, or are empty (brand unknown: the line goes back on the office list); linked invoices locked `FOR UPDATE` in `id` order after the delivery row, refused `INVOICE_POSTED` if posted, overdue or paid |
+| `review_typed_brand` | active admin | pick is typed and current; `link` needs a brand on the line's current list |
+| `get_delivery_brands` | the delivery read rule (a driver only while active) | |
+| `get_typed_brands_for_review`, `get_deliveries_missing_brands` | active admin | |
+
+### 15.5 Existing rows
+
+The new tables start empty. A delivery completed before the apply has no `completed` event: `get_deliveries_missing_brands` lists such a line "completed before brand capture" only when its product has a brand list today. Deliveries scheduled or in progress at the apply have no picks and complete as today, with a `completed` event. The deployed app never sends `p_brand_base_seq`, so every completion until B-2 records `picks_confirmed: null` and is not flagged for it. Read-only check after the apply: both new tables exist with RLS on and app roles limited to `SELECT`; each delivery completed after the apply has one `completed` event; a pick count above 0 is fine (the new RPCs are callable as soon as the apply lands), and every pick sits on a delivery that is not cancelled or voided.
+
+### 15.6 Proof cases (local real-schema prover, test data only)
+
+- When a driver not on the delivery, an inactive user or an anonymous caller saves picks, then refused. Same key and same save, then one event and the same answer; different payload, then `IDEMPOTENCY_PAYLOAD_MISMATCH`; another operation's key, then `IDEMPOTENCY_CROSS_OP_KEY_REUSE`; no key, then `IDEMPOTENCY_KEY_REQUIRED`.
+- When a brand from another parent, from another size's legacy list, or a retired parent brand is saved, then `BRAND_NOT_FOR_PRODUCT`. A not-currently-sourced listed brand is accepted. A typed name equal to a listed brand with the same or a blank number is stored as the listed pick; with a different number, as typed and pending review.
+- When picks add up to more than loaded, then `BRAND_SPLIT_OVER_LOADED`. When a save uses an old base `seq` (after another save or an `edit_delivery`), then `BRAND_PICKS_CHANGED`.
+- When a delivery completes through `complete_delivery`, `start_and_complete_delivery` or an offline replay, with a branded line and no pick, a split that does not add up, or zero delivered, then it completes: zero delivered keeps no picks, one pick above delivered is trimmed to delivered, and one `completed` event records each line's delivered amount and brand-list size. A replay writes no second event.
+- When completion is sent with a stale `p_brand_base_seq`, then it completes against the current picks with `picks_confirmed: false`; with the current one, `true`; none sent, `null` (not flagged). An office review does make a loaded `seq` stale (Luna round 4). A delivered amount with more than 4 decimals completes and keeps its pick (listed as a mismatch).
+- When a legacy pick's size is grouped before completion, then the pick is re-pointed to its parent brand and its snapshot is unchanged.
+- When `edit_delivery` changes only the date and sends the same items, then the picks are kept under the new line IDs; when one line's quantity changes, then only that line's picks drop. Both write one `edited` event.
+- When an admin corrects a delivery with a linked posted invoice, then `INVOICE_POSTED`; with only drafts, then the old picks are superseded and the new ones current. Two corrections from one base: the second is `BRAND_PICKS_CHANGED`. A non-admin is refused.
+- When the receipt is queued, then its lines are exactly as before B-1a and `_enqueue_delivery_receipt` is unchanged (brands on the receipt ship with B-3).
+- When grants are read from the catalog, then app roles have only `SELECT` on the new tables, no helper is executable by an app role, and every new `SECURITY DEFINER` function pins `search_path`.
+- When the same flow runs with and without picks, then no money, quantity, stock or invoice column differs.
+
+### 15.7 Delivery
+
+B-1a ships alone, database only. The deployed app keeps working unchanged: the new parameters default to NULL and the new RPCs are unused until B-2. Recovery is a forward repair in its own reviewed migration: it restores the re-issued functions from their pre-apply bodies (pinned by md5 in the preflight) and the two original signatures, and drops the new functions. The two tables and their rows stay, because every completion after the apply writes a `completed` event and the new RPCs are callable at once; dropping them would need its own explicitly approved migration. B-1b follows as its own PR.
+
+### 15.8 Open business decisions
+
+None. Every behaviour above is one of Mason's earlier answers (Q1 to Q9) or an engineering choice.
+
+### 15.9 Cold challenge (Astra, 2026-11-11) and what changed
+
+Astra's challenge of this contract was triaged against the live code. **Fixed in the migration:** rollback keeps the tables (forward repair, 15.7); an ambiguous edit match drops picks instead of guessing (15.2.4); edit carry keeps review fields; the driver read rule needs an active profile; pick amounts are above zero, not NaN, at most 4 decimals; a typed name shared by two listed brands with no number stays typed for review; a correction may empty a line; the office list adds `brand_no_longer_listed` and flags "completed before brand capture" only for a line with no picks; the delivery row is locked before `edit_delivery` copies picks. **Kept, with reasons:** the base `seq` stays out of the completion fingerprint (15.2.2); lock order (delivery, then invoices by id) matches posting, which never locks a delivery; direct admin edits of `delivery_items` have no app path (the composite key still refuses a product change on a picked line); one statement per read gives one snapshot. **Later parts:** the corrected-receipt resend and invoice and RUP copies are B-1b and B-3; screens are B-2.
+
+### 15.10 Reviewer round 1 (rls-security, compliance, migration-drift; 2026-11-11) and what changed
+
+- **HIGH (both reviewers):** completion trimmed a single pick to a delivered amount with more than 4 decimals, which broke the pick CHECK and refused the whole completion. Now the trim runs only when the delivered amount fits 4 places; otherwise the pick stays and the office list shows a mismatch. Corrections and the office list compare at 4 places. Prover case 14.
+- **MED:** a stale `p_brand_base_seq` refused the completion. Mason's rule is warn only, so it now completes with `picks_confirmed: false` (prover case 6). An office review (`reviewed` event) no longer moves the stale-save base, so it cannot make a driver's loaded picks stale.
+- **LOW fixed:** table owners set explicitly; the postflight also checks the re-issued internal bodies stay unexecutable; `_delivery_brand_resolve_picks` marked VOLATILE; reads and reviews skip soft-deleted deliveries; ledger wording.
+- **LOW accepted:** picks cascade away with no brand event when an order clean-up deletes a cancelled delivery's line (the earlier events still hold them); retries after access is lost get the access error (house rule); `review_brand_ref` has no foreign key (it names either kind of brand); a wrongly shaped typed EPA number refuses that save, not the completion; B-2 types RPC picks narrower than `DeliveryItemBrand`; B-1b must refuse copying brands onto an already-posted invoice; refresh the schema registry after apply.
+- **Drift review MED fixed:** the reporting role `metabase_ro` and the `delivery_brand_events.seq` counter are revoked like the newest tables, and the postflight checks both. **After apply (applied-docs PR):** re-pin the four sweep allowlist entries for the new `complete_delivery` and `start_and_complete_delivery` signatures, run `npm run db-sweeps:live`, regenerate the schema registry, flip the ledger record with the live version and name, and record live ordering against the DM-4 and RT-3 stamps (20270104100000 and 20270104110000, both lower than this one).
+- **Luna round 1 (gpt-6-luna xhigh, head e831d365f):** HIGH "the receipt shows picks before the trim" **refuted**: the receipt is queued by `_complete_delivery_evidence_impl_20270104` after the whole completion chain returns, so after the brand step; prover case 11 now trims a pick (3 loaded, 2 delivered) and the receipt shows 2. MED "a bad `crx.brand_base_seq` value errors the completion" **fixed**: anything that is not a plain number reads as not confirmed (prover case 6 sets a garbage value; the completion runs without error). LOW "table policies let admins and reps read brand rows of a soft-deleted delivery" **accepted**: it matches `del_items_select` on `delivery_items` itself; the RPC reads skip soft-deleted deliveries.
+- **Sol round 1 (gpt-6-sol high, head 19ff6f882):** HIGH "a direct delete of a scheduled delivery line cascades its picks away with no event or stale-base change" **fixed**: a BEFORE DELETE trigger on `delivery_items` (`_delivery_brands_on_line_delete`) records the line's current picks as one `line_removed` event first, which moves the stale-save base; `edit_delivery` sets `crx.delivery_brand_edit` around its body so its re-create is recorded once, as `edited` (prover cases 8 and 15). MED "a correction of 2.3333 is accepted for 2.33333 delivered and the office list shows no mismatch" **refuted, by design**: a pick holds 4 places, so 4 places is the closest a correction can record; the full delivered amount stays on the line. MED "an admin can link a typed pick to a listed brand with a different EPA number" **accepted**: the review is the admin's judgment after checking the jug; the typed snapshot (name, number) is kept beside the link, so the difference stays visible.
+- **Luna round 2 (head ea266325d):** HIGH "the line-delete trigger writes its event without locking the delivery, so a concurrent brand save can commit a lower seq after it" **fixed**: the trigger locks the delivery row first, like every other brand writer, then checks for picks. A delete and a brand save on the same line at the same instant can now deadlock; Postgres cancels one and the other completes, which is acceptable for a rare office action. Not proven by a two-session test (the prover runs one session at a time).
+- **Luna round 3 (head f60c67273):** HIGH "the receipt prints brand amounts from a split that does not add up to delivered" **fixed**: a line's brand amounts appear on the receipt only when its picks add up to delivered (4 places); otherwise the receipt names the brands without amounts and the office list shows the mismatch (prover case 11). MED "an office dismissal can be undone by a driver save loaded before it" **fixed**: a `reviewed` event moves the stale-save base again. That is safe now, because a stale base never refuses a completion (it records picks_confirmed false; prover case 14). MED "the round 2 trigger lock can deadlock a completion that holds the delivery and waits on the line" **fixed by removing the lock**: the `line_removed` event is history only and no longer moves the stale-save base, so it needs no ordering with other writers; a save that names the deleted line is refused as `DELIVERY_ITEM_NOT_ON_DELIVERY`, and the rest of the delivery still saves (prover case 15). This replaces the round 2 fix above. Builder's record: the line-delete trigger has drawn two HIGHs (Sol round 1, Luna round 2); the business fallback, if it draws more, is to refuse deleting a line that has recorded brands.
+- **Luna round 4 (head 50e6673df):** HIGH "a session can set `crx.delivery_brand_edit` or `crx.brand_base_seq` itself, skipping the `line_removed` event or recording picks as confirmed" **refuted with live evidence (read-only, 2026-11-11)**: `authenticated` and `anon` cannot log in (`rolcanlogin` false), so app users reach the database only through PostgREST, one request per transaction, which runs no `SET` and exposes no `pg_catalog.set_config`; the only `public` function that calls `set_config` with a non-literal name (`_snapshot_quote_item_cost`) is not executable by `authenticated`; every brand setter clears its value before returning, and a failed call rolls its local setting back. A session that can set these values directly is a trusted server role that could already write the tables. MED "a `line_removed` event can sort by seq before a save that committed first" **accepted**: since round 3 the event is history only and moves no stale-save base, so a listing order off by one concurrent save changes no decision; its `created_at` and contents stay exact.
+- **Sol round 2 (gpt-6-sol high, head d6ee8e279):** HIGH "unconfirmed picks are emailed to the customer and missing from the office list" and HIGH "a correction leaves an already queued or sent receipt showing the old brand" **fixed by moving the receipt brands to B-3**: B-1a no longer re-issues `_enqueue_delivery_receipt`, so the receipt is exactly as today (prover case 11 checks its body is unchanged). The brand lines reach no customer until B-3 changes the sender anyway, and B-3 already owns the resend after a correction (4.F), so the receipt, its printer and its correction handling are built and reviewed together. This also retires the Luna round 3 receipt fix. The office half is **fixed** here: a completion from an out-of-date screen (a stale seq) lists each picked line as `picks_not_confirmed` until an admin corrects that line (prover cases 12 and 14). A completion that sent no seq (today's app, before B-2) records `picks_confirmed: null` (not stated) and is not flagged, so the list is not flooded before the screens ship. MED "a line deletion does not advance the stale-save base, so a completion can record picks confirmed" **refuted**: the deleted line is no longer on the delivery, and every remaining line's picks are exactly what the screen loaded, so "confirmed" is true for what was delivered (Luna round 3 design). MED "2.33335 delivered with 2.3334 recorded shows no mismatch" **refuted, by design**: the same 4-place rule as Sol round 1. LOW "history seq can disagree with commit order" **accepted**, as in Luna round 4.
+- **Luna round 5 (head 211c65677):** BLOCKER "a build-sheet note reads as an instruction to reviewers" **fixed**: the round 3 note is reworded as the builder's record of a fallback. HIGH "a correction misses a posted invoice linked through `invoice_items.delivery_item_id`" **refuted with live evidence (read-only, 2026-11-11)**: live `invoice_items` has no delivery-line column, and no migration adds one; invoices link by `delivery_id` or `order_item_id`, both checked. HIGH "posted credit memos are skipped by the posted-invoice refusal" **refuted, by design**: a credit memo never carries brand lines (4.D, P15), so a brand correction changes nothing on it, the same exclusion completion uses for tote numbers. MED "a correction that adds the first pick to an unconfirmed line leaves `picks_not_confirmed`" **fixed**: any `corrected` event after the completion that names the line (before or after rows) clears it (prover case 12).
+- **Taha's review (PR #1808, head b797f1e74):** no BLOCKER, HIGH or MED. LOW "the line-delete trigger can still deadlock with a completion, against its comment" **comment fixed, risk accepted**: the event's delivery foreign key takes a key-share lock on the delivery, so a completion holding the delivery while it waits on a line being deleted can deadlock; Postgres cancels one and it is retried. The trigger fires with the line already held, so it cannot take the delivery first; the case needs a direct delete of a picked line during its completion. LOW "a negative brand seq refuses a completion" **fixed**: the wrappers no longer refuse it; it reads as not confirmed, like any value that is not a plain number (prover case 6).
+
+---
+
+## 16. Behavior contract for B-1b (2026-11-11, `plan-contract`)
+
+Read on `main` `167126d17` and live (read-only) on 2026-11-11, after B-1a's apply (ledger `20261111235530`). Section 14 holds; this section records how B-1b meets it against the live code, which mechanisms it chooses, and what the cold challenge (16.10) changed. Migration stamp `20270106110000`.
+
+### 16.1 Facts (live, 2026-11-11)
+
+- Preconditions met: B-1a live; `epa_registration_seed_run` has its row (seeded 2026-11-11 15:14 UTC); the capture foreign key is `ON UPDATE CASCADE` (`20270102160000`); `rup_sales_records` has 0 rows.
+- Sales: no invoice posted since 2026-11-06 (0 in 30 days, 0 since the seed); 0 brand picks; 0 deliveries completed since B-1a; 11 order-linked lines on draft or unposted invoices. No sales before the switch-on (Mason, 2026-11-10). No brand can be picked from the app until B-2 ships the picker.
+- BEFORE triggers on `invoice_items` fire by name; the new `trg_fill_invoice_line_zbrands` sorts after `trg_fill_invoice_line_vendor` and before `trg_guard_split_invoice_items`. AFTER: `trg_zz_capture_invoice_line_rup` (capture), `zz_cap_delivery_invoice_items`, `zz_cap_order_invoice_items` (billing caps).
+- `_refuse_posted_invoice_child_write` lets a posted line's update through only when nothing but `cost_cents`, `return_credit_cogs_cents`, `tote_number` and `updated_at` changed. `_fill_invoice_line_epa` returns a posted line unchanged on update (it fills a blank number only on a draft or unposted invoice, or on a product change, which the posted guard refuses). So a posted cost or tote update stays allowed.
+- A touch of a draft line that changes no price, cost, quantity or product passes the below-cost, price-required and both billing-cap triggers (each returns early when the quantity did not rise). `guard_terminal_order_invoice_items` takes `orders FOR UPDATE NOWAIT` and can raise `ORDER_LIFECYCLE_BUSY_RETRY` or `ORDER_INVOICE_TERMINAL`.
+- The billing caps compare invoice quantities directly with `round(quantity_delivered, 4)`, so invoice and delivery quantities are already the same unit everywhere; B-1b adds no conversion. Across every active invoice of an order, billed never exceeds delivered.
+- `invoice_items.quantity` is `numeric(12,4)`; `extended_cents` is bigint. `rup_sales_records.epa_registration` allows NULL: #1746's per-line record carries a blank number when the line has none, and Sales to check lists it `no_epa_number`.
+- `generate_rup_sales_records` is called only by `_post_invoice_impl_20260714` and `_post_deleted_delivery_recovery_invoice_20260719`, both without an idempotency key; it refuses an invoice that is not posted, and upgrades to Yes at posting only when `posted_at = now()`. Admins and sales reps may also call it on an already-posted invoice (it then adds missing records only).
+- `invoice_items` is readable by admins and by the invoice's creator and salesperson; app roles cannot write it directly.
+- The deployed Sales to check screen (`EpaRegistrationSetup.tsx`) keys rows by `line_id` and maps `reason` through a fixed text table; the register screen (`Compliance.tsx`) lists records by their own id. No invoice, email, statement or PDF path selects `brand_lines` (`INVOICE_ITEM_COLUMNS` does not include it).
+- `get_rup_sales_register` is `RETURNS TABLE`, admin only (`require_admin`), EXECUTE for `authenticated` and `service_role`.
+
+### 16.2 What B-1b builds (one migration, plus the Sales to check screen's types and labels)
+
+1. **The reader, `_invoice_line_brand_lines(invoice_id, order_item_id, product_id)`**, used to write the snapshot (fill trigger, re-copy, backfill), to detect staleness, and by posting to refuse a stale line a record (16.2.3).
+   - **A delivery being completed** (named in `crx.brand_completing_delivery`, no `completed` event yet) is read as B-1a's rule will leave it: whether a line had a brand list comes from the current list, and a single pick above the delivered amount (when that amount fits 4 places) reads as the delivered amount. Lines drafted during the completion (plain, Bill Split, landlord split, backdated) hold the final brands.
+   - **Covered lines.** None for a credit memo or a line with no `order_item_id`. An invoice with a `delivery_id` covers that delivery's lines for the order line; one without covers every delivery of the order line. Only deliveries with status `completed` and not deleted, and only delivery lines of the same product.
+   - **State.** Per covered line: its current picks, and whether its `completed` event recorded a brand list. A line completed before B-1a has no event, so no list.
+     - No covered line has a pick or a list: `NULL`.
+     - Some had a list but none has a pick: `[]`.
+     - Otherwise, one entry per current pick. Each covered line with no pick (a legacy trip included) adds one no-brand entry for its delivered amount.
+   - **Order (total, so repeated reads are identical).** By covered line (completion time, delivery id, delivery line id). Within a line by lower brand name, then normalized number, then pick id.
+   - **Entry fields.** `brand_key`, `brand_name`, `epa_registration`, `manufacturer`, `signal_word`, `quantity` (the pick's amount, or the line's delivered amount for a no-brand entry), `line_delivered` (`round(quantity_delivered, 4)` of its covered line), `typed`, `pick_id`, `delivery_id`, `delivery_item_id`, `completed_at`.
+   - **`brand_key`.** `'b:' || lower(btrim(brand_name)) || '|' || coalesce(normalized number, '')` for a brand, `'n:'` for a no-brand entry. The tag keeps them apart whatever a typed name says.
+2. **Fill trigger `trg_fill_invoice_line_zbrands`** (BEFORE INSERT OR UPDATE).
+   - On an invoice that is not `draft` or `unposted`: an update keeps `OLD.brand_lines` and leaves the number alone; an insert gets NULL.
+   - Otherwise `brand_lines` := the reader's result, and the number is set:
+     - all entries share one `b:` key with a number: that number (two trips of one brand print the brand's number, which Q8 and Q9 mean);
+     - `brand_lines` not NULL (including `[]`, a no-brand entry, a no-number brand or several brands), or newly NULL after holding brands: the product's own number;
+     - NULL before and after: `trg_fill_invoice_line_epa`'s number, unchanged.
+   - Any writer's value for `brand_lines`, `service_role`'s included, is overwritten.
+3. **Re-copy at the end of the writer's transaction.** A constraint trigger on `delivery_brand_events` (AFTER INSERT, `DEFERRABLE INITIALLY DEFERRED`, for each row) runs `_invoice_brand_recopy(delivery_id)` at commit.
+   - It therefore sees the final picks: after a correction supersedes and re-inserts them (its event is written first), and after a `line_removed` delete has cascaded.
+   - `_invoice_brand_recopy`, per covering invoice in id order (draft or unposted, not deleted, not a credit memo), in its own sub-transaction:
+     - skip a split-group invoice (one with a `split_invoice_provenance` row): it keeps the brands it was made with, which are final (16.2.1), and counts as skipped;
+     - lock the invoice row `FOR SHARE NOWAIT`, re-checking the status on the row as it now is; another writer holding it makes this a caught error (the brand write never waits) and the draft keeps its brands until its next save;
+     - skip it if it is no longer draft or unposted;
+     - otherwise update its covered lines whose stored `brand_lines` differs from the reader, so the fill trigger recomputes them.
+   - Any error in one invoice is caught and raised as a warning; that draft stays as it was (Q5). Busy order lock, terminal order, lock timeout and deadlock are all covered.
+   - Several events in one transaction re-copy several times; the later ones find nothing different.
+   - **Never a wrong record:** posting writes no brand record for a line whose stored `brand_lines` differs from the reader at that moment (a split draft corrected after it was made, or a draft the re-copy skipped). The line is listed `brand_lines_stale`. A NULL or `[]` line keeps #1746's per-line record, unless the picks now name brands (a split draft made with no pick, corrected afterwards): then no record under the product's number, and the line is listed `brand_lines_stale` (Sol r1).
+4. **Allocation `_invoice_line_brand_allocation(line_id)`.**
+   - **Input.** Reads only stored values: the line's `brand_lines`, its `quantity` and `extended_cents`, and the stored `brand_lines` and quantities of its payer group.
+   - **Arithmetic.** `numeric` (no overflow), quantities as whole units of 0.0001, cents as whole cents. Floor division only; leftovers go to the largest remainders, ties to the earlier entry.
+   - **Returns** `problem` (NULL or a reason) and the per-`brand_key` merged `quantity` and `cents`. A zero quantity, or a group billing zero, allocates nothing.
+   - **Problems.** Q6: the line gets no record and is listed. Checked in this order:
+     1. `brand_split_mismatch`: a covered delivery line with picks whose picks do not add up to its `line_delivered`. Checked per covered line, so errors on two trips cannot cancel out.
+     2. `overlapping_invoices`: another active invoice line for the same order line covers an overlapping set of trips under a different coverage, for example a whole-order invoice and a delivery invoice both active.
+     3. `payer_split_changed`: a payer-group member's stored `brand_lines` differs from this line's.
+     4. `billed_above_delivered`: the group's billed total is above the covered delivered total.
+   - **Payer group.** Every line with the same `order_item_id` and product on active invoices (not deleted, voided, cancelled or a credit memo) whose `delivery_id` is the same as this invoice's (both NULL for whole-order invoices), ordered by invoice id and then line id. The rule is the same for every member, split or not.
+   - **Group of one.** Entries in order, each up to its amount, until the line quantity is used.
+   - **Group of several.**
+     - Group brand shares: billed total × entry ÷ delivered total.
+     - Payers in order: each takes its row from the remaining brand shares and remaining total by the same rule; the last takes the rest.
+     - Every payer row adds up to its line quantity and every brand column to its share, whatever order the payers post in.
+   - **Cents per line.** Each entry's share of `extended_cents` by its allocated quantity, so a line's entries add up to its cents. Entries sharing a `brand_key` merge after allocation.
+5. **Brand captures.**
+   - **Table.** Private `invoice_line_brand_rup_captures` (14.4), plus a `basis` column: the first entry's display name, snapshot number and signal word, and the product id and product number.
+   - **Re-issued `_capture_invoice_line_rup`.** After its seeded check, when the line has non-empty `brand_lines` or holds brand captures, it first takes the shared registration lock, then syncs the brand rows:
+     - a line with `brand_lines` NULL or `[]`, or no product: every brand row deleted;
+     - otherwise:
+       - rows for keys no longer present are deleted;
+       - a new key is captured;
+       - a key whose basis changed is captured again;
+       - a key with an unchanged basis is kept.
+     - A Yes stays Yes on the same product.
+     - It then runs #1746's per-line capture, unchanged.
+   - **Facts.** `_invoice_brand_rup_facts(product, brand number, brand signal word)` as 14.4. The captured number is the brand's, else the product's, else none. Merged entries take the first entry's display name and facts, by the total order above.
+6. **Records.**
+   - **Columns.** `rup_sales_records` gains `brand_name` and `brand_key`.
+   - **Indexes.** A unique active index on `(invoice_item_id, COALESCE(brand_key, ''))` replaces the per-line one. `_guard_rup_sales_record_line` also refuses a line holding a per-line record and a brand record at once.
+   - **`generate_rup_sales_records`** (md5-pinned) branches per line:
+     - `brand_lines` NULL or `[]`: #1746's per-line path, unchanged.
+     - Non-empty: the posting-time capture of missing brand keys, and the Yes-at-posting upgrade, per brand (same `posted_at = now()` rule). Then the allocation. With a problem, no record. Otherwise one record per `brand_key` that is captured Yes, has a positive allocated quantity and has no active record. Each record carries:
+       - the allocated quantity and cents, `brand_name` and `brand_key`;
+       - the captured number and signal word;
+       - the line's unit and unit price.
+   - **Blank numbers.** A record has no number only where #1746's per-line record would: neither the brand nor the product has one. It is then listed `no_epa_number`.
+7. **Lists.**
+   - **Scope.** `get_epa_sales_to_check()` and `_epa_registration_unrecorded_posted_lines` are re-issued. Posted lines only, as #1746.
+   - **Row shape.** One row per line, `brand_key` and reason: #1746's fields plus `brand_key`, `brand_name` and `allocated_quantity`.
+   - **Line-level reasons.**
+     - `brand_split_mismatch`, `overlapping_invoices`, `payer_split_changed`, `billed_above_delivered`;
+     - `brand_lines_stale`: stored differs from the reader, NULL and `[]` included;
+     - `brand_not_recorded`: `[]` or any `n:` entry;
+     - #1746's own reasons for NULL and `[]` lines.
+   - **Brand-level reasons.** `restricted_use_to_record`, `not_reviewed`, `now_restricted_use`, `not_captured`, `no_epa_number`, and `brand_no_epa_number` (a `b:` brand with no number).
+   - **Which brands are listed.** Only brands with a positive allocated quantity. A record for A never counts for B.
+   - **`payer_split_changed` after posting.** Also listed when a posted line's active brand records no longer match its allocation computed now (a sibling changed after it posted).
+   - **Screens.**
+     - `get_rup_sales_register` is dropped and re-created adding `brand_name` at the end, with the same grants and admin gate.
+     - `src/types` `RUPSalesRecord` and `SaleToCheck` gain the new fields.
+     - `EpaRegistrationSetup.tsx` gains text for each new reason and keys rows by line, brand and reason.
+8. **From the B-1a review (Sol round 4 MED).** `get_typed_brands_for_review` leaves out picks on voided or cancelled deliveries, and `review_typed_brand` refuses them with the `BRAND_PICK_NOT_FOUND` it already gives a deleted delivery. Both keep their signature and grants.
+9. **Escaping.** B-1b's only new text is on the admin Sales to check screen, which React renders as text. No invoice, email or PDF path prints `brand_lines` (checked: `INVOICE_ITEM_COLUMNS`, `supabase/functions`). B-3 prints brand fields through `escapeHtml` in the receipt email and any HTML, and as plain jsPDF text on PDFs.
+10. **Backfill at apply.** `_invoice_brand_recopy` over every draft or unposted invoice with order-linked lines, the same caught sub-transactions. The migration notes how many it skipped. The 11 live lines and their orders' states are read before the apply.
+11. **Preflight.** It refuses unless:
+    - B-1a's tables exist;
+    - `_epa_registrations_seeded()` is true;
+    - every re-issued body matches its md5 pin.
+
+    It locks `invoices`, `invoice_items` and `rup_sales_records` in #1746's order.
+
+### 16.3 Rules that always hold
+
+- No amount, quantity, price, cost or stock changes anywhere. Only `brand_lines` changes, plus `epa_registration` on draft or unposted lines.
+- A posted, overdue or paid line's `brand_lines` and number never change. A written `brand_lines` is always overwritten by the trigger.
+- Brand completeness (no pick, a split that does not add up, no number, a typed brand) never refuses posting, saving, completion or correction (Q5). Existing refusals stay: authorization, stale saves, posted invoices on correction, billing caps.
+- A split is never guessed: a line with a Q6 problem gets no record. A record never claims more than its allocated share.
+- A line's active records are one per-line record or per-brand records, never both, and at most one per brand key.
+- Posting records from the stored snapshot the office reviewed; a later change shows as `brand_lines_stale`, never as a different record.
+
+### 16.4 Who may act
+
+- **Writers.** No new callable writer. Writes happen inside existing writers (invoice saves, completion, brand RPCs) through triggers owned by `postgres`, `SECURITY DEFINER`, `SET search_path = public, pg_temp`. Every new helper has EXECUTE revoked from `PUBLIC`, `anon`, `authenticated` and `service_role`.
+- **Reads.** `get_epa_sales_to_check()` and `get_rup_sales_register` stay admin only.
+- **Who sees `brand_lines`.** Whoever may already read the invoice line (admins, the invoice's creator and salesperson). The brand on the invoice is what the customer is billed for, so this is intended.
+
+### 16.5 Existing rows
+
+- Live has 0 records and 0 picks.
+- **Draft lines.** Draft or unposted lines are backfilled once at apply (`NULL`, or `[]` where a delivery completed after B-1a had a list).
+- **Posted lines.** They keep `brand_lines` NULL and #1746's behaviour.
+- **Older deliveries.** A delivery completed before B-1a gives `NULL` until an admin corrects its brands (then it has picks like any other), and adds a no-brand entry when an order-level invoice also covers a newer picked trip.
+- **The deployed app** sends nothing new.
+- **One reload.** Adding the column changes each draft's posting hash once, so a screen loaded before the apply must reload before posting (`INVOICE_CHANGED_SINCE_LOADED`, as in `20261027060000`).
+
+### 16.6 Timing
+
+- **Correction, edit, completion or line delete, then posting.** The re-copy runs at the writer's commit, holding the delivery (and the order where the writer holds it), then each draft invoice `FOR SHARE`. Posting holds its invoice `FOR UPDATE`, then the shared registration lock, and never waits on a delivery or a brand event.
+  - **Posting first:** the re-copy does not wait (`NOWAIT`): it skips the invoice, which posts with the brands it had. If the brands changed, it is listed `brand_lines_stale`.
+  - **Re-copy first:** posting waits and then records the re-copied snapshot. `post_invoice`'s version check refuses a screen loaded before the re-copy (`INVOICE_CHANGED_SINCE_LOADED`), as for any change.
+- **A registration edit (exclusive) queued between the two.** Every holder of the registration lock takes it shared. PostgreSQL's deadlock check reorders soft waits, so no cycle forms. A re-copy that still fails is caught and leaves the draft; a posting is never the victim of a brand path.
+- **No new idempotent RPC.** Posting calls the generator with no key, so an unpost and repost writes fresh records.
+
+### 16.7 Proof cases (local real-schema prover, test data only)
+
+- **One brand.** When a delivery of one brand completes with an automatic draft invoice, then the line has one entry and the brand's number. Posting writes one brand record under that number, brand name and signal word.
+- **Two brands, one line.**
+  - When a line delivered as A 60 and B 40 is posted at 100 and both are restricted use, then two records of 60 and 40 whose cents add up to the line.
+  - When only A is restricted use, then one record of 60 with A's cents.
+  - When it is billed at 60, then A 60 and no B record, and B is not listed as unrecorded.
+- **Bill Split.**
+  - Billed 50 and 50: each payer records A 30 and B 20.
+  - Billed 30 and 30: A 36 and B 24 in total, in either posting order.
+  - A sibling's stored brands differ: both lines are listed `payer_split_changed` with no records.
+- **Problems.**
+  - Picks add up to 90 of 100 delivered: no record, and the line is listed `brand_split_mismatch`.
+  - Two trips of 50 with picks of 60 and 40: `brand_split_mismatch`, not cancelled out.
+  - A 5-place delivered amount uses the 4-place value, as correction does.
+- **Q8 cases.**
+  - A line with `[]`, or a no-number brand under a numbered product: one record under the product's number, listed.
+  - A no-number brand under a numberless product: a record with no number, listed `no_epa_number` (as #1746).
+  - A typed brand named `~none` keeps its own key.
+- **Several trips.** When two trips of the same brand feed a whole-order line, then one record. Trips A 30, B 40, A 30 billed at 60 record A 30 and B 30. Entries tied on completion time read in the same order every time.
+- **Completions that draft split invoices (H1).** A real Bill Split completion (one pick 3 loaded / 2 delivered, plus a brand-listed line with no pick): every payer line holds the trimmed entry and `[]`, the stored claim equals `_split_invoice_content_claim`, posting writes each payer's records, nothing is listed stale. The same for a real landlord auto-split and a backdated plain completion. A split draft corrected after it was made keeps its brands and claim, posts with no record and is listed `brand_lines_stale`.
+- **Re-copy.**
+  - A correction (event before the picks), a line delete and a later trip re-copy open drafts with the final picks.
+  - A posted invoice is not touched; a posted line whose picks changed is listed `brand_lines_stale`.
+  - The order row locked by another session: the brand write still commits and the draft stays as it was.
+- **Race, both orders.** A correction and a posting of the same draft, run in two sessions with a registration edit queued, in both orders: neither errors, nothing deadlocks, and the outcome matches 16.6.
+- **Saving and posted lines.**
+  - `save_invoice` re-saves an order-linked branded draft with a price change: `brand_lines` and the brand captures survive the id restore.
+  - A brand change re-captures only the changed key.
+  - Posted cost and tote updates still pass.
+- **Overwrites and records.**
+  - `service_role` writes `brand_lines`: the trigger overwrites it.
+  - A per-line record exists and a brand record is inserted on that line (as postgres): refused.
+  - Unpost and repost: fresh active records.
+- **Lists and grants.**
+  - A typed pick on a voided delivery is not on the review list, and `review_typed_brand` refuses it.
+  - Grants read from the catalog: no app role reads the capture table or runs a helper; every new `SECURITY DEFINER` function pins `search_path`; the register keeps its grants and returns `brand_name`.
+- **Money.** The same flow run with and without brands leaves no money, quantity or invoice total different.
+- **Apply.** Before the seed, the preflight refuses. A draft under a terminal order does not stop the backfill.
+
+### 16.8 Delivery and order
+
+- **Ships alone.** B-1b ships as one PR: the migration, the two `src/types` additions and the Sales to check labels. It works with the deployed app; the register's extra column is ignored until B-3.
+- **Order with B-2 and B-3.** Until B-2's picker, no picks exist, so entries never appear; only `[]` lines appear, which post like #1746 lines and are listed. B-2's picker must not go live before B-3's invoice warnings ("Post anyway", section 6) or with them.
+- **Recovery.** A forward repair in its own reviewed migration:
+  - drops the fill trigger and the re-copy trigger;
+  - restores the re-issued bodies from their md5-pinned originals;
+  - keeps the new columns, the capture table and its rows, and the two-column active index. The old generator never writes brand records, and the index still allows one per-line record per line. The per-line index comes back only if no line holds more than one active record.
+
+### 16.9 Open business decisions
+
+None. Q5, Q6, Q8 and Q9 and the no-sales rule (Mason, 2026-11-10) settle every behaviour above. Leaving picks on cancelled deliveries off the review list follows the same reasoning as voided ones.
+
+### 16.10 Cold challenge (Astra, gpt-6-astra high, 2026-11-11) and what changed
+
+40 findings (4 BLOCKER). Each is fixed in 16.1-16.8 or answered with evidence:
+
+- **Fixed in the design.**
+  - **1 BLOCKER (copy saw the old picks).** The re-copy is deferred to commit (16.2.3).
+  - **2 BLOCKER (generator read current picks).** The generator reads only the stored snapshot (16.2.1, 16.2.4).
+  - **3 BLOCKER (blank number vs never block).** #1746's per-line record already allows a blank number and lists it; brand records follow the same rule (16.2.6). The old "never blank" sentence was wrong.
+  - **4 BLOCKER (recovery).** It keeps the two-column index and the columns (16.8).
+  - **Snapshot shape (5, 6).** `NULL`, `[]` and entries are defined, legacy trips included (16.2.1, 16.5).
+  - **Line number (7).** One brand key gives the brand's number (16.2.2).
+  - **Key collision (8).** Tagged keys.
+  - **Re-capture (9-11).** A `basis` column decides re-capture, and the first entry's facts win.
+  - **Allocation (12-15).** A total order; per-trip validation; the 4-place rule; positive shares only.
+  - **Payer groups (16-18).** The group rule is the same for every member; `overlapping_invoices` and `payer_split_changed` cover the rest.
+  - **Locks and timing (19-21).** The re-copy's lock and status re-read, the registration lock taken first, and the deferred trigger.
+  - **Screens and wording (25, 34, 38).** The response shape and the screen's text and keys; the Q5 wording narrowed.
+- **Answered with evidence.**
+  - **22.** Changes without a brand event are listed stale; drafts heal at their next save.
+  - **23.** Q5 and Q6 settle it.
+  - **24.** No picks exist before B-2, and the B-2/B-3 order is in 16.8.
+  - **26.** Live census: 0 posted since the seed.
+  - **27.** Sub-transactions, with a terminal-order case.
+  - **28, 31, 32.** Live trigger and caller bodies (16.1).
+  - **29.** Lock order.
+  - **30.** Invoice readers (16.4).
+  - **33.** B-1a's live correction rule, unchanged here.
+  - **35.** `numeric`.
+  - **36.** The billing caps already equate the units.
+  - **37.** The cases in 16.7.
+  - **39.** A positive-quantity product change is refused; a zero line allocates nothing.
+- **40 (suggestion).** Adopted in substance.

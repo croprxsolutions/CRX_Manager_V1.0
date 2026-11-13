@@ -76,8 +76,8 @@ BEGIN
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Price Lock Farm ' || v_suffix) RETURNING id INTO v_c1;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Price Lock Other Farm ' || v_suffix) RETURNING id INTO v_c2;
-  INSERT INTO products (product_name, unit_size) VALUES ('[SMOKE] Lock P ' || v_suffix, 'gal') RETURNING id INTO v_p;
-  INSERT INTO products (product_name, unit_size) VALUES ('[SMOKE] Lock Q ' || v_suffix, 'gal') RETURNING id INTO v_q;
+  INSERT INTO products (product_name, unit_size, product_form) VALUES ('[SMOKE] Lock P ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_p;
+  INSERT INTO products (product_name, unit_size, product_form) VALUES ('[SMOKE] Lock Q ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_q;
   v_price_res := preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(
       jsonb_build_object('product_id', v_p, 'row_version', (SELECT pricing_version FROM products WHERE id = v_p),

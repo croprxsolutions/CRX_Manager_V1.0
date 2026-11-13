@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Save, Send, Ban, Plus, Trash2, Search, DollarSign, FileText, Printer, Truck, Mail, RotateCcw, AlertTriangle,
 } from 'lucide-react';
@@ -27,9 +27,11 @@ import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '..
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
+import VendorSelect from '../components/orders/VendorSelect';
+import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -42,10 +44,14 @@ import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
+import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type BrandWarningLine } from '../lib/invoiceBrandWarnings';
+import { invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
+import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
 import WriteOffModal from '../components/invoices/WriteOffModal';
+import StandingDiscountControl from '../components/invoices/StandingDiscountControl';
 import WatchdogFlagBanner from '../components/watchdog/WatchdogFlagBanner';
 import InvoicePrintDialog from '../components/invoices/InvoicePrintDialog';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -54,6 +60,7 @@ import { useCreditLimitCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { INVOICE_COLUMNS, INVOICE_ITEM_COLUMNS, INVOICE_POST_VERSION_COLUMNS, INVOICES_POSTABLE, PRODUCT_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
+import { toSentryError } from '../lib/sentryError';
 
 interface LineItem {
   id?: string;
@@ -71,6 +78,7 @@ interface LineItem {
   sort_order: number;
   notes: string | null;
   tote_number: string | null;
+  vendor?: string | null;
   price_source: 'quoted' | 'tier' | 'manual' | null;
   quoted_price_cents: number | null;
   /** Per-line split billing: set when this line was produced by a split billing line.
@@ -91,6 +99,8 @@ interface LineItem {
   gl_lb_unit: string | null;
   epa_registration: string | null;
   product_form: string | null;
+  /** Brand PR B-3: the delivered brands as saved (read-only; set by the database on every save). */
+  brand_lines?: unknown;
 }
 
 const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
@@ -193,6 +203,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Goal 3: no order and no delivery behind it -> charge lines only (the database refuses product
   // lines on such an invoice, migration 20261021050000). Never on the field-invoices route.
   const isFromScratch = routeArea !== 'field' && isFromScratchInvoice(invoice);
+  const vendorNames = useVendorNames(routeArea !== 'field');
   // Billing plan M1: a chemical sale backed by an order or a delivery also takes typed charge lines
   // (freight, service...) beside its products (migration 20261108160000).
   const takesCharges = isFromScratch || (routeArea !== 'field' && invoice.invoice_type === 'chemical_sale'
@@ -254,6 +265,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Print dialog
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [shares, setShares] = useState<InvoiceShare[]>([]);
+  const [billSplitPayers, setBillSplitPayers] = useState<BillSplitPayer[]>([]);
 
   // Void modal
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -329,6 +341,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // B1 (deep-dive H1): RUP warning surfaced in the post-confirm when the buyer
   // has no valid applicator license — posting is the legal point of sale.
   const [rupPostWarning, setRupPostWarning] = useState<string | null>(null);
+  // Brand PR B-3: brand warnings on the same confirm ("Post anyway"); never a gate.
+  const [brandPostWarning, setBrandPostWarning] = useState<string | null>(null);
 
   // ── Post binds the saved, reviewed invoice (Goal 3, migration 20261022022000) ──────────────
   // post_invoice / post_invoice_group post what is SAVED, and refuse if the saved invoice (or a
@@ -409,6 +423,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     postIdem.resetKey();
     let warning: string | null = null;
+    // Brand PR B-3: the saved lines' delivered brands. With no unsaved edits (checked above) `items` is the saved copy.
+    let brandLines: BrandWarningLine[] = items.map((it) => ({
+      label: it.product_name || it.description || 'line',
+      quantity: Number(it.quantity),
+      order_item_id: it.order_item_id ?? null,
+      product_id: it.product_id,
+      delivery_id: invoice?.delivery_id ?? null,
+      brand_lines: it.brand_lines,
+    }));
     // A RUP finding is a warning on the confirm, not a gate. A check that could not run
     // is different: it stops here with RUP_POST_CHECK_FAILED_MESSAGE, so an unchecked
     // RUP sale never reaches the confirm looking clean.
@@ -424,7 +447,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         // this screen loaded, the post would be refused, so reload now and show what would post.
         const { data: grp, error: grpError } = await supabase
           .from(INVOICES_POSTABLE)
-          .select(`id, invoice_number, customer_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id)`)
+          .select(`id, invoice_number, customer_id, delivery_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id, order_item_id, description, quantity, brand_lines)`)
           .eq('invoice_group_id', invoice.invoice_group_id)
           .is('deleted_at', null);
         if (grpError || !Array.isArray(grp)) {
@@ -450,6 +473,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           }
           if (finding) parts.push(finding);
         }
+        brandLines = (grp as Array<{ invoice_number: string; delivery_id: string | null; invoice_items: Array<{ product_id: string | null; order_item_id: string | null; description: string | null; quantity: number | null; brand_lines: unknown }> | null }>)
+          .flatMap((m) => (m.invoice_items ?? []).map((it) => ({
+            label: `${m.invoice_number} ${it.description || 'line'}`,
+            quantity: Number(it.quantity ?? 0),
+            order_item_id: it.order_item_id,
+            product_id: it.product_id,
+            delivery_id: m.delivery_id,
+            brand_lines: it.brand_lines,
+          })));
         if (parts.length > 0) {
           warning = `Posting this invoice group posts every invoice in it. Restricted-use products without a valid license — ${parts.join('; ')}. These will be recorded in the RUP sales register.`;
         }
@@ -476,11 +508,23 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         }
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'rup_post_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'rup_post_check' } });
       stopUnchecked();
       return;
     }
+    // The current picks: saved brands that no longer match them, and typed brands still waiting for the office's check.
+    // A read that fails stops here, as the RUP check does.
+    let brandWarning: string | null;
+    try {
+      const picks = await loadDeliveryPicks(brandDeliveryIds(brandLines));
+      brandWarning = brandPostWarningText(invoiceBrandWarnings(brandLines, picks));
+    } catch (err) {
+      Sentry.captureException(toSentryError(err), { extra: { context: 'brand_post_check' } });
+      toast('error', 'The delivered brands could not be checked, so the invoice was not posted. Try again.');
+      return;
+    }
     setRupPostWarning(warning);
+    setBrandPostWarning(brandWarning);
     setShowPostConfirm(true);
   };
 
@@ -788,6 +832,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         sort_order: it.sort_order,
         notes: it.notes as string | null,
         tote_number: (it.tote_number as string) ?? null,
+        vendor: (it.vendor as string) ?? null,
         price_source: (it.price_source as LineItem['price_source']) ?? null,
         quoted_price_cents: it.quoted_price_cents != null ? Number(it.quoted_price_cents) : null,
         return_credit_cogs_cents: it.return_credit_cogs_cents != null ? Number(it.return_credit_cogs_cents) : null,
@@ -801,6 +846,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         gl_lb_unit: ((it as Record<string, unknown>).gl_lb_unit as string) ?? null,
         epa_registration: ((it as Record<string, unknown>).epa_registration as string) ?? null,
         product_form: ((it as Record<string, unknown>).product_form as string) ?? null,
+        brand_lines: (it as Record<string, unknown>).brand_lines ?? null,
       })) as LineItem[]
     );
 
@@ -815,6 +861,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     if (shareError) throw shareError;
     if (!Array.isArray(shareData)) throw new Error('The invoice share read returned no list');
     setShares(shareData as InvoiceShare[]);
+
+    // A chemical sale split across payers: each payer's invoice shows that delivery's payers.
+    const payers = readsBillSplitPayers(data) && data.invoice_group_id && shareData.length === 0
+      ? await loadBillSplitPayers(supabase, invoiceId)
+      : [];
+    if (isStale()) return;
+    setBillSplitPayers(payers);
 
     // Fetch write-offs
     const { data: woData, error: woError } = await supabase
@@ -992,7 +1045,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             toast('error', 'The customer changed while the product was being added. Add the product again.');
             return;
           }
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'invoice_add_product_customer_tier' } });
+          Sentry.captureException(toSentryError(err), { extra: { context: 'invoice_add_product_customer_tier' } });
           toast('error', "Could not load this customer's price tier. The product was not added; try again.");
           return;
         } finally {
@@ -1173,13 +1226,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           footer_notes: invoice.footer_notes || null,
         };
 
-        const itemsPayload = items.map((it, idx) => ({
+        // The discount and tax lines are the database's (rebuilt at commit, dropped if the type changes): never sent back.
+        const itemsPayload = items.filter((it) => !isComputedChargeLine(it.charge_type)).map((it, idx) => ({
           // Existing generated lines carry their server identity back to the
           // writer so it can preserve immutable order-line and historical-cost
           // lineage while rebuilding a draft invoice. New manual lines omit id.
           id: it.id,
           order_item_id: it.order_item_id,
           product_id: it.product_id,
+          vendor: it.vendor ?? null,
           description: it.description || it.product_name,
           quantity: it.quantity,
           unit_price_cents: it.unit_price_cents,
@@ -1330,7 +1385,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       toast('success', invoice.invoice_group_id ? 'Invoice group posted' : 'Invoice posted');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'post_invoice_group' : 'post_invoice' },
       });
       // This is the single-invoice posting flow, so it must speak the same
@@ -1392,7 +1447,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setShowVoidModal(false);
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: voidedGroup ? 'void_invoice_group' : 'void_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1452,7 +1507,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         delete unpostKeysRef.current[invoice.invoice_group_id ? `grp:${invoice.invoice_group_id}` : id];
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: invoice.invoice_group_id ? 'unpost_invoice_group' : 'unpost_invoice' },
       });
       toast('error', sanitizeError(err));
@@ -1491,7 +1546,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         transferToSchedulingIdem.resetKey();
         fetchInvoice(id);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'transfer_invoice_to_job' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'transfer_invoice_to_job' } });
       toast('error', sanitizeError(err));
     }
     setTransferringToScheduling(false);
@@ -1544,7 +1599,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     try {
       match = await findDuplicatePayment(payment.customerId, amountCents, payment.reference);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'duplicate_payment_check' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'duplicate_payment_check' } });
       if (payAttemptRef.current === attempt) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
       setPayingInvoice(false);
       return;
@@ -1597,7 +1652,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setPayNotes('');
       fetchInvoice(id!);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'allocate_payment' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'allocate_payment' } });
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH) && payAttemptRef.current === attempt) {
         // The form can be closed during the save, and this refusal has to be seen.
         setPayRetryRefused(true);
@@ -1690,7 +1745,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         applyCreditIdem.resetKey();
         setUnresolvedApplyCreditIntent(null);
       }
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'apply_credit_memo_to_invoice' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'apply_credit_memo_to_invoice' } });
       toast('error', sanitizeError(err));
     }
     setApplyingCredit(false);
@@ -1727,7 +1782,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       setReverseWoTarget(null);
       if (id) fetchInvoice(id);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reverse_write_off' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reverse_write_off' } });
       toast('error', sanitizeError(err));
     }
     setReversingWo(false);
@@ -1736,6 +1791,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Build PDF data object (shared by print + email)
   // billTo: the customer row an email already read for its key, so the PDF prints exactly what the key covers.
   const buildInvoicePdfData = async (options?: InvoicePrintOptions, billTo?: InvoiceBillTo): Promise<InvoicePdfData> => {
+    // Re-read the payers: another payer's invoice may have gained a charge since this page loaded
+    // (the email path reads them fresh too).
+    const printPayers = billSplitPayers.length > 0 && invoice?.invoice_group_id
+      ? await loadBillSplitPayers(supabase, id!)
+      : billSplitPayers;
     const { data: enrichedItems, error: itemsError } = await supabase
       .from('invoice_items')
       .select(`${INVOICE_ITEM_COLUMNS}, product:products(product_name, epa_registration, product_form)`)
@@ -1811,7 +1871,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         split_percentage: s.split_percentage,
         acres: s.acres,
         amount_cents: s.amount_cents,
-      })) : undefined,
+      })) : printPayers.length > 0 ? printPayers : undefined,
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
       total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
@@ -1961,7 +2021,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // shares (Codex P1 #6). Paired with the hard guard in handleSave.
   const isSplitInvoice = !!(invoice as { field_app_billing_set_id?: string | null }).field_app_billing_set_id;
   const canEdit = isAdminOrRep;
+  const showVendors = invoice.invoice_type === 'chemical_sale' && !isFromScratch;
   const editable = canEdit && !isSplitInvoice && (isNew || ['draft', 'unposted'].includes(invoice.status || ''));
+  // The standing discount (M4b) and sales tax (M4a) lines are the database's own: shown, never edited or removed here.
+  const rowEditable = (item: LineItem) => editable && !isComputedChargeLine(item.charge_type);
   const storedTotalCostCents = (invoice as { total_cost_cents?: number | null }).total_cost_cents;
   // Total Cost / Margin:
   // - Split invoice (Codex r5 P2): chemical items store PER-UNIT cost, but the header
@@ -2413,10 +2476,21 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-secondary">Margin</span>
-                  <span className={totalCents - totalCostCents > 0 ? 'text-crx-green' : 'text-red-600'}>
-                    {fmt(totalCents - totalCostCents)}
+                  <span className={invoiceMarginCents(items, totalCostCents) > 0 ? 'text-crx-green' : 'text-red-600'}>
+                    {fmt(invoiceMarginCents(items, totalCostCents))}
                   </span>
                 </div>
+              </>
+            )}
+            {/* The office's discount on this sale (billing plan M4b): admin, chemical-sale draft. */}
+            {isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' && (
+              <>
+                <hr className="border-gray-100" />
+                <StandingDiscountControl
+                  invoiceId={invoice.id}
+                  disabled={hasUnsavedChanges}
+                  onChanged={() => fetchInvoice(invoice.id as string)}
+                />
               </>
             )}
             {!isNew && (
@@ -2446,6 +2520,31 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           </div>
         </Card>
       </div>
+
+      {billSplitPayers.length > 1 && (
+        <Card>
+          <h2 className="text-sm font-semibold text-nav-dark mb-1">Bill Split</h2>
+          <p className="text-xs text-secondary mb-3">The payers on this delivery</p>
+          <div className="space-y-2">
+            {billSplitPayers.map((payer) => (
+              <div key={payer.invoice_id} className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0">
+                  <span className="font-medium text-nav-dark">{payer.customer_name}</span>
+                  {payer.invoice_id === id ? (
+                    <span className="ml-2 text-xs text-secondary">{payer.invoice_number} (this invoice)</span>
+                  ) : (
+                    <Link to={`/invoices/${payer.invoice_id}`} className="ml-2 text-xs text-crx-green hover:underline">{payer.invoice_number}</Link>
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  <span className="text-secondary mr-3">{payer.split_percentage}%</span>
+                  <span className="font-semibold">{fmt(payer.amount_cents)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Line Items */}
       <Card>
@@ -2483,6 +2582,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               <thead>
                 <tr className="text-left text-secondary border-b border-gray-100">
                   <th className="pb-2 pr-4">{isFromScratch ? 'Charge' : 'Product'}</th>
+                  {showVendors && <th className="pb-2 pr-4">Vendor</th>}
                   <th className="pb-2 pr-4 w-24">Qty</th>
                   <th className="pb-2 pr-4 w-28">{isFromScratch ? 'Amount' : 'Unit Price'}</th>
                   <th className="pb-2 pr-4 w-28">Extended</th>
@@ -2496,7 +2596,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                 {displayItems.map((item, idx) => (
                   <tr key={idx} className="group">
                     <td className="py-2 pr-4">
-                      {editable && (item.charge_type || (takesCharges && !item.product_id)) ? (
+                      {rowEditable(item) && (item.charge_type || (takesCharges && !item.product_id)) ? (
                         <div className="flex flex-col gap-1 sm:flex-row">
                           <select
                             aria-label="Charge type"
@@ -2531,9 +2631,27 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           )}
                         </>
                       )}
+                      {/* Brand PR B-3: the delivered brands, read-only (as of the last save). */}
+                      {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
+                        <div key={note} className="text-xs text-secondary">{note}</div>
+                      ))}
                     </td>
+                    {showVendors && (
+                      <td className="py-2 pr-4 text-secondary">
+                        {/* Only a delivered order line keeps a vendor through a save (20261118110000). */}
+                        {rowEditable(item) && item.order_item_id && item.quantity > 0 ? (
+                          <VendorSelect
+                            label={`Vendor for ${item.product_name || item.description || 'line'}`}
+                            value={item.vendor}
+                            vendors={vendorNames}
+                            disabled={saving}
+                            onChange={(vendor) => updateItem(idx, 'vendor', vendor)}
+                          />
+                        ) : (item.vendor || '-')}
+                      </td>
+                    )}
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
+                      {rowEditable(item) && !item.billing_line_id && !item.charge_type && !(takesCharges && !item.product_id) ? (
                         <input
                           type="number"
                           value={item.quantity}
@@ -2547,7 +2665,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       )}
                     </td>
                     <td className="py-2 pr-4">
-                      {editable && !item.billing_line_id ? (
+                      {rowEditable(item) && !item.billing_line_id ? (
                         <input
                           type="number"
                           value={(item.unit_price_cents / 100).toFixed(2)}
@@ -2579,7 +2697,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                       <td className="py-2 pr-4 text-secondary">{item.tote_number || '-'}</td>
                     )}
                     <td className="py-2">
-                      {editable && !item.billing_line_id && (
+                      {rowEditable(item) && !item.billing_line_id && (
                         <button
                           onClick={() => removeItem(idx)}
                           className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -2593,7 +2711,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               </tbody>
               <tfoot>
                 <tr className="border-t border-gray-200 font-semibold">
-                  <td className="pt-3" colSpan={displayItems.some((i) => i.tote_number) ? 4 : 3}>
+                  <td className="pt-3" colSpan={(displayItems.some((i) => i.tote_number) ? 4 : 3) + (showVendors ? 1 : 0)}>
                     Total
                   </td>
                   <td className="pt-3">{fmt(totalCents)}</td>
@@ -2891,10 +3009,13 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Print Dialog */}
       <InvoicePrintDialog
+        // Remounted on every open, so its defaults (payer shares ticked) come back after an untick and close.
+        key={`${invoice.id}:${billSplitPayers.length > 1 ? 'bill-split' : 'plain'}:${showPrintDialog ? 'open' : 'closed'}`}
+        sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}
         invoiceType={invoice.invoice_type || 'chemical_sale'}
-        hasShares={shares.length > 1}
+        hasShares={shares.length > 1 || billSplitPayers.length > 1}
         onPrint={handlePrint}
         loading={printing}
       />
@@ -2924,11 +3045,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         onClose={() => setShowPostConfirm(false)}
         onConfirm={() => { setShowPostConfirm(false); handlePost(); }}
         title="Post Invoice"
-        message={rupPostWarning
-          ? `${rupPostWarning} Post this invoice anyway? This will lock amounts and start AR aging.`
+        message={rupPostWarning || brandPostWarning
+          ? `${[rupPostWarning, brandPostWarning].filter(Boolean).join(' ')} Post this invoice anyway? This will lock amounts and start AR aging.`
           : 'Post this invoice? This will lock amounts and start AR aging.'}
-        confirmLabel="Post Invoice"
-        variant={rupPostWarning ? 'danger' : 'warning'}
+        confirmLabel={rupPostWarning || brandPostWarning ? 'Post anyway' : 'Post Invoice'}
+        variant={rupPostWarning || brandPostWarning ? 'danger' : 'warning'}
         icon={AlertTriangle}
         loading={posting}
       />

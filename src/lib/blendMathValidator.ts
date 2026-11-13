@@ -5,6 +5,7 @@
 // though no MG size is defined anywhere. Any other factor table used here would let
 // this warning and the invoice disagree about the same line.
 import { fieldAppPricedQuantity } from './chemCalculator';
+import { DOTTED_FLUID_OUNCE, foldInvisibleUnitChars } from './labelGuardrails';
 import { asProductForm } from './units';
 import { weightTotalWarnings, type WeightTotalOptions } from './blendWeightTotals';
 
@@ -59,9 +60,9 @@ const VOLUME_ONLY_UNITS = new Set([
  * whole file is being rebuilt to remove.
  */
 function parseApplicationRate(raw: string | null | undefined): { value: number; unit: string } | null {
-  // Zero-width first, so a pasted '10 g<ZWSP>al/acre' closes up to '10 gal/acre'
+  // Invisible characters first, so a pasted '10 g<ZWSP>al/acre' closes up to '10 gal/acre'
   // instead of splitting into '10 g al/acre', which would parse to no known unit.
-  const text = (raw ?? '').replace(ZERO_WIDTH, '').replace(WHITESPACE_RUN, ' ').trim();
+  const text = foldInvisibleUnitChars(raw ?? '').replace(WHITESPACE_RUN, ' ').trim();
   if (text === '') return null;
   const match = /^(\d+(?:\.\d+)?)\s*(.+)$/.exec(text);
   if (match === null) return null;
@@ -147,52 +148,25 @@ const UNIT_ALIASES: Record<string, string> = Object.assign(Object.create(null), 
  * lists, so folding twice would be a second place to drift.
  */
 function rateBaseUnit(unit: string | null | undefined): string {
-  // DELIBERATELY NOT zero-width-stripped, and deliberately NOT whitespace-collapsed —
-  // unlike `normalizeUnit` below. This is the SERVER-PARITY normalizer, and its only
-  // job is to predict what the live `normalize_rate_unit` will do. That function is
-  // `lower(btrim(COALESCE(p_unit,'')))` plus a CASE: `btrim` strips OUTER SPACES ONLY,
-  // so live returns 'm<ZWSP>g' and 'fl  oz' unchanged, matches no size table, and
-  // `field_app_priced_quantity` refuses — which makes
-  // `create_invoice_from_blend_ticket` raise BLEND_TICKET_UNIT_UNCONVERTIBLE.
-  //
-  // Closing the character up here would make this check MORE permissive than the
-  // database it is predicting: the ticket would look invoice-ready and then fail at
-  // billing. Verified against live `pg_proc.prosrc` on 2026-08-20 (gpt-5.6-sol finding
-  // CRX-MONEY-PARITY-001 on PR #439). The operator-friendly fix is to teach the SQL to
-  // close zero-width up, in a reviewed migration, and relax this in the same change —
-  // never one side alone. `normalizeUnit` may and does strip them, because it only
-  // ever compares two client-side strings and no server contract rides on it.
-  const raw = (unit ?? '').trim().toLowerCase();
+  // SERVER-PARITY normalizer: its only job is to predict what the live `normalize_rate_unit`
+  // will do. Since 20261231100000 that function folds invisible characters first (zero-width
+  // deleted, non-breaking space to a space) and then `btrim`s OUTER SPACES ONLY, so this applies
+  // the same shared fold and is still deliberately NOT whitespace-collapsed: live returns
+  // 'fl  oz' unchanged, matches no size table, and `create_invoice_from_blend_ticket` raises
+  // BLEND_TICKET_UNIT_UNCONVERTIBLE. Being more lenient than the database here would make a
+  // ticket look invoice-ready and then fail at billing (CRX-MONEY-PARITY-001, PR #439).
+  const raw = foldInvisibleUnitChars(unit ?? '').trim().toLowerCase();
   if (raw === '') return '';
   const perAcreSlash = /\s*\/\s*(ac|acre|acres|a)\s*$/;
   const perAcreSpelled = /\s+per\s+acre$/;
-  if (perAcreSlash.test(raw)) return raw.replace(perAcreSlash, '').trim();
-  if (perAcreSpelled.test(raw)) return raw.replace(perAcreSpelled, '').trim();
-  return raw;
+  let base = raw;
+  if (perAcreSlash.test(raw)) base = raw.replace(perAcreSlash, '').trim();
+  else if (perAcreSpelled.test(raw)) base = raw.replace(perAcreSpelled, '').trim();
+  // The server maps a dotted fluid ounce to 'fl oz' (20270101000000); the size tables list 'fl oz'.
+  return DOTTED_FLUID_OUNCE.has(base) ? 'fl oz' : base;
 }
 
-/**
- * Zero-width characters, which ride along on text pasted out of a PDF or a
- * spreadsheet. These are DELETED rather than collapsed to a space: they occupy no
- * width, so a reader who types 'gal' and a reader who pastes 'g<ZWSP>al' mean the
- * same unit and must produce the same key. Turning one into a space instead would
- * split the abbreviation into 'g al', which matches nothing — the check would then
- * be skipped and the message would list two units that look identical on screen.
- *
- * `\s` already matches the BOM (U+FEFF) but not the zero-width space / non-joiner
- * / joiner, and it is the wrong treatment for all four, so the BOM is handled here
- * too. Genuinely visible whitespace — including the non-breaking space — is left
- * to `WHITESPACE_RUN` below, because a space between words IS meaningful.
- *
- * Built from character codes because eslint's `no-irregular-whitespace` rule
- * (rightly) forbids writing those characters literally.
- */
-const ZERO_WIDTH = new RegExp(
-  `[${[0x200b, 0x200c, 0x200d, 0xfeff].map((c) => String.fromCharCode(c)).join('')}]`,
-  'g'
-);
-
-/** A run of real whitespace, collapsed to one space. Applied after ZERO_WIDTH. */
+/** A run of real whitespace, collapsed to one space. Applied after the invisible-character fold. */
 const WHITESPACE_RUN = /\s+/g;
 
 /**
@@ -213,9 +187,9 @@ const WHITESPACE_RUN = /\s+/g;
 function normalizeUnit(
   unit: string | null | undefined
 ): { key: string; label: string } | null {
-  // Zero-width first, so 'g<ZWSP>al' closes up to 'gal' instead of splitting into
-  // 'g al'; only then is real whitespace collapsed.
-  const label = (unit ?? '').replace(ZERO_WIDTH, '').replace(WHITESPACE_RUN, ' ').trim();
+  // Invisible characters first (the database's fold, KI-16), so 'g<ZWSP>al' closes up to
+  // 'gal' instead of splitting into 'g al'; only then is real whitespace collapsed.
+  const label = foldInvisibleUnitChars(unit ?? '').replace(WHITESPACE_RUN, ' ').trim();
   if (label === '') return null;
   // Periods are decoration on an abbreviation, never part of which unit is meant.
   // Dropping one can leave a double space ('fl . oz'), so collapse again after.
@@ -276,7 +250,7 @@ export function validateBlendMath(
       const form = asProductForm(product.product_form) ?? 'liquid';
 
       // Billing's own fallback for a blank line rate unit.
-      const lineRateUnit = (product.rate_per_acre_unit ?? '').trim();
+      const lineRateUnit = foldInvisibleUnitChars(product.rate_per_acre_unit ?? '').trim();
       const rateUnit = rateBaseUnit(lineRateUnit !== '' ? lineRateUnit : product.product_rate_unit);
       const qtyUnit = rateBaseUnit(product.unit);
 
@@ -321,12 +295,17 @@ export function validateBlendMath(
   // not depend on `total_acres` being filled in yet, nor on a quantity having been
   // entered. Leaving it nested meant a half-filled ticket reported nothing and then
   // failed at billing, which is the exact surprise this check exists to prevent.
-  // Still gated on a real rate, so a blank new row stays quiet.
+  // Still gated on a real rate, so a blank new row stays quiet; the save-blocking invisible-only check is not.
   for (const product of products) {
-    if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
     const name = product.product_name || 'Unnamed product';
+    const lineRateUnit = foldInvisibleUnitChars(product.rate_per_acre_unit ?? '').trim();
+    // The database refuses an invisible-only line unit (20261231100000) whatever the rate, so warn whatever the rate.
+    if (lineRateUnit === '' && (product.rate_per_acre_unit ?? '').replace(/^ +| +$/g, '') !== '') {
+      mismatch(`${name}: the rate unit contains only invisible characters, so this ticket cannot be saved. Clear the rate unit or re-type it.`);
+      continue;
+    }
+    if (!product.rate_per_acre || product.rate_per_acre <= 0) continue;
     const form = asProductForm(product.product_form) ?? 'liquid';
-    const lineRateUnit = (product.rate_per_acre_unit ?? '').trim();
     const rateUnit = rateBaseUnit(lineRateUnit !== '' ? lineRateUnit : product.product_rate_unit);
     const soldUnit = rateBaseUnit(product.product_inventory_unit);
     // Deliberately silent when either side is blank, though the SQL would refuse such
@@ -339,6 +318,13 @@ export function validateBlendMath(
     // is exactly the wallpaper effect the two-tier design exists to avoid. Closing
     // this properly means telling the validator whether the catalog row RESOLVED,
     // rather than inferring it from an empty string; tracked in KNOWN_ISSUES.md.
+    // Billing reads the sold unit WITHOUT the fold, so one that is nothing but invisible characters
+    // neither falls back to unit_size nor converts: say so instead of going quiet.
+    // ASCII spaces only, as SQL btrim: JS .trim() would also drop the NBSP-only unit billing cannot read.
+    if (rateUnit !== '' && soldUnit === '' && (product.product_inventory_unit ?? '').replace(/^ +| +$/g, '') !== '') {
+      mismatch(`${name}: the unit this product is sold in contains only invisible characters, so this ticket will fail when you invoice it. Fix the product's unit.`);
+      continue;
+    }
     if (rateUnit !== '' && soldUnit !== '' && fieldAppPricedQuantity(1, rateUnit, soldUnit, form) === null) {
       mismatch(
         form === 'seed' || form === 'each'

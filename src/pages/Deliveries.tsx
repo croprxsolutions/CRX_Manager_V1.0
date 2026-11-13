@@ -63,6 +63,7 @@ import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import HelpTip from '../components/ui/HelpTip';
 import DeliveryCalendar from '../components/deliveries/DeliveryCalendar';
 import type { Delivery, DeliveryCompletionEvidence, DeliveryEvidencePhoto, Profile } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 /* ─── Row type ─── */
 interface DeliveryRow extends Delivery {
@@ -760,7 +761,7 @@ export default function Deliveries() {
             await uploadSignatureImage(signaturePath, signatureAtSubmit);
           } catch (sigErr) {
             signatureUploadError = sigErr;
-            Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Deliveries list signature upload before completion failed; sending the completion anyway' } });
+            Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Deliveries list signature upload before completion failed; sending the completion anyway' } });
           }
           if (!stillOpenForTarget()) return 'cancelled';
           if (!inputsUnchanged()) return 'changed';
@@ -1036,6 +1037,8 @@ export default function Deliveries() {
     await runCriticalAction({
       action: async () => {
         const { generateBatchDeliveryPdf } = await import('../lib/deliveryPdf');
+        const { loadDeliveryBrandInfo } = await import('../lib/deliveryBrandPaper');
+        const { receiptBrandNotes } = await import('../../supabase/functions/_shared/brandNotes.ts');
 
         // Use selected deliveries, or every scheduled/in_progress one matching the search and filters (all pages)
         const rows = selectedDeliveries.length > 0
@@ -1113,6 +1116,8 @@ export default function Deliveries() {
             throw new Error(`No delivery items found for ${del.delivery_number}`);
           }
 
+          // Brand PR B-3: the brands under each line, from the current picks.
+          const brandInfo = await loadDeliveryBrandInfo(del.id);
           const delAny = del as unknown as Record<string, unknown>;
           const custInfo = customerMap[del.customer_id] || { contact_name: null, phone: null, shipping_address: null, billing_address: null };
 
@@ -1146,6 +1151,10 @@ export default function Deliveries() {
                 unit_size: (it.unit_size as string) || '-',
                 quantity_delivered: (it.quantity_delivered as number) || undefined,
                 tote_number: (it.tote_number as string) || undefined,
+                brand_notes: receiptBrandNotes({
+                  ...brandInfo.get(it.id as string),
+                  qty: (it.quantity_delivered as number | null) ?? (it.quantity as number),
+                }),
               }))
               .sort((a, b) => (a.product_name || '').localeCompare(b.product_name || '')),
           });
@@ -1554,7 +1563,8 @@ export default function Deliveries() {
     },
     {
       key: 'delivery_number',
-      header: (<span className="flex items-center">Delivery #<HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" /></span>),
+      header: 'Delivery #',
+      headerExtra: <HelpTip text="Warehouse stock on hand is less than this delivery needs, counting every active delivery that needs the same product. Check inventory before dispatching." className="ml-1" />,
       sortable: true,
       render: (row) => (
         <div className="flex items-center gap-2">

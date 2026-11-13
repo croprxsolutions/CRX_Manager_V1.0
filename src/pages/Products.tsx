@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, FileUp, Download, FileText, Eye, EyeOff, ChevronDown, FileSpreadsheet, Upload, Power, PowerOff } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import TypedBrandReview from '../components/products/TypedBrandReview';
+import DeliveriesMissingBrands from '../components/deliveries/DeliveriesMissingBrands';
 import EditableDataTable, { type EditableColumn } from '../components/ui/EditableDataTable';
 import Badge from '../components/ui/Badge';
 import BulkActionBar from '../components/ui/BulkActionBar';
@@ -29,6 +31,7 @@ import HelpTip from '../components/ui/HelpTip';
 import PageHeader from '../components/ui/PageHeader';
 import ProductRateLockControl from '../components/products/ProductRateLockControl';
 import ProductSetupWorkbookModal from '../components/products/ProductSetupWorkbookModal';
+import RateReviewWorkbookModal from '../components/products/RateReviewWorkbookModal';
 import { loadProductRateLock } from '../lib/productRateLock';
 import type { Product, ProductCategory, ProductRateLock, SalesSheetFormat } from '../types';
 import {
@@ -178,6 +181,7 @@ export default function Products() {
   const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
+  const [rateReviewOpen, setRateReviewOpen] = useState(false);
   const [activeReview, setActiveReview] = useState<{ ids: string[]; active: boolean; scope: string; result: ActiveReview } | null>(null);
   const activeReviewSeq = useRef(0);
   const [deactivating, setDeactivating] = useState(false);
@@ -1357,6 +1361,14 @@ export default function Products() {
               >
                 Setup Workbook
               </Button>
+              <Button
+                variant="secondary"
+                icon={<FileSpreadsheet className="w-4 h-4" />}
+                onClick={() => setRateReviewOpen(true)}
+                title="Approve draft per-acre rates and record one outcome per parent"
+              >
+                Rate Review
+              </Button>
             </div>
           )}
           </div>
@@ -1500,6 +1512,9 @@ export default function Products() {
         </div>
       </Card>
 
+      {isAdmin && <TypedBrandReview />}
+      {isAdmin && <DeliveriesMissingBrands />}
+
       {isAdmin && (
         <ProductSetupWorkbookModal
           open={setupWorkbookOpen}
@@ -1507,6 +1522,9 @@ export default function Products() {
           onClose={() => setSetupWorkbookOpen(false)}
           onSaved={() => { void fetchProducts(); }}
         />
+      )}
+      {isAdmin && (
+        <RateReviewWorkbookModal open={rateReviewOpen} profileId={profile?.id ?? ''} onClose={() => setRateReviewOpen(false)} />
       )}
 
       <BulkProductImport

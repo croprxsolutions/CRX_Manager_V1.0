@@ -44,6 +44,7 @@ vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load 
 
 import { DEFAULT_COMPANY_INFO } from './companyInfo';
 import { generateInvoicePdf, downloadInvoicePdf, generateBatchInvoicePdf, groupReturnCreditDisplayItems, mapInvoicePdfItem } from './invoicePdf';
+import { INVOICE_PDF_ITEM_COLUMNS } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 import type { InvoicePdfData, InvoicePdfItem, InvoicePdfShare } from './invoicePdf';
@@ -243,6 +244,30 @@ describe('generateInvoicePdf', () => {
       ],
     }));
     expect(doc).toBe(mockDoc);
+  });
+
+  it('Old Print names a share table with no acres "Customer", fitting a Bill Split payer and a legacy grower alike', async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      options: { format: 'legacy', show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Smith Farm', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && !h.includes('Acres'))).toBe(true);
+    expect(heads.some((h) => h.includes('"Payer"'))).toBe(false);
+  });
+
+  it("a Bill Split payer's misc charge invoice prints the payer table too (Mason, 9 Nov: every payer's invoice shows every payer)", async () => {
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    autoTable.mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'misc_charge',
+      options: { show_shares: true, show_price_per_acre: false, show_epa_registration: false },
+      shares: [makeShare({ customer_name: 'Farmer', acres: null, price_per_acre_cents: null }), makeShare({ customer_name: 'Landlord', acres: null, price_per_acre_cents: null })],
+    }));
+    const heads = autoTable.mock.calls.map((c) => JSON.stringify((c[1] as { head?: unknown }).head ?? ''));
+    expect(heads.some((h) => h.includes('"Customer"') && h.includes('"Shares"'))).toBe(true);
   });
 
   it('handles field_application with finance charges', async () => {
@@ -481,6 +506,38 @@ describe('generateInvoicePdf', () => {
 
 // ── Legacy "Old Print" format (field-app parity #30) ─────────────────────────
 
+describe('generateInvoicePdf — Bill Split payers on a chemical sale', () => {
+  const payers = [
+    { ...makeShare({ customer_name: 'Farmer', split_percentage: 70.6672, amount_cents: 35588, price_per_acre_cents: null, pricing_note: null }), invoice_number: 'CS-2026-0060-1' },
+    { ...makeShare({ customer_name: 'Landlord', split_percentage: 29.3328, amount_cents: 14772, price_per_acre_cents: null, pricing_note: null }), invoice_number: 'CS-2026-0060-2' },
+  ];
+  const tableBodies = async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    return vi.mocked(autoTable).mock.calls.map(([, opts]) => (opts as { body?: unknown[][] }).body ?? []);
+  };
+
+  it('prints each payer with their share and total', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    vi.mocked(autoTable).mockClear();
+    await generateInvoicePdf(makeInvoiceData({ invoice_type: 'chemical_sale', shares: payers }));
+    const body = (await tableBodies()).find((b) => JSON.stringify(b).includes('Landlord'));
+    expect(body?.[1]).toEqual(['Landlord', expect.stringContaining('29.3328'), expect.stringContaining('147.72')]);
+  });
+
+  it('labels each payer by their real invoice number on Old Print', async () => {
+    const { default: autoTable } = await import('jspdf-autotable');
+    vi.mocked(autoTable).mockClear();
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'chemical_sale',
+      invoice_number: 'CS-2026-0060-2',
+      shares: payers,
+      options: { show_shares: true, show_price_per_acre: false, show_epa_registration: false, format: 'legacy' },
+    }));
+    const body = (await tableBodies()).find((b) => JSON.stringify(b).includes('Landlord'));
+    expect(body?.map((row) => row[0])).toEqual(['CS-2026-0060-1', 'CS-2026-0060-2']);
+  });
+});
+
 describe('generateInvoicePdf — legacy "Old Print" format', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -684,5 +741,43 @@ describe('generateBatchInvoicePdf', () => {
   it('downloads a batch of one invoice (a batch can drop to one after a skip)', async () => {
     await generateBatchInvoicePdf([makeInvoiceData({ invoice_number: 'INV-2026-0003' })]);
     expect(mockDoc.save).toHaveBeenCalledWith('INV-2026-0003.pdf');
+  });
+});
+
+describe('chemical sale: the standing discount and sales tax lines (billing plan M4a, M4b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoc.lastAutoTable = { finalY: 300 };
+  });
+
+  it('prints them by name and amount only, with no date, quantity or unit price', async () => {
+    const items = [
+      makeItem({ quantity: 10, unit_price_cents: 10000, extended_cents: 100000 }),
+      makeItem({ description: 'Freight', product_name: 'Freight', product_id: null, quantity: 1, unit_price_cents: 4500, extended_cents: 4500, charge_type: 'freight' }),
+      makeItem({ description: 'Standing discount 3%', product_name: 'Standing discount 3%', product_id: null, quantity: 1, unit_price_cents: -3000, extended_cents: -3000, charge_type: 'standing_discount' }),
+      makeItem({ description: 'Sales tax 6.25%', product_name: 'Sales tax 6.25%', product_id: null, quantity: 1, unit_price_cents: 6408, extended_cents: 6408, charge_type: 'sales_tax' }),
+    ];
+    await generateInvoicePdf(makeInvoiceData({ invoice_type: 'chemical_sale', items, total_amount_cents: 107908, balance_cents: 107908 }));
+    const autoTable = vi.mocked(await import('jspdf-autotable')).default;
+    const body = autoTable.mock.calls
+      .map(([, opts]) => (opts as { body?: string[][] }).body ?? [])
+      .find((rows) => rows.some((r) => r.includes('Sales tax 6.25%')));
+    expect(body).toBeDefined();
+    const discount = body!.find((r) => r.includes('Standing discount 3%'))!;
+    const tax = body!.find((r) => r.includes('Sales tax 6.25%'))!;
+    // Only the name and the amount (with or without the EPA column).
+    expect(discount.filter((cell) => cell !== '')).toEqual(['Standing discount 3%', '-$30.00']);
+    expect(tax.filter((cell) => cell !== '')).toEqual(['Sales tax 6.25%', '$64.08']);
+    // A charge line someone typed keeps its quantity and price.
+    expect(body!.find((r) => r.includes('Freight'))![2]).not.toBe('');
+  });
+
+  it('reads the line type with the lines (email and batch print load them from the database)', () => {
+    expect(INVOICE_PDF_ITEM_COLUMNS.split(',').map((c) => c.trim())).toContain('charge_type');
+  });
+
+  it('carries the line type from the database row', () => {
+    expect(mapInvoicePdfItem({ description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 6408, extended_cents: 6408, charge_type: 'sales_tax' }).charge_type)
+      .toBe('sales_tax');
   });
 });

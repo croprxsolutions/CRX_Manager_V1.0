@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -709,14 +709,12 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   // pipeline, the risky-diff classification and the exact-SHA proof. Codex round
   // 6 found this; PR #502 established the class. See codexAppAdvisory().
 
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
+  const notAgents = agentMergeProblem(base, normalize(pullRequest.headRefName));
+  if (notAgents) return denied(`CODEX PRODUCTION GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const migration = stagingMigrationOnGitHub({
-      baseSha: pullRequest.baseRefOid,
-      headSha: pullRequest.headRefOid,
-      repo: request.repo,
-      gh: (args) => runGh(args, repoDir),
-    });
-    if (migration) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${migration}.`);
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, headSha: pullRequest.headRefOid, repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
   }
   // Main's PR #560 migrated this gate from "no approval" to "an active
   // objection", matching the Claude side. Taking main's predicate: the denial

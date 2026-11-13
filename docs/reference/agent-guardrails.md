@@ -28,6 +28,15 @@
 > on a guard change` and exits 1 without calling Codex (count: `crx-luna-guard-rounds.json` in the git common dir,
 > not a proof). Drop the carve-out or hand the decision to Mason.
 >
+> **Whole-branch round cap (Mason, 2026-11-09).** The written stop rule (same mechanism, three rounds) failed seven times
+> (PR #1688 ran about 12 Luna rounds, Brand PR B 26). After 6 completed whole-branch Luna rounds on a branch (default or
+> `--base` scope; `--commit`, `--uncommitted`, `--sol` and a detached HEAD are neither stopped nor counted), the 7th prints
+> `LUNA RESULT: STOPPED after 6 whole-branch Luna rounds` and exits 1 without calling Codex. It names three ways on:
+> simplify (a fresh "attack this plan for simplicity" session), merge or rebase onto current main and re-plan, or ask Mason
+> the business rule behind the mechanism. Rerunning with `--after-simplify`, `--after-rebase` or `--after-new-approach "<reason>"`
+> allows 6 more and records the step and reason under `<branch> luna-unlocks` in the same counter file. The flag is refused
+> before the cap stops a run. The guard-change cap of 2 is unchanged. Advisory only: no gate reads the count.
+>
 > **Luna runs code health first (Mason, 2026-11-06).** When the reviewed diff touches `src/`, `scripts/luna-review.mjs`
 > runs `scripts/check-code-health.mjs` before calling Codex. A `FAIL` stops the round with exit 2 (`DID NOT RUN`) and no
 > model call; a check that cannot run (no `node_modules`/knip) warns, Luna continues, and the result says
@@ -122,6 +131,27 @@
 > PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
+> **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
+> `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
+> `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a
+> business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
+> `main` at that head, the session he replies in) builds a request bound to that PR, head, base, Sol run and finding
+> text; Mason replies `accept <code> <reason>` and `owner-approval-prompt.mjs` records it (the code works once, for
+> 24 hours, only for that finding; `approve` cannot answer it and `accept` cannot answer a migration request; a reason
+> under two words, over 300 characters, or with money amounts, emails, phone numbers, `#<number>` or markup is
+> refused without using the code). Once every finding of the run is accepted, `--log` writes the deterministic
+> `DECISION_LOG.md` entry (PR, each finding's `file:line` and text hash, his reason, date; never the finding's wording,
+> because an accepted finding is unfixed and the repo is public); commit that file alone on top of the reviewed head,
+> then `node scripts/write-codex-push-proof.mjs --carry-owner-accepted` mints a carried proof (`carry.mode`
+> `owner_accepted`, `root_review.owner_accepted`, same base, the original run's 24 hours, `codex_ran` false) only when
+> the commit's sole change is exactly that entry and the code running is the bytes committed at that head. A PR that
+> changes hooks, `.codex`, `.husky`, `.github`, `scripts/lib`, `package.json` or the proof, approval and apply scripts
+> cannot use this path: a review that was not clean cannot vouch for gate code. Later carries (main merge, restamp,
+> post-apply) keep the acceptances and tell their focused Sol check the findings are accepted, not fixed. It satisfies
+> the merge gate and the apply landing gate; it does NOT cover the content-bound migration charter proofs from
+> `write-apply-proofs.mjs`. Same trust boundary as the migration approval: it stops a mistaken or relayed acceptance,
+> not an agent forging files or feeding the reply hook by hand.
+>
 > **Sol pre-flight (Mason, 2026-10-23).** A full `write-codex-push-proof.mjs` run first checks the head is quiet and
 > refuses with no Codex call otherwise: the head contains the exact origin/main the review pins, no Codex App review of
 > this commit is still running, no open Codex App thread stands on it, no open CodeRabbit thread stands on current code,
@@ -149,8 +179,9 @@
 > refused outright, and since 2026-11-02 so is an agent arming auto-merge any other way (the app's `set_auto_merge` tool,
 > GraphQL `enablePullRequestAutoMerge`); only Mason arms it, from the app; `--admin` and `CHANGES_REQUESTED` still are. A repeated StatusContext counts its WORSE state. (2) `migration-apply-lib.mjs` applies its former
 > hands-free-only proof set (content binding, both reviewer names, fresh content-bound Sol proof) in EVERY session,
-> and refuses DESTRUCTIVE, data-overwriting and access-changing SQL for agents in every session with no agent
-> override (an agent-passed approval flag cannot prove Mason approved that exact migration; `apply-migration-file.mjs`
+> and refuses DESTRUCTIVE SQL (and SQL whose rewrite/access check crashed) for agents in every session with no agent
+> override; since 2026-11-11 (Mason, "All but deletions", `ownerApprovalNeeded`) data-overwriting and access-changing
+> SQL lands on the proofs alone (an agent-passed approval flag cannot prove Mason approved that exact migration; `apply-migration-file.mjs`
 > rejects `--mason-approved-destructive` as unknown). The one way through is Mason's own approval (2026-09-29), given
 > since 2026-10-09 by chat reply instead of a Windows Hello signature so he can approve from his phone
 > (`owner-approval-lib.mjs`; request command `scripts/owner-approve-migration.mjs`; reply hook

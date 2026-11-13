@@ -20,8 +20,8 @@ import {
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed } from '../lib/deliverySplitBilling';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -40,6 +40,12 @@ import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { toSentryError } from '../lib/sentryError';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
+import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
+import { brandWarnings } from '../lib/deliveryBrands';
 
 interface StopItem {
   id: string;
@@ -117,6 +123,12 @@ export default function FieldStop() {
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
+  // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
+  const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
+  // Tied to the stop that raised it: on another stop it never shows, so its Complete anyway cannot act there.
+  const [brandWarning, setBrandWarning] = useState<{ stopId: string; list: string[] } | null>(null);
+  const brandWarningList = brandWarning && brandWarning.stopId === id ? brandWarning.list : [];
+  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty && step !== 'done');
 
   // Every photo-list read and local add takes a number; only the newest read may replace the list,
   // so a slow older read can never drop a photo added (or keep one removed) after it started.
@@ -359,6 +371,9 @@ export default function FieldStop() {
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
+    // A missing or mismatched brand only warns (Mason, 2026-11-09).
+    const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
+    if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
     void handleComplete();
   };
 
@@ -431,6 +446,10 @@ export default function FieldStop() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
+    // Unsaved brand choices are saved first. Anything not saved (left out, refused, overtaken, or brands not
+    // loaded) completes anyway as "not confirmed", which lands on the office's list. The seq is not part of the
+    // completion's key: a retry replays on the key.
+    const brandBaseSeq = await brandState.saveForCompletion();
     // The checks above can take a few seconds; re-check the stop did not change meanwhile.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -452,7 +471,7 @@ export default function FieldStop() {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
         signatureUploadError = sigErr;
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
+        Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }
@@ -465,6 +484,7 @@ export default function FieldStop() {
       // passed during them, a ticket dated "today" is now a past date and must carry its own timestamp.
       const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
+        p_brand_base_seq: brandBaseSeq,
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, rpcParams.p_idempotency_key, () => (
           usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined)),
@@ -489,14 +509,18 @@ export default function FieldStop() {
     const finishCompleted = async (result: unknown) => {
       // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
-      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
+      // A Bill Split drafts one invoice per payer and no auto_invoice; name them all.
+      const billSplit = billSplitCompletion(result);
+      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || billSplit.numbers.join(', ') || null;
+      const plural = billSplit.numbers.length > 1;
       // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
       const stillOnStop = activeStopIdRef.current === id;
       if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
-      toast('success', invoiceNum
-        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
+      if (billSplit.failed) {
+        toast('warning', forThisStop(billSplitFailedMessage(profile.role)));
+      } else toast('success', invoiceNum
+        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice${plural ? 's' : ''} ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
-      if (billSplitFailed(result)) toast('warning', forThisStop(BILL_SPLIT_FAILED_MESSAGE));
 
       logActivity({
         event: 'delivery_completed',
@@ -657,6 +681,7 @@ export default function FieldStop() {
               </li>
             )}
           </ul>
+          <div className="mt-4"><DeliveryBrandsPanel state={brandState} busy={completing} /></div>
           {!hasAnyQty && <p className="text-sm text-amber-800 mt-3 text-center">At least one item needs a quantity above zero.</p>}
           <MainAction disabled={!hasAnyQty} onClick={() => setStep('sign')}>
             {isPartial ? 'Continue with Partial' : 'All Full — Continue'}
@@ -817,7 +842,7 @@ export default function FieldStop() {
             <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
             {autoInvoiceNumber && (
               <p className="inline-flex items-center gap-1 text-sm text-nav-dark mt-3">
-                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice {autoInvoiceNumber} created
+                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice{autoInvoiceNumber.includes(',') ? 's' : ''} {autoInvoiceNumber} created
               </p>
             )}
           </div>
@@ -827,6 +852,30 @@ export default function FieldStop() {
         </>
       )}
 
+      <ConfirmModal
+        open={brandWarningList.length > 0}
+        onClose={() => { setBrandWarning(null); setStep('verify'); }}
+        onConfirm={() => {
+          const raisedHere = brandWarning?.stopId === id;
+          setBrandWarning(null);
+          if (raisedHere) void handleComplete();
+        }}
+        title="Brands not complete"
+        message={`${brandWarningList.join(' ')} You can still complete; the office will follow up.`}
+        confirmLabel="Complete anyway"
+        cancelLabel="Pick brand"
+        variant="warning"
+      />
+      <ConfirmModal
+        open={brandLeaveBlocker.state === 'blocked'}
+        onClose={() => brandLeaveBlocker.reset?.()}
+        onConfirm={() => brandLeaveBlocker.proceed?.()}
+        title="Leave this stop?"
+        message="Brand choices not saved. Leave anyway?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="warning"
+      />
     </div>
   );
 }

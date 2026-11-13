@@ -52,7 +52,7 @@ It doesn't replace the detailed documents. It says:
 | **2** | One parent record per formulation, then the mechanisms for weight, chemistry, EPA data and registration status | PAR-1, PAR-2, BLK-1, DM-2, DM-1, REG-1, DM-4, DM-1b | Mason 2026-10-29, refresh plan, August 1b, WP-5 and Phase 5 | 2.9 |
 | **3** | Brands: which real brand filled a generic | Brand PR B, the cancelled-registration warnings, step 2 | Brand plan | 2.8 |
 | **4** | Rates are trustworthy: low, high and recommended values, one quoting default, clean units | RT-1 to RT-4 | August Phase 2 | 2.11 |
-| **5** | Compare products by chemistry, cost and price: **the Brand vs Generic page rebuilt from scratch, last** | CMP-2 | August Phase 3; Mason 2026-10-29 | 2.12 |
+| **5** | Compare products by chemistry, cost and price: **the Brand vs Generic page rebuilt from scratch, last**. ⛔ **ON HOLD: Mason re-reviews the CMP-2 plan "BEFORE ANY BUILD HAPPENS" (2026-11-11)** | CMP-2 | August Phase 3; Mason 2026-10-29 | 2.12 |
 | **6** | Use guidance: crop and timing pairs, adjuvants, label link, quoting notes | USE-1 to USE-3 | August Phase 4 | 2.13 |
 | **7** | Suggested groupings for leftovers, and return policy | FAM-1, RET-1 | August Phases 5 and 0b | Later (CAN-WAIT) |
 | **8** | Clean-up: retire `unit_size`, retire `ingredient_map` once the rebuilt page replaces it, the name-vs-brand check | CLN-1 to CLN-3 | August Phases 7 and 3.8, B-16 | 2.14 |
@@ -251,7 +251,7 @@ A generic has several EPA numbers, one per brand row.
 - a warning when the product is added to a quote;
 - a warning at the delivery brand pick.
 
-They ship after REG-1, not in brand PR B. Delivery and application records keep a snapshot of the EPA number written at the time, so correcting a brand's number never rewrites history.
+They ship after REG-1, not in brand PR B. Status 2026-11-12: the product banner is built; the delivery brand-pick warning follows B-2; the quote warning is deferred (see the note after MOA-1). Delivery and application records keep a snapshot of the EPA number written at the time, so correcting a brand's number never rewrites history.
 
 ### 9. Data clean-up vs bulk tools (DM-0; Sol 1, 55)
 **Settled:** DM-0 moves into Stage 1, right after WP-PM-9 and before bulk import (WP-PM-10) and the detail upload (WP-PM-11a). Bulk tools need each product to have one identity.
@@ -632,6 +632,22 @@ Stage 2 builds the **mechanisms** and fills the records that apply (Sol 52). Cat
   - A product with a usable EPA number has its workbook chemistry refused by name.
   - A repeated upload with the same retry key writes once.
 
+**MOA-1 · Resistance mode-of-action groups shown on the product** (Mason, 2026-11-11; planned, no build scheduled; Mason places it)
+- **Build sheet:** `docs/plans/2026-11-12-product-MOA1-BUILD-SHEET.md` (2026-11-12; a plan only. Mason answered its questions the same day: admins only, typed groups kept and flagged, salts use their acid's groups, and a one-time bulk load of all ingredient groups instead of hand entry).
+- **Mason's words:** "on the product setup when it pulls in and we set the active ingredients it keeps track of which FRAC groups that product contains". Mason said FRAC; this item covers the resistance mode-of-action group for every chemical type: FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides.
+- **What already exists (checked 2026-11-11 against `main`):**
+  - DM-1 (live) built `product_parent_modes_of_action`: one row per parent, ingredient, scheme and group, with scheme limited to `HRAC`, `FRAC` or `IRAC` (no separate `WSSA`; the August record D-17 chose the numeric global herbicide code, which HRAC and WSSA now share).
+  - The product page's chemistry section already lets an admin type a group beside each ingredient and shows it there (`ChemistryEntryModal`, `ChemistryParts`).
+  - Groups are stored **per product, typed by hand**. No group is stored on the shared ingredient (`active_ingredients`), so the same active must be re-typed on every product that contains it, although D-17 called mode of action a property of the ingredient.
+  - Neither auto-fill sets a group: the EPA lookup does not return modes of action (DM-4 build sheet), and the workbook Ingredients tab carries ingredient rows only (DM-1b build sheet, point 4).
+  - Nothing shows a product-level summary of its groups.
+- **What MOA-1 adds:** when a product's actives are set, by the DM-4 EPA lookup or the DM-1b workbook, it shows which mode-of-action groups it contains, derived from its ingredients, without retyping. The likely shape is a reviewed group list on each shared ingredient that fills or proposes the product's rows, plus a "Groups: …" summary on the product. Its build sheet decides the shape, how a typed group that disagrees is kept (as D-L does for EPA), and who may edit.
+- **Relation to CMP-2:** CMP-2's mode-of-action filter reads the same data, so MOA-1 should land before it. CMP-2 is on hold (Stage 5).
+- **Quote screen (Part B), logged only:** an option on the quote page to show each line's actives and groups to the grower is a To-Do "Later features" item, **on hold while Taha works on the quote and chemical-sales screens**; no quote-screen file is touched until his UI PRs land.
+- **Done when** (draft, refined in its build sheet): a product whose actives come from an EPA lookup or the workbook shows its groups without anyone typing them; a two-ingredient premix shows both groups; an ingredient with no known group shows "group not recorded", never a guess.
+
+**Cancelled-registration warning on the quote page, deferred** (2026-11-12): the §8 warning when a product on a cancelled registration is added to a quote is **on hold while Taha works on the quote screens**, like MOA-1's quote item above; no quote-screen file (`QuoteBuilder.tsx`, quote components, `components/ui`) is touched until his UI PRs land. The product-page banner and the Brands-table mark ship first; the delivery brand-pick warning follows brand PR B-2.
+
 **DM-5 · dropped (2026-10-29).** Parent records (PAR-1) replace copying between sizes; the nickname moved to PAR-1 (overlaps 7, 13).
 
 ### Stage 3: brands (To-Do 2.8, its own plan)
@@ -702,6 +718,8 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
 **Per-crop rates** stay parked (August). RT-1 leaves room for an optional crop column.
 
 ### Stage 5: comparison (August Phase 3; Sol 27, 35)
+> ⛔ **CMP-2 IS ON HOLD (Mason, 2026-11-11).** Mason wants to re-review the CMP-2 plan **"BEFORE ANY BUILD HAPPENS"**. No CMP-2 build session, build sheet or code may start until Mason has re-reviewed this plan and approved it in chat. CLN-2 waits with it. Recorded in `docs/manual/DECISION_LOG.md` (2026-11-11).
+
 - **CMP-1** (admin cost per lb of active) ships with DM-1.
 - **CMP-2 · The full tool, as a complete rebuild of the Brand vs Generic page.** Mason refined "last" on 2026-10-30: build it after its required parent records, chemistry, weights, brands, trusted rates (RT-4) and relevant use guidance are ready. Optional images, groupings and the return-policy editor do not delay it. CLN-2 follows the verified replacement to retire the old table. It reads only the new data (parents, registrations, ingredients, weights, approved rates), never `ingredient_map`. It covers:
   - search by active ingredient through the canonical ingredient;
@@ -867,7 +885,7 @@ Every package's "done" is the *mechanism*. The app becomes useful only when the 
 2. **Stage 2:** PAR-1 → PAR-2, then BLK-1a may record quantities and DM-2 → DM-1 → REG-1 → DM-4 → DM-1b proceed independently. BLK-1b follows the separately reviewed and activated costing foundation. Data: DATA-9, then DATA-2, then DATA-4 and DATA-5 from the D-Y worklist.
 3. **Stage 3:** brand PR B after the staged PAR-1/PAR-2 brand move is live and verified, then beside the rest of Stage 2, with care over shared files; the warnings after REG-1.
 4. **Stage 4:** RT-1 and RT-2 in either order, each on its own evidence. Then RT-3 (Mason's review), then RT-4.
-5. **Stage 5:** CMP-2 follows its required data, RT-4 and relevant use guidance. Optional images, groupings and return-policy editing do not delay it (Mason, 2026-10-30). CLN-2 follows CMP-2.
+5. **Stage 5:** ⛔ **On hold until Mason re-reviews and approves the CMP-2 plan ("BEFORE ANY BUILD HAPPENS", 2026-11-11).** After that, CMP-2 follows its required data, RT-4 and relevant use guidance. Optional images, groupings and return-policy editing do not delay it (Mason, 2026-10-30). CLN-2 follows CMP-2.
 6. **Stage 6:** USE-1 (after WP-PM-5), then USE-2 (after REG-1), then USE-3.
 7. **Stage 8:** CLN-3 after brand PR B; CLN-1 after Stages 2 and 4; CLN-2 right after CMP-2.
 8. **Stages 7 and 9** when Mason says so.

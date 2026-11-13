@@ -44,6 +44,7 @@ Pick the worker's model and effort from `docs/reference/claude-model-tuning.md` 
 
 | Need | Use |
 |---|---|
+| Agree a risky change's behavior before code (pilot) | `plan-contract` |
 | Claude reviews current Codex work | `claude-review` |
 | Codex reviews current Claude work | `codex-review` |
 | Both agents review and reconcile | `agent-pair-review` |

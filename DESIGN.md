@@ -14,9 +14,9 @@ colors:
   cream-dark: "#f0ede6"
   white: "#ffffff"
   border-gray: "#e5e7eb"
-  field-border: "#d1d5db"
-  danger: "#dc2626"
-  danger-hover: "#b91c1c"
+  field-border: "#d1d5db" # descriptive alias, not a src/index.css token; use border-gray-300
+  danger: "#dc2626" # descriptive alias, not a src/index.css token; use red-600
+  danger-hover: "#b91c1c" # descriptive alias, not a src/index.css token; use red-700
 typography:
   page-title:
     fontFamily: "Barlow Semi Condensed, sans-serif"
@@ -112,7 +112,9 @@ Recorded from the shipped code on 2026-11-02. Token sources: the `@theme` block 
 
 CRX Manager is an operations tool, not a showcase. Office staff work in it all day on desktop; drivers and applicators use it on phones in trucks and fields. Every screen favours scanability and consistency over expression: a warm cream page, white cards with hairline borders, one deep brand green that marks action and the current place, and a condensed heading face that keeps titles compact.
 
-The brand is fixed. In November 2026 the owner approved deepening the green for readability (from #28A26A to the current crx-green) while keeping everything else. New screens extend this system; they never restyle it. Any visual change beyond what a task needs requires the owner's approval.
+The brand is fixed. In November 2026 the owner approved deepening the green for readability (from #28A26A to the current crx-green) while keeping everything else. New screens extend this system; they never restyle it. Any visual change beyond what a task needs requires the owner's approval (but see the 2026-11-07 note below: free rein on UI work if behaviour does not change).
+
+Owner, 2026-11-07: free rein on UI work; behaviour must not change.
 
 **Key Characteristics:**
 - Light theme only: cream page, white surfaces, near-black text.
@@ -139,11 +141,11 @@ A warm neutral base carrying a single deep green.
 - **Charcoal Lift** (nav-dark-hover): sidebar hover surface.
 - **Slate Ink** (secondary): secondary text, labels, inactive tabs, ghost buttons.
 - **Hairline** (border-gray): default border on every element (pinned Tailwind 3 gray-200), card and table borders.
-- **Field Edge** (field-border): input and secondary-button borders (gray-300).
+- **Field Edge** (gray-300): input and secondary-button borders. There is no `field-border` token in `src/index.css`; use `border-gray-300`, as `Input.tsx` does.
 
 ### Status (Tailwind stock, not brand)
-Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a `50` fill with a `200` border and a `500` icon. Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`.
-- **Danger Red** (danger / danger-hover): destructive buttons only.
+Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a white card with a gray hairline border and a 24px round icon chip (success emerald-50 fill with an emerald-700 icon, error red-50/red-700, info sky-50/sky-800, warning amber-50/amber-800). Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`.
+- **Danger Red** (red-600, hover red-700): destructive buttons, error text and danger menu items (red-700 text in `ActionMenu`). There is no `danger` token in `src/index.css`; use `red-600` / `red-700` as `Input.tsx` does.
 
 ### Named Rules
 **The One Green Rule.** The brand green is the crx-green token family and nothing else. Never use raw Tailwind `green-*` or `emerald-*` classes to mean "brand" or "primary". Emerald is reserved for the success status colour.
@@ -163,7 +165,7 @@ Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed
 
 ### Hierarchy
 - **Page title** (Barlow 600, 1.5rem): one per page through `PageHeader`; the phone top bar uses 1.125rem rising to 1.25rem on desktop.
-- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles.
+- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles (`text-xl`, `md:text-2xl`).
 - **Accent word** (Barlow 300, crx-green): the second half of a split heading.
 - **Body** (Inter 400, 0.875rem): almost all UI text, tables included.
 - **Label** (Inter 500, 0.875rem, Slate Ink): form labels, tabs, buttons.
@@ -190,11 +192,11 @@ Mostly flat, with soft ambient shadows that separate white surfaces from the cre
 - **Card** (`shadow-card`): resting cards.
 - **Card hover** (`shadow-card-hover`): only on cards that are clickable (`Card hover`).
 - **Small** (`shadow-sm`, pinned to Tailwind 3): filled buttons.
-- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a 40% black, lightly blurred backdrop.
+- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
 
 ## Shapes
 
-Gently rounded, never sharp and never bubbly. Buttons, inputs, toasts and icon buttons use 0.5rem corners; cards and desktop modals use 0.75rem; badges, count bubbles and workspace link pills are fully round. Borders are 1px hairlines.
+Gently rounded, never sharp and never bubbly. Buttons, inputs and icon buttons use 0.5rem corners; cards and toasts use 0.75rem (`rounded-xl`); desktop modals use 1rem (`rounded-2xl`); badges, count bubbles and workspace link pills are fully round. Borders are 1px hairlines.
 
 ## Components
 
@@ -205,13 +207,28 @@ All shared pieces live in `src/components/ui/` and `src/components/layout/`. Use
 - **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron` only on a button that goes to another page or the next step; Save and other in-place actions never show the › arrow.
 
 ### Status badges (`Badge`)
-Fully round pills, 0.75rem medium text, capitalised. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc.
+Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a word, never colour alone; the status dot arrives with the quote screens (PR 2). Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
 
 ### Cards (`Card`, `CardHeader`)
 White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off with `padding={false}` for tables). `CardHeader` gives a section title with an optional accent word and a right-aligned action.
 
 ### Inputs (`Input`, `Select`, `Combobox`, `SearchableSelect`)
-White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500.
+On redesigned screens, choice lists use `Dropdown` and dates use `DatePicker` (below); the old `Select` stays for now because its callers read native change events, and each screen moves over in its own module round. White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500. Each field keeps a fixed helper line (`min-h-5`) for help, a warning or an error, so nothing below it moves when a message appears. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order, not the order in the string, decides which one wins.
+
+### Dropdown (`Dropdown`)
+The one choice list, built on React Aria Components. Props: `value` (string or null), `onChange(value)`, `options` (`{ value, label, description?, disabled? }`), `label` or `aria-label`, `placeholder`, `helper`, `error`, `disabled`, `size` (`md` default, `sm`). It gives an `onChange` with the value, not a native change event. Use it on any redesigned screen; never a browser `<select>`. The trigger is 44px below 768px and 40px above (`h-11 md:h-10`). `size="sm"` is 36px and for dense desktop use only, never on phone screens.
+
+### Date picker (`DatePicker`)
+The one date field. `value` and `onChange` are plain `'YYYY-MM-DD'` strings (or null), with no JS `Date`; "today" is Chicago time. The field shows React Aria's typeable numeric segments (for example 9/30/2027) and opens a calendar. Pass `presets` (`{ label, value }`, such as "Season end") to show them as chips in the calendar and as a pill in the field when the value matches. Also takes `minValue`, `label` or `aria-label`, `helper`, `error` and `disabled`. Use it for every date; never `<input type="date">`.
+
+### Action menu (`ActionMenu`)
+The ⋯ "More actions" menu. Props: `label` (the button's accessible name), `items` (`{ id, label, icon?, onAction, danger?, disabled?, disabledReason?, group? }`) and `trigger` (`'icon'` by default, or `{ text, variant, icon }` for a split-style button). Danger items always sort last, after a divider, in red. A disabled item shows its `disabledReason` as a description under the label. Put the secondary and rare actions here, not extra buttons.
+
+### Switch (`Switch`)
+An on/off setting. Props: `label`, `description`, `isSelected`, `onChange(boolean)`, `isDisabled`. Green when on, gray when off, 44px tall.
+
+### Help tips (`HelpTip`)
+An info button labelled "More info" that opens on press (and by keyboard). It holds help text, so the page needs no explanatory paragraphs; one short line under a field is fine. Place it beside the control, never inside another button, link or clickable header. For a sortable `DataTable` column, pass it as `headerExtra`, which renders next to the sort button rather than inside it.
 
 ### Tabs (`Tabs`)
 Underline tabs: Inter 500 at 0.875rem, a 2px crx-green underline and green text on the active tab, Slate Ink otherwise, optional count bubble (solid crx-green with white text when active). Arrow-key navigation, scrolls horizontally on phones. Pages keep the active tab in the `?tab=` URL parameter.
@@ -223,10 +240,10 @@ A row of round pills under the top bar that link between sibling pages of one wo
 Sidebar: charcoal, gray-400 items that turn white on hover, active item marked by a 3px crx-green-on-dark bar on its left edge and a crx-green-on-dark icon. Top bar: translucent cream with blur, page title with accent. Bottom nav (phones): icons over short labels, active item in crx-green.
 
 ### Tables (`DataTable`, `EditableDataTable`, `MobileCardList`)
-Header row on Cream Shadow at 50% with Slate Ink medium labels and Lucide sort arrows; 0.875rem body. On phones, show records as `MobileCardList` cards instead of wide tables.
+Header row on Cream Shadow at 50% with Slate Ink medium labels and Lucide sort arrows; 0.875rem body. On phones, show records as `MobileCardList` cards instead of wide tables. A column's `headerExtra` holds a `HelpTip` beside the sortable header. Numbers are right-aligned in Inter with tabular figures; never monospace for money.
 
 ### Feedback (`Toast`, `ConfirmModal`, `Modal`, `EmptyState`, `Skeleton`)
-Use toasts for results and errors, `ConfirmModal` for every confirmation, `Modal` for forms, `EmptyState` for empty or failed lists, and `Skeleton` for loading. Never use the browser's `window.confirm` or `alert`.
+Use toasts for results and errors, `ConfirmModal` for every confirmation, `Modal` for forms, `EmptyState` for empty or failed lists, and `Skeleton` for loading. Never use the browser's `window.confirm` or `alert`. Every server action shows progress (a spinner and "Saving…" on the button) and then a toast that says what happened, including "nothing changed". `ConfirmModal` titles are a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK"). `EmptyState` is a Lucide icon in a soft green circle, one bold line, one helpful line and the next action; an inline empty ("First time for this customer") is a small muted icon and text. Loading is skeleton rows shaped like the content, never a lone spinner in the middle of a page.
 
 ### App-wide layout style (Style D, compact and bold)
 Chosen 2026-11-02. Label-left rows, a Save per sub-part, Cream Shadow section bands with a green icon tile, a sticky `SectionJumpBar`, and on phones a Charcoal header with labelled steps and a pinned 56px main button. The full rules are in `docs/workflows/UI_PATTERNS.md` ("Style D").
@@ -237,7 +254,21 @@ Chosen 2026-11-02. Label-left rows, a Save per sub-part, Cream Shadow section ba
 - **Do** use the crx-green tokens for every brand or primary-action colour, and `CRX_GREEN` in PDFs.
 - **Do** use the shared components (`Button`, `Card`, `Badge`, `Tabs`, `Input`, `PageHeader`, `Modal`, `ConfirmModal`, toasts, `EmptyState`) before writing new markup.
 - **Do** style with Tailwind classes and named tokens, and use Lucide icons only.
-- **Do** wrap phone-edited screens in `.phone-touch` and give every phone control a 44px target.
+- **Do** wrap phone-edited screens in `.phone-touch` and give every phone control a 44px target below 768px and 40px on desktop (`h-11 md:h-10`). Every control is reachable by keyboard with a visible focus ring.
+- **Do** keep behaviour fixed: UI work never changes what a button does, what is saved or when, permissions, totals or rounding.
+- **Do** use `Dropdown` for every choice list and `DatePicker` for every date on a redesigned screen.
+- **Do** give each screen one green button, the next step for the record's status, and at most two or three secondary buttons. Everything else goes in the ⋯ `ActionMenu`, with danger items last, after a divider, in red.
+- **Do** lay out a record header with the title, status badge and save status on the left and the actions on the right, wrapping cleanly. On a phone, actions move to a sticky bottom bar (primary and secondary) and the ⋯ menu sits in the top bar.
+- **Do** put help behind a `HelpTip` beside the control. One short line under a field is fine; no explanatory paragraphs.
+- **Do** confirm before costly actions (removing a line with data, declining, cancelling, closing a booking, deleting), and show progress and a result for every server action.
+- **Do** keep auto-saving screens auto-saving and show "Saving…", "All changes saved · 2:41 pm" or "Couldn't save. Retry" next to the title. Screens with a Save button show "Unsaved changes" until saved.
+- **Do** show skeleton rows while loading and an `EmptyState` (icon, bold line, helpful line, next action) when a list is empty.
+- **Do** set numbers in Inter with tabular figures, right-aligned in tables.
+- **Do** write plain American English with no em dashes and no internal codes. Status labels read "Closed short" and "Fulfilled".
+- **Do** build filters as search, dropdowns and toggle chips. An active chip is green-tinted with a check; "Clear" appears only when something is filtered, in a reserved spot.
+- **Do** keep priority table columns at 1024px and wider, turn rows into cards below 768px, and never let the page scroll sideways.
+- **Do** make PDFs follow the layout the owner knows from the old billing software: company block left, logo centred with the document name, document details right, a bill-to block where a window envelope shows it, plain grey table headers, totals right, terms and page number in the footer.
+- **Do** check every screen at 360, 390, 768, 1024, 1280, 1366, 1440 and 1920px before calling it done.
 - **Do** keep the light theme: cream page, white surfaces, Charcoal text.
 
 ### Don't:
@@ -245,7 +276,13 @@ Chosen 2026-11-02. Label-left rows, a Save per sub-part, Cream Shadow section ba
 - **Don't** type hex colour codes in components or pages; add or reuse a token in `src/index.css` instead.
 - **Don't** hand-roll tab buttons; use `Tabs` (views in a page) or `WorkspaceTabs` (links between pages).
 - **Don't** use `window.confirm`, `window.alert`, another icon set, or another styling system.
-- **Don't** add a dark theme, new brand colours, or restyle existing screens without the owner's approval.
+- **Don't** add a dark theme or new brand colours. Restyling existing screens is covered by the owner's 2026-11-07 note in the Overview (free rein if behaviour does not change).
+- **Don't** use a browser `<select>` or `<input type="date">` on a redesigned screen.
+- **Don't** put a `HelpTip` inside a button, link or clickable header; place it beside the control, or use `headerExtra` in a `DataTable` column.
+- **Don't** stack two colour classes for a state change; pick one with `cond ? 'a' : 'b'`.
+- **Don't** use an amber chip for an active filter, brand green for a status badge, or colour alone to show status.
+- **Don't** use monospace for money, full-width colour banners on PDFs, or the two-tone accent word on card titles: it is for the page title only.
+- **Don't** use a lone spinner in the middle of a page for loading, or "OK" as a confirm button label.
 
 ### Known drift (do not copy; fix only when a task touches it)
 - About 57 files use raw Tailwind `green-*` / `emerald-*` classes where crx-green is meant.

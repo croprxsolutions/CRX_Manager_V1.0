@@ -18,6 +18,8 @@ import { PRODUCT_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import { exportToCSV } from '../lib/csvExport';
+import { formatCents } from '../lib/money';
+import { inventoryValueNote, summarizeInventoryValue } from '../lib/inventoryValue';
 import { downloadReportPdf } from '../lib/reportPdf';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useActiveWarehouses, warehouseOptions } from '../hooks/useActiveWarehouses';
@@ -1232,7 +1234,7 @@ export default function InventoryPage() {
   const totalCommitted = inventory.reduce((s, i) => s + i.quantity_prebooked, 0);
   const totalDeliveredYTD = inventory.reduce((s, i) => s + i.delivered_ytd, 0);
   const showInventoryCost = isAdmin && inventoryForAdmin === true;
-  const totalValuation = inventory.reduce((sum, r) => sum + (r.quantity_available * (r.current_cost || 0)), 0);
+  const valuation = summarizeInventoryValue(inventory.map((r) => ({ quantity: r.quantity_available, unitCost: r.current_cost })));
 
   const netPositionColor = (n: number) => {
     if (n > 10) return 'text-emerald-600';
@@ -1471,7 +1473,7 @@ export default function InventoryPage() {
       : []),
   ];
 
-  const summaryCards: Array<{ label: string; value: number; color: string; icon: typeof Package; format?: 'currency' }> = [
+  const summaryCards: Array<{ label: string; value: number; color: string; icon: typeof Package; format?: 'cents'; note?: string }> = [
     { label: 'On Order', value: totalOnOrder, color: 'bg-teal-50 text-teal-600', icon: Package },
     { label: 'Total on Floor', value: totalOnFloor, color: 'bg-blue-50 text-blue-600', icon: Package },
     { label: 'Net Position', value: totalNetPosition, color: totalNetPosition >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600', icon: Package },
@@ -1480,7 +1482,7 @@ export default function InventoryPage() {
     { label: 'Delivered YTD', value: totalDeliveredYTD, color: 'bg-gray-50 text-gray-600', icon: Package },
     // Valued at cost, so admin-only (cost is admin-only, Mason 2026-10-15; the server
     // no longer sends non-admins current_cost, which would show a false $0).
-    ...(showInventoryCost ? [{ label: 'Inventory Value', value: totalValuation, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'currency' as const }] : []),
+    ...(showInventoryCost ? [{ label: 'Inventory Value', value: valuation.valueCents, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'cents' as const, note: inventoryValueNote(valuation) }] : []),
   ];
 
   const filteredProducts = products.filter((p) =>
@@ -1512,12 +1514,12 @@ export default function InventoryPage() {
               <>
                 <Package className="w-4 h-4" />
                 Inventory
-                <HelpTip text="Two distinct numbers worth knowing: 'Net Position' = Available − Prebooked + On Order (forward-looking — used for order creation warnings, dashboard widgets, this column, and the field-app shortfall preview). 'Today's Free' = Available − Prebooked − active Holds (right-now physical stock — used internally by the manual-hold modal warning, since a hold competes against today's stock not future PO arrivals). Holds and planned-quote demand are shown separately in the 'Planned' column, NOT subtracted from Net Position. Click the ledger icon on any row to see the full transaction history." className="ml-1" />
               </>
             ),
             content: (
               <>
       <div className="flex justify-end gap-2 flex-wrap">
+        <HelpTip text="Two distinct numbers worth knowing: 'Net Position' = Available − Prebooked + On Order (forward-looking: used for order creation warnings, dashboard widgets, this column, and the field-app shortfall preview). 'Today's Free' = Available − Prebooked − active Holds (right-now physical stock: used internally by the manual-hold modal warning, since a hold competes against today's stock not future PO arrivals). Holds and planned-quote demand are shown separately in the 'Planned' column, NOT subtracted from Net Position. Click the ledger icon on any row to see the full transaction history." className="mr-auto" />
         <Button variant="secondary" size="sm" icon={<Download className="w-4 h-4" />} onClick={handleExportCSV} disabled={inventoryFailed}>
           Export CSV
         </Button>
@@ -1556,10 +1558,11 @@ export default function InventoryPage() {
             </div>
             <p className="text-xs text-secondary">{c.label}</p>
             <p className="text-2xl font-semibold font-heading text-nav-dark">
-              {c.format === 'currency'
-                ? `$${c.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              {c.format === 'cents'
+                ? formatCents(c.value)
                 : c.value.toLocaleString(undefined, { maximumFractionDigits: 1 })}
             </p>
+            {c.note && <p className="text-xs text-secondary mt-1">{c.note}</p>}
           </Card>
         ))}
       </div>

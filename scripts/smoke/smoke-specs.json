@@ -1257,6 +1257,17 @@
         "billing"
       ]
     },
+    "update_cycle_count_item": {
+      "chain": "smoke-cycle-count-onhand-at-count.sql",
+      "description": "KI-134 (20270103170000): a count line is compared with on hand when it is saved. Stock in during a count (created 100, +10, shelf 110) completes at 110, not 120; stock out plus real shrink (created 110, -10, shelf 97) stores expected 100 / variance -3 and completes at 97. Uses one active admin and [SMOKE] fixtures; terminal rollback.",
+      "covers": [
+        "update_cycle_count_item",
+        "complete_cycle_count"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
     "complete_cycle_count": {
       "chain": "smoke-cycle-count-concurrency-guards.sql",
       "description": "Cycle-count complete/reverse chain: quantity changes 100->112->100, both replays are stable, lifecycle states advance correctly, and both wrappers retain inventory row locks.",
@@ -2087,6 +2098,36 @@
       "description": "KI-25 follow-up (20261221100000): live-safe, plants no rows. No signed-in user, a missing key and a bad reason are refused; an admin on an unknown delivery gets outcome none and the same key replays it; manual_send on a delivery that is not completed is refused (DELIVERY_NOT_COMPLETED); an active driver is refused (office only); a real sent receipt of a completed delivery answers sent with sent_at and no address and is not changed, and its key with another reason is refused (IDEMPOTENCY_INTENT_MISMATCH); EXECUTE is authenticated-only. Pausing, closing, the in-flight refusal and the races with the worker need seeded deliveries and are proved in prove-close-delivery-receipt-real-schema.mjs. Terminal rollback.",
       "covers": ["close_delivery_receipt"],
       "area": ["security", "idempotency", "lifecycle"]
+    },
+    "bill_split_payers_read": {
+      "chain": "smoke-bill-split-payers-read.sql",
+      "description": "Migration 20261222110000 (#1534): rep 1 sells a Bill Split 50/50 and an admin moves payer 2's draft to rep 2 through save_invoice; rep 1's direct group read now sees one invoice (the gap); get_bill_split_payers on payer 1's invoice gives rep 1 both payers totalling the sale; rep 2 gets both on their own invoice and INVOICE_NOT_VISIBLE on payer 1's; a driver gets INVOICE_NOT_VISIBLE; anon has no EXECUTE; an invoice with no split group returns no rows; with payer 1's draft moved to no sales rep, a driver, another rep and a call with no claims are all refused (a NULL in the check never lets a caller through); a deactivated rep is refused on their own invoice; a grouped invoice that is not a Bill Split returns no rows. Terminal rollback.",
+      "covers": ["get_bill_split_payers", "save_invoice", "complete_delivery"],
+      "area": ["billing", "security", "regression"]
+    },
+    "sales_reports_per_payer": {
+      "chain": "smoke-sales-reports-per-payer.sql",
+      "description": "Migration 20261229150000: reads Sales Detail, every Sales Summary grouping and the dashboard as an admin; a rep sells a Bill Split 60/40, delivered and billed per payer; Sales Detail shows one row per payer (payer 2 exactly 40% rounded down, the main customer the rest), each with that payer's own invoice, and every other row unchanged; detail, every summary grouping and the dashboard headline grew by exactly the line; the customer filter and \"by customer\" credit payer 2; a rep gets the payer rows with cost, profit and margin empty; no API role may call _sales_line_payers. Terminal rollback.",
+      "covers": ["get_sales_detail_report", "get_sales_summary_report", "financial_dashboard_summary", "_sales_line_payers"],
+      "area": ["billing", "regression"]
+    },
+    "standing_grower_discount": {
+      "chain": "smoke-standing-grower-discount.sql",
+      "description": "Migration 20261231110000 (billing plan M4b): a 3% customer's delivery invoice drafts at products less 3% (half up, to the cent) with one 'Standing discount 3%' line; freight is not discounted; a re-save never discounts twice; a hand edit or delete of the line is put right at commit; a rep can't set a rate; each invoice keeps the rate it was drafted at (a customer's later change leaves it, posted and unposted amounts never move); Bill Split payers each get their own rate and the group posts, and unposts after a payer's rate changes; a misc-charge draft can't carry the line and a draft switched to misc charge loses it; the office's rate on one sale (set_invoice_standing_discount) sets, clears and restores, relabels at 3.01%, keeps every field of the draft's lines, is replay-safe, and is refused for a rep, a posted invoice and a direct write; the discount's change to a total has its own audit entry; a new empty draft records its customer's rate; a field application draft's total is never changed; a chemical sale drafted and posted in one transaction records its rate, so unposting after a customer change keeps its amount; the office's rate is refused on an unposted invoice; a draft switched to misc charge and posted before any commit is refused; a sale created already posted can't take lines; the anonymous role can't set a rate; the office's rate change has its own audit entry; the change's audit entries add up to it once; returns of a 3% sale (two lines, one in two parts) and of a 3% Bill Split payer's whole share credit the posted totals to the cent. Deferred triggers fired with SET CONSTRAINTS at each commit point. Terminal rollback.",
+      "covers": ["_recompute_standing_discount_20261231", "_standing_discount_expected_20261231", "_standing_discount_after_line_change_20261231", "_standing_discount_after_invoice_change_20261231", "_standing_discount_before_fingerprint_20261231", "guard_customer_standing_discount_20261231", "guard_standing_discount_line_scope_20261231", "guard_standing_discount_current_on_post_20261231", "set_invoice_standing_discount", "_standing_discount_record_rate_20261231", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "sales_tax_checkbox": {
+      "chain": "smoke-sales-tax.sql",
+      "description": "Migration 20261231120000 (billing plan M4a, B10): a taxed sale for a 3% customer with $45.00 freight drafts one 'Sales tax 6.25%' line = round((products - discount + freight) x 6.25%), half up; untaxed by default; a re-save never taxes twice; a hand edit or delete of the line is put right at commit; a taxed Bill Split is exact per payer and its group posts; set_order_sales_tax moves the sale's drafts on and off, leaves posted invoices alone, admin or the sale's own rep only (a sale with no salesman is no rep's), replay-safe; a draft keeps its rate when Settings changes, a new draft takes the new one; a bad Settings rate is refused; the line is refused off a chemical sale; a stale tax line can't post; unposting keeps the posted tax; a draft switched to misc charge loses its tax and regains it when switched back; returns credit the posted total, tax included.",
+      "covers": ["_recompute_standing_discount_20261231", "_sales_tax_expected_20261231", "_sales_tax_setting_rate_20261231", "_sales_tax_record_rate_20261231", "guard_sales_tax_line_scope_20261231", "guard_sales_tax_current_on_post_20261231", "set_order_sales_tax", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "epa_long_name_cas_match": {
+      "chain": "smoke-epa_long_name_cas_match.sql",
+      "description": "REQUIRES 20270107100000 (#1810 follow-up). On an invented product with one Glyphosate row, an admin starts an EPA lookup and the epa-lookup role records an answer listing Glyphosate by CAS under a 250-character name: the proposal shows that entry as an unticked conflict with no change, shows the product's row beside it, and does not list the row as missing from EPA. Fails before the migration. Terminal rollback.",
+      "covers": ["_epa_proposal_items", "start_epa_lookup", "record_epa_lookup", "_epa_lookup_input"],
+      "area": ["regression"]
     }
   }
 }

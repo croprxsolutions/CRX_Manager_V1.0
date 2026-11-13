@@ -150,6 +150,8 @@ export const RpcErrorCodes = {
   PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
   PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',
   PRODUCT_PARENT_RATES_STALE: 'PRODUCT_PARENT_RATES_STALE',
+  // Crop + timing choices (migration 20261229120000): the choice changed since it was loaded.
+  USE_TIMING_STALE: 'USE_TIMING_STALE',
   // Product weights (migration 20261207100000): a weight screen older than the subject, a lower-trust value
   // that needs Correct weight, and a draft entered for a pack or formulation that has since changed.
   PRODUCT_WEIGHT_STALE: 'PRODUCT_WEIGHT_STALE',
@@ -160,6 +162,10 @@ export const RpcErrorCodes = {
   PRODUCT_BRANDS_BELONG_TO_PARENT: 'PRODUCT_BRANDS_BELONG_TO_PARENT',
   // Raised by the screen, not SQL: the size joined, left or moved parents since its brand list loaded.
   PRODUCT_BRANDS_PARENT_CHANGED: 'PRODUCT_BRANDS_PARENT_CHANGED',
+  // Delivery brands (20270104120000): someone else saved this delivery's brands since the screen loaded,
+  // and a correction that would change a posted invoice.
+  BRAND_PICKS_CHANGED: 'BRAND_PICKS_CHANGED',
+  INVOICE_POSTED: 'INVOICE_POSTED',
   COST_BASIS_REQUIRED: 'COST_BASIS_REQUIRED',
   COST_BASIS_CENTS_REQUIRED: 'COST_BASIS_CENTS_REQUIRED',
   DRAW_ALLOCATION_MISMATCH: 'DRAW_ALLOCATION_MISMATCH',
@@ -460,6 +466,10 @@ export const RpcErrorCodes = {
   BRAND_TEXT_TOO_LONG: 'BRAND_TEXT_TOO_LONG',
   BRAND_NOT_FOUND: 'BRAND_NOT_FOUND',
   EPA_REGISTRATION_INVALID: 'EPA_REGISTRATION_INVALID',
+  // REG-1 switch-on (20261231220000): the one-time seed, its preview, and Sales to check before it ran.
+  EPA_REGISTRATION_SEED_DONE: 'EPA_REGISTRATION_SEED_DONE',
+  EPA_REGISTRATION_SEED_STALE: 'EPA_REGISTRATION_SEED_STALE',
+  EPA_REGISTRATION_NOT_SEEDED: 'EPA_REGISTRATION_NOT_SEEDED',
   NOT_AUTHORIZED: 'NOT_AUTHORIZED',
   PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
   PRODUCT_INACTIVE: 'PRODUCT_INACTIVE',

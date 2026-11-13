@@ -8,6 +8,7 @@ import Card from '../ui/Card';
 import Badge from '../ui/Badge';
 import HelpTip from '../ui/HelpTip';
 import type { TeamBoardDeliveryData, TeamBoardDelivery } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 // deliveries.priority is low, normal, high or urgent (deliveries_priority_check); team notes use 'medium'.
 const priorityBorderColors: Record<string, string> = {
@@ -106,7 +107,7 @@ export default function TodaysDeliveries() {
       }
       setData(assertRpcResult<TeamBoardDeliveryData>(result, 'get_team_board_deliveries'));
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'TodaysDeliveries.fetchDeliveries' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'TodaysDeliveries.fetchDeliveries' } });
       toast('error', err instanceof Error ? err.message : 'Failed to load deliveries');
     } finally {
       setLoading(false);

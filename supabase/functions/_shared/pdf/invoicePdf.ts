@@ -18,6 +18,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
 import { dueDateFromTerms } from "../paymentTerms.ts";
+import { invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
 import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
@@ -54,7 +55,7 @@ export interface InvoicePrintOptions {
 export const INVOICE_PDF_ITEM_COLUMNS =
   'order_item_id, product_id, return_credit_source_item_id, description, quantity, unit_size, unit_price_cents, ' +
   'extended_cents, rate_per_acre, rate_unit, acres, total_applied, total_applied_unit, total_applied_gl_lb, ' +
-  'gl_lb_unit, epa_registration, is_application_fee, product_form, product:products(product_name, epa_registration, product_form)';
+  'gl_lb_unit, epa_registration, is_application_fee, product_form, charge_type, brand_lines, product:products(product_name, epa_registration, product_form)';
 
 
 // ── PDF Data Interfaces ─────────────────────────────────────────────────
@@ -81,7 +82,14 @@ export interface InvoicePdfItem {
   epa_registration?: string | null;
   is_application_fee?: boolean;
   product_form?: string | null;
+  /** invoice_items.charge_type: 'standing_discount' and 'sales_tax' are the database's computed lines (M4b, M4a). */
+  charge_type?: string | null;
+  /** Brand PR B-3: invoice_items.brand_lines as stored (see brandNotes.ts). */
+  brand_lines?: unknown;
 }
+
+/** The database's own lines: printed by name and amount only. */
+const isComputedLine = (item: InvoicePdfItem) => item.charge_type === 'standing_discount' || item.charge_type === 'sales_tax';
 
 /** Convert a database invoice-item row into the one PDF shape every caller uses. */
 export function mapInvoicePdfItem(item: unknown): InvoicePdfItem {
@@ -110,6 +118,8 @@ export function mapInvoicePdfItem(item: unknown): InvoicePdfItem {
     epa_registration: (row.epa_registration as string) || row.product?.epa_registration || null,
     is_application_fee: Boolean(row.is_application_fee),
     product_form: (row.product_form as string) || row.product?.product_form || null,
+    charge_type: (row.charge_type as string) || null,
+    brand_lines: row.brand_lines ?? null,
   };
 }
 
@@ -183,6 +193,15 @@ export function groupReturnCreditDisplayItems<T extends ReturnCreditDisplayItem>
  * plain dollar amount (no "/AC"). The Amount + invoice total use extended_cents
  * and are unchanged — this is display only.
  */
+/**
+ * The product cell: the name, then the delivered brands under it (Brand PR B-3). On a Bill Split payer's invoice the
+ * brand amounts are the whole load's, so they read "on the load".
+ */
+export function productCellText(item: InvoicePdfItem, data: Pick<InvoicePdfData, 'shares'>): string {
+  const onTheLoad = (data.shares ?? []).some((s) => 'invoice_id' in s && !!(s as BillSplitPayer).invoice_id);
+  return [item.product_name || item.description, ...invoiceBrandNotes(item.brand_lines, onTheLoad)].join('\n');
+}
+
 export function isFuelSurchargeLine(item: InvoicePdfItem): boolean {
   return Boolean(item.is_application_fee) && item.description === 'Fuel Surcharge';
 }
@@ -194,6 +213,141 @@ export interface InvoicePdfShare {
   amount_cents: number;
   price_per_acre_cents?: number | null;
   pricing_note?: string | null;
+  /** A Bill Split payer's own invoice, printed as its reference on Old Print. */
+  invoice_number?: string | null;
+}
+
+/** One payer of a Bill Split sale (billing plan M2): their invoice and their share of the sale (the order's split when it bills the whole sale, else of the billed totals). */
+export interface BillSplitPayer extends InvoicePdfShare {
+  invoice_id: string;
+}
+
+/**
+ * A Bill Split draws per delivery. A field split's chemical-sale invoices have a group but no delivery.
+ * A payer's draft may be switched to misc charge (guard_invoice_terminal_order) and stays in the group.
+ */
+export function isBillSplitInvoice(row: { invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null }): boolean {
+  return (row.invoice_type === 'chemical_sale' || row.invoice_type === 'misc_charge') && !!row.invoice_group_id && !!row.delivery_id;
+}
+
+/**
+ * Whether this invoice shows the sale's payer table: a live Bill Split payer invoice. get_bill_split_payers refuses a
+ * voided, cancelled or deleted invoice as its key, so those show no table rather than failing to open.
+ */
+export function readsBillSplitPayers(row: {
+  invoice_type?: string | null; invoice_group_id?: string | null; delivery_id?: string | null;
+  status?: string | null; deleted_at?: string | null;
+}): boolean {
+  return isBillSplitInvoice(row) && !['voided', 'cancelled'].includes(row.status ?? '') && !row.deleted_at;
+}
+
+export function billSplitPayerShares(rows: Array<{
+  id: string;
+  invoice_number: string | null;
+  total_amount_cents: number | null;
+  customer?: { farm_name?: string | null } | null;
+}>, weightOf: (name: string) => number = () => NaN): BillSplitPayer[] {
+  // Numeric, so -10 follows -2. The database sorts the suffix as text.
+  const ordered = [...rows].sort((a, b) => (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '', undefined, { numeric: true }));
+  // Each payer's weight: the order's split when the caller has it (whole millionths of a percent), else their
+  // billed total (cents).
+  const weights = ordered.map((r) => {
+    const w = weightOf(r.customer?.farm_name || 'Unknown');
+    return Number.isNaN(w) ? (r.total_amount_cents ?? 0) : w;
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  // Hundredths of a percent, largest remainder first, so the printed column adds up to exactly 100%.
+  // Whole numbers throughout (cents or millionths x 10000 stay exact), so equal remainders tie exactly and go in order.
+  const parts = weights.map((w) => (total > 0 ? w * 10000 : 0));
+  const bp = parts.map((p) => (total > 0 ? Math.floor(p / total) : 0));
+  const short = total > 0 ? 10000 - bp.reduce((s, v) => s + v, 0) : 0;
+  parts.map((p, i) => [total > 0 ? p - bp[i] * total : 0, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1])
+    .slice(0, short).forEach(([, i]) => { bp[i] += 1; });
+  return ordered.map((r, i) => ({
+    invoice_id: r.id,
+    invoice_number: r.invoice_number,
+    customer_name: r.customer?.farm_name || 'Unknown',
+    split_percentage: bp[i] / 100,
+    acres: null,
+    amount_cents: r.total_amount_cents ?? 0,
+  }));
+}
+
+/**
+ * Every payer of the Bill Split sale this invoice belongs to, read through get_bill_split_payers (anyone who may
+ * read the invoice gets the whole group, so a rep who can't see another payer's invoice still gets the full table).
+ * Read from the group's invoices, not invoice_shares: those rows split one invoice, and a re-save rescales them to it.
+ * Counted, so a read cut short by the row cap is refused rather than printed as a partial payer table.
+ */
+export async function loadBillSplitPayers(db: SupabaseClient, invoiceId: string): Promise<BillSplitPayer[]> {
+  const { data, error, count } = await db.rpc('get_bill_split_payers', { p_invoice_id: invoiceId }, { count: 'exact' });
+  if (error) throw new InvoiceDetailsUnavailableError();
+  const rows = assertRpcResult<Array<{ id: string; invoice_number: string | null; total_amount_cents: number | null; farm_name: string | null }>>(data, 'get_bill_split_payers');
+  if (!Array.isArray(rows) || count !== rows.length) throw new InvoiceDetailsUnavailableError();
+  const split = await orderSplit(db, invoiceId);
+  // Names are how get_bill_split_payers identifies payers. The card must name exactly these payers, as many per name,
+  // and customers who share a name must share a weight, so it can't matter which payer is which.
+  const perName = new Map<string, number>();
+  for (const r of rows) perName.set(r.farm_name || 'Unknown', (perName.get(r.farm_name || 'Unknown') ?? 0) + 1);
+  const matches = split !== null && split.size === perName.size
+    && [...perName].every(([n, k]) => split.get(n)?.length === k && split.get(n)!.every((w) => w === split.get(n)![0]));
+  return billSplitPayerShares(rows
+    .map((r) => ({ id: r.id, invoice_number: r.invoice_number, total_amount_cents: r.total_amount_cents, customer: { farm_name: r.farm_name } })),
+    matches ? (n) => split.get(n)![0] : undefined);
+}
+
+/**
+ * The sale's split from its order (Mason, 2026-11-12: the % column shows "the 50/50 split from the order, with freight
+ * as its own line for that payer", not the share of billed totals that freight, discount and tax move): each payer's
+ * card share in whole millionths of a percent, the main customer taking whatever the card leaves (as the split bills),
+ * keyed by farm name (one weight per customer of that name). Null, so the billed share shows, when the invoice has no
+ * order or a line has its own payers (the card doesn't bill those lines). A failed read refuses, as a failed payer read does.
+ */
+async function orderSplit(db: SupabaseClient, invoiceId: string): Promise<Map<string, number[]> | null> {
+  const inv = await db.from('invoices').select('order_id').eq('id', invoiceId).maybeSingle();
+  // get_bill_split_payers has already shown this invoice to this reader, so an empty read is a failure, not "no order".
+  if (inv.error || !inv.data) throw new InvoiceDetailsUnavailableError();
+  const orderId = (inv.data as { order_id?: string | null }).order_id;
+  if (!orderId) return null;
+  const [order, shares, lineShares] = await Promise.all([
+    db.from('orders').select('customer_id, customer:customers(farm_name)').eq('id', orderId).maybeSingle(),
+    db.from('order_shares').select('customer_id, split_percentage, customer:customers(farm_name)').eq('order_id', orderId),
+    db.from('order_item_shares').select('id, order_items!inner(order_id)', { count: 'exact', head: true }).eq('order_items.order_id', orderId),
+  ]);
+  type Row = { customer_id: string; split_percentage?: number | string; customer?: { farm_name?: string | null } | null };
+  const main = order.data as Row | null;
+  if (order.error || shares.error || lineShares.error || typeof lineShares.count !== 'number' || !main || !Array.isArray(shares.data)) {
+    throw new InvoiceDetailsUnavailableError();
+  }
+  // Only an active admin or sales rep, or the service role, gets past get_bill_split_payers. The read policies on
+  // order_items (oitems_select: admin or rep), order_shares and order_item_shares (admin or rep, order not deleted;
+  // 20261215110000) admit all of them, so the count covers every line share on the order.
+  if (lineShares.count > 0) return null;
+  // numeric(9,6): whole millionths are exact.
+  const byCustomer = new Map<string, { name: string; weight: number }>();
+  let left = 100_000_000;
+  for (const s of shares.data as Row[]) {
+    const w = Math.round(Number(s.split_percentage) * 1_000_000);
+    if (!Number.isFinite(w) || w <= 0) return null;
+    const seen = byCustomer.get(s.customer_id);
+    if (seen) seen.weight += w;
+    else byCustomer.set(s.customer_id, { name: s.customer?.farm_name || 'Unknown', weight: w });
+    left -= w;
+  }
+  if (left < 0) return null;
+  const own = byCustomer.get(main.customer_id);
+  if (own) own.weight += left;
+  else if (left > 0) byCustomer.set(main.customer_id, { name: main.customer?.farm_name || 'Unknown', weight: left });
+  const byName = new Map<string, number[]>();
+  for (const { name, weight } of byCustomer.values()) byName.set(name, [...(byName.get(name) ?? []), weight]);
+  return byName;
+}
+
+// Supabase returns null data, not an error, when a call is denied; this shared file runs in Deno too,
+// so it keeps its own copy (as create-user and send-delivery-receipts do).
+function assertRpcResult<T>(data: unknown, _rpcName: string): T {
+  if (data === null || data === undefined) throw new InvoiceDetailsUnavailableError();
+  return data as T;
 }
 
 export interface InvoicePdfData {
@@ -405,7 +559,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -430,8 +584,12 @@ export async function buildInvoicePdfDataFromRow(
     discount_earned_cents?: number | null; discount_date?: string | null;
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
-    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null;
+    diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
   } | null;
+  const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
+      && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
+    ? await loadBillSplitPayers(db, inv.id)
+    : [];
   const pickPo = inv.purchase_order_ref !== undefined ? inv.purchase_order_ref : billingRow?.purchase_order_ref;
   const pickTerms = inv.payment_terms !== undefined ? inv.payment_terms : billingRow?.payment_terms;
   const pickDue = inv.due_date !== undefined ? inv.due_date : billingRow?.due_date;
@@ -504,7 +662,7 @@ export async function buildInvoicePdfDataFromRow(
           price_per_acre_cents: s.price_per_acre_cents ?? null,
           pricing_note: s.pricing_note ?? null,
         }))
-      : undefined,
+      : billSplitPayers.length > 0 ? billSplitPayers : undefined,
     items: pdfItems,
     total_amount_cents: inv.total_amount_cents || 0,
     total_cost_cents: inv.total_cost_cents || 0,
@@ -816,7 +974,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   } else if (data.invoice_type === 'chemical_sale') {
     y = drawChemicalSaleLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   } else {
-    y = drawMiscChargeLayout(doc, data, y, margin, pageW, autoTable, drawPageFooter);
+    y = drawMiscChargeLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
   }
 
   // ── Totals Section ─────────────────────────────────────────────────
@@ -1010,10 +1168,11 @@ function drawFieldApplicationLayout(
         ? `${fmtNum(item.unit_price_cents / 100, 2)} AC`
         : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`;
 
+    const product = productCellText(item, data);
     const row = showEpa
       ? [
-        item.product_name || item.description,
-        item.epa_registration || '',
+        product,
+        invoiceLineEpaText(item.brand_lines, item.epa_registration),
         rateStr,
         totalApplied,
         glLb,
@@ -1021,7 +1180,7 @@ function drawFieldApplicationLayout(
         fmt(item.extended_cents),
       ]
       : [
-        item.product_name || item.description,
+        product,
         rateStr,
         totalApplied,
         glLb,
@@ -1184,12 +1343,17 @@ function drawChemicalSaleLayout(
     : [['Date', 'Chemical', 'Quantity', 'Cost', 'Total']];
 
   const rows = data.items.map((item) => {
+    if (isComputedLine(item)) {
+      const name = item.product_name || item.description;
+      return showEpa ? ['', name, '', '', '', fmt(item.extended_cents)] : ['', name, '', '', fmt(item.extended_cents)];
+    }
     const qtyStr = `${fmtNum(item.quantity, 2)} ${item.unit_size || item.rate_unit || ''}`;
     const costStr = `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
 
+    const product = productCellText(item, data);
     return showEpa
-      ? [fmtDate(data.invoice_date), item.product_name || item.description, item.epa_registration || '', qtyStr, costStr, fmt(item.extended_cents)]
-      : [fmtDate(data.invoice_date), item.product_name || item.description, qtyStr, costStr, fmt(item.extended_cents)];
+      ? [fmtDate(data.invoice_date), product, invoiceLineEpaText(item.brand_lines, item.epa_registration), qtyStr, costStr, fmt(item.extended_cents)]
+      : [fmtDate(data.invoice_date), product, qtyStr, costStr, fmt(item.extended_cents)];
   });
 
   autoTable(doc, {
@@ -1233,6 +1397,38 @@ function drawChemicalSaleLayout(
   y += 18;
 
   // Shares table (chemical sales can also have splits)
+  y = drawSharesTable(doc, data, y, margin, opts, autoTable, drawPageFooter);
+
+  // Finance charges
+  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
+    y += 4;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(margin, y, pageW - margin, y);
+    y += 12;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...CHARCOAL);
+    doc.text('FIN', margin, y);
+    doc.text('Finance Charges', margin + 60, y);
+    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
+    y += 16;
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
+    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
+    y += 16;
+  }
+
+  return y + 10;
+}
+
+// ── Layout 3: Misc Charge ────────────────────────────────────────────────
+
+/** The customer share table under a chemical sale's or misc charge's lines (a Bill Split payer's draft can be either). */
+function drawSharesTable(
+  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
+): number {
+  let y = startY;
   if (opts.show_shares && data.shares && data.shares.length > 1) {
     y += 4;
     const hasPerAcrePricing = data.shares.some(s => s.price_per_acre_cents != null);
@@ -1278,34 +1474,12 @@ function drawChemicalSaleLayout(
     });
     y = doc.lastAutoTable.finalY + 6;
   }
-
-  // Finance charges
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    y += 4;
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 12;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text('FIN', margin, y);
-    doc.text('Finance Charges', margin + 60, y);
-    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
-    y += 16;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
-    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
-    y += 16;
-  }
-
-  return y + 10;
+  return y;
 }
-
-// ── Layout 3: Misc Charge ────────────────────────────────────────────────
 
 function drawMiscChargeLayout(
   doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  autoTable: AutoTable, drawPageFooter: () => void,
+  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
 ): number {
   let y = startY;
 
@@ -1339,7 +1513,8 @@ function drawMiscChargeLayout(
     didDrawPage: drawPageFooter,
   });
 
-  return doc.lastAutoTable.finalY + 20;
+  // Every Bill Split payer's invoice shows every payer (Mason, 9 Nov), a payer's misc charge draft too.
+  return drawSharesTable(doc, data, doc.lastAutoTable.finalY + 20, margin, opts, autoTable, drawPageFooter);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

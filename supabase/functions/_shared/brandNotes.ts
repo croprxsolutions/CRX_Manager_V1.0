@@ -15,6 +15,8 @@ export interface ReceiptBrandInfo {
   brands?: ReceiptBrand[] | null;
   brand_recorded?: boolean | null;
   brand_picked_quantity?: number | string | null;
+  /** Pre-delivery paper compares picks with the planned load, not an in-progress delivered amount. */
+  brand_planned_quantity?: number | string | null;
 }
 
 /** Quantities are stored to 4 places; compare them as whole ten-thousandths, never as floats. */
@@ -43,7 +45,9 @@ export function receiptBrandNotes(line: ReceiptBrandInfo & { qty: number | strin
   if (!Array.isArray(line.brands) || line.brands.length === 0) return [];
   const notes = line.brands.map((b) =>
     `Brand: ${brandLabel(b.name, b.epa_registration)}${b.quantity != null ? ` - ${fmtBrandQty(b.quantity)}` : ''}`);
-  if (line.brand_picked_quantity != null) notes.push(mismatchNote(ofText(line.brand_picked_quantity, line.qty)));
+  if (line.brand_picked_quantity != null) notes.push(line.brand_planned_quantity != null
+    ? `Brand amounts do not match planned load: ${ofText(line.brand_picked_quantity, line.brand_planned_quantity)} picked`
+    : mismatchNote(ofText(line.brand_picked_quantity, line.qty)));
   return notes;
 }
 
@@ -115,6 +119,15 @@ export function brandLinesDelivered(entries: InvoiceBrandEntry[]): number {
   return [...seen.values()].reduce((s, v) => s + v, 0);
 }
 
+/** The same delivered trip printed under two invoice rows must not show its whole-load brand amounts twice. */
+export function hasRepeatedBrandTrip(lines: ReadonlyArray<{ brand_lines?: unknown }>, index: number): boolean {
+  const entries = parseBrandLines(lines[index]?.brand_lines);
+  if (!entries) return false;
+  const ids = new Set(entries.map((e) => e.delivery_item_id).filter((id): id is string => !!id));
+  return lines.some((line, i) => i !== index
+    && (parseBrandLines(line.brand_lines) ?? []).some((e) => ids.has(e.delivery_item_id ?? '')));
+}
+
 /** The EPA column: a line covering several numbered brands prints them joined; otherwise the line's own number. */
 export function invoiceLineEpaText(brandLines: unknown, lineEpa: string | null | undefined): string {
   // Each delivered brand's own number; a brand with none is recorded under the product's (the line's) number.
@@ -124,14 +137,18 @@ export function invoiceLineEpaText(brandLines: unknown, lineEpa: string | null |
 }
 
 /** The notes under one invoice line. onTheLoad: a Bill Split payer's line, whose brand amounts are the whole load's. */
-export function invoiceBrandNotes(brandLines: unknown, onTheLoad = false): string[] {
+export function invoiceBrandNotes(brandLines: unknown, billedQuantity: number | string, onTheLoad = false, repeatedTrip = false): string[] {
   const entries = parseBrandLines(brandLines);
   if (entries === null) return [];
   if (entries.length === 0) return ['Brand not recorded'];
-  const notes = entries.filter(isPick).map((e) =>
-    `Brand: ${brandLabel(e.brand_name, e.epa_registration)} - ${fmtBrandQty(e.quantity)}${onTheLoad ? ' on the load' : ''}`);
+  const hideAmounts = repeatedTrip || (!onTheLoad && brandLinesDelivered(entries) !== tenThousandths(billedQuantity));
+  const picks = entries.filter(isPick);
+  const shown = hideAmounts ? picks.filter((e, i) => picks.findIndex((p) => p.brand_key === e.brand_key) === i) : picks;
+  const notes = shown.map((e) =>
+    `Brand: ${brandLabel(e.brand_name, e.epa_registration)}${hideAmounts ? '' : ` - ${fmtBrandQty(e.quantity)}${onTheLoad ? ' on the load' : ''}`}`);
   if (entries.some((e) => !isPick(e))) notes.push('Brand not recorded');
   const mismatch = brandSplitMismatch(entries);
   if (mismatch) notes.push(mismatchNote(mismatch));
+  else if (hideAmounts) notes.push('Full-load brand amounts are on the delivery receipt.');
   return notes;
 }

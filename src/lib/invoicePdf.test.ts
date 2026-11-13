@@ -93,6 +93,7 @@ function makeInvoiceData(overrides: Partial<InvoicePdfData> = {}): InvoicePdfDat
     due_date: '2026-04-01',
     invoice_type: 'field_application',
     status: 'posted',
+    bill_split_on_load: false,
     customer_name: 'Smith Farm',
     customer_email: 'john@smith.com',
     customer_phone: '555-1234',

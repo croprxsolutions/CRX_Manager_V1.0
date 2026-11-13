@@ -3,6 +3,7 @@
 import { supabaseUntyped, assertRpcResult } from './db';
 import { receiptBrandInfoFromPicks, type ReceiptBrandInfo } from '../../supabase/functions/_shared/brandNotes.ts';
 import type { DeliveryPickLine } from './invoiceBrandWarnings';
+import { fetchAllRows, pageWithList } from './pagedRead';
 
 interface BrandsReadLine {
   delivery_item_id: string;
@@ -35,7 +36,7 @@ const touches = (rows: unknown, itemId: string) =>
 /**
  * Receipt brand keys per delivery line id, by the receipt's own rule (20270109100000): a line completed from an
  * out-of-date screen, or before brand capture (no completion event), prints no brand until the office corrects it; and "not recorded" uses the brand list the line had at
- * completion. Before completion nothing is delivered yet, so only picks already made are shown. A completion that sent
+ * completion. Before completion the planned quantity is the target for picks. A completion that sent
  * no brand sequence (picks_confirmed null, an older app) counts as confirmed, as the receipt counts it (Mason,
  * 2026-11-12, Sol r2: deliveries are not in use yet, so none completes from an older app).
  */
@@ -47,11 +48,10 @@ export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map
     const corrected = events.some((e) => e.event_type === 'corrected' && (!done || e.seq > done.seq)
       && (touches(e.before_rows, id) || touches(e.after_rows, id)));
     if (completed && (!done || done.details?.picks_confirmed === false) && !corrected) return [id, {}];
-    const delivered = Number(l.quantity_delivered ?? l.quantity);
+    const delivered = Number(completed ? (l.quantity_delivered ?? l.quantity) : l.quantity);
     const listSize = done?.details?.lines?.find((x) => x.delivery_item_id === id)?.brand_list_size ?? 0;
     const info = receiptBrandInfoFromPicks(l.picks ?? [], delivered, !!done && delivered > 0 && listSize > 0);
-    // Not delivered yet: no "do not match delivered" note.
-    if (!completed) delete info.brand_picked_quantity;
+    if (!completed && info.brand_picked_quantity != null) info.brand_planned_quantity = l.quantity;
     return [id, info];
   }));
 }
@@ -59,12 +59,13 @@ export function paperBrandInfo(read: BrandsRead, events: BrandPaperEvent[]): Map
 export async function loadDeliveryBrandInfo(deliveryId: string): Promise<Map<string, ReceiptBrandInfo>> {
   // Events before picks: a correction landing between the two reads then reads as not yet made, so its line prints
   // no brand rather than the pick it replaced.
-  const { data, error } = await supabaseUntyped
+  const { data, error } = await fetchAllRows<BrandPaperEvent>((from, to) => pageWithList(supabaseUntyped
     .from('delivery_brand_events')
-    .select('seq, event_type, details, before_rows, after_rows')
+    .select('seq, event_type, details, before_rows, after_rows', { count: 'exact' })
     .eq('delivery_id', deliveryId)
     .in('event_type', ['completed', 'corrected'])
-    .order('seq');
+    .order('seq')
+    .range(from, to)));
   if (error) throw error;
   return paperBrandInfo(await readDeliveryBrands(deliveryId), (data ?? []) as BrandPaperEvent[]);
 }

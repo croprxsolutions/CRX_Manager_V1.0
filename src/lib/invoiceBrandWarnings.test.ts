@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type BrandWarningLine, type DeliveryPickLine } from './invoiceBrandWarnings';
 import { paperBrandInfo, type BrandPaperEvent } from './deliveryBrandPaper';
 import {
+  hasRepeatedBrandTrip,
   invoiceBrandNotes,
   invoiceLineEpaText,
   receiptBrandInfoFromPicks,
@@ -45,12 +46,12 @@ const warn = (lines: BrandWarningLine[], pending: string[] = []) => invoiceBrand
 
 describe('invoice brand notes (paper)', () => {
   it('prints nothing for a line with no brand information, and not recorded for []', () => {
-    expect(invoiceBrandNotes(null)).toEqual([]);
-    expect(invoiceBrandNotes([])).toEqual(['Brand not recorded']);
+    expect(invoiceBrandNotes(null, 5)).toEqual([]);
+    expect(invoiceBrandNotes([], 5)).toEqual(['Brand not recorded']);
   });
   it('prints each brand with its number and amount, on the load for a Bill Split payer, and a mismatch', () => {
     const bl = [e({ brand_name: 'Bravo', epa_registration: '100-2', quantity: 3 }), e({ brand_name: 'Alpha', quantity: 1 })];
-    expect(invoiceBrandNotes(bl, true)).toEqual([
+    expect(invoiceBrandNotes(bl, 2, true)).toEqual([
       'Brand: Bravo (EPA 100-2) - 3 on the load',
       'Brand: Alpha (no EPA number) - 1 on the load',
       'Brand amounts do not match delivered: 4 of 5 recorded',
@@ -67,7 +68,40 @@ describe('invoice brand notes (paper)', () => {
     expect(invoiceLineEpaText(null, '9-9')).toBe('9-9');
   });
   it('no-brand trip entry prints not recorded', () => {
-    expect(invoiceBrandNotes([e({ brand_key: 'n:', brand_name: null, quantity: 5 })])).toEqual(['Brand not recorded']);
+    expect(invoiceBrandNotes([e({ brand_key: 'n:', brand_name: null, quantity: 5 })], 5)).toEqual(['Brand not recorded']);
+  });
+  it('hides whole-load amounts on an ordinary partial invoice, but keeps them on a Bill Split payer', () => {
+    const bl = [e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 2 }), e({ brand_name: 'Beta', epa_registration: '2-2', quantity: 3 })];
+    expect(invoiceBrandNotes(bl, 3)).toEqual([
+      'Brand: Alpha (EPA 1-1)', 'Brand: Beta (EPA 2-2)',
+      'Full-load brand amounts are on the delivery receipt.',
+    ]);
+    expect(invoiceBrandNotes(bl, 5)).toEqual([
+      'Brand: Alpha (EPA 1-1) - 2', 'Brand: Beta (EPA 2-2) - 3',
+    ]);
+    expect(invoiceBrandNotes(bl, 3, true)).toEqual([
+      'Brand: Alpha (EPA 1-1) - 2 on the load', 'Brand: Beta (EPA 2-2) - 3 on the load',
+    ]);
+  });
+  it('hides a repeated trip on both invoice rows, and de-duplicates a brand across trips', () => {
+    const bl = [e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 5 })];
+    const lines = [{ brand_lines: bl }, { brand_lines: bl }];
+    expect(hasRepeatedBrandTrip(lines, 0)).toBe(true);
+    expect(hasRepeatedBrandTrip(lines, 1)).toBe(true);
+    expect(invoiceBrandNotes(bl, 5, false, hasRepeatedBrandTrip(lines, 0))).toEqual([
+      'Brand: Alpha (EPA 1-1)', 'Full-load brand amounts are on the delivery receipt.',
+    ]);
+    const trips = [bl[0], e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, delivery_item_id: 'di2' })];
+    expect(invoiceBrandNotes(trips, 5)).toEqual([
+      'Brand: Alpha (EPA 1-1)', 'Full-load brand amounts are on the delivery receipt.',
+    ]);
+  });
+  it('keeps an unreconciled trip warning and a missing-brand trip when amounts are hidden', () => {
+    const bl = [e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 4 }), e({ brand_key: 'n:', brand_name: null, quantity: 2, line_delivered: 2, delivery_item_id: 'di2' })];
+    expect(invoiceBrandNotes(bl, 3)).toEqual([
+      'Brand: Alpha (EPA 1-1)', 'Brand not recorded',
+      'Brand amounts do not match delivered: 4 of 5 recorded',
+    ]);
   });
 });
 
@@ -194,5 +228,13 @@ describe('delivery paper brand notes follow the receipt rule', () => {
     expect(paperBrandInfo(read([pick]), []).get('di1')).toEqual({});
     const fix: BrandPaperEvent = { seq: 5, event_type: 'corrected', details: null, before_rows: [{ delivery_item_id: 'di1' }], after_rows: [] };
     expect(paperBrandInfo(read([pick]), [fix]).get('di1')?.brands).toHaveLength(1);
+  });
+  it('compares pre-delivery picks with planned quantity even after a partial in-progress delivery', () => {
+    const partial = { ...read([{ ...pick, quantity: 4 }]), status: 'in_progress',
+      lines: [{ ...read([]).lines[0], quantity_delivered: 3, picks: [{ ...pick, quantity: 4 }] }] };
+    const info = paperBrandInfo(partial, []).get('di1');
+    expect(receiptBrandNotes({ ...info, qty: 3 })).toEqual([
+      'Brand: Alpha (EPA 1-1)', 'Brand amounts do not match planned load: 4 of 5 picked',
+    ]);
   });
 });

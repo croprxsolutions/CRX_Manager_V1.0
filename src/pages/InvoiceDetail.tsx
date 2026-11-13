@@ -31,7 +31,7 @@ import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
-import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
+import { assertInvoiceLinesLoaded, isBillSplitInvoice, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt } from '../lib/money';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -45,7 +45,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
 import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type BrandWarningLine } from '../lib/invoiceBrandWarnings';
-import { invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
+import { hasRepeatedBrandTrip, invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
@@ -1872,6 +1872,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         acres: s.acres,
         amount_cents: s.amount_cents,
       })) : printPayers.length > 0 ? printPayers : undefined,
+      bill_split_on_load: isBillSplitInvoice(invoice),
       items: groupReturnCreditDisplayItems(invoice.invoice_type, enrichedItems.map(mapInvoicePdfItem)),
       total_amount_cents: printedTotalCents,
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
@@ -2632,8 +2633,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         </>
                       )}
                       {/* Brand PR B-3: the delivered brands, read-only (as of the last save). */}
-                      {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
-                        <div key={note} className="text-xs text-secondary">{note}</div>
+                      {invoiceBrandNotes(item.brand_lines, item.quantity, isBillSplitInvoice(invoice), hasRepeatedBrandTrip(items, idx)).map((note, noteIndex) => (
+                        <div key={`${note}-${noteIndex}`} className="text-xs text-secondary">{note}</div>
                       ))}
                     </td>
                     {showVendors && (

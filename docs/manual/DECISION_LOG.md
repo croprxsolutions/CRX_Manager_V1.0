@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-13 — A partly billed sale's commission is split by the share billed in each period (KI-125)
+
+**Decision (Mason, in session, 2026-11-13: "Split by share billed").** Refines 2026-11-10 (To-Do decision 15): when an order is billed across more than one period, Bottom Line P&L and Monthly Summary subtract only the share of its commission that matches the share of the order billed in that period (a quarter billed in December puts a quarter of the commission in December).
+**Why:** the 2026-11-10 rule, read literally, put the whole commission in the first period with any CRX invoice ([2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md), finding 2).
+**What this forbids/implies:** the KI-125 fix must match commission to invoiced share, not to whether an invoice exists. Not built; recorded for future work only.
+
 ## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

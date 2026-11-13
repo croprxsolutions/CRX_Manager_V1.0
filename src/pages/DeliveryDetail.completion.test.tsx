@@ -423,6 +423,18 @@ describe('Invoices on this sale card', () => {
     expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
   });
 
+  // Attack LOW-3: drivers cannot read invoices (RLS) and FieldStop tells them billing is not their job.
+  it('a driver on a completed delivery sees no Invoices on this sale card, even with invoices on the sale', async () => {
+    setRole('driver');
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    await renderPage();
+    expect((await screen.findAllByText('DEL-1')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('invoices'));
+    expect(screen.queryByRole('heading', { name: 'Invoices on this sale' })).not.toBeInTheDocument();
+    expect(invoicesCard()).toBeNull();
+    expect(screen.queryByText(paragraph(REP_EMPTY_TEXT))).not.toBeInTheDocument();
+  });
+
   it('with no invoice, a sales rep is told none he can see, without the button', async () => {
     setRole('sales_rep');
     useCompletedDeliveryOnOrder([]);

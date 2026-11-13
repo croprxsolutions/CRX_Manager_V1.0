@@ -37,6 +37,19 @@ describe('InvoicePayersTable', () => {
     expect(footer).toHaveTextContent('$1,421.84');
   });
 
+  it('uses the true minus sign, two-decimal shares and the shared status palette', () => {
+    renderTable({ rows: [
+      { ...rows[0], pct: 33.333333, totalCents: -1500, status: 'paid' },
+      { ...rows[1], pct: 66.666667, status: 'posted' },
+    ] });
+    const [, first, second] = screen.getAllByRole('row');
+    expect(first).toHaveTextContent('33.33%');
+    expect(first).toHaveTextContent('\u2212$15.00');
+    expect(second).toHaveTextContent('66.67%');
+    expect(within(first).getByText('Paid').className).toContain('bg-emerald-200');
+    expect(within(second).getByText('Posted').className).toContain('bg-emerald-100');
+  });
+
   it('says where the shares come from when the sale is known', () => {
     renderTable({ saleHref: '/orders/ord-7', saleNumber: 'ORD-2026-0007' });
     expect(screen.getByText(/Shares come from sale/)).toBeInTheDocument();

@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import Card from '../ui/Card';
-import Badge, { statusToBadgeVariant } from '../ui/Badge';
-import { formatCents as fmt } from '../../lib/money';
-import { statusLabel } from '../../lib/statusLabel';
+import Badge from '../ui/Badge';
+import { formatCentsMinus as fmt } from '../../lib/money';
+import { formatSharePct, invoiceStatusBadge } from '../../lib/statusLabel';
 
 export interface InvoicePayerRow {
   payerName: string;
@@ -53,11 +53,11 @@ export default function InvoicePayersTable({ rows, saleHref, saleNumber }: Props
                     </Link>
                   )}
                 </td>
-                <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums">{r.pct}%</td>
+                <td className="whitespace-nowrap px-2 py-3 text-right tabular-nums">{formatSharePct(r.pct)}</td>
                 <td className="px-3 py-3 text-right">
                   <div className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{fmt(r.totalCents)}</div>
                   {r.status && (
-                    <Badge variant={statusToBadgeVariant[r.status] || 'default'} className="mt-1">{statusLabel(r.status)}</Badge>
+                    <Badge variant={invoiceStatusBadge(r.status).variant} className="mt-1" normalCase>{invoiceStatusBadge(r.status).label}</Badge>
                   )}
                 </td>
               </tr>
@@ -66,7 +66,7 @@ export default function InvoicePayersTable({ rows, saleHref, saleNumber }: Props
           <tfoot>
             <tr className="font-semibold text-nav-dark">
               <td className="px-3 pt-3">Delivery total</td>
-              <td className="whitespace-nowrap px-2 pt-3 text-right tabular-nums">{Number(pctTotal.toFixed(2))}%</td>
+              <td className="whitespace-nowrap px-2 pt-3 text-right tabular-nums">{formatSharePct(pctTotal)}</td>
               <td className="whitespace-nowrap px-3 pt-3 text-right tabular-nums">{fmt(centsTotal)}</td>
             </tr>
           </tfoot>

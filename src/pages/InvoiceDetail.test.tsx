@@ -239,14 +239,14 @@ describe('InvoiceDetail', () => {
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
     openApplyCreditFromMore();
-    await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
+    await screen.findByRole('dialog', { name: 'Apply a credit memo?' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply Credit' }).slice(-1)[0]);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'network response lost after commit'));
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Apply Credit Memo' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Apply a credit memo?' })).not.toBeInTheDocument());
     openApplyCreditFromMore();
-    await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
+    await screen.findByRole('dialog', { name: 'Apply a credit memo?' });
     expect(screen.getByLabelText('Credit Memo')).toBeDisabled();
     expect(screen.getByLabelText('Amount to apply ($)')).toBeDisabled();
     expect(screen.getByLabelText('Amount to apply ($)')).toHaveValue(50);
@@ -276,7 +276,7 @@ describe('InvoiceDetail', () => {
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
     openApplyCreditFromMore();
-    const dialog = await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
+    const dialog = await screen.findByRole('dialog', { name: 'Apply a credit memo?' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Apply Credit' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'AMOUNT_EXCEEDS_CREDIT'));
     await waitFor(() => expect(screen.getByLabelText('Amount to apply ($)')).toBeEnabled());
@@ -300,7 +300,7 @@ describe('InvoiceDetail', () => {
     renderInvoiceDetail('inv-credit-target');
     await screen.findAllByText('INV-CREDIT-TARGET');
     openApplyCreditFromMore();
-    const dialog = await screen.findByRole('dialog', { name: 'Apply Credit Memo' });
+    const dialog = await screen.findByRole('dialog', { name: 'Apply a credit memo?' });
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply Credit' }).slice(-1)[0]);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled());
 
@@ -308,10 +308,10 @@ describe('InvoiceDetail', () => {
     fireEvent.click(dialog.querySelector('[aria-hidden="true"]') as Element);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('dialog', { name: 'Apply Credit Memo' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Apply a credit memo?' })).toBeInTheDocument();
 
     await act(async () => { resolveApply({ data: { application_id: 'application-1' }, error: null }); });
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Apply Credit Memo' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Apply a credit memo?' })).not.toBeInTheDocument());
   });
 
   it('fetches invoice data on mount', () => {
@@ -1310,7 +1310,7 @@ describe('InvoiceDetail — Phase 1 group-aware Post routing', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Void Invoice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Void invoice' }));
 
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('void_invoice', expect.objectContaining({ p_invoice_id: 'inv-123' }));
@@ -1335,7 +1335,7 @@ describe('InvoiceDetail — Phase 1 group-aware Post routing', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Void Invoice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Void invoice' }));
 
     await waitFor(() => {
       expect(mockRpc).toHaveBeenCalledWith('void_invoice_group', expect.objectContaining({
@@ -2310,7 +2310,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
       fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: '' } });
       fireEvent.click(post);
-      expect(await screen.findByRole('dialog', { name: 'Post Invoice' })).toBeInTheDocument();
+      expect(await screen.findByRole('dialog', { name: 'Post this invoice?' })).toBeInTheDocument();
     });
   }
 
@@ -2345,8 +2345,8 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     await screen.findByRole('button', { name: 'Record payment' });
     openMore();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Void invoice…' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Void Invoice' });
-    expect(within(dialog).getByRole('button', { name: 'Void Invoice' }).className).toContain('bg-red-600');
+    const dialog = await screen.findByRole('dialog', { name: 'Void this invoice?' });
+    expect(within(dialog).getByRole('button', { name: 'Void invoice' }).className).toContain('bg-red-600');
   });
 
   it('posted, sales rep: Print…, More with only Unpost…, Apply credit… as the main button; no cost or margin', async () => {
@@ -2371,7 +2371,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     openMore();
     expect(menuNames()).toEqual(['Transfer to scheduling…']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Transfer to scheduling…' }));
-    expect(await screen.findByRole('dialog', { name: 'Transfer to Scheduling' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Transfer this invoice to scheduling?' })).toBeInTheDocument();
   });
 
   describe('what this invoice bills', () => {

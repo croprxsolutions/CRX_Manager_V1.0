@@ -33,7 +33,7 @@ import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, Invoice
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt, formatCentsMinus } from '../lib/money';
-import { statusLabel } from '../lib/statusLabel';
+import { invoiceStatusBadge, statusLabel } from '../lib/statusLabel';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
 import { withBelowCostReason } from '../lib/belowCostApproval';
@@ -121,17 +121,8 @@ interface PaymentEntry {
 }
 
 const statusBadge = (status: InvoiceStatus) => {
-  const map: Record<InvoiceStatus, { variant: 'default' | 'warning' | 'success' | 'error' | 'info'; label: string }> = {
-    draft: { variant: 'default', label: 'Draft' },
-    unposted: { variant: 'warning', label: 'Unposted' },
-    posted: { variant: 'success', label: 'Posted' },
-    paid: { variant: 'info', label: 'Paid' },
-    overdue: { variant: 'error', label: 'Overdue' },
-    voided: { variant: 'error', label: 'Voided' },
-    cancelled: { variant: 'default', label: 'Cancelled' },
-  };
-  const s = map[status] || { variant: 'default' as const, label: status };
-  return <Badge variant={s.variant}>{s.label}</Badge>;
+  const s = invoiceStatusBadge(status);
+  return <Badge variant={s.variant} normalCase>{s.label}</Badge>;
 };
 
 export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'chemical' } = {}) {
@@ -2231,6 +2222,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           <fieldset disabled={postFlowBusy} className="order-1 m-0 min-w-0 border-0 p-0 md:order-none">
             <InvoiceAmountDue
               breakdown={breakdown}
+              // The saved total, as the PDF prints it; a new invoice has none yet, so its lines add up.
+              totalCents={isNew ? breakdown.totalCents : invoice.total_amount_cents || 0}
+              dirty={hasUnsavedChanges}
+              firstLabel={invoice.invoice_type === 'field_application' ? 'Subtotal' : 'Products'}
+              writtenOffCents={(invoice as { write_off_cents?: number | null }).write_off_cents || 0}
               paidCents={isNew ? null : invoice.paid_amount_cents || 0}
               prepayCents={invoice.prepay_applied_cents || 0}
               balanceCents={invoice.balance_cents || 0}
@@ -2846,7 +2842,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       </Modal>
 
       {/* Void Modal */}
-      <Modal open={showVoidModal} onClose={() => setShowVoidModal(false)} title="Void Invoice">
+      <Modal open={showVoidModal} onClose={() => setShowVoidModal(false)} title="Void this invoice?">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
             This will void invoice <strong>{invoice.invoice_number}</strong> and reverse any balance impact.
@@ -2861,7 +2857,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setShowVoidModal(false)}>Cancel</Button>
             <Button variant="danger" onClick={handleVoid} loading={voiding}>
-              Void Invoice
+              Void invoice
             </Button>
           </div>
         </div>
@@ -2915,7 +2911,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       <Modal
         open={showApplyCreditModal}
         onClose={() => { if (!applyingCredit) setShowApplyCreditModal(false); }}
-        title="Apply Credit Memo"
+        title="Apply a credit memo?"
         closeDisabled={applyingCredit}
       >
         <div className="space-y-4">
@@ -3038,7 +3034,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         open={showPostConfirm}
         onClose={() => setShowPostConfirm(false)}
         onConfirm={() => { setShowPostConfirm(false); handlePost(); }}
-        title="Post Invoice"
+        title="Post this invoice?"
         message={rupPostWarning || brandPostWarning
           ? `${[rupPostWarning, brandPostWarning].filter(Boolean).join(' ')} Post this invoice anyway? This will lock amounts and start AR aging.`
           : 'Post this invoice? This will lock amounts and start AR aging.'}
@@ -3053,7 +3049,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         open={showTransferToSchedulingModal}
         onClose={() => setShowTransferToSchedulingModal(false)}
         onConfirm={handleTransferToScheduling}
-        title="Transfer to Scheduling"
+        title="Transfer this invoice to scheduling?"
         message="Return this invoice to its source job? This cancels the invoice (its line items and customer shares are removed) and returns the job to Completed so it can be re-invoiced or cancelled. Only works on an unposted invoice."
         confirmLabel="Transfer to Scheduling"
         variant="info"

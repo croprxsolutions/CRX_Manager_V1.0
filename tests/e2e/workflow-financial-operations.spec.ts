@@ -616,8 +616,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
     await expect(reasonInput).toBeVisible({ timeout: 3000 });
     await reasonInput.fill('E2E test — void verification');
 
-    // Click "Void Invoice" in modal
-    const confirmVoidBtn = voidModal.locator('button:has-text("Void Invoice")');
+    // Click "Void invoice" in modal
+    const confirmVoidBtn = voidModal.locator('button:has-text("Void invoice")');
     await expect(confirmVoidBtn).toBeVisible({ timeout: 5000 });
     await confirmVoidBtn.click();
     await waitForPage(page, 3000);

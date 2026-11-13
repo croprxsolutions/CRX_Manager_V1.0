@@ -848,7 +848,8 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
     p.y += 10;
     drawBoxedNote(p, data.footer_notes);
   }
-  drawPageFooters(doc, [company.name, company.email, company.phone && `Questions? Call ${company.phone}.`].filter(Boolean).join(' · '));
+  // The legal name, as the old footer printed it: a paid invoice has no pay note to carry it.
+  drawPageFooters(doc, [COMPANY_LEGAL_NAME, company.email, company.phone && `Questions? Call ${company.phone}.`].filter(Boolean).join(' · '));
   return doc;
 }
 

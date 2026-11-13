@@ -60,7 +60,8 @@ export default function InvoicePrintDialog({
         </p>
 
         {/* Layout: current vs legacy "Old print" (field-app parity #30) */}
-        <fieldset>
+        {/* Locked while a download runs, so the choices shown are the ones it uses. */}
+        <fieldset disabled={loading}>
           <legend className="text-xs font-medium text-secondary mb-1.5">Layout</legend>
           <div role="radiogroup" aria-label="Layout" className="grid gap-2 sm:grid-cols-2">
             {([
@@ -88,7 +89,7 @@ export default function InvoicePrintDialog({
           </div>
         </fieldset>
 
-        <fieldset className="space-y-3">
+        <fieldset disabled={loading} className="space-y-3">
           <legend className="text-xs font-medium text-secondary mb-1.5">Include</legend>
           {hasShares && (
             <label className="flex min-h-11 md:min-h-0 items-center gap-3 cursor-pointer">

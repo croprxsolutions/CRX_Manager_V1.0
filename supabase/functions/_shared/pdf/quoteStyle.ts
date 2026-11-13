@@ -4,7 +4,7 @@
  * Keep the values equal to the quote PDF's until both share one copy. US Letter, points.
  */
 import type { jsPDF } from "npm:jspdf@4.2.1";
-import { companyTaglineHeader, type CompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
+import { companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, fitCompanyNameFont } from "./companyInfo.ts";
 import { CRX_LOGO_HEIGHT_PX, CRX_LOGO_PNG_BASE64, CRX_LOGO_WIDTH_PX } from "./crxLogo.ts";
 
 type RGB = [number, number, number];
@@ -48,7 +48,7 @@ export function drawLogo(doc: jsPDF, x: number, top: number, w: number): void {
   } catch { /* print without the logo */ }
 }
 
-/** Company name, tagline, address and phone as saved in Settings, top-left. Returns the last baseline. */
+/** Company name, tagline, address and phone as saved in Settings, top-left; a blank address prints the default town, as the old header did. Returns the last baseline. */
 export function drawCompanyBlock(doc: jsPDF, company: CompanyInfo, top: number, colW: number): number {
   doc.setTextColor(...Q_TEXT);
   doc.setFont("helvetica", "bold");
@@ -61,7 +61,8 @@ export function drawCompanyBlock(doc: jsPDF, company: CompanyInfo, top: number, 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.25);
   const tagline = companyTaglineHeader(company).split("  •  ")[0];
-  for (const line of [tagline, ...(doc.splitTextToSize(company.address, colW) as string[]), company.phone]) {
+  const address = company.address.trim() || DEFAULT_COMPANY_INFO.address;
+  for (const line of [tagline, ...(doc.splitTextToSize(address, colW) as string[]), company.phone]) {
     y += 12;
     doc.text(line, Q_MARGIN_X, y);
   }

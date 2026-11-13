@@ -575,6 +575,22 @@ describe('generateInvoicePdf — legacy "Old Print" format', () => {
     }
   });
 
+  it('a blank Settings address prints the default town, as the old header did', async () => {
+    companyInfo.load.mockResolvedValueOnce({ ...DEFAULT_COMPANY_INFO, address: '  ' });
+    await generateInvoicePdf(makeInvoiceData());
+    const printed = mockDoc.text.mock.calls.flat(2);
+    expect(printed).toContain('West York, IL');
+    expect(printed).not.toContain('  ');
+  });
+
+  it('the footer names the legal company, even on a paid invoice with no pay note', async () => {
+    companyInfo.load.mockResolvedValueOnce({ name: 'Test Ag Co', phone: '555-0199', email: 'office@testag.test', address: '1 Main St, Town, IL' });
+    await generateInvoicePdf(makeInvoiceData({ status: 'paid', paid_amount_cents: 18500, balance_cents: 0 }));
+    const printed = mockDoc.text.mock.calls.flat(2);
+    expect(printed.some((t: unknown) => typeof t === 'string' && t.startsWith('Make checks payable'))).toBe(false);
+    expect(printed).toContain('Crop RX Solutions, Inc. · office@testag.test · Questions? Call 555-0199.');
+  });
+
   it('renders the plain-text "INVOICE" header (no green band)', async () => {
     await generateInvoicePdf(makeInvoiceData({ options: legacyOpts }));
     const textCalls = mockDoc.text.mock.calls.flat();

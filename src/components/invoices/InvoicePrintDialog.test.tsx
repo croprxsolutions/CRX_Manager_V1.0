@@ -127,6 +127,15 @@ describe('InvoicePrintDialog', () => {
     expect(screen.getByRole('button', { name: /download pdf/i })).toBeDisabled();
   });
 
+  it('locks the layout and include choices while a download runs', () => {
+    const { rerender } = render(<InvoicePrintDialog {...defaultProps} invoiceType="field_application" hasShares loading />);
+    const choices = [...screen.getAllByRole('radio'), ...screen.getAllByRole('checkbox')];
+    expect(choices).toHaveLength(5);
+    for (const c of choices) expect(c).toBeDisabled();
+    rerender(<InvoicePrintDialog {...defaultProps} invoiceType="field_application" hasShares loading={false} />);
+    for (const c of choices) expect(c).toBeEnabled();
+  });
+
   it('names the layouts as two radio cards in one radio group, Current first and selected', () => {
     render(<InvoicePrintDialog {...defaultProps} />);
     expect(screen.getByRole('radiogroup', { name: 'Layout' })).toBeInTheDocument();

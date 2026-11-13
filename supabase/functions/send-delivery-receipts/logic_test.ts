@@ -29,6 +29,24 @@ Deno.test("the request is identical on every attempt and escapes typed text", ()
   assertEquals(receiptDateText("2026-11-08"), "11/8/2026");
 });
 
+Deno.test("brand notes print escaped; a receipt queued before B-3 prints with none", () => {
+  const old = buildReceiptRequest(claim, "f@x.invalid").body.html;
+  assertEquals(old.includes("Brand"), false);
+  assertEquals(old.includes("<br><span"), false);
+  const branded = structuredClone(claim);
+  branded.receipt.lines = [
+    { name: "Gly", qty: 5, brands: [{ name: "Bravo <i>", epa_registration: "100-1", quantity: 3 }, { name: "Alpha", epa_registration: null, quantity: 2 }] },
+    { name: "Dic", qty: 3, brands: [{ name: "Golf & Co", epa_registration: "100-2" }], brand_picked_quantity: 2 },
+    { name: "Atr", qty: 1, brand_recorded: false },
+  ];
+  const html = buildReceiptRequest(branded, "f@x.invalid").body.html;
+  assertEquals(html.includes("Brand: Bravo &lt;i&gt; (EPA 100-1) - 3"), true);
+  assertEquals(html.includes("Brand: Alpha (no EPA number) - 2"), true);
+  assertEquals(html.includes("Brand: Golf &amp; Co (EPA 100-2)<"), true);
+  assertEquals(html.includes("Brand amounts do not match delivered: 2 of 3 recorded"), true);
+  assertEquals(html.includes("Brand not recorded"), true);
+});
+
 Deno.test("provider answers map to sent / retry / check", async () => {
   const req = buildReceiptRequest(claim, "f@x.invalid");
   assertEquals(await sendViaResend(req, "k", reply(200, { id: "m1" })), { outcome: "sent", messageId: "m1" });

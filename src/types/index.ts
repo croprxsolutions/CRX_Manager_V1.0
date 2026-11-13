@@ -2209,6 +2209,51 @@ export interface ProductParentModeOfAction {
   updated_at: string;
 }
 
+/** MOA-1 (20270108100000): one reviewed resistance group of one active ingredient. Written only by set_active_ingredient_modes. */
+export interface IngredientModeOfAction {
+  id: string;
+  ingredient_id: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  source_note: string;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One entry of an ingredient's list, as get_ingredient_mode_users returns it and set_active_ingredient_modes takes it. */
+export interface IngredientModeEntry {
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  source_note: string;
+}
+
+/** get_parent_mode_groups: a parent's groups, worked out when read (sheet 3.3). */
+export interface ParentModeGroups {
+  parent_id: string;
+  /** Not bumped by an ingredient-list edit: never use it as the cache key for these groups. */
+  chemistry_version: number;
+  ingredients: {
+    ingredient_id: string;
+    name: string;
+    derived_from: 'from_ingredient' | 'from_acid' | null;
+    acid_name: string | null;
+    schemes: {
+      scheme: ModeOfActionScheme;
+      live: string[];
+      derived: string[];
+      typed: { row_id: string; group_code: string; source: 'typed' | 'epa_lookup' }[];
+      status: 'derived' | 'typed' | 'matches' | 'differs';
+    }[];
+    not_recorded: boolean;
+  }[];
+  summary: { scheme: ModeOfActionScheme; group_code: string; differs: boolean }[];
+  not_recorded_count: number;
+}
+
 export interface ProductParentFertilizerAnalysis {
   id: string;
   parent_id: string;
@@ -4859,6 +4904,8 @@ export interface RUPSalesRecord {
   compliance_status: 'compliant' | 'warning' | 'non_compliant';
   compliance_notes: string | null;
   season: number | null;
+  /** Brand PR B-1b: the brand this record is for; null on a whole-line record. */
+  brand_name?: string | null;
   invoice_number?: string;
   created_at: string;
 }

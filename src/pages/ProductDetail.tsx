@@ -1,5 +1,5 @@
 import { toSentryError } from '../lib/sentryError';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Plus, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
@@ -16,6 +16,8 @@ import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
+import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations, useStickyCancellations } from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -44,7 +46,7 @@ import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FOR
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { usePhoneSections } from '../hooks/usePhoneSections';
-import type { CostHistory, EpaLookupResult, Product, ProductRateLock, UnitConversion } from '../types';
+import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -416,6 +418,41 @@ export default function ProductDetail() {
   // On phones the page folds. Pricing opens first; someone with no pricing to edit starts on the details.
   const { sectionProps, reveal: revealPhoneSection } = usePhoneSections(
     isNew || !isAdmin ? ['information', 'pricing'] : ['pricing'],
+  );
+
+  // Cancelled-registration warning (grand plan §8): the saved product number and its brands' numbers.
+  const [brandRegistrations, setBrandRegistrations] = useState<{ label: string; epaRegistration: string | null }[]>([]);
+  // A brand list that failed, or is still loading after the check timeout, shows "could not check",
+  // never "no cancelled brands".
+  const [brandsRead, setBrandsRead] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const handleBrandsChange = useCallback((forProductId: string, brands: ProductBrand[] | null | undefined) => {
+    // A report for another product (a late reply after a switch) never lands on this one.
+    if (forProductId !== productIdRef.current) return;
+    setBrandsRead(brands === undefined ? 'loading' : brands === null ? 'failed' : 'loaded');
+    setBrandRegistrations((brands ?? []).map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
+  }, [productIdRef]);
+  // Another product's brands never sit under this product's number.
+  useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  const productLoaded = persistedProduct?.id === id;
+  // The brand list's clock starts once the product (and so the Brands section) has loaded.
+  const [brandsReadSlow, setBrandsReadSlow] = useState(false);
+  useEffect(() => {
+    setBrandsReadSlow(false);
+    if (!productLoaded || brandsRead !== 'loading') return undefined;
+    const timer = setTimeout(() => setBrandsReadSlow(true), CHECK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [brandsRead, productLoaded, id]);
+  const registrationSources = useMemo(() => (
+    persistedProduct && persistedProduct.id === id
+      ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
+      : []
+  ), [persistedProduct, id, brandRegistrations]);
+  const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const shownCancellations = useStickyCancellations(id ?? '', registrationSources, registrationStatus.cancelled);
+  const registrationCheckState = registrationCheck(
+    productLoaded,
+    brandsRead === 'loading' && brandsReadSlow ? 'slow' : brandsRead,
+    registrationStatus.lookup,
   );
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
@@ -1304,6 +1341,9 @@ export default function ProductDetail() {
           Still needed for complete setup: {missingSetup.join(', ')}.{isAdmin ? ' You can still save and price this product.' : ''}
         </p>
       )}
+      {!isNew && (
+        <CancelledRegistrationBanner sources={shownCancellations.sources} cancelled={shownCancellations.cancelled} check={registrationCheckState} />
+      )}
 
       {duplicateSource && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
@@ -2004,6 +2044,8 @@ export default function ProductDetail() {
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
+                cancelled={shownCancellations.cancelled}
+                onBrandsChange={handleBrandsChange}
               />
             </PhoneSection>
           )}

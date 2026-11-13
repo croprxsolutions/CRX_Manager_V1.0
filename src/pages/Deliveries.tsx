@@ -1037,6 +1037,8 @@ export default function Deliveries() {
     await runCriticalAction({
       action: async () => {
         const { generateBatchDeliveryPdf } = await import('../lib/deliveryPdf');
+        const { loadDeliveryBrandInfo } = await import('../lib/deliveryBrandPaper');
+        const { receiptBrandNotes } = await import('../../supabase/functions/_shared/brandNotes.ts');
 
         // Use selected deliveries, or every scheduled/in_progress one matching the search and filters (all pages)
         const rows = selectedDeliveries.length > 0
@@ -1114,6 +1116,8 @@ export default function Deliveries() {
             throw new Error(`No delivery items found for ${del.delivery_number}`);
           }
 
+          // Brand PR B-3: the brands under each line, from the current picks.
+          const brandInfo = await loadDeliveryBrandInfo(del.id);
           const delAny = del as unknown as Record<string, unknown>;
           const custInfo = customerMap[del.customer_id] || { contact_name: null, phone: null, shipping_address: null, billing_address: null };
 
@@ -1147,6 +1151,10 @@ export default function Deliveries() {
                 unit_size: (it.unit_size as string) || '-',
                 quantity_delivered: (it.quantity_delivered as number) || undefined,
                 tote_number: (it.tote_number as string) || undefined,
+                brand_notes: receiptBrandNotes({
+                  ...brandInfo.get(it.id as string),
+                  qty: (it.quantity_delivered as number | null) ?? (it.quantity as number),
+                }),
               }))
               .sort((a, b) => (a.product_name || '').localeCompare(b.product_name || '')),
           });

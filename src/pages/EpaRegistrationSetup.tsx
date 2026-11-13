@@ -21,6 +21,13 @@ const REASON_TEXT: Record<SaleToCheck['reason'], string> = {
   no_epa_number: 'Restricted use with no EPA number: add one',
   now_restricted_use: 'Now restricted use: check whether to record it',
   not_reviewed: 'Restricted use not reviewed: review the label',
+  brand_no_epa_number: 'Brand has no EPA number: add one',
+  brand_split_mismatch: 'Brands do not add up to what was delivered: correct the delivery brands',
+  overlapping_invoices: 'Another invoice bills the same delivery: check the invoices',
+  payer_split_changed: 'Split-bill payers no longer agree on brands: check the invoices',
+  billed_above_delivered: 'Billed more than was delivered: check the invoice',
+  brand_lines_stale: 'Delivery brands changed after the invoice was made: check the record',
+  brand_not_recorded: 'No brand recorded for this delivery: check what was sold',
 };
 
 /** Where a line's capture comes from: the seed always takes the product's current number. */
@@ -33,8 +40,14 @@ function lineNumberText(line: SeedLine): string {
   return own === productNumber ? productNumber : `${productNumber} (line says ${own})`;
 }
 
+const WHOLE_LINE_BRAND_REASONS = new Set<SaleToCheck['reason']>([
+  'brand_split_mismatch', 'overlapping_invoices', 'payer_split_changed', 'billed_above_delivered', 'brand_lines_stale', 'brand_not_recorded',
+]);
+
 /** The captured number, never replaced by the line's saved one: a missing capture must look missing. */
 function capturedNumberText(r: SaleToCheck): string {
+  // A row about the whole line's brands has no single brand number to show.
+  if (r.brand_key == null && WHOLE_LINE_BRAND_REASONS.has(r.reason)) return '—';
   const captured = r.epa_registration ?? 'None captured';
   return r.saved_number && r.saved_number !== r.epa_registration ? `${captured} (line saved ${r.saved_number})` : captured;
 }
@@ -60,12 +73,12 @@ function SalesToCheck() {
             <thead><tr className="text-secondary"><th>Invoice</th><th>Date</th><th>Product</th><th>EPA number</th><th>Qty</th><th>Why</th></tr></thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.line_id} className="border-t border-gray-100">
+                <tr key={`${r.line_id}|${r.brand_key ?? ''}|${r.reason}`} className="border-t border-gray-100">
                   <td>{r.invoice_number ?? '—'}</td>
                   <td>{r.invoice_date ?? '—'}</td>
-                  <td>{r.product_name}</td>
+                  <td>{r.brand_name ? `${r.product_name} (${r.brand_name})` : r.product_name}</td>
                   <td>{capturedNumberText(r)}</td>
-                  <td>{r.quantity}</td>
+                  <td>{r.allocated_quantity ?? r.quantity}</td>
                   <td>{REASON_TEXT[r.reason] ?? r.reason}</td>
                 </tr>
               ))}

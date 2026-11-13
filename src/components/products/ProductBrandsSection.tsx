@@ -24,6 +24,7 @@ import {
   type ProductBrandInput,
 } from '../../lib/productBrands';
 import { sanitizeError } from '../../lib/errorSanitizer';
+import { cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations } from '../../lib/epaRegistrationStatus';
 import { Sentry } from '../../lib/sentry';
 import type { BrandSignalWord, EpaLookupResult, ProductBrand } from '../../types';
 import { toSentryError } from '../../lib/sentryError';
@@ -37,6 +38,10 @@ interface ProductBrandsSectionProps {
   isAdmin: boolean;
   /** The signed-in user's profile id; only needed for admin edits. */
   userId: string | null;
+  /** Registrations stored as cancelled (the product page reads them); each brand row on one is marked. */
+  cancelled?: CancelledRegistrations;
+  /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
+  onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
 }
 
 interface BrandDraft {
@@ -129,7 +134,7 @@ function isClearRefusal(err: unknown): boolean {
   ].some((code) => hasRpcCode(err, code));
 }
 
-export default function ProductBrandsSection({ productId, productName, isAdmin, userId }: ProductBrandsSectionProps) {
+export default function ProductBrandsSection({ productId, productName, isAdmin, userId, cancelled, onBrandsChange }: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
   // A grouped size shows and edits its parent's list (PAR-2); null while the size has its own list.
@@ -137,6 +142,10 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const onBrandsChangeRef = useLatestRef(onBrandsChange);
+  useEffect(() => {
+    onBrandsChangeRef.current?.(productId, loading ? undefined : loadError ? null : brands);
+  }, [productId, brands, loading, loadError, onBrandsChangeRef]);
 
   const [draft, setDraft] = useState<BrandDraft | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -492,6 +501,12 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                   <td className="py-2 pr-3">
                     <div>{brand.epa_registration ?? <span className="text-secondary">None</span>}</div>
                     <EpaLabelLink epaRegistration={brand.epa_registration} />
+                    {(() => {
+                      const key = normalizeEpaRegistration(brand.epa_registration);
+                      return key && cancelled?.has(key) ? (
+                        <Badge variant="error" size="sm">{cancelledOnText(cancelled.get(key))}</Badge>
+                      ) : null;
+                    })()}
                   </td>
                   <td className="py-2 pr-3">{brand.manufacturer ?? '—'}</td>
                   <td className="py-2 pr-3">{rupLabel(brand.is_rup)}</td>

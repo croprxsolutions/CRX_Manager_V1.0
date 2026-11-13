@@ -2825,6 +2825,8 @@ function registryMigrationHighWater(): string {
 // 20261231110000 (M4b standing discount, #1752) and 20261231120000 (M4a sales tax, #1767) were added on
 // 2026-11-11 when staging took main: both are local candidates, not applied live, and main's REG-1 refresh
 // had moved the boundary to 20261231220000, past them.
+// 20270103190000 (sales tax rep fix, #1809) joined them on 2026-11-12 in the back-merge: staging-only, not
+// applied live, and main's registry refresh had moved the boundary to 20270106110000, past it.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
   '20260831161000',
@@ -2878,8 +2880,10 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261231210000',
   '20261231220000',
   '20270103160000',
+  '20270103190000',
   '20270104110000',
   '20270105110000',
+  '20270106110000',
 ]);
 
 /**
@@ -3161,6 +3165,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   'record_epa_lookup',
   'reject_epa_proposal',
   'start_epa_lookup',
+  // 20270108100000 (MOA-1, local candidate): admin-only ingredient group writer; replays through
+  // _product_parent_replay and saves its receipt on every path. Prune once the generated types carry it.
+  'set_active_ingredient_modes',
   // 20270104110000 (RT-3, local candidate): admin-only rate review commit; replays through _product_parent_replay
   // and saves its receipt. Prune once the generated types carry it.
   'commit_rate_review',
@@ -3279,11 +3286,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
-  // 20270104120000 (Brand PR B part B-1a, local candidate): private helpers. Prune once applied and the types carry them.
-  _delivery_brand_event: 'internal B-1a helper (20270104120000): called only by the keyed delivery brand writers, edit_delivery and the completion step, each after its own replay check; every API-role EXECUTE is revoked',
-  _delivery_brand_insert: 'internal B-1a helper (20270104120000): called only by set_delivery_brands and correct_delivery_brands after their own replay check; every API-role EXECUTE is revoked',
-  _delivery_brands_on_complete: 'internal B-1a helper (20270104120000): called only by _complete_delivery_aggregate_impl on a fresh completion (a replay returns before it); every API-role EXECUTE is revoked',
-  _delivery_brands_on_line_delete: 'B-1a trigger function (20270104120000): BEFORE DELETE on delivery_items, appends one line_removed brand event for a deleted line\'s current picks; runs only as a trigger, every API-role EXECUTE is revoked',
+  // 20270106110000 (Brand PR B part B-1b, local candidate): private helpers. Prune once applied and the types carry them.
+  _delivery_brand_event_recopy: 'B-1b trigger function (20270106110000): deferred constraint trigger on delivery_brand_events, re-copies brand snapshots onto open draft invoices when the writing transaction commits; runs only as a trigger, every API-role EXECUTE is revoked',
+  _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
+  _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',
+  _sync_invoice_line_brand_captures: 'internal B-1b helper (20270106110000): called only by the _capture_invoice_line_rup trigger to keep one RUP capture per brand on a line; every API-role EXECUTE is revoked',
   // KI-28 (local candidate 20261215100000): a trigger function, never called as an RPC.
   // Prune once applied and the registry high-water moves past it.
   _sync_job_location_dispatch_on_applicator_qualify:

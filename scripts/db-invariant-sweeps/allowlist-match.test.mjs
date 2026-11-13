@@ -36,7 +36,9 @@ try {
   // 42 after 2026-11-06 (20261123110000, KI-10 batch 4e, PR #1558): +13 batch 4e wrappers (ten re-bind a shadowed
   //    v_actor before ACTOR_MISMATCH, two bulk-prepay wrappers raise PREPAY_BULK_APPLY_DISABLED first, and the keyless
   //    update_field_app_applied_info path forwards to its unchanged body, which refuses a forged actor first).
-  equal(actorEntries.length, 42, '42 reviewed exceptions (save_job, save_field_app_invoice, apply_product_setup, six batch 4d and thirteen batch 4e wrappers added; three unflagged order/application exceptions removed; convert_quote_to_order has a live and a candidate entry)');
+  // 44 after 2026-11-11 (20270104120000, Brand PR B-1a, PR #1808): complete_delivery and start_and_complete_delivery
+  //    became pass-through wrappers over their renamed reviewed bodies, so p_performed_by is flagged beside p_signed_by.
+  equal(actorEntries.length, 44, '44 reviewed exceptions (save_job, save_field_app_invoice, apply_product_setup, six batch 4d and thirteen batch 4e wrappers added; three unflagged order/application exceptions removed; convert_quote_to_order has a live and a candidate entry; the two B-1a delivery wrappers carry p_signed_by and p_performed_by entries)');
   const convertEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('convert_quote_to_order('));
   equal(convertEntries.length, 2, 'convert_quote_to_order has exactly one current-live and one candidate contract set');
   const convertImplKey = Object.keys(convertEntries[0].reviewed_contracts).find((key) => key.startsWith('public._convert_quote_to_order_below_cost_impl_20260810('));
@@ -264,11 +266,14 @@ try {
   let result = run();
   equal(result.status, 0, result.stderr);
   equal(JSON.parse(result.stdout).execution, 'captured-results-only', 'capture adjudication is not linked-live certification');
-  writeFileSync(capture, JSON.stringify([{ ...packet, rows: [signed, forged] }]));
+  // The real allowlist now reviews complete_delivery's p_performed_by too (B-1a wrapper, 2026-11-11), so the CLI
+  // fixtures use a parameter that has no reviewed entry: the matcher must still bind each exception to its parameter.
+  const unreviewed = { violation_key: delivery.violation_key, suspect_param: 'p_issue_notes' };
+  writeFileSync(capture, JSON.stringify([{ ...packet, rows: [signed, unreviewed] }]));
   result = run();
   equal(result.status, 1, 'real actor-param row fails the actual CLI');
-  equal(JSON.parse(result.stdout).summary[0].violations, [forged], 'CLI uses same parameter-bound matcher');
-  const largeRows = Array.from({ length: 5000 }, (_, index) => ({ ...forged, fixture_index: index }));
+  equal(JSON.parse(result.stdout).summary[0].violations, [unreviewed], 'CLI uses same parameter-bound matcher');
+  const largeRows = Array.from({ length: 5000 }, (_, index) => ({ ...unreviewed, fixture_index: index }));
   writeFileSync(capture, JSON.stringify([{ ...packet, rows: largeRows }]));
   result = run();
   equal(result.status, 1, 'large unallowlisted capture retains failure exit code');

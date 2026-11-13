@@ -10,6 +10,134 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `CANDIDATE_SNAPSHOT/supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `2a0980c05f230dbc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bb09d35ddd4d)
+
+## 2026-11-12 — #1844: Mason owner-accepted 1 Sol finding(s) at `b9df7ab46525`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1844 at `b9df7ab46525` (base `9c63dfc52f9f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/epaRegistrationStatus.ts:34`, text sha256 `8645bc5565107be0` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our business (ref 22f926bda5c3)
+
+## 2026-11-12 — #1844 (cancelled-registration banner): a shown warning stays until the page reloads
+
+**Decision (Mason, 2026-11-12, in chat: "Yes, keep it").** On PR #1844, once the product page has shown a cancelled EPA registration (the product's own number or a brand's), that warning and the brand row's mark stay until the page is reloaded or another product is opened, even if a later check fails or no longer covers that number. A failed or unfinished check adds the "could not check" notice beside the red warning; it never replaces it.
+**Why:** the warning exists to warn loudly (selling is never blocked), so information already confirmed must not disappear because a later read failed. Sol rounds 1, 2 and 4 each found a new case in how the banner handled checks that failed or had not finished.
+**What this forbids/implies:** `useStickyCancellations` in `src/lib/epaRegistrationStatus.ts` keeps each shown cancellation per product for the page session. Clearing a shown warning before reload needs a new Mason decision.
+## 2026-11-12 — #1848: Mason owner-accepted 3 Sol finding(s) at `07f3fca34460`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `07f3fca34460` (base `9c63dfc52f9f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `supabase/migrations/20270109100000_delivery_receipt_brands.sql:104`, text sha256 `730738816390b32f` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref bd909543f1b3)
+- Finding 2 (HIGH) at `src/lib/invoiceBrandWarnings.ts:85`, text sha256 `6212d3b8de7535b8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 4632ae22123b)
+- Finding 3 (HIGH) at `src/lib/invoiceBrandWarnings.ts:61`, text sha256 `02703d0f85ba3885` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9676e1c15a8a)
+
+## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `3657639bbb62`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `3657639bbb62` (base `f52b9a05acec`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/lib/invoiceBrandWarnings.ts:85`, text sha256 `d04464577f300d52` (the wording stays with the proof, not here)
+  Mason's reason: deliveries are not in use yet and Sales to check still lists the line (ref 3747e8e82666)
+## 2026-11-12 — #1840: Mason owner-accepted 1 Sol finding(s) at `de529580591b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1840 at `de529580591b` (base `8b6c3281c24c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/CorrectBrandsModal.tsx:94`, text sha256 `2cf94e722dd4660e` (the wording stays with the proof, not here)
+  Mason's reason: brand retuurns to review list, office relinks (ref 775f98f6999f)
+
+## 2026-11-12 — #1840 (B-2 brand screens): an unconfirmed brand step still completes, flagged for the office
+
+**Decision (Mason, 2026-11-12, in chat: "Yes, warn and flag later").** On PR #1840, when the delivery screens cannot confirm the brand picks at completion (the brand list did not load, or a choice was left out, refused by the database, failed to save, or overtaken by someone else's save), the delivery still completes and the driver is warned. The completion is recorded as picks not confirmed, so every picked line lands on the office's Deliveries missing brands list.
+**Why:** brands never block a delivery (Mason, 2026-11-09). Sol rounds 1, 3 and 4 each found another way a brand problem at completion either blocked the completion or left a wrong brand unflagged.
+**What this forbids/implies:** `saveForCompletion` in `src/components/deliveries/useDeliveryBrands.ts` sends the loaded brand seq only when every choice on screen was saved. Otherwise it sends `BRANDS_NOT_CONFIRMED` (-1), which `complete_delivery` records as `picks_confirmed: false` (20270104120000). Refusing a completion over brands needs a new Mason decision. Completion never waits on brands either (Sol round 5, applying this same decision): a brand list still loading, a Save brands still in flight, or a completion brand save with no reply within 10 seconds all complete as not confirmed.
+
+## 2026-11-12 — #1825 (B-1b invoice brands): every brand problem shows on Sales to check
+
+**Decision (Mason, 2026-11-11 late evening, in chat: "Yes, always show").** On PR #1825, every branded invoice line whose brands do not add up, no longer match the picks, have no brand recorded, or whose payers changed is listed on Sales to check, whether or not anything on it looks restricted use. This replaces the filter that listed those lines only where a record might be owed.
+**Why:** brands never block a sale, a delivery or a posting, so a few extra lines to check cost little; a filter that guesses what is restricted can hide a restricted sale. Sol rounds 1, 3, 4 and 5 each found a new case where deciding restricted use for a brand line went wrong.
+**What this forbids/implies:** `get_epa_sales_to_check` in `20270106110000_invoice_brands_rup.sql` lists the line-level brand reasons with no restricted-use filter. Hiding brand problems on unrestricted products again needs a new Mason decision.
+
+## 2026-11-11 — #1825 (B-1b invoice brands): a brand's own restricted-use tick counts
+
+**Decision (Mason, 2026-11-11, in chat: "Yes, any tick counts").** A brand ticked restricted use on its own brand row makes that brand's sale restricted, as the product's tick does, even when the registration of its EPA number says No. This answers Sol round 4's HIGH on PR #1825.
+**Why:** any Yes already makes a sale restricted (Mason, 2026-11-10); counting the brand's tick can only add a record, never miss one. Sol rounds 1, 3 and 4 kept returning to what decides restricted use for a brand line, so the rule is settled here rather than patched again.
+**What this forbids/implies:** `20270106110000_invoice_brands_rup.sql` reads the tick live from the pick's brand row when a brand's sale is captured (never stored in the invoice's brand copy, so a tick change never makes a draft stale) and on Sales to check. Ignoring a brand's tick after the registration switch-on needs a new Mason decision.
+
+## 2026-11-12 — #1731: Mason owner-accepted 1 Sol finding(s) at `2d312b756cf4`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1731 at `2d312b756cf4` (base `a4f37aed7913`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `docs/manual/DECISION_LOG.md:20`, text sha256 `9a61f50f511ffd2f` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen (ref d1a70a9e249f)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-12 — #1731: the quick-delivery unit rule stays; the PR lands (KI-76)
+
+**Decision (Mason, in chat, 2026-11-12: "Yes, keep it"):** a quick-delivery line keeps recording its product's own unit, as decided on 2026-11-10, and #1731 is merged now that `20270106100000` is live.
+**Why:** the app's quick-delivery screen always sends the product's unit, and no quick delivery has been recorded live.
+
+## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `53f376a556db`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `53f376a556db` (base `11ea9ce0c24e`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:283`, text sha256 `fc91aa9d83feaa27` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref 9741c7ce503f)
+- Finding 2 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:227`, text sha256 `b91a5b074e4b2e15` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref abe447cbbba5)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1731: Mason owner-accepted 2 Sol finding(s) at `9554792cbe99`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-11).** Sol's review of PR #1731 at `9554792cbe99` (base `a9864de8dfb1`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:284`, text sha256 `1b370274f50ba11a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisnes (ref c9ddd013792d)
+- Finding 2 (HIGH) at `supabase/migrations/20270106100000_blank_unit_fill_and_post_refusal.sql:227`, text sha256 `dc584e8216ceea93` (the wording stays with the proof, not here)
+  Mason's reason: old lines with empty-text units had 0 live rows; fixing them needs a backfill I decide separately (ref d8d76c4660fa)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-11 — #1731 lands; quick-delivery edits keep their unit (KI-76)
+
+**Decision (Mason, in chat, 2026-11-11: "Yes, land it"):** after Taha's review of #1731 ("fine to apply as written", two LOWs), land it. Then, after Sol round 5 (Mason: "Yes, do that"): an admin's direct edit of a quick-delivery line keeps the unit the line was recorded in unless the product changes (Taha's first LOW, fixed); the empty-text limit from 2026-11-10 stays as decided; Taha's second LOW is a follow-up under KI-76.
+**Why:** the edit fix is one line and keeps the delivery, order and invoice units the same; the empty-text case had 0 live rows and fixing it needs a backfill.
+
+## 2026-11-10 — Sale lines carry a unit; quick deliveries use the product's unit (KI-76, #1731, `20270106100000`)
+
+**Decision (Mason, in chat, 2026-11-10: "Refuse every blank line", then "Yes, option A"):** a chemical-sale invoice is never posted with a product line that has no unit; a blank line unit is filled from the order line, else the product; a quick-delivery line always records its product's own unit, whatever unit the request names.
+**Why:** a line with no unit could never get a return credit. Sol rounds 1 to 4 kept finding gaps in the product fallback; the quick-delivery lock removes the one where a request built outside the app records one unit on the delivery and another on the invoice.
+**Accepted limit:** an old order line and invoice line that both hold empty text (0 live on 2026-11-10) get the product unit on the invoice line, so their return is refused. Changing it needs the order line written (a backfill Mason decides).
+## 2026-11-12 — #1817: Mason owner-accepted 2 Sol finding(s) at `bf082cbf3764`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1817 at `bf082cbf3764` (base `a4f37aed7913`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (BLOCKER) at `CANDIDATE_SNAPSHOT/docs/manual/DECISION_LOG.md:15`, text sha256 `cf5d95cd4c8093ee` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref 50bfea63360e)
+- Finding 2 (HIGH) at `CANDIDATE_SNAPSHOT/src/lib/rateReviewWorkbook.ts:328`, text sha256 `feba3a841f05cc97` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref b7845a6c7ad3)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+
+## 2026-11-12 — #1817: Mason owner-accepted 1 Sol finding(s) at `f0be509d06e0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1817 at `f0be509d06e0` (base `325707cb62f5`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue, so the PR may land without fixing them.
+- Finding 1 (HIGH) at `CANDIDATE_SNAPSHOT/src/components/products/RateReviewWorkbookModal.tsx:35`, text sha256 `7756a596af3002d3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buisness (ref bd104087d7ef)
+
+**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). Any later change on the Sol list needs a normal Sol review.
+## 2026-11-11 — CMP-2 (rebuilt Brand vs Generic page) is on hold until Mason re-reviews its plan
+
+**Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".
+**Why:** CMP-2 is the last and largest product-comparison build; Mason wants to look at its plan again before any work starts.
+**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here.
+
+## 2026-11-11 — Resistance mode-of-action groups: shown on the product, later on quotes
+
+**Decision (Mason, 2026-11-11):** "on the product setup when it pulls in and we set the active ingredients it keeps track of which FRAC groups that product contains, and have option in quotes page to select to show the active ingredients and FRAC mode of action to help growers decide."
+**Why:** growers rotate chemistry to slow resistance; seeing each product's groups helps them choose.
+**What this forbids/implies:** logged as two future items, neither scheduled. Mason said FRAC; the item covers the resistance mode-of-action group for every chemical type (FRAC for fungicides, HRAC/WSSA for herbicides, IRAC for insecticides). **Part A** (the product shows its groups, filled from its ingredients when actives come from the EPA lookup or the workbook) is MOA-1 in the grand plan, after DM-1b; Mason places it. **Part B** (an option on the quote page to show each line's actives and groups to the grower) is a To-Do "Later features" item and is held: Taha is working on the quote and chemical-sales screens, so no quote-screen file is touched until his UI PRs land.
+
 ## 2026-11-11 — #1808: deleting a delivery line with recorded brands stays allowed
 
 **Decision (Mason, 2026-11-11):** "Keep allowing it." A delivery line that has brands recorded can still be deleted; the delete keeps a `line_removed` history entry and is never refused.

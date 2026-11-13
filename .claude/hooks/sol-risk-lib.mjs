@@ -248,18 +248,26 @@ export function releaseFreezeProblem({ repo, gh }) {
 // #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into
 // staging it would merge unflagged and first meet his approval on release day, holding the whole release; so an
 // agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
+// Also (Taha, 13 Nov; replaces GitHub's code-owner review on .github/): a PR that adds, changes, deletes or
+// renames anything under .github/ (the release guard and workflows) is Taha's to merge, never an agent's.
 export function stagingDestructiveProblem({ repo, gh, number, headSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
   if (!/^[0-9a-f]{40}$/i.test(String(headSha || "")) || !Number.isInteger(Number(number))) return "GitHub reported an unusable PR number or head (fail closed)";
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
-  let files;
+  let rows;
   try {
-    files = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | select(.status != "removed") | .filename']))
-      .split(/\r?\n/).filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f));
+    rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
+      .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
   } catch (error) {
     return `the PR's files could not be read (${show(error)}) (fail closed)`;
   }
+  if (rows.some((r) => r.length !== 3 || !r[1])) return "GitHub returned an unreadable file list (fail closed)";
+  const github = rows.flatMap(([, f, prev]) => [f, prev]).filter((f) => f.startsWith(".github/"));
+  if (github.length) {
+    return `it changes ${[...new Set(github)].join(", ")}: the release guard and workflows live in .github/, so Taha merges it, never an agent (ship.md › Staging)`;
+  }
+  const files = rows.filter(([status, f]) => status !== "removed" && /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map(([, f]) => f);
   const found = [];
   for (const f of files) {
     let sql;

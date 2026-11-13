@@ -160,14 +160,27 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
     throw new Error(`unexpected ${a}`);
   };
   const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H });
-  assert.equal(run("src/a.ts\n", ""), null, "no migration");
-  assert.equal(run("supabase/migrations/x.sql\n", "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
-  assert.match(run("supabase/migrations/x.sql\n", "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
-  assert.match(run("supabase/migrations/x.sql\n", "DROP TABLE t;"), /DROP TABLE/);
+  const MIG = "added\tsupabase/migrations/x.sql\t\n";
+  assert.equal(run("modified\tsrc/a.ts\t\n", ""), null, "no migration");
+  assert.equal(run(MIG, "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
+  assert.equal(run("removed\tsupabase/migrations/x.sql\t\n", ""), null, "a removed migration is not read");
+  assert.match(run(MIG, "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
+  assert.match(run(MIG, "DROP TABLE t;"), /DROP TABLE/);
   assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
-  assert.match(run("supabase/migrations/x.sql\n", new Error("HTTP 502")), /fail closed/);
+  assert.match(run(MIG, new Error("HTTP 502")), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H }), /fail closed/);
-  assert.match(run("supabase/migrations/x.sql\n", "   "), /came back empty/);
+  assert.match(run(MIG, "   "), /came back empty/);
+  assert.match(run("src/a.ts\n", ""), /unreadable file list.*fail closed/, "a list without status and tabs fails closed");
+});
+
+check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", () => {
+  const gh = (files) => (args) => { if (/pulls\/5\/files/.test(args.join(" "))) return files; throw new Error(`unexpected ${args.join(" ")}`); };
+  const run = (files) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files), number: 5, headSha: "a".repeat(40) });
+  assert.match(run("modified\t.github/workflows/release-flow.yml\t\n"), /\.github\/workflows\/release-flow\.yml.*Taha merges it, never an agent/);
+  assert.match(run("removed\t.github/CODEOWNERS\t\n"), /\.github\/CODEOWNERS/, "a deletion counts");
+  assert.match(run("renamed\tdocs/old.yml\t.github/workflows/ci.yml\n"), /\.github\/workflows\/ci\.yml/, "a move out of .github/ counts");
+  assert.match(run("modified\tsrc/a.ts\t\nadded\t.github/scripts/x.mjs\t\n"), /\.github\/scripts\/x\.mjs/, "one .github file among others");
+  assert.equal(run("modified\tsrc/.github-like.ts\t\nmodified\tdocs/github/a.md\t\n"), null, "only the top-level .github/ folder");
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

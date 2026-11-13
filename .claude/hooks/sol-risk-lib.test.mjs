@@ -121,7 +121,9 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
 });
 
 check("agents never approve a pull request (#1838 HIGH 2)", () => {
-  for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE"]) assert.ok(prApprovalProblem(t), t);
+  for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE",
+    "gh api repos/o/r/pulls/5/reviews --method POST --input /tmp/review.json", "gh api graphql -F query=@q.graphql -f v='{}' # submitPullRequestReview"]) assert.ok(prApprovalProblem(t), t);
+  for (const t of ["gh api repos/o/r/pulls/5/reviews", "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body=note"]) assert.equal(prApprovalProblem(t), null, t);
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
@@ -132,6 +134,7 @@ check("staging merges wait while the release is being applied (#1838 MED 2)", ()
   assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[]"]]) }), null, "no release PR open");
   assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "Staging proof: x\nlooks good"]]) }), null, "release open, nothing applied yet");
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "note\nApplied live: 20270110100000_x"]]) }), /#77.*being applied live/);
+  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "Ready to merge: abcdef1"]]) }), /#77/, "Taha's go-ahead starts the freeze");
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, new Error("HTTP 502")]]) }), /fail closed/);
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, new Error("HTTP 502")]]) }), /fail closed/);
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "{}"]]) }), /unexpected/);
@@ -143,7 +146,7 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   const gh = (files, sql) => (args) => {
     const a = args.join(" ");
     if (/pulls\/5\/files/.test(a)) { if (files instanceof Error) throw files; return files; }
-    if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; return b64(sql); }
+    if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; assert.ok(a.includes("application/vnd.github.raw")); return sql; }
     throw new Error(`unexpected ${a}`);
   };
   const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H });
@@ -154,6 +157,7 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
   assert.match(run("supabase/migrations/x.sql\n", new Error("HTTP 502")), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H }), /fail closed/);
+  assert.match(run("supabase/migrations/x.sql\n", "   "), /came back empty/);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

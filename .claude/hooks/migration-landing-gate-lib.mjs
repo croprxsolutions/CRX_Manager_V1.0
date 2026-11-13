@@ -41,7 +41,7 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { readTeammateComments, teammateCommentsDenial } from "./teammate-comments-lib.mjs";
+import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -74,6 +74,22 @@ export function tahaHoldProblem(pr, now = Date.now()) {
   const waitMin = Math.ceil((TAHA_HOLD_MS - Math.max(0, now - opened)) / 60_000);
   return `Taha's 4-hour review hold is still on (ship.md Step 8 item 4a): the PR opened ${Math.floor(Math.max(0, now - opened) / 60_000)} minutes ago and Taha (TahaKhanAbdalli) has not posted a review or comment on it. ` +
     `Wait about ${waitMin} more minutes or for his review, then re-run. Mason's chat approval does not lift this hold.`;
+}
+
+// #1838 (Taha's choice, 13 Nov 2026): an agent applies a release or hotfix migration live only while Taha is there
+// to merge right after, so live never runs the old app on the new database for long. His go-ahead is a PR comment
+// from his own account (Mason's is the one his agents share), naming the PR's current head, at most 30 minutes old.
+export const READY_WINDOW_MS = 30 * 60_000;
+export function readyToMergeProblem({ comments, head, now = Date.now() }) {
+  if (!Array.isArray(comments)) return "GitHub did not list the PR's comments, so Taha's go-ahead cannot be checked (fail closed).";
+  const fresh = comments.some((c) => {
+    const m = READY_TO_MERGE_LINE.exec(String(c?.body ?? ""));
+    const at = Date.parse(String(c?.createdAt ?? ""));
+    return m && String(c?.author?.login ?? "").trim().toLowerCase() === TAHA_LOGIN &&
+      String(head).toLowerCase().startsWith(m[1].toLowerCase()) && Number.isFinite(at) && now - at <= READY_WINDOW_MS && at - now <= 60_000;
+  });
+  return fresh ? null
+    : `Taha hasn't given the go-ahead for this head: he comments \`Ready to merge: ${String(head).slice(0, 12)}\` on the PR when he's there to merge right after, and an agent applies within 30 minutes of it (ship.md › Staging). Ask him, then retry.`;
 }
 
 function refuse(why) {
@@ -245,6 +261,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   const hold = tahaHoldProblem(pr, now);
   if (hold) return refuse(`${number}: ${hold}`);
+  const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
+  if (ready) return refuse(`${number}: ${ready}`);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate, hotfixStampProblem } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
@@ -1637,7 +1637,9 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     state: "OPEN", isCrossRepository: false, baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
-    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
+    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    // Taha's go-ahead for this head (#1838, his choice 13 Nov): fresh, from his account.
+    comments: [{ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString() }],
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
@@ -1775,12 +1777,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const otherReview = readyPr.reviews;
-    refused(gate({ pr: { createdAt: young } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
+    const go = readyPr.comments[0];
+    refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
     refused(gate({ pr: { createdAt: young, comments: [{ author: { login: "someoneelse" }, body: "lgtm" }] } }),
       "4-hour review hold", "another person's comment does not lift the hold");
-    refused(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
+    refused(gate({ pr: { createdAt: young, comments: [], reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
       "4-hour review hold", "Taha's unposted (PENDING) review does not lift the hold");
-    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }] } }).ok === true,
+    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }, go] } }).ok === true,
       "a Taha comment lifts the hold on a young PR");
     ok(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "COMMENTED" }] } }).ok === true,
       "a posted Taha review lifts the hold on a young PR");
@@ -1837,6 +1840,19 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   ok(gate({ stagingBehind: "3\n" }).ok === true, "a hotfix doesn't need staging's tip");
   refused(gate({ pr: { isCrossRepository: true } }), "comes from a fork", "a fork's branch is refused");
   refused(gate({ pr: { isCrossRepository: undefined } }), "comes from a fork", "an unknown origin is refused");
+  // #1838, Taha's choice (13 Nov): an agent applies only within 30 minutes of Taha's "Ready to merge: <head>".
+  {
+    const t = (over = {}) => ({ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 7)}`, createdAt: new Date().toISOString(), ...over });
+    const now = Date.now();
+    ok(readyToMergeProblem({ comments: [t()], head: HEAD_SHA, now }) === null, "Taha's fresh go-ahead for this head");
+    ok(readyToMergeProblem({ comments: [t({ author: { login: "masonwells1" } })], head: HEAD_SHA, now }), "the shared account doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ createdAt: new Date(now - 31 * 60_000).toISOString() })], head: HEAD_SHA, now }), "older than 30 minutes doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge: 1234567" })], head: HEAD_SHA, now }), "another head doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge soon" })], head: HEAD_SHA, now }), "free text doesn't count");
+    ok(readyToMergeProblem({ comments: undefined, head: HEAD_SHA, now }), "no comment list fails closed");
+  }
+  refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "an apply without Taha's go-ahead is refused");
+  refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
   // The name alone is not enough: main's release guard must have passed on this head.

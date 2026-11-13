@@ -80,4 +80,12 @@ assert.deepEqual(
 assert.match(teammateCommentsDenial("X", "7", [{ login: "tahakhanabdalli", url: LINK }]),
   /@tahakhanabdalli: https:[^\n]*issuecomment-12[\s\S]*gh pr comment 7 --body/, "the denial names who, which comment and how");
 
+// Taha's one-line go-ahead for the live apply (#1838) asks nothing, so it needs no answer.
+{
+  const page = (nodes) => ({ pageInfo: { hasPreviousPage: false }, nodes });
+  const pr = (body) => ({ author: { login: "masonwells1" }, comments: page([{ author: { __typename: "User", login: "TahaKhanAbdalli" }, url: "u", body }]), reviews: page([]), reviewThreads: page([]) });
+  assert.equal(unansweredTeammateComments(pr("Ready to merge: abcdef1234")).comments.length, 0, "the go-ahead line needs no answer");
+  assert.equal(unansweredTeammateComments(pr("Ready to merge: abcdef1234\nbut check X")).comments.length, 1, "anything more is a real comment");
+}
+
 console.log("teammate-comments-lib tests passed");

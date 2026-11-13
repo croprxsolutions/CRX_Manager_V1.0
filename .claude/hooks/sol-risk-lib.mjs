@@ -190,7 +190,12 @@ export function prApprovalProblem(text) {
   const cliApprove = ghReview && /\bgh(?:\.exe)?\b/i.test(t) &&
     t.slice(ghReview.index).split(/\s+/).some((w) => /^--approve(?:=|$)/i.test(w) || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
   const apiApprove = /\bAPPROVE\b/.test(t) && /review/i.test(t);
-  return cliApprove || apiApprove
+  // A write to a PR's reviews whose event isn't spelled out here (--input <file>, a variables file) may approve: only a
+  // visible COMMENT or REQUEST_CHANGES passes (Luna, #1838 fixes).
+  const reviewWrite = (/\/pulls\/[^/\s]+\/reviews\b/i.test(t) && /(?:^|\s)(?:-X|--method)\s*(?:POST|PUT|PATCH)\b|(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b/i.test(t)) ||
+    /\b(?:addPullRequestReview|submitPullRequestReview)\b/.test(t);
+  const visibleSafeEvent = /\b(?:COMMENT|REQUEST_CHANGES)\b/.test(t) && !/\bAPPROVE\b/.test(t);
+  return cliApprove || apiApprove || (reviewWrite && !visibleSafeEvent)
     ? "an agent never approves a pull request: CODEOWNERS names masonwells1, the account the agents share, so an agent's approval would count as a code owner's review (for example on a change to the release guard). Leave approvals to Taha or Mason, by hand"
     : null;
 }
@@ -216,7 +221,8 @@ export function releaseFreezeProblem({ repo, gh }) {
     } catch (error) {
       return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
     }
-    if (/^\s*Applied live:/m.test(bodies)) {
+    // Taha's "Ready to merge:" comes before the first apply, "Applied live:" after each one (Luna, #1838 fixes).
+    if (/^\s*(?:Applied live:|Ready to merge:)/im.test(bodies)) {
       return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
     }
   }
@@ -242,10 +248,12 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha }) {
   for (const f of files) {
     let sql;
     try {
-      sql = Buffer.from(String(gh(["api", `${repoPath}/contents/${f}?ref=${headSha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64").toString("utf8");
+      // The raw media type serves files of any size; the JSON form has no content over 1 MB (Luna, #1838 fixes).
+      sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${f}?ref=${headSha}`]));
     } catch (error) {
       return `${f} could not be read (${show(error)}) (fail closed)`;
     }
+    if (!sql.trim()) return `${f} came back empty from GitHub (fail closed)`;
     let verdict;
     try { verdict = destructiveMigrationCheck(sql); } catch { verdict = { destructive: true, reason: "it could not be checked" }; }
     if (verdict?.destructive) found.push(`${f.split("/").pop()} (${verdict.reason})`);

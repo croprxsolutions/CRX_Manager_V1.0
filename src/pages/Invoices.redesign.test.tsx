@@ -104,6 +104,12 @@ describe('Invoices list redesign', () => {
     });
   });
 
+  // The export follows the filters, not the table search, so the title says filters (Sol MED).
+  it('List PDF says it lists the invoices that match the filters', async () => {
+    await renderList();
+    expect(screen.getByRole('button', { name: 'List PDF' })).toHaveAttribute('title', 'Download a PDF list of the invoices that match your filters');
+  });
+
   describe('one selection bar, same actions, counts and people as today', () => {
     it('admin: n selected, Print n…, More (Email, Void, Delete in red) and Post n invoices… as the primary', async () => {
       await renderList();

@@ -111,15 +111,15 @@ describe('FieldStop billing lines', () => {
 
   it('names the Bill Split invoices on the done step', async () => {
     await completeWith({ success: true, bill_split_invoices: [{ invoice_number: 'CS-2026-0005-1' }, { invoice_number: 'CS-2026-0005-2' }] });
-    expect(screen.getByText('Billing done.').parentElement).toHaveTextContent(
-      'Billing done. The office has 2 draft invoices for this delivery (CS-2026-0005-1, CS-2026-0005-2).',
+    expect(screen.getByText('Invoices drafted.').parentElement).toHaveTextContent(
+      'Invoices drafted. The office has 2 draft invoices for this delivery (CS-2026-0005-1, CS-2026-0005-2).',
     );
   });
 
   it('names the single auto invoice on the done step', async () => {
     await completeWith({ success: true, auto_invoice: { invoice_id: 'inv-1', invoice_number: 'INV-77' } });
-    expect(screen.getByText('Billing done.').parentElement).toHaveTextContent(
-      'Billing done. The office has 1 draft invoice for this delivery (INV-77).',
+    expect(screen.getByText('Invoices drafted.').parentElement).toHaveTextContent(
+      'Invoices drafted. The office has 1 draft invoice for this delivery (INV-77).',
     );
   });
 
@@ -128,7 +128,7 @@ describe('FieldStop billing lines', () => {
     expect(screen.getByText('The office will finish billing.').parentElement).toHaveTextContent(
       'The office will finish billing. The invoices for this delivery could not be made automatically. The office has been told. Nothing for you to do.',
     );
-    expect(screen.queryByText('Billing done.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoices drafted.')).not.toBeInTheDocument();
     // The toast is unchanged.
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/Bill Split invoices couldn't be drafted/));
   });
@@ -136,7 +136,7 @@ describe('FieldStop billing lines', () => {
   it('says nothing about billing when no invoice came back and nothing failed (as today)', async () => {
     await completeWith({ success: true });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Delivery completed'));
-    expect(screen.queryByText('Billing done.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoices drafted.')).not.toBeInTheDocument();
     expect(screen.queryByText('The office will finish billing.')).not.toBeInTheDocument();
   });
 });

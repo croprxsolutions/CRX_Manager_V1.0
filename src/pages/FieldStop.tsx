@@ -907,7 +907,7 @@ function DoneBilling({ billing }: { billing: DoneBillingResult | null }) {
   return (
     <div role="status" className="mt-3 flex items-start gap-2.5 rounded-xl border border-crx-green/25 bg-crx-green-light px-3 py-2.5 text-sm text-crx-green-hover">
       <Receipt className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-      <p><strong>Billing done.</strong> The office has {numbers.length} draft invoice{numbers.length > 1 ? 's' : ''} for this delivery ({numbers.join(', ')}).</p>
+      <p><strong>Invoices drafted.</strong> The office has {numbers.length} draft invoice{numbers.length > 1 ? 's' : ''} for this delivery ({numbers.join(', ')}).</p>
     </div>
   );
 }

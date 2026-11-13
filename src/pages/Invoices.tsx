@@ -1054,7 +1054,7 @@ export default function Invoices() {
               icon={<Printer className="w-4 h-4" />}
               onClick={handleExportPDF}
               loading={exportingPdf}
-              title="Download the invoices in view as a PDF list"
+              title="Download a PDF list of the invoices that match your filters"
             >
               List PDF
             </Button>

@@ -13,7 +13,8 @@ vi.mock('../../lib/db', () => ({
   assertRpcResult: (data: unknown) => data,
 }));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
-import DeliveryBrandPicker from './DeliveryBrandPicker';
+import DeliveryBrandPicker, { DeliveryBrandsPanel } from './DeliveryBrandPicker';
+import type { DeliveryBrandsState } from './useDeliveryBrands';
 import { OTHER_BRAND, type DeliveryBrands, type DraftLines } from '../../lib/deliveryBrands';
 
 const brands: DeliveryBrands = {
@@ -104,7 +105,7 @@ describe('DeliveryBrandPicker cancelled-registration warning (#1849)', () => {
     db.rpc.mockResolvedValue({ data: [cancelled('100-200', null)], error: null });
     render(<Harness />);
     const alert = await screen.findByTestId('cancelled-registration-product');
-    expect(alert.textContent).toContain('This product: EPA Reg. No. 100-200, cancelled (date not recorded)');
+    expect(alert.textContent).toContain('Glyphosate 2.5: EPA Reg. No. 100-200, cancelled (date not recorded)');
   });
 
   it('warns on a typed EPA number from the jug that is cancelled', async () => {
@@ -131,6 +132,29 @@ describe('DeliveryBrandPicker cancelled-registration warning (#1849)', () => {
     db.products.mockResolvedValue({ data: [{ id: 'P2', epa_registration: null }], error: null });
     render(<Harness />);
     expect(await screen.findByTestId('registration-check-failed')).toBeTruthy();
+  });
+
+  it('checks the EPA number recorded on a saved pick, not only the brand’s current one (Sol r1)', async () => {
+    const saved: DeliveryBrands = { ...brands, lines: [{ ...brands.lines[0], brand_list: [{ ...brands.lines[0].brand_list[0], epa_registration: '300-400' }],
+      picks: [{ id: 'k1', delivery_item_id: 'L1', source: 'size', parent_brand_id: null, legacy_brand_id: 'b1', brand_name: 'Roundup', epa_registration: '524-475', manufacturer: null, quantity: 10, review_state: null }] }] };
+    render(<DeliveryBrandPicker brands={saved} disabled={false} fullQuantity={(l) => l.quantity} onChange={() => undefined}
+      drafts={{ L1: [{ brandId: 'b1', typedName: '', typedEpa: '', typedManufacturer: '', quantity: '' }] }} />);
+    expect((await screen.findByTestId('cancelled-registration-pick')).textContent).toContain('EPA Reg. No. 524-475');
+  });
+
+  it('warns about a cancelled product on a line with no brand list (Sol r1)', async () => {
+    db.rpc.mockResolvedValue({ data: [cancelled('100-200', null)], error: null });
+    const unbranded: DeliveryBrands = { ...brands, lines: [{ ...brands.lines[0], brand_list: [], picks: [] }] };
+    render(<DeliveryBrandsPanel busy={false} state={{ brands: unbranded, drafts: {}, setLineDraft: () => undefined, dirty: false, saving: false,
+      savedAt: null, loadFailed: false, save: async () => undefined, reload: async () => undefined } as unknown as DeliveryBrandsState} />);
+    expect((await screen.findByTestId('cancelled-registration-product')).textContent).toContain('Glyphosate 2.5: EPA Reg. No. 100-200');
+    expect(screen.queryByText('Brands delivered')).toBeNull();
+  });
+
+  it('says it is still checking while the lookup is pending (Sol r1)', async () => {
+    db.rpc.mockImplementation(() => new Promise(() => undefined));
+    render(<Harness />);
+    expect((await screen.findByText(/Checking EPA registration status/))).toBeTruthy();
   });
 
   it('says it could not check when the lookup never answers', async () => {

@@ -525,7 +525,7 @@ function gateRequest(request) {
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
     const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
-    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid });
+    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
     if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
   }
 

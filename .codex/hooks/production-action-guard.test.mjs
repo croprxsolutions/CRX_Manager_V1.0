@@ -106,7 +106,10 @@ const isMainCompare = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\
 const isReleasePrList = (args) => args?.[0] === "api" && (args ?? []).some((a) => /\/pulls\?base=main&state=open/.test(String(a)));
 // And no migration files on a staging PR unless a test says so (stagingDestructiveProblem, #1838 MED 3).
 const isPrFileList = (args) => args?.[0] === "api" && args?.[1] === "--paginate" && /\/pulls\/\d+\/files\?per_page=100$/.test(String(args?.[2] ?? ""));
-const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "" : isPrFileList(args) ? "" : runGh(args, ...rest)));
+// And an unchanged .github/ tree (merge-base, then the same tree sha at head and merge-base).
+const isMergeBase = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.[0-9a-f]{40}$/.test(String(args?.[1] ?? "")) && args?.[3] === ".merge_base_commit.sha";
+const isRootTree = (args) => args?.[0] === "api" && /\/contents\?ref=[0-9a-f]{40}$/.test(String(args?.[1] ?? ""));
+const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "" : isPrFileList(args) ? "" : isMergeBase(args) ? "c".repeat(40) : isRootTree(args) ? "t".repeat(40) : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
   { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare)))(
     options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh)) },

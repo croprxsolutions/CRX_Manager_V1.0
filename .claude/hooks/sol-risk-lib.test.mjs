@@ -156,10 +156,12 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   const gh = (files, sql) => (args) => {
     const a = args.join(" ");
     if (/pulls\/5\/files/.test(a)) { if (files instanceof Error) throw files; return files; }
+    if (/compare\/b{40}\.\.\.a{40}/.test(a)) return "c".repeat(40);
+    if (/contents\?ref=/.test(a)) return "t".repeat(40);
     if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; assert.ok(a.includes("application/vnd.github.raw")); return sql; }
     throw new Error(`unexpected ${a}`);
   };
-  const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H });
+  const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H, baseSha: "b".repeat(40) });
   const MIG = "added\tsupabase/migrations/x.sql\t\n";
   assert.equal(run("modified\tsrc/a.ts\t\n", ""), null, "no migration");
   assert.equal(run(MIG, "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
@@ -168,19 +170,35 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   assert.match(run(MIG, "DROP TABLE t;"), /DROP TABLE/);
   assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
   assert.match(run(MIG, new Error("HTTP 502")), /fail closed/);
-  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H }), /fail closed/);
+  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H, baseSha: "b".repeat(40) }), /fail closed/);
+  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: 5, headSha: H, baseSha: undefined }), /fail closed/, "no base sha");
   assert.match(run(MIG, "   "), /came back empty/);
   assert.match(run("src/a.ts\n", ""), /unreadable file list.*fail closed/, "a list without status and tabs fails closed");
 });
 
 check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", () => {
-  const gh = (files) => (args) => { if (/pulls\/5\/files/.test(args.join(" "))) return files; throw new Error(`unexpected ${args.join(" ")}`); };
-  const run = (files) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files), number: 5, headSha: "a".repeat(40) });
+  const gh = (files, trees = {}) => (args) => {
+    const a = args.join(" ");
+    if (/pulls\/5\/files/.test(a)) return files;
+    if (/compare\/b{40}\.\.\.a{40}/.test(a)) { if (trees.base instanceof Error) throw trees.base; return trees.base ?? "c".repeat(40); }
+    if (/contents\?ref=a{40}/.test(a)) return trees.head ?? "t".repeat(40);
+    if (/contents\?ref=c{40}/.test(a)) { if (trees.old instanceof Error) throw trees.old; return trees.old ?? "t".repeat(40); }
+    throw new Error(`unexpected ${a}`);
+  };
+  const run = (files, trees) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, trees), number: 5, headSha: "a".repeat(40), baseSha: "b".repeat(40) });
   assert.match(run("modified\t.github/workflows/release-flow.yml\t\n"), /\.github\/workflows\/release-flow\.yml.*Taha merges it, never an agent/);
   assert.match(run("removed\t.github/CODEOWNERS\t\n"), /\.github\/CODEOWNERS/, "a deletion counts");
   assert.match(run("renamed\tdocs/old.yml\t.github/workflows/ci.yml\n"), /\.github\/workflows\/ci\.yml/, "a move out of .github/ counts");
   assert.match(run("modified\tsrc/a.ts\t\nadded\t.github/scripts/x.mjs\t\n"), /\.github\/scripts\/x\.mjs/, "one .github file among others");
   assert.equal(run("modified\tsrc/.github-like.ts\t\nmodified\tdocs/github/a.md\t\n"), null, "only the top-level .github/ folder");
+  // The file list is capped and not bound to the head, so the .github/ tree at the head is compared with the merge-base's.
+  assert.match(run("modified\tsrc/a.ts\t\n", { head: "d".repeat(40) }), /changes \.github\/.*Taha merges it/, "a change the capped list missed");
+  assert.match(run("", { head: "", old: "t".repeat(40) }), /changes \.github\//, "deleting the whole folder");
+  assert.match(run("", { head: "d".repeat(40), old: "" }), /changes \.github\//, "adding the folder");
+  assert.equal(run("", { head: "", old: "" }), null, "no .github/ on either side");
+  assert.match(run("", { base: "nope" }), /merge-base could not be read.*fail closed/);
+  assert.match(run("", { base: new Error("HTTP 502") }), /could not be compared.*fail closed/);
+  assert.match(run("", { old: new Error("HTTP 404") }), /could not be compared.*fail closed/);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

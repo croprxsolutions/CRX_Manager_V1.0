@@ -717,7 +717,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
     if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
     const frozen = releaseFreezeProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir) });
     if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
-    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid });
+    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid, baseSha: pullRequest.baseRefOid });
     if (destructive) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${destructive}.`);
   }
   // Main's PR #560 migrated this gate from "no approval" to "an active

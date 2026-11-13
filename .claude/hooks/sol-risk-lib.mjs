@@ -250,11 +250,22 @@ export function releaseFreezeProblem({ repo, gh }) {
 // agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
 // Also (Taha, 13 Nov; replaces GitHub's code-owner review on .github/): a PR that adds, changes, deletes or
 // renames anything under .github/ (the release guard and workflows) is Taha's to merge, never an agent's.
-export function stagingDestructiveProblem({ repo, gh, number, headSha }) {
+export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
-  if (!/^[0-9a-f]{40}$/i.test(String(headSha || "")) || !Number.isInteger(Number(number))) return "GitHub reported an unusable PR number or head (fail closed)";
+  if (!/^[0-9a-f]{40}$/i.test(String(headSha || "")) || !/^[0-9a-f]{40}$/i.test(String(baseSha || "")) || !Number.isInteger(Number(number))) return "GitHub reported an unusable PR number, base or head (fail closed)";
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
+  // The file list below is capped at 3,000 files and not bound to the head (Luna/Sol, 13 Nov), so .github/ is
+  // also compared by tree: its tree at the head against its tree at the PR's merge-base. Exact, no cap.
+  let treesDiffer;
+  try {
+    const mergeBase = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".merge_base_commit.sha"])).trim();
+    if (!/^[0-9a-f]{40}$/i.test(mergeBase)) return "the PR's merge-base could not be read (fail closed)";
+    const tree = (sha) => String(gh(["api", `${repoPath}/contents?ref=${sha}`, "--jq", '.[] | select(.path == ".github") | .sha'])).trim();
+    treesDiffer = tree(headSha) !== tree(mergeBase);
+  } catch (error) {
+    return `the PR's .github/ folder could not be compared (${show(error)}) (fail closed)`;
+  }
   let rows;
   try {
     rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
@@ -264,8 +275,8 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha }) {
   }
   if (rows.some((r) => r.length !== 3 || !r[1])) return "GitHub returned an unreadable file list (fail closed)";
   const github = rows.flatMap(([, f, prev]) => [f, prev]).filter((f) => f.startsWith(".github/"));
-  if (github.length) {
-    return `it changes ${[...new Set(github)].join(", ")}: the release guard and workflows live in .github/, so Taha merges it, never an agent (ship.md › Staging)`;
+  if (github.length || treesDiffer) {
+    return `it changes ${github.length ? [...new Set(github)].join(", ") : ".github/"}: the release guard and workflows live in .github/, so Taha merges it, never an agent (ship.md › Staging)`;
   }
   const files = rows.filter(([status, f]) => status !== "removed" && /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map(([, f]) => f);
   const found = [];

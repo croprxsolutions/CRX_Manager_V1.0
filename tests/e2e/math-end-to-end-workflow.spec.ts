@@ -231,13 +231,13 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         const h2 = page.locator('h2.font-semibold, h1.font-semibold').first();
         state.orderNumber = ((await h2.textContent()) ?? '').trim();
 
-        // Get order total from summary
-        const totalPriceLabel = page.locator('text=Total Price').first();
+        // Get order total from summary (Billing UI, Nov 13: the sale page tile is "Sale total", the order's total_price)
+        const totalPriceLabel = page.locator('text=Sale total').first();
         const totalVisible = await totalPriceLabel
           .isVisible({ timeout: 5000 })
           .catch(() => false);
         if (totalVisible) {
-          const val = await summaryValue(page, 'Total Price');
+          const val = await summaryValue(page, 'Sale total');
           state.orderTotalCents = parseDollars(val);
         }
 

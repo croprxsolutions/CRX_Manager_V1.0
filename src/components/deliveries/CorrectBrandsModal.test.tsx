@@ -97,7 +97,7 @@ describe('CorrectBrandsModal', () => {
     expect(correctDeliveryBrands).not.toHaveBeenCalled();
   });
   it.each(['added', 'dismissed'] as const)('confirms a typed brand with office review %s, excludes an empty line and sends no review authority', async (review_state) => {
-    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', epa_registration: '100-997', manufacturer: 'Maker', review_state };
+    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', epa_registration: '100-997', manufacturer: 'Maker', review_state, review_reason: 'Office checked', reviewed_by: 'reviewer' };
     getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], picks: [typed] }, brands.lines[1]] }));
     correctDeliveryBrands.mockReset();
     correctDeliveryBrands.mockResolvedValue({ delivery_id: 'D1', event_seq: 8, invoice_ids: [], picks: [] });

@@ -1,4 +1,4 @@
-## 2026-11-13 - Restore guidance budget and correct the MOA migration record
+## 2026-11-13 - Correct the applied MOA migration record
 
 An intermediate commit removed redundant wording from the shared contract introduction. The later staging merge retained staging's guidance, so this branch's final change against staging includes no `AGENTS.md` edit. The remaining record correction below changes no rule, gate, workflow, authority or limit.
 

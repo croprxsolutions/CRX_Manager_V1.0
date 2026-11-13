@@ -160,7 +160,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
       {brands && hasLines && (
         <div className="space-y-4">
           <p className="text-sm text-secondary">The brand amounts on each line must add up to what was delivered. The old brands stay in the history. Saving with no changes confirms the brands as they are.</p>
-          <p className="text-sm text-secondary">A capitalization-only edit to an office-reviewed typed brand keeps the recorded spelling.</p>
+          <p className="text-sm text-secondary">Changing only the capitalization of a reviewed typed brand's name keeps its recorded name.</p>
           <DeliveryBrandPicker
             brands={brands}
             drafts={drafts}

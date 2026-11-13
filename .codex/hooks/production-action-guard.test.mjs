@@ -104,7 +104,9 @@ const MAIN_INSIDE_STAGING = JSON.stringify({ status: "identical", ahead_by: 0, c
 const isMainCompare = (args) => args?.[0] === "api" && /\/compare\/[0-9a-f]{40}\.\.\.main$/.test(String(args?.[1] ?? ""));
 // No release being applied unless a test says so (releaseFreezeProblem, #1838 MED 2).
 const isReleasePrList = (args) => args?.[0] === "api" && /\/pulls\?base=main&state=open/.test(String(args?.[1] ?? ""));
-const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "[]" : runGh(args, ...rest)));
+// And no migration files on a staging PR unless a test says so (stagingDestructiveProblem, #1838 MED 3).
+const isPrFileList = (args) => args?.[0] === "api" && args?.[1] === "--paginate" && /\/pulls\/\d+\/files\?per_page=100$/.test(String(args?.[2] ?? ""));
+const withMainCompareDefault = (runGh, answer = MAIN_INSIDE_STAGING) => runGh && ((args, ...rest) => (isMainCompare(args) ? answer : isReleasePrList(args) ? "[]" : isPrFileList(args) ? "" : runGh(args, ...rest)));
 const evaluateProductionAction = (options) => evaluateProductionActionRaw(
   { ...options, runGh: ((inner) => (options?.rawMainCompare ? inner : withMainCompareDefault(inner, options?.mainCompare)))(
     options?.rawThreads ? options?.runGh : withThreadDefault(options?.runGh)) },

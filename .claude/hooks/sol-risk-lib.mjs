@@ -12,6 +12,7 @@
 
 import { isMoneyPath } from "./codex-bot-review-lib.mjs";
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
+import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
@@ -220,6 +221,38 @@ export function releaseFreezeProblem({ repo, gh }) {
     }
   }
   return null;
+}
+
+// #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into
+// staging it would merge unflagged and first meet his approval on release day, holding the whole release; so an
+// agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
+export function stagingDestructiveProblem({ repo, gh, number, headSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  if (!/^[0-9a-f]{40}$/i.test(String(headSha || "")) || !Number.isInteger(Number(number))) return "GitHub reported an unusable PR number or head (fail closed)";
+  const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
+  let files;
+  try {
+    files = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | select(.status != "removed") | .filename']))
+      .split(/\r?\n/).filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f));
+  } catch (error) {
+    return `the PR's files could not be read (${show(error)}) (fail closed)`;
+  }
+  const found = [];
+  for (const f of files) {
+    let sql;
+    try {
+      sql = Buffer.from(String(gh(["api", `${repoPath}/contents/${f}?ref=${headSha}`, "--jq", ".content"])).replace(/\s+/g, ""), "base64").toString("utf8");
+    } catch (error) {
+      return `${f} could not be read (${show(error)}) (fail closed)`;
+    }
+    let verdict;
+    try { verdict = destructiveMigrationCheck(sql); } catch { verdict = { destructive: true, reason: "it could not be checked" }; }
+    if (verdict?.destructive) found.push(`${f.split("/").pop()} (${verdict.reason})`);
+  }
+  return found.length
+    ? `it carries a destructive migration (${found.join(", ")}), which is Mason's on live, so an agent doesn't merge it into staging: Taha or Mason merges it, and Mason approves that exact file before release day`
+    : null;
 }
 
 // null when an agent may merge this PR (its other gates still apply).

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem, releaseFreezeProblem,
+  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -135,6 +135,25 @@ check("staging merges wait while the release is being applied (#1838 MED 2)", ()
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, new Error("HTTP 502")]]) }), /fail closed/);
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, new Error("HTTP 502")]]) }), /fail closed/);
   assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "{}"]]) }), /unexpected/);
+});
+
+check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {
+  const H = "a".repeat(40);
+  const b64 = (t) => Buffer.from(t).toString("base64");
+  const gh = (files, sql) => (args) => {
+    const a = args.join(" ");
+    if (/pulls\/5\/files/.test(a)) { if (files instanceof Error) throw files; return files; }
+    if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; return b64(sql); }
+    throw new Error(`unexpected ${a}`);
+  };
+  const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H });
+  assert.equal(run("src/a.ts\n", ""), null, "no migration");
+  assert.equal(run("supabase/migrations/x.sql\n", "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
+  assert.match(run("supabase/migrations/x.sql\n", "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
+  assert.match(run("supabase/migrations/x.sql\n", "DROP TABLE t;"), /DROP TABLE/);
+  assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
+  assert.match(run("supabase/migrations/x.sql\n", new Error("HTTP 502")), /fail closed/);
+  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H }), /fail closed/);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

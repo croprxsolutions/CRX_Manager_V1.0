@@ -635,7 +635,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
@@ -649,7 +649,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
   // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
   // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
-  ok(/"baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
+  ok(/"number,baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
   ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
     "a PR without a usable Follow-ups section is denied");
   ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),

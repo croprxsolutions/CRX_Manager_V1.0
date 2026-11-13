@@ -566,7 +566,9 @@ describe('generateInvoicePdf — legacy "Old Print" format', () => {
       } else {
         // The current layout prints the letterhead as the quote PDF does: the name as saved, one detail per line.
         for (const line of ['Test Ag Co', 'Agricultural Input Solutions', '1 Main St, Town, IL', '555-0199']) expect(printed).toContain(line);
-        expect(printed.some((t: unknown) => typeof t === 'string' && /crop rx solutions/i.test(t))).toBe(false);
+        expect(printed).not.toContain('Crop RX Solutions');
+        // The pay note names the legal payee, as the old footer did.
+        expect(printed).toContain('Make checks payable to Crop RX Solutions, Inc. and write the invoice number on the check.');
       }
       expect(printed.some((t: unknown) => typeof t === 'string' && t.includes('office@testag.test'))).toBe(true);
       expect(printed).not.toContain('CROP RX SOLUTIONS');
@@ -884,31 +886,83 @@ const PRINTED_BEFORE: Record<string, string[]> = {
   miscCharge: ['$120.00', '-$15.00', '$105.00', '-$105.00', '$0.00'],
 };
 
-// The only new amounts: subtotals of lines the same PDF prints (checked below).
-const ADDED_SUBTOTALS: Record<string, string[]> = {
-  fieldApplication: [],
-  chemicalSaleSplit: ['$666.60', '$1,421.84'],
-  creditMemo: [],
-  miscCharge: [],
+// The new layout's full list, in order, written as the old list with each deliberate change spelled out.
+const B = PRINTED_BEFORE;
+const PRINTED_AFTER: Record<string, string[]> = {
+  fieldApplication: [
+    ...B.fieldApplication.slice(0, 22), // the table, price per acre, grower shares, the finance strip: unchanged
+    '$2,790.00', // added: the Subtotal row (one row, the lines' sum), above Invoice total
+    ...B.fieldApplication.slice(22), // Invoice total (was "Subtotal"), payments, prepay, write-off, finance, balance, discount earned
+  ],
+  chemicalSaleSplit: [
+    ...B.chemicalSaleSplit.slice(0, 12), // three products and the Freight line (quantity, price, amount)
+    // removed: the discount and tax rows of the table (B[12..14]) move to the totals below
+    // removed: B[15], the "Total: $734.83" line under the table (Invoice total prints it once)
+    ...B.chemicalSaleSplit.slice(16, 18), // who pays: the two payers (was the shares table)
+    '$1,421.84', // added: Delivery total, the payers' sum
+    '$666.60', // added: Products row
+    '$45.00', // added: Freight row (the same amount as the Freight line)
+    ...B.chemicalSaleSplit.slice(12, 15), // moved: Standing discount 3%, "Sales tax 6.25%" label, its amount
+    B.chemicalSaleSplit[18], // Invoice total (was "Subtotal")
+    ...B.chemicalSaleSplit.slice(19), // payments, write-off, balance due
+  ],
+  creditMemo: [
+    ...B.creditMemo.slice(0, 2), // the table
+    ...B.creditMemo.slice(0, 2), // added: the Products and Other rows, the same amounts as the two lines
+    ...B.creditMemo.slice(2), // Invoice total (was "Subtotal"), balance due
+  ],
+  miscCharge: [
+    ...B.miscCharge.slice(0, 2), // the table
+    ...B.miscCharge.slice(0, 2), // added: the Service and Other rows, the same amounts as the two lines
+    ...B.miscCharge.slice(2), // Invoice total (was "Subtotal"), payments, balance due
+  ],
+};
+
+/** Every label in the totals and finance strip, with the exact value printed right after it. */
+const LABELLED: Record<string, Array<[string, string]>> = {
+  fieldApplication: [
+    ['Subtotal', '$2,790.00'], ['Invoice total', '$2,790.00'], ['Payments', '-$1,000.00'], ['Prepay applied', '-$250.00'],
+    ['Write-off', '-$15.00'], ['Finance charges', '$12.50'], ['Net Due (INV-2026-0001):', '$1,537.50'],
+    ['Balance due', '$1,525.00'], ['Discount earned (if paid early)', '$20.00'],
+  ],
+  chemicalSaleSplit: [
+    ['Products', '$666.60'], ['Freight', '$45.00'], ['Standing discount 3%', '-$20.00'], ['Sales tax 6.25%', '$43.23'],
+    ['Invoice total', '$734.83'], ['Payments', '-$100.00'], ['Write-off', '-$5.00'], ['Balance due', '$629.83'],
+  ],
+  creditMemo: [['Products', '-$44.75'], ['Other', '$5.00'], ['Invoice total', '-$39.75'], ['Balance due', '-$39.75']],
+  miscCharge: [['Service', '$120.00'], ['Other', '-$15.00'], ['Invoice total', '$105.00'], ['Payments', '-$105.00'], ['Balance due', '$0.00']],
+};
+
+const texts = () => mockDoc.text.mock.calls.map((c) => c[0]).flat(Infinity) as unknown[];
+/** The text drawn right after a label: the label's value on the same row. */
+const valueAfter = (label: string) => {
+  const all = texts();
+  const at = all.indexOf(label);
+  return at < 0 ? undefined : all[at + 1];
 };
 
 describe('invoice PDF money is unchanged by the quote-style layout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.getNumberOfPages.mockReturnValue(1);
   });
 
-  it.each(Object.keys(moneyFixtures))('%s prints every amount it printed before, and only sums of them besides', async (name) => {
+  it.each(Object.keys(moneyFixtures))('%s prints the old amounts, in order, with only the listed changes', async (name) => {
     await generateInvoicePdf(moneyFixtures[name]);
-    const printed = await printedNumbers();
-    expect([...new Set(PRINTED_BEFORE[name])].filter((v) => !printed.includes(v))).toEqual([]);
-    expect([...new Set(printed.filter((v) => !PRINTED_BEFORE[name].includes(v)))].sort()).toEqual([...ADDED_SUBTOTALS[name]].sort());
+    expect(await printedNumbers()).toEqual(PRINTED_AFTER[name]);
   });
 
-  it('the added amounts are the products subtotal and the delivery total', () => {
+  it.each(Object.keys(moneyFixtures))('%s prints each amount beside its label', async (name) => {
+    await generateInvoicePdf(moneyFixtures[name]);
+    expect(LABELLED[name].map(([label]) => [label, valueAfter(label)])).toEqual(LABELLED[name]);
+  });
+
+  it('the added amounts are subtotals of the same lines', () => {
     expect(24740 + 26850 + 15070).toBe(66660); // Products $666.60
     expect(73483 + 68701).toBe(142184); // Delivery total $1,421.84
     expect(66660 + 4500 - 2000 + 4323).toBe(73483); // the rows add up to the invoice total
+    expect(111000 + 72000 + 96000).toBe(279000); // field application Subtotal $2,790.00
   });
 });
 
@@ -920,17 +974,9 @@ describe('invoice PDF in the quote style', () => {
   });
 
   const split = () => ({ ...moneyFixtures.chemicalSaleSplit, purchase_order_ref: '4471', account_number: 'C-1042', salesman_name: 'Test Admin' });
-  const texts = () => mockDoc.text.mock.calls.map((c) => c[0]).flat(Infinity) as unknown[];
   const tables = async () => vi.mocked((await import('jspdf-autotable')).default).mock.calls
     .map(([, opts]) => opts as { head?: unknown[][]; body?: unknown[][] })
     .map((o) => ({ head: (o.head?.[0] ?? []).map(cellText), body: (o.body ?? []).map((r) => r.map(cellText)) }));
-  /** The text drawn right after a label: the label's value on the same row. */
-  const valueAfter = (label: string) => {
-    const all = texts();
-    const at = all.indexOf(label);
-    return at < 0 ? undefined : all[at + 1];
-  };
-
   it('heads the first page with the logo, "Invoice" and the invoice details', async () => {
     await generateInvoicePdf(split());
     expect(mockDoc.addImage).toHaveBeenCalledTimes(1);
@@ -1012,5 +1058,68 @@ describe('invoice PDF in the quote style', () => {
     const products = (await tables()).find((t) => t.head[0] === 'Product')!;
     expect(products.body.some((r) => r.includes('Sales tax 6.25%'))).toBe(true);
     expect(valueAfter('Invoice total')).toBe('$730.00');
+  });
+
+  it('keeps the totals beside Who pays when the payer table runs onto the next page', async () => {
+    const autoTable = vi.mocked((await import('jspdf-autotable')).default);
+    const original = autoTable.getMockImplementation()!;
+    const log: Array<{ text: unknown; page: number; x: number; y: number }> = [];
+    let page = 1;
+    mockDoc.setPage.mockImplementation((n: number) => { page = n; });
+    mockDoc.text.mockImplementation((text: unknown, x: number, y: number) => { log.push({ text, page, x, y }); });
+    let payerTable: { startY: number; margin: { right: number } } | undefined;
+    autoTable.mockImplementation((doc: unknown, opts: unknown) => {
+      const o = opts as { startY: number; head: unknown[][]; margin: { right: number } };
+      if (o.head[0][0] === 'Payer') {
+        // A long payer list: the table ends on page 2.
+        payerTable = o;
+        page = 2;
+        mockDoc.getNumberOfPages.mockReturnValue(2);
+        (doc as typeof mockDoc).lastAutoTable = { finalY: 140 };
+      } else {
+        (doc as typeof mockDoc).lastAutoTable = { finalY: o.startY + 100 };
+      }
+    });
+    try {
+      await generateInvoicePdf(split());
+      const at = (text: string) => log.find((l) => l.text === text)!;
+      const whoPays = at('WHO PAYS FOR THIS DELIVERY');
+      expect(whoPays.page).toBe(1);
+      for (const label of ['Products', 'Invoice total', 'Balance due']) {
+        expect(at(label).page).toBe(1);
+        expect(at(label).y).toBeGreaterThan(whoPays.y - 9);
+        // To the right of the payer table, so the two never overlap.
+        expect(at(label).x).toBeGreaterThan(612 - payerTable!.margin.right);
+      }
+      // What follows starts on the last page, below the payer table.
+      const note = at('Please pay by 04/01/2026.');
+      expect(note.page).toBe(2);
+      expect(note.y).toBeGreaterThan(140);
+    } finally {
+      autoTable.mockImplementation(original);
+      mockDoc.text.mockReset();
+      mockDoc.setPage.mockReset();
+      mockDoc.getNumberOfPages.mockReturnValue(1);
+    }
+  });
+
+  it('moves the price per acre line to a new page when the table ends at the content bottom', async () => {
+    const autoTable = vi.mocked((await import('jspdf-autotable')).default);
+    autoTable.mockImplementationOnce((doc: unknown) => { (doc as typeof mockDoc).lastAutoTable = { finalY: 720 }; });
+    await generateInvoicePdf(makeInvoiceData({ options: { show_shares: false, show_price_per_acre: true, show_epa_registration: true } }));
+    const call = mockDoc.text.mock.calls.findIndex((c) => typeof c[0] === 'string' && c[0].startsWith('Price per acre'));
+    expect(mockDoc.addPage).toHaveBeenCalled();
+    expect(mockDoc.addPage.mock.invocationCallOrder[0]).toBeLessThan(mockDoc.text.mock.invocationCallOrder[call]);
+    expect(mockDoc.text.mock.calls[call][2]).toBeLessThanOrEqual(792 - 66);
+  });
+
+  it('labels a field application\'s first totals row "Subtotal" and a chemical sale\'s "Products"', async () => {
+    await generateInvoicePdf(moneyFixtures.fieldApplication);
+    expect(texts()).toContain('Subtotal');
+    expect(texts()).not.toContain('Products');
+    vi.clearAllMocks();
+    await generateInvoicePdf(moneyFixtures.chemicalSaleSplit);
+    expect(texts()).toContain('Products');
+    expect(texts()).not.toContain('Subtotal');
   });
 });

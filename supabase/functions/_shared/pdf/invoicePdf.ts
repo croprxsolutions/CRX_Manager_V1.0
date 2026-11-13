@@ -20,7 +20,7 @@ import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts"
 import { dueDateFromTerms } from "../paymentTerms.ts";
 import { invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
 import type { CellDef, Styles } from "npm:jspdf-autotable@5.0.9";
-import { type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo } from "./companyInfo.ts";
+import { COMPANY_LEGAL_NAME, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo } from "./companyInfo.ts";
 import { type InvoiceBreakdown, invoiceBreakdown } from "./invoiceBreakdown.ts";
 import {
   drawCompanyBlock, drawLogo, drawPageFooters, Q_CONTENT_BOTTOM, Q_CONTINUED_TOP, Q_LOGO_RATIO, Q_LOGO_WIDTH, Q_MARGIN_TOP,
@@ -843,7 +843,7 @@ export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfDat
   else if (data.invoice_type === 'chemical_sale') drawChemicalSaleLayout(p);
   else drawMiscChargeLayout(p);
   drawTotals(p);
-  drawPayNote(p, company);
+  drawPayNote(p);
   if (data.footer_notes) {
     p.y += 10;
     drawBoxedNote(p, data.footer_notes);
@@ -1128,6 +1128,7 @@ function drawFieldApplicationLayout(p: Page): void {
 
   if (opts.show_price_per_acre && data.total_acres && data.total_acres > 0) {
     const pricePerAcre = data.total_amount_cents / 100 / data.total_acres;
+    if (p.y + 18 > p.bottom) newPage(p);
     p.y += 14;
     doc.setFontSize(8.25);
     doc.setFont('helvetica', 'normal');
@@ -1225,7 +1226,9 @@ function breakdownRows(p: Page): Array<[string, string]> {
   const b = p.breakdown;
   if (!b) return [];
   const others = [...b.charges, ...(b.discount ? [b.discount] : []), ...(b.tax ? [b.tax] : [])];
-  const products = b.productsCents !== 0 || others.length === 0 ? [{ label: 'Products', cents: b.productsCents }] : [];
+  // A field application's first row holds the application fee too, so it is a subtotal, not products.
+  const first = p.data.invoice_type === 'field_application' ? 'Subtotal' : 'Products';
+  const products = b.productsCents !== 0 || others.length === 0 ? [{ label: first, cents: b.productsCents }] : [];
   return [...products, ...others].map(({ label, cents }) => [label || 'Other charges', fmt(cents)]);
 }
 
@@ -1247,15 +1250,25 @@ function drawTotals(p: Page): void {
   const height = Math.max((rows.length + after.length) * 12 + 76, payers ? 30 + (payers.length + 2) * 17 : 0);
   p.y += 18;
   if (p.y + height > p.bottom) newPage(p);
-  const top = p.y;
-  let payersEnd = top;
-  if (payers) {
-    drawWhoPays(p, payers);
-    payersEnd = p.y;
-    p.y = top;
+  if (!payers) {
+    drawTotalsBlock(p, rows, after);
+    return;
   }
+  // Content is always drawn on the last page. Who pays may run onto a new page; the totals stay beside its start.
+  const top = p.y;
+  const startPage = p.doc.getNumberOfPages();
+  drawWhoPays(p, payers);
+  const payersEnd = p.y;
+  const endPage = p.doc.getNumberOfPages();
+  if (endPage !== startPage) p.doc.setPage(startPage);
+  p.y = top;
   drawTotalsBlock(p, rows, after);
-  p.y = Math.max(p.y, payersEnd);
+  if (endPage !== startPage) {
+    p.doc.setPage(endPage);
+    p.y = payersEnd;
+  } else {
+    p.y = Math.max(p.y, payersEnd);
+  }
 }
 
 function drawTotalsRows(p: Page, rows: Array<[string, string]>, x: number): void {
@@ -1342,11 +1355,11 @@ function drawWhoPays(p: Page, payers: InvoicePdfShare[]): void {
 }
 
 /** "Please pay by <due date>." and how to pay, while anything is owed. */
-function drawPayNote(p: Page, company: CompanyInfo): void {
+function drawPayNote(p: Page): void {
   if (p.data.balance_cents <= 0) return;
   const lead = p.data.due_date ? `Please pay by ${fmtDate(p.data.due_date)}.` : 'Payment is due on receipt.';
   p.y += 16;
-  drawBoxedNote(p, `Make checks payable to ${company.name} and write the invoice number on the check.`, lead);
+  drawBoxedNote(p, `Make checks payable to ${COMPANY_LEGAL_NAME} and write the invoice number on the check.`, lead);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

@@ -10,6 +10,33 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-08 — Field split rules: who may be billed, split dates, the extra penny, archiving fields
+
+**Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
+- **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
+- **Split changes:** a new split starts on a date the office picks (any date, past or future, from the first package on; superseded the earlier today-only limit, see the 2026-11-08 Astra-review entry below); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
+- **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
+**Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
+**What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
+
+## 2026-11-08 — Field splits: separate application and product shares; "shared with" on bills; posted field invoices editable until money or month close
+
+**Decision (Mason, in chat, 2026-11-08 evening, after the plan was compared with other ag retail software):** each payer on a field's split has an application share and a product share, set on the field; application and fuel-surcharge lines start from the application shares, product lines from the product shares, and any one line can still be changed by hand before posting. Each payer's invoice shows who else shares it. A posted field-application invoice can be edited (unpost, change, re-post, whole payer set) while no payment, prepay, credit or write-off is applied to any invoice in the set and its accounting month is open; after that, only a credit and a new bill.
+**Why:** matches how other ag retail systems split landlord and tenant bills by product group, with only the two groups CRX needs, and lets the office fix a bill before money or the month makes it final.
+**What this forbids/implies:** replaces the yes/no "pays application" flag in the fields-and-who-pays plan (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §0); no edit of a posted field invoice once money touches it or its month closes.
+
+## 2026-11-08 — Field splits: any start date from the start; fuel surcharge follows who pays application
+
+**Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.
+
+**What this forbids/implies:** the old invoice, job-transfer, blend-ticket and field-linked order screens are not made date-aware. Mason confirmed the same day that field application invoices are not billed until February, the feature is used from about March, and the old screens stay on for testing only ("im not using them so just keep them on so we can test etc no real orders will be entered"); each later package's cutover checks that no real record went through an old screen. A nightly job keeps the old copy current when a future split starts. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
+
+## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
+
+**Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
+**Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
+**What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
 ## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

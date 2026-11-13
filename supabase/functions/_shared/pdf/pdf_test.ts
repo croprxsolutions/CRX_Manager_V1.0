@@ -102,10 +102,10 @@ Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved 
     assert(text.includes(printed), `PDF does not print ${printed}`);
   }
   // The letterhead takes the Settings company details; a blank address keeps the default town.
-  for (const printed of ["TEST AG CO", "555-0199", "office@testag.test", "West York, IL"]) {
+  for (const printed of ["Test Ag Co", "555-0199", "office@testag.test", "West York, IL"]) {
     assert(text.includes(printed), `PDF does not print the Settings value ${printed}`);
   }
-  assert(!text.includes("CROP RX SOLUTIONS"), "PDF still prints the built-in company name");
+  assert(!/crop rx solutions/i.test(text), "PDF still prints the built-in company name");
 });
 
 Deno.test("any failed invoice read refuses instead of drawing a PDF with parts missing", async () => {

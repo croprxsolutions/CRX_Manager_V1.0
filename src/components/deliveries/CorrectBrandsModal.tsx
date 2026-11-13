@@ -17,10 +17,6 @@ import DeliveryBrandPicker from './DeliveryBrandPicker';
 
 const delivered = (line: DeliveryBrandLine) => line.quantity_delivered ?? line.quantity;
 
-/**
- * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
- * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
- */
 /** The server preserves office review for unchanged typed identities, including amount-only corrections. */
 function linesToConfirm(lines: DeliveryBrandLine[]): string[] {
   return lines.filter((l) => l.picks.length > 0).map((l) => l.delivery_item_id);
@@ -36,6 +32,10 @@ function correctionMismatch(brands: DeliveryBrands, changed: string[], drafts: D
     Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])), true)[0];
 }
 
+/**
+ * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
+ * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
+ */
 export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyChange }: {
   open: boolean; deliveryId: string; onClose: () => void; onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -160,6 +160,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
       {brands && hasLines && (
         <div className="space-y-4">
           <p className="text-sm text-secondary">The brand amounts on each line must add up to what was delivered. The old brands stay in the history. Saving with no changes confirms the brands as they are.</p>
+          <p className="text-sm text-secondary">A capitalization-only edit to an office-reviewed typed brand keeps the recorded spelling.</p>
           <DeliveryBrandPicker
             brands={brands}
             drafts={drafts}

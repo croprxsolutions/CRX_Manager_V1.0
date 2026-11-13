@@ -1634,12 +1634,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
-    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
+    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
     author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
+      startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
+    { __typename: "CheckRun", workflowName: "Release flow", name: "Release flow guard (main)", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
   const crThread = (resolved, outdated = false) => ({ isResolved: resolved, isOutdated: outdated,
@@ -1774,6 +1776,25 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ behindBy: "" }), "does not contain its base", "an empty compare answer fails closed");
   ok(gate({ behindBy: "0\n" }).ok === true, "a head that contains its base passes");
   refused(gate({ pr: { baseRefName: "develop" } }), "does not target main", "a PR into another branch is refused");
+  refused(gate({ pr: { baseRefName: "staging" } }), "staging database job applies it after the merge", "a PR into staging is never applied live before its merge");
+  for (const head of ["claude/feature", "main", "hotfix/a/b", "release/next2", "release/other", ""]) {
+    refused(gate({ pr: { headRefName: head } }), "is not the release PR (release/next) or a hotfix/<name> PR", `into main, only the release PR and a hotfix are applied live first (${head || "no head"})`);
+  }
+  // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // The name alone is not enough: main's release guard must have passed on this head.
+  const build = readyPr.statusCheckRollup[0];
+  const guardRun = readyPr.statusCheckRollup[1];
+  for (const head of ["release/next", "hotfix/test-fix"]) {
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build] } }), "no green \"Release flow guard (main)\"", `${head}: a missing release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, conclusion: "SKIPPED" }] } }), "no green \"Release flow guard (main)\"", `${head}: a skipped release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, status: "IN_PROGRESS", conclusion: "" }] } }), "not merge-ready", `${head}: a running release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, name: "Release flow guard (staging)" }] } }), "no green \"Release flow guard (main)\"", `${head}: the staging guard does not count`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, workflowName: "Other" }] } }), "no green \"Release flow guard (main)\"", `${head}: a job of that name in another workflow does not count`);
+  }
+  const earlier = new Date(Date.now() - 60000).toISOString();
+  ok(gate({ pr: { headRefName: "release/next", statusCheckRollup: [build, { ...guardRun, conclusion: "FAILURE", startedAt: earlier, completedAt: earlier }, guardRun] } }).ok === true,
+    "a release guard that failed, then passed on a re-run, counts as green");
   refused(gate({ pr: { headRefOid: "c".repeat(40) } }), "is not this checkout's HEAD", "a checkout behind or ahead of the PR head is refused");
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.

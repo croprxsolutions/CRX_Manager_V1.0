@@ -75,6 +75,14 @@ function eq(a, b, m) { assert.equal(a, b, m); pass++; }
   ok(!blocked("gh pr create --help"), "--help allowed");
   ok(!blocked("echo gh pr create --base main"), "echo of the text is not a PR");
   ok(blocked("GH_REPO=o/r gh pr create --base main --fill"), "env assignment before gh still checked");
+  // Codex review on #1863
+  ok(!blocked(`gh pr create --base="staging" --fill`), "quoted attached --base=\"staging\" allowed");
+  ok(blocked(`gh pr create --base="main" --fill`), "quoted attached --base=\"main\" still blocked");
+  ok(!blocked("gh api --method GET repos/o/r/pulls -f base=main"), "listing PRs into main (GET) allowed");
+  ok(!blocked("gh api -X GET repos/o/r/pulls -f base=main"), "-X GET listing allowed");
+  ok(blocked("gh api -X POST repos/o/r/pulls -f base=main"), "explicit POST into main blocked");
+  ok(!blocked(`gh api graphql -f query='query { repository(owner:"o",name:"r") { pullRequests(first:5) { nodes { baseRefName } } } }'`), "GraphQL read of baseRefName allowed");
+  ok(blocked(`gh api graphql -f query='mutation { updatePullRequest(input:{pullRequestId:"x",baseRefName:"main"}) { clientMutationId } }'`), "GraphQL mutation setting baseRefName blocked");
 }
 
 // ── direct dangerous-command patterns (unchanged behavior) ────────────────

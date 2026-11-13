@@ -514,7 +514,8 @@ export function readPackageScripts(cwd) {
 const MAIN_PR_HEAD_RE = /^(?:release\/next|hotfix\/[^/]+)$/;
 const FOLDER_CHANGE_HEADS = new Set(["cd", "pushd", "set-location", "sl", "chdir"]);
 function unquoteWord(word) {
-  return String(word).replace(/^["']|["']$/g, "");
+  // Quotes can sit inside a word (`--base="staging"`); branch names never hold them.
+  return String(word).replace(/["']/g, "");
 }
 // The LAST value wins, as it does for gh when a flag repeats.
 function prFlagValue(args, long, short) {
@@ -562,10 +563,14 @@ function checkPrBaseText(text, cwd, branchOf) {
     while (ghIndex < words.length && /^[A-Za-z_]\w*=/.test(words[ghIndex])) ghIndex += 1;
     if (!/^gh(?:\.exe|\.cmd)?$/i.test(String(words[ghIndex] || "").split(/[\\/]/).pop())) continue;
     if (words[ghIndex + 1] === "api") {
-      if (/createPullRequest|baseRefName/i.test(segment)) {
+      // A query that only reads `baseRefName` is fine; a mutation that sets it is not.
+      if (/\bmutation\b/i.test(segment) && /createPullRequest|baseRefName/i.test(segment)) {
         return "Blocked a GraphQL call that opens a PR or sets its target branch: that branch cannot be checked here. Use `gh pr create --base staging`.";
       }
       if (!words.some((word) => /\/pulls(?:\/\d+)?\/?$/.test(word))) continue;
+      // `--method GET` sends the fields as a list filter, not a new PR.
+      const method = prFlagValue(words.slice(ghIndex + 2), "--method", "-X");
+      if (method !== null && method.toUpperCase() === "GET") continue;
       const bases = words.map((word) => REST_BASE_FIELD_RE.exec(word)?.[1]).filter((value) => value !== undefined);
       if (words.some((word) => word === "--input" || word.startsWith("--input=")) || bases.some((value) => branchName(value) !== "staging")) {
         return "Blocked a raw `gh api …/pulls` call that sets a PR's target branch to something other than `staging`. Use `gh pr create --base staging` (a hotfix: `--base main --head hotfix/<name>`).";

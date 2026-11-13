@@ -24,14 +24,47 @@ import type { CommitRateReviewResult, RateReviewResult, RateReviewWorkbook } fro
 const ACTION_WORDS: Record<string, string> = { save: 'save values', approve: 'approve', reopen: 'send back to draft', delete: 'delete' };
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 type PendingRateReview = { actorId: string; upload: ParsedRateReview; preview: RateReviewResult };
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const nullableText = (value: unknown) => value === null || typeof value === 'string';
+const rowNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value > 0;
+const versionNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const isStoredRate = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return rowNumber(value.sheetRow) && typeof value.parent_name === 'string' && typeof value.parent_id === 'string'
+    && nullableText(value.rate_id) && (value.expected_row_version === null || versionNumber(value.expected_row_version))
+    && ['basis', 'source', 'low', 'recommended', 'high', 'unit', 'over_label_reason', 'reason'].every((field) => nullableText(value[field]))
+    && typeof value.is_quoting_default === 'boolean'
+    && (value.decision === null || value.decision === 'approve' || value.decision === 'reopen' || value.decision === 'delete');
+};
+const isStoredOutcome = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return rowNumber(value.sheetRow) && typeof value.parent_name === 'string' && typeof value.parent_id === 'string'
+    && versionNumber(value.expected_outcome_version) && nullableText(value.note)
+    && (value.outcome === null || value.outcome === 'approved_default' || value.outcome === 'no_per_acre_default' || value.outcome === 'needs_label_data');
+};
+const isStoredPreviewRow = (value: unknown, count: number) => {
+  if (!isRecord(value)) return false;
+  if (typeof value.index !== 'number' || !Number.isInteger(value.index) || value.index < 0 || value.index >= count
+      || typeof value.status !== 'string') return false;
+  if (['rate_id', 'parent_id', 'name', 'outcome', 'note', 'problem'].some((field) => value[field] !== undefined && !nullableText(value[field]))) return false;
+  if (value.actions != null && (!Array.isArray(value.actions) || !value.actions.every((action: unknown) => typeof action === 'string'))) return false;
+  if (value.label_check != null) {
+    if (!isRecord(value.label_check) || typeof value.label_check.status !== 'string') return false;
+    if (value.label_check.status === 'above' && (!Array.isArray(value.label_check.above) || !value.label_check.above.every(isRecord))) return false;
+    if (value.label_check.why != null && typeof value.label_check.why !== 'string') return false;
+  }
+  return true;
+};
 const isPendingRateReview = (value: unknown): value is PendingRateReview => {
-  if (!value || typeof value !== 'object') return false;
-  const request = value as Partial<PendingRateReview>;
-  return typeof request.actorId === 'string' && !!request.upload && Array.isArray(request.upload.rates)
-    && Array.isArray(request.upload.outcomes) && !!request.upload.recorded
-    && typeof request.upload.recorded === 'object' && !!request.preview && Array.isArray(request.preview.rates)
-    && Array.isArray(request.preview.outcomes)
-    && [...request.preview.rates, ...request.preview.outcomes].every((row) => row && typeof row.index === 'number' && typeof row.status === 'string');
+  if (!isRecord(value) || typeof value.actorId !== 'string' || !isRecord(value.upload) || !isRecord(value.preview)) return false;
+  const { rates, outcomes, recorded } = value.upload;
+  const previewRates = value.preview.rates;
+  const previewOutcomes = value.preview.outcomes;
+  return Array.isArray(rates) && rates.every(isStoredRate) && Array.isArray(outcomes) && outcomes.every(isStoredOutcome)
+    && isRecord(recorded) && Object.values(recorded).every((outcome) => typeof outcome === 'string')
+    && Array.isArray(previewRates) && previewRates.every((row) => isStoredPreviewRow(row, rates.length))
+    && Array.isArray(previewOutcomes) && previewOutcomes.every((row) => isStoredPreviewRow(row, outcomes.length));
 };
 const retryProblem = (pending: PendingRetry<PendingRateReview> | null, kept: PendingRetry<PendingRateReview> | null,
   actorId: string, upload: ParsedRateReview): string | null => {

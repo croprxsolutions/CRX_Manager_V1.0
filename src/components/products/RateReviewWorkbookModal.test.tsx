@@ -205,6 +205,30 @@ describe('RateReviewWorkbookModal', () => {
     expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeDisabled();
   });
 
+  it('refuses to restore a damaged rate row instead of rendering or retrying it', () => {
+    const name = 'crx:pending-retry:rate-review:u1';
+    sessionStorage.setItem(name, JSON.stringify({ key: 'old-key', sentAt: Date.now(), request: {
+      actorId: 'u1', upload: { ...upload, rates: [null] },
+      preview: { rates: [{ index: 0, status: 'change' }], outcomes: [] },
+    } }));
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(screen.queryByLabelText('Rate review preview')).not.toBeInTheDocument();
+    expect(H.commit).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(name)).toBeNull();
+  });
+
+  it('restores a valid pending review whose downloaded versions are zero', async () => {
+    const initial = { ...upload, rates: [{ ...upload.rates[0], expected_row_version: 0 }],
+      outcomes: [{ ...upload.outcomes[0], expected_outcome_version: 0 }] };
+    sessionStorage.setItem('crx:pending-retry:rate-review:u1', JSON.stringify({ key: 'old-key', sentAt: Date.now(), request: {
+      actorId: 'u1', upload: initial,
+      preview: { rates: [{ index: 0, status: 'change' }], outcomes: [{ index: 0, status: 'change', parent_id: P1, name: 'Atrazine 4L' }] },
+    } }));
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+    expect(H.commit).not.toHaveBeenCalled();
+  });
+
   it('shows no other admin a previous admin’s unanswered preview', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     H.commit.mockRejectedValue(new TypeError('Failed to fetch'));

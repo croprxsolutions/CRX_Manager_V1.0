@@ -36,7 +36,8 @@ jobs:
     permissions:
       actions: write # hotfix PRs: ask the release bot for their release-gate
       contents: read
-      pull-requests: read # hotfix PRs: who added hotfix-backport
+      issues: read # hotfix PRs: who added hotfix-backport (issue events)
+      pull-requests: read
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
       BASE_REF: ${{ github.base_ref }}

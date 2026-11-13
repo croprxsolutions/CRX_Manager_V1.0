@@ -246,7 +246,12 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (headRef !== "release/next") {
     let trees;
     try {
-      const names = (branch) => String(gh(["api", `repos/{owner}/{repo}/git/trees/${branch}:supabase/migrations`, "--jq", "if .truncated then error(\"truncated\") else .tree[].path end"])).split(/\r?\n/).filter(Boolean);
+      // Documented route: the directory's tree id from the contents API, then that tree (no ref:path ids).
+      const names = (branch) => {
+        const dirSha = String(gh(["api", `repos/{owner}/{repo}/contents/supabase?ref=${branch}`, "--jq", '.[] | select(.path == "supabase/migrations" and .type == "dir") | .sha'])).trim();
+        if (!/^[0-9a-f]{40}$/i.test(dirSha)) throw new Error(`no supabase/migrations directory on ${branch}`);
+        return String(gh(["api", `repos/{owner}/{repo}/git/trees/${dirSha}`, "--jq", "if .truncated then error(\"truncated\") else .tree[].path end"])).split(/\r?\n/).filter(Boolean);
+      };
       trees = { mainFiles: names("main"), stagingFiles: names("staging") };
     } catch (error) {
       if (OUT(error)) throw error;
@@ -276,8 +281,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (!guard.length || !guard.every((c) => String(c.status || "").toUpperCase() === "COMPLETED" && String(c.conclusion || "").toUpperCase() === "SUCCESS")) {
     return refuse(`${number} has no green "Release flow guard (main)" check, so it is not proven to carry only what it should. Wait for it, or fix what it reports.`);
   }
-  // Sol, #1838: before switch-on the guard passed without checking anything, so only a run finished after it counts.
-  if (!guard.every((c) => Date.parse(String(c.completedAt || "")) > Date.parse(RELEASE_FLOW_ON_AT))) {
+  // Sol, #1838: before switch-on the guard passed without checking anything, so only a run started after it counts.
+  if (!guard.every((c) => Date.parse(String(c.startedAt || "")) > Date.parse(RELEASE_FLOW_ON_AT))) {
     return refuse(`${number}'s "Release flow guard (main)" result is from before the release flow was switched on (${RELEASE_FLOW_ON_AT}), when it checked nothing. Re-run that check, then retry.`);
   }
   // #1838 HIGH 2: GitHub runs the PR's own copy of the workflows, so a PR that changes .github/workflows could
@@ -286,7 +291,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let workflowsOnMain;
   try {
     workflowsHere = String(git(["rev-parse", "HEAD:.github/workflows"])).trim();
-    workflowsOnMain = String(gh(["api", "repos/{owner}/{repo}/git/trees/main:.github", "--jq", '.tree[] | select(.path == "workflows") | .sha'])).trim();
+    workflowsOnMain = String(gh(["api", "repos/{owner}/{repo}/contents/.github?ref=main", "--jq", '.[] | select(.name == "workflows" and .type == "dir") | .sha'])).trim();
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not compare ${number}'s .github/workflows with main's (${error?.message || error}); fail closed.`);

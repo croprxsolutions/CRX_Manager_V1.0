@@ -144,7 +144,7 @@ if (typeof toolInput.command === "string" && /\bapi\s+graphql\b|\/graphql\b/i.te
 // Agents never approve a pull request (#1838 HIGH 2): the GitHub review tools and any shell or API spelling.
 {
   const approval = /pull_request_review/i.test(toolName) && /APPROVE/.test(JSON.stringify(toolInput))
-    ? prApprovalProblem("review APPROVE")
+    ? prApprovalProblem("review event=APPROVE")
     : null;
   if (approval) deny(`PR MERGE GATE: ${approval}.`);
 }

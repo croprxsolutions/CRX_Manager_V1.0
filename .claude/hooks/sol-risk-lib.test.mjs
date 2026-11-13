@@ -123,7 +123,10 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
 check("agents never approve a pull request (#1838 HIGH 2)", () => {
   for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE",
     "gh api repos/o/r/pulls/5/reviews --method POST --input /tmp/review.json", "gh api graphql -F query=@q.graphql -f v='{}' # submitPullRequestReview"]) assert.ok(prApprovalProblem(t), t);
-  for (const t of ["gh api repos/o/r/pulls/5/reviews", "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body=note"]) assert.equal(prApprovalProblem(t), null, t);
+  for (const t of ["gh api repos/o/r/pulls/5/reviews", "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body=note",
+    "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body='Please do not APPROVE this yet'"]) assert.equal(prApprovalProblem(t), null, t);
+  for (const t of ["curl -d @body.json https://api.github.com/repos/o/r/pulls/5/reviews", "gh api graphql -F query=@/tmp/approve.graphql",
+    "curl --data-binary @q.json https://api.github.com/graphql"]) assert.ok(prApprovalProblem(t), t);
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
@@ -131,13 +134,18 @@ check("staging merges wait while the release is being applied (#1838 MED 2)", ()
   const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
   const list = /pulls\?base=main&state=open/;
   const comments = /issues\/77\/comments/;
-  assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[]"]]) }), null, "no release PR open");
-  assert.equal(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "Staging proof: x\nlooks good"]]) }), null, "release open, nothing applied yet");
-  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "note\nApplied live: 20270110100000_x"]]) }), /#77.*being applied live/);
-  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, "Ready to merge: abcdef1"]]) }), /#77/, "Taha's go-ahead starts the freeze");
-  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, new Error("HTTP 502")]]) }), /fail closed/);
-  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "[77]"], [comments, new Error("HTTP 502")]]) }), /fail closed/);
-  assert.match(releaseFreezeProblem({ repo: "o/r", gh: gh([[list, "{}"]]) }), /unexpected/);
+  const now = Date.parse("2026-11-19T10:00:00Z");
+  const c = (login, body, at = "2026-11-19T09:50:00Z") => JSON.stringify({ login, at, body });
+  const run = (answers) => releaseFreezeProblem({ repo: "o/r", gh: gh(answers), now });
+  assert.equal(run([[list, ""]]), null, "no release PR open");
+  assert.equal(run([[list, "77"], [comments, c("someone", "Staging proof: x")]]), null, "release open, nothing applied yet");
+  assert.match(run([[list, "77"], [comments, c("masonwells1", "note\nApplied live: 20270110100000_x")]]), /#77.*being applied live/);
+  assert.match(run([[list, "77"], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef1")]]), /#77/, "Taha's fresh go-ahead starts the freeze");
+  assert.equal(run([[list, "77"], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef1", "2026-11-19T09:00:00Z")]]), null, "an expired go-ahead freezes nothing");
+  assert.equal(run([[list, "77"], [comments, c("stranger", "Ready to merge: abcdef1") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
+  assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
+  assert.match(run([[list, "77"], [comments, new Error("HTTP 502")]]), /fail closed/);
+  assert.match(run([[list, "nope"]]), /fail closed/);
 });
 
 check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {

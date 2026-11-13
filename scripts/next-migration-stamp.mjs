@@ -131,6 +131,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   try {
     const { seen, prCount, mainTop, waiting } = collect();
+    if (hotfix && flags["--gap-minutes"] !== undefined) {
+      console.error("--gap-minutes doesn't apply to --hotfix: a hotfix stamp sits one free minute above main's newest");
+      process.exit(2);
+    }
     if (hotfix) {
       const ceiling = waiting.filter((w) => w > mainTop).sort()[0] ?? "";
       const stamp = hotfixStamp({ mainTop, live, ceiling, taken: new Set(seen.map((x) => x.stamp)) });

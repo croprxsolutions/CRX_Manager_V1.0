@@ -1710,16 +1710,18 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         if (stagingBehind instanceof Error) throw stagingBehind;
         return stagingBehind;
       }
-      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/git/trees/main:.github") {
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/contents/.github?ref=main") {
         if (workflowsMain instanceof Error) throw workflowsMain;
         return `${workflowsMain}\n`;
       }
       // The hotfix stamp check lists the migrations on main and staging (#1838 HIGH 1).
-      const tree = /^repos\/\{owner\}\/\{repo\}\/git\/trees\/(main|staging):supabase\/migrations$/.exec(String(args[1]));
-      if (args[0] === "api" && tree) {
+      const dir = /^repos\/\{owner\}\/\{repo\}\/contents\/supabase\?ref=(main|staging)$/.exec(String(args[1]));
+      if (args[0] === "api" && dir) {
         if (treesError) throw treesError;
-        return trees[tree[1]].join("\n") + "\n";
+        return `${dir[1] === "main" ? "1".repeat(40) : "2".repeat(40)}\n`;
       }
+      const tree = /^repos\/\{owner\}\/\{repo\}\/git\/trees\/(1{40}|2{40})$/.exec(String(args[1]));
+      if (args[0] === "api" && tree) return trees[tree[1][0] === "1" ? "main" : "staging"].join("\n") + "\n";
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
         assert.deepEqual(args, ["api", `repos/{owner}/{repo}/compare/${base}...${HEAD_SHA}`, "--jq", ".behind_by"]);
@@ -1832,6 +1834,8 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     const old = "2026-11-12T10:00:00Z";
     refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old, completedAt: old }] } }),
       "from before the release flow was switched on", "a pre-switch-on guard result is refused");
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old }] } }),
+      "from before the release flow was switched on", "a run started before switch-on and finished after is refused (Luna)");
   }
   // Sol (#1838): a release guard result goes stale when staging moves after it ran.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release head that contains staging's tip passes");

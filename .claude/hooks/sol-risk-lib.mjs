@@ -189,12 +189,16 @@ export function prApprovalProblem(text) {
   const ghReview = /\bpr\s+review\b/i.exec(t);
   const cliApprove = ghReview && /\bgh(?:\.exe)?\b/i.test(t) &&
     t.slice(ghReview.index).split(/\s+/).some((w) => /^--approve(?:=|$)/i.test(w) || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
-  const apiApprove = /\bAPPROVE\b/.test(t) && /review/i.test(t);
+  // An approve EVENT, not the word in a comment's text (Luna): event=APPROVE, "event":"APPROVE", event: APPROVE.
+  const apiApprove = /\bevent\W{0,6}APPROVE\b/i.test(t) && /review/i.test(t);
   // A write to a PR's reviews whose event isn't spelled out here (--input <file>, a variables file) may approve: only a
   // visible COMMENT or REQUEST_CHANGES passes (Luna, #1838 fixes).
-  const reviewWrite = (/\/pulls\/[^/\s]+\/reviews\b/i.test(t) && /(?:^|\s)(?:-X|--method)\s*(?:POST|PUT|PATCH)\b|(?:^|\s)(?:-f|-F|--field|--raw-field|--input)\b/i.test(t)) ||
-    /\b(?:addPullRequestReview|submitPullRequestReview)\b/.test(t);
-  const visibleSafeEvent = /\b(?:COMMENT|REQUEST_CHANGES)\b/.test(t) && !/\bAPPROVE\b/.test(t);
+  const writes = /(?:^|\s)(?:-X|--method|--request)\s*(?:POST|PUT|PATCH)\b|(?:^|\s)(?:-f|-F|--field|--raw-field|--input|-d|--data(?:-binary|-raw|-urlencode)?|--json|-T|--upload-file)\b/i;
+  const reviewWrite = (/\/pulls\/[^/\s]+\/reviews\b/i.test(t) && writes.test(t)) ||
+    /\b(?:addPullRequestReview|submitPullRequestReview)\b/.test(t) ||
+    // A GraphQL request whose body or query comes from a file can't be read here, so it may approve (Sol).
+    (/graphql/i.test(t) && /(?:query=@|--input\b|(?:-d|--data(?:-binary|-raw)?)\s*@|-T\b|--upload-file\b)/i.test(t));
+  const visibleSafeEvent = /\bevent\W{0,6}(?:COMMENT|REQUEST_CHANGES)\b/i.test(t) && !apiApprove;
   return cliApprove || apiApprove || (reviewWrite && !visibleSafeEvent)
     ? "an agent never approves a pull request: CODEOWNERS names masonwells1, the account the agents share, so an agent's approval would count as a code owner's review (for example on a change to the release guard). Leave approvals to Taha or Mason, by hand"
     : null;
@@ -203,26 +207,34 @@ export function prApprovalProblem(text) {
 // #1838 MED 2 (Mason's agents): once a release migration is applied live ("Applied live:" on the open release PR),
 // a staging merge moves release/next under the remaining applies, so staging merges wait until the release merges.
 // null when no release is being applied; otherwise why the merge waits. Never throws; an unreadable answer refuses.
-export function releaseFreezeProblem({ repo, gh }) {
+export function releaseFreezeProblem({ repo, gh, now = Date.now() }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
   let numbers;
   try {
-    numbers = JSON.parse(String(gh(["api", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '[.[] | select(.head.ref == "release/next") | .number]'])));
+    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | .number']))
+      .split(/\r?\n/).filter(Boolean).map(Number);
+    if (numbers.some((x) => !Number.isInteger(x))) throw new Error("not a PR number");
   } catch (error) {
     return `the open release PR could not be read (${show(error)}), so a release being applied can't be ruled out (fail closed)`;
   }
   if (!Array.isArray(numbers)) return "GitHub's list of open PRs into main was unexpected (fail closed)";
   for (const n of numbers) {
-    let bodies;
+    let comments;
     try {
-      bodies = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[].body"]));
+      comments = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[] | {login: .user.login, at: .created_at, body: .body} | tojson"]))
+        .split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
     } catch (error) {
       return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
     }
-    // Taha's "Ready to merge:" comes before the first apply, "Applied live:" after each one (Luna, #1838 fixes).
-    if (/^\s*(?:Applied live:|Ready to merge:)/im.test(bodies)) {
+    // Taha's fresh "Ready to merge:" comes before the first apply, "Applied live:" (agents' account or Taha) after
+    // each one; anyone else's text, or Taha's go-ahead once it has expired, freezes nothing (Luna, Sol).
+    const by = (c, ...logins) => logins.includes(String(c?.login ?? "").toLowerCase());
+    const applying = comments.some((c) =>
+      (by(c, "masonwells1", "tahakhanabdalli") && /^\s*Applied live:/im.test(String(c?.body ?? ""))) ||
+      (by(c, "tahakhanabdalli") && /^\s*Ready to merge:/i.test(String(c?.body ?? "")) && now - Date.parse(String(c?.at ?? "")) <= 30 * 60_000));
+    if (applying) {
       return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
     }
   }

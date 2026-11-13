@@ -272,6 +272,12 @@ test('a hotfix carrying staging work under new commit ids is caught (Sol, #1838)
   const blob = (side, f) => blobs[side][f] ?? null;
   assert.deepEqual(hotfixStagingCarry({ changed: ['a.ts', 'b.ts', 'c.ts', 'gone.ts'], blob, cherry: ['+ aaa', '- bbb'] }), { files: ['a.ts'], commits: ['bbb'] });
   assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: ['+ aaa'] }), { files: [], commits: [] });
+  // A staging line copied into a bigger hotfix edit (Luna, Sol).
+  const lines = { staging: { 'b.ts': ['  if (order.status === "refund_pending") return null;', '}'] }, head: { 'b.ts': ['  if (order.status === "refund_pending") return null;', '  fixTheBug();'] } };
+  const added = (side, f) => lines[side]?.[f] ?? [];
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added }).files, ['b.ts']);
+  const shortOnly = (side, f) => (side === 'staging' ? ['}', 'return;'] : ['}', 'return;']);
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added: shortOnly }).files, [], 'short common lines do not count');
 });
 
 test("only Taha's hotfix-backport label lets a backport through", () => {

@@ -12,10 +12,15 @@ export function isReleaseOrHotfixHead(ref) {
 // Sol (#1838): a hotfix may carry nothing staging has that main hasn't released, even under new commit ids.
 // A file the hotfix leaves exactly as staging has it (and main doesn't) came from staging; a hotfix commit whose
 // patch staging already has (git cherry "-") was cherry-picked from it. blob(side, file) is the git blob id or null.
-export function hotfixStagingCarry({ changed, blob, cherry }) {
+// added(side, file): the lines main...side adds to that file. A hotfix line staging also added (and main lacks) is
+// staging work copied into a bigger edit (Luna, Sol); short lines (braces, `return;`) are too common to count.
+const MEANINGFUL_LINE = 20;
+export function hotfixStagingCarry({ changed, blob, cherry, added = () => [] }) {
   const files = changed.filter((f) => {
     const h = blob('head', f);
-    return h !== null && h === blob('staging', f) && h !== blob('main', f);
+    if (h !== null && h === blob('staging', f) && h !== blob('main', f)) return true;
+    const staged = new Set(added('staging', f).map((l) => l.trim()).filter((l) => l.length >= MEANINGFUL_LINE));
+    return staged.size > 0 && added('head', f).some((l) => staged.has(l.trim()));
   });
   const commits = cherry.filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim());
   return { files, commits };
@@ -758,17 +763,21 @@ const commands = {
     const blob = (side, f) => { try { return git('rev-parse', `${ref[side]}:${f}`); } catch { return null; } };
     const changed = git('diff', '--name-only', `origin/main...${head}`).split('\n').filter(Boolean);
     const cherry = git('cherry', 'origin/staging', head, 'origin/main').split('\n').filter(Boolean);
-    const { files, commits } = hotfixStagingCarry({ changed, blob, cherry });
+    const added = (side, f) => git('diff', '-U0', '--no-color', `origin/main...${ref[side]}`, '--', f).split('\n')
+      .filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1));
+    const { files, commits } = hotfixStagingCarry({ changed, blob, cherry, added });
     if (!files.length && !commits.length) return 0;
     const events = [];
+    let complete = false;
     for (let page = 1; page <= 10; page++) {
       const batch = await gh(`/issues/${number}/events?per_page=100&page=${page}`);
       events.push(...batch);
-      if (batch.length < 100) break;
+      if (batch.length < 100) { complete = true; break; }
     }
     const labels = await gh(`/issues/${number}/labels`);
     const what = [...commits.map((c) => `commit ${c.slice(0, 9)}`), ...files].slice(0, 20).join(', ');
-    if (backportAllowed({ events, labels })) {
+    // Over 1,000 events the newest label change may be unread, so it can't prove Taha's (Sol): no backport.
+    if (complete && backportAllowed({ events, labels })) {
       console.log(`::notice::This hotfix carries staging work (${what}); Taha allowed it as a backport (${BACKPORT_LABEL}).`);
       return 0;
     }

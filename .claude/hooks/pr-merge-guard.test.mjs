@@ -347,6 +347,8 @@ for (const command of [
 }
 r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "APPROVE" } });
 ok(r.decision?.permissionDecision === "deny", "the GitHub review tool's APPROVE is denied");
+r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "COMMENT", body: "Do not APPROVE until the proof passes" } });
+ok(r.status === 0 && r.decision === null, "a COMMENT review that mentions APPROVE in its body passes");
 for (const command of ["gh pr review 5 --comment -b 'see the note'", "gh pr review 5 -r -b 'needs a test'", "gh pr view 5 --json reviewDecision"]) {
   r = runHook({ tool_name: "Bash", tool_input: { command } });
   ok(r.status === 0 && r.decision === null, `a non-approving review call passes: ${command}`);

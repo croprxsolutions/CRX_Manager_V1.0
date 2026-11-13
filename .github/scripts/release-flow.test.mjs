@@ -278,13 +278,19 @@ test('a hotfix carrying staging work under new commit ids is caught (Sol, #1838)
   assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added }).files, ['b.ts']);
   const shortOnly = (side, f) => (side === 'staging' ? ['}', 'return;'] : ['}', 'return;']);
   assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added: shortOnly }).files, [], 'short common lines do not count');
+  const gone = (side, f) => (f === 'b.ts' ? ['  if (!isValid(order)) throw new Error("invalid order");'] : []);
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], removed: gone }).files, ['b.ts'], 'a staging deletion copied into the hotfix');
 });
 
-test("only Taha's hotfix-backport label lets a backport through", () => {
+test("only Taha's hotfix-backport label, added after the latest push, lets a backport through", () => {
   const lab = (event, login) => ({ event, label: { name: 'hotfix-backport' }, actor: { login } });
+  const commit = (sha) => ({ event: 'committed', sha });
   const labels = [{ name: 'hotfix-backport' }];
-  assert.equal(backportAllowed({ events: [lab('labeled', 'TahaKhanAbdalli')], labels }), true);
-  assert.equal(backportAllowed({ events: [lab('labeled', 'masonwells1')], labels }), false);
-  assert.equal(backportAllowed({ events: [lab('labeled', 'TahaKhanAbdalli'), lab('unlabeled', 'x'), lab('labeled', 'masonwells1')], labels }), false);
-  assert.equal(backportAllowed({ events: [lab('labeled', 'TahaKhanAbdalli')], labels: [] }), false);
+  const ok = (events, head = 'h2') => backportAllowed({ events, labels, head });
+  assert.equal(ok([commit('h1'), commit('h2'), lab('labeled', 'TahaKhanAbdalli')]), true);
+  assert.equal(ok([commit('h2'), lab('labeled', 'masonwells1')]), false);
+  assert.equal(ok([commit('h2'), lab('labeled', 'TahaKhanAbdalli'), lab('unlabeled', 'x'), lab('labeled', 'masonwells1')]), false);
+  assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli'), commit('h2')]), false, 'a push after the label needs the label again');
+  assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli')]), false, 'the head commit must be in the timeline');
+  assert.equal(backportAllowed({ events: [commit('h2'), lab('labeled', 'TahaKhanAbdalli')], labels: [], head: 'h2' }), false);
 });

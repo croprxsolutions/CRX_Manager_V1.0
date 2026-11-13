@@ -93,7 +93,7 @@ serving; `captureEdgeException` then logs the same tag instead of reporting.
 ```bash
 git fetch origin
 git checkout -b hotfix/revert-<short-name> origin/main
-git revert <bad-commit-sha>
+git revert <bad-commit-sha>        # a merge commit (every release and hotfix): git revert -m 1 <merge-sha>
 git push -u origin hotfix/revert-<short-name>
 gh pr create --base main --fill
 ```

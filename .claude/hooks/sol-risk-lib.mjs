@@ -207,20 +207,20 @@ export function prApprovalProblem(text) {
 // #1838 MED 2 (Mason's agents): once a release migration is applied live ("Applied live:" on the open release PR),
 // a staging merge moves release/next under the remaining applies, so staging merges wait until the release merges.
 // null when no release is being applied; otherwise why the merge waits. Never throws; an unreadable answer refuses.
-export function releaseFreezeProblem({ repo, gh, now = Date.now() }) {
+export function releaseFreezeProblem({ repo, gh }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
   let numbers;
   try {
-    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | .number']))
-      .split(/\r?\n/).filter(Boolean).map(Number);
-    if (numbers.some((x) => !Number.isInteger(x))) throw new Error("not a PR number");
+    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | "\\(.number) \\(.head.sha)"']))
+      .split(/\r?\n/).filter(Boolean).map((l) => { const [n, sha] = l.split(" "); return { n: Number(n), sha }; });
+    if (numbers.some((x) => !Number.isInteger(x.n) || !/^[0-9a-f]{40}$/i.test(String(x.sha)))) throw new Error("not a PR number and head");
   } catch (error) {
     return `the open release PR could not be read (${show(error)}), so a release being applied can't be ruled out (fail closed)`;
   }
   if (!Array.isArray(numbers)) return "GitHub's list of open PRs into main was unexpected (fail closed)";
-  for (const n of numbers) {
+  for (const { n, sha } of numbers) {
     let comments;
     try {
       comments = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[] | {login: .user.login, at: .created_at, body: .body} | tojson"]))
@@ -228,12 +228,14 @@ export function releaseFreezeProblem({ repo, gh, now = Date.now() }) {
     } catch (error) {
       return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
     }
-    // Taha's fresh "Ready to merge:" comes before the first apply, "Applied live:" (agents' account or Taha) after
-    // each one; anyone else's text, or Taha's go-ahead once it has expired, freezes nothing (Luna, Sol).
+    // Taha's "Ready to merge: <sha>" for the release's current head comes before the first apply and holds until the
+    // release merges, closes or moves (no expiry: a failed "Applied live:" post must not end it; Sol). "Applied live:"
+    // (agents' account or Taha) follows each apply. Anyone else's text freezes nothing (Luna, Sol).
     const by = (c, ...logins) => logins.includes(String(c?.login ?? "").toLowerCase());
+    const go = (c) => /^\s*Ready to merge:\s*([0-9a-f]{7,40})\s*$/i.exec(String(c?.body ?? ""));
     const applying = comments.some((c) =>
       (by(c, "masonwells1", "tahakhanabdalli") && /^\s*Applied live:/im.test(String(c?.body ?? ""))) ||
-      (by(c, "tahakhanabdalli") && /^\s*Ready to merge:/i.test(String(c?.body ?? "")) && now - Date.parse(String(c?.at ?? "")) <= 30 * 60_000));
+      (by(c, "tahakhanabdalli") && go(c) && String(sha).toLowerCase().startsWith(go(c)[1].toLowerCase())));
     if (applying) {
       return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
     }

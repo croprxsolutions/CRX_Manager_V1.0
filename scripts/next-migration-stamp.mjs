@@ -42,11 +42,12 @@ export function nextStamp(seen, { gapMinutes = 60, now = new Date() } = {}) {
 // one on release day (#1838 HIGH 1). taken: every stamp seen anywhere, so the pick collides with none.
 export function hotfixStamp({ mainTop, live = "", ceiling = "", taken = new Set() }) {
   const floor = [mainTop, live].filter(Boolean).sort().pop() || "00000000000000";
-  let d = new Date(Math.floor(toDate(floor).getTime() / 60_000) * 60_000 + 60_000);
-  while (taken.has(toStamp(d))) d = new Date(d.getTime() + 60_000);
-  const stamp = toStamp(d);
+  const free = (step, start) => { let d = start; while (taken.has(toStamp(d))) d = new Date(d.getTime() + step); return toStamp(d); };
+  // A whole minute when one fits, else the next free second (Sol: 20270109100030 < x < 20270109100100).
+  let stamp = free(60_000, new Date(Math.floor(toDate(floor).getTime() / 60_000) * 60_000 + 60_000));
+  if (ceiling && stamp >= ceiling) stamp = free(1_000, new Date(toDate(floor).getTime() + 1_000));
   if (stamp <= floor) throw new Error(`computed ${stamp} is not above ${floor}`);
-  if (ceiling && stamp >= ceiling) throw new Error(`no free stamp between ${floor} and ${ceiling} (the oldest migration waiting on staging); ask Taha or Mason`);
+  if (ceiling && stamp >= ceiling) throw new Error(`no free stamp between ${floor} and ${ceiling} (the oldest migration waiting for the release); ask Taha or Mason`);
   return stamp;
 }
 
@@ -89,14 +90,19 @@ function collect() {
   }
 
   const LIMIT = 500;
-  const prs = JSON.parse(run("gh", ["pr", "list", "--state", "open", "--limit", String(LIMIT), "--json", "number,files"]));
+  const prs = JSON.parse(run("gh", ["pr", "list", "--state", "open", "--limit", String(LIMIT), "--json", "number,files,baseRefName"]));
   if (prs.length >= LIMIT) throw new Error(`${prs.length} open PRs reached the ${LIMIT} listing cap; some may be unseen`);
   for (const pr of prs) {
     // gh lists at most 100 files per PR; read the full list for any PR at that cap.
     const paths = (pr.files ?? []).length >= 100
       ? run("gh", ["pr", "diff", String(pr.number), "--name-only"]).split("\n").map((p) => p.trim())
       : (pr.files ?? []).map((f) => f.path);
-    for (const p of paths) if (p.startsWith(`${DIR}/`)) add(p, `open PR #${pr.number}`);
+    for (const p of paths) if (p.startsWith(`${DIR}/`)) {
+      add(p, `open PR #${pr.number}`);
+      // A migration on its way into staging waits for the release too (Luna, #1838 fixes).
+      const st = stampOf(p);
+      if (st && pr.baseRefName === "staging" && !onMain.has(p.split("/").pop()) && !onMain.has(p)) waiting.push(st);
+    }
   }
   const mainTop = mainFiles.map(stampOf).filter(Boolean).sort().pop() ?? "";
   return { seen, prCount: prs.length, mainTop, waiting };
@@ -131,6 +137,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   try {
     const { seen, prCount, mainTop, waiting } = collect();
+    if (hotfix && !live) {
+      console.error("--hotfix needs --live <live high-water>: a stamp below live's newest is refused by the apply gate (the query is at the top of this file)");
+      process.exit(2);
+    }
     if (hotfix && flags["--gap-minutes"] !== undefined) {
       console.error("--gap-minutes doesn't apply to --hotfix: a hotfix stamp sits one free minute above main's newest");
       process.exit(2);

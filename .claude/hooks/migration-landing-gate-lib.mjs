@@ -172,7 +172,7 @@ export function hotfixStampProblem({ stamp, mainFiles, stagingFiles }) {
   const mainTop = mainFiles.map(stampOf).filter(Boolean).sort().pop() || "";
   const waiting = stagingFiles.filter((f) => !onMain.has(f)).map(stampOf).filter((s) => s && s > mainTop).sort();
   if (!waiting.length || stamp < waiting[0]) return null;
-  return `its stamp ${stamp} is not below ${waiting[0]}, a migration waiting on staging for the release, so live would refuse that one on release day. Restamp this hotfix between main's newest (${mainTop}) and ${waiting[0]}: node scripts/next-migration-stamp.mjs --hotfix`;
+  return `its stamp ${stamp} is not below ${waiting[0]}, a migration waiting on staging for the release, so live would refuse that one on release day. Restamp this hotfix between main's newest (${mainTop}) and ${waiting[0]}: node scripts/next-migration-stamp.mjs --hotfix --live <live high-water>`;
 }
 
 function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessionId }) {

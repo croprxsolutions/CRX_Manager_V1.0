@@ -382,6 +382,22 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   if (!headContainsBase) {
     return refuse(`${number}'s head ${head.slice(0, 12)} does not contain its base ${baseSha.slice(0, 12)}, or GitHub could not confirm it — merge origin/main into the branch, push, and re-run the checks and the Sol review.`);
   }
+  // Sol (#1838): the guard proved this release head equals staging + main when it ran. If staging has moved since
+  // (and the bot hasn't refreshed release/next yet), that proof is stale: the head must still contain staging's tip.
+  if (headRef === "release/next") {
+    let stagingTip = "";
+    let fresh = false;
+    try {
+      stagingTip = String(gh(["api", "repos/{owner}/{repo}/commits/staging", "--jq", ".sha"])).trim();
+      fresh = /^[0-9a-f]{40}$/i.test(stagingTip) && headContainsBaseOnGitHub({ baseSha: stagingTip, headSha: head, gh });
+    } catch (error) {
+      if (OUT(error)) throw error;
+      fresh = false;
+    }
+    if (!fresh) {
+      return refuse(`${number}'s head ${head.slice(0, 12)} does not contain staging's tip ${stagingTip.slice(0, 12) || "(unreadable)"}: staging moved after the release guard ran. Wait for the bot to refresh release/next (no staging merges during the release), then re-run the checks and Sol.`);
+    }
+  }
   let proven = false;
   for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {
     try {

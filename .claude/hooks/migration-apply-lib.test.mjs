@@ -1660,7 +1660,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
     crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
     trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
-    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40) } = {}) => evaluateLandingGate({
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0" } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
@@ -1699,6 +1699,14 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         assert.ok(args.includes("owner={owner}") && args.includes("name={repo}") && args.includes(`number=${pr.number ?? 900}`));
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: threadsHead,
           reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
+      }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/commits/staging") {
+        if (stagingTip instanceof Error) throw stagingTip;
+        return `${stagingTip}\n`;
+      }
+      if (args[0] === "api" && args[1] === `repos/{owner}/{repo}/compare/${"d".repeat(40)}...${HEAD_SHA}`) {
+        if (stagingBehind instanceof Error) throw stagingBehind;
+        return stagingBehind;
       }
       if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/git/trees/main:.github") {
         if (workflowsMain instanceof Error) throw workflowsMain;
@@ -1822,6 +1830,11 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old, completedAt: old }] } }),
       "from before the release flow was switched on", "a pre-switch-on guard result is refused");
   }
+  // Sol (#1838): a release guard result goes stale when staging moves after it ran.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release head that contains staging's tip passes");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingBehind: "3\n" }), "does not contain staging's tip", "a release head behind staging is refused");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingTip: new Error("HTTP 502") }), "does not contain staging's tip", "an unreadable staging tip fails closed");
+  ok(gate({ stagingBehind: "3\n" }).ok === true, "a hotfix doesn't need staging's tip");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
   // The name alone is not enough: main's release guard must have passed on this head.

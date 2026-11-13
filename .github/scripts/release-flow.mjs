@@ -9,6 +9,26 @@ export function isReleaseOrHotfixHead(ref) {
   return typeof ref === 'string' && /^(release\/next|hotfix\/[^/]+)$/.test(ref);
 }
 
+// Sol (#1838): a hotfix may carry nothing staging has that main hasn't released, even under new commit ids.
+// A file the hotfix leaves exactly as staging has it (and main doesn't) came from staging; a hotfix commit whose
+// patch staging already has (git cherry "-") was cherry-picked from it. blob(side, file) is the git blob id or null.
+export function hotfixStagingCarry({ changed, blob, cherry }) {
+  const files = changed.filter((f) => {
+    const h = blob('head', f);
+    return h !== null && h === blob('staging', f) && h !== blob('main', f);
+  });
+  const commits = cherry.filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim());
+  return { files, commits };
+}
+// Taha may let a deliberate backport through with the hotfix-backport label; Mason's account is the one his
+// agents share, so only Taha's counts. events: the PR's issue events, oldest first; labels: its current labels.
+export const BACKPORT_LABEL = 'hotfix-backport';
+export function backportAllowed({ events, labels, by = 'TahaKhanAbdalli' }) {
+  if (!labels.some((l) => l?.name === BACKPORT_LABEL)) return false;
+  const last = events.filter((e) => e?.label?.name === BACKPORT_LABEL && (e.event === 'labeled' || e.event === 'unlabeled')).pop();
+  return last?.event === 'labeled' && last?.actor?.login === by;
+}
+
 // release/next may differ from "staging merged with main" only in the files the bot writes.
 // Comparing trees (not commits or authors) also catches a change hidden in a merge commit.
 export const BOT_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'src/releaseNotes.ts'];
@@ -310,7 +330,7 @@ async function gh(path, { method = 'GET', body, allow404 = method === 'DELETE', 
   const res = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      authorization: `Bearer ${process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN}`,
       accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28',
       ...(body ? { 'content-type': 'application/json' } : {}),
@@ -731,6 +751,29 @@ const commands = {
     await gh(`/issues/${pr.number}/comments`, { method: 'POST', body: { body: problem } });
     console.log(`#${pr.number}: removed ${label.name}`);
     return 0;
+  },
+  // usage: release-flow.mjs check-hotfix-content <head sha> <PR number>   (in a checkout with origin/main and origin/staging)
+  async 'check-hotfix-content'([head, number]) {
+    const ref = { head, staging: 'origin/staging', main: 'origin/main' };
+    const blob = (side, f) => { try { return git('rev-parse', `${ref[side]}:${f}`); } catch { return null; } };
+    const changed = git('diff', '--name-only', `origin/main...${head}`).split('\n').filter(Boolean);
+    const cherry = git('cherry', 'origin/staging', head, 'origin/main').split('\n').filter(Boolean);
+    const { files, commits } = hotfixStagingCarry({ changed, blob, cherry });
+    if (!files.length && !commits.length) return 0;
+    const events = [];
+    for (let page = 1; page <= 10; page++) {
+      const batch = await gh(`/issues/${number}/events?per_page=100&page=${page}`);
+      events.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const labels = await gh(`/issues/${number}/labels`);
+    const what = [...commits.map((c) => `commit ${c.slice(0, 9)}`), ...files].slice(0, 20).join(', ');
+    if (backportAllowed({ events, labels })) {
+      console.log(`::notice::This hotfix carries staging work (${what}); Taha allowed it as a backport (${BACKPORT_LABEL}).`);
+      return 0;
+    }
+    console.log(`::error::This hotfix carries work staging has that main hasn't released (${what}). Cut hotfix/<name> from main with only the fix; a deliberate backport needs Taha's ${BACKPORT_LABEL} label.`);
+    return 1;
   },
   // usage: release-flow.mjs check-head <head ref>
   'check-head'([ref]) {

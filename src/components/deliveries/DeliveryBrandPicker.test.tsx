@@ -128,6 +128,12 @@ describe('DeliveryBrandPicker cancelled-registration warning (#1849)', () => {
     expect(await screen.findByTestId('registration-check-failed')).toBeTruthy();
   });
 
+  it('says it could not check when the product read throws', async () => {
+    db.products.mockRejectedValue(new Error('network down'));
+    render(<Harness />);
+    expect(await screen.findByTestId('registration-check-failed')).toBeTruthy();
+  });
+
   it('says it could not check when the product read leaves a product out', async () => {
     db.products.mockResolvedValue({ data: [{ id: 'P2', epa_registration: null }], error: null });
     render(<Harness />);

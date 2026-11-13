@@ -21,17 +21,17 @@ function useProductRegistrations(productIds: string[]) {
     if (!key) { setState({ key, numbers: new Map(), status: 'loaded' }); return undefined; }
     let active = true;
     setState({ key, numbers: new Map(), status: 'loading' });
-    void supabase.from('products').select('id, epa_registration').in('id', key.split('|')).then(({ data, error }) => {
+    const fail = (err: unknown) => {
       if (!active) return;
+      Sentry.captureException(toSentryError(err), { extra: { context: 'delivery brand pick: product EPA numbers' } });
+      setState({ key, numbers: new Map(), status: 'failed' });
+    };
+    const ids = key.split('|');
+    supabase.from('products').select('id, epa_registration').in('id', ids).then(({ data, error }) => {
       // A product the read did not return (hidden or gone) was not checked, so it is never "none cancelled".
-      const ids = key.split('|');
-      if (error || !data || ids.some((id) => !data.some((p) => p.id === id))) {
-        Sentry.captureException(toSentryError(error), { extra: { context: 'delivery brand pick: product EPA numbers' } });
-        setState({ key, numbers: new Map(), status: 'failed' });
-        return;
-      }
-      setState({ key, numbers: new Map(data.map((p) => [p.id, p.epa_registration])), status: 'loaded' });
-    });
+      if (error || !data || ids.some((id) => !data.some((p) => p.id === id))) { fail(error); return; }
+      if (active) setState({ key, numbers: new Map(data.map((p) => [p.id, p.epa_registration])), status: 'loaded' });
+    }, fail);
     const timer = setTimeout(() => {
       if (active) setState((prev) => (prev.key === key && prev.status === 'loading' ? { ...prev, status: 'slow' } : prev));
     }, CHECK_TIMEOUT_MS);

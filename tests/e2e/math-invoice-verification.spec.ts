@@ -22,18 +22,27 @@ async function nav(page: Page, path: string) {
   await waitForPageStable(page);
 }
 
-/** Extract a summary value from the invoice detail card by label text */
+/** Extract a summary value from the invoice detail's Amount due card by its exact row label.
+ *  Billing UI (Nov 13): rows are "Products", each charge, the discount, the tax, "Invoice total" (the old
+ *  "Subtotal": every line), "Paid", "Prepay applied" (only when above 0) and "Balance due". */
 async function invoiceSummaryVal(page: Page, label: string): Promise<number> {
-  const el = page.locator(`text=${label}`).first();
+  const card = page.locator('section[aria-labelledby="invoice-amount-due"]');
+  const el = card.getByText(label, { exact: true }).first();
   const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
   if (!visible) return 0;
   const parent = el.locator('..');
   const valEl = parent
-    .locator('.font-medium, .font-semibold, .text-crx-green, .text-red-600')
+    .locator('.tabular-nums')
     .first();
   const valVisible = await valEl.isVisible({ timeout: 2000 }).catch(() => false);
   if (!valVisible) return 0;
   return parseDollars(await valEl.textContent());
+}
+
+/** The closing "Invoice total" amount of the "What this invoice bills" card. */
+function linesCardTotal(page: Page) {
+  return page.locator('section[aria-labelledby="invoice-lines-title"]')
+    .getByText('Invoice total', { exact: true }).locator('..').locator('.tabular-nums').first();
 }
 
 interface InvoiceLineItem {
@@ -43,48 +52,53 @@ interface InvoiceLineItem {
   extendedCents: number;
 }
 
-/** Extract line items from the invoice detail table.
+/** Extract the product lines from the invoice detail's "What this invoice bills" table (Billing UI, Nov 13:
+ *  charges and the worked-out discount and tax lines sit below it, so these lines add up to "Products").
  *  Handles both editable mode (inputs) and read-only mode (plain text). */
 async function extractLineItems(page: Page): Promise<InvoiceLineItem[]> {
-  const table = page.locator('table').first();
+  const table = page.locator('section[aria-labelledby="invoice-lines-title"] table').first();
   const tableVisible = await table.isVisible({ timeout: 5000 }).catch(() => false);
   if (!tableVisible) return [];
 
   const bodyRows = table.locator('tbody tr');
   const rowCount = await bodyRows.count();
   const items: InvoiceLineItem[] = [];
+  const headers = (await table.locator('thead th').allTextContents()).map((h) => h.trim());
+  const qtyCol = headers.indexOf('Qty');
+  const priceCol = headers.indexOf('Unit price');
+  const amountCol = headers.indexOf('Amount');
 
   for (let i = 0; i < rowCount; i++) {
     const cells = bodyRows.nth(i).locator('td');
     const cellCount = await cells.count();
     if (cellCount < 4) continue;
 
-    // Columns: Product | Qty | Unit Price | Extended | (delete)
+    // Columns: Product | (Vendor) | Qty | Unit price | (Tote #) | Amount (with the remove button)
     const product = ((await cells.nth(0).textContent()) ?? '').trim();
 
     // Qty cell — may be an <input> in edit mode or plain text
     let qty = 0;
-    const qtyInput = cells.nth(1).locator('input').first();
+    const qtyInput = cells.nth(qtyCol).locator('input').first();
     const qtyInputVisible = await qtyInput.isVisible({ timeout: 500 }).catch(() => false);
     if (qtyInputVisible) {
       qty = parseFloat(await qtyInput.inputValue() || '0') || 0;
     } else {
-      qty = parseQuantity((await cells.nth(1).textContent()) ?? '');
+      qty = parseQuantity((await cells.nth(qtyCol).textContent()) ?? '');
     }
 
     // Unit Price cell — may be <input> (value in DOLLARS) or plain text (formatted)
     let unitPriceCents = 0;
-    const priceInput = cells.nth(2).locator('input').first();
+    const priceInput = cells.nth(priceCol).locator('input').first();
     const priceInputVisible = await priceInput.isVisible({ timeout: 500 }).catch(() => false);
     if (priceInputVisible) {
       const dollarVal = parseFloat(await priceInput.inputValue() || '0') || 0;
       unitPriceCents = Math.round(dollarVal * 100);
     } else {
-      unitPriceCents = parseDollars((await cells.nth(2).textContent()) ?? '');
+      unitPriceCents = parseDollars((await cells.nth(priceCol).textContent()) ?? '');
     }
 
-    // Extended is always plain text: fmt(item.extended_cents)
-    const extendedCents = parseDollars((await cells.nth(3).textContent()) ?? '');
+    // Amount is always plain text: the line's extended_cents
+    const extendedCents = parseDollars((await cells.nth(amountCol).textContent()) ?? '');
 
     if (qty > 0 || unitPriceCents > 0 || extendedCents > 0) {
       items.push({ product, qty, unitPriceCents, extendedCents });
@@ -151,7 +165,7 @@ test.describe('Invoice Math Verification', () => {
     await csRow.locator('td').nth(1).click();
     // Same loading-race guard as IV5/IV12: InvoiceDetail returns a spinner while
     // loading=true; the line items table only renders once the fetch completes.
-    await page.locator('text=Subtotal').first()
+    await page.locator('text=Invoice total').first()
       .waitFor({ state: 'visible', timeout: 10000 })
       .catch(() => {});
     await waitForPageStable(page);
@@ -179,21 +193,20 @@ test.describe('Invoice Math Verification', () => {
     test.skip(items.length === 0, 'No line items');
 
     const recalcSum = items.reduce((s, it) => s + it.extendedCents, 0);
-    const displayedSubtotal = await invoiceSummaryVal(page, 'Subtotal');
+    const displayedSubtotal = await invoiceSummaryVal(page, 'Products');
 
     if (displayedSubtotal > 0) {
       assertCentsEqual(recalcSum, displayedSubtotal, 2,
         `Sum of extended ($${(recalcSum / 100).toFixed(2)}) should match Subtotal ($${(displayedSubtotal / 100).toFixed(2)})`);
     }
 
-    // Also verify tfoot total.
-    // NOTE: tfoot has 3 tds: <td>Total</td> | <td>$X.XX</td> | <td></td> (empty delete-column).
-    // Using .filter({ hasText: /\$/ }) finds the value cell, not the empty placeholder.
-    const tfootTotal = page.locator('tfoot td').filter({ hasText: /\$/ }).first();
+    // Also verify the lines card's closing total (no table footer any more): products, charges, discount
+    // and tax together, so it must equal Amount due's "Invoice total".
+    const tfootTotal = linesCardTotal(page);
     const tfootVisible = await tfootTotal.isVisible({ timeout: 2000 }).catch(() => false);
     if (tfootVisible) {
       const tfootCents = parseDollars(await tfootTotal.textContent());
-      assertCentsEqual(tfootCents, recalcSum, 2, 'Table footer total should match sum');
+      assertCentsEqual(tfootCents, await invoiceSummaryVal(page, 'Invoice total'), 2, 'Lines card total should match the Amount due total');
     }
   });
 
@@ -203,7 +216,7 @@ test.describe('Invoice Math Verification', () => {
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
     const items = await extractLineItems(page);
     const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-    const subtotal = await invoiceSummaryVal(page, 'Subtotal');
+    const subtotal = await invoiceSummaryVal(page, 'Products');
 
     if (items.length > 0 && subtotal > 0) {
       assertCentsEqual(lineSum, subtotal, 2);
@@ -221,10 +234,10 @@ test.describe('Invoice Math Verification', () => {
     const inv = await goToInvoice(page, 0);
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
 
-    const subtotal = await invoiceSummaryVal(page, 'Subtotal');
+    const subtotal = await invoiceSummaryVal(page, 'Invoice total');
     const paid = await invoiceSummaryVal(page, 'Paid');
-    const prepay = await invoiceSummaryVal(page, 'Prepay Applied');
-    const balance = await invoiceSummaryVal(page, 'Balance Due');
+    const prepay = await invoiceSummaryVal(page, 'Prepay applied');
+    const balance = await invoiceSummaryVal(page, 'Balance due');
 
     test.skip(subtotal === 0, 'Invoice has no subtotal (possibly new)');
 
@@ -263,19 +276,19 @@ test.describe('Invoice Math Verification', () => {
       // Explicitly wait for InvoiceDetail to finish loading.
       // The component returns a pure spinner when loading=true; "Subtotal" only
       // appears once the fetch completes and loading becomes false.
-      await page.locator('text=Subtotal').first()
+      await page.locator('text=Invoice total').first()
         .waitFor({ state: 'visible', timeout: 10000 })
         .catch(() => {});
       await waitForPageStable(page);
 
-      const subtotal = await invoiceSummaryVal(page, 'Subtotal');
+      const subtotal = await invoiceSummaryVal(page, 'Invoice total');
       const paid     = await invoiceSummaryVal(page, 'Paid');
-      const balance  = await invoiceSummaryVal(page, 'Balance Due');
+      const balance  = await invoiceSummaryVal(page, 'Balance due');
 
       if (paid > 0 && balance > 0 && subtotal > 0) {
         // Found a partially paid invoice
         const paidPlusBalance = paid + balance;
-        const prepay = await invoiceSummaryVal(page, 'Prepay Applied');
+        const prepay = await invoiceSummaryVal(page, 'Prepay applied');
         assertCentsEqual(paidPlusBalance + prepay, subtotal, 100,
           `Paid ($${(paid / 100).toFixed(2)}) + Balance ($${(balance / 100).toFixed(2)}) + Prepay ($${(prepay / 100).toFixed(2)}) should = Subtotal ($${(subtotal / 100).toFixed(2)})`);
         found = true;
@@ -321,8 +334,8 @@ test.describe('Invoice Math Verification', () => {
     await paidRow.locator('td').nth(1).click();
     await waitForPageStable(page);
 
-    const subtotal = await invoiceSummaryVal(page, 'Subtotal');
-    const balance  = await invoiceSummaryVal(page, 'Balance Due');
+    const subtotal = await invoiceSummaryVal(page, 'Invoice total');
+    const balance  = await invoiceSummaryVal(page, 'Balance due');
     test.skip(subtotal === 0, 'Paid invoice has no subtotal');
 
     // The defining property of a fully paid invoice is balance = $0.00
@@ -344,7 +357,7 @@ test.describe('Invoice Math Verification', () => {
       await voidRow.locator('td').nth(1).click();
       await waitForPageStable(page);
 
-      const balance = await invoiceSummaryVal(page, 'Balance Due');
+      const balance = await invoiceSummaryVal(page, 'Balance due');
       // Voided invoice should have 0 balance
       expect(balance).toBe(0);
     } else {
@@ -374,7 +387,7 @@ test.describe('Invoice Math Verification', () => {
       }
 
       const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-      const subtotal = await invoiceSummaryVal(page, 'Subtotal');
+      const subtotal = await invoiceSummaryVal(page, 'Products');
       if (subtotal > 0 && items.length > 0) {
         assertCentsEqual(lineSum, subtotal, 2);
       }
@@ -410,10 +423,9 @@ test.describe('Invoice Math Verification', () => {
     const inv = await goToInvoice(page, 0);
     if (inv === null) { test.skip(true, 'No data rows available — skipping'); return; }
 
-    const subtotal = await invoiceSummaryVal(page, 'Subtotal');
-    // NOTE: tfoot has 3 tds: <td>Total</td> | <td>$X.XX</td> | <td></td> (empty delete-column).
-    // Using .filter({ hasText: /\$/ }) finds the value cell, not the empty placeholder.
-    const tfootTotal = page.locator('tfoot td').filter({ hasText: /\$/ }).first();
+    const subtotal = await invoiceSummaryVal(page, 'Invoice total');
+    // The lines card closes with its own "Invoice total" row (there is no table footer any more).
+    const tfootTotal = linesCardTotal(page);
     const tfootVisible = await tfootTotal.isVisible({ timeout: 3000 }).catch(() => false);
 
     if (tfootVisible && subtotal > 0) {
@@ -436,14 +448,14 @@ test.describe('Invoice Math Verification', () => {
       await mcRow.locator('td').nth(1).click();
       await waitForPageStable(page);
 
-      const _subtotal = await invoiceSummaryVal(page, 'Subtotal');
+      const _subtotal = await invoiceSummaryVal(page, 'Invoice total');
       // Credit memos might have negative subtotals or just be a reversal.
       // The key check is that the page loaded and has a valid invoice number in h1.
-      // InvoiceDetail briefly renders 'New Invoice' while the fetch is in-flight; wait it out.
+      // InvoiceDetail briefly renders 'New invoice' while the fetch is in-flight; wait it out.
       // Use 'main h1' to avoid matching the banner h1 ("Invoice Management") which appears
       // earlier in DOM order than the content-area h1 (the invoice number like "MC-2026-0004").
       const h1 = page.locator('main h1').first();
-      await expect(h1).not.toContainText('New Invoice', { timeout: 8000 }).catch(() => {});
+      await expect(h1).not.toContainText('New invoice', { timeout: 8000 }).catch(() => {});
       const h1Text = (await h1.textContent()) ?? '';
       expect(h1Text.includes('MC-') || h1Text.includes('INV') || h1Text.includes('CS-')).toBeTruthy();
     } else {
@@ -476,7 +488,7 @@ test.describe('Invoice Math Verification', () => {
     for (let i = 0; i < Math.min(csCount, 10); i++) {
       await csRows.nth(i).locator('td').nth(1).click();
       // Wait for InvoiceDetail to finish loading before reading line items.
-      await page.locator('text=Subtotal').first()
+      await page.locator('text=Invoice total').first()
         .waitFor({ state: 'visible', timeout: 10000 })
         .catch(() => {});
       await waitForPageStable(page);
@@ -493,7 +505,7 @@ test.describe('Invoice Math Verification', () => {
 
         // Verify sum
         const lineSum = items.reduce((s, it) => s + it.extendedCents, 0);
-        const subtotal = await invoiceSummaryVal(page, 'Subtotal');
+        const subtotal = await invoiceSummaryVal(page, 'Products');
         if (subtotal > 0) {
           assertCentsEqual(lineSum, subtotal, 2);
         }

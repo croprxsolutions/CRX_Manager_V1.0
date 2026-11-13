@@ -2119,7 +2119,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   }
 
   return (
-    <div className="space-y-4 pb-32 md:pb-0">
+    <div className="space-y-4 pb-36 md:pb-0">
       {/* Header */}
       <Breadcrumbs items={[
         { label: 'Invoices', href: '/invoices' },
@@ -2223,10 +2223,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:grid-cols-[minmax(0,1fr)_380px]">
-        {/* The rail comes first, so below lg it sits above the details, as on the sale page. */}
-        <div className="grid min-w-0 gap-4 md:grid-cols-2 md:items-start lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
+        {/* The rail comes first, so from md to lg it sits above the details, as on the sale page. Below md the
+            rail and main column are display: contents and the cards follow the phone board: Amount due, the
+            lines, Who pays and Related, then Details. */}
+        <div className="contents md:grid md:min-w-0 md:gap-4 md:grid-cols-2 md:items-start lg:col-start-2 lg:row-start-1 lg:grid-cols-1">
           {/* A disabled fieldset locks the discount control while Post runs; it draws nothing itself. */}
-          <fieldset disabled={postFlowBusy} className="m-0 min-w-0 border-0 p-0">
+          <fieldset disabled={postFlowBusy} className="order-1 m-0 min-w-0 border-0 p-0 md:order-none">
             <InvoiceAmountDue
               breakdown={breakdown}
               paidCents={isNew ? null : invoice.paid_amount_cents || 0}
@@ -2247,7 +2249,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
             />
           </fieldset>
           {(billSplitPayers.length > 1 || parentOrder || relatedDeliveries.length > 0) && (
-            <div className="grid min-w-0 gap-4">
+            <div className="order-3 grid min-w-0 gap-4 md:order-none">
               {billSplitPayers.length > 1 && (
                 <InvoicePayersTable
                   rows={billSplitPayers.map((payer) => ({
@@ -2304,10 +2306,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           )}
         </div>
 
-        <div className="min-w-0 space-y-4">
-      {/* A disabled fieldset locks every input and button in the invoice details and lines while
-          Post runs; it draws nothing itself. */}
-      <fieldset disabled={postFlowBusy} className="m-0 min-w-0 space-y-4 border-0 p-0">
+        <div className="contents md:block md:min-w-0 md:space-y-4">
+      {/* Disabled fieldsets lock every input and button in the invoice details and lines while
+          Post runs; they draw nothing themselves. */}
+      <fieldset disabled={postFlowBusy} className="order-4 m-0 min-w-0 border-0 p-0 md:order-none">
       <Card>
         <section aria-labelledby="invoice-details-title">
           <h2 id="invoice-details-title" className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
@@ -2506,8 +2508,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           </div>
         </section>
       </Card>
+      </fieldset>
 
       {/* What this invoice bills: products, then the charges staff add, then the lines the database works out. */}
+      <fieldset disabled={postFlowBusy} className="order-2 m-0 min-w-0 border-0 p-0 md:order-none">
       <Card padding={false}>
         <section aria-labelledby="invoice-lines-title">
           <div className="px-5 pt-5 pb-3">
@@ -2759,7 +2763,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Write-Offs */}
       {writeOffs.length > 0 && (
-        <Card>
+        <Card className="order-5 md:order-none">
           <h3 className="text-sm font-semibold text-nav-dark mb-3">Write-offs</h3>
           <div className="divide-y divide-gray-50">
             {writeOffs.map((wo) => (
@@ -2790,7 +2794,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
       {/* Void reason */}
       {invoice.void_reason && (
-        <Card>
+        <Card className="order-5 md:order-none">
           <div className="flex items-center gap-2 text-red-600">
             <Ban className="w-4 h-4" />
             <span className="text-sm font-medium">Void reason:</span>

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 
 const _RUN_ID = Date.now().toString(36);
 const waitForPage = (page: import('@playwright/test').Page, ms: number) => page.waitForTimeout(ms);
@@ -58,7 +59,8 @@ test.describe('Invoice Detail Interactions', () => {
 
     // One of Post or Unpost should be visible depending on current invoice status
     const postButton = page.locator('button:has-text("Post")').first();
-    const unpostButton = page.locator('button:has-text("Unpost")').first();
+    // Unpost… sits under More actions on the invoice page.
+    const unpostButton = await moreAction(page, /^Unpost/);
 
     const hasPost = await postButton.isVisible().catch(() => false);
     const hasUnpost = await unpostButton.isVisible().catch(() => false);
@@ -225,9 +227,8 @@ test.describe('Invoice Detail Interactions', () => {
     await waitForPage(page, 3000);
 
     // Look for void button
-    const voidButton = page.locator(
-      'button:has-text("Void"), button:has-text("Void Invoice")'
-    ).first();
+    // Void invoice… sits under More actions on the invoice page.
+    const voidButton = await moreAction(page, /^Void invoice/);
 
     const voidVisible = await voidButton.isVisible({ timeout: 5000 }).catch(() => false);
 
@@ -290,9 +291,8 @@ test.describe('Invoice Detail Interactions', () => {
     await waitForPage(page, 3000);
 
     // Look for write-off button
-    const writeOffButton = page.locator(
-      'button:has-text("Write Off"), button:has-text("Write-Off"), button:has-text("WriteOff")'
-    ).first();
+    // Write off… sits under More actions on the invoice page.
+    const writeOffButton = await moreAction(page, /^Write off/);
 
     const writeOffVisible = await writeOffButton.isVisible({ timeout: 5000 }).catch(() => false);
 

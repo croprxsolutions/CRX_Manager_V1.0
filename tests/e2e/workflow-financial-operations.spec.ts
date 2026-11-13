@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 
 /**
  * Financial Operations E2E Gate Test
@@ -600,8 +601,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
       await waitForPage(page, 3000);
     }
 
-    // Now void it — button should be enabled on a posted invoice
-    const voidBtn = page.locator('button:has-text("Void")');
+    // Now void it — Void invoice… sits under More actions on a posted invoice
+    const voidBtn = await moreAction(page, /^Void invoice/);
     await expect(voidBtn).toBeVisible({ timeout: 10000 });
     await voidBtn.click();
     await waitForPage(page, 1000);

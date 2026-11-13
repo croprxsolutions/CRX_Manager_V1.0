@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import InvoiceActionsBar from './InvoiceActionsBar';
 
@@ -60,6 +60,33 @@ describe('InvoiceActionsBar', () => {
     render(<InvoiceActionsBar save={act()} />);
     expect(buttonNames()).toEqual(['Save changes']);
     expect(isPrimary(screen.getByRole('button', { name: 'Save changes' }))).toBe(true);
+  });
+
+  describe('below md (phone)', () => {
+    afterEach(() => { vi.unstubAllGlobals(); });
+    const phone = () => vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(max-width: 767px)', media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+
+    it('keeps only the main button, Save changes and Print… in the bar; Email moves into More', () => {
+      phone();
+      const email = act();
+      render(<InvoiceActionsBar save={act()} print={act()} email={email} post={{ ...act(), dirty: false }} transfer={act()} />);
+      expect(buttonNames()).toEqual(['Save changes', 'Print…', 'More actions', 'Post invoice…']);
+      openMore();
+      expect(menuNames()).toEqual(['Email', 'Transfer to scheduling…']);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Email' }));
+      expect(email.onClick).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('while there are unsaved edits, a visible hint says why Post waits and describes the button', () => {
+    const { rerender } = render(<InvoiceActionsBar save={act()} print={act()} post={{ ...act(), dirty: true }} />);
+    const hint = screen.getByText('Save your changes first');
+    expect(screen.getByRole('button', { name: 'Post invoice…' })).toHaveAttribute('aria-describedby', hint.id);
+    rerender(<InvoiceActionsBar save={act()} print={act()} post={{ ...act(), dirty: false }} />);
+    expect(screen.queryByText('Save your changes first')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Post invoice…' })).not.toHaveAttribute('aria-describedby');
   });
 
   it('a busy action in More is disabled', () => {

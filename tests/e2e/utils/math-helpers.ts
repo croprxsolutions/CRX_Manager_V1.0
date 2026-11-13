@@ -20,7 +20,8 @@ export function parseDollars(text: string | null | undefined): number {
   const cleaned = text.trim();
   if (!cleaned) return 0;
 
-  const isNegative = cleaned.startsWith('-') || cleaned.startsWith('(');
+  // The invoice page shows negatives with a true minus sign ("\u2212$20.00", Billing UI Nov 13).
+  const isNegative = cleaned.startsWith('-') || cleaned.startsWith('\u2212') || cleaned.startsWith('(');
   // Strip everything except digits and decimal point
   const digits = cleaned.replace(/[^0-9.]/g, '');
   if (!digits) return 0;

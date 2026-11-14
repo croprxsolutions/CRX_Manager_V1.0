@@ -157,6 +157,7 @@ describe('Reports past the 1,000-row server cap', () => {
       open_credit: 0,
       invoice_count: 1,
       oldest_unpaid_date: '2026-09-01',
+      unavailable_reason: null,
     }));
     await openTab('Financial', 'Customer Balance');
 

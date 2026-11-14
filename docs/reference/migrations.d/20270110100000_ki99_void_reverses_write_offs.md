@@ -1,0 +1,5 @@
+**LOCAL CANDIDATE — NOT APPLIED.** KI-99: `20270110100000_ki99_void_reverses_write_offs.sql` (SQL sha256: `82257bf1b24f66f03aa819224b3d97d63e194a241d90a1cd5a92f950e1c4528b`). Re-issues `_void_invoice_split_provenance_impl_20260719(uuid,text,text)` (md5 pinned to its live body, same signature, owner postgres, SECURITY DEFINER, `search_path`, and no app grants) so every void path (single, batch, group) marks each active write-off on the voided invoice reversed, with one `write_off_reversed` audit row each; a write-off in a closed Chicago month refuses the whole void.
+
+Proof: `node scripts/smoke/prove-ki99-void-reverses-write-offs-real-schema.mjs` (prints `KI99_VOID_REVERSES_WRITE_OFFS_PROOF_PASS`). After the apply, read back the function md5 (`2ae11121f2fae161fa95f21229dd299d`) and confirm no voided invoice keeps an active write-off.
+
+Rollback (its own reviewed migration): re-issue the function from `20261206110000_ki18_leftovers_hold_expiry_reversal_month_stale_quotes.sql` (lines 291-608). Write-offs already auto-reversed stay reversed.

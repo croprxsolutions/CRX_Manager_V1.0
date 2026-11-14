@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
+  IS_SALES_GAUNTLET, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
   assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
 } from './target.mjs';
 
@@ -16,7 +17,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 // The refusal tests point this at a throwaway copy. Whatever it holds still has to pass the
 // checks, and it may only be in the temp folder, where the frontend cannot serve it.
-const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, '.state');
+const STATE_DIR = process.env.CRX_LOCAL_APP_STATE_DIR || path.join(HERE, STATE_FOLDER);
 const STATE_FILE = path.join(STATE_DIR, 'local.env');
 const BUILD_FILE = path.join(STATE_DIR, 'build.json');
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -26,7 +27,8 @@ const SUPABASE_CLI = '2.109.1';
 // Children get only what they need to run, never the caller's whole environment.
 const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
 function childEnv(extra = {}) {
-  return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))), ...extra };
+  return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))),
+    ...(IS_SALES_GAUNTLET ? { CRX_LOCAL_APP_PROFILE: 'sales-gauntlet' } : {}), ...extra };
 }
 
 function run(command, args, { input, allowFailure, env, stdio } = {}) {
@@ -70,14 +72,26 @@ function createState() {
     LOCAL_SERVICE_KEY: signKey(secret, 'service_role'),
     LOCAL_TEST_EMAIL: TEST_EMAIL,
     LOCAL_TEST_PASSWORD: randomBytes(12).toString('hex'),
+    ...(IS_SALES_GAUNTLET ? {
+      LOCAL_REP_EMAIL: REP_EMAIL, LOCAL_REP_PASSWORD: randomBytes(12).toString('hex'),
+      LOCAL_OTHER_REP_EMAIL: OTHER_REP_EMAIL, LOCAL_OTHER_REP_PASSWORD: randomBytes(12).toString('hex'),
+    } : {}),
   };
   mkdirSync(STATE_DIR, { recursive: true });
+  if (IS_SALES_GAUNTLET) {
+    const gateway = readFileSync(path.join(HERE, 'kong.yml'), 'utf8');
+    if (gateway.split('http://127.0.0.1:5199').length !== 4) throw new Refused('The gateway origin template changed.');
+    writeFileSync(path.join(STATE_DIR, 'kong.yml'), gateway.replaceAll('http://127.0.0.1:5199', APP_URL));
+  }
   writeFileSync(STATE_FILE, Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
   return state;
 }
 
 function compose(args, options) {
-  return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], options);
+  return run('docker', ['compose', '-p', PROJECT, '-f', path.join(HERE, 'compose.yaml'), '--env-file', STATE_FILE, ...args], {
+    ...options,
+    env: childEnv(IS_SALES_GAUNTLET ? { LOCAL_KONG_CONFIG: path.join(STATE_DIR, 'kong.yml') } : {}),
+  });
 }
 
 function assertExistingStackIsOurs() {
@@ -87,6 +101,9 @@ function assertExistingStackIsOurs() {
   for (const container of inspected) {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
+    }
+    if (IS_SALES_GAUNTLET && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
+      throw new Refused('The sales test stack belongs to another checkout. Nothing was changed.');
     }
   }
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
@@ -226,14 +243,17 @@ AS $live_crlf_close$${body}$live_crlf_close$;\n${sql}`;
 
 const approvedMigrations = () => text(run(process.execPath, ['scripts/list-post-baseline-migrations.mjs'])).split(/\r?\n/).filter(Boolean);
 
-function pushPostBaselineMigrations(state) {
+async function pushPostBaselineMigrations(state) {
   const version = text(run('supabase', ['--version']));
   if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
+  const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
+  const companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
+  if (text(run(companion, ['--version'])) !== SUPABASE_CLI) throw new Error(`Use the matching Supabase ${SUPABASE_CLI} companion executable.`);
   const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
   // The password travels in the environment so it never shows in a process list.
   const urlWithoutPassword = state.LOCAL_DB_URL.replace(`:${state.LOCAL_DB_PASSWORD}@`, '@');
-  const env = childEnv({ PGPASSWORD: state.LOCAL_DB_PASSWORD });
+  const env = childEnv({ PGPASSWORD: state.LOCAL_DB_PASSWORD, SUPABASE_GO_BINARY: companion });
   try {
     mkdirSync(path.join(workdir, 'supabase', 'migrations'), { recursive: true });
     // Not `supabase init`: CLI 2.109.1 writes a [local_smtp] block it then refuses to parse.
@@ -247,7 +267,14 @@ function pushPostBaselineMigrations(state) {
     // The CLI stores what follows the version as the name, so this makes it store the whole stem,
     // which is what live's ledger holds and what later migrations look for.
     const ledgerFile = (name) => `${name.slice(0, 14)}_${name}`;
-    const push = (names) => {
+    const push = async (names) => {
+      if (!names.length) return;
+      const registrationBoundary = names.indexOf('20270106110000_invoice_brands_rup.sql');
+      if (registrationBoundary >= 0) {
+        await push(names.slice(0, registrationBoundary));
+        await seedRegistrationPrerequisite(state);
+        names = names.slice(registrationBoundary);
+      }
       for (const name of names) writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(name)), migrationBytes(`supabase/migrations/${name}`));
       const db = ['--workdir', workdir, 'db', 'push', '--db-url', urlWithoutPassword, '--include-all'];
       const dry = run('supabase', [...db, '--dry-run'], { env });
@@ -266,38 +293,72 @@ function pushPostBaselineMigrations(state) {
     for (const stem of Object.keys(oneShot).sort()) {
       const until = names.findIndex((name) => name > stem);
       const next = until < 0 ? names.length : until;
-      push(names.slice(done, next));
+      await push(names.slice(done, next));
       done = next;
       writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(`${stem}.sql`)), '');
       run('supabase', ['--workdir', workdir, 'migration', 'repair', stem.slice(0, 14), '--status', 'applied', '--db-url', urlWithoutPassword], { env });
     }
-    push(names.slice(done));
+    await push(names.slice(done));
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
   return files;
 }
 
-async function seed(state) {
+async function seedUsers(state) {
   const headers = { apikey: state.LOCAL_SERVICE_KEY, Authorization: `Bearer ${state.LOCAL_SERVICE_KEY}`, 'Content-Type': 'application/json' };
-  const email = state.LOCAL_TEST_EMAIL;
-  if (scalar(`SELECT count(*) FROM auth.users WHERE email = '${email}';`) === '0') {
-    const created = await fetch(`${API_URL}/auth/v1/admin/users`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ email, password: state.LOCAL_TEST_PASSWORD, email_confirm: true, user_metadata: { full_name: 'Test Admin (invented)' } }),
-    });
-    if (!created.ok) throw new Error(`Could not create the test user: ${created.status} ${await created.text()}`);
-  }
-  // New accounts start inactive and banned, and only an admin can approve one. The first admin
-  // has nobody to ask, so these writes skip the triggers that enforce that.
-  psql(`SET session_replication_role = replica;
-    UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = (SELECT id FROM auth.users WHERE email = '${email}');
+  const fixtures = [{ email: state.LOCAL_TEST_EMAIL, password: state.LOCAL_TEST_PASSWORD, role: 'admin', name: 'Test Admin (invented)' },
+    ...(IS_SALES_GAUNTLET ? [
+      { email: state.LOCAL_REP_EMAIL, password: state.LOCAL_REP_PASSWORD, role: 'sales_rep', name: 'Test Sales Rep (invented)' },
+      { email: state.LOCAL_OTHER_REP_EMAIL, password: state.LOCAL_OTHER_REP_PASSWORD, role: 'sales_rep', name: 'Other Sales Rep (invented)' },
+    ] : [])];
+  for (const { email, password, role, name } of fixtures) {
+    if (scalar(`SELECT count(*) FROM auth.users WHERE email = '${email}';`) === '0') {
+      const created = await fetch(`${API_URL}/auth/v1/admin/users`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { full_name: name } }),
+      });
+      if (!created.ok) throw new Error(`Could not create the test user: ${created.status}`);
+    }
+    // Only generated local fixtures: activate their intended role before testing as real callers.
+    psql(`SET session_replication_role = replica;
+    UPDATE public.profiles SET role = '${role}', is_active = true WHERE id = (SELECT id FROM auth.users WHERE email = '${email}');
     UPDATE auth.users SET banned_until = NULL WHERE email = '${email}';
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
-  psql(readFileSync(path.join(HERE, 'seed.sql')));
+  }
   const users = scalar('SELECT count(*) FROM auth.users;');
-  if (users !== '1') throw new Error(`Expected one test user, found ${users}.`);
+  if (users !== String(fixtures.length)) throw new Error(`Expected ${fixtures.length} test users, found ${users}.`);
+}
+
+async function seedRegistrationPrerequisite(state) {
+  if (scalar('SELECT public._epa_registrations_seeded();') === 't') return;
+  compose(['up', '-d', 'auth']);
+  try {
+    await waitFor('login service for registration initialization', () => answers(`${API_URL}/auth/v1/health`));
+    await seedUsers(state);
+  } finally {
+    compose(['stop', 'auth']);
+  }
+  const actor = scalar(`SELECT id FROM auth.users WHERE email = '${state.LOCAL_TEST_EMAIL}';`);
+  psql(`BEGIN;
+    SELECT set_config('request.jwt.claim.sub', '${actor}', true);
+    SELECT set_config('request.jwt.claims', '{"sub":"${actor}","role":"authenticated"}', true);
+    SET LOCAL ROLE authenticated;
+    DO $local_registration_seed$ DECLARE plan jsonb; BEGIN
+      plan := public.preview_epa_registration_seed('no');
+      IF (plan->>'registration_count')::integer IS DISTINCT FROM 0 THEN
+        RAISE EXCEPTION 'Local registration initialization expected no numbered business products';
+      END IF;
+      PERFORM public.seed_epa_registrations('{}'::jsonb, 'no', plan->>'fingerprint', 'local-app-empty-registration-seed');
+    END $local_registration_seed$;
+    COMMIT;`);
+  if (scalar('SELECT public._epa_registrations_seeded();') !== 't') throw new Error('Local registration initialization did not complete.');
+  console.log('Initialized registrations through the real admin seed workflow (no numbered business products).');
+}
+
+async function seed(state) {
+  await seedUsers(state);
+  psql(readFileSync(path.join(HERE, 'seed.sql')));
 }
 
 async function rebuild() {
@@ -315,7 +376,7 @@ async function rebuild() {
   console.log('Pushing the approved migrations...');
   // Some migrations refuse to run beside another open transaction, so the services wait.
   compose(['stop', 'auth', 'rest', 'storage']);
-  const migrations = pushPostBaselineMigrations(state);
+  const migrations = await pushPostBaselineMigrations(state);
   // The services can come back on swapped addresses, and the gateway remembers the old ones.
   compose(['stop', 'gateway']);
   await startServices(state);
@@ -377,7 +438,7 @@ async function start() {
     await waitFor('test app', () => portIsOpen(APP_PORT));
   }
   await assertFrontendIsOurs(state.LOCAL_ANON_KEY);
-  console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/.state/local.env`);
+  console.log(`Test app: ${APP_URL}\nSign in with LOCAL_TEST_EMAIL and LOCAL_TEST_PASSWORD from scripts/local-app/${STATE_FOLDER}/local.env`);
 }
 
 // `frontend --port 5201` runs a second copy beside the shared one. It reaches the gateway through
@@ -386,6 +447,7 @@ async function frontend() {
   const flag = process.argv.indexOf('--port');
   const port = flag < 0 ? APP_PORT : assertExtraAppPort(process.argv[flag + 1]);
   const state = await preflight();
+  if (IS_SALES_GAUNTLET) requireFinishedBuild();
   const supabaseUrl = port === APP_PORT ? API_URL : `http://127.0.0.1:${port}/_sb`;
   run(process.execPath, vite(port), { env: frontendEnv(state, supabaseUrl), stdio: 'inherit' });
 }
@@ -395,6 +457,7 @@ async function test() {
   requireFinishedBuild();
   await startDatabase(state);
   await startServices(state);
+  if (IS_SALES_GAUNTLET) run(process.execPath, ['scripts/local-app/sales-checks.mjs'], { stdio: 'inherit' });
   run(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '--config', 'scripts/local-app/playwright.config.ts'], { stdio: 'inherit' });
 }
 
@@ -428,7 +491,14 @@ const COMMANDS = {
   },
 };
 
-(COMMANDS[process.argv[2]] ?? (() => { throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`); }))().catch((error) => {
+const extra = process.argv.slice(3);
+const validArguments = extra.length === 0 || (process.argv[2] === 'frontend' && extra.length === 2 && extra[0] === '--port');
+(async () => {
+  if (!validArguments) throw new Refused('Unsupported test-app arguments. Use sales.mjs for the sales gauntlet.');
+  const command = COMMANDS[process.argv[2]];
+  if (!command) throw new Error(`Use one of: ${Object.keys(COMMANDS).join(', ')}`);
+  await command();
+})().catch((error) => {
   console.error(error.message);
   // Not process.exit(): on Windows it can crash Node while a fetch is still closing.
   process.exitCode = error instanceof Refused ? 3 : 1;

@@ -592,7 +592,7 @@ export default function DispatchBoard() {
   ];
 
   return (
-    <div className="-m-4 sm:-m-6 lg:-m-8 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100">
+    <div className="-m-4 lg:-m-6 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100">
       <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)]">
         {/* LEFT RAIL — nav groups (criterion #2) */}
         <nav className="lg:w-60 shrink-0 bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-800 p-3 lg:p-4">

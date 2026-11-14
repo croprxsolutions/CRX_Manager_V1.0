@@ -17,25 +17,9 @@ import DeliveryBrandPicker from './DeliveryBrandPicker';
 
 const delivered = (line: DeliveryBrandLine) => line.quantity_delivered ?? line.quantity;
 
-/**
- * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
- * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
- */
-// Re-sending a typed brand someone already linked or dismissed would undo that review (the database replaces the
-// picks), so confirming leaves such lines as they are; picking the listed brand on the line corrects them instead.
-function hasReviewedTypedPick(line: DeliveryBrandLine): boolean {
-  return line.picks.some((p) => p.source === 'typed' && p.review_state !== 'pending');
-}
-
-function nothingToSaveMessage(confirming: boolean, lines: DeliveryBrandLine[]): string {
-  return confirming && lines.some(hasReviewedTypedPick)
-    ? 'A typed brand here was already reviewed. To confirm that line, pick the listed brand on it.'
-    : 'No brand changes to save.';
-}
-
-/** The lines "save with no changes" confirms: those with picks, except a reviewed typed brand's. */
+/** The server preserves office review for unchanged typed identities, including amount-only corrections. */
 function linesToConfirm(lines: DeliveryBrandLine[]): string[] {
-  return lines.filter((l) => l.picks.length > 0 && !hasReviewedTypedPick(l)).map((l) => l.delivery_item_id);
+  return lines.filter((l) => l.picks.length > 0).map((l) => l.delivery_item_id);
 }
 
 /**
@@ -48,6 +32,10 @@ function correctionMismatch(brands: DeliveryBrands, changed: string[], drafts: D
     Object.fromEntries(changedLines.map((l) => [l.delivery_item_id, delivered(l)])), true)[0];
 }
 
+/**
+ * Admin only, on a completed delivery (Brand PR B, B-2): fixes which brands went off the truck with
+ * correct_delivery_brands. The old picks are kept as history; a posted invoice must be voided and reissued first.
+ */
 export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyChange }: {
   open: boolean; deliveryId: string; onClose: () => void; onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -93,7 +81,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
     const confirming = edited.length === 0;
     const changed = confirming ? linesToConfirm(brands.lines.filter(showLine)) : edited;
     if (changed.length === 0) {
-      toast('info', nothingToSaveMessage(confirming, brands.lines));
+      toast('info', 'No brand changes to save.');
       return;
     }
     if (!reason.trim()) { toast('error', 'Say why the brands are being corrected.'); return; }
@@ -172,6 +160,7 @@ export default function CorrectBrandsModal({ open, deliveryId, onClose, onDirtyC
       {brands && hasLines && (
         <div className="space-y-4">
           <p className="text-sm text-secondary">The brand amounts on each line must add up to what was delivered. The old brands stay in the history. Saving with no changes confirms the brands as they are.</p>
+          <p className="text-sm text-secondary">Changing only the capitalization of a reviewed typed brand's name keeps its recorded name.</p>
           <DeliveryBrandPicker
             brands={brands}
             drafts={drafts}

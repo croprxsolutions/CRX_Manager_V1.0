@@ -3201,6 +3201,8 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
+  _delivery_brand_insert:
+    'private SECURITY DEFINER delivery-brand row inserter called within keyed brand workflows; live catalog denies EXECUTE to anon, authenticated, and service_role',
   // M4a sales tax (local candidate 20261231120000): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',

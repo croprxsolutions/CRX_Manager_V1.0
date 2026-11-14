@@ -25,6 +25,7 @@ import { exportToCSV, fmtCSV } from '../lib/csvExport';
 import { fetchAllRows } from '../lib/pagedRead';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import RupIncompleteNotice, { RUP_FLAGS_KNOWN_INCOMPLETE } from '../components/compliance/RupIncompleteNotice';
+import DeliveriesMissingBrands from '../components/deliveries/DeliveriesMissingBrands';
 import { localToday, localDatePlusDays, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonStartDate } from '../utils/season';
 import { formatCents as fmtCurrency } from '../lib/money';
@@ -560,6 +561,8 @@ export default function Compliance() {
           </Button>
         ) : undefined}
       />
+
+      {canViewRupRegister && <DeliveriesMissingBrands />}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">

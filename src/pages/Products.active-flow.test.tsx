@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   products: [] as Array<Record<string, unknown>>,
   rpc: vi.fn(),
   toast: vi.fn(),
+  missingBrandsPanel: vi.fn(() => null),
 }));
 const active = {
   id: '11111111-1111-4111-8111-111111111111', product_name: 'Test Chemical',
@@ -24,7 +25,7 @@ function chainable(result: unknown) {
   return builder;
 }
 vi.mock('../components/products/TypedBrandReview', () => ({ default: () => null }));
-vi.mock('../components/deliveries/DeliveriesMissingBrands', () => ({ default: () => null }));
+vi.mock('../components/deliveries/DeliveriesMissingBrands', () => ({ default: mocks.missingBrandsPanel }));
 vi.mock('../lib/db', async (original) => ({
   ...(await original<typeof import('../lib/db')>()),
   supabase: { from: vi.fn(() => chainable({ data: mocks.products, error: null })) },
@@ -88,6 +89,11 @@ describe('product active review flow', () => {
     expect(await screen.findByText('Test Chemical: order PM3-OPEN')).toBeInTheDocument();
     expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not mount the deliveries missing-brands panel on Products', async () => {
+    await loaded();
+    expect(mocks.missingBrandsPanel).not.toHaveBeenCalled();
   });
 
   it('confirms a stock warning using the preview token and a retry key', async () => {

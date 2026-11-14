@@ -30,7 +30,11 @@ vi.mock('../lib/db', async (importOriginal) => {
     },
   });
   // The register is read page by page; pagedRpcReply serves the mocked reply like the server.
-  return { ...actual, supabase: { from: () => builder, rpc: (...args: unknown[]) => pagedRpcReply(H.rpc(...args)) } };
+  return {
+    ...actual,
+    supabase: { from: () => builder, rpc: (...args: unknown[]) => pagedRpcReply(H.rpc(...args)) },
+    supabaseUntyped: { rpc: (...args: unknown[]) => H.rpc(...args) },
+  };
 });
 
 vi.mock('../contexts/AuthContext', () => ({
@@ -70,6 +74,38 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Compliance RUP Sales Register gating', () => {
+  it('shows and loads missing-brand follow-up for an active admin below the page header', async () => {
+    H.rpc.mockImplementation(async (name: string) => ({
+      data: name === 'get_deliveries_missing_brands' ? [{
+        delivery_id: 'delivery-1', delivery_number: 'DL-100', delivered_on: '2026-11-12',
+        delivery_item_id: 'item-1', product_name: 'Test product', quantity_delivered: 10,
+        picked_quantity: 0, reasons: ['brand_not_recorded'],
+      }] : [],
+      error: null,
+    }));
+    await renderPage();
+    const cardTitle = await screen.findByRole('heading', { name: 'Deliveries missing brands' });
+    expect(cardTitle).toBeTruthy();
+    const pageTitle = screen.getByRole('heading', { name: 'Compliance', level: 1 });
+    expect(pageTitle.compareDocumentPosition(cardTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText('DL-100')).toBeTruthy();
+    const tabs = screen.getByRole('button', { name: /Applicator Licenses/ });
+    expect(cardTitle.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(H.rpc).toHaveBeenCalledWith('get_deliveries_missing_brands', expect.objectContaining({ p_from: expect.any(String), p_to: expect.any(String) }));
+  });
+
+  it.each([
+    { name: 'a sales rep', role: 'sales_rep', active: true },
+    { name: 'an inactive admin', role: 'admin', active: false },
+  ])('does not mount or call missing-brand follow-up for $name', async ({ role, active }) => {
+    H.role.current = role;
+    H.active.current = active;
+    await renderPage();
+    await screen.findByRole('button', { name: /Applicator Licenses/ });
+    expect(screen.queryByRole('heading', { name: 'Deliveries missing brands' })).toBeNull();
+    expect(H.rpc.mock.calls.some(([name]) => name === 'get_deliveries_missing_brands')).toBe(false);
+  });
+
   it('hides the register tab from a sales rep and never calls the register', async () => {
     H.role.current = 'sales_rep';
     await renderPage();

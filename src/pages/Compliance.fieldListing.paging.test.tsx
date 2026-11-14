@@ -45,6 +45,7 @@ function customerSearch(rows: Row[]) {
   return chain;
 }
 
+vi.mock('../components/deliveries/DeliveriesMissingBrands', () => ({ default: () => null }));
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
   return {

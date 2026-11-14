@@ -102,10 +102,12 @@ Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved 
     assert(text.includes(printed), `PDF does not print ${printed}`);
   }
   // The letterhead takes the Settings company details; a blank address keeps the default town.
-  for (const printed of ["TEST AG CO", "555-0199", "office@testag.test", "West York, IL"]) {
+  for (const printed of ["Test Ag Co", "555-0199", "office@testag.test", "West York, IL"]) {
     assert(text.includes(printed), `PDF does not print the Settings value ${printed}`);
   }
-  assert(!text.includes("CROP RX SOLUTIONS"), "PDF still prints the built-in company name");
+  // The built-in name never heads the letterhead; the pay note names the legal payee ("Crop RX Solutions, Inc."), as the old footer did.
+  assert(!text.includes("CROP RX SOLUTIONS") && !text.includes("(Crop RX Solutions)"), "PDF still prints the built-in company name");
+  assert(text.includes("Make checks payable to Crop RX Solutions, Inc."), "PDF does not name the legal payee");
 });
 
 Deno.test("any failed invoice read refuses instead of drawing a PDF with parts missing", async () => {

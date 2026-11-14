@@ -3008,6 +3008,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         sharesOnByDefault={billSplitPayers.length > 1}
         open={showPrintDialog}
         onClose={() => setShowPrintDialog(false)}
+        invoiceNumbers={invoice.invoice_number ? [invoice.invoice_number] : []}
         invoiceType={invoice.invoice_type || 'chemical_sale'}
         hasShares={shares.length > 1 || billSplitPayers.length > 1}
         onPrint={handlePrint}

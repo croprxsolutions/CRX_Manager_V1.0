@@ -2,16 +2,23 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { connect } from 'node:net';
 
-export const PROJECT = 'crx-local-app';
-export const API_PORT = 54721;
-export const DB_PORT = 54722;
-export const APP_PORT = 5199;
+if (process.env.CRX_LOCAL_APP_PROFILE && process.env.CRX_LOCAL_APP_PROFILE !== 'sales-gauntlet') {
+  throw new Error('LOCAL_APP_REFUSED: Unknown local test profile.');
+}
+export const IS_SALES_GAUNTLET = process.env.CRX_LOCAL_APP_PROFILE === 'sales-gauntlet';
+export const STATE_FOLDER = IS_SALES_GAUNTLET ? '.state/sales-gauntlet' : '.state';
+export const PROJECT = IS_SALES_GAUNTLET ? 'crx-sales-gauntlet' : 'crx-local-app';
+export const API_PORT = IS_SALES_GAUNTLET ? 54821 : 54721;
+export const DB_PORT = IS_SALES_GAUNTLET ? 54822 : 54722;
+export const APP_PORT = IS_SALES_GAUNTLET ? 5209 : 5199;
 export const API_URL = `http://127.0.0.1:${API_PORT}`;
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 export const DB_URL_PREFIX = `postgresql://postgres:`;
 export const DB_URL_SUFFIX = `@127.0.0.1:${DB_PORT}/postgres?sslmode=disable`;
-export const ISSUER = 'crx-local-app';
+export const ISSUER = PROJECT;
 export const TEST_EMAIL = 'admin@crx-local-app.test';
+export const REP_EMAIL = 'rep@crx-sales-gauntlet.test';
+export const OTHER_REP_EMAIL = 'other-rep@crx-sales-gauntlet.test';
 
 const PROD_REF = 'rhyzpcqhnizqbxphqdkr';
 // Names that decide where a database or Supabase tool connects, or that hold a live credential.
@@ -98,11 +105,16 @@ function signedBy(secret, token) {
 export function assertLocalState(state) {
   const known = ['LOCAL_API_URL', 'LOCAL_APP_URL', 'LOCAL_API_PORT', 'LOCAL_DB_PORT', 'LOCAL_DB_PASSWORD', 'LOCAL_DB_URL',
     'LOCAL_JWT_SECRET', 'LOCAL_ANON_KEY', 'LOCAL_SERVICE_KEY', 'LOCAL_TEST_EMAIL', 'LOCAL_TEST_PASSWORD'];
+  if (IS_SALES_GAUNTLET) known.push('LOCAL_REP_EMAIL', 'LOCAL_REP_PASSWORD', 'LOCAL_OTHER_REP_EMAIL', 'LOCAL_OTHER_REP_PASSWORD');
   if (Object.keys(state).sort().join() !== [...known].sort().join()) {
     throw new Refused('The saved settings hold something the test app did not write.');
   }
   if (state.LOCAL_TEST_EMAIL !== TEST_EMAIL || !/^[0-9a-f]{24}$/.test(state.LOCAL_TEST_PASSWORD)) {
     throw new Refused('The saved test user is not the one this test app generated.');
+  }
+  if (IS_SALES_GAUNTLET && (state.LOCAL_REP_EMAIL !== REP_EMAIL || state.LOCAL_OTHER_REP_EMAIL !== OTHER_REP_EMAIL
+    || !/^[0-9a-f]{24}$/.test(state.LOCAL_REP_PASSWORD) || !/^[0-9a-f]{24}$/.test(state.LOCAL_OTHER_REP_PASSWORD))) {
+    throw new Refused('The saved sales test users are not the ones this test app generated.');
   }
   if (state.LOCAL_API_URL !== API_URL) throw new Refused('LOCAL_API_URL is not this computer\'s test gateway.');
   if (state.LOCAL_APP_URL !== APP_URL) throw new Refused('LOCAL_APP_URL is not this computer\'s test app.');
@@ -178,8 +190,8 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
  */
 export function assertExtraAppPort(port) {
   const number = /^\d{4,5}$/.test(String(port ?? '')) ? Number(port) : NaN;
-  if (!(number >= 1024 && number <= 65535) || [APP_PORT, API_PORT, DB_PORT].includes(number)) {
-    throw new Refused(`--port needs a port from 1024 to 65535 other than ${APP_PORT}, ${API_PORT} and ${DB_PORT}.`);
+  if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822].includes(number)) {
+    throw new Refused('--port needs a port from 1024 to 65535 outside both test profiles\' reserved ports.');
   }
   return number;
 }

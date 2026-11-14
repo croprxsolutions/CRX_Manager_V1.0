@@ -27,8 +27,14 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
 const FOLLOW_UPS = [];
-// Later files that only READ what this proof covers and redefine none of it.
-const LATER_READ_ONLY = new Set();
+// These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
+const LATER_READ_ONLY = new Set([
+  '20270104120000_delivery_brands.sql',
+  '20270105110000_epa_chemistry_proposals.sql',
+  '20270106110000_invoice_brands_rup.sql',
+  '20270108100000_ingredient_modes_of_action.sql',
+  '20270109100000_delivery_receipt_brands.sql',
+]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -552,15 +558,22 @@ function batchCases() {
     { parent_id: L[7], basis: 'per_acre', source: 'label', low: '0.5', high: '1.5', unit: 'pt', decision: 'approve' }], [outRow(L[7], 'approved_default', null, p8)]));
   assert.equal(rec.rates_changed, 2); assert.equal(rec.outcomes_changed, 1);
   assert.equal(outcomeOf(L[7]), 'approved_default');
-  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  // A fresh approved row can reconfirm the exact recorded outcome and note in the same upload.
   const p3 = par(L[2]);
-  js(ADMIN, commit([up(L[2], p3.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
-    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3)]));
+  const sameOutcome = js(ADMIN, commit([{ parent_id: L[2], basis: 'per_100_gal', source: 'label', recommended: '1', unit: 'pt', decision: 'approve' }],
+    [outRow(L[2], p3.outcome, p3.outcome_note, p3)]));
+  assert.equal(sameOutcome.outcomes_changed, 1);
+  assert.equal(outcomeOf(L[2]), 'approved_default');
+  assert.equal(par(L[2]).outcome_note, p3.outcome_note);
+  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  const p3After = par(L[2]);
+  js(ADMIN, commit([up(L[2], p3After.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
+    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3After)]));
   assert.equal(outcomeOf(L[2]), 'needs_label_data');
   assert.equal(statusOf(R.b3), 'draft');
   // But an outcome row whose parent's outcome moved since the download is stale.
-  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3)]), /PRODUCT_RATE_OUTCOME_STALE/);
-  console.log('[case] 10 one upload adds and approves a default, then sets approved_default; a reopen + edit with the outcome in the same upload is not stale');
+  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3After)]), /PRODUCT_RATE_OUTCOME_STALE/);
+  console.log('[case] 10 one upload sets the same recorded outcome and note after a rate change, then a reopen + edit with a new outcome is not stale');
 
   // 11a. The upload's parent_id must be the rate's parent; unknown parents; duplicates.
   const wrong = js(ADMIN, preview([upId(L[8], R.a9, { parent_id: L[0], decision: 'reopen', reason: 'x' })])).rates[0];

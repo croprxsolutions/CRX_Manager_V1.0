@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
@@ -1634,12 +1634,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
-    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
+    state: "OPEN", isCrossRepository: false, baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
-    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
+    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    // Taha's go-ahead for this head (#1838, his choice 13 Nov): fresh, from his account.
+    comments: [{ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString() }],
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
+      startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
+    { __typename: "CheckRun", workflowName: "Release flow", name: "Release flow guard (main)", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
   const crThread = (resolved, outdated = false) => ({ isResolved: resolved, isOutdated: outdated,
@@ -1656,13 +1660,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
-    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false } = {}) => evaluateLandingGate({
+    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
+    trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
       if (key in git) { if (git[key] instanceof Error) throw git[key]; return git[key]; }
       if (key === "rev-parse HEAD") return `${HEAD_SHA}\n`;
       if (key === "rev-parse --abbrev-ref HEAD") return "claude/feature\n";
+      if (key === "rev-parse HEAD:.github/workflows") return `${workflowsHead}\n`;
       if (key.startsWith("show HEAD:")) return SQL;
       if (key.startsWith("status --porcelain")) return "";
       // git's shared folder: this fixture is its own main checkout.
@@ -1670,6 +1677,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /pullRequests\(baseRefName:\\?"staging/.test(String(a)))) {
+        if (openStaging instanceof Error) throw openStaging;
+        return JSON.stringify({ data: { repository: { pullRequests: { totalCount: openStaging.length, nodes: openStaging.map((paths) => ({ files: { totalCount: paths.length, nodes: paths.map((p) => ({ path: p })) } })) } } } });
+      }
       // The REST file list the requirement read always makes (rename sources).
       if (args[0] === "api" && String(args[1]).includes("/files?per_page")) {
         assert.ok(String(args[1]).startsWith(`repos/{owner}/{repo}/pulls/${pr.number ?? 900}/files`));
@@ -1695,6 +1706,26 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: threadsHead,
           reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
       }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/commits/staging") {
+        if (stagingTip instanceof Error) throw stagingTip;
+        return `${stagingTip}\n`;
+      }
+      if (args[0] === "api" && args[1] === `repos/{owner}/{repo}/compare/${"d".repeat(40)}...${HEAD_SHA}`) {
+        if (stagingBehind instanceof Error) throw stagingBehind;
+        return stagingBehind;
+      }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/contents/.github?ref=main") {
+        if (workflowsMain instanceof Error) throw workflowsMain;
+        return `${workflowsMain}\n`;
+      }
+      // The hotfix stamp check lists the migrations on main and staging (#1838 HIGH 1).
+      const dir = /^repos\/\{owner\}\/\{repo\}\/contents\/supabase\?ref=(main|staging)$/.exec(String(args[1]));
+      if (args[0] === "api" && dir) {
+        if (treesError) throw treesError;
+        return `${dir[1] === "main" ? "1".repeat(40) : "2".repeat(40)}\n`;
+      }
+      const tree = /^repos\/\{owner\}\/\{repo\}\/git\/trees\/(1{40}|2{40})$/.exec(String(args[1]));
+      if (args[0] === "api" && tree) return trees[tree[1][0] === "1" ? "main" : "staging"].join("\n") + "\n";
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
         assert.deepEqual(args, ["api", `repos/{owner}/{repo}/compare/${base}...${HEAD_SHA}`, "--jq", ".behind_by"]);
@@ -1752,12 +1783,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const otherReview = readyPr.reviews;
-    refused(gate({ pr: { createdAt: young } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
+    const go = readyPr.comments[0];
+    refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
     refused(gate({ pr: { createdAt: young, comments: [{ author: { login: "someoneelse" }, body: "lgtm" }] } }),
       "4-hour review hold", "another person's comment does not lift the hold");
-    refused(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
+    refused(gate({ pr: { createdAt: young, comments: [], reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
       "4-hour review hold", "Taha's unposted (PENDING) review does not lift the hold");
-    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }] } }).ok === true,
+    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }, go] } }).ok === true,
       "a Taha comment lifts the hold on a young PR");
     ok(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "COMMENTED" }] } }).ok === true,
       "a posted Taha review lifts the hold on a young PR");
@@ -1774,6 +1806,79 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ behindBy: "" }), "does not contain its base", "an empty compare answer fails closed");
   ok(gate({ behindBy: "0\n" }).ok === true, "a head that contains its base passes");
   refused(gate({ pr: { baseRefName: "develop" } }), "does not target main", "a PR into another branch is refused");
+  refused(gate({ pr: { baseRefName: "staging" } }), "staging database job applies it after the merge", "a PR into staging is never applied live before its merge");
+  for (const head of ["claude/feature", "main", "hotfix/a/b", "release/next2", "release/other", ""]) {
+    refused(gate({ pr: { headRefName: head } }), "is not the release PR (release/next) or a hotfix/<name> PR", `into main, only the release PR and a hotfix are applied live first (${head || "no head"})`);
+  }
+  // #1838 HIGH 1 (Mason's agents, 2026-11-12): a hotfix stamped above a migration waiting on staging would make live
+  // refuse that one on release day.
+  {
+    const main = ["20270109100000_on_main.sql"];
+    const staging = [...main, "20261231110000_m4b_old.sql", "20270110100000_waiting.sql"];
+    ok(hotfixStampProblem({ stamp: "20270109110000", mainFiles: main, stagingFiles: staging }) === null, "a hotfix between main's newest and the waiting migration is fine");
+    ok(/20270110100000/.test(hotfixStampProblem({ stamp: "20270110100000", mainFiles: main, stagingFiles: staging })), "a hotfix at the waiting stamp is refused");
+    ok(/next-migration-stamp\.mjs --hotfix/.test(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: staging })), "a hotfix above it is refused, with the fix");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: [...main, "20261231110000_m4b_old.sql"] }) === null,
+      "a waiting migration below main's newest (already out of order, restamped on its own) doesn't count");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: main }) === null, "nothing waiting: anything goes");
+  }
+  const waitingTrees = { main: ["20260801000000_x.sql"], staging: ["20260801000000_x.sql", "20260810000000_waiting.sql"] };
+  refused(gate({ trees: waitingTrees }), "a migration waiting on staging", "a hotfix stamped above a waiting staging migration is refused");
+  ok(gate({ trees: { ...waitingTrees, staging: [...waitingTrees.staging.slice(0, 1), "20260901000000_later.sql"] } }).ok === true, "a hotfix below the waiting one passes");
+  refused(gate({ treesError: new Error("HTTP 502") }), "could not list the migrations", "an unreadable listing fails closed");
+  refused(gate({ openStaging: [["supabase/migrations/20260810000000_pending.sql"]] }), "a migration waiting on staging", "a migration in an open staging PR counts (Sol)");
+  refused(gate({ openStaging: new Error("HTTP 502") }), "could not list the migrations", "unreadable open staging PRs fail closed");
+  refused(gate({ trees: { main: [], staging: [] } }), "listed no migrations", "an empty listing fails closed");
+  ok(gate({ trees: waitingTrees, pr: { headRefName: "release/next" } }).ok === true, "the release PR carries the waiting migrations itself: no stamp check");
+  // #1838 HIGH 2: a PR that changes .github/workflows is judged by its own copy of the guard.
+  refused(gate({ workflowsHead: "b".repeat(40) }), "changes .github/workflows", "a PR with its own workflows is refused");
+  refused(gate({ workflowsHead: "b".repeat(40), pr: { headRefName: "release/next" } }), "changes .github/workflows", "a release with a workflow change is refused too");
+  refused(gate({ workflowsMain: new Error("HTTP 502") }), "could not compare", "an unreadable main tree fails closed");
+  refused(gate({ workflowsHead: "" }), "changes .github/workflows", "no workflows tree at HEAD is refused");
+  // Sol (#1838): a guard result from before switch-on checked nothing.
+  {
+    const old = "2026-11-12T10:00:00Z";
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old, completedAt: old }] } }),
+      "from before the release flow was switched on", "a pre-switch-on guard result is refused");
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old }] } }),
+      "from before the release flow was switched on", "a run started before switch-on and finished after is refused (Luna)");
+  }
+  // Sol (#1838): a release guard result goes stale when staging moves after it ran.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release head that contains staging's tip passes");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingBehind: "3\n" }), "does not contain staging's tip", "a release head behind staging is refused");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingTip: new Error("HTTP 502") }), "does not contain staging's tip", "an unreadable staging tip fails closed");
+  ok(gate({ stagingBehind: "3\n" }).ok === true, "a hotfix doesn't need staging's tip");
+  refused(gate({ pr: { isCrossRepository: true } }), "comes from a fork", "a fork's branch is refused");
+  refused(gate({ pr: { isCrossRepository: undefined } }), "comes from a fork", "an unknown origin is refused");
+  // #1838, Taha's choice (13 Nov): an agent applies only within 30 minutes of Taha's "Ready to merge: <head>".
+  {
+    const t = (over = {}) => ({ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString(), ...over });
+    const now = Date.now();
+    ok(readyToMergeProblem({ comments: [t()], head: HEAD_SHA, now }) === null, "Taha's fresh go-ahead for this head");
+    ok(readyToMergeProblem({ comments: [t({ author: { login: "masonwells1" } })], head: HEAD_SHA, now }), "the shared account doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ createdAt: new Date(now - 31 * 60_000).toISOString() })], head: HEAD_SHA, now }), "older than 30 minutes doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge: 123456789abc" })], head: HEAD_SHA, now }), "another head doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: `Ready to merge: ${HEAD_SHA.slice(0, 7)}` })], head: HEAD_SHA, now }), "seven characters are too few to name a head (Sol)");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge soon" })], head: HEAD_SHA, now }), "free text doesn't count");
+    ok(readyToMergeProblem({ comments: undefined, head: HEAD_SHA, now }), "no comment list fails closed");
+  }
+  refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "an apply without Taha's go-ahead is refused");
+  refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
+  // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // The name alone is not enough: main's release guard must have passed on this head.
+  const build = readyPr.statusCheckRollup[0];
+  const guardRun = readyPr.statusCheckRollup[1];
+  for (const head of ["release/next", "hotfix/test-fix"]) {
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build] } }), "no green \"Release flow guard (main)\"", `${head}: a missing release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, conclusion: "SKIPPED" }] } }), "no green \"Release flow guard (main)\"", `${head}: a skipped release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, status: "IN_PROGRESS", conclusion: "" }] } }), "not merge-ready", `${head}: a running release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, name: "Release flow guard (staging)" }] } }), "no green \"Release flow guard (main)\"", `${head}: the staging guard does not count`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, workflowName: "Other" }] } }), "no green \"Release flow guard (main)\"", `${head}: a job of that name in another workflow does not count`);
+  }
+  const earlier = new Date(Date.now() - 60000).toISOString();
+  ok(gate({ pr: { headRefName: "release/next", statusCheckRollup: [build, { ...guardRun, conclusion: "FAILURE", startedAt: earlier, completedAt: earlier }, guardRun] } }).ok === true,
+    "a release guard that failed, then passed on a re-run, counts as green");
   refused(gate({ pr: { headRefOid: "c".repeat(40) } }), "is not this checkout's HEAD", "a checkout behind or ahead of the PR head is refused");
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.

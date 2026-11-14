@@ -36,6 +36,21 @@ interface DropdownProps {
   active?: boolean;
 }
 
+// The trigger's look per state, kept out of Dropdown for its complexity budget.
+function triggerClass({ height, inline, error, active }: { height: string; inline: boolean; error: boolean; active: boolean }) {
+  return `
+      ${height} ${inline ? 'w-auto' : 'w-full'} flex items-center justify-between gap-2 px-3 text-sm
+      border ${inline ? 'rounded-full md:rounded-lg' : 'rounded-lg'} text-left focus:outline-none focus-visible:ring-2
+      disabled:opacity-50 disabled:bg-gray-50
+      transition-colors duration-150
+      ${error
+        ? 'bg-white text-nav-dark border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600 data-[pressed]:border-red-600'
+        : active
+          ? 'bg-crx-green-light text-crx-green font-medium border-crx-green focus-visible:ring-crx-green/20'
+          : 'bg-white text-nav-dark border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green data-[pressed]:border-crx-green'}
+    `;
+}
+
 export default function Dropdown({
   label,
   'aria-label': ariaLabel,
@@ -76,17 +91,7 @@ export default function Dropdown({
       )}
       <Button
         ref={triggerRef}
-        className={`
-          ${height} ${inline ? 'w-auto' : 'w-full'} flex items-center justify-between gap-2 px-3 text-sm
-          border ${inline ? 'rounded-full md:rounded-lg' : 'rounded-lg'} text-left focus:outline-none focus-visible:ring-2
-          disabled:opacity-50 disabled:bg-gray-50
-          transition-colors duration-150
-          ${error
-            ? 'bg-white text-nav-dark border-red-600 focus-visible:ring-red-200 focus-visible:border-red-600 data-[pressed]:border-red-600'
-            : active
-              ? 'bg-crx-green-light text-crx-green font-medium border-crx-green focus-visible:ring-crx-green/20'
-              : 'bg-white text-nav-dark border-gray-300 focus-visible:ring-crx-green/20 focus-visible:border-crx-green data-[pressed]:border-crx-green'}
-        `}
+        className={triggerClass({ height, inline, error: !!error, active })}
       >
         {inline && label && <span className={active ? 'font-normal' : 'text-secondary'} aria-hidden="true">{label}</span>}
         <SelectValue className="truncate data-[placeholder]:text-gray-500" />

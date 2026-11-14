@@ -236,7 +236,7 @@ function as(uid, sql) {
 // ---------------------------------------------------------------------------------------------
 const CUSTOMER = id('c1');
 const INV = { one: id('b1'), paid: id('b2'), closed: id('b3'), batch: id('b4'), plain: id('b5'), cash: id('b9'), key: id('b6') };
-const WO = { active2: id('e9'), open: id('ea'), cash: id('eb'), active: id('e1'), old: id('e2'), paid: id('e3'), closed: id('e4'), batch: id('e5'), key: id('e6') };
+const WO = { active2: id('e9'), open: id('d4'), cash: id('eb'), active: id('e1'), old: id('e2'), paid: id('e3'), closed: id('e4'), batch: id('e5'), key: id('e6') };
 
 function ok(uid, sql) { const r = as(uid, sql); assert.equal(r.status, 0, r.output); return r.rows.at(-1); }
 function refused(uid, sql, pattern) {
@@ -397,6 +397,8 @@ function main() {
   console.log('[prover] case 2: a paid invoice settled by a write-off voids and its write-off is reversed');
 
   // 3. the write-off's Chicago month (October) closed: the whole void is refused; November closed: it passes.
+  // The open-month write-off is processed first (ORDER BY id), so the refusal must undo its reversal.
+  assert.ok(WO.open < WO.closed, 'the open-month write-off must sort before the closed one');
   setClosed('2026-10-01');
   const refusal = refused(ADMIN, voidSql(INV.closed), /closed accounting period/);
   assert.deepEqual(invState(INV.closed), { status: 'posted', write_off_cents: 1300 });

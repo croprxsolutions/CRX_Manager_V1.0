@@ -19,7 +19,7 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '2ae11121f2fae161fa95f21229dd299d', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '3293393c3a73721c768a365465ffe31a', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
   ) AS t(sig, pre_md5, post_md5, acl, args)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
@@ -29,6 +29,7 @@ BEGIN
     IF md5(replace(v_fn.prosrc, chr(13), '')) NOT IN (v_row.pre_md5, v_row.post_md5)
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR NOT v_fn.prosecdef
+       OR v_fn.provolatile <> 'v'
        OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
        OR pg_get_function_arguments(v_fn.oid) <> v_row.args
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres'
@@ -251,7 +252,7 @@ BEGIN
     INSERT INTO financial_audit_log (operation_type, entity_type, entity_id, actor_role, old_values, new_values, total_impact_cents, description)
     VALUES ('write_off_reversed', 'write_off', v_wo.id, v_actor_role,
       jsonb_build_object('amount_cents', v_wo.amount_cents, 'reversed_at', null, 'invoice_status', v_inv.status),
-      jsonb_build_object('reversed_at', now(), 'reverse_reason', 'Auto-reversed: invoice voided — ' || p_void_reason,
+      jsonb_build_object('reversed_at', now(), 'reverse_reason', 'Auto-reversed: invoice ' || v_inv.invoice_number || ' voided — ' || p_void_reason,
         'invoice_status', 'voided'),
       v_wo.amount_cents,
       'Write-off of ' || (v_wo.amount_cents::numeric / 100)::text || ' reversed on invoice ' || p_invoice_id::text
@@ -390,7 +391,7 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '2ae11121f2fae161fa95f21229dd299d', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '3293393c3a73721c768a365465ffe31a', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
   ) AS t(sig, pre_md5, post_md5, acl, args)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
@@ -398,6 +399,7 @@ BEGIN
        OR md5(replace(v_fn.prosrc, chr(13), '')) <> v_row.post_md5
        OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
        OR NOT v_fn.prosecdef
+       OR v_fn.provolatile <> 'v'
        OR coalesce((SELECT array_agg(g::text ORDER BY g::text COLLATE "C") FROM unnest(v_fn.proacl) g)::text, 'NULL') IS DISTINCT FROM v_row.acl
        OR pg_get_function_arguments(v_fn.oid) <> v_row.args
        OR pg_get_userbyid(v_fn.proowner) <> 'postgres' THEN

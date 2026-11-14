@@ -333,6 +333,8 @@ ROLLBACK;` });
 }
 const statementRefs = () => ok(ADMIN, `SELECT coalesce(string_agg(txn_type || ':' || ref_num || ':' || amount_cents, ',' ORDER BY ref_num, txn_type), '-')
   FROM public.get_customer_statement('${CUSTOMER}', '2026-01-01', '2099-12-31') s(txn_date, txn_type, ref_num, description, amount_cents, running_balance_cents);`);
+const statementTotal = () => Number(ok(ADMIN, `SELECT coalesce(sum(amount_cents), 0)
+  FROM public.get_customer_statement('${CUSTOMER}', '2026-01-01', '2099-12-31') s(txn_date, txn_type, ref_num, description, amount_cents, running_balance_cents);`));
 const definition = (sig) => docker([...psqlArgs(), '-A', '-t'], { input: `SELECT pg_get_functiondef('public.${sig}'::regprocedure);` }).stdout.replace(/\r/g, '');
 const aclOf = (sig) => scalar(`SELECT coalesce(proacl::text, '-') || ' ' || pg_get_userbyid(proowner) || ' ' || prosecdef::text || ' ' || provolatile::text FROM pg_proc WHERE oid = 'public.${sig}'::regprocedure;`);
 const TARGET = '_void_invoice_split_provenance_impl_20260719(uuid,text,text)';
@@ -366,6 +368,7 @@ function main() {
 
   // 1. posted invoice: the active write-off is reversed and recorded; the earlier reversal is untouched.
   const oldBefore = row(`SELECT to_jsonb(w) FROM public.write_offs w WHERE id = '${WO.old}'`);
+  const totalBefore = statementTotal();
   ok(ADMIN, voidSql(INV.one));
   assert.deepEqual(invState(INV.one), { status: 'voided', write_off_cents: 0 });
   assert.deepEqual(woState(WO.active), { reversed: true, by: ADMIN, reason: 'Auto-reversed: invoice INV-K99-1 voided — [PROVER] wrong customer' });
@@ -377,12 +380,14 @@ function main() {
   assert.equal(audits(WO.old), 0);
   const audit = row(`SELECT jsonb_build_object('impact', total_impact_cents, 'role', actor_role, 'old', old_values, 'new', new_values - 'reversed_at') FROM public.financial_audit_log WHERE operation_type = 'write_off_reversed' AND entity_id = '${WO.active}'`);
   assert.deepEqual(audit, { impact: 1000, role: 'admin', old: { amount_cents: 1000, reversed_at: null, invoice_status: 'posted' },
-    new: { reverse_reason: 'Auto-reversed: invoice voided — [PROVER] wrong customer', invoice_status: 'voided' } });
+    new: { reverse_reason: 'Auto-reversed: invoice INV-K99-1 voided — [PROVER] wrong customer', invoice_status: 'voided' } });
   console.log('[prover] case 1: void reverses both active write-offs (by the admin, with the void reason) and logs one write_off_reversed row each (+$10.00, +$2.50, actor filled); the earlier reversal is untouched');
 
   // 5. statement: neither the voided invoice nor its write-off shows.
   const stmt = statementRefs();
   assert.ok(!stmt.includes('INV-K99-1'), `the statement still shows INV-K99-1: ${stmt}`);
+  // The $100.00 invoice and its $12.50 of active write-offs leave together: the total drops by $87.50, no leftover credit.
+  assert.equal(statementTotal(), totalBefore - 8750, `statement total ${totalBefore} -> ${statementTotal()}`);
   console.log('[prover] case 5: the customer statement shows neither INV-K99-1 nor its write-off');
 
   // 2. paid invoice settled only by a write-off.

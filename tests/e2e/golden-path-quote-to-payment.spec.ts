@@ -205,16 +205,18 @@ test.describe.serial('Golden Path: Quote → Payment', () => {
       const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
       if (!visible) return 0;
       const parent = el.locator('..');
-      const valueEl = parent.locator('.font-medium, .font-semibold, .text-crx-green, .text-red-600').first();
+      const valueEl = parent.locator('.tabular-nums, .font-medium, .font-semibold, .text-crx-green, .text-red-600').first();
       const valVisible = await valueEl.isVisible({ timeout: 2000 }).catch(() => false);
       if (!valVisible) return 0;
       return parseDollars(await valueEl.textContent());
     };
 
-    const subtotal = await getVal('Subtotal');
+    // Billing UI (Nov 13): Amount due shows "Invoice total" (the old "Subtotal", every line), "Paid",
+    // "Prepay applied" (only when above 0) and "Balance due".
+    const subtotal = await getVal('Invoice total');
     const paid = await getVal('Paid');
-    const prepay = await getVal('Prepay Applied');
-    const balance = await getVal('Balance Due');
+    const prepay = await getVal('Prepay applied');
+    const balance = await getVal('Balance due');
 
     state.totalCents = subtotal;
 

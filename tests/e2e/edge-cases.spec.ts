@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 
 /**
  * Phase 6: Edge Case Testing
@@ -106,8 +107,8 @@ test.describe('Edge Cases', () => {
       await page.waitForTimeout(2000);
       // Invoice detail should load
       await expect(page).toHaveURL(/\/invoices\/.+/);
-      // Look for void button
-      const voidBtn = page.locator('button:has-text("Void")');
+      // Look for Void invoice… (under More actions)
+      const voidBtn = await moreAction(page, /^Void invoice/);
       const _isVisible = await voidBtn.isVisible({ timeout: 3000 }).catch(() => false);
       // If visible, clicking should show confirmation (don't actually void)
       // Just verify page loaded correctly

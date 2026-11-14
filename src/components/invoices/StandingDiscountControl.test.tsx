@@ -31,7 +31,7 @@ describe('StandingDiscountControl (billing plan M4b)', () => {
   it('shows the sale\'s rate and saves a new one for this sale only', async () => {
     const onChanged = vi.fn();
     render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={onChanged} />);
-    const input = await screen.findByLabelText('Standing discount for this sale (%)');
+    const input = await screen.findByLabelText('Standing discount for this sale');
     expect(input).toHaveValue(3);
     expect(screen.getByText(/the customer's rate/i)).toBeInTheDocument();
     fireEvent.change(input, { target: { value: '1.5' } });
@@ -51,9 +51,14 @@ describe('StandingDiscountControl (billing plan M4b)', () => {
     })));
   });
 
+  it('tells a screen reader the rate is a percent', async () => {
+    render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
+    expect(await screen.findByLabelText('Standing discount for this sale')).toHaveAccessibleDescription('%');
+  });
+
   it('is locked while the invoice has unsaved changes', async () => {
     render(<StandingDiscountControl invoiceId="inv-1" disabled onChanged={vi.fn()} />);
-    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toBeDisabled();
+    expect(await screen.findByLabelText('Standing discount for this sale')).toBeDisabled();
     expect(screen.getByText(/save your changes first/i)).toBeInTheDocument();
   });
 });
@@ -75,17 +80,17 @@ describe('StandingDiscountControl: a late reply for another invoice (review roun
     });
     const { rerender } = render(<StandingDiscountControl invoiceId="inv-a" disabled={false} onChanged={vi.fn()} />);
     rerender(<StandingDiscountControl invoiceId="inv-b" disabled={false} onChanged={vi.fn()} />);
-    const input = await screen.findByLabelText('Standing discount for this sale (%)');
+    const input = await screen.findByLabelText('Standing discount for this sale');
     expect(input).toHaveValue(5);
     releaseA({ data: { rate_pct: 3, set_by: null }, error: null });
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByLabelText('Standing discount for this sale (%)')).toHaveValue(5);
+    expect(screen.getByLabelText('Standing discount for this sale')).toHaveValue(5);
   });
 
   it('takes hundredths of a percent (no 0.5 step)', async () => {
     mockFrom.mockImplementation(() => rateRead({ rate_pct: 2.25, set_by: 'admin-1' }));
     render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
-    expect(await screen.findByLabelText('Standing discount for this sale (%)')).toHaveAttribute('step', '0.01');
+    expect(await screen.findByLabelText('Standing discount for this sale')).toHaveAttribute('step', '0.01');
   });
 });
 
@@ -97,10 +102,10 @@ describe('StandingDiscountControl: a save that finishes on another invoice (revi
     mockFrom.mockImplementation(() => rateRead({ rate_pct: 3, set_by: null }));
     mockRpc.mockImplementation(() => new Promise((resolve) => { releaseSave = resolve; }));
     const { rerender } = render(<StandingDiscountControl invoiceId="inv-a" disabled={false} onChanged={vi.fn()} />);
-    fireEvent.change(await screen.findByLabelText('Standing discount for this sale (%)'), { target: { value: '1.5' } });
+    fireEvent.change(await screen.findByLabelText('Standing discount for this sale'), { target: { value: '1.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     rerender(<StandingDiscountControl invoiceId="inv-b" disabled={false} onChanged={vi.fn()} />);
     releaseSave({ data: { invoice_id: 'inv-a', rate_pct: 1.5 }, error: null });
-    await waitFor(() => expect(screen.getByLabelText('Standing discount for this sale (%)')).toBeEnabled());
+    await waitFor(() => expect(screen.getByLabelText('Standing discount for this sale')).toBeEnabled());
   });
 });

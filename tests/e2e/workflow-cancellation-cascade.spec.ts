@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 
 /**
  * Cancellation Cascade Workflow
@@ -131,8 +132,8 @@ test.describe('Cancellation Cascade Workflow', () => {
       await page.waitForTimeout(2000);
       await expect(page).toHaveURL(/\/invoices\/.+/);
 
-      // Void button should be available on posted invoices (for admin)
-      const voidBtn = page.locator('button:has-text("Void"), button:has-text("Void Invoice")').first();
+      // Void invoice… should be available on posted invoices (for admin), under More actions
+      const voidBtn = await moreAction(page, /^Void invoice/);
       await expect(voidBtn).toBeVisible({ timeout: 5000 });
     }
   });

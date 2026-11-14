@@ -157,7 +157,7 @@ describe('NewVendorBill PO-overage handling', { timeout: 30_000 }, () => {
     // throws before clicking until then, and waitFor stops calling it once it clicks.
     const reason = 'Freight surcharge approved by the owner';
     await waitFor(() => {
-      const box = screen.getByPlaceholderText(/Why should cumulative billing exceed/i);
+      const box = screen.getByPlaceholderText(/Why should billing exceed what was received or ordered/i);
       if ((box as HTMLTextAreaElement).value !== reason) fireEvent.change(box, { target: { value: reason } });
       expect(box).toHaveValue(reason);
       fireEvent.click(screen.getAllByRole('button', { name: /^Create Bill$/ }).slice(-1)[0]);
@@ -185,7 +185,7 @@ describe('NewVendorBill PO-overage handling', { timeout: 30_000 }, () => {
       expect(screen.getByText(/pending request for this bill could not be cleared/i)).toBeTruthy();
     });
     expect(screen.queryByText(/Enter a reason to confirm the overage/i)).toBeNull();
-    expect(screen.queryByPlaceholderText(/Why should cumulative billing exceed/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/Why should billing exceed what was received or ordered/i)).toBeNull();
     expect(screen.queryByRole('button', { name: /Retry Exact Bill/i })).toBeTruthy();
   });
 

@@ -174,7 +174,7 @@ export default function PurchaseOrders() {
         product:products(product_name),
         purchase_orders!inner(po_number, vendor, status, expected_delivery_date)
       `, { count: 'exact' })
-      .not('purchase_orders.status', 'in', '("cancelled","fully_received")')
+      .not('purchase_orders.status', 'in', '("cancelled","fully_received","closed")')
       .order('id')
       .range(from, to)));
     if (seq !== fetchOutstandingSeq.current) return;
@@ -308,7 +308,7 @@ export default function PurchaseOrders() {
       sortable: true,
       render: (row) => (
         <Badge variant={statusToBadgeVariant[row.status] || 'default'}>
-          {row.status.replace(/_/g, ' ')}
+          {row.status === 'closed' ? 'closed short' : row.status.replace(/_/g, ' ')}
         </Badge>
       ),
     },
@@ -395,7 +395,7 @@ export default function PurchaseOrders() {
       sortable: true,
       render: (row) => (
         <Badge variant={statusToBadgeVariant[row.po_status] || 'default'}>
-          {row.po_status.replace(/_/g, ' ')}
+          {row.po_status === 'closed' ? 'closed short' : row.po_status.replace(/_/g, ' ')}
         </Badge>
       ),
     },
@@ -503,7 +503,8 @@ export default function PurchaseOrders() {
     setCancelling(true);
     let cancelledCount = 0;
     for (const po of selectedRows) {
-      if (po.status !== 'cancelled') {
+      // A closed-short PO is final; the server refuses to cancel it.
+      if (po.status !== 'cancelled' && po.status !== 'closed') {
         // Bulk loop: deterministic per-PO key (NOT crypto.randomUUID()) so a
         // retry of the same cancel batch reuses identical keys and the server
         // dedupes already-cancelled POs instead of double-executing.
@@ -726,6 +727,7 @@ export default function PurchaseOrders() {
                       <option value="partially_received">Partially Received</option>
                       <option value="fully_received">Fully Received</option>
                       <option value="cancelled">Cancelled</option>
+                      <option value="closed">Closed Short</option>
                     </select>
                     {statusFilter && (
                       <button

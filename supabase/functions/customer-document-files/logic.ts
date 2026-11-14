@@ -124,6 +124,12 @@ export function canAccessCustomerDocuments(role: string): boolean {
   return role === "admin" || role === "sales_rep";
 }
 
+// A removed document stays downloadable for admins only, so they can check it
+// before restoring it (KI-07). For everyone else it answers like a missing one.
+export function canDownloadDocument(role: string, deletedAt: string | null): boolean {
+  return deletedAt === null || role === "admin";
+}
+
 export function sanitizeFilename(filename: string): string {
   const sanitized = filename
     .trim()

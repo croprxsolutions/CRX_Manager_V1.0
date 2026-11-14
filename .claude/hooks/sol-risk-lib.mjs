@@ -12,6 +12,7 @@
 
 import { isMoneyPath } from "./codex-bot-review-lib.mjs";
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
+import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
@@ -132,35 +133,185 @@ export function solRiskOnGitHub(args) {
   }
 }
 
-// ── staging (Mason on #1363, 2026-11-04: "yes with the guard updates first") ──
+// ── staging (Mason on #1363, 2026-11-04) and the staging-first release flow ──
 // A merge into either base is a landing on the way to production, so both merge
 // guards give staging every gate main has. The Sol proof stays bound to
 // origin/main (write-codex-push-proof.mjs), so a merge into staging needs staging
 // to already contain the main that Sol reviewed against.
 export const GATED_MERGE_BASES = Object.freeze(["main", "staging"]);
 
-// Until Mason approves the job that applies migrations to the staging database
-// (#crx-approvals, the CI/CD plan), a migration reaches production only as today:
-// a PR into main, applied live first (ship.md Step 5). null when `files` (GitHub
-// compare entries) hold no migration; otherwise why the merge is refused.
-const MIGRATIONS_DIR = "supabase/migrations/";
-export function stagingMigrationProblem(files) {
-  if (!Array.isArray(files) || files.length === 0) return "GitHub did not return a readable list of changed files";
-  if (files.length >= SOL_RISK_MAX_FILES) return `${files.length} changed files may be a truncated list`;
-  for (const entry of files) {
-    if (entry === null || typeof entry !== "object" || typeof entry.filename !== "string" || !entry.filename) return "a changed-file entry is unreadable";
-    for (const name of [entry.filename, entry.previous_filename]) {
-      if (typeof name === "string" && name.replace(/\\/g, "/").toLowerCase().startsWith(MIGRATIONS_DIR)) {
-        return `${show(name)} is a migration, and migrations do not go through staging yet: open the PR into main, ` +
-          "apply it live first and merge it there (ship.md Step 5), then merge main into staging";
-      }
+// Staging-first: feature work, migrations included, merges into staging, and the
+// staging database job applies a migration after the merge. Only the weekly
+// release PR (release/next) and hotfix/<name> PRs go into main, and Taha or Mason
+// merges them, never an agent; the same for the back-merge of main into staging.
+// A back-merge under another branch name: while main has commits staging lacks, a PR into staging
+// whose head holds any of them brings main into staging. Two GitHub comparisons, each listing up to 250
+// commits: staging...main (main's commits staging lacks) and head...main (those the head lacks). Any of
+// the first not in the second is carried by the PR. null when it carries none; otherwise why the merge
+// is refused. Never throws: an unreadable, cut-short or unexpected answer refuses (so a branch more than
+// 250 of main's commits behind is refused while a back-merge is pending; merging staging in clears it).
+// ponytail: matched by commit id, so main's changes squashed or cherry-picked onto a branch (new ids)
+// are not seen; the release guard's tree comparison on release/next is the backstop for main itself.
+function mainAheadOf(sha, { repoPath, gh }) {
+  let answer;
+  try {
+    answer = JSON.parse(String(gh(["api", `${repoPath}/compare/${sha}...main`, "--jq", "{status: .status, ahead_by: .ahead_by, commits: [.commits[]?.sha]}"])));
+  } catch (error) {
+    return { problem: `GitHub's main comparison could not be read (${show(String(error?.message || error).split(/\r?\n/)[0])})` };
+  }
+  if ((answer?.status === "identical" || answer?.status === "behind") && answer?.ahead_by === 0 && Array.isArray(answer?.commits) && answer.commits.length === 0) return { commits: [] };
+  if (!["ahead", "diverged"].includes(answer?.status) || !Array.isArray(answer?.commits) || !Number.isInteger(answer?.ahead_by) || answer.ahead_by < 1 || answer.ahead_by !== answer.commits.length) {
+    return { problem: "GitHub's list of main's commits is unreadable, unexpected or cut short, so this can't be shown not to be a back-merge (fail closed)" };
+  }
+  return { commits: answer.commits.map((c) => String(c).toLowerCase()) };
+}
+export function mainCommitsInPrOnGitHub({ stagingSha, headSha, repo, gh }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  if (!SHA_RE.test(String(stagingSha || "")) || !SHA_RE.test(String(headSha || ""))) return "GitHub reported an unusable base commit or head (not a full commit id)";
+  const missingFromStaging = mainAheadOf(String(stagingSha).toLowerCase(), { repoPath, gh });
+  if (missingFromStaging.problem) return missingFromStaging.problem;
+  if (missingFromStaging.commits.length === 0) return null; // main is inside staging: nothing to bring in
+  const missingFromHead = mainAheadOf(String(headSha).toLowerCase(), { repoPath, gh });
+  if (missingFromHead.problem) return missingFromHead.problem;
+  const lacking = new Set(missingFromHead.commits);
+  const carried = missingFromStaging.commits.filter((c) => !lacking.has(c));
+  return carried.length
+    ? `it carries ${carried.length} commit(s) from main that staging doesn't have yet (${carried[0].slice(0, 9)}…), so it is a back-merge, which is Taha's or Mason's to merge. Branch from staging and merge staging (never main) into your branch, or wait for the back-merge`
+    : null;
+}
+
+// #1838 HIGH 2 (Mason's agents, 2026-11-12): CODEOWNERS names masonwells1, the account the agents share, so an
+// agent's approving review would count as a code owner's on a .github/ change (the release guard included).
+// Agents never approve a pull request; Taha or Mason does, by hand. null when the text approves nothing.
+export function prApprovalProblem(text) {
+  const t = String(text || "");
+  const ghReview = /\bpr\s+review\b/i.exec(t);
+  const cliApprove = ghReview && /\bgh(?:\.exe)?\b/i.test(t) &&
+    t.slice(ghReview.index).split(/\s+/).some((w) => /^--approve(?:=|$)/i.test(w) || /^-[A-Za-z]*a[A-Za-z]*$/.test(w));
+  // An approve EVENT, not the word in a comment's text (Luna): event=APPROVE, "event":"APPROVE", event: APPROVE.
+  const apiApprove = /\bevent\W{0,6}APPROVE\b/i.test(t) && /review/i.test(t);
+  // A write to a PR's reviews whose event isn't spelled out here (--input <file>, a variables file) may approve: only a
+  // visible COMMENT or REQUEST_CHANGES passes (Luna, #1838 fixes).
+  const writes = /(?:^|\s)(?:-X|--method|--request)\s*(?:POST|PUT|PATCH)\b|(?:^|\s)(?:-f|-F|--field|--raw-field|--input|-d|--data(?:-binary|-raw|-urlencode)?|--json|-T|--upload-file)\b/i;
+  const reviewWrite = (/\/pulls\/[^/\s]+\/reviews\b/i.test(t) && writes.test(t)) ||
+    /\b(?:addPullRequestReview|submitPullRequestReview)\b/.test(t) ||
+    // A GraphQL request whose body or query comes from a file can't be read here, so it may approve (Sol).
+    (/graphql/i.test(t) && /(?:query=@|--input\b|(?:-d|--data(?:-binary|-raw)?)\s*@|-T\b|--upload-file\b)/i.test(t));
+  // A body from a file (--input, -d @file) can't be read here, so no text in the command makes it safe (Sol).
+  const fileBody = /(?:^|\s)(?:--input|-T|--upload-file)\b|(?:^|\s)(?:-d|--data(?:-binary|-raw|-urlencode)?)\s*@|=@/i.test(t);
+  const visibleSafeEvent = !fileBody && /\bevent\W{0,6}(?:COMMENT|REQUEST_CHANGES)\b/i.test(t) && !apiApprove;
+  return cliApprove || apiApprove || (reviewWrite && !visibleSafeEvent)
+    ? "an agent never approves a pull request: CODEOWNERS names masonwells1, the account the agents share, so an agent's approval would count as a code owner's review (for example on a change to the release guard). Leave approvals to Taha or Mason, by hand"
+    : null;
+}
+
+// #1838 MED 2 (Mason's agents): once a release migration is applied live ("Applied live:" on the open release PR),
+// a staging merge moves release/next under the remaining applies, so staging merges wait until the release merges.
+// null when no release is being applied; otherwise why the merge waits. Never throws; an unreadable answer refuses.
+export function releaseFreezeProblem({ repo, gh }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
+  let numbers;
+  try {
+    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | "\\(.number) \\(.head.sha)"']))
+      .split(/\r?\n/).filter(Boolean).map((l) => { const [n, sha] = l.split(" "); return { n: Number(n), sha }; });
+    if (numbers.some((x) => !Number.isInteger(x.n) || !/^[0-9a-f]{40}$/i.test(String(x.sha)))) throw new Error("not a PR number and head");
+  } catch (error) {
+    return `the open release PR could not be read (${show(error)}), so a release being applied can't be ruled out (fail closed)`;
+  }
+  if (!Array.isArray(numbers)) return "GitHub's list of open PRs into main was unexpected (fail closed)";
+  for (const { n, sha } of numbers) {
+    let comments;
+    try {
+      comments = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[] | {login: .user.login, at: .created_at, body: .body} | tojson"]))
+        .split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
+    } catch (error) {
+      return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
+    }
+    // Taha's "Ready to merge: <sha>" for the release's current head comes before the first apply and holds until the
+    // release merges, closes or moves (no expiry: a failed "Applied live:" post must not end it; Sol). "Applied live:"
+    // (agents' account or Taha) follows each apply. Anyone else's text freezes nothing (Luna, Sol).
+    const by = (c, ...logins) => logins.includes(String(c?.login ?? "").toLowerCase());
+    const go = (c) => /^\s*Ready to merge:\s*([0-9a-f]{12,40})\s*$/i.exec(String(c?.body ?? ""));
+    const applying = comments.some((c) =>
+      (by(c, "masonwells1", "tahakhanabdalli") && /^\s*Applied live:/im.test(String(c?.body ?? ""))) ||
+      (by(c, "tahakhanabdalli") && go(c) && String(sha).toLowerCase().startsWith(go(c)[1].toLowerCase())));
+    if (applying) {
+      return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
     }
   }
   return null;
 }
 
-// GitHub's base...head checked for migrations. Never throws: any failure refuses.
-export function stagingMigrationOnGitHub(args) {
-  const compared = compareOnGitHub(args);
-  return compared.problem ? `${compared.problem}, so it cannot be shown to carry no migration (fail closed)` : stagingMigrationProblem(compared.files);
+// #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into
+// staging it would merge unflagged and first meet his approval on release day, holding the whole release; so an
+// agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
+// Also (Taha, 13 Nov; on top of GitHub's code-owner review of .github/, which stays on as the guard agents can't
+// edit): a PR that adds, changes, deletes or renames anything under .github/ is Taha's to merge, never an agent's.
+export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath) return "the pull request's repository could not be read";
+  if (!/^[0-9a-f]{40}$/i.test(String(headSha || "")) || !/^[0-9a-f]{40}$/i.test(String(baseSha || "")) || !Number.isInteger(Number(number))) return "GitHub reported an unusable PR number, base or head (fail closed)";
+  const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
+  // The file list below is capped at 3,000 files and not bound to the head (Luna/Sol, 13 Nov), so .github/ is
+  // also compared by tree: its tree at the head against its tree at the PR's merge-base. Exact, no cap.
+  let treesDiffer;
+  try {
+    const mergeBase = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".merge_base_commit.sha"])).trim();
+    if (!/^[0-9a-f]{40}$/i.test(mergeBase)) return "the PR's merge-base could not be read (fail closed)";
+    // The git trees API, not the contents listing: that one stops at 1,000 root entries (Sol, 13 Nov).
+    const tree = (sha) => String(gh(["api", `${repoPath}/git/trees/${sha}`, "--jq", 'if .truncated then error("truncated") else (.tree[] | select(.path == ".github" and .type == "tree") | .sha) end'])).trim();
+    const [atHead, atBase] = [tree(headSha), tree(mergeBase)];
+    if (!atHead && !atBase) return "the PR's .github/ folder was not found on either side (fail closed)";
+    treesDiffer = atHead !== atBase;
+  } catch (error) {
+    return `the PR's .github/ folder could not be compared (${show(error)}) (fail closed)`;
+  }
+  let rows;
+  try {
+    rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
+      .split(/\r?\n/).filter(Boolean).map((line) => { const r = line.split("\t"); return r.length === 2 ? [...r, ""] : r; });
+  } catch (error) {
+    return `the PR's files could not be read (${show(error)}) (fail closed)`;
+  }
+  if (rows.some((r) => r.length !== 3 || !r[1])) return "GitHub returned an unreadable file list (fail closed)";
+  const github = rows.flatMap(([, f, prev]) => [f, prev]).filter((f) => f.startsWith(".github/"));
+  if (github.length || treesDiffer) {
+    return `it changes ${github.length ? [...new Set(github)].join(", ") : ".github/"}: the release guard and workflows live in .github/, so Taha merges it, never an agent (ship.md › Staging)`;
+  }
+  const files = rows.filter(([status, f]) => status !== "removed" && /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map(([, f]) => f);
+  const found = [];
+  for (const f of files) {
+    let sql;
+    try {
+      // The raw media type serves files of any size; the JSON form has no content over 1 MB (Luna, #1838 fixes).
+      sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${f}?ref=${headSha}`]));
+    } catch (error) {
+      return `${f} could not be read (${show(error)}) (fail closed)`;
+    }
+    if (!sql.trim()) return `${f} came back empty from GitHub (fail closed)`;
+    let verdict;
+    try { verdict = destructiveMigrationCheck(sql); } catch { verdict = { destructive: true, reason: "it could not be checked" }; }
+    if (verdict?.destructive) found.push(`${f.split("/").pop()} (${verdict.reason})`);
+  }
+  return found.length
+    ? `it carries a destructive migration (${found.join(", ")}), which is Mason's on live, so an agent doesn't merge it into staging: Taha or Mason merges it, and Mason approves that exact file before release day`
+    : null;
+}
+
+// null when an agent may merge this PR (its other gates still apply).
+export function agentMergeProblem(base, headRef) {
+  if (base === "main") {
+    return "an agent never merges into main: only the weekly release PR (release/next) and hotfix/<name> PRs go there, " +
+      "and Taha or Mason merges them. Feature PRs, migrations included, target staging (ship.md › Staging)";
+  }
+  if (base === "staging" && headRef === "main") {
+    return "the back-merge (main into staging) is Taha's or Mason's to merge, with \"Create a merge commit\"";
+  }
+  if (base === "staging" && (headRef === "release/next" || /^hotfix\//.test(String(headRef || "")))) {
+    return "release/next and hotfix/<name> go into main, not staging; a PR from either into staging is a mistake: retarget it to main (Taha or Mason merges it)";
+  }
+  return null;
 }

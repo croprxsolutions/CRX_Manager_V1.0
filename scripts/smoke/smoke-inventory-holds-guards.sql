@@ -29,6 +29,8 @@ DECLARE
   v_holds_before bigint;
   v_sweep jsonb;
   v_constraint text;
+  v_review jsonb;
+  v_receipt uuid;
 BEGIN
   SELECT p.id INTO v_admin FROM public.profiles p WHERE p.role = 'admin' AND p.is_active ORDER BY p.created_at LIMIT 1;
   IF v_admin IS NULL THEN
@@ -36,10 +38,10 @@ BEGIN
   END IF;
 
   -- Fixtures, as the owner: a retired product with an open PO line, and a plain active product.
-  INSERT INTO public.products (product_name, is_active)
-  VALUES ('[E2E] smoke retired on-order product', false) RETURNING id INTO v_retired;
-  INSERT INTO public.products (product_name, is_active)
-  VALUES ('[E2E] smoke hold product', true) RETURNING id INTO v_plain;
+  INSERT INTO public.products (product_name, is_active, product_form)
+  VALUES ('[E2E] smoke retired on-order product', true, 'liquid') RETURNING id INTO v_retired;
+  INSERT INTO public.products (product_name, is_active, product_form)
+  VALUES ('[E2E] smoke hold product', true, 'liquid') RETURNING id INTO v_plain;
   INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
   VALUES ('[E2E]-SMOKE-HOLDS-GUARDS', '[E2E] smoke vendor', 'submitted', v_admin) RETURNING id INTO v_po;
   INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received)
@@ -47,6 +49,25 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- Since 20261103100000 an open PO line blocks turning a product off, and a turned-off product
+  -- cannot gain a PO line. The one way it is on order again is a receipt reversal (left unguarded
+  -- so stock can be corrected): receive the line, turn the product off, reverse the receipt.
+  v_result := public.receive_po_items(
+    jsonb_build_array(jsonb_build_object('po_item_id',
+      (SELECT id FROM public.purchase_order_items WHERE purchase_order_id = v_po),
+      'quantity', 10, 'storage_location', 'Main Warehouse', 'condition', 'good')),
+    v_admin, 'e2e-holds-guards-receive-' || v_po, false);
+  v_receipt := ((v_result->'receiving_record_ids')->>0)::uuid;
+  v_review := public.preview_product_active_change(ARRAY[v_retired], false);
+  PERFORM public.set_product_active(ARRAY[v_retired], false, v_review->>'review_token',
+    'e2e-holds-guards-retire-' || v_po);
+  PERFORM public.reverse_receiving_record(v_receipt, '[E2E] holds guards: retired product back on order',
+    v_admin, 'e2e-holds-guards-reverse-' || v_po);
+  IF (SELECT is_active FROM public.products WHERE id = v_retired)
+     OR (SELECT status FROM public.purchase_orders WHERE id = v_po) NOT IN ('submitted', 'partially_received') THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: the retired product is not back on an open PO';
+  END IF;
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   -- (a) The retired product is on order.

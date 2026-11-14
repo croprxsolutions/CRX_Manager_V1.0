@@ -8,6 +8,7 @@ import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import type { JobBatch } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 interface JobBatchAssignModalProps {
   open: boolean;
@@ -88,7 +89,7 @@ export default function JobBatchAssignModal({
       if (code === '23505') {
         toast('error', 'A batch with that name already exists');
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobBatchAssignModal.createBatch' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchAssignModal.createBatch' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -116,7 +117,7 @@ export default function JobBatchAssignModal({
       onApplied();
       onClose();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobBatchAssignModal.apply' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchAssignModal.apply' } });
       toast('error', sanitizeError(err));
     }
     setApplying(false);

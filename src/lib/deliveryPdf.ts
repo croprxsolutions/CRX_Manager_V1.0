@@ -19,6 +19,8 @@ interface PdfDeliveryItem {
   unit_size: string;
   quantity_delivered?: number;
   tote_number?: string | null;
+  /** Brand PR B-3: printed under the product name (loadDeliveryBrandNotes). */
+  brand_notes?: string[];
 }
 
 export interface PdfDeliveryData {
@@ -133,7 +135,7 @@ function renderDeliveryPage(
   })();
 
   const rows = data.items.map((item) => {
-    const cols = [item.product_name];
+    const cols = [[item.product_name, ...(item.brand_notes ?? [])].join('\n')];
     if (hasDelivered) {
       cols.push(fmt(item.quantity), fmt(item.quantity_delivered ?? item.quantity));
     } else {

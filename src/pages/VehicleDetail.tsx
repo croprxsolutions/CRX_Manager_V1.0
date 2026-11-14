@@ -12,6 +12,7 @@ import { logActivity } from '../lib/activityLogger';
 import { sanitizeError, supabase, checkMutationResult } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 import type { Vehicle, VehicleType, VehicleStatus } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 const CATEGORY_SUGGESTIONS = ['Sprayer', 'Tender', 'Spreader', 'Drone', 'Other'];
 
@@ -136,7 +137,7 @@ export default function VehicleDetail() {
         setIsDirty(false);
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_vehicle' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_vehicle' } });
       toast('error', sanitizeError(err));
     }
     setSaving(false);

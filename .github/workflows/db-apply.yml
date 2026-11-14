@@ -1,0 +1,171 @@
+# Database changes through GitHub, not laptops (Taha, 2026-11-10; staging half approved by Mason on
+# 2026-11-03). On every push to staging: apply new migrations to the staging database (fsnjredpmakbmhwowjjt),
+# each file plus its ledger row in one transaction, verified by sha256; then deploy changed edge
+# functions to staging (all of them, each run). On PRs: check new migration stamps. Replaces local-supabase/catchup-staging.sh.
+# The staging jobs are inert until the repository variable STAGING_DB_JOB is "on".
+# The live half (main, behind an approval) is a separate PR and stays off until Mason's 6 points,
+# a clean week on staging and his agents' review.
+name: Database
+
+on:
+  pull_request:
+    branches: [staging, main]
+    paths: ['supabase/migrations/**', 'supabase/baselines/**', '.github/scripts/db-apply*.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
+  push:
+    branches: [staging]
+    paths: ['supabase/migrations/**', 'supabase/functions/**', 'supabase/baselines/**', 'supabase/config.toml', '.github/scripts/db-apply.mjs', '.github/scripts/schema-fingerprint.sql', '.github/scripts/rebuild-schema.sh', '.github/scripts/rebuild/**', 'scripts/decompress-schema-baseline.mjs', '.github/workflows/db-apply.yml']
+  # Nightly drift + schema check on staging, 02:30 Dubai (scheduled runs use main's copy of this file).
+  schedule:
+    - cron: '30 22 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# One staging run at a time, start to finish (migrations, then functions), so an older run can never
+# deploy after a newer one. PR runs don't wait on each other. A failed run: re-run it, or run the
+# workflow by hand (Actions -> Database -> Run workflow on staging).
+# Nightly and main-dispatched runs only read, so they queue in their own group: a waiting staging push
+# is never replaced by one (GitHub keeps one pending run per group).
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('db-pr-{0}', github.run_id) || (github.ref == 'refs/heads/staging' && 'db-staging' || 'db-check') }}
+  cancel-in-progress: false
+
+jobs:
+  stamp-check:
+    name: Migration stamps
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The rule comes from the base branch's copy of the script, never the PR's own. It runs before the
+      # PR's own tests, which could otherwise move origin/* refs or the environment first.
+      - run: |
+          if git show "origin/$BASE_REF:.github/scripts/db-apply.mjs" > "$RUNNER_TEMP/db-apply.mjs" 2>/dev/null; then
+            node "$RUNNER_TEMP/db-apply.mjs" stamp-check "origin/$BASE_REF"
+          else
+            echo "::notice::No stamp check on $BASE_REF yet."
+          fi
+      - run: node --test .github/scripts/db-apply.test.mjs
+
+  apply-staging:
+    name: Apply migrations to staging
+    if: github.ref == 'refs/heads/staging' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: staging-db
+    permissions:
+      contents: read
+    env:
+      STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
+      DB_URL: ${{ secrets.STAGING_DB_URL }}
+      TARGET_REF: fsnjredpmakbmhwowjjt
+      BACKFILL: '1'
+      # Staging can hold staging-only migrations (e.g. a change waiting for its live partner) that sit
+      # ahead of main's stamps; older files then apply after them with a warning. Live never does this.
+      ALLOW_OUT_OF_ORDER: '1'
+    steps:
+      - id: on
+        run: |
+          if [ "$STAGING_DB_JOB" != "on" ]; then echo "::notice::Staging DB job not switched on yet (STAGING_DB_JOB)."; exit 0; fi
+          if [ -z "$DB_URL" ]; then echo "::error::STAGING_DB_URL is missing from the staging-db environment."; exit 1; fi
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.on.outputs.yes
+        run: node .github/scripts/db-apply.mjs apply
+      # Read-only: the ledger must match the repo. A row without a file, or a file edited after it ran,
+      # fails the job (first report, 11 Nov: clean). Migrations are already committed by then; the
+      # edge-function deploy waits until the drift is fixed.
+      - name: Ledger drift check
+        if: steps.on.outputs.yes
+        run: node .github/scripts/db-apply.mjs drift
+
+  edge-functions-staging:
+    name: Deploy edge functions to staging
+    needs: apply-staging
+    if: github.ref == 'refs/heads/staging' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: staging-db
+    permissions:
+      contents: read
+    env:
+      STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: fsnjredpmakbmhwowjjt
+      # Functions woken without a user token (see the header of each); everything else keeps verify_jwt on.
+      NO_VERIFY_JWT: send-delivery-receipts
+    steps:
+      - id: on
+        run: |
+          if [ "$STAGING_DB_JOB" != "on" ]; then echo "::notice::Staging DB job not switched on yet (STAGING_DB_JOB)."; exit 0; fi
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::SUPABASE_ACCESS_TOKEN is missing from the staging-db environment."; exit 1; fi
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Every function, every run: a run that failed or was replaced never leaves one stale (there are
+      # nine). ponytail: a deleted function folder stays deployed; removing it is a manual, approved step.
+      - name: Deploy every edge function to staging
+        if: steps.on.outputs.yes
+        run: |
+          for fn in $(find supabase/functions -mindepth 1 -maxdepth 1 -type d ! -name '_shared' -exec basename {} \; | sort); do
+            flags=""
+            for nv in $NO_VERIFY_JWT; do [ "$fn" = "$nv" ] && flags="--no-verify-jwt"; done
+            echo "Deploying $fn to $PROJECT_REF $flags"
+            npx --yes supabase@2.122.0 functions deploy "$fn" --project-ref "$PROJECT_REF" --use-api $flags
+          done
+
+  # Read-only, with its own login (crx_drift_ro, catalog + ledger only): staging's public schema must
+  # equal one rebuilt from the files, so a change made in the SQL Editor shows even with no ledger row.
+  # After every staging apply, nightly, and on "Run workflow". Inert until STAGING_DB_JOB is "on".
+  schema-staging:
+    name: Staging schema matches the files
+    needs: apply-staging
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.apply-staging.result != 'failure' }}
+    runs-on: ubuntu-latest
+    environment: staging-db-readonly
+    permissions:
+      contents: read
+    env:
+      STAGING_DB_JOB: ${{ vars.STAGING_DB_JOB }}
+      TARGET_REF: fsnjredpmakbmhwowjjt
+    # The read-only URL is given only to the steps that use it, never to checkout or the rebuild.
+    steps:
+      - id: on
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: |
+          if [ "$STAGING_DB_JOB" != "on" ]; then echo "::notice::Staging DB job not switched on yet (STAGING_DB_JOB)."; exit 0; fi
+          if [ -z "$DB_URL" ]; then echo "::error::STAGING_DB_READONLY_URL is missing from the staging-db-readonly environment."; exit 1; fi
+          echo "yes=1" >> "$GITHUB_OUTPUT"
+      # The commit this run applied (push or Run workflow on staging); the staging branch for nightly runs.
+      - if: steps.on.outputs.yes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref == 'refs/heads/staging' && github.sha || 'staging' }}
+          persist-credentials: false
+      - name: Ledger drift check
+        if: steps.on.outputs.yes && github.ref != 'refs/heads/staging'
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: node .github/scripts/db-apply.mjs drift
+      - name: Rebuild the schema from the files
+        if: steps.on.outputs.yes
+        shell: bash
+        run: |
+          .github/scripts/rebuild-schema.sh "$RUNNER_TEMP/rebuild" | tee "$RUNNER_TEMP/rebuild.log"
+          grep '^REBUILT_DB_URL=' "$RUNNER_TEMP/rebuild.log" >> "$GITHUB_ENV"
+      - name: Compare staging with the rebuild
+        if: steps.on.outputs.yes
+        env:
+          DB_URL: ${{ secrets.STAGING_DB_READONLY_URL }}
+        run: node .github/scripts/db-apply.mjs schema

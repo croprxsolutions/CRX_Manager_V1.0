@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PackageCheck, Pencil, Ban, Download, Send, RotateCcw, MessageSquarePlus, FileDown, Mail } from 'lucide-react';
+import { PackageCheck, Pencil, Ban, Download, Send, RotateCcw, MessageSquarePlus, FileDown, Mail, PackageX } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
@@ -48,6 +48,7 @@ import { ProductOptionDetails, type ProductOptionPresentationModel } from '../co
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { PRODUCT_COLUMNS, PURCHASE_ORDER_COLUMNS, PURCHASE_ORDER_ITEM_COLUMNS, withAdminCost, withAdminCosts } from '../lib/costFields';
 import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
+import { toSentryError } from '../lib/sentryError';
 
 const COST_CHANGE_SOURCE_LABEL: Record<PurchaseOrderCostChangeSource, string> = {
   entered: 'Entered on the PO',
@@ -127,6 +128,7 @@ export default function PurchaseOrderDetail() {
     resetKey: resetSubmitPOKey,
   } = useIdempotencyKey('submit_purchase_order', `${profile?.id || ''}:${id || ''}`);
   const cancelPOIdem = useIdempotencyKey('cancel_purchase_order', profile?.id || '');
+  const closePOIdem = useIdempotencyKey('close_purchase_order_short', profile?.id || '');
   const reverseIdem = useIdempotencyKey('reverse_receiving_record', profile?.id || '');
   const setCostsIdem = useIdempotencyKey('set_purchase_order_item_costs', profile?.id || '');
   const [poPdfBusy, setPoPdfBusy] = useState(false);
@@ -203,6 +205,8 @@ export default function PurchaseOrderDetail() {
   // form holds "0" for every cost; if the session is promoted before Save, those must not be sent (Codex).
   const [editHasCosts, setEditHasCosts] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [closeShortOpen, setCloseShortOpen] = useState(false);
+  const [closeShortReason, setCloseShortReason] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [editForm, setEditForm] = useState({
     vendor: '',
@@ -643,7 +647,7 @@ export default function PurchaseOrderDetail() {
       }
       idemKey = receiveIntent.getIdempotencyKey();
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { tags: { source: 'durable-intent', page: 'purchase-order-detail' } });
+      Sentry.captureException(toSentryError(error), { tags: { source: 'durable-intent', page: 'purchase-order-detail' } });
       // "Nothing was received" is only true for a FIRST attempt. When a frozen
       // request is already pending, this same catch is reached by a RETRY — and the
       // storage failure that broke the earlier post-commit cleanup is exactly what
@@ -1323,9 +1327,10 @@ export default function PurchaseOrderDetail() {
     if (draft === undefined || draft.trim() === '') return [];
     const cents = parseCostDraft(draft);
     if (cents === null) return [];
-    const changed = cents !== purchaseOrderUnitCostCents(item.unit_cost ?? 0);
+    const currentCents = purchaseOrderUnitCostCents(item.unit_cost ?? 0);
+    const changed = cents !== currentCents;
     return changed || item.cost_needs_review
-      ? [{ id: item.id, unit_cost_cents: cents, changed, received: item.quantity_received > 0 || receivedLineIds.has(item.id) }]
+      ? [{ id: item.id, unit_cost_cents: cents, changed, lowered: cents < currentCents, received: item.quantity_received > 0 || receivedLineIds.has(item.id) }]
       : [];
   }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // A change to a received line must say why (Mason, 2026-10-20); the server refuses it otherwise.
@@ -1346,6 +1351,11 @@ export default function PurchaseOrderDetail() {
     }
     if (costChanges.length === 0) {
       setCostOpen(false);
+      return;
+    }
+    // A closed-short PO's costs never go down (Mason, 2026-11-11); the server refuses with PO_CLOSED_COST_CUT.
+    if (po.status === 'closed' && costChanges.some((c) => c.lowered)) {
+      toast('error', 'This purchase order was closed short: a cost can be raised but not lowered. Fix a price mistake on the vendor bill or with a vendor credit.');
       return;
     }
     const reason = costReason.trim();
@@ -1459,6 +1469,38 @@ export default function PurchaseOrderDetail() {
     setSaving(false);
   };
 
+  const handleCloseShort = async () => {
+    const reason = closeShortReason.trim();
+    if (!po || !profile || !reason) return;
+    setSaving(true);
+    // The server binds the key to caller, PO and reason; scope it the same way so a changed reason gets a fresh key.
+    const closeScope = `close-po:${id}:${fingerprintIntentPayload([reason])}`;
+    try {
+      const { data, error } = await supabase.rpc('close_purchase_order_short', {
+        p_po_id: id!,
+        p_reason: reason,
+        p_idempotency_key: closePOIdem.getKeyFor(closeScope),
+      });
+      if (error) throw error;
+      assertRpcResult(data, 'close_purchase_order_short');
+      closePOIdem.resetKeyFor(closeScope);
+      toast('success', (data as { status?: string } | null)?.status === 'already_closed'
+        ? 'This purchase order was already closed short'
+        : 'Purchase order closed short');
+      setCloseShortOpen(false);
+      setCloseShortReason('');
+      fetchPO();
+    } catch (err: unknown) {
+      if (getIdempotencyBindingRejection(err)) {
+        closePOIdem.resetKeyFor(closeScope);
+        toast('warning', 'That retry belongs to a different close. The purchase order was not changed; retry with a fresh key.');
+      } else {
+        toast('error', sanitizeError(err));
+      }
+    }
+    setSaving(false);
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -1488,6 +1530,12 @@ export default function PurchaseOrderDetail() {
       </div>
     );
   }
+
+  /* What a close short takes off order: each line's unreceived remainder */
+  const closeShortRemainder = items
+    .map((item) => ({ item, left: (item.quantity_ordered || 0) - (item.quantity_received || 0) }))
+    .filter(({ left }) => left > 0);
+  const statusLabel = po.status === 'closed' ? 'closed short' : po.status.replace(/_/g, ' ');
 
   /* Items with qty entered for review step */
   const reviewItems = items.filter((item) => parseFloat(receiveItems[item.id]?.qty || '0') > 0);
@@ -1547,7 +1595,12 @@ export default function PurchaseOrderDetail() {
           >
             Create Task
           </Button>
-          {canManagePO && po.status !== 'cancelled' && po.status !== 'fully_received' && (
+          {canManagePO && po.status === 'partially_received' && (
+            <Button variant="secondary" icon={<PackageX className="w-4 h-4" />} onClick={() => { setCloseShortReason(''); setCloseShortOpen(true); }}>
+              Close Short
+            </Button>
+          )}
+          {canManagePO && po.status !== 'cancelled' && po.status !== 'fully_received' && po.status !== 'closed' && (
             <>
               <Button variant="secondary" icon={<Pencil className="w-4 h-4" />} onClick={openEditModal}>
                 Edit
@@ -1570,7 +1623,7 @@ export default function PurchaseOrderDetail() {
             <p className="text-sm text-secondary mt-1">{po.vendor}</p>
           </div>
           <Badge variant={statusToBadgeVariant[po.status] || 'default'} size="md">
-            {po.status.replace(/_/g, ' ')}
+            {statusLabel}
           </Badge>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
@@ -1597,7 +1650,7 @@ export default function PurchaseOrderDetail() {
           <div>
             <p className="text-xs text-secondary">Status</p>
             <p className="text-sm font-medium text-nav-dark capitalize">
-              {po.status.replace(/_/g, ' ')}
+              {statusLabel}
             </p>
           </div>
         </div>
@@ -1612,6 +1665,19 @@ export default function PurchaseOrderDetail() {
             {new Date(po.cancelled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             {po.cancel_reason && <> &mdash; {po.cancel_reason}</>}
           </p>
+        </div>
+      )}
+
+      {/* Closed Short Banner */}
+      {po.status === 'closed' && po.closed_at && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p className="text-sm font-medium text-amber-800">This purchase order was closed short</p>
+          <p className="text-xs text-amber-700 mt-1">
+            {new Date(po.closed_at).toLocaleDateString()} at{' '}
+            {new Date(po.closed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {po.close_reason && <> &mdash; {po.close_reason}</>}
+          </p>
+          <p className="text-xs text-amber-700 mt-1">What was received stays in stock. The rest no longer counts as on order.</p>
         </div>
       )}
 
@@ -2276,6 +2342,12 @@ export default function PurchaseOrderDetail() {
             it never moves inventory and never changes the product&apos;s catalog cost. Lines marked Unconfirmed were
             added by a sales rep at the catalog cost; saving them as shown confirms them.
           </p>
+          {po.status === 'closed' && (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              This purchase order was closed short: a cost can be raised but not lowered. Fix a price mistake on the vendor
+              bill or with a vendor credit.
+            </p>
+          )}
           {items.map((item) => (
             <div key={item.id} className="grid grid-cols-3 items-center gap-3">
               <span className="col-span-2 text-sm text-nav-dark">
@@ -2338,6 +2410,44 @@ export default function PurchaseOrderDetail() {
             </Button>
             <Button variant="danger" onClick={handleCancel} loading={saving}>
               Cancel PO
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Close Short Modal */}
+      <Modal open={closeShortOpen} onClose={() => { if (!saving) setCloseShortOpen(false); }} title="Close Purchase Order" accent="Short">
+        <div className="space-y-4">
+          <p className="text-sm text-secondary">
+            Close <span className="font-medium text-nav-dark">{po.po_number}</span> short? What was received stays received.
+            The rest below stops counting as on order. This cannot be undone: if the vendor ships it later, put it on a new PO.
+          </p>
+          {closeShortRemainder.length > 0 && (
+            <ul className="text-sm text-nav-dark bg-gray-50 rounded-lg p-3 space-y-1">
+              {closeShortRemainder.map(({ item, left }) => (
+                <li key={item.id}>
+                  {item.product_name || 'Product'}: {left} {item.unit_size || ''} not coming
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-secondary">This does not notify the vendor.</p>
+          <div>
+            <label htmlFor="close-short-reason" className="block text-sm font-medium text-nav-dark mb-1">Reason (required)</label>
+            <Input
+              id="close-short-reason"
+              value={closeShortReason}
+              onChange={(e) => setCloseShortReason(e.target.value)}
+              disabled={saving}
+              placeholder="e.g. Vendor discontinued the product"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCloseShortOpen(false)} disabled={saving}>
+              Keep PO Open
+            </Button>
+            <Button variant="danger" onClick={handleCloseShort} loading={saving} disabled={!closeShortReason.trim()}>
+              Close Short
             </Button>
           </div>
         </div>

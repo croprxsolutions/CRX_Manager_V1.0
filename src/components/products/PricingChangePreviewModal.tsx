@@ -269,6 +269,11 @@ function displayInfoValue(value: unknown): string {
   return String(value);
 }
 
+/** A new quote line shows the quoting note, or the product's description when the note is blank. */
+function quoteLineText(note: unknown): string {
+  return typeof note === 'string' && note.trim() ? note.trim() : "(the product's description)";
+}
+
 function ProductInfoEffectDetails({ effect }: { effect: PricingEffect }) {
   const changes = effect.product_info_changes;
   if (!changes || Object.keys(changes).length === 0) return null;
@@ -287,6 +292,18 @@ function ProductInfoEffectDetails({ effect }: { effect: PricingEffect }) {
             </dd>
           </div>
         ))}
+        {'quoting_notes' in changes && quoteLineText(changes.quoting_notes.before) !== quoteLineText(changes.quoting_notes.after) && (
+          <div className="grid gap-1 sm:grid-cols-[10rem_1fr]">
+            <dt className="text-xs font-medium text-amber-800">New quote lines show</dt>
+            <dd className="text-nav-dark">
+              <ChangePair
+                oldValue={quoteLineText(changes.quoting_notes.before)}
+                newValue={quoteLineText(changes.quoting_notes.after)}
+              />
+              <span className="block text-xs text-secondary">Existing quotes keep their notes.</span>
+            </dd>
+          </div>
+        )}
       </dl>
     </div>
   );

@@ -329,6 +329,31 @@ Two things sit outside the block and differ by target:
       FROM public.inventory_transactions
      WHERE transaction_type = 'prebook_reconciliation'
        AND notes LIKE 'CRX-2026-10-07 release of deleted-order reservation%'
+  ), ki30_epa_fixed (product_id, new_epa) AS (VALUES
+        ('3c404225-cd73-4744-ba8c-9536abcf6223', '352-840'), ('0302ddf4-8745-44a5-a344-c48d7d439c7c', '352-840'),
+        ('b9be7164-b8bc-4a52-b4b6-6405b6c0d777', '279-3246'), ('b1b96b2a-46ed-438d-86af-8004750b0f85', '7969-112'),
+        ('2b92d279-51f3-4324-8792-13f52e9bbbe8', '62719-260'), ('0ac5816e-9c4a-4692-a78a-68b3e495431f', '7969-150'),
+        ('98165916-4c2b-459c-a1a4-8b501b46927b', '62719-739'), ('a5746e61-7b21-40d8-a33f-54476caa7c9e', '62719-739'),
+        ('76cc1352-4de1-4d81-abaf-b712c8cf96d7', '7969-197'), ('0c7db329-e84b-46c8-9a84-8354d420494f', '279-3642-62719'),
+        ('1a1bcdf2-7292-49c4-8e6a-3bee2fbff4da', '279-3642-62719'), ('1debe3ec-f7fc-40b5-912b-25ab5c922394', '7969-289'),
+        ('036d97fb-0410-47dc-99d7-536278da71fa', '264-1023'), ('0aa0f180-7a84-44cb-81c4-2e934b846176', '264-1135'),
+        ('0294faa8-ab0b-488e-9efe-868071738625', '228-654'), ('25e84da2-107d-4c42-9720-4f875e317db8', '70506-68-59639'),
+        ('1ba9b1f2-6c5f-49c5-add2-71a270c254cb', '53883-505'), ('014f67c4-4f17-4403-8312-13bb3a93de7c', '7969-311'),
+        ('2cf386c9-782c-45fa-8dc4-ccf27608d8d9', '105211-119'), ('5e7dcbfe-46d9-4fdf-a6e9-82e017c9b758', '5481-579'),
+        ('6e3aa651-e662-499d-8ad5-364ae2130926', '70506-394-62719'), ('e86dc089-9121-4a5e-b5f6-7211bee3d809', '62719-121'),
+        ('2a7e1649-9d21-40ae-964d-738f24554642', '100-1684'), ('4422a2d9-fd77-4ec2-b17b-8010b539ba1c', '100-1684'),
+        ('ac926057-cfae-4070-9cb6-ff2ecc421c3c', '71368-76'), ('df4b8cb5-8992-4866-bebe-073ea2e971ad', '524-614'),
+        ('db6b3b17-7c38-4987-9b7f-f5374310f975', '241-447'), ('eea41d96-64b1-4ef1-8263-f07bb1254c6d', '7969-279'),
+        ('5ae6e7b6-c982-4345-be9e-9f07e8b49a18', '7969-279'), ('22332dd6-4eab-4f46-8f2e-8fe8b9975c6c', '352-942'),
+        ('00da2570-a3a6-4b50-8704-aad1e5c700ff', '100-1724'), ('b7d9f11d-6256-4c47-940d-b309612323ec', '100-1295'),
+        ('25d83c17-75d7-46be-a8cc-60d472d029a1', '62719-746'), ('76aaae09-429f-4498-84d8-15e352a1e279', '62719-746'),
+        ('3ba6df61-b644-4f25-97a9-33a9dfda88b5', '91234-430'), ('d4fb23e5-48b0-49a5-98ce-ce68c2d80e2d', '279-9719'),
+        ('1ec38578-6eaa-4cff-acd5-0ee0ec8dceda', '101563-183'), ('071ee443-aa74-419f-bf24-3a9317e7c7e3', '8419-1'),
+        ('b5d42717-1626-4962-bd74-f69e671cc615', '70506-396'), ('a55d16f2-fdae-4ab8-afa7-e544a001f01e', '70506-425'),
+        ('cc840d15-dc65-47b7-91bc-15af348523d4', '5481-676'), ('2495e380-7c58-44ea-822f-a84838fbdf27', '7969-441'),
+        ('386a0ef3-bbcd-4628-9e02-66bf51dd22e6', '7969-441'), ('038d3694-28f8-4753-a802-e939b5989704', '7969-441'),
+        ('651c4660-3cee-472b-a2e2-2547d9b0065e', '105211-118'), ('d50b3d7f-1dd3-4271-b230-8ee2925e6273', '105211-118'),
+        ('1ba1edbd-9859-47cd-8e35-874c75dbbfff', '5481-677'), ('2476f61e-8c79-460a-9ad4-a448889b2a9b', '101563-86')
   )
   SELECT 'line profit rule' AS correction, count(*) = 0 AS proven
     FROM public.order_items
@@ -360,7 +385,17 @@ Two things sit outside the block and differ by target:
                      JOIN public.vendors v ON v.id = l.vendor_id
                     WHERE l.product_id = p.id AND l.is_preferred AND l.is_active
                       AND l.link_status = 'confirmed' AND v.deleted_at IS NULL
-                      AND v.name = p.vendor) <> 1);
+                      AND v.name = p.vendor) <> 1)
+  UNION ALL
+  -- KI-30 (20261214100000): each of the 48 products has a change-history row setting its corrected
+  -- EPA number. History, not the current number, so a later edit by the office does not fail it.
+  SELECT 'KI-30 EPA numbers',
+         (SELECT count(*) FROM ki30_epa_fixed) = 48
+         AND NOT EXISTS (
+           SELECT 1 FROM ki30_epa_fixed f
+            WHERE NOT EXISTS (SELECT 1 FROM public.product_change_history h
+                               WHERE h.product_id = f.product_id::uuid AND h.change_type = 'updated'
+                                 AND h.field_name = 'epa_registration' AND h.new_value = f.new_epa));
   ```
 
   The test copy has no business rows, so this order has only been run on an empty

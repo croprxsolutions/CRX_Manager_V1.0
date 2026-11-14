@@ -22,6 +22,7 @@ import {
 import { isWholeCentDollarInput, MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../../lib/costFields';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
+import { toSentryError } from '../../lib/sentryError';
 import {
   buildBulkPOIntentKey,
   buildBulkPOIdempotencyKey,
@@ -339,7 +340,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
           const parsed = await parseWithVisionOCR(file, file.name, sourceIndex, products);
           results.push(parsed);
         } catch (err) {
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `Error parsing ${file.name}` } });
+          Sentry.captureException(toSentryError(err), { extra: { context: `Error parsing ${file.name}` } });
           results.push({
             source_file: file.name,
             source_index: sourceIndex,
@@ -360,7 +361,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
       }
       setParsedPOs(results);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Parse error' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'Parse error' } });
       toast('error', 'Error processing files');
     } finally {
       setParsing(false);
@@ -585,7 +586,7 @@ export default function BulkPOImport({ open, onClose, onSuccess }: BulkPOImportP
           newSuccessCount++;
         }
       } catch (error) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Error importing PO' } });
+        Sentry.captureException(toSentryError(error), { extra: { context: 'Error importing PO' } });
         const guidance = bulkPOImportFailureGuidance(error);
         if (guidance) {
           toast('error', `${po.source_file}: ${guidance}`);

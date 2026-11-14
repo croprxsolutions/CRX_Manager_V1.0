@@ -2172,6 +2172,44 @@ export type Database = {
           },
         ]
       }
+      customer_document_restores: {
+        Row: {
+          customer_id: string
+          document_id: string
+          id: string
+          removed_at: string
+          removed_by: string | null
+          restored_at: string
+          restored_by: string
+        }
+        Insert: {
+          customer_id: string
+          document_id: string
+          id?: string
+          removed_at: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by: string
+        }
+        Update: {
+          customer_id?: string
+          document_id?: string
+          id?: string
+          removed_at?: string
+          removed_by?: string | null
+          restored_at?: string
+          restored_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_document_restores_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "customer_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_facts: {
         Row: {
           category: string
@@ -2390,6 +2428,7 @@ export type Database = {
           row_version: number
           shipping_address: string | null
           soybean_acres: number | null
+          standing_discount_pct: number
           state: string | null
           total_acres: number | null
           updated_at: string
@@ -2424,6 +2463,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -2458,6 +2498,7 @@ export type Database = {
           row_version?: number
           shipping_address?: string | null
           soybean_acres?: number | null
+          standing_discount_pct?: number
           state?: string | null
           total_acres?: number | null
           updated_at?: string
@@ -4458,6 +4499,7 @@ export type Database = {
         Row: {
           acres: number | null
           billing_line_id: string | null
+          brand_lines: Json | null
           charge_type: string | null
           cost_cents: number
           created_at: string
@@ -4494,6 +4536,7 @@ export type Database = {
         Insert: {
           acres?: number | null
           billing_line_id?: string | null
+          brand_lines?: Json | null
           charge_type?: string | null
           cost_cents?: number
           created_at?: string
@@ -4530,6 +4573,7 @@ export type Database = {
         Update: {
           acres?: number | null
           billing_line_id?: string | null
+          brand_lines?: Json | null
           charge_type?: string | null
           cost_cents?: number
           created_at?: string
@@ -4962,6 +5006,68 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_sales_tax_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_sales_tax_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_standing_discount_rates: {
+        Row: {
+          invoice_id: string
+          rate_pct: number
+          set_at: string
+          set_by: string | null
+        }
+        Insert: {
+          invoice_id: string
+          rate_pct: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Update: {
+          invoice_id?: string
+          rate_pct?: number
+          set_at?: string
+          set_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_standing_discount_rates_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: true
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_standing_discount_rates_set_by_fkey"
+            columns: ["set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -6147,6 +6253,7 @@ export type Database = {
           call_date: string | null
           carrier_rate_gpa: number | null
           commission_split: Json | null
+          completed_at: string | null
           consultant_id: string | null
           created_at: string
           created_by: string | null
@@ -6194,6 +6301,7 @@ export type Database = {
           call_date?: string | null
           carrier_rate_gpa?: number | null
           commission_split?: Json | null
+          completed_at?: string | null
           consultant_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -6241,6 +6349,7 @@ export type Database = {
           call_date?: string | null
           carrier_rate_gpa?: number | null
           commission_split?: Json | null
+          completed_at?: string | null
           consultant_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -6768,6 +6877,48 @@ export type Database = {
           },
         ]
       }
+      order_item_shares: {
+        Row: {
+          created_at: string
+          customer_id: string
+          id: string
+          order_item_id: string
+          split_percentage: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          id?: string
+          order_item_id: string
+          split_percentage: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          id?: string
+          order_item_id?: string
+          split_percentage?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_item_shares_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_item_shares_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           acres: number | null
@@ -7005,6 +7156,7 @@ export type Database = {
           pricing_status: string
           program_notes: string | null
           quote_id: string | null
+          sales_tax: boolean
           salesman_id: string | null
           season: number | null
           status: string
@@ -7033,6 +7185,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -7061,6 +7214,7 @@ export type Database = {
           pricing_status?: string
           program_notes?: string | null
           quote_id?: string | null
+          sales_tax?: boolean
           salesman_id?: string | null
           season?: number | null
           status?: string
@@ -8923,6 +9077,9 @@ export type Database = {
           cancel_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
+          close_reason: string | null
+          closed_at: string | null
+          closed_by: string | null
           created_at: string
           created_by: string
           expected_delivery_date: string | null
@@ -8940,6 +9097,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by: string
           expected_delivery_date?: string | null
@@ -8957,6 +9117,9 @@ export type Database = {
           cancel_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
           created_at?: string
           created_by?: string
           expected_delivery_date?: string | null
@@ -8974,6 +9137,13 @@ export type Database = {
           {
             foreignKeyName: "purchase_orders_cancelled_by_fkey"
             columns: ["cancelled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_orders_closed_by_fkey"
+            columns: ["closed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -10032,6 +10202,7 @@ export type Database = {
           epa_registration: string | null
           id: string
           invoice_id: string | null
+          invoice_item_id: string | null
           order_id: string | null
           product_id: string
           product_name: string
@@ -10059,6 +10230,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id: string
           product_name: string
@@ -10086,6 +10258,7 @@ export type Database = {
           epa_registration?: string | null
           id?: string
           invoice_id?: string | null
+          invoice_item_id?: string | null
           order_id?: string | null
           product_id?: string
           product_name?: string
@@ -10127,6 +10300,13 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_postable"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rup_sales_records_invoice_item_id_fkey"
+            columns: ["invoice_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_items"
             referencedColumns: ["id"]
           },
           {
@@ -13260,6 +13440,14 @@ export type Database = {
         }
         Returns: Json
       }
+      close_purchase_order_short: {
+        Args: {
+          p_idempotency_key?: string
+          p_po_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       close_quote_as_applied: {
         Args: {
           p_idempotency_key?: string
@@ -13325,6 +13513,7 @@ export type Database = {
       }
       complete_delivery: {
         Args: {
+          p_brand_base_seq?: number
           p_completed_at?: string
           p_delivery_id: string
           p_email_receipt?: boolean
@@ -13915,6 +14104,17 @@ export type Database = {
         Returns: Json
       }
       get_booking_settlement: { Args: { p_quote_id: string }; Returns: Json }
+      get_bill_split_payers: {
+        Args: {
+          p_invoice_id: string
+        }
+        Returns: {
+          farm_name: string | null
+          id: string
+          invoice_number: string | null
+          total_amount_cents: number | null
+        }[]
+      }
       get_bottom_line_pnl: {
         Args: { p_end_date: string; p_start_date: string }
         Returns: {
@@ -15313,6 +15513,10 @@ export type Database = {
         }
         Returns: number
       }
+      rate_unit_line_refusal: {
+        Args: { p_check_characters: boolean; p_rate_unit: string }
+        Returns: string
+      }
       reactivate_vendor: {
         Args: { p_idempotency_key?: string; p_vendor_id: string }
         Returns: Json
@@ -15838,6 +16042,22 @@ export type Database = {
         }
         Returns: Json
       }
+      set_invoice_standing_discount: {
+        Args: {
+          p_idempotency_key: string
+          p_invoice_id: string
+          p_pct: number | null
+        }
+        Returns: Json
+      }
+      set_order_sales_tax: {
+        Args: {
+          p_idempotency_key: string
+          p_order_id: string
+          p_sales_tax: boolean
+        }
+        Returns: Json
+      }
       set_product_margin_floors: {
         Args: {
           p_idempotency_key?: string
@@ -16045,6 +16265,8 @@ export type Database = {
         }
         Returns: Json
       }
+      unit_fold_invisible: { Args: { p_text: string }; Returns: string }
+      unit_names_fluid_ounce: { Args: { p_unit: string }; Returns: boolean }
       unlink_blend_ticket_from_order: {
         Args: {
           p_blend_ticket_id: string

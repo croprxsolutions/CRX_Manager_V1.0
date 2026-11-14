@@ -38,8 +38,8 @@ BEGIN
   -- preview/apply path the app uses (the smoke-order-invoice-type-gate.sql
   -- pattern). The server-math assertion below proves the client-supplied 999s
   -- cannot land: the stored values come from this governed cost and price.
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[SMOKE] RV product ' || v_suffix, 'gal') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[SMOKE] RV product ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_product;
   v_q := public.preview_product_pricing_changes(
     'product_page',
     NULL,

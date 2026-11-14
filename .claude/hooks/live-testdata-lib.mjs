@@ -975,7 +975,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["e86e0b0d2f61073fce6110913bf9260a9332f92d29c295a61d1a7810345dda49", "returns-lifecycle-rpc-owned.sql"],
   ["7dab8645f051bbcf2d619853b721b8beac3eef0f901c37538b9d9c1b579c0961", "save-field-actor-binding.sql"],
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],
-  ["a214ec21734991ea10daa54e7832dc9f814d41b18bb5523dcb5ea42f2f60e93b", "section9-po-ap-controls.sql"],
+  ["6b8c4da26da112e6b536bf1d2b9424f7552c10438c1b37680355027167b638c4", "section9-po-ap-controls.sql"],
   ["f0bd806a01f9114345eb47a0e1523e54a9e5ef7d2e8b40dfbd47f278bfe4503b", "status-literals.sql"],
   ["dbaa1cfe6d3d81ca66c8f44ac9085d8b9c47e507733cd708c4de2ead823b53c1", "ungated-secdef-mutators.sql"],
 ]);

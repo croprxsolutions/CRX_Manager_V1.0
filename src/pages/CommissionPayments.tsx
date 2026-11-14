@@ -24,6 +24,7 @@ import { todayInBusinessTz } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
 import { logActivity } from '../lib/activityLogger';
 import { formatUSD as fmt } from '../lib/money';
+import { toSentryError } from '../lib/sentryError';
 
 // Every uncertain-outcome message on this page ends by sending the admin to the
 // list below it. If the refresh that was supposed to make that list current
@@ -517,7 +518,7 @@ export default function CommissionPayments() {
       if (rejection) {
         createPaymentIdem.resetKey();
         if (rejection !== 'intent') {
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `create_commission_payment_${rejection}_mismatch` } });
+          Sentry.captureException(toSentryError(err), { extra: { context: `create_commission_payment_${rejection}_mismatch` } });
         }
         // Refresh BEFORE the toast: the message tells the admin to check the list
         // below it, so the list must already show post-refusal state when they
@@ -539,7 +540,7 @@ export default function CommissionPayments() {
             ? `The database could not confirm the outcome of this request, so nothing was created now. Check the payment list below before creating another.${listIsCurrent ? '' : STALE_LIST_NOTE}`
             : `This retry was already used by an earlier commission payment, so nothing new was created. Check the payment list below before creating another.${listIsCurrent ? '' : STALE_LIST_NOTE}`);
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'create_commission_payment' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'create_commission_payment' } });
         // The call went out, so this is genuinely uncertain: a payment that
         // committed but lost its response looks exactly like one that never ran.
         // The dialog stays open with the same commissions selected, which keeps
@@ -621,7 +622,7 @@ export default function CommissionPayments() {
       if (rejection) {
         postPaymentIdem.resetKey();
         if (rejection !== 'intent') {
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `post_commission_payment_${rejection}_mismatch` } });
+          Sentry.captureException(toSentryError(err), { extra: { context: `post_commission_payment_${rejection}_mismatch` } });
         }
         // See handleCreate: refresh before the toast that points at the list.
         const refusalListIsCurrent = await fetchPayments({ quiet: true });
@@ -631,7 +632,7 @@ export default function CommissionPayments() {
             ? `The database could not confirm the outcome of this request, so nothing was posted now. Check the payment list below before posting again.${refusalListIsCurrent ? '' : STALE_LIST_NOTE}`
             : `This retry was already used by an earlier posting, so nothing was posted now. Check the payment list below before posting again.${refusalListIsCurrent ? '' : STALE_LIST_NOTE}`);
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'post_commission_payment' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'post_commission_payment' } });
         // The call went out, so this is genuinely uncertain: a posting that
         // committed but lost its response looks exactly like one that never ran.
         // The key for this payment is deliberately retained, so pressing Post
@@ -693,7 +694,7 @@ export default function CommissionPayments() {
       if (rejection) {
         voidPaymentIdem.resetKey();
         if (rejection !== 'intent') {
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `void_commission_payment_${rejection}_mismatch` } });
+          Sentry.captureException(toSentryError(err), { extra: { context: `void_commission_payment_${rejection}_mismatch` } });
         }
         // See handleCreate: refresh before the toast that points at the list.
         setShowVoid(false);
@@ -706,7 +707,7 @@ export default function CommissionPayments() {
             ? `The database could not confirm the outcome of this request, so nothing was voided now. Check the payment list below before voiding again.${voidListIsCurrent ? '' : STALE_LIST_NOTE}`
             : `This retry was already used by an earlier void, so nothing was voided now. Check the payment list below before voiding again.${voidListIsCurrent ? '' : STALE_LIST_NOTE}`);
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'void_commission_payment' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'void_commission_payment' } });
         // Ordinary failure (timeout, network, a server guard) — and it does NOT
         // prove the void did not happen. The call may have committed and lost
         // its response, and everything after the RPC (the activity-log write,

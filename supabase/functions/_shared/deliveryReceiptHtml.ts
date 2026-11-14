@@ -1,5 +1,6 @@
 // The CRX email shell and the customer delivery receipt, shared by the app (src/lib re-exports these) and the
 // send-delivery-receipts Edge Function (KI-25), so a receipt looks the same whichever side sends it.
+import { receiptBrandNotes, type ReceiptBrandInfo } from './brandNotes.ts';
 
 /** Escapes text placed into email HTML (send-email does not escape the HTML it is given). */
 export function escapeHtml(s: string): string {
@@ -56,7 +57,8 @@ export function buildEmailHtml(bodyContent: string): string {
 </html>`;
 }
 
-export interface DeliveryReceiptLine {
+/** brands / brand_recorded / brand_picked_quantity: Brand PR B-3 (absent on a receipt queued before it). */
+export interface DeliveryReceiptLine extends ReceiptBrandInfo {
   name: string;
   qty: number;
 }
@@ -86,7 +88,8 @@ export function buildDeliveryReceiptHtml(input: DeliveryReceiptInput): string {
 
   const lineRows = input.lines
     .map((line) => `<tr>
-              <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;">${escapeHtml(line.name)}</td>
+              <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;">${escapeHtml(line.name)}${receiptBrandNotes(line)
+                .map((note) => `<br><span style="color:#64748b;font-size:12px;">${escapeHtml(note)}</span>`).join('')}</td>
               <td style="padding:6px 12px;border:1px solid #e2e8f0;font-size:13px;text-align:right;">${line.qty}</td>
             </tr>`)
     .join('');

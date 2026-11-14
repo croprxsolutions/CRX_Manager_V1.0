@@ -38,6 +38,7 @@ import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { formatCents as fmt } from '../lib/money';
 import type { DuplicatePayment, PaymentAllocationEntry, PaymentAllocationResult, InvoiceType } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 
@@ -173,7 +174,7 @@ export default function PaymentAllocation() {
         setSearchFailed(false);
         setShowDropdown(true);
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'payment_customer_search' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'payment_customer_search' } });
         if (!cancelled) {
           setCustomerResults([]);
           // Not "No customers found": the search did not run.
@@ -362,7 +363,7 @@ export default function PaymentAllocation() {
     try {
       match = await findDuplicatePayment(payment.customerId, payment.cents, payment.reference);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'duplicate_payment_check' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'duplicate_payment_check' } });
       if (mountedRef.current) toast('error', DUPLICATE_CHECK_FAILED_MESSAGE);
       setSubmitting(false);
       return;
@@ -419,7 +420,7 @@ export default function PaymentAllocation() {
       }
       toast('success', parts.join('. '));
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'critical_action', action: 'allocate_payment' } });
+      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'allocate_payment' } });
       if (hasRpcCode(err, RpcErrorCodes.IDEMPOTENCY_ARGUMENT_MISMATCH)) setRetryRefused(true);
       else toast('error', rpcAuthErrorMessage(err) ?? sanitizeError(err));
     }

@@ -19,9 +19,9 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { evaluateMigrationApply, normalizeMigName, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
+import { evaluateMigrationApply, normalizeMigName, ownerApprovalNeeded, resolveMigrationSource, originFetchAgeMs } from "./migration-apply-lib.mjs";
 import { checkWrappable } from "./migration-wrappability-lib.mjs";
-import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
+import { evaluateLandingGate, hotfixStampProblem, readyToMergeProblem } from "./migration-landing-gate-lib.mjs";
 import { cancelCodeRabbitSkip, recordCodeRabbitSkip } from "./coderabbit-skip-lib.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
@@ -514,9 +514,9 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
   denies(evaluate(destructiveFixture(autopilot), { query: DESTRUCTIVE, masonApprovedDestructive: true }),
     "destructive statement", `${label}: a self-asserted approval input is ignored — destructive SQL stays refused`);
 }
-// PERMISSIONS are Mason's too (Sol HIGH, round 9; his 2026-09-26 choice "Routine
-// auto, widening waits"): a migration that widens or changes existing access is
-// refused for agents in every session, whatever its proofs.
+// PERMISSIONS used to be Mason's (his 2026-09-26 "widening waits"). Since his
+// 2026-11-11 "All but deletions" an access change lands on the normal proofs and
+// a ready PR, armed or not, with no approval.
 {
   const WIDENING = "GRANT SELECT ON public.customers TO anon;\n";
   const wideningHash = createHash("sha256").update(WIDENING).digest("hex");
@@ -527,8 +527,10 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
     codexProof: { ...goodCodex, queryHash: wideningHash },
   });
   for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
-    denies(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: true }) }),
-      "changes who can access what", `${label}: a GRANT to anon is refused even with perfect proofs and a ready PR`);
+    allows(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: true }) }),
+      `${label}: a GRANT to anon applies with perfect proofs and a ready PR (no approval since 2026-11-11)`);
+    denies(evaluate(wideningFixture(autopilot), { query: WIDENING, landingGate: () => ({ ok: false, reason: "MIGRATION LANDING GATE: not merge-ready" }) }),
+      "not merge-ready", `${label}: a GRANT to anon still waits for a merge-ready PR`);
   }
   // The routine lock-down on a function the same migration creates passes this
   // check and reaches the next one.
@@ -542,16 +544,16 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
   }), { query: ROUTINE_SQL, landingGate: () => ({ ok: true }) }),
     "routine lock-down on a new function applies with perfect proofs and a ready PR");
 
-  // Sol round 11 (Mason 2026-09-27, "Data rewrites wait"): overwriting existing
-  // rows is refused like deleting them, whatever the proofs.
+  // Overwriting existing rows waited for Mason from 2026-09-27 ("Data rewrites
+  // wait") until his 2026-11-11 "All but deletions": it now lands on the proofs.
   const REWRITE = "UPDATE public.invoices SET total_amount_cents = 0;\n";
   const rewriteHash = createHash("sha256").update(REWRITE).digest("hex");
-  denies(evaluate(fixture({
+  allows(evaluate(fixture({
     migrationFile: REWRITE,
     proof: { migration: MIG, timestamp: iso(0), reviewers: ["rls-security-reviewer", "migration-drift-reviewer"], findings: "clean", queryHash: rewriteHash },
     codexProof: { ...goodCodex, queryHash: rewriteHash },
   }), { query: REWRITE, landingGate: () => ({ ok: true }) }),
-    "changes existing data", "an UPDATE of existing rows is refused even with perfect proofs and a ready PR");
+    "an UPDATE of existing rows applies with perfect proofs and a ready PR (no approval since 2026-11-11)");
 
   // Sol round 10: the gate reads the migration HISTORY beside the file. An
   // earlier (already applied) migration locked f away from authenticated, so
@@ -570,9 +572,9 @@ for (const [label, autopilot] of [["UNARMED", null], ["ARMED", armed()]]) {
     if (earlier) writeFileSync(path.join(root, "supabase", "migrations", "20260101000000_baseline.sql"), earlier, "utf8");
     return root;
   };
-  denies(evaluate(replaceFixture("CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n" +
+  allows(evaluate(replaceFixture("CREATE FUNCTION public.f(p uuid) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\n" +
     "REVOKE ALL ON FUNCTION public.f(uuid) FROM PUBLIC, anon, authenticated;\n"), { query: REPLACE_SQL, landingGate: () => ({ ok: true }) }),
-    "did not have before", "replacing a locked-down function and granting it to authenticated is refused (history read from disk)");
+    "replacing a locked-down function and granting it to authenticated now lands on the proofs (2026-11-11)");
   allows(evaluate(replaceFixture(null), { query: REPLACE_SQL, landingGate: () => ({ ok: true }) }),
     "the same replace with no earlier definition is a new function's routine lock-down");
 }
@@ -1632,12 +1634,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
-    state: "OPEN", baseRefName: "main", baseRefOid: BASE_SHA, headRefOid: HEAD_SHA,
+    state: "OPEN", isCrossRepository: false, baseRefName: "main", baseRefOid: BASE_SHA, headRefName: "hotfix/test-fix", headRefOid: HEAD_SHA,
     mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
     // Opened 5 hours ago, so Taha's 4-hour hold is over unless a test says otherwise.
-    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), comments: [],
+    author: { login: "masonwells1" }, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    // Taha's go-ahead for this head (#1838, his choice 13 Nov): fresh, from his account.
+    comments: [{ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString() }],
     reviews: [{ author: { login: "coderabbitai" }, state: "APPROVED", commit: { oid: HEAD_SHA }, submittedAt: new Date().toISOString() }],
     statusCheckRollup: [{ __typename: "CheckRun", workflowName: "CI", name: "build", status: "COMPLETED", conclusion: "SUCCESS",
+      startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
+    { __typename: "CheckRun", workflowName: "Release flow", name: "Release flow guard (main)", status: "COMPLETED", conclusion: "SUCCESS",
       startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
   };
   const crThread = (resolved, outdated = false) => ({ isResolved: resolved, isOutdated: outdated,
@@ -1654,13 +1660,16 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     commits: { totalCount: 1, nodes: [{ commit: { oid: head, parents: { totalCount: 1 }, status: { contexts: statuses } } }] },
   } } } });
   const gate = ({ git = {}, pr = {}, prError = null, behindBy = "0", migName = MIG, queryHash = HASH, threads = [], threadsError = null, threadsMore = false, threadsHead = HEAD_SHA,
-    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false } = {}) => evaluateLandingGate({
+    crStatuses = crDone, crError = null, crHead = HEAD_SHA, sessionId = undefined, mates = [], matesError = null, matesMore = false,
+    trees = { main: ['20260101000000_old.sql'], staging: ['20260101000000_old.sql'] }, treesError = null,
+    workflowsHead = "a".repeat(40), workflowsMain = "a".repeat(40), stagingTip = "d".repeat(40), stagingBehind = "0", openStaging = [] } = {}) => evaluateLandingGate({
     checkoutDir: gateDir, migName, queryHash, listWorktrees: () => "", sessionId,
     runGit: (args) => {
       const key = args.join(" ");
       if (key in git) { if (git[key] instanceof Error) throw git[key]; return git[key]; }
       if (key === "rev-parse HEAD") return `${HEAD_SHA}\n`;
       if (key === "rev-parse --abbrev-ref HEAD") return "claude/feature\n";
+      if (key === "rev-parse HEAD:.github/workflows") return `${workflowsHead}\n`;
       if (key.startsWith("show HEAD:")) return SQL;
       if (key.startsWith("status --porcelain")) return "";
       // git's shared folder: this fixture is its own main checkout.
@@ -1668,6 +1677,10 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       throw new Error(`unexpected git ${key}`);
     },
     runGh: (args) => {
+      if (args[0] === "api" && args[1] === "graphql" && args.some((a) => /pullRequests\(baseRefName:\\?"staging/.test(String(a)))) {
+        if (openStaging instanceof Error) throw openStaging;
+        return JSON.stringify({ data: { repository: { pullRequests: { totalCount: openStaging.length, nodes: openStaging.map((paths) => ({ files: { totalCount: paths.length, nodes: paths.map((p) => ({ path: p })) } })) } } } });
+      }
       // The REST file list the requirement read always makes (rename sources).
       if (args[0] === "api" && String(args[1]).includes("/files?per_page")) {
         assert.ok(String(args[1]).startsWith(`repos/{owner}/{repo}/pulls/${pr.number ?? 900}/files`));
@@ -1693,6 +1706,26 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
         return JSON.stringify({ data: { repository: { pullRequest: { headRefOid: threadsHead,
           reviewThreads: { pageInfo: { hasNextPage: threadsMore, endCursor: threadsMore ? null : null }, nodes: threads } } } } });
       }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/commits/staging") {
+        if (stagingTip instanceof Error) throw stagingTip;
+        return `${stagingTip}\n`;
+      }
+      if (args[0] === "api" && args[1] === `repos/{owner}/{repo}/compare/${"d".repeat(40)}...${HEAD_SHA}`) {
+        if (stagingBehind instanceof Error) throw stagingBehind;
+        return stagingBehind;
+      }
+      if (args[0] === "api" && args[1] === "repos/{owner}/{repo}/contents/.github?ref=main") {
+        if (workflowsMain instanceof Error) throw workflowsMain;
+        return `${workflowsMain}\n`;
+      }
+      // The hotfix stamp check lists the migrations on main and staging (#1838 HIGH 1).
+      const dir = /^repos\/\{owner\}\/\{repo\}\/contents\/supabase\?ref=(main|staging)$/.exec(String(args[1]));
+      if (args[0] === "api" && dir) {
+        if (treesError) throw treesError;
+        return `${dir[1] === "main" ? "1".repeat(40) : "2".repeat(40)}\n`;
+      }
+      const tree = /^repos\/\{owner\}\/\{repo\}\/git\/trees\/(1{40}|2{40})$/.exec(String(args[1]));
+      if (args[0] === "api" && tree) return trees[tree[1][0] === "1" ? "main" : "staging"].join("\n") + "\n";
       if (args[0] === "api") {
         const base = pr.baseRefOid || BASE_SHA;
         assert.deepEqual(args, ["api", `repos/{owner}/{repo}/compare/${base}...${HEAD_SHA}`, "--jq", ".behind_by"]);
@@ -1750,12 +1783,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     const young = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const otherReview = readyPr.reviews;
-    refused(gate({ pr: { createdAt: young } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
+    const go = readyPr.comments[0];
+    refused(gate({ pr: { createdAt: young, comments: [] } }), "4-hour review hold", "a 30-minute-old PR with no word from Taha is refused");
     refused(gate({ pr: { createdAt: young, comments: [{ author: { login: "someoneelse" }, body: "lgtm" }] } }),
       "4-hour review hold", "another person's comment does not lift the hold");
-    refused(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
+    refused(gate({ pr: { createdAt: young, comments: [], reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "PENDING" }] } }),
       "4-hour review hold", "Taha's unposted (PENDING) review does not lift the hold");
-    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }] } }).ok === true,
+    ok(gate({ pr: { createdAt: young, comments: [{ author: { login: "TahaKhanAbdalli" }, body: "Reviewed, fine." }, go] } }).ok === true,
       "a Taha comment lifts the hold on a young PR");
     ok(gate({ pr: { createdAt: young, reviews: [...otherReview, { author: { login: "TahaKhanAbdalli" }, state: "COMMENTED" }] } }).ok === true,
       "a posted Taha review lifts the hold on a young PR");
@@ -1772,6 +1806,79 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ behindBy: "" }), "does not contain its base", "an empty compare answer fails closed");
   ok(gate({ behindBy: "0\n" }).ok === true, "a head that contains its base passes");
   refused(gate({ pr: { baseRefName: "develop" } }), "does not target main", "a PR into another branch is refused");
+  refused(gate({ pr: { baseRefName: "staging" } }), "staging database job applies it after the merge", "a PR into staging is never applied live before its merge");
+  for (const head of ["claude/feature", "main", "hotfix/a/b", "release/next2", "release/other", ""]) {
+    refused(gate({ pr: { headRefName: head } }), "is not the release PR (release/next) or a hotfix/<name> PR", `into main, only the release PR and a hotfix are applied live first (${head || "no head"})`);
+  }
+  // #1838 HIGH 1 (Mason's agents, 2026-11-12): a hotfix stamped above a migration waiting on staging would make live
+  // refuse that one on release day.
+  {
+    const main = ["20270109100000_on_main.sql"];
+    const staging = [...main, "20261231110000_m4b_old.sql", "20270110100000_waiting.sql"];
+    ok(hotfixStampProblem({ stamp: "20270109110000", mainFiles: main, stagingFiles: staging }) === null, "a hotfix between main's newest and the waiting migration is fine");
+    ok(/20270110100000/.test(hotfixStampProblem({ stamp: "20270110100000", mainFiles: main, stagingFiles: staging })), "a hotfix at the waiting stamp is refused");
+    ok(/next-migration-stamp\.mjs --hotfix/.test(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: staging })), "a hotfix above it is refused, with the fix");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: [...main, "20261231110000_m4b_old.sql"] }) === null,
+      "a waiting migration below main's newest (already out of order, restamped on its own) doesn't count");
+    ok(hotfixStampProblem({ stamp: "20270111000000", mainFiles: main, stagingFiles: main }) === null, "nothing waiting: anything goes");
+  }
+  const waitingTrees = { main: ["20260801000000_x.sql"], staging: ["20260801000000_x.sql", "20260810000000_waiting.sql"] };
+  refused(gate({ trees: waitingTrees }), "a migration waiting on staging", "a hotfix stamped above a waiting staging migration is refused");
+  ok(gate({ trees: { ...waitingTrees, staging: [...waitingTrees.staging.slice(0, 1), "20260901000000_later.sql"] } }).ok === true, "a hotfix below the waiting one passes");
+  refused(gate({ treesError: new Error("HTTP 502") }), "could not list the migrations", "an unreadable listing fails closed");
+  refused(gate({ openStaging: [["supabase/migrations/20260810000000_pending.sql"]] }), "a migration waiting on staging", "a migration in an open staging PR counts (Sol)");
+  refused(gate({ openStaging: new Error("HTTP 502") }), "could not list the migrations", "unreadable open staging PRs fail closed");
+  refused(gate({ trees: { main: [], staging: [] } }), "listed no migrations", "an empty listing fails closed");
+  ok(gate({ trees: waitingTrees, pr: { headRefName: "release/next" } }).ok === true, "the release PR carries the waiting migrations itself: no stamp check");
+  // #1838 HIGH 2: a PR that changes .github/workflows is judged by its own copy of the guard.
+  refused(gate({ workflowsHead: "b".repeat(40) }), "changes .github/workflows", "a PR with its own workflows is refused");
+  refused(gate({ workflowsHead: "b".repeat(40), pr: { headRefName: "release/next" } }), "changes .github/workflows", "a release with a workflow change is refused too");
+  refused(gate({ workflowsMain: new Error("HTTP 502") }), "could not compare", "an unreadable main tree fails closed");
+  refused(gate({ workflowsHead: "" }), "changes .github/workflows", "no workflows tree at HEAD is refused");
+  // Sol (#1838): a guard result from before switch-on checked nothing.
+  {
+    const old = "2026-11-12T10:00:00Z";
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old, completedAt: old }] } }),
+      "from before the release flow was switched on", "a pre-switch-on guard result is refused");
+    refused(gate({ pr: { statusCheckRollup: [readyPr.statusCheckRollup[0], { ...readyPr.statusCheckRollup[1], startedAt: old }] } }),
+      "from before the release flow was switched on", "a run started before switch-on and finished after is refused (Luna)");
+  }
+  // Sol (#1838): a release guard result goes stale when staging moves after it ran.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release head that contains staging's tip passes");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingBehind: "3\n" }), "does not contain staging's tip", "a release head behind staging is refused");
+  refused(gate({ pr: { headRefName: "release/next" }, stagingTip: new Error("HTTP 502") }), "does not contain staging's tip", "an unreadable staging tip fails closed");
+  ok(gate({ stagingBehind: "3\n" }).ok === true, "a hotfix doesn't need staging's tip");
+  refused(gate({ pr: { isCrossRepository: true } }), "comes from a fork", "a fork's branch is refused");
+  refused(gate({ pr: { isCrossRepository: undefined } }), "comes from a fork", "an unknown origin is refused");
+  // #1838, Taha's choice (13 Nov): an agent applies only within 30 minutes of Taha's "Ready to merge: <head>".
+  {
+    const t = (over = {}) => ({ author: { login: "TahaKhanAbdalli" }, body: `Ready to merge: ${HEAD_SHA.slice(0, 12)}`, createdAt: new Date().toISOString(), ...over });
+    const now = Date.now();
+    ok(readyToMergeProblem({ comments: [t()], head: HEAD_SHA, now }) === null, "Taha's fresh go-ahead for this head");
+    ok(readyToMergeProblem({ comments: [t({ author: { login: "masonwells1" } })], head: HEAD_SHA, now }), "the shared account doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ createdAt: new Date(now - 31 * 60_000).toISOString() })], head: HEAD_SHA, now }), "older than 30 minutes doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge: 123456789abc" })], head: HEAD_SHA, now }), "another head doesn't count");
+    ok(readyToMergeProblem({ comments: [t({ body: `Ready to merge: ${HEAD_SHA.slice(0, 7)}` })], head: HEAD_SHA, now }), "seven characters are too few to name a head (Sol)");
+    ok(readyToMergeProblem({ comments: [t({ body: "Ready to merge soon" })], head: HEAD_SHA, now }), "free text doesn't count");
+    ok(readyToMergeProblem({ comments: undefined, head: HEAD_SHA, now }), "no comment list fails closed");
+  }
+  refused(gate({ pr: { comments: [] } }), "Taha hasn't given the go-ahead", "an apply without Taha's go-ahead is refused");
+  refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
+  // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
+  ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // The name alone is not enough: main's release guard must have passed on this head.
+  const build = readyPr.statusCheckRollup[0];
+  const guardRun = readyPr.statusCheckRollup[1];
+  for (const head of ["release/next", "hotfix/test-fix"]) {
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build] } }), "no green \"Release flow guard (main)\"", `${head}: a missing release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, conclusion: "SKIPPED" }] } }), "no green \"Release flow guard (main)\"", `${head}: a skipped release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, status: "IN_PROGRESS", conclusion: "" }] } }), "not merge-ready", `${head}: a running release guard is refused`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, name: "Release flow guard (staging)" }] } }), "no green \"Release flow guard (main)\"", `${head}: the staging guard does not count`);
+    refused(gate({ pr: { headRefName: head, statusCheckRollup: [build, { ...guardRun, workflowName: "Other" }] } }), "no green \"Release flow guard (main)\"", `${head}: a job of that name in another workflow does not count`);
+  }
+  const earlier = new Date(Date.now() - 60000).toISOString();
+  ok(gate({ pr: { headRefName: "release/next", statusCheckRollup: [build, { ...guardRun, conclusion: "FAILURE", startedAt: earlier, completedAt: earlier }, guardRun] } }).ok === true,
+    "a release guard that failed, then passed on a re-run, counts as green");
   refused(gate({ pr: { headRefOid: "c".repeat(40) } }), "is not this checkout's HEAD", "a checkout behind or ahead of the PR head is refused");
   refused(gate({ pr: { reviewDecision: "CHANGES_REQUESTED" } }), "CHANGES_REQUESTED", "an open objection is refused");
   // CodeRabbit is advisory since 2026-10-19 (Mason): its approval is not a landing condition.
@@ -1940,7 +2047,85 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     query: sql, ownerApprovalDoor: true, ownerSessionId: "sess-mason-chat-0001", ownerTrustCheck: () => {}, landingGate: readyLanding, ...over,
   });
 
-  for (const [category, sql] of Object.entries(parkedSql)) {
+  // Mason, 2026-11-11 ("All but deletions"): overwriting rows or changing access
+  // lands on the normal proofs through either door, with no approval at all.
+  for (const category of ["overwrites-data", "changes-access"]) {
+    const sql = parkedSql[category];
+    allows(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }),
+      `${category}: lands on the normal proofs through the MCP door with no approval`);
+    allows(scriptDoor(ownerFixture(sql), sql, { ownerTrustCheck: () => { throw new Error("must not be run"); } }),
+      `${category}: the apply script's door never asks for an approval`);
+    denies(evaluate(ownerFixture(sql, { proofs: false }), { query: sql, landingGate: readyLanding }),
+      "without subagent review proof", `${category}: still needs the reviewer proof`);
+  }
+  // A crashed rewrite/access check is unknown, not safe: it still needs Mason.
+  ok(ownerApprovalNeeded([{ category: "changes-access", reason: "access-check error (boom) — failing closed" }]).length === 1,
+    "a crashed access check still waits for Mason");
+  ok(ownerApprovalNeeded([{ category: "overwrites-data", reason: "data-rewrite check error (boom) — failing closed" }]).length === 1,
+    "a crashed rewrite check still waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(parkedSql["overwrites-data"] + parkedSql["changes-access"], { history: [] })).length === 0,
+    "a plain rewrite plus a grant needs no approval");
+  // Codex P1, PR #1799: a row change fires the table's triggers.
+  const delTrigger = "CREATE FUNCTION public.t_del() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; RETURN NEW; END $$;\n" +
+    "CREATE TRIGGER t_del AFTER UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.t_del();\n";
+  const touchTrigger = "CREATE FUNCTION public.t_touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at := now(); RETURN NEW; END $$;\n" +
+    "CREATE TRIGGER t_touch BEFORE UPDATE ON public.invoices FOR EACH ROW EXECUTE FUNCTION public.t_touch();\n";
+  const upd = "UPDATE public.invoices SET notes = NULL;\n";
+  ok(ownerApprovalNeeded(parkedCategories(delTrigger + upd, { history: [] })).length >= 1,
+    "an UPDATE that fires a deleting trigger defined in the same migration waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger }] })).length >= 1,
+    "an UPDATE that fires a deleting trigger from an earlier migration waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories("CREATE FUNCTION public.w() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; END $$;\nSELECT public.w();\n",
+    { history: [{ name: "a.sql", text: delTrigger }] })).length >= 1,
+    "an UPDATE inside a called function that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: touchTrigger }] })).length === 0,
+    "an UPDATE that fires only a harmless trigger still needs no approval");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger.replace("AFTER UPDATE", "AFTER DELETE") }] })).length === 0,
+    "a DELETE-only trigger is not fired by an UPDATE");
+  ok(ownerApprovalNeeded(parkedCategories(upd, { history: [{ name: "a.sql", text: delTrigger.replace("AFTER UPDATE", "AFTER DELETE OR UPDATE OF notes") }] })).length >= 1,
+    "an 'UPDATE OF column' trigger still counts");
+  const insTrigger = delTrigger.replace("AFTER UPDATE ON public.invoices", "AFTER INSERT ON public.audit_log");
+  const ins = "INSERT INTO public.audit_log (message) VALUES ('repaired');\n";
+  ok(ownerApprovalNeeded(parkedCategories(upd + ins, { history: [{ name: "a.sql", text: insTrigger }] })).length >= 1,
+    "an UPDATE then a plain INSERT that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(`CREATE FUNCTION public.w() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${ins} END $$;\nSELECT public.w();\n` + upd,
+    { history: [{ name: "a.sql", text: insTrigger }] })).length >= 1,
+    "a plain INSERT inside a called function that fires a deleting trigger waits for Mason");
+  ok(ownerApprovalNeeded(parkedCategories(upd + ins, { history: [{ name: "a.sql", text: touchTrigger }] })).length === 0,
+    "an UPDATE plus a plain INSERT with no deleting trigger still needs no approval");
+  ok(ownerApprovalNeeded(parkedCategories(upd)).length >= 1,
+    "an UPDATE with no migration history to read triggers from waits for Mason");
+  // Security review + Luna, 2026-11-11: a delete the rewrite/access checks find
+  // (inside a called function, dynamic SQL, unreadable SQL) is still Mason's.
+  for (const [label, sql] of [
+    ["a called function that DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called function that TRUNCATEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN TRUNCATE public.customers; END $$;\nSELECT public.z();\n"],
+    ["dynamic SQL in a DO block", "DO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
+    // Codex P1, PR #1799: an earlier plain rewrite or grant must not hide a later delete.
+    ["an UPDATE then a called function that DELETEs", "UPDATE public.invoices SET notes = NULL;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and DELETEs", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DELETE FROM public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called UPDATE function, then a called DELETE function", "CREATE FUNCTION public.y() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; END $$;\nCREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM public.customers; END $$;\nSELECT public.y();\nSELECT public.z();\n"],
+    ["a called function that MERGEs (can delete matched rows)", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; MERGE INTO public.customers c USING public.x s ON c.id = s.id WHEN MATCHED THEN DELETE; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a table", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP TABLE public.customers; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a column", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; ALTER TABLE public.customers DROP COLUMN email; END $$;\nSELECT public.z();\n"],
+    ["a called function that drops a column without the COLUMN word", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; ALTER TABLE public.customers DROP email; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a type with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP TYPE public.customer_kind CASCADE; END $$;\nSELECT public.z();\n"],
+    ["a called function that UPDATEs and drops a domain with CASCADE", "CREATE FUNCTION public.z() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.invoices SET notes = NULL; DROP DOMAIN public.money_cents CASCADE; END $$;\nSELECT public.z();\n"],
+    ["a GRANT then dynamic SQL", "GRANT SELECT ON public.customers TO anon;\nDO $$ BEGIN EXECUTE 'DELE' || 'TE FROM public.customers'; END $$;\n"],
+    // Codex P2: a deleting function past the call-depth limit (ten links deep).
+    ["a delete ten calls deep behind an UPDATE", Array.from({ length: 10 }, (_, i) =>
+      `CREATE FUNCTION public.c${i}() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${i === 0 ? "UPDATE public.invoices SET notes = NULL; " : ""}${i < 9 ? `PERFORM public.c${i + 1}();` : "DELETE FROM public.customers;"} END $$;\n`).join("") + "SELECT public.c0();\n"],
+  ]) {
+    ok(ownerApprovalNeeded(parkedCategories(sql)).length >= 1, `${label} still waits for Mason`);
+    denies(evaluate(ownerFixture(sql), { query: sql, landingGate: readyLanding }), "THE ONE WAY THROUGH",
+      `${label}: the gate refuses it without an approval`);
+  }
+  ok(ownerApprovalNeeded([{ category: "overwrites-data", reason: "it runs public.f() while applying, and without the migration history this check cannot tell whether that changes existing rows" }]).length === 1,
+    "a call the check cannot see into still waits for Mason");
+  ok(ownerApprovalNeeded([{ category: "changes-access", reason: "the SQL could not be read for access changes" }]).length === 1,
+    "unreadable SQL still waits for Mason");
+  // Deleting data stays Mason's; a file that deletes AND changes access does too.
+  for (const [category, sql] of Object.entries({ "deletes-data": parkedSql["deletes-data"], "deletes-and-grants": `${parkedSql["deletes-data"]}${parkedSql["changes-access"]}` })) {
     const approval = approvalFor(sql);
     const v = scriptDoor(ownerFixture(sql, { approval }), sql);
     allows(v, `${category}: Mason's valid chat-reply approval lets it through the apply script's door`);
@@ -1951,7 +2136,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       "THE ONE WAY THROUGH", `${category}: the MCP door (no ownerApprovalDoor) refuses even with a valid approval`);
   }
 
-  const ACCESS = parkedSql["changes-access"];
+  const ACCESS = parkedSql["deletes-data"];
   denies(scriptDoor(ownerFixture(ACCESS), ACCESS), "No approval from Mason was found",
     "the apply script's door without an approval refuses");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS), proofs: false }), ACCESS),
@@ -1974,7 +2159,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
     "applying session is unknown", "an apply with no session id fails closed");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
     "not the pull request's current head", "an approval for another head is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "changes-access", reason: "adds a comment" }] }) }), ACCESS),
+  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "deletes-data", reason: "adds a comment" }] }) }), ACCESS),
     "in the words the safety check uses", "an approval that softened what Mason was told is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS,
     { landingGate: () => ({ ok: true }) }), "head is unknown", "a landing verdict without a head fails closed");
@@ -1986,7 +2171,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   {
     // An approval of one parked file cannot carry a different parked file.
     const approval = approvalFor(ACCESS);
-    const DROP = parkedSql["deletes-data"];
+    const DROP = "DROP TABLE public.vendors;\n";
     denies(scriptDoor(ownerFixture(DROP, { approval }), DROP), "file changed",
       "an approval of different SQL under the same name is refused");
   }

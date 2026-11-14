@@ -41,6 +41,7 @@ function buildChain(table: string): Record<string, unknown> {
   return self;
 }
 
+vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }) }));
 vi.mock('../lib/db', () => ({
   supabase: {
     from: mockFrom,

@@ -90,24 +90,24 @@ END;
 $smoke$;
 
 INSERT INTO public.products(
-  id, product_name, sku, category, container_size, unit_size, inventory_unit
+  id, product_name, sku, category, container_size, unit_size, inventory_unit, product_form
 )
 SELECT
   (value->>'product_id')::uuid,
   '[SMOKE] Phase 2 Product Page Pricing',
   'SMOKE-P2-PAGE-' || left(replace(value->>'product_id', '-', ''), 16),
-  'Herbicide', 1, 'gal', 'gal'
+  'Herbicide', 1, 'gal', 'Gal', 'liquid'
 FROM phase2_live_smoke
 WHERE key = 'context';
 
 INSERT INTO public.products(
-  id, product_name, sku, category, container_size, unit_size, inventory_unit
+  id, product_name, sku, category, container_size, unit_size, inventory_unit, product_form
 )
 SELECT
   (value->>'workbook_product_id')::uuid,
   '[SMOKE] Phase 2 Workbook Pricing',
   'SMOKE-P2-XLSX-' || left(replace(value->>'workbook_product_id', '-', ''), 16),
-  'Herbicide', 1, 'gal', 'gal'
+  'Herbicide', 1, 'gal', 'Gal', 'liquid'
 FROM phase2_live_smoke
 WHERE key = 'context';
 

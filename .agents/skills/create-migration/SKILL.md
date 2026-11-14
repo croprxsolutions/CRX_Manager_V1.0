@@ -71,7 +71,9 @@ npm run next-migration-stamp -- --live <live high-water>
        Use `SECURITY DEFINER` only when owner privileges are actually required, and say why in
        the header comment.
      - Mutating RPCs accept and **actually enforce** `p_idempotency_key text DEFAULT NULL`, with
-       the lookup scoped to `operation`, not the key alone.
+       the lookup scoped to `operation`, not the key alone. If it acts on a row that can be reset or
+       re-queued, the saved result names the row version it acted on, and a retry after that
+       version changed is refused rather than acting on the newer row (PR #1678).
      - Mutating RPCs validate the actor against `auth.uid()` and check role/active-profile; never
        trust a caller-supplied `p_performed_by` without an `ACTOR_MISMATCH` gate.
      - New money storage is `bigint` cents — never float. Existing PostgreSQL numeric-dollar

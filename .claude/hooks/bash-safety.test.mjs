@@ -20,12 +20,70 @@ import {
   splitShellWords,
   resolveNpmScriptChain,
   readPackageScripts,
+  checkPrBase,
 } from "./bash-safety-lib.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
 function ok(c, m) { assert.ok(c, m); pass++; }
 function eq(a, b, m) { assert.equal(a, b, m); pass++; }
+
+// ── staging-first: PRs open into staging; only hotfix/ and release/next into main ──
+{
+  const on = (branch) => () => branch;
+  const blocked = (cmd, branch = "claude/feature") => checkPrBase(cmd, ".", on(branch));
+  ok(!blocked("gh pr create --base staging --title x --body y"), "PR into staging allowed");
+  ok(!blocked("gh pr create --base=staging --fill"), "--base=staging allowed");
+  ok(!blocked("gh pr create -B staging --fill"), "-B staging allowed");
+  ok(blocked("gh pr create --fill"), "no --base blocked (GitHub default is main)");
+  ok(blocked("gh pr create --base main --fill"), "feature branch into main blocked");
+  ok(blocked("gh.exe -R croprxsolutions/CRX_Manager_V1.0 pr create -B main --fill"), "gh.exe -R spelling into main blocked");
+  ok(blocked("gh pr create --base 'main' --fill"), "quoted main blocked");
+  ok(blocked("git push -u origin x && gh pr create --base main --fill"), "second segment checked");
+  ok(!blocked("gh pr create --base main --fill", "hotfix/restamp"), "hotfix branch into main allowed");
+  ok(!blocked("gh pr create --base main --head hotfix/restamp --fill"), "explicit hotfix head allowed");
+  ok(blocked("gh pr create --base main --head claude/feature --fill", "hotfix/x"), "explicit feature head into main blocked");
+  ok(blocked("cd ../other && gh pr create --base main --fill", "hotfix/x"), "after cd the checkout's branch is not trusted");
+  ok(blocked("gh pr edit 12 --base main"), "retarget onto main blocked");
+  ok(!blocked("gh pr edit 12 --base staging"), "retarget onto staging allowed");
+  ok(!blocked("gh pr edit 12 --title x"), "edit without base allowed");
+  ok(!blocked("gh pr view 12 --json baseRefName"), "other pr subcommands untouched");
+  ok(!blocked("rg -n 'gh pr create --base main' docs"), "searching for the text is not a PR");
+  ok(checkCommandDeep("gh pr create --base main --head claude/x --fill", "."), "wired into checkCommandDeep");
+  // Luna round 1 on this guard.
+  ok(blocked("gh pr create -B=main --head claude/feature --fill"), "-B=main spelling blocked");
+  ok(blocked("gh pr edit 12 -B=main"), "-B=main retarget blocked");
+  ok(blocked(`bash -c 'gh pr create --base main --head claude/feature --fill'`), "PR nested in bash -c blocked");
+  ok(blocked(`pwsh -Command "gh pr create --fill"`), "no-base PR nested in pwsh blocked");
+  ok(blocked("gh api repos/o/r/pulls -f base=main -f head=claude/x -f title=t"), "raw REST create into main blocked");
+  ok(!blocked("gh api repos/o/r/pulls -f base=staging -f head=claude/x -f title=t"), "raw REST create into staging allowed");
+  ok(!blocked(`gh pr create --base main --title "cd into test folder" --fill`, "hotfix/x"), "quoted 'cd' in a title is not a folder change");
+  ok(blocked("gh pr create --base main --head hotfix/a/b --fill"), "hotfix name must be one segment, as CI requires");
+  // Luna r2
+  ok(blocked("gh pr create --base production --fill"), "a base other than staging/main blocked");
+  ok(blocked("gh pr edit 12 --base production"), "retarget onto another branch blocked");
+  ok(blocked("gh pr create --base $BASE --fill"), "shell-expanded base blocked");
+  ok(blocked("gh pr create --base main --head hotfix/$NAME --fill"), "shell-expanded head blocked");
+  ok(blocked("gh pr create --base staging --base main --fill"), "repeated --base: last value (main) wins");
+  ok(!blocked("gh pr create --base main --base staging --fill"), "repeated --base: last value (staging) wins");
+  ok(blocked("gh api repos/o/r/pulls --field=base=main -f head=claude/x"), "--field=base=main blocked");
+  ok(blocked("gh api repos/o/r/pulls -F base=main"), "-F base=main blocked");
+  ok(blocked("gh api repos/o/r/pulls --raw-field base=production"), "raw-field into another branch blocked");
+  ok(blocked("gh api repos/o/r/pulls --input body.json"), "--input body cannot be checked, blocked");
+  ok(blocked(`gh api graphql -f query='mutation { createPullRequest(input: {}) { clientMutationId } }'`), "GraphQL createPullRequest blocked");
+  ok(!blocked("gh api repos/o/r/pulls/12"), "reading a PR via api allowed");
+  ok(!blocked("gh pr create --help"), "--help allowed");
+  ok(!blocked("echo gh pr create --base main"), "echo of the text is not a PR");
+  ok(blocked("GH_REPO=o/r gh pr create --base main --fill"), "env assignment before gh still checked");
+  // Codex review on #1863
+  ok(!blocked(`gh pr create --base="staging" --fill`), "quoted attached --base=\"staging\" allowed");
+  ok(blocked(`gh pr create --base="main" --fill`), "quoted attached --base=\"main\" still blocked");
+  ok(!blocked("gh api --method GET repos/o/r/pulls -f base=main"), "listing PRs into main (GET) allowed");
+  ok(!blocked("gh api -X GET repos/o/r/pulls -f base=main"), "-X GET listing allowed");
+  ok(blocked("gh api -X POST repos/o/r/pulls -f base=main"), "explicit POST into main blocked");
+  ok(!blocked(`gh api graphql -f query='query { repository(owner:"o",name:"r") { pullRequests(first:5) { nodes { baseRefName } } } }'`), "GraphQL read of baseRefName allowed");
+  ok(blocked(`gh api graphql -f query='mutation { updatePullRequest(input:{pullRequestId:"x",baseRefName:"main"}) { clientMutationId } }'`), "GraphQL mutation setting baseRefName blocked");
+}
 
 // ── direct dangerous-command patterns (unchanged behavior) ────────────────
 ok(checkDangerousCommand("git push --force origin main"), "force push blocked");

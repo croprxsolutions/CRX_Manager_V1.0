@@ -12,6 +12,7 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import ConfirmModal from '../ui/ConfirmModal';
 import Badge from '../ui/Badge';
+import { toSentryError } from '../../lib/sentryError';
 
 interface CustomerContactsProps { customerId: string; performedBy: string; }
 
@@ -129,7 +130,7 @@ export default function CustomerContacts({ customerId, performedBy }: CustomerCo
       setOpen(false);
       await loadContacts();
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerContacts.save' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerContacts.save' } });
       const message = error instanceof Error ? error.message : 'Failed to save contact';
       // Prefer the Postgres unique-violation code; keep the constraint-name
       // substring as a fallback for wrappers that strip the code.

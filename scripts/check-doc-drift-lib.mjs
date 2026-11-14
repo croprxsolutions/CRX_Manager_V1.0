@@ -85,7 +85,9 @@ export function freshnessEnforcedFor(changedFiles) {
     || file === 'docs/manual/CURRENT_STATE.md' || file === 'docs/manual/KNOWN_ISSUES.md');
 }
 
-export function manualFreshnessBoundary(newestMigrationDate, todayChicago) {
-  if (!newestMigrationDate) return undefined;
-  return newestMigrationDate > todayChicago ? todayChicago : newestMigrationDate;
+// The bar is the newest migration that is already due (dated today or earlier, Chicago).
+// Future-dated migrations do not count, and "today" alone is never the bar: otherwise
+// every open PR went red at midnight Central while one sat on main (Mason, 2026-11-09).
+export function manualFreshnessBoundary(migrationDates, todayChicago) {
+  return migrationDates.filter((date) => date <= todayChicago).sort().at(-1);
 }

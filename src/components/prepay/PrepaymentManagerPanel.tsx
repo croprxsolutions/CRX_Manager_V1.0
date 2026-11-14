@@ -26,6 +26,7 @@ import { logActivity } from '../../lib/activityLogger';
 import { formatCents as fmt } from '../../lib/money';
 import { getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../../lib/pagedRead';
+import { toSentryError } from '../../lib/sentryError';
 
 interface CustomerPrepay {
   [k: string]: unknown;
@@ -532,7 +533,7 @@ export default function PrepaymentManagerPanel() {
       );
       fetchCustomers();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'apply_remaining_prepayments' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'apply_remaining_prepayments' } });
       toast('error', sanitizeError(err));
     }
     setApplying(null);
@@ -568,7 +569,7 @@ export default function PrepaymentManagerPanel() {
       }
       fetchCustomers();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'batch_apply_all_prepayments' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'batch_apply_all_prepayments' } });
       toast('error', sanitizeError(err));
     }
     setBatchApplying(false);

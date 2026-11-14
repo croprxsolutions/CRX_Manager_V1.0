@@ -33,6 +33,7 @@ import { sanitizeError } from './errorSanitizer';
 import { fetchProductWeights } from './productWeights';
 import { Sentry } from './sentry';
 import type { MasterMixJobInput, MasterMixExcludedJob, MasterMixWeights } from './masterMixSummaryData';
+import { toSentryError } from './sentryError';
 
 /** The fetch result: the jobs to combine + the jobs that must be shown as excluded. */
 export interface MasterMixFetchResult {
@@ -56,7 +57,7 @@ export async function fetchMasterMixWeights(jobs: readonly MasterMixJobInput[]):
     if (error instanceof Error && error.message === 'Too many products to weigh at once') {
       return { unavailable: 'Too many products to weigh at once: select fewer jobs' };
     }
-    Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { level: 'warning', extra: { context: 'master_mix_weights' } });
+    Sentry.captureException(toSentryError(error), { level: 'warning', extra: { context: 'master_mix_weights' } });
     return { unavailable: 'Product weights not shown: they could not be read. Reprint to include them.' };
   }
 }

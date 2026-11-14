@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
 import { compressImage } from '../../lib/imageCompression';
 import { teamNotePhotoExtension } from '../../lib/privatePhotos';
+import { toSentryError } from '../../lib/sentryError';
 
 interface NotePhotoUploadProps {
   noteId: string;
@@ -72,7 +73,7 @@ export default function NotePhotoUpload({ noteId, onUploadComplete }: NotePhotoU
 
         uploadCount++;
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Photo upload error' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'Photo upload error' } });
         toast('error', 'Photo upload failed. Please try again.');
       }
     }

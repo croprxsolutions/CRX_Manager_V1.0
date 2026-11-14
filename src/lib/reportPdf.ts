@@ -77,7 +77,7 @@ export async function generateReportPdf(options: ReportPdfOptions) {
   if (options.dateRange?.start) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.25);
-    doc.text(`${options.dateRange.start} — ${options.dateRange.end}`, pageW - margin, y + 9, { align: 'right' });
+    doc.text(`${options.dateRange.start} to ${options.dateRange.end}`, pageW - margin, y + 9, { align: 'right' });
   }
   y = Math.max(companyY, titleY + (titleLines.length - 1) * 15);
 

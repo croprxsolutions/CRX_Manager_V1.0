@@ -178,11 +178,9 @@ describe('generateReportPdf', () => {
       makeOptions({ dateRange: { start: '01/01/2026', end: '03/31/2026' } })
     );
     const textCalls = mockDoc.text.mock.calls;
-    const hasDate = textCalls.some(
-      (args: unknown[]) =>
-        typeof args[0] === 'string' && args[0].includes('01/01/2026')
-    );
-    expect(hasDate).toBe(true);
+    const printed = textCalls.map((args: unknown[]) => args[0]);
+    expect(printed).toContain('01/01/2026 to 03/31/2026');
+    expect(printed.join(' ')).not.toMatch(/[—–]/);
   });
 
   it('calls autoTable with column headers and body rows', async () => {

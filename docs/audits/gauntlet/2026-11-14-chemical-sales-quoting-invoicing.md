@@ -13,18 +13,20 @@
 | Repaired delivery-invoice cap proof | Passed defect reproduction, expected ordering refusal, valid delivery/invoice chains, concurrent writers and mutation checks; historical candidate scope |
 | Repaired quote pricing proof, `--chemical-sales` | Passed candidate-era chains and 13 applicable mutation checks; frozen fixture with recorded provenance; field/job cases excluded |
 | Fresh isolated current-schema build | Passed at 10:06 a.m. CST: 287 selected migrations, 1,207 ledger rows; sealed Docker network; local storage enabled |
-| Current-schema SQL checks | Nine rolled-back chains passed: conversion, quote versions/expiry/customer saves, booked prices/overdraw, unchanged invoice cents/cost and charge lines |
+| Current-schema SQL checks | Ten rolled-back chains passed: conversion, quote versions/expiry/customer saves, booked prices/overdraw, unchanged invoice cents/cost charge lines and multi-payer quantity/cents conservation |
 | Browser admin journey | Passed saved/reloaded quote, quote PDF, presentation/version, conversion plus retry, signed delivery/storage, exact stock reduction, auto draft, save/reload, stale-tab post refusal, post plus retry, invoice PDF, unpost/repost/void and separate draft cancellation |
 | Browser rep journey | Passed separate rep logins, own quote saves and server refusal of an unrelated rep edit without changing the saved quote |
 | PDF inspection | Downloaded quote and invoice text matched customer, product, quantity and $24.68 total; both rendered and visually inspected |
 | Setup refusal tests | Both default and sales profiles passed; separate state/ports/ownership and unsupported input refusal |
 | Toolchain | Typecheck, lint, build, agent guidance and focused historical-scope tests passed; delivery checks recorded in the PR |
 
-Run the repeatable current-schema checks with `node scripts/local-app/sales.mjs rebuild`, then `node scripts/local-app/sales.mjs test`. The latter runs nine SQL chains followed by two real browser tests. The fixed profile owns only `crx-sales-gauntlet`; it preserves the existing default stack. CLI rebuild requires a matching Supabase launcher and companion, both version 2.109.1. Private generated credentials, PDFs and browser captures stay under ignored `.state/sales-gauntlet/` and are never committed.
+Run the repeatable current-schema checks with `node scripts/local-app/sales.mjs rebuild`, then `node scripts/local-app/sales.mjs test`. The latter runs ten SQL chains followed by two real browser tests. The fixed profile owns only `crx-sales-gauntlet`; it preserves the existing default stack. CLI rebuild requires a matching Supabase launcher and companion, both version 2.109.1. Private generated credentials, PDFs and browser captures stay under ignored `.state/sales-gauntlet/` and are never committed.
 
 Historical proofs deliberately stop at their named candidate. They do not certify later behavior. The separate fresh full replay supplies the current-schema evidence. One-shot production data migrations are ledgered, never executed against test business rows. A registration prerequisite is performed through the normal local admin RPC before its dependent migration, before browser products are seeded.
 
 ## Application findings retained
+
+Independent Luna review: first round's four MED findings were fixed with matching CLI companion validation, conversion retry proof, stale/duplicate invoice-post proof and exact stock movement assertions. Whole-branch review of `329394484762d16f9fced5934a54730d46a0dd71` found one MED coverage gap and no HIGH/BLOCKER. The fix adds a tenth current-schema check: two and three payers conserve delivered quantity, exact cents and main-customer remainder; an extra-unit write is refused and group posting preserves total balances. The check was executed successfully. These changes only resolve that finding and document its disposition; the review workflow permits them without another whole-branch round.
 
 These findings are outside the requested test repair. Application sales rules and production records were not changed.
 

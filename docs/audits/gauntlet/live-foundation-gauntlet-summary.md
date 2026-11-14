@@ -1,6 +1,6 @@
 # CRX Live Foundation Gauntlet Summary
 
-2026-11-14 scoped run: [Chemical sales quoting and invoicing](2026-11-14-chemical-sales-quoting-invoicing.md) completed with findings. Fresh local schema, nine SQL chains and two browser journeys passed; field application excluded. Known KI-99/KI-03 and three LOW observations remain follow-ups. The numbered global queue is unchanged.
+2026-11-14 scoped run: [Chemical sales quoting and invoicing](2026-11-14-chemical-sales-quoting-invoicing.md) completed with findings. Fresh local schema, ten SQL chains and two browser journeys passed; field application excluded. Known KI-99/KI-03 and three LOW observations remain follow-ups. The numbered global queue is unchanged.
 
 Last updated: 2026-08-23
 

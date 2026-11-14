@@ -19,6 +19,7 @@ const chains = [
   'smoke-invoice-resave-keeps-line-cents.sql',
   'smoke-invoice-resave-keeps-cost.sql',
   'smoke-delivery-invoice-charge-lines.sql',
+  'smoke-chemical-sales-payer-conservation.sql',
 ];
 let failed = false;
 for (const chain of chains) {

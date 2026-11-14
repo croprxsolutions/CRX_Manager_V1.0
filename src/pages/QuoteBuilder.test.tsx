@@ -509,6 +509,34 @@ async function pickCustomerThenReleaseField(held: ReturnType<typeof holdFieldRea
 }
 
 describe('QuoteBuilder', () => {
+  it.each(['admin', 'sales_rep'])('uses line-rounded totals in the %s save payload without exposing costs', async (role) => {
+    authState.role = role;
+    const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);
+    const product = { ...baseProduct, current_cost: role === 'admin' ? 0.01 : 0, tier1_price: 1 };
+    const items = ['item-a', 'item-b'].map((id) => ({ ...item, id, product, current_cost: product.current_cost,
+      price_per_unit: 1, total_units_needed: 0.5, total_price: 0.5, profit: role === 'admin' ? 0.49 : 0, net_margin: 98 }));
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? items
+        : table === 'products' ? [product] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'save_quote' ? { quote_id: quote.id, row_version: 8 } : null, error: null }));
+    renderQuoteBuilder(quote.id);
+    await screen.findByText('Total Price');
+    if (role === 'admin') {
+      expect(screen.getByText('Total Cost').parentElement).toHaveTextContent('$0.02');
+      expect(screen.getByText('Total Profit').parentElement).toHaveTextContent('$0.98');
+      expect(screen.getByText('Overall Margin').parentElement).toHaveTextContent('98.0%');
+    } else {
+      expect(screen.queryByText('Total Cost')).not.toBeInTheDocument();
+      expect(screen.queryByText('Total Profit')).not.toBeInTheDocument();
+    }
+    expect(screen.getByText('Total Price').parentElement).toHaveTextContent('$1.00');
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({
+      p_quote_payload: expect.objectContaining({ total_price: 1, total_cost: role === 'admin' ? 0.02 : 0,
+        total_profit: role === 'admin' ? 0.98 : 1, total_margin_pct: role === 'admin' ? 98 : 100 }),
+    })));
+  });
+
   it('prefers customer-facing quoting guidance and falls back to the grower description', () => {
     expect(preferredQuoteNotes({ quoting_notes: 'Customer quote guidance', notes: 'Grower copy' }))
       .toBe('Customer quote guidance');

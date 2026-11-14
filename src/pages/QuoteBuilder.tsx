@@ -65,7 +65,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
+import { catalogPricePerAcre, computeQuoteTotals, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -2124,25 +2124,7 @@ export default function QuoteBuilder() {
     });
   };
 
-  const totals = useMemo(() => {
-    let totalPrice = 0;
-    let totalCost = 0;
-    let totalProfit = 0;
-    sections.forEach((sec) => {
-      sec.items.forEach((item) => {
-        totalPrice += item.total_price;
-        totalCost += item.current_cost * (item.total_units_needed || 0);
-        totalProfit += item.profit;
-      });
-    });
-    const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
-    return {
-      totalPrice: Math.round(totalPrice * 100) / 100,
-      totalCost: Math.round(totalCost * 100) / 100,
-      totalProfit: Math.round(totalProfit * 100) / 100,
-      totalMarginPct: Math.round(totalMarginPct * 100) / 100,
-    };
-  }, [sections]);
+  const totals = useMemo(() => computeQuoteTotals(sections.flatMap((section) => section.items)), [sections]);
 
   // KI-82: after a save, show an admin the cost the database recorded for each saved line. A new
   // line, or one switched to another product, is stamped at today's cost, which may have moved since

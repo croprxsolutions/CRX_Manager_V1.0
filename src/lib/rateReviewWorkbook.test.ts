@@ -74,6 +74,40 @@ describe('rate review workbook', () => {
     await expect(invalid).rejects.toThrow('Rate Outcomes row 2: reconfirm must be');
   });
 
+  it('reports bad rate choices together with an unknown parent or damaged download record', async () => {
+    const unknownParent = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Unknown parent');
+      set(wb, 'Draft Rates', 4, 'decision', 'approved');
+      set(wb, 'Draft Rates', 4, 'is_quoting_default', 'maybe');
+    });
+    for (const problem of ['decision must be', 'is_quoting_default must be', 'type a parent name exactly']) {
+      await expect(unknownParent).rejects.toThrow(problem);
+    }
+    const damaged = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'rate_id', R2);
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'maybe');
+    });
+    await expect(damaged).rejects.toThrow('is_quoting_default must be');
+    await expect(damaged).rejects.toThrow('Draft Rates row 2 is damaged');
+  });
+
+  it('does not invent dependent errors when an unreadable row hides the required edit or parent', async () => {
+    const decided: RateReviewWorkbook = { ...exported, parents: [{ ...exported.parents[0], outcome: 'approved_default' }] };
+    const badRate = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'decision', 'approved');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes');
+    }, decided);
+    await expect(badRate).rejects.toThrow('decision must be');
+    await expect(badRate).rejects.not.toThrow('Reconfirm needs an edited');
+    const badOutcome = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'note', { formula: '1+1', result: 2 });
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Atrazine 4L');
+      set(wb, 'Draft Rates', 4, 'recommended', '12');
+    });
+    await expect(badOutcome).rejects.toThrow('note has a formula');
+    await expect(badOutcome).rejects.not.toThrow('type a parent name exactly');
+  });
+
   it('reports every bad row and malformed cell across both sheets before returning an upload', async () => {
     const invalid = roundTrip((wb) => {
       set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');

@@ -43,11 +43,28 @@ async function uploadFile() {
 describe('RateReviewWorkbookModal', () => {
   beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); });
 
+  it('pages long error lists without dropping any problems', async () => {
+    H.parse.mockRejectedValueOnce(new PricingWorkbookFormatError(Array.from({ length: 120 }, (_, i) => `Workbook problem ${i + 1}.`).join('\n')));
+    await uploadFile();
+    const alert = await screen.findByRole('region', { name: 'Workbook file problems' });
+    expect(alert).toHaveTextContent('Problems 1–50 of 120');
+    expect(alert).not.toHaveTextContent('Workbook problem 51.');
+    fireEvent.click(screen.getByRole('button', { name: 'Next problems' }));
+    expect(alert).toHaveTextContent('Problems 51–100 of 120');
+    fireEvent.click(screen.getByRole('button', { name: 'Next problems' }));
+    expect(alert).toHaveTextContent('Workbook problem 120.');
+    expect(screen.getByRole('button', { name: 'Next problems' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous problems' }));
+    expect(alert).toHaveTextContent('Problems 51–100 of 120');
+    expect(H.preview).not.toHaveBeenCalled();
+    expect(H.commit).not.toHaveBeenCalled();
+  });
+
   it('keeps every file problem visible without previewing or saving, then clears on a corrected upload', async () => {
     H.parse.mockRejectedValueOnce(new PricingWorkbookFormatError('Draft Rates row 2: bad decision.\nDraft Rates row 2: bad default.'));
     H.preview.mockResolvedValue({ rates: [], outcomes: [] });
     await uploadFile();
-    const alert = await screen.findByRole('alert');
+    const alert = await screen.findByRole('region', { name: 'Workbook file problems' });
     expect(alert).toHaveTextContent('Draft Rates row 2: bad decision.');
     expect(alert).toHaveTextContent('Draft Rates row 2: bad default.');
     expect(H.preview).not.toHaveBeenCalled();

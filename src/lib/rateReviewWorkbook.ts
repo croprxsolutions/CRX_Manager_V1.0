@@ -309,7 +309,10 @@ function readOutcomeSheet(sheet: Worksheet | undefined, problems: string[]) {
   const seenParents = new Set<string>();
   const recorded: Record<string, string> = {};
   let outcomeRows = 0;
-  for (const row of readRows(sheet, OUTCOMES_SHEET, OUTCOME_HEADERS, problems)) {
+  const beforeRead = problems.length;
+  const rows = readRows(sheet, OUTCOMES_SHEET, OUTCOME_HEADERS, problems);
+  const parentNamesIncomplete = problems.length > beforeRead;
+  for (const row of rows) {
     if (row.parent_id === '' && row.row_state === '') continue;
     const key = row.parent_name.toLowerCase();
     parentByName.set(key, parentByName.has(key) && parentByName.get(key) !== row.parent_id ? AMBIGUOUS : row.parent_id);
@@ -323,38 +326,52 @@ function readOutcomeSheet(sheet: Worksheet | undefined, problems: string[]) {
       if (parsed.downloaded) recorded[row.parent_id] = parsed.downloaded;
     });
   }
-  return { parentByName, outcomes, reconfirmed, recorded, outcomeRows };
+  return { parentByName, outcomes, reconfirmed, recorded, outcomeRows, parentNamesIncomplete };
 }
 
-function rateChoices(row: SheetRow<(typeof RATE_HEADERS)[number]>, where: string) {
-  const problems: string[] = [];
+function rateChoices(row: SheetRow<(typeof RATE_HEADERS)[number]>, where: string, problems: string[]) {
   const decision = collectRowProblem(problems, () => parseDecision(row.decision, where));
   const isDefault = collectRowProblem(problems, () => parseYesNo(row.is_quoting_default, where));
-  if (decision === undefined || isDefault === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
   return { decision, isDefault };
 }
 
+function addedRateParent(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName: Map<string, string>, incomplete: boolean): string | null {
+  const where = `Draft Rates row ${row.sheetRow}`;
+  const parentId = parentByName.get(row.parent_name.toLowerCase());
+  if (parentId === AMBIGUOUS) throw new PricingWorkbookFormatError(`${where}: more than one parent is named "${row.parent_name}". Add this rate in the setup workbook, or rename one parent first.`);
+  if (!parentId && incomplete) return null; // Its parent may be on an unreadable row; that error already refuses the file.
+  if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
+  return parentId;
+}
+
+function rateDownloadState(row: SheetRow<(typeof RATE_HEADERS)[number]>, where: string) {
+  const damaged = new PricingWorkbookFormatError(`${where} is damaged (its hidden download record or rate id). Download a fresh workbook.`);
+  const saved = parseState<(Partial<RateValues> & { rate_id?: unknown; parent_id?: unknown; row_version?: unknown }) | null>(row.row_state, damaged);
+  if (!saved || saved.rate_id !== row.rate_id || typeof saved.parent_id !== 'string' || typeof saved.row_version !== 'number') throw damaged;
+  return { ...saved, parent_id: saved.parent_id, row_version: saved.row_version };
+}
+
 /** An edited or new Draft Rates row, or null when it matches the download (or is an empty blank row). */
-function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName: Map<string, string>): RateUpload | null {
+function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName: Map<string, string>, parentNamesIncomplete: boolean): RateUpload | null {
   const where = `Draft Rates row ${row.sheetRow}`;
   const values = {
     basis: blankToNull(row.basis), source: blankToNull(row.source), low: blankToNull(row.low),
     recommended: blankToNull(row.recommended), high: blankToNull(row.high), unit: blankToNull(row.unit),
     over_label_reason: blankToNull(row.over_label_reason),
   };
-  const { decision, isDefault } = rateChoices(row, where);
+  const problems: string[] = [];
+  const { decision, isDefault } = rateChoices(row, where, problems);
   const reason = blankToNull(row.reason);
   if (row.rate_id === '' && row.row_state === '') {
     if (!RATE_EDITABLE.some((field) => row[field] !== '')) return null;
-    const parentId = parentByName.get(row.parent_name.toLowerCase());
-    if (parentId === AMBIGUOUS) throw new PricingWorkbookFormatError(`${where}: more than one parent is named "${row.parent_name}". Add this rate in the setup workbook, or rename one parent first.`);
-    if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
+    const parentId = collectRowProblem(problems, () => addedRateParent(row, parentByName, parentNamesIncomplete));
+    if (decision === undefined || isDefault === undefined || parentId === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
+    if (parentId === null) return null;
     return { sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: null, parent_id: parentId, expected_row_version: null,
       ...values, is_quoting_default: isDefault, decision, reason };
   }
-  const damaged = new PricingWorkbookFormatError(`${where} is damaged (its hidden download record or rate id). Download a fresh workbook.`);
-  const saved = parseState<(Partial<RateValues> & { rate_id?: unknown; parent_id?: unknown; row_version?: unknown }) | null>(row.row_state, damaged);
-  if (!saved || saved.rate_id !== row.rate_id || typeof saved.parent_id !== 'string' || typeof saved.row_version !== 'number') throw damaged;
+  const saved = collectRowProblem(problems, () => rateDownloadState(row, where));
+  if (decision === undefined || isDefault === undefined || saved === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
   const edited = decision != null || reason != null || isDefault !== saved.is_quoting_default
     || (['basis', 'source', 'unit', 'over_label_reason'] as const).some((f) => values[f] !== (saved[f] ?? null))
     || (['low', 'recommended', 'high'] as const).some((f) => decimalKey(values[f]) !== decimalKey(saved[f] ?? null));
@@ -388,11 +405,12 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
   }
 
   const problems: string[] = [];
-  const { parentByName, outcomes, reconfirmed, recorded, outcomeRows } = readOutcomeSheet(workbook.getWorksheet(OUTCOMES_SHEET), problems);
+  const { parentByName, outcomes, reconfirmed, recorded, outcomeRows, parentNamesIncomplete } = readOutcomeSheet(workbook.getWorksheet(OUTCOMES_SHEET), problems);
 
   const rates: RateUpload[] = [];
   let rateRows = 0;
   const seenRates = new Set<string>();
+  const beforeRates = problems.length;
   for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS, problems)) {
     collectRowProblem(problems, () => {
       if (row.rate_id !== '' || row.row_state !== '') {
@@ -400,13 +418,14 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
         if (seenRates.has(row.rate_id)) throw new PricingWorkbookFormatError(`Draft Rates row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
         seenRates.add(row.rate_id);
       }
-      const edited = parseRateRow(row, parentByName);
+      const edited = parseRateRow(row, parentByName, parentNamesIncomplete);
       if (edited) rates.push(edited);
     });
   }
   const editedRateParents = new Set(rates.map((rate) => rate.parent_id));
+  const ratesReadable = problems.length === beforeRates;
   for (const [parentId, sheetRow] of reconfirmed) {
-    if (!editedRateParents.has(parentId)) {
+    if (ratesReadable && !editedRateParents.has(parentId)) {
       problems.push(`Rate Outcomes row ${sheetRow}: Reconfirm needs an edited Draft Rates row for this parent in the same upload.`);
     }
   }

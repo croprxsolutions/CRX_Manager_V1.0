@@ -209,11 +209,6 @@ function Totals({ totals }: { totals: RateReviewWorkbook['totals'] }) {
   );
 }
 
-/**
- * RT-3: Mason's rate review. Download the draft rates, approve / correct / add / delete / reopen them and set one
- * outcome per parent in the spreadsheet, upload it for a preview (nothing is kept), then confirm the whole review
- * in one all-or-nothing save. Separate from the setup workbook; nothing reads these rates until RT-4.
- */
 function RateWorkbookFileControls({ fileRef, busy, blocked, onDownload, onFile }: {
   fileRef: RefObject<HTMLInputElement | null>; busy: boolean; blocked: boolean; onDownload: () => void; onFile: (file: File) => void;
 }) {
@@ -237,6 +232,22 @@ function RateWorkbookFileControls({ fileRef, busy, blocked, onDownload, onFile }
   </>;
 }
 
+function WorkbookFileProblems({ error }: { error: string }) {
+  const [page, setPage] = useState(0);
+  const problems = error.split('\n');
+  const start = page * 50;
+  return <section aria-label="Workbook file problems" className="space-y-2 text-red-700">
+    <p role="alert">Nothing was saved. Fix these problems in the file and upload it again.</p>
+    <p aria-live="polite" className="max-h-72 overflow-auto whitespace-pre-line">{problems.slice(start, start + 50).join('\n')}</p>
+    {problems.length > 50 && <div className="flex flex-wrap items-center gap-2">
+      <span>Problems {start + 1}–{Math.min(start + 50, problems.length)} of {problems.length}</span>
+      <Button variant="secondary" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous problems</Button>
+      <Button variant="secondary" disabled={start + 50 >= problems.length} onClick={() => setPage(page + 1)}>Next problems</Button>
+    </div>}
+  </section>;
+}
+
+/** RT-3 rate review: upload for a preview, then explicitly confirm the whole review in one atomic save. */
 export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   open: boolean;
   profileId: string;
@@ -436,10 +447,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
           onDownload={() => void download()} onFile={(file) => void readFile(file)} />
         {totals && <Totals totals={totals} />}
 
-        {fileError && <div role="alert" className="space-y-2 text-red-700">
-          <p>Nothing was saved. Fix these problems in the file and upload it again.</p>
-          <p className="max-h-72 overflow-auto whitespace-pre-line">{fileError}</p>
-        </div>}
+        {fileError && <WorkbookFileProblems key={fileError} error={fileError} />}
 
         {nothingEdited && <p className="text-secondary">No edits in this file. Change a rate, decision or outcome, then upload it again.</p>}
 

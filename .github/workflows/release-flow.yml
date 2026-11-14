@@ -6,7 +6,7 @@ name: Release flow
 on:
   pull_request:
     branches: [main, staging]
-    types: [opened, synchronize, reopened, edited] # edited = base changed (retargeted to main)
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled] # edited = base changed (retargeted to main); labels: hotfix-backport
   push:
     branches: [main, staging]
   schedule:
@@ -36,6 +36,8 @@ jobs:
     permissions:
       actions: write # hotfix PRs: ask the release bot for their release-gate
       contents: read
+      issues: read # hotfix PRs: who added hotfix-backport (issue events)
+      pull-requests: read
     env:
       RELEASE_FLOW: ${{ vars.RELEASE_FLOW }}
       BASE_REF: ${{ github.base_ref }}

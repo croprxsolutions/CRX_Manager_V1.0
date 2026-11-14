@@ -25,6 +25,16 @@ async function openQuotes(page: Page) {
   await page.locator('.animate-pulse').first().waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
 }
 
+async function createCustomer(page: Page, name: string) {
+  await page.goto('/customers/new');
+  await page.getByLabel('Farm Name').fill(name);
+  // An admin's new customer needs a commission recipient before it saves.
+  await page.getByRole('button', { name: /Recipient for split 1/ }).click();
+  await page.getByRole('listbox', { name: 'Recipient for split 1' }).getByRole('option').first().click();
+  await page.getByRole('button', { name: 'Create Customer' }).click();
+  await page.waitForURL(/\/customers\/[0-9a-f-]{36}/, { timeout: 15000 });
+}
+
 test.describe('Quotes list width guard', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -46,10 +56,7 @@ test.describe('Quotes list width guard', () => {
 
     // Seed through the app: a customer, then a draft quote with one product.
     await page.setViewportSize({ width: 1280, height: HEIGHT });
-    await page.goto('/customers/new');
-    await page.getByLabel('Farm Name').fill(name);
-    await page.getByRole('button', { name: 'Create Customer' }).click();
-    await page.waitForURL(/\/customers\/[0-9a-f-]{36}/, { timeout: 15000 });
+    await createCustomer(page, name);
 
     await page.goto('/quotes/new');
     await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));
@@ -88,10 +95,7 @@ test.describe('Quote builder width and keyboard guard', () => {
 
     // Seed through the app: a customer, then a quote with two sections of one product each.
     await page.setViewportSize({ width: 1280, height: HEIGHT });
-    await page.goto('/customers/new');
-    await page.getByLabel('Farm Name').fill(name);
-    await page.getByRole('button', { name: 'Create Customer' }).click();
-    await page.waitForURL(/\/customers\/[0-9a-f-]{36}/, { timeout: 15000 });
+    await createCustomer(page, name);
 
     await page.goto('/quotes/new');
     await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));

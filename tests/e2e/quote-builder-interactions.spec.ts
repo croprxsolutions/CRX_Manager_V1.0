@@ -565,9 +565,7 @@ test.describe('Quote Builder Interactions', () => {
       if (menuVisible) {
         await moreMenu.click();
         await waitForPage(page, 1000);
-        const pdfOption = page.locator(
-          'text=/pdf/i, text=/download/i, text=/print/i'
-        ).first();
+        const pdfOption = page.getByRole('menuitem', { name: /pdf|download|print/i }).first();
         const optionVisible = await pdfOption.isVisible().catch(() => false);
         expect(optionVisible).toBeTruthy();
       } else {

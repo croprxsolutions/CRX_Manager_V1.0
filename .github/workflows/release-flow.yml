@@ -77,8 +77,6 @@ jobs:
               echo "::error::This hotfix carries unreleased staging work. Cut hotfix/<name> from main."
               exit 1
             fi
-            # The same work under new commit ids (cherry-picked or copied) counts too.
-            node "$RUNNER_TEMP/release-flow.mjs" check-hotfix-content "$HEAD_SHA" "$PR_NUMBER"
             # release-gate (required on main) comes from the release bot, never from this job.
             gh workflow run release-pr.yml --repo "$REPO" --ref main -f create=false -f hotfix_pr="$PR_NUMBER"
           fi

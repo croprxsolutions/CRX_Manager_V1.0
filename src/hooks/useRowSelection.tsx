@@ -111,10 +111,15 @@ export function createCheckboxColumn<T>(
   toggleSelect: (id: string) => void,
   getId: (row: T) => string,
   isSelectable?: (row: T) => boolean,
-  /** Accessible name for each row's checkbox, e.g. "Select Q-0001". */
-  getLabel?: (row: T) => string,
-  /** Extra classes for each row's checkbox (opt-in, e.g. the brand accent colour). */
-  checkboxClassName = '',
+  {
+    getLabel,
+    checkboxClassName = '',
+  }: {
+    /** Accessible name for each row's checkbox, e.g. "Select Q-0001". */
+    getLabel?: (row: T) => string;
+    /** Extra classes for each row's checkbox (opt-in, e.g. the brand accent colour). */
+    checkboxClassName?: string;
+  } = {},
 ): Column<T> {
   return {
     key: '_select',

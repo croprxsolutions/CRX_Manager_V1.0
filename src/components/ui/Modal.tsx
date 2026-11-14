@@ -28,6 +28,19 @@ export const ALERT_BUTTON = 'min-h-12 w-full md:min-h-10 md:w-auto max-md:rounde
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]):not([type="hidden"]), select:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])';
 
+// The non-alert panel's size: full screen on phones, then a width (and, for wide, a height) from md up.
+function panelSizeClassFor(size: ModalProps['size'], maxWidth: ModalProps['maxWidth']) {
+  return size === 'fullscreen'
+    ? 'h-[100dvh] max-h-[100dvh] max-w-full rounded-none'
+    : `h-[100dvh] max-h-[100dvh] max-w-full rounded-none ${maxWidth === 'max-w-2xl'
+      ? 'md:max-w-2xl'
+      : size === 'large'
+        ? 'md:max-w-4xl'
+        : size === 'wide'
+          ? 'md:max-w-6xl'
+          : 'md:max-w-lg'} md:mx-4 ${size === 'wide' ? 'md:h-[90vh]' : 'md:h-auto'} md:max-h-[90vh] md:rounded-2xl`;
+}
+
 export default function Modal({
   open,
   onClose,
@@ -42,15 +55,7 @@ export default function Modal({
   icon: Icon,
   iconClassName = '',
 }: ModalProps) {
-  const panelSizeClass = size === 'fullscreen'
-    ? 'h-[100dvh] max-h-[100dvh] max-w-full rounded-none'
-    : `h-[100dvh] max-h-[100dvh] max-w-full rounded-none ${maxWidth === 'max-w-2xl'
-      ? 'md:max-w-2xl'
-      : size === 'large'
-        ? 'md:max-w-4xl'
-        : size === 'wide'
-          ? 'md:max-w-6xl'
-          : 'md:max-w-lg'} md:mx-4 ${size === 'wide' ? 'md:h-[90vh]' : 'md:h-auto'} md:max-h-[90vh] md:rounded-2xl`;
+  const panelSizeClass = panelSizeClassFor(size, maxWidth);
   const dialogRef = useRef<HTMLDivElement>(null);
   // useId gives every open modal a unique, render-stable id (a random id read from a ref is
   // impure during render and can collide).

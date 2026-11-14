@@ -4799,7 +4799,8 @@ export default function QuoteBuilder() {
         const openSectionNote = () => setOpenSectionNotes((prev) => (prev.has(sec._key) ? prev : new Set(prev).add(sec._key)));
 
         // Each line's controls are built once and laid out as a table row (1024 px and up) or a card.
-        const lineParts = (item: LocalItem, n: number) => {
+        // What one line needs before its cells are drawn.
+        const linePriceFacts = (item: LocalItem) => {
           const prod =
             item.product ||
             products.find((p) => p.id === item.product_id);
@@ -4821,6 +4822,9 @@ export default function QuoteBuilder() {
           const costHint = costAlert?.below_cost
             ? "Below today's cost: converting needs an admin's approval."
             : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
+          return { prod, todayPrice, todayPriceOffer, sentState, sentHint, costAlert, costHint };
+        };
+        const lineProductFacts = (item: LocalItem, { prod }: ReturnType<typeof linePriceFacts>) => {
           const openPicker = () => {
             setProductSearchOpen({
               sectionKey: sec._key,
@@ -4846,8 +4850,16 @@ export default function QuoteBuilder() {
             ...unitChoices.map((uc) => ({ value: uc.unit, label: label(uc.unit) })),
             ...(current && !unitChoices.some((uc) => uc.unit === current) ? [{ value: current, label: label(current) }] : []),
           ];
+          return { openPicker, charged, charge, lastChargeText, defaultNote, noteEditing, allowNoUnit, unitChoices, unitOptions };
+        };
+        const lineFacts = (item: LocalItem) => {
+          const priceFacts = linePriceFacts(item);
+          return { ...priceFacts, ...lineProductFacts(item, priceFacts) };
+        };
+        type LineFacts = ReturnType<typeof lineFacts>;
 
-          const product = (
+        const lineProduct = (item: LocalItem, { prod, openPicker, lastChargeText, defaultNote, noteEditing }: LineFacts) => {
+          return (
             <div className="min-w-0">
               {prod ? (
                 <button
@@ -4910,99 +4922,44 @@ export default function QuoteBuilder() {
               )}
             </div>
           );
+        };
 
-          const rate = (
-            <>
-              <div className={`${UNIT_BOX} border-gray-300 bg-white`}>
-                <input
-                  type="number"
-                  value={item.actual_rate ?? ''}
-                  onChange={(e) =>
-                    updateItem(sec._key, item._key, {
-                      actual_rate: e.target.value
-                        ? parseFloat(e.target.value)
-                        : null,
-                      calc_mode: 'rate_acres',
-                    })
-                  }
-                  aria-label="Actual rate"
-                  className={UNIT_BOX_INPUT}
-                  step="any"
-                  min={0}
-                />
-                <Dropdown
-                  aria-label="Rate unit"
-                  noHelperRow
-                  value={item.rate_unit || (allowNoUnit ? NO_UNIT : null)}
-                  onChange={(v) =>
-                    updateItem(sec._key, item._key, {
-                      rate_unit: v === NO_UNIT ? null : v || null,
-                    })
-                  }
-                  options={unitOptions(item.rate_unit, (unit) => unit)}
-                  placeholder="--"
-                  disabled={editLocked}
-                  className={UNIT_SELECT}
-                />
-              </div>
-              {item.oz_per_acre != null && (
-                <p className="mt-1 text-xs text-secondary tabular-nums">{item.oz_per_acre.toFixed(2)} oz/acre</p>
+        // The sent, cost and "Use today" hints under a line price.
+        const linePriceHints = (item: LocalItem, { todayPriceOffer, sentHint, costAlert, costHint }: LineFacts) => (
+          !customerView && (sentHint || todayPriceOffer != null || costHint) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs">
+              {sentHint && <span className="text-amber-700">{sentHint}</span>}
+              {costHint && (
+                <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
               )}
-            </>
-          );
-
-          const acres = (
-            <input
-              type="number"
-              value={item.acres ?? ''}
-              onChange={(e) =>
-                updateItem(sec._key, item._key, {
-                  acres: e.target.value
-                    ? parseFloat(e.target.value)
-                    : null,
-                  acres_source: 'typed',
-                  calc_mode: item.calc_mode === 'units_direct'
-                    ? 'units_direct' // keep units_direct if typing acres alongside units
-                    : 'rate_acres',
-                })
-              }
-              aria-label="Acres"
-              className={`${LINE_INPUT} border-gray-300`}
-              step="any"
-              min={0}
-            />
-          );
-
-          const quantity = (
-            <>
-              <div className={`${UNIT_BOX} ${
-                item.calc_mode === 'units_direct'
-                  ? 'border-crx-green bg-crx-green-tint'
-                  : 'border-gray-300 bg-white'
-              }`}>
-                <input
-                  type="number"
-                  value={item.total_units_needed ?? ''}
-                  onChange={(e) =>
-                    updateItem(sec._key, item._key, {
-                      total_units_needed: e.target.value
-                        ? parseFloat(e.target.value)
-                        : null,
-                      calc_mode: 'units_direct',
-                    })
-                  }
-                  aria-label="Quantity"
-                  className={UNIT_BOX_INPUT}
-                  step="any"
-                  min={0}
-                />
-                {prod?.inventory_unit && <span className={UNIT_STRIP}>{prod.inventory_unit}</span>}
-              </div>
-              {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
-            </>
-          );
-
-          const price = (
+              {todayPriceOffer != null && (
+                <>
+                  {(sentHint || costHint) && <span aria-hidden="true" className="text-secondary">·</span>}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // A new choice: send it again even if an earlier one was saved.
+                      const saved = savedLineIdsRef.current.get(item._key);
+                      if (saved) saved.todayApplied = false;
+                      useTierUndoRef.current.delete(item._key);
+                      updateItem(sec._key, item._key, {
+                        price_override: null,
+                        use_todays_price: true,
+                      });
+                    }}
+                    disabled={editLocked}
+                    className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
+                  >
+                    Use today {fmt(todayPriceOffer)}
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        );
+        const linePrice = (item: LocalItem, f: LineFacts) => {
+          const { prod, allowNoUnit, unitOptions } = f;
+          return (
             <>
               <div className={`${UNIT_BOX} ${
                 item.price_override != null
@@ -5092,39 +5049,105 @@ export default function QuoteBuilder() {
                   </label>
                 );
               })()}
-              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
-                <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs">
-                  {sentHint && <span className="text-amber-700">{sentHint}</span>}
-                  {costHint && (
-                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
-                  )}
-                  {todayPriceOffer != null && (
-                    <>
-                      {(sentHint || costHint) && <span aria-hidden="true" className="text-secondary">·</span>}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // A new choice: send it again even if an earlier one was saved.
-                          const saved = savedLineIdsRef.current.get(item._key);
-                          if (saved) saved.todayApplied = false;
-                          useTierUndoRef.current.delete(item._key);
-                          updateItem(sec._key, item._key, {
-                            price_override: null,
-                            use_todays_price: true,
-                          });
-                        }}
-                        disabled={editLocked}
-                        className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
-                      >
-                        Use today {fmt(todayPriceOffer)}
-                      </button>
-                    </>
-                  )}
-                </div>
+              {linePriceHints(item, f)}
+            </>
+          );
+        };
+
+        const linePerAcre = (item: LocalItem) => `${item.price_per_acre != null ? fmt(item.price_per_acre) : '–'} / acre`;
+        const lineParts = (item: LocalItem, n: number) => {
+          const f = lineFacts(item);
+          const { prod, openPicker, allowNoUnit, unitOptions } = f;
+          const product = lineProduct(item, f);
+          const rate = (
+            <>
+              <div className={`${UNIT_BOX} border-gray-300 bg-white`}>
+                <input
+                  type="number"
+                  value={item.actual_rate ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      actual_rate: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'rate_acres',
+                    })
+                  }
+                  aria-label="Actual rate"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
+                <Dropdown
+                  aria-label="Rate unit"
+                  noHelperRow
+                  value={item.rate_unit || (allowNoUnit ? NO_UNIT : null)}
+                  onChange={(v) =>
+                    updateItem(sec._key, item._key, {
+                      rate_unit: v === NO_UNIT ? null : v || null,
+                    })
+                  }
+                  options={unitOptions(item.rate_unit, (unit) => unit)}
+                  placeholder="--"
+                  disabled={editLocked}
+                  className={UNIT_SELECT}
+                />
+              </div>
+              {item.oz_per_acre != null && (
+                <p className="mt-1 text-xs text-secondary tabular-nums">{item.oz_per_acre.toFixed(2)} oz/acre</p>
               )}
             </>
           );
-
+          const acres = (
+            <input
+              type="number"
+              value={item.acres ?? ''}
+              onChange={(e) =>
+                updateItem(sec._key, item._key, {
+                  acres: e.target.value
+                    ? parseFloat(e.target.value)
+                    : null,
+                  acres_source: 'typed',
+                  calc_mode: item.calc_mode === 'units_direct'
+                    ? 'units_direct' // keep units_direct if typing acres alongside units
+                    : 'rate_acres',
+                })
+              }
+              aria-label="Acres"
+              className={`${LINE_INPUT} border-gray-300`}
+              step="any"
+              min={0}
+            />
+          );
+          const quantity = (
+            <>
+              <div className={`${UNIT_BOX} ${
+                item.calc_mode === 'units_direct'
+                  ? 'border-crx-green bg-crx-green-tint'
+                  : 'border-gray-300 bg-white'
+              }`}>
+                <input
+                  type="number"
+                  value={item.total_units_needed ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      total_units_needed: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'units_direct',
+                    })
+                  }
+                  aria-label="Quantity"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
+                {prod?.inventory_unit && <span className={UNIT_STRIP}>{prod.inventory_unit}</span>}
+              </div>
+              {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
+            </>
+          );
+          const price = linePrice(item, f);
           // Admin only, never in Customer view (hideCost): cost when quoted beside today's, then profit and margin.
           const cost = !hideCost && (
             <div>
@@ -5142,7 +5165,6 @@ export default function QuoteBuilder() {
               </div>
             </div>
           );
-
           const menu = (
             <ActionMenu
               label={`Actions for line ${n} in ${sec.section_name || 'Untitled section'}`}
@@ -5160,9 +5182,7 @@ export default function QuoteBuilder() {
               ]}
             />
           );
-
-          const perAcre = `${item.price_per_acre != null ? fmt(item.price_per_acre) : '–'} / acre`;
-
+          const perAcre = linePerAcre(item);
           return { prod, product, rate, acres, quantity, price, perAcre, cost, menu };
         };
 

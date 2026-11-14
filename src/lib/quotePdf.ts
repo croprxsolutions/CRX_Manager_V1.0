@@ -89,6 +89,16 @@ const PDF_COLUMN_DEFS: Record<string, { label: string; getValue: (item: PdfQuote
 // Default columns when none specified (matches legacy behavior)
 const DEFAULT_PDF_COLUMNS = ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
 
+// The label/value pairs in the header's details table.
+function quoteDetails(data: PdfQuoteData): [string, string][] {
+  return [
+    ['Quote #', data.quote_number],
+    ['Quote date', new Date(data.created_at).toLocaleDateString()],
+    ['Valid until', new Date(data.expires_at).toLocaleDateString()],
+    ['Prepared by', data.sales_rep_name],
+  ];
+}
+
 export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
@@ -118,12 +128,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFontSize(13.5);
   doc.text('Quote', pageW / 2, quoteWordY, { align: 'center' });
 
-  const details: [string, string][] = [
-    ['Quote #', data.quote_number],
-    ['Quote date', new Date(data.created_at).toLocaleDateString()],
-    ['Valid until', new Date(data.expires_at).toLocaleDateString()],
-    ['Prepared by', data.sales_rep_name],
-  ];
+  const details = quoteDetails(data);
   doc.setFontSize(8.25);
   const labelW = Math.max(...details.map(([label]) => doc.getTextWidth(label))) + 9;
   doc.setFont('helvetica', 'normal');

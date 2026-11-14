@@ -446,7 +446,7 @@ export default function Quotes() {
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
   const checkboxCol: Column<QuoteRow> = {
-    ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), (q) => `Select ${q.quote_number}`, 'accent-crx-green'),
+    ...createCheckboxColumn<QuoteRow>(selected, toggleSelect, (q) => q.id, (q) => DELETABLE.includes(q.status), { getLabel: (q) => `Select ${q.quote_number}`, checkboxClassName: 'accent-crx-green' }),
     header: (
       <input
         type="checkbox"

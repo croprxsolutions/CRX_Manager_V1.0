@@ -95,6 +95,11 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
   );
 }
 
+// The phone layout may use a shorter placeholder; kept out of DataTable for its complexity budget.
+const searchPlaceholderFor = (phone: boolean, short: string | undefined, full: string) => (phone && short) || full;
+// false: the page draws its own phone sort control, so the table offers no sort columns.
+const phoneSortColumnsFor = <C,>(phoneSort: boolean, columns: C[]): C[] => (phoneSort ? columns : []);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function DataTable<T extends Record<string, any>>({
   data,
@@ -120,7 +125,7 @@ export default function DataTable<T extends Record<string, any>>({
   phoneSort = true,
 }: DataTableProps<T>) {
   const { phoneRow, sortableColumns: phoneSortColumns } = usePhoneLayout(mobileRow, columns);
-  const sortableColumns = phoneSort ? phoneSortColumns : [];
+  const sortableColumns = phoneSortColumnsFor(phoneSort, phoneSortColumns);
   // Internal fallback state — used only when the caller doesn't control it.
   const [searchInner, setSearchInner] = useState('');
   const [sortKeyInner, setSortKeyInner] = useState<string | null>(null);
@@ -165,7 +170,7 @@ export default function DataTable<T extends Record<string, any>>({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={(phoneRow && phoneSearchPlaceholder) || searchPlaceholder}
+                placeholder={searchPlaceholderFor(!!phoneRow, phoneSearchPlaceholder, searchPlaceholder)}
                 aria-label={searchPlaceholder}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg
                   focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green

@@ -16,6 +16,7 @@ vi.mock('../../lib/rateReviewWorkbook', async (importActual) => ({
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: H.toast }) }));
 
 import RateReviewWorkbookModal from './RateReviewWorkbookModal';
+import { PricingWorkbookFormatError } from '../../lib/productPricingWorkbook';
 import type { ParsedRateReview } from '../../lib/rateReviewWorkbook';
 
 const P1 = '11111111-1111-4111-8111-111111111111';
@@ -41,6 +42,23 @@ async function uploadFile() {
 
 describe('RateReviewWorkbookModal', () => {
   beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); });
+
+  it('keeps every file problem visible without previewing or saving, then clears on a corrected upload', async () => {
+    H.parse.mockRejectedValueOnce(new PricingWorkbookFormatError('Draft Rates row 2: bad decision.\nDraft Rates row 2: bad default.'));
+    H.preview.mockResolvedValue({ rates: [], outcomes: [] });
+    await uploadFile();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Draft Rates row 2: bad decision.');
+    expect(alert).toHaveTextContent('Draft Rates row 2: bad default.');
+    expect(H.preview).not.toHaveBeenCalled();
+    expect(H.commit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /Confirm rate review/ })).not.toBeInTheDocument();
+    const repaired = new File(['repaired'], 'review.xlsx');
+    Object.defineProperty(repaired, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+    fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [repaired] } });
+    await waitFor(() => expect(H.preview).toHaveBeenCalledWith(upload));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 
   it('shows each problem by sheet row and blocks Confirm', async () => {
     H.preview.mockResolvedValue({

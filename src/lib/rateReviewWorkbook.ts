@@ -202,7 +202,17 @@ export async function generateRateReviewWorkbook(exported: RateReviewWorkbook): 
 }
 
 type SheetRow<H extends string> = Record<H, string> & { sheetRow: number };
-function readRows<H extends string>(sheet: Worksheet | undefined, name: string, headers: readonly H[]): Array<SheetRow<H>> {
+function collectRowProblem<T>(problems: string[], read: () => T): T | undefined {
+  try {
+    return read();
+  } catch (error) {
+    if (!(error instanceof PricingWorkbookFormatError)) throw error;
+    problems.push(error.message);
+    return undefined;
+  }
+}
+
+function readRows<H extends string>(sheet: Worksheet | undefined, name: string, headers: readonly H[], problems: string[]): Array<SheetRow<H>> {
   if (!sheet) throw new PricingWorkbookFormatError(`Missing the ${name} sheet. Download a fresh rate review workbook.`);
   const found = headers.map((_, index) => cellValueToText(sheet.getRow(1).getCell(index + 1).value, `${name} header ${index + 1}`));
   if (sheet.getRow(1).cellCount !== headers.length || headers.some((header, index) => found[index] !== header)) {
@@ -212,12 +222,15 @@ function readRows<H extends string>(sheet: Worksheet | undefined, name: string, 
   if (sheet.rowCount > MAX_SHEET_ROWS) throw new PricingWorkbookFormatError(`The ${name} sheet has more than ${MAX_SHEET_ROWS} rows. Download a fresh rate review workbook.`);
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = { sheetRow: rowNumber } as SheetRow<H>;
+    const problemCount = problems.length;
     headers.forEach((header, index) => {
-      const cell = sheet.getCell(rowNumber, index + 1);
-      if (isFormulaValue(cell.value)) throw new PricingWorkbookFormatError(`${name} row ${rowNumber}, ${header} has a formula. Type the value instead.`);
-      (row as Record<H, string>)[header] = cellValueToText(cell.value, `${name} row ${rowNumber}, ${header}`).trim();
+      collectRowProblem(problems, () => {
+        const cell = sheet.getCell(rowNumber, index + 1);
+        if (isFormulaValue(cell.value)) throw new PricingWorkbookFormatError(`${name} row ${rowNumber}, ${header} has a formula. Type the value instead.`);
+        (row as Record<H, string>)[header] = cellValueToText(cell.value, `${name} row ${rowNumber}, ${header}`).trim();
+      });
     });
-    rows.push(row);
+    if (problems.length === problemCount) rows.push(row);
   }
   return rows;
 }
@@ -272,13 +285,15 @@ function outcomeDownloadState(row: OutcomeSheetRow): OutcomeDownloadState {
 /** An edited Rate Outcomes row, or null when it matches the download. */
 function parseOutcomeRow(row: OutcomeSheetRow): { edited: OutcomeUpload | null; reconfirm: boolean; downloaded: string | null } {
   const saved = outcomeDownloadState(row);
+  const problems: string[] = [];
   const outcome = blankToNull(row.outcome.toLowerCase());
   if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
-    throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
+    problems.push(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
   }
   const note = blankToNull(row.note);
   const downloadedNote = saved.note?.trim() || null;
-  const reconfirm = parseYesNo(row.reconfirm, `Rate Outcomes row ${row.sheetRow}`, 'reconfirm');
+  const reconfirm = collectRowProblem(problems, () => parseYesNo(row.reconfirm, `Rate Outcomes row ${row.sheetRow}`, 'reconfirm'));
+  if (problems.length > 0 || reconfirm === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
   if (reconfirm && (saved.outcome === null || outcome !== saved.outcome || note !== downloadedNote)) {
     throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow}: Reconfirm needs an unchanged recorded outcome and note. To change either cell, leave Reconfirm blank.`);
   }
@@ -287,26 +302,36 @@ function parseOutcomeRow(row: OutcomeSheetRow): { edited: OutcomeUpload | null; 
     expected_outcome_version: saved.outcome_version, outcome: outcome as ProductRateOutcome | null, note }, reconfirm, downloaded: saved.outcome };
 }
 
-function readOutcomeSheet(sheet: Worksheet | undefined) {
+function readOutcomeSheet(sheet: Worksheet | undefined, problems: string[]) {
   const parentByName = new Map<string, string>();
   const outcomes: OutcomeUpload[] = [];
   const reconfirmed = new Map<string, number>();
   const seenParents = new Set<string>();
   const recorded: Record<string, string> = {};
   let outcomeRows = 0;
-  for (const row of readRows(sheet, OUTCOMES_SHEET, OUTCOME_HEADERS)) {
+  for (const row of readRows(sheet, OUTCOMES_SHEET, OUTCOME_HEADERS, problems)) {
     if (row.parent_id === '' && row.row_state === '') continue;
     const key = row.parent_name.toLowerCase();
     parentByName.set(key, parentByName.has(key) && parentByName.get(key) !== row.parent_id ? AMBIGUOUS : row.parent_id);
     outcomeRows += 1;
-    if (seenParents.has(row.parent_id)) throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
-    seenParents.add(row.parent_id);
-    const parsed = parseOutcomeRow(row);
-    if (parsed.edited) outcomes.push(parsed.edited);
-    if (parsed.reconfirm) reconfirmed.set(row.parent_id, row.sheetRow);
-    if (parsed.downloaded) recorded[row.parent_id] = parsed.downloaded;
+    collectRowProblem(problems, () => {
+      if (seenParents.has(row.parent_id)) throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
+      seenParents.add(row.parent_id);
+      const parsed = parseOutcomeRow(row);
+      if (parsed.edited) outcomes.push(parsed.edited);
+      if (parsed.reconfirm) reconfirmed.set(row.parent_id, row.sheetRow);
+      if (parsed.downloaded) recorded[row.parent_id] = parsed.downloaded;
+    });
   }
   return { parentByName, outcomes, reconfirmed, recorded, outcomeRows };
+}
+
+function rateChoices(row: SheetRow<(typeof RATE_HEADERS)[number]>, where: string) {
+  const problems: string[] = [];
+  const decision = collectRowProblem(problems, () => parseDecision(row.decision, where));
+  const isDefault = collectRowProblem(problems, () => parseYesNo(row.is_quoting_default, where));
+  if (decision === undefined || isDefault === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
+  return { decision, isDefault };
 }
 
 /** An edited or new Draft Rates row, or null when it matches the download (or is an empty blank row). */
@@ -317,7 +342,7 @@ function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName
     recommended: blankToNull(row.recommended), high: blankToNull(row.high), unit: blankToNull(row.unit),
     over_label_reason: blankToNull(row.over_label_reason),
   };
-  const decision = parseDecision(row.decision, where);
+  const { decision, isDefault } = rateChoices(row, where);
   const reason = blankToNull(row.reason);
   if (row.rate_id === '' && row.row_state === '') {
     if (!RATE_EDITABLE.some((field) => row[field] !== '')) return null;
@@ -325,12 +350,11 @@ function parseRateRow(row: SheetRow<(typeof RATE_HEADERS)[number]>, parentByName
     if (parentId === AMBIGUOUS) throw new PricingWorkbookFormatError(`${where}: more than one parent is named "${row.parent_name}". Add this rate in the setup workbook, or rename one parent first.`);
     if (!parentId) throw new PricingWorkbookFormatError(`${where}: type a parent name exactly as on the Rate Outcomes sheet to add a rate.`);
     return { sheetRow: row.sheetRow, parent_name: row.parent_name, rate_id: null, parent_id: parentId, expected_row_version: null,
-      ...values, is_quoting_default: parseYesNo(row.is_quoting_default, where), decision, reason };
+      ...values, is_quoting_default: isDefault, decision, reason };
   }
   const damaged = new PricingWorkbookFormatError(`${where} is damaged (its hidden download record or rate id). Download a fresh workbook.`);
   const saved = parseState<(Partial<RateValues> & { rate_id?: unknown; parent_id?: unknown; row_version?: unknown }) | null>(row.row_state, damaged);
   if (!saved || saved.rate_id !== row.rate_id || typeof saved.parent_id !== 'string' || typeof saved.row_version !== 'number') throw damaged;
-  const isDefault = parseYesNo(row.is_quoting_default, where);
   const edited = decision != null || reason != null || isDefault !== saved.is_quoting_default
     || (['basis', 'source', 'unit', 'over_label_reason'] as const).some((f) => values[f] !== (saved[f] ?? null))
     || (['low', 'recommended', 'high'] as const).some((f) => decimalKey(values[f]) !== decimalKey(saved[f] ?? null));
@@ -363,27 +387,31 @@ export async function parseRateReviewWorkbook(arrayBuffer: ArrayBuffer): Promise
     throw new PricingWorkbookFormatError('This is not a CRX rate review workbook. Download a fresh one from Rate Review.');
   }
 
-  const { parentByName, outcomes, reconfirmed, recorded, outcomeRows } = readOutcomeSheet(workbook.getWorksheet(OUTCOMES_SHEET));
+  const problems: string[] = [];
+  const { parentByName, outcomes, reconfirmed, recorded, outcomeRows } = readOutcomeSheet(workbook.getWorksheet(OUTCOMES_SHEET), problems);
 
   const rates: RateUpload[] = [];
   let rateRows = 0;
   const seenRates = new Set<string>();
-  for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS)) {
-    if (row.rate_id !== '' || row.row_state !== '') {
-      rateRows += 1;
-      if (seenRates.has(row.rate_id)) throw new PricingWorkbookFormatError(`Draft Rates row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
-      seenRates.add(row.rate_id);
-    }
-    const edited = parseRateRow(row, parentByName);
-    if (edited) rates.push(edited);
+  for (const row of readRows(workbook.getWorksheet(RATES_SHEET), RATES_SHEET, RATE_HEADERS, problems)) {
+    collectRowProblem(problems, () => {
+      if (row.rate_id !== '' || row.row_state !== '') {
+        rateRows += 1;
+        if (seenRates.has(row.rate_id)) throw new PricingWorkbookFormatError(`Draft Rates row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
+        seenRates.add(row.rate_id);
+      }
+      const edited = parseRateRow(row, parentByName);
+      if (edited) rates.push(edited);
+    });
   }
   const editedRateParents = new Set(rates.map((rate) => rate.parent_id));
   for (const [parentId, sheetRow] of reconfirmed) {
     if (!editedRateParents.has(parentId)) {
-      throw new PricingWorkbookFormatError(`Rate Outcomes row ${sheetRow}: Reconfirm needs an edited Draft Rates row for this parent in the same upload.`);
+      problems.push(`Rate Outcomes row ${sheetRow}: Reconfirm needs an edited Draft Rates row for this parent in the same upload.`);
     }
   }
 
+  if (problems.length > 0) throw new PricingWorkbookFormatError(problems.join('\n'));
   checkRowCount(RATES_SHEET, rateRows, entries.get('rate_row_count'));
   checkRowCount(OUTCOMES_SHEET, outcomeRows, entries.get('outcome_row_count'));
   if (rates.length > MAX_RATE_REVIEW_RATE_ROWS || outcomes.length > MAX_RATE_REVIEW_OUTCOME_ROWS) {

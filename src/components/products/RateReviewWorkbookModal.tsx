@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Download, Upload } from 'lucide-react';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
@@ -6,6 +6,7 @@ import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/db';
+import { PricingWorkbookFormatError } from '../../lib/productPricingWorkbook';
 import { isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { clearPendingRetry, loadPendingRetry, markPendingRetryForCheck, savePendingRetry, type PendingRetry } from '../../lib/pendingRetry';
 import {
@@ -213,6 +214,29 @@ function Totals({ totals }: { totals: RateReviewWorkbook['totals'] }) {
  * outcome per parent in the spreadsheet, upload it for a preview (nothing is kept), then confirm the whole review
  * in one all-or-nothing save. Separate from the setup workbook; nothing reads these rates until RT-4.
  */
+function RateWorkbookFileControls({ fileRef, busy, blocked, onDownload, onFile }: {
+  fileRef: RefObject<HTMLInputElement | null>; busy: boolean; blocked: boolean; onDownload: () => void; onFile: (file: File) => void;
+}) {
+  return <>
+    <p className="text-secondary">
+      Review the draft per-acre rates. In the spreadsheet, approve, correct, add, delete or reopen rates on Draft Rates and set
+      one outcome per parent on Rate Outcomes, then upload it here. You see every change before anything is saved, and the
+      whole review saves at once or not at all. Quotes and jobs do not use these rates yet.
+    </p>
+    <div className="flex flex-wrap gap-2">
+      <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={onDownload} loading={busy}>
+        Download rate review workbook
+      </Button>
+      <Button variant="secondary" icon={<Upload className="w-4 h-4" />} onClick={() => fileRef.current?.click()} disabled={blocked}>
+        Upload and preview
+      </Button>
+      <input ref={fileRef} type="file" className="hidden" aria-label="Rate review workbook file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        onChange={(event) => { const file = event.target.files?.[0]; if (file) onFile(file); }} />
+    </div>
+  </>;
+}
+
 export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   open: boolean;
   profileId: string;
@@ -225,6 +249,7 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
   const [upload, setUpload] = useState<ParsedRateReview | null>(null);
   const [preview, setPreview] = useState<RateReviewResult | null>(null);
   const [saved, setSaved] = useState<CommitRateReviewResult | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [actorId, setActorId] = useState(profileId);
   const [pending, setPending] = useState<PendingRetry<PendingRateReview> | null>(null);
   const [clearingPending, setClearingPending] = useState(false);
@@ -248,12 +273,13 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     setUpload(kept?.request.actorId === profileId ? kept.request.upload : null);
     setPreview(kept?.request.actorId === profileId ? kept.request.preview : null);
     setSaved(null);
+    setFileError(null);
     setBusy(false);
     setClearingPending(false);
   }, [open, pendingName, profileId]);
   useEffect(() => () => { view.current.epoch += 1; }, []);
 
-  const reset = () => { setUpload(null); setPreview(null); setSaved(null); };
+  const reset = () => { setUpload(null); setPreview(null); setSaved(null); setFileError(null); };
   const close = () => { reset(); setTotals(null); onClose(); };
 
   const download = async () => {
@@ -301,7 +327,10 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
       setUpload(parsed);
       if (parsed.rates.length + parsed.outcomes.length > 0) await runPreview(parsed, epoch);
     } catch (error) {
-      if (isCurrent(epoch)) toast('error', sanitizeError(error));
+      if (isCurrent(epoch)) {
+        if (error instanceof PricingWorkbookFormatError) setFileError(error.message);
+        else toast('error', sanitizeError(error));
+      }
     } finally {
       if (isCurrent(epoch)) setBusy(false);
     }
@@ -403,23 +432,14 @@ export default function RateReviewWorkbookModal({ open, profileId, onClose }: {
     <Modal open={open} onClose={close} closeDisabled={busy} title="Rate review" size="large"
       footer={<Button variant="secondary" onClick={close} disabled={busy}>Close</Button>}>
       <div className="space-y-4 text-sm">
-        <p className="text-secondary">
-          Review the draft per-acre rates. In the spreadsheet, approve, correct, add, delete or reopen rates on Draft Rates and set
-          one outcome per parent on Rate Outcomes, then upload it here. You see every change before anything is saved, and the
-          whole review saves at once or not at all. Quotes and jobs do not use these rates yet.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={() => void download()} loading={busy}>
-            Download rate review workbook
-          </Button>
-          <Button variant="secondary" icon={<Upload className="w-4 h-4" />} onClick={() => fileRef.current?.click()} disabled={busy || !!pending || !profileId}>
-            Upload and preview
-          </Button>
-          <input ref={fileRef} type="file" className="hidden" aria-label="Rate review workbook file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file); }} />
-        </div>
+        <RateWorkbookFileControls fileRef={fileRef} busy={busy} blocked={busy || !!pending || !profileId}
+          onDownload={() => void download()} onFile={(file) => void readFile(file)} />
         {totals && <Totals totals={totals} />}
+
+        {fileError && <div role="alert" className="space-y-2 text-red-700">
+          <p>Nothing was saved. Fix these problems in the file and upload it again.</p>
+          <p className="max-h-72 overflow-auto whitespace-pre-line">{fileError}</p>
+        </div>}
 
         {nothingEdited && <p className="text-secondary">No edits in this file. Change a rate, decision or outcome, then upload it again.</p>}
 

@@ -51,6 +51,44 @@ const set = (wb: Wb, sheet: string, row: number, header: string, value: unknown)
 };
 
 describe('rate review workbook', () => {
+  it('reports independent semantic mistakes on one rate row, then accepts the corrected row', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'decision', 'approved');
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'maybe');
+    });
+    await expect(invalid).rejects.toThrow('Draft Rates row 2: decision must be');
+    await expect(invalid).rejects.toThrow('Draft Rates row 2: is_quoting_default must be');
+    const corrected = await roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'decision', 'approve');
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'yes');
+    });
+    expect(corrected.rates[0]).toMatchObject({ decision: 'approve', is_quoting_default: true });
+  });
+
+  it('reports both invalid outcome and invalid Reconfirm on the same row', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'maybe');
+    });
+    await expect(invalid).rejects.toThrow('outcome must be');
+    await expect(invalid).rejects.toThrow('Rate Outcomes row 2: reconfirm must be');
+  });
+
+  it('reports every bad row and malformed cell across both sheets before returning an upload', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');
+      set(wb, 'Draft Rates', 2, 'rate_id', R2);
+      set(wb, 'Draft Rates', 3, 'low', { formula: '1+1', result: 2 });
+      set(wb, 'Draft Rates', 3, 'high', { formula: '2+2', result: 4 });
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Nope');
+      set(wb, 'Draft Rates', 4, 'low', '1');
+    });
+    for (const problem of ['Rate Outcomes row 2 (Atrazine 4L): outcome must be', 'Draft Rates row 2 is damaged',
+      'Draft Rates row 3, low has a formula', 'Draft Rates row 3, high has a formula', 'Draft Rates row 4: type a parent name exactly']) {
+      await expect(invalid).rejects.toThrow(problem);
+    }
+  });
+
   it('sends nothing for an untouched download, and keeps the blank add rows', async () => {
     const blob = await generateRateReviewWorkbook(exported);
     expect(blob.size).toBeGreaterThan(0);

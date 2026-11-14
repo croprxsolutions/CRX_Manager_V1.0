@@ -11,7 +11,8 @@ export type BadgeVariant =
   | 'accepted'
   | 'declined'
   | 'expired'
-  | 'danger';
+  | 'danger'
+  | 'paid';
 
 export interface BadgeProps {
   variant?: BadgeVariant;
@@ -33,6 +34,8 @@ const variantClasses: Record<BadgeVariant, string> = {
   declined: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
   expired: 'bg-orange-100 text-orange-800 ring-1 ring-inset ring-orange-200',
   danger: 'bg-red-100 text-red-800 ring-1 ring-inset ring-red-200',
+  // A paid invoice: darker than Posted's green so the two read apart.
+  paid: 'bg-emerald-200 text-emerald-900 ring-1 ring-inset ring-emerald-300',
 };
 
 // eslint-disable-next-line react-refresh/only-export-components

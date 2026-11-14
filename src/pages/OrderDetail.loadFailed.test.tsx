@@ -119,8 +119,8 @@ afterEach(cleanup);
 describe('Order Detail', () => {
   it('an undelivered order offers Schedule Delivery and explains prepay', async () => {
     open();
-    expect(await screen.findByRole('button', { name: /Schedule Delivery/ })).toBeInTheDocument();
-    expect(screen.getByText(/Product invoices are created after delivery/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Schedule delivery/ })).toBeInTheDocument();
+    expect(screen.getByText(/Product invoices are made after delivery/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
   });
 
@@ -132,7 +132,7 @@ describe('Order Detail', () => {
       open();
       expect(await screen.findByText(FAILED)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
-      expect(screen.queryByText('Total Invoiced')).not.toBeInTheDocument();
+      expect(screen.queryByText('Invoiced')).not.toBeInTheDocument();
       expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
 
       // Try again re-reads; the invoice that exists now hides Create Invoice.
@@ -155,7 +155,7 @@ describe('Order Detail', () => {
     expect(screen.queryByRole('button', { name: /Create Invoice/ })).not.toBeInTheDocument();
     H.failing.delete(table);
     tryAgain();
-    expect(await screen.findByRole('button', { name: /Schedule Delivery/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Schedule delivery/ })).toBeInTheDocument();
   });
 
   it.each<Mode>(['error', 'nodata'])('a %s customer read says could not be loaded, not an order with no customer', async (mode) => {

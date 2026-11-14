@@ -1,11 +1,11 @@
 /**
- * Non-admins only see invoices they created or are the salesman on (invoices RLS),
+ * Non-admins only see invoices they created or are the salesperson on (invoices RLS),
  * so the order's AR strip must never show a bare $0.00 that reads as "unbilled /
  * unpaid" when the office has in fact billed and collected it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 const { mockFrom, mockRole, mockToast } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
@@ -74,10 +74,10 @@ const paidInvoice = {
   prepay_applied_cents: 0, balance_cents: 0, write_off_cents: 0,
 };
 
-function renderWith(role: string, invoices: unknown[]) {
+function renderWith(role: string, invoices: unknown[], status = orderData.status) {
   mockRole.current = role;
   mockFrom.mockImplementation((table: string) => {
-    if (table === 'orders') return buildChain({ data: orderData, error: null });
+    if (table === 'orders') return buildChain({ data: { ...orderData, status }, error: null });
     if (table === 'invoices') return buildChain({ data: invoices, error: null });
     return buildChain({ data: [], error: null });
   });
@@ -95,8 +95,9 @@ describe('OrderDetail AR strip for non-admins', () => {
 
   it('admin sees the full totals with no visibility note', async () => {
     renderWith('admin', [paidInvoice]);
-    expect(await screen.findByText('Total Invoiced')).toBeInTheDocument();
+    expect(await screen.findByText('Invoiced')).toBeInTheDocument();
     expect(screen.getAllByText('$500.00').length).toBeGreaterThan(0);
+    expect(screen.getByText('Profit · margin')).toBeInTheDocument();
     expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
     expect(screen.queryByText(/include only the invoices you created/)).not.toBeInTheDocument();
   });
@@ -104,17 +105,40 @@ describe('OrderDetail AR strip for non-admins', () => {
   it('a rep who can see no invoices gets an office note instead of $0.00 tiles', async () => {
     renderWith('sales_rep', []);
     expect(await screen.findByText(/You can't view any invoices for this order. Ask the office whether it has been billed or paid./)).toBeInTheDocument();
-    expect(screen.queryByText('Total Invoiced')).not.toBeInTheDocument();
-    expect(screen.queryByText('Amount Paid')).not.toBeInTheDocument();
-    expect(screen.queryByText('Balance Due')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Record Payment/ })).toBeInTheDocument();
+    expect(screen.queryByText('Invoiced')).not.toBeInTheDocument();
+    expect(screen.queryByText('Paid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Balance due')).not.toBeInTheDocument();
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('Profit · margin')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Record payment' })).toBeInTheDocument();
   });
 
   it('a rep who can see some invoices gets the totals plus a partial-view note', async () => {
     renderWith('sales_rep', [paidInvoice]);
-    expect(await screen.findByText('Total Invoiced')).toBeInTheDocument();
-    expect(screen.getByText(/include only the invoices you created or are the salesman on/)).toBeInTheDocument();
+    expect(await screen.findByText('Invoiced')).toBeInTheDocument();
+    expect(screen.queryByText('Profit · margin')).not.toBeInTheDocument();
+    expect(screen.getByText(/include only the invoices you created or are the salesperson on/)).toBeInTheDocument();
     expect(screen.queryByText(/can't view any invoices/)).not.toBeInTheDocument();
+  });
+});
+
+describe('OrderDetail More actions for a sales rep', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(['confirmed', 'partially_fulfilled', 'fulfilled'])('a rep gets no cancel or void on a %s order', async (status) => {
+    renderWith('sales_rep', [], status);
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Record payment' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cancel order…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Cancel remaining quantity…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Void order…' })).not.toBeInTheDocument();
+  });
+
+  it('an admin on the same confirmed order does get Cancel order…', async () => {
+    renderWith('admin', [], 'confirmed');
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Cancel order…' })).toBeInTheDocument();
   });
 });
 
@@ -127,8 +151,37 @@ describe('OrderDetail draft invoice actions', () => {
     const draft = (n: number) => ({ ...paidInvoice, id: `inv-d${n}`, invoice_number: `CS-000${n}`, status: 'draft',
       paid_amount_cents: 0, balance_cents: 50000 });
     renderWith('admin', [draft(1), draft(2)]);
-    expect(await screen.findByRole('button', { name: /Post all drafts/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Post 2 drafts…' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Consolidate drafts/ })).not.toBeInTheDocument();
+  });
+
+  // The page is reused across /orders/:id, so a Post drafts dialog opened on one sale must not stay open on the next.
+  it('closes the Post drafts dialog when the page moves to another sale', async () => {
+    let saleId = 'ord-123';
+    const draft = (n: number) => ({ ...paidInvoice, id: `inv-${saleId}-${n}`, order_id: saleId, invoice_number: `CS-000${n}`,
+      status: 'draft', paid_amount_cents: 0, balance_cents: 50000 });
+    mockRole.current = 'admin';
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'orders') return buildChain({ data: { ...orderData, id: saleId, order_number: saleId === 'ord-123' ? 'ORD-0099' : 'ORD-0100' }, error: null });
+      if (table === 'invoices') return buildChain({ data: [draft(1), draft(2)], error: null });
+      return buildChain({ data: [], error: null });
+    });
+    let go: (to: string) => void = () => {};
+    function GoTo() { go = useNavigate(); return null; }
+    render(
+      <MemoryRouter initialEntries={['/orders/ord-123']}>
+        <GoTo />
+        <Routes>
+          <Route path="/orders/:id" element={<OrderDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 drafts…' }));
+    expect(screen.getByRole('dialog', { name: 'Post 2 drafts on this sale?' })).toBeInTheDocument();
+    saleId = 'ord-456';
+    act(() => go('/orders/ord-456'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'ORD-0100' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
 
@@ -137,7 +190,7 @@ describe('OrderDetail sales tax box (billing plan M4a)', () => {
 
   it('an admin ticks it and the sale is taxed through set_order_sales_tax', async () => {
     renderWith('admin', []);
-    const box = await screen.findByRole('checkbox', { name: /Sales tax/ });
+    const box = await screen.findByRole('switch', { name: /Charge sales tax/ });
     expect(box).not.toBeChecked();
     expect(box).toBeEnabled();
     fireEvent.click(box);
@@ -149,19 +202,19 @@ describe('OrderDetail sales tax box (billing plan M4a)', () => {
   it('on a sale not yet invoiced, says its new invoices will be taxed', async () => {
     (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null });
     renderWith('admin', []);
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Sales tax/ }));
+    fireEvent.click(await screen.findByRole('switch', { name: /Charge sales tax/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', 'Sales tax on. New invoices for this sale will be taxed.'));
   });
 
   it('on a sale already posted, says the posted invoices keep their tax', async () => {
     (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ data: { order_id: 'ord-123', sales_tax: true, drafts_updated: 0 }, error: null });
     renderWith('admin', [{ ...paidInvoice, status: 'posted' }]);
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Sales tax/ }));
+    fireEvent.click(await screen.findByRole('switch', { name: /Charge sales tax/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', 'Sales tax on. New invoices for this sale will be taxed; posted invoices keep their tax.'));
   });
 
   it('a rep cannot change another rep\'s sale', async () => {
     renderWith('sales_rep', []);
-    expect(await screen.findByRole('checkbox', { name: /Sales tax/ })).toBeDisabled();
+    expect(await screen.findByRole('switch', { name: /Charge sales tax/ })).toBeDisabled();
   });
 });

@@ -95,10 +95,7 @@ test.describe('Quote builder width and keyboard guard', () => {
 
     // Seed through the app: a customer, then a quote with two sections of one product each.
     await page.setViewportSize({ width: 1280, height: HEIGHT });
-    await page.goto('/customers/new');
-    await page.getByLabel('Farm Name').fill(name);
-    await page.getByRole('button', { name: 'Create Customer' }).click();
-    await page.waitForURL(/\/customers\/[0-9a-f-]{36}/, { timeout: 15000 });
+    await createCustomer(page, name);
 
     await page.goto('/quotes/new');
     await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));

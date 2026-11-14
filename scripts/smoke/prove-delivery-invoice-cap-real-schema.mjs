@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20261010120000_cap_delivery_invoice_at_delivered (Sol exact-SHA HIGH on
+ * HISTORICAL CANDIDATE-ERA proof for 20261010120000_cap_delivery_invoice_at_delivered (Sol exact-SHA HIGH on
  * PR #889, 2026-10-10): a delivery invoice can bill only the products and quantities its delivery
- * delivered.
+ * delivered. Current-schema acceptance runs separately through local-app/sales.mjs.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
- * container, replays every ordered post-baseline schema migration (one-shot data files excluded),
+ * container, replays ordered post-baseline schema migrations before the candidate (one-shot data files excluded),
  * applies the candidate, seeds one order with two completed deliveries (D1 delivered 6 of the 10
  * ordered units of product A; D2 delivered product B), creates D1's draft invoice through the real
  * create_invoice_for_unbilled_delivery, and then proves, through the real save_invoice as an admin
@@ -94,8 +94,9 @@ function selected() {
   const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
-  assert.equal(all.at(-1), CAP, 'the candidate must be the last schema migration in the replay plan');
-  const before = all.slice(0, -1);
+  const candidateIndex = all.indexOf(CAP);
+  assert.ok(candidateIndex >= 0, 'the candidate must be selected in the replay plan');
+  const before = all.slice(0, candidateIndex);
   for (const name of PARKED) {
     const file = before.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);

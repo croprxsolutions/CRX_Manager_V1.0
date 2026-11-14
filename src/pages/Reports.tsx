@@ -14,7 +14,8 @@ import { generateIdempotencyKey, getIdempotencyBindingRejection } from '../lib/i
 import { logActivity } from '../lib/activityLogger';
 import { unavailableReasonText } from '../lib/historicalBalanceReasons';
 import { exportToCSV, fmtCSV, fmtDateCSV, formatProductMoneyCSV } from '../lib/csvExport';
-import { formatExactUSD, formatUSD } from '../lib/money';
+import { formatCents, formatExactUSD, formatUSD } from '../lib/money';
+import { inventoryValueNote, summarizeInventoryValue } from '../lib/inventoryValue';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
@@ -40,6 +41,7 @@ import type {
   YearEndSummaryData,
 } from '../types';
 import type { Database } from '../types/supabase';
+import { toSentryError } from '../lib/sentryError';
 
 // ─── Category / Tab types ──────────────────────────────────────
 type Category = 'profitability' | 'logbook' | 'financial' | 'operational' | 'year_end';
@@ -427,7 +429,7 @@ export default function Reports() {
       return true;
     } catch (err) {
       if (loadId !== commissionsLoadId.current) return true;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'load_commissions' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'load_commissions' } });
       fail();
       return false;
     }
@@ -895,7 +897,7 @@ export default function Reports() {
       }
       setShowYeDialog(false);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'generate_year_end_summary' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'generate_year_end_summary' } });
       toast('error', sanitizeError(err));
     }
     setYeLoading(false);
@@ -1063,7 +1065,7 @@ export default function Reports() {
       const rejection = getIdempotencyBindingRejection(err);
       if (rejection) {
         if (scopeInFlight) markPaidKeys.current.delete(scopeInFlight);
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: `mark_commissions_paid_${rejection}_mismatch` } });
+        Sentry.captureException(toSentryError(err), { extra: { context: `mark_commissions_paid_${rejection}_mismatch` } });
         const refusalListIsCurrent = await fetchCommissions();
         // Never claim "nothing was created" outright — recipients processed
         // before the refusal really were paid, and telling the admin otherwise
@@ -1076,7 +1078,7 @@ export default function Reports() {
           ? `That retry could not be matched to this request. ${totalBatched} commission(s) were already added to a payment batch before it stopped — check Commission Payments before trying again.${refusalListIsCurrent ? '' : STALE_COMMISSION_LIST_NOTE}`
           : `That retry could not be matched to this request, so nothing new was created by this attempt — but an earlier attempt may already have created a batch. Check Commission Payments before trying again.${refusalListIsCurrent ? '' : STALE_COMMISSION_LIST_NOTE}`);
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'mark_commissions_paid' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'mark_commissions_paid' } });
         // Ordinary failure (timeout, network, a server guard). Earlier recipients
         // in this same click may already be batched, so refresh the list BEFORE
         // saying anything and name how many landed — a bare error message reads
@@ -1769,11 +1771,15 @@ export default function Reports() {
           )}
 
           {/* Inventory cost total */}
-          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (
-            <div className="flex items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+          {isAdmin && operationalTab === 'inventory_cost' && inventoryCostData.length > 0 && (() => {
+            const valuation = summarizeInventoryValue(inventoryCostData.map((r) => ({ quantity: r.quantity_available, unitCost: r.unit_cost, rowValue: r.total_cost_value })));
+            const note = inventoryValueNote(valuation);
+            return (
+            <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Total Inventory Value:</span>{' '}
-                {fmt(inventoryCostData.reduce((sum, r) => sum + r.total_cost_value, 0))}
+                {formatCents(valuation.valueCents)}
+                {note && <span className="ml-2 text-xs">({note})</span>}
               </span>
               <span className="text-sm text-blue-800">
                 <span className="font-semibold">Products:</span> {inventoryCostData.length}
@@ -1782,7 +1788,8 @@ export default function Reports() {
                 <span className="font-semibold">Below Reorder:</span> {inventoryCostData.filter((r) => r.below_reorder).length}
               </span>
             </div>
-          )}
+            );
+          })()}
 
           {isAdmin && operationalTab === 'stale_costs' && !reportFailed && !loading && (
             <div className="flex flex-wrap items-center gap-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-900">

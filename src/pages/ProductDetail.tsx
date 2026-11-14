@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { toSentryError } from '../lib/sentryError';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Copy, DollarSign, ExternalLink, Plus, Search, Save } from 'lucide-react';
 import Card, { CardHeader } from '../components/ui/Card';
@@ -15,6 +16,8 @@ import ProductPriceHistory from '../components/products/ProductPriceHistory';
 import ProductSellPriceHistory from '../components/products/ProductSellPriceHistory';
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
+import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
+import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations, useStickyCancellations } from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
@@ -43,7 +46,7 @@ import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FOR
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { usePhoneSections } from '../hooks/usePhoneSections';
-import type { CostHistory, EpaLookupResult, Product, ProductRateLock, UnitConversion } from '../types';
+import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
   applyProductPricingChangeSet,
   approvePricingChangeSet,
@@ -74,8 +77,11 @@ import {
   duplicateProductDraft, duplicateProductSource, listProductCategories, missingProductSetup, nearMatchNames, normalizedProductSetup,
   productSetupValidationMessage, visibleProductCategories, type DuplicateProductSource,
 } from '../lib/productSetup';
-import { listProductUseTimingOptions, visibleProductUseTimingOptions } from '../lib/productUseTimings';
-import type { ProductCategory, UseTimingOption } from '../types';
+import { listProductCropOptions, listProductUseTimingOptions } from '../lib/productUseTimings';
+import UseTimingPicker from '../components/products/UseTimingPicker';
+import UseTimingChoicesModal from '../components/products/UseTimingChoicesModal';
+import { quoteLineChange } from '../lib/quoteNotes';
+import type { CropOption, ProductCategory, UseTimingOption } from '../types';
 
 const PRODUCT_NONPRICING_FIELDS = [
   'product_name', 'sku', 'category', 'vendor', 'manufacturer',
@@ -336,6 +342,8 @@ export default function ProductDetail() {
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
   const [timingOptions, setTimingOptions] = useState<UseTimingOption[]>([]);
+  const [cropOptions, setCropOptions] = useState<CropOption[]>([]);
+  const [timingChoicesOpen, setTimingChoicesOpen] = useState(false);
   const [timingLoadFailed, setTimingLoadFailed] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
   const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
@@ -410,6 +418,41 @@ export default function ProductDetail() {
   // On phones the page folds. Pricing opens first; someone with no pricing to edit starts on the details.
   const { sectionProps, reveal: revealPhoneSection } = usePhoneSections(
     isNew || !isAdmin ? ['information', 'pricing'] : ['pricing'],
+  );
+
+  // Cancelled-registration warning (grand plan §8): the saved product number and its brands' numbers.
+  const [brandRegistrations, setBrandRegistrations] = useState<{ label: string; epaRegistration: string | null }[]>([]);
+  // A brand list that failed, or is still loading after the check timeout, shows "could not check",
+  // never "no cancelled brands".
+  const [brandsRead, setBrandsRead] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const handleBrandsChange = useCallback((forProductId: string, brands: ProductBrand[] | null | undefined) => {
+    // A report for another product (a late reply after a switch) never lands on this one.
+    if (forProductId !== productIdRef.current) return;
+    setBrandsRead(brands === undefined ? 'loading' : brands === null ? 'failed' : 'loaded');
+    setBrandRegistrations((brands ?? []).map((b) => ({ label: `Brand ${b.brand_name}`, epaRegistration: b.epa_registration })));
+  }, [productIdRef]);
+  // Another product's brands never sit under this product's number.
+  useEffect(() => { setBrandRegistrations([]); setBrandsRead('loading'); }, [id]);
+  const productLoaded = persistedProduct?.id === id;
+  // The brand list's clock starts once the product (and so the Brands section) has loaded.
+  const [brandsReadSlow, setBrandsReadSlow] = useState(false);
+  useEffect(() => {
+    setBrandsReadSlow(false);
+    if (!productLoaded || brandsRead !== 'loading') return undefined;
+    const timer = setTimeout(() => setBrandsReadSlow(true), CHECK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [brandsRead, productLoaded, id]);
+  const registrationSources = useMemo(() => (
+    persistedProduct && persistedProduct.id === id
+      ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
+      : []
+  ), [persistedProduct, id, brandRegistrations]);
+  const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const shownCancellations = useStickyCancellations(id ?? '', registrationSources, registrationStatus.cancelled);
+  const registrationCheckState = registrationCheck(
+    productLoaded,
+    brandsRead === 'loading' && brandsReadSlow ? 'slow' : brandsRead,
+    registrationStatus.lookup,
   );
 
   const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
@@ -538,6 +581,8 @@ export default function ProductDetail() {
       setTimingLoadFailed(true);
       toast('error', 'Could not load use timings. Refresh before changing them.');
     });
+    // Crop names only label the picker's groups; without them each group shows its crop code.
+    listProductCropOptions().then(setCropOptions).catch(() => undefined);
     // Vendor and manufacturer remain free-text choices.
     // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
     void fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to))).then(({ data, error }) => {
@@ -870,7 +915,7 @@ export default function ProductDetail() {
       toast('success', 'Product updated');
       logActivity({ event: 'product_updated', description: `Product ${product.product_name} updated`, performedBy: profile!.id, entityType: 'product', entityId: id });
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_product' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_product' } });
       toast('error', sanitizeError(err));
       if (addSizeTo && hasRpcCode(err, RpcErrorCodes.PRODUCT_PARENT_STALE) && addSizeTo.sizes[0]) {
         // The parent changed since "Add a size" opened: show its current values; the next save uses them.
@@ -1055,7 +1100,7 @@ export default function ProductDetail() {
         toast('warning', `EPA did not find registration ${regNumber}.`);
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'edge_function', action: 'epa_lookup' },
       });
       toast('error', err instanceof Error ? err.message : 'EPA lookup failed. Please try again.');
@@ -1181,10 +1226,6 @@ export default function ProductDetail() {
     update('category', next);
   };
 
-  const toggleUseTiming = (code: string, checked: boolean) => {
-    const selected = product.use_timings ?? [];
-    update('use_timings', checked ? [...selected, code] : selected.filter((item) => item !== code));
-  };
 
   const updatePricingMargin = (field: ProductPricingMarginField, text: string) => {
     if (pricingReloadRequired) return;
@@ -1256,6 +1297,8 @@ export default function ProductDetail() {
     : null;
 
   const missingSetup = missingProductSetup(product);
+  // What a new quote line will show once this edit saves; existing quote lines keep their copied note.
+  const quoteLine = !isNew && persistedProduct && persistedProduct.id === product.id ? quoteLineChange(persistedProduct, product) : null;
 
   return (
     <div className={`phone-touch space-y-4 ${isAdmin ? 'max-md:pb-10' : ''}`}>
@@ -1297,6 +1340,9 @@ export default function ProductDetail() {
         <p className="text-sm text-secondary" data-testid="product-setup-missing">
           Still needed for complete setup: {missingSetup.join(', ')}.{isAdmin ? ' You can still save and price this product.' : ''}
         </p>
+      )}
+      {!isNew && (
+        <CancelledRegistrationBanner sources={shownCancellations.sources} cancelled={shownCancellations.cancelled} check={registrationCheckState} />
       )}
 
       {duplicateSource && (
@@ -1343,6 +1389,7 @@ export default function ProductDetail() {
               ratesLocked={rateLock ? rateLock.is_locked : null}
               categoryOptions={categoryOptions}
               timingOptions={timingOptions}
+              cropOptions={cropOptions}
               rateUnitOptions={rateUnitOptionsForProduct(unitConversions, parent.product_form, product.inventory_unit).map((uc) => uc.unit)}
               busy={isDirty || pricingReloadRequired || saving}
               onChanged={() => {
@@ -1454,20 +1501,25 @@ export default function ProductDetail() {
                         <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
                         <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
                       </>
-                    ) : visibleProductUseTimingOptions(timingOptions, product.category, product.use_timings ?? []).map((option) => (
-                      <label key={option.code} className={`flex min-h-9 items-center gap-2 rounded px-2 text-sm text-nav-dark ${isAdmin && !pricingReloadRequired && !(isNew && saving) ? 'hover:bg-gray-50' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={(product.use_timings ?? []).includes(option.code)}
-                          onChange={(event) => toggleUseTiming(option.code, event.target.checked)}
-                          disabled={!isAdmin || timingLoadFailed || parentOwned}
-                          className="h-4 w-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                        />
-                        {option.label}{option.is_active ? '' : ' (retired)'}
-                      </label>
-                    ))}
+                    ) : (
+                      <UseTimingPicker
+                        options={timingOptions}
+                        crops={cropOptions}
+                        category={product.category}
+                        selected={product.use_timings ?? []}
+                        held={persistedProduct?.use_timings ?? []}
+                        disabled={!isAdmin || parentOwned}
+                        onChange={(next) => update('use_timings', next)}
+                      />
+                    )}
                     {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
                   </div>
+                  {isAdmin && !timingLoadFailed && (
+                    <button type="button" onClick={() => setTimingChoicesOpen(true)}
+                      className="mt-1 min-h-8 text-sm font-medium text-crx-green hover:underline focus-visible:ring-2 focus-visible:ring-crx-green">
+                      Manage crop and timing choices
+                    </button>
+                  )}
                 </fieldset>
               )}
               <div>
@@ -1956,6 +2008,11 @@ export default function ProductDetail() {
                 rows={3}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
               />
+              {quoteLine && (
+                <p className="mt-1 text-xs text-amber-800" role="status">
+                  New quote lines will show: {quoteLine.after ? `"${quoteLine.after}"` : '(blank)'}. Existing quotes keep their notes.
+                </p>
+              )}
             </div>
           </Card>
           </PhoneSection>
@@ -1987,6 +2044,8 @@ export default function ProductDetail() {
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
+                cancelled={shownCancellations.cancelled}
+                onBrandsChange={handleBrandsChange}
               />
             </PhoneSection>
           )}
@@ -2406,6 +2465,20 @@ export default function ProductDetail() {
           setPendingCategory(undefined);
         }}
       />
+      {timingChoicesOpen && profile && (
+        <UseTimingChoicesModal
+          options={timingOptions}
+          crops={cropOptions}
+          defaultCategory={product.category}
+          profileId={profile.id}
+          onReload={async () => {
+            const fresh = await listProductUseTimingOptions();
+            setTimingOptions(fresh);
+            return fresh;
+          }}
+          onClose={() => setTimingChoicesOpen(false)}
+        />
+      )}
     </div>
   );
 }

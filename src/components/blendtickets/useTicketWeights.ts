@@ -1,3 +1,4 @@
+import { toSentryError } from '../../lib/sentryError';
 import { useEffect, useMemo, useState } from 'react';
 import { Sentry } from '../../lib/sentry';
 import { fetchProductWeights, type ProductWeightsResult } from '../../lib/productWeights';
@@ -20,7 +21,7 @@ function useTaggedRead<T>(tag: unknown, enabled: boolean, read: () => Promise<T>
     read().then(
       (data) => { if (!cancelled) setState({ tag, read: { status: 'ready', data } }); },
       (error: unknown) => {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { level: 'warning', extra: { context } });
+        Sentry.captureException(toSentryError(error), { level: 'warning', extra: { context } });
         if (!cancelled) setState({ tag, read: { status: 'failed', why: 'weights unavailable' } });
       },
     );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from './invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceMarginCents, isFromScratchInvoice } from './invoiceChargeLines';
 
 describe('isFromScratchInvoice', () => {
   it('is a misc_charge or chemical_sale with no order and no delivery', () => {
@@ -32,10 +32,56 @@ describe('fromScratchLinesProblem', () => {
   });
 });
 
+describe('the standing discount line (billing plan M4b)', () => {
+  const discount = { product_id: null, charge_type: 'standing_discount' as const, description: 'Standing discount 3%', quantity: 1, unit_price_cents: -300 };
+  const freight = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 4500 };
+
+  it('lets a discounted chemical sale be saved: the database writes that line, so the screen does not check it', () => {
+    expect(fromScratchLinesProblem([freight, discount])).toBeNull();
+    expect(fromScratchLinesProblem([discount])).toBeNull();
+  });
+
+  it('still checks every other charge line beside it', () => {
+    expect(fromScratchLinesProblem([{ ...freight, unit_price_cents: 0 }, discount])).toBe('Every charge needs an amount above $0.00.');
+  });
+
+  it('is labelled but never offered as a type to pick', () => {
+    expect(chargeTypeLabel('standing_discount')).toBe('Standing discount');
+    expect(CHARGE_TYPE_OPTIONS.map((option) => option.value)).not.toContain('standing_discount');
+  });
+});
+
+describe('the sales tax line (billing plan M4a)', () => {
+  const tax = { product_id: null, charge_type: 'sales_tax' as const, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 281 };
+  const freight = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 4500 };
+
+  it('is the database\'s own line, so the screen does not check it, and still checks the lines beside it', () => {
+    expect(fromScratchLinesProblem([freight, tax])).toBeNull();
+    expect(fromScratchLinesProblem([{ ...freight, description: ' ' }, tax])).toBe('Add a description to every charge.');
+  });
+
+  it('is labelled but never offered as a type to pick', () => {
+    expect(chargeTypeLabel('sales_tax')).toBe('Sales tax');
+    expect(CHARGE_TYPE_OPTIONS.map((option) => option.value)).not.toContain('sales_tax');
+  });
+});
+
 describe('charge types', () => {
-  it('are exactly the four the database accepts (invoice_items_charge_type_check)', () => {
+  it('offer staff the four types they can pick (the database also writes its own standing_discount and sales_tax lines)', () => {
     expect(CHARGE_TYPE_OPTIONS.map((o) => o.value)).toEqual(['freight', 'application_fee', 'service', 'other']);
     expect(chargeTypeLabel('application_fee')).toBe('Application fee');
     expect(chargeTypeLabel(null)).toBe('');
+  });
+});
+
+describe('invoiceMarginCents (billing plan M4a)', () => {
+  it('leaves the sales tax out: tax is collected for the state, not earned', () => {
+    const lines = [
+      { extended_cents: 100000, charge_type: null },
+      { extended_cents: 4500, charge_type: 'freight' as const },
+      { extended_cents: -3000, charge_type: 'standing_discount' as const },
+      { extended_cents: 6408, charge_type: 'sales_tax' as const },
+    ];
+    expect(invoiceMarginCents(lines, 90000)).toBe(100000 + 4500 - 3000 - 90000);
   });
 });

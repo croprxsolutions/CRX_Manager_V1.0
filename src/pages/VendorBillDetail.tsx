@@ -44,6 +44,7 @@ import { getIdempotencyMismatchResult } from '../lib/idempotency';
 import { Sentry } from '../lib/sentry';
 import type { VendorBill, VendorPayment } from '../types';
 import ClearExpiredIntentButton from '../components/ClearExpiredIntentButton';
+import { toSentryError } from '../lib/sentryError';
 
 const statusVariant: Record<string, BadgeVariant> = {
   unpaid: 'warning',
@@ -317,7 +318,7 @@ export default function VendorBillDetail() {
       });
       payKey = paymentIntent.getIdempotencyKey();
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { source: 'durable-intent', page: 'vendor-bill-detail' },
       });
       if (activeBillIdRef.current !== submittedBillId) return;
@@ -376,7 +377,7 @@ export default function VendorBillDetail() {
         } catch (resolveError) {
           try {
             Sentry.captureException(
-              resolveError instanceof Error ? resolveError : new Error(String(resolveError)),
+              toSentryError(resolveError),
               { tags: { source: 'durable-intent-resolve', page: 'vendor-bill-detail', operation: 'record_vendor_payment' } },
             );
           } catch { /* Reporting cannot change the confirmed payment. */ }
@@ -404,7 +405,7 @@ export default function VendorBillDetail() {
         // guard only stops an unexpected rejection from bypassing the toast.
         // 'uncertain' is the fail-closed answer: the payload stays locked.
         Sentry.captureException(
-          classifyError instanceof Error ? classifyError : new Error(String(classifyError)),
+          toSentryError(classifyError),
           { tags: { source: 'durable-intent-classify', page: 'vendor-bill-detail' } },
         );
         disposition = 'uncertain';
@@ -601,14 +602,14 @@ export default function VendorBillDetail() {
       // deliberately left retained here: the request's outcome is unknown, and
       // retaining is the direction that replays rather than double-applies.
       if (!isStillCurrentBill()) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+        Sentry.captureException(toSentryError(err), {
           tags: { source: 'vendor-bill-edit', reason: 'stale-route-response' },
         });
         return;
       }
       if (hasRpcCode(err, RpcErrorCodes.PO_CUMULATIVE_BILLING_CONFIRMATION_REQUIRED)) {
         setEditOverageMessage(
-          'The exact server total shows this edit would raise active billing above 105% of the purchase order. Enter a reason to confirm the overage.',
+          'The exact server total shows this edit would raise active billing above 105% of what was received on the purchase order (or of the ordered total, if that is lower or nothing has arrived yet). Enter a reason to confirm the overage.',
         );
       } else if (getIdempotencyBindingRejection(err)) {
         // A binding rejection can still carry the receipt of an edit that
@@ -1136,7 +1137,7 @@ export default function VendorBillDetail() {
         confirmLabel="Save Changes"
         variant="warning"
         loading={editing}
-        placeholder="Why should cumulative billing exceed the PO total?"
+        placeholder="Why should billing exceed what was received or ordered on this PO?"
         minLength={5}
       />
 

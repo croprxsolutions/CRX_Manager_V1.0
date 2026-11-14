@@ -1,3 +1,4 @@
+import { toSentryError } from '../../lib/sentryError';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Trash2, Save, AlertCircle, Beaker } from 'lucide-react';
 import Button from '../ui/Button';
@@ -305,7 +306,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         .order('id')
         .range(from, to));
       if (prodError) {
-        Sentry.captureException(new Error(String(prodError.message)), { extra: { context: 'Failed to load products' } });
+        Sentry.captureException(toSentryError(prodError), { extra: { context: 'Failed to load products' } });
         setError('Failed to load Products. Close this window and open it again to retry.');
         // Never keep a previous or partial catalog; products and saving stay blocked.
         setAllProducts([]);
@@ -322,7 +323,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
         .eq('is_active', true)
         .is('deleted_at', null)
         .order('name');
-      if (recipeError) Sentry.captureException(new Error(String(recipeError.message)), { extra: { context: 'Failed to load recipes' } });
+      if (recipeError) Sentry.captureException(toSentryError(recipeError), { extra: { context: 'Failed to load recipes' } });
       if (recipeData) setRecipes(recipeData as unknown as (BlendRecipe & { items: BlendRecipeItem[] })[]);
     };
     loadData();
@@ -545,7 +546,7 @@ export function ManualTicketCreate({ customers, onComplete }: ManualTicketCreate
       onComplete();
     } catch (err: unknown) {
       Sentry.captureException(
-        err instanceof Error ? err : new Error(String(err)),
+        toSentryError(err),
         { extra: { context: 'Error creating manual ticket' } },
       );
       const message = err instanceof Error ? err.message : 'Failed to create ticket';

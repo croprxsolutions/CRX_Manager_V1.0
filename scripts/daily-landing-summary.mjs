@@ -35,8 +35,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "../.claude/hooks/live-testdata-lib.mjs";
-import { accessChangeCheck, dataRewriteCheck } from "../.claude/hooks/migration-access-lib.mjs";
+import { accessChangeCheck, dataRewriteCheck, readMigrationHistory } from "../.claude/hooks/migration-access-lib.mjs";
+import { ownerApprovalNeeded } from "../.claude/hooks/migration-apply-lib.mjs";
 
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "supabase", "migrations");
 const ISSUE_TITLE = "Daily landing summary";
 const MASON = "masonwells1";
 const DEFAULT_REPO = "croprxsolutions/CRX_Manager_V1.0";
@@ -110,23 +112,21 @@ export function waitingReasons({ labels = [], files = [] }) {
       reasons.push(`its database change ${migrationName(path.basename(name))} deletes data (${plainText(verdict.reason, 100)}), which stays yours to approve`);
       continue;
     }
-    // Overwriting existing rows is his too (2026-09-27, "Data rewrites wait").
-    // Without history, a call to an earlier public function counts as unknown.
-    let rewrite;
-    try { rewrite = dataRewriteCheck(added); } catch { rewrite = { rewrites: true, reason: "could not be classified" }; }
-    if (rewrite.rewrites) {
-      reasons.push(`its database change ${migrationName(path.basename(name))} changes existing data (${plainText(rewrite.reason, 120)}), which stays yours to approve`);
-      continue;
-    }
-    // Permission changes are his too (2026-09-26). The patch shows only this
-    // PR's added lines, so for an EDITED file the check may miss objects the
-    // file created earlier — that errs toward listing it, never toward hiding it.
-    // No migration history is passed either, so a grant on a REPLACED object
-    // counts as unknown and is listed (Sol HIGH #2, round 10).
-    let access;
-    try { access = accessChangeCheck(added); } catch { access = { changesAccess: true, reason: "could not be classified" }; }
-    if (access.changesAccess) {
-      reasons.push(`its database change ${migrationName(path.basename(name))} changes who can access what (${plainText(access.reason, 120)}), which stays yours to approve`);
+    // Rewrites and access changes stopped being his on 2026-11-11 ("All but
+    // deletions"); a delete hidden in a function or dynamic SQL, or SQL these
+    // checks cannot read, still waits for him (the apply gate's same rule).
+    // The checked-out migrations before this one, so triggers on a changed table
+    // can be read (Codex P1, PR #1799); unreadable means unknown, which waits.
+    let history;
+    try { history = readMigrationHistory(MIGRATIONS_DIR, path.basename(name)); } catch { history = undefined; }
+    const found = [];
+    try { const r = dataRewriteCheck(added, { history }); if (r.rewrites) found.push({ category: "overwrites-data", reason: String(r.reason) }); }
+    catch { found.push({ category: "overwrites-data", reason: "could not be read" }); }
+    try { const a = accessChangeCheck(added); if (a.changesAccess) found.push({ category: "changes-access", reason: String(a.reason) }); }
+    catch { found.push({ category: "changes-access", reason: "could not be read" }); }
+    const [needs] = ownerApprovalNeeded(found);
+    if (needs) {
+      reasons.push(`its database change ${migrationName(path.basename(name))} may delete data or could not be fully read (${plainText(needs.reason, 120)}), which stays yours to approve`);
     }
   }
   return reasons;

@@ -16,6 +16,7 @@ import { getIdempotencyBindingRejection } from '../../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../../lib/parseCents';
 import { logActivity } from '../../lib/activityLogger';
 import { formatCents as fmt } from '../../lib/money';
+import { toSentryError } from '../../lib/sentryError';
 
 interface WriteOffModalProps {
   open: boolean;
@@ -91,7 +92,7 @@ export default function WriteOffModal({
       onClose();
       onSuccess();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'WriteOffModal.handleSubmit' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'WriteOffModal.handleSubmit' } });
       toast('error', sanitizeError(err));
     }
     setSubmitting(false);

@@ -146,6 +146,7 @@ is there.
 | 0 | `LUNA RESULT: CLEAN` | Luna read the whole diff and found nothing |
 | 1 | `LUNA RESULT: FINDINGS <n>` | Luna's findings are printed above that line |
 | 1 | `LUNA RESULT: STOPPED` | Third round on a hook change (`.claude/hooks/`, `.codex/hooks/`): Codex was not called. Drop the carve-out or hand the decision to Mason; do not rerun |
+| 1 | `LUNA RESULT: STOPPED after 6 whole-branch Luna rounds` | Seventh whole-branch round on this branch: the design keeps drawing findings and Codex was not called. Do ONE of: (a) simplify, run a fresh "attack this plan for simplicity" session; (b) merge or rebase onto current main and re-plan; (c) change approach, ask Mason the business rule behind the mechanism. Then rerun with `--after-simplify`, `--after-rebase` or `--after-new-approach` and a one-line reason: that buys 6 more rounds and is recorded. Never pass the flag without doing the step |
 | 2 | `LUNA RESULT: DID NOT RUN` | **Not a review and not a clean result.** The `Why:` line says what broke |
 
 **Exit 2 is a broken run, never a verdict:** a refused or substituted model (the script names it and
@@ -159,6 +160,15 @@ code-health ratchet that pre-push runs (`scripts/check-code-health.mjs`, about 3
 fails, the run stops with exit 2 and prints the violations, and no model is called: fix them, commit,
 and run Luna again. If the check cannot run at all (no `node_modules` or knip in the worktree), Luna
 goes ahead and the result says `Code health: NOT CHECKED`; pre-push and CI still run the real check.
+
+**Settled findings (Mason, 2026-11-09).** When Luna keeps re-raising a finding you already refuted or
+deferred (PR #1688: the same refuted finding in 4 of 8 rounds), write a short file with one line per
+finding plus why it was settled, and add `--settled <file>` to the next round. Luna gets the list as
+untrusted data, still reads the whole diff, and re-reports a listed item only with new evidence,
+which it must name; the result prints `Settled list: ...` so the report shows a list was used. The
+file is capped at 8 KB (bigger is refused, exit 2). Add only findings you refuted with evidence or
+named as deferrals. **Never for Sol:** `--settled` with `--sol` is refused, and the Step 3B gate
+(`write-codex-push-proof.mjs`) has no such input, so Sol stays fully independent.
 
 **Oversized diffs.** When Luna runs out of output (`max_output_tokens`, twice on a 960-line diff in
 PR #1248) the script says so and prints one `--commit` command per commit, oldest first. Run those

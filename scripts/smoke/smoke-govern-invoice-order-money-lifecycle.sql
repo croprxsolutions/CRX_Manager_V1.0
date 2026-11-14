@@ -117,11 +117,11 @@ BEGIN
   VALUES ('[E2E] Other Lifecycle Farm ' || v_suffix)
   RETURNING id INTO v_other_customer;
 
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'GL')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'GL', 'liquid')
   RETURNING id INTO v_product;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'GL')
+  INSERT INTO public.products (product_name, unit_size, product_form)
+  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'GL', 'liquid')
   RETURNING id INTO v_other_product;
   -- Order lines need a positive cost basis (COST_BASIS_REQUIRED), and a product
   -- is born pricing-free, so price both shells through the governed
@@ -258,9 +258,11 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: rejected product swap leaked an order, delivery, inventory, or ledger change';
   END IF;
 
-  -- Valid backend sequence: create the whole-order draft first, then partially
-  -- deliver. Closing remainder must refuse before shrinking any order/inventory
-  -- state, because that draft still bills the original full quantity.
+  -- An active whole-order (legacy shape: no delivery link) invoice on a partially delivered
+  -- order. Closing the remainder must refuse before shrinking any order/inventory state.
+  -- create_invoice_from_order can no longer make this shape (it refuses any order with a
+  -- delivery, and the delivered cap, 20261029160000, refuses billing before one), so the
+  -- historical draft is written as the owner after the delivery, billing the delivered unit.
   INSERT INTO public.orders (
     order_number, customer_id, order_date, status, booking_draw
   ) VALUES (
@@ -274,10 +276,6 @@ BEGIN
     v_invoiced_order, v_product, '[E2E] invoice-first line', 10, 6,
     3, 30, 12, 40, 0, 3
   ) RETURNING id INTO v_invoiced_item;
-  v_order_level_invoice := public.create_invoice_from_order(
-    v_invoiced_order, v_admin, 'chemical_sale',
-    'e2e-life-invoice-first-' || v_suffix
-  );
   INSERT INTO public.deliveries (
     delivery_number, order_id, customer_id, scheduled_date, status, created_by
   ) VALUES (
@@ -288,14 +286,32 @@ BEGIN
     delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
   ) VALUES (v_invoiced_delivery, v_invoiced_item, v_product, 1, 1, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_invoiced_delivery;
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_invoiced_delivery::text, true);
   UPDATE public.deliveries
      SET status = 'completed', completed_at = now(), signed_by = '[E2E] Invoice-first Receiver'
    WHERE id = v_invoiced_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   UPDATE public.order_items
      SET quantity_delivered = 1, quantity_remaining = 2
    WHERE id = v_invoiced_item;
   UPDATE public.orders SET status = 'partially_fulfilled'
    WHERE id = v_invoiced_order;
+  INSERT INTO public.invoices (
+    invoice_number, customer_id, order_id, invoice_type,
+    status, invoice_date, due_date, total_amount_cents, created_by
+  ) VALUES (
+    'E2E-LIFE-INVOICED-I-' || v_suffix, v_customer, v_invoiced_order,
+    'chemical_sale', 'draft', v_today, v_today + 30, 1000, v_admin
+  ) RETURNING id INTO v_order_level_invoice;
+  INSERT INTO public.invoice_items (
+    invoice_id, product_id, order_item_id, description, quantity,
+    unit_price_cents, extended_cents, cost_cents
+  ) VALUES (
+    v_order_level_invoice, v_product, v_invoiced_item, '[E2E] invoice-first line', 1,
+    1000, 1000, 600
+  );
   SELECT quantity_prebooked INTO v_numeric
     FROM public.inventory
    WHERE product_id = v_product AND location = 'Main Warehouse';
@@ -316,7 +332,7 @@ BEGIN
      OR (SELECT status FROM public.invoices WHERE id = v_order_level_invoice)
        IS DISTINCT FROM 'draft'
      OR (SELECT total_amount_cents FROM public.invoices WHERE id = v_order_level_invoice)
-       IS DISTINCT FROM 3000::bigint
+       IS DISTINCT FROM 1000::bigint
      OR (SELECT quantity_prebooked FROM public.inventory
           WHERE product_id = v_product AND location = 'Main Warehouse')
        IS DISTINCT FROM v_numeric
@@ -360,11 +376,15 @@ BEGIN
   SET status = 'in_progress'
   WHERE id = v_delivery;
 
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_delivery::text, true);
   UPDATE public.deliveries
   SET status = 'completed',
       completed_at = now(),
       signed_by = '[E2E] Lifecycle Receiver'
   WHERE id = v_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
 
   -- Represent the canonical post-completion stock state: four delivered units
   -- have already consumed four of the ten prebooked units.
@@ -465,9 +485,13 @@ BEGIN
     quantity_delivered, unit_size
   ) VALUES (v_tiny_delivery, v_tiny_item, v_product, 1, 1, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_tiny_delivery;
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_tiny_delivery::text, true);
   UPDATE public.deliveries
      SET status = 'completed', completed_at = now(), signed_by = '[E2E] Tiny Receiver'
    WHERE id = v_tiny_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   -- recipient_user_id: commissions must resolve to an active user
   -- (trg_commissions_recipient_resolved, 20260722134252); the [E2E] labels stay.
   INSERT INTO public.commissions (
@@ -492,6 +516,8 @@ BEGIN
 
   -- Exact argument-bound retry proofs for the three invoice wrappers. Each
   -- identical retry replays; the same key with changed target/reason/type fails.
+  -- A zero-quantity line: create_invoice_from_order can no longer bill a product line (it refuses
+  -- any delivery and the delivered cap, 20261029160000, refuses none); the binding is unchanged.
   INSERT INTO public.orders (
     order_number, customer_id, order_date, status, booking_draw
   ) VALUES (
@@ -504,7 +530,7 @@ BEGIN
     quantity_delivered, quantity_remaining
   ) VALUES (
     v_bound_order, v_product, '[E2E] bound invoice line', 10, 6,
-    1, 10, 4, 40, 0, 1
+    0, 0, 0, 40, 0, 0
   ) RETURNING id INTO v_bound_item;
 
   v_bound_invoice := public.create_invoice_from_order(
@@ -619,9 +645,13 @@ BEGIN
       quantity_delivered, unit_size
     ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 2, 'GL');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+    PERFORM set_config('crx.delivery_completion_evidence', v_corrupt_delivery::text, true);
     UPDATE public.deliveries
        SET status = 'completed', completed_at = now(), signed_by = '[E2E] Corrupt Receiver'
      WHERE id = v_corrupt_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
 
     PERFORM public.cancel_order(
       v_corrupt_order, v_admin, 'e2e-life-corrupt-delivery-' || v_suffix
@@ -701,9 +731,13 @@ BEGIN
     ) VALUES (v_corrupt_delivery, v_foreign_item, v_product, 1, 0, 'GL');
     PERFORM set_config('app.admin_override', 'false', true);
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+    PERFORM set_config('crx.delivery_completion_evidence', v_corrupt_delivery::text, true);
     UPDATE public.deliveries
        SET status = 'completed', completed_at = now(), signed_by = '[E2E] Lineage Receiver'
      WHERE id = v_corrupt_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
     PERFORM public.cancel_order(
       v_corrupt_order, v_admin, 'e2e-life-lineage-' || v_suffix
     );
@@ -742,9 +776,13 @@ BEGIN
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
     ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'GL');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+    PERFORM set_config('crx.delivery_completion_evidence', v_corrupt_delivery::text, true);
     UPDATE public.deliveries
        SET status = 'completed', completed_at = now(), signed_by = '[E2E] Customer Lineage Receiver'
      WHERE id = v_corrupt_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
     PERFORM set_config('app.admin_override', 'false', true);
     PERFORM public.cancel_order(
       v_corrupt_order, v_admin, 'e2e-life-customer-lineage-' || v_suffix
@@ -785,9 +823,13 @@ BEGIN
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
     ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'GL');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
+    -- Historical completed-delivery fixture: the completion marker records it the way
+    -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+    PERFORM set_config('crx.delivery_completion_evidence', v_corrupt_delivery::text, true);
     UPDATE public.deliveries
        SET status = 'completed', completed_at = now(), signed_by = '[E2E] No Quote Receiver'
      WHERE id = v_corrupt_delivery;
+    PERFORM set_config('crx.delivery_completion_evidence', '', true);
     PERFORM public.cancel_order(
       v_corrupt_order, v_admin, 'e2e-life-noquote-' || v_suffix
     );
@@ -845,12 +887,14 @@ BEGIN
     'E2E-LIFE-SURVIVE-' || v_suffix, v_customer, v_other_order,
     'chemical_sale', 'draft', v_today, v_today + 30, 0, v_admin
   ) RETURNING id INTO v_surviving_invoice;
+  -- A freight charge: the order has no delivered goods, and the delivered cap (20261029160000)
+  -- refuses any product line on it; the terminal-order line guards apply to every line.
   INSERT INTO public.invoice_items (
-    invoice_id, product_id, description, quantity,
+    invoice_id, charge_type, description, quantity,
     unit_price_cents, extended_cents, cost_cents
   ) VALUES (
-    v_surviving_invoice, v_product, '[E2E] surviving line', 1,
-    1000, 1000, 600
+    v_surviving_invoice, 'freight', '[E2E] surviving line', 1,
+    1000, 1000, 0
   ) RETURNING id INTO v_terminal_invoice_item;
   -- A financial status needs posted_at (invoices_financial_status_requires_posted_at).
   UPDATE public.invoices SET status = 'posted', posted_at = now(), posted_by = v_admin WHERE id = v_surviving_invoice;
@@ -905,9 +949,13 @@ BEGIN
     quantity_delivered, unit_size
   ) VALUES (v_other_delivery, v_blocked_item, v_product, 1, 1, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_other_delivery;
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_other_delivery::text, true);
   UPDATE public.deliveries
      SET status = 'completed', completed_at = now(), signed_by = '[E2E] Block Receiver'
    WHERE id = v_other_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
 
   BEGIN
     UPDATE public.orders SET status = 'cancelled' WHERE id = v_blocked_order;
@@ -1012,9 +1060,13 @@ BEGIN
     quantity_delivered, unit_size
   ) VALUES (v_draw_delivery, v_draw_item, v_product, 1, 1, 'GL');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_draw_delivery;
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_draw_delivery::text, true);
   UPDATE public.deliveries
      SET status = 'completed', completed_at = now(), signed_by = '[E2E] Draw Receiver'
    WHERE id = v_draw_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   UPDATE public.inventory
      SET quantity_prebooked = 1
    WHERE product_id = v_product AND location = 'Main Warehouse';
@@ -1121,9 +1173,13 @@ BEGIN
   ) VALUES (v_deleted_delivery, v_deleted_item, v_product, 2, 2, 'GL');
   UPDATE public.deliveries SET status = 'in_progress'
    WHERE id = v_deleted_delivery;
+  -- Historical completed-delivery fixture: the completion marker records it the way
+  -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
+  PERFORM set_config('crx.delivery_completion_evidence', v_deleted_delivery::text, true);
   UPDATE public.deliveries
      SET status = 'completed', completed_at = now(), signed_by = '[E2E] Historical Receiver'
    WHERE id = v_deleted_delivery;
+  PERFORM set_config('crx.delivery_completion_evidence', '', true);
   PERFORM set_config('session_replication_role', 'replica', true);
   UPDATE public.orders SET deleted_at = now() WHERE id = v_deleted_order;
   PERFORM set_config('session_replication_role', 'origin', true);
@@ -1563,7 +1619,12 @@ BEGIN
   -- Real table privilege proof: authenticated keeps SELECT, while neither a
   -- browser role nor the service role can bypass governed RPCs by mutating
   -- invoice headers, lines, or append-only financial evidence directly.
-  IF NOT has_table_privilege('authenticated', 'public.invoices', 'SELECT')
+  -- Since 20261022101000 (cost columns admin-only) the read is per column: the invoice
+  -- columns stay readable and the cost columns do not.
+  IF NOT has_column_privilege('authenticated', 'public.invoices', 'total_amount_cents', 'SELECT')
+     OR NOT has_column_privilege('authenticated', 'public.invoice_items', 'extended_cents', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.invoices', 'total_cost_cents', 'SELECT')
+     OR has_column_privilege('authenticated', 'public.invoice_items', 'cost_cents', 'SELECT')
      OR has_table_privilege('authenticated', 'public.invoices', 'INSERT')
      OR has_table_privilege('authenticated', 'public.invoices', 'UPDATE')
      OR has_table_privilege('authenticated', 'public.invoices', 'DELETE')

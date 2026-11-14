@@ -9,6 +9,8 @@ interface InvoicePrintDialogProps {
   onClose: () => void;
   invoiceType: string;
   hasShares: boolean;
+  /** A Bill Split invoice prints its payer table unless someone unticks it. */
+  sharesOnByDefault?: boolean;
   onPrint: (options: InvoicePrintOptions) => void;
   loading?: boolean;
 }
@@ -18,12 +20,13 @@ export default function InvoicePrintDialog({
   onClose,
   invoiceType,
   hasShares,
+  sharesOnByDefault = false,
   onPrint,
   loading = false,
 }: InvoicePrintDialogProps) {
   const isFieldApp = invoiceType === 'field_application';
 
-  const [showShares, setShowShares] = useState(isFieldApp && hasShares);
+  const [showShares, setShowShares] = useState(sharesOnByDefault || (isFieldApp && hasShares));
   const [showPricePerAcre, setShowPricePerAcre] = useState(isFieldApp);
   const [showEpa, setShowEpa] = useState(true);
   // Field-app parity #30: ChemMan "Print" (current) vs "Old Print" (legacy).
@@ -83,8 +86,9 @@ export default function InvoicePrintDialog({
                 className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
               />
               <div>
-                <div className="text-sm font-medium text-nav-dark">Show grower shares</div>
-                <div className="text-xs text-secondary">Display split percentages, acres, and amounts per grower</div>
+                {/* Only a Bill Split prints its shares by default; its payers may be landlords, not growers. */}
+                <div className="text-sm font-medium text-nav-dark">{sharesOnByDefault ? 'Show payer shares' : 'Show grower shares'}</div>
+                <div className="text-xs text-secondary">{sharesOnByDefault ? 'Display each payer, their share and amount' : 'Display split percentages, acres, and amounts per grower'}</div>
               </div>
             </label>
           )}

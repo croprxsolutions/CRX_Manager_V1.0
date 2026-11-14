@@ -12,6 +12,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchAllRows } from '../lib/pagedRead';
 import { withSenderNames } from '../lib/activityLogger';
 import type { Notification as NotificationType } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 export default function Notifications() {
   const { profile } = useAuth();
@@ -81,7 +82,7 @@ export default function Notifications() {
           prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n))
         );
       } catch (err: unknown) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'mark_notification_read' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'mark_notification_read' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -131,7 +132,7 @@ export default function Notifications() {
       if (markAllResult.error) throw markAllResult.error;
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'mark_all_notifications_read' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'mark_all_notifications_read' } });
       toast('error', sanitizeError(err));
     }
   };

@@ -1,5 +1,6 @@
 import { supabase } from './db';
 import { Sentry } from './sentry';
+import { toSentryError } from './sentryError';
 
 export interface OpenBooking {
   id: string;
@@ -30,7 +31,7 @@ export async function fetchOpenBookings(customerId: string): Promise<OpenBooking
     return (data || []) as OpenBooking[];
   } catch (error) {
     Sentry.captureException(
-      error instanceof Error ? error : new Error(String(error)),
+      toSentryError(error),
       { tags: { source: 'fetch', action: 'open_bookings' } }
     );
     return [];

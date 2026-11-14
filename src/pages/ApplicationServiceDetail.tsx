@@ -1,3 +1,4 @@
+import { toSentryError } from '../lib/sentryError';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
@@ -243,7 +244,7 @@ export default function ApplicationServiceDetail() {
         toast('success', costKnown ? 'Service saved' : 'Service saved — cost/acre left unchanged (it could not be loaded)'); setIsDirty(false);
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_application_service' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_application_service' } });
       toast('error', sanitizeError(err));
     }
     setSaving(false);

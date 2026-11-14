@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../ui/Toast';
 import { useRealtimeComments } from '../../hooks/useRealtimeSubscription';
 import Button from '../ui/Button';
+import { toSentryError } from '../../lib/sentryError';
 
 interface Comment {
   id: string;
@@ -175,7 +176,7 @@ export default function CommentsSection({ noteId }: CommentsSectionProps) {
       setEditContent('');
       fetchComments();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'CommentsSection.handleEditComment' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'CommentsSection.handleEditComment' } });
       toast('error', sanitizeError(err));
     }
     setSending(false);
@@ -197,7 +198,7 @@ export default function CommentsSection({ noteId }: CommentsSectionProps) {
       toast('success', 'Comment deleted');
       fetchComments();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'CommentsSection.handleDeleteComment' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'CommentsSection.handleDeleteComment' } });
       toast('error', sanitizeError(err));
     }
   };

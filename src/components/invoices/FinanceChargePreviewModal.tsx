@@ -23,6 +23,7 @@ import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
 import { LoadFailedState } from '../ui/EmptyState';
 import type { FinanceChargePreview } from '../../types';
 import { formatCents as fmtCents } from '../../lib/money';
+import { toSentryError } from '../../lib/sentryError';
 
 interface FinanceChargePreviewModalProps {
   open: boolean;
@@ -72,7 +73,7 @@ export default function FinanceChargePreviewModal({
       setSelected(new Set(rows.map((r) => r.customer_id)));
     } catch (err: unknown) {
       if (seq !== previewLoadSeq.current) return;
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'FinanceChargePreviewModal.fetchPreview' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'FinanceChargePreviewModal.fetchPreview' } });
       toast('error', sanitizeError(err));
       // Nothing to generate from a failed preview, so no stale or partial list stays selectable.
       setPreviews([]);
@@ -146,7 +147,7 @@ export default function FinanceChargePreviewModal({
       onClose();
       onSuccess();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'FinanceChargePreviewModal.handleGenerate' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'FinanceChargePreviewModal.handleGenerate' } });
       toast('error', sanitizeError(err));
     }
     setGenerating(false);

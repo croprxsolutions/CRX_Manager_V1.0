@@ -47,7 +47,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Any Rep Prices Farm ' || v_suffix) RETURNING id INTO v_c1;
-  INSERT INTO products (product_name, unit_size) VALUES ('[SMOKE] Any Rep P ' || v_suffix, 'gal') RETURNING id INTO v_p;
+  INSERT INTO products (product_name, unit_size, product_form) VALUES ('[SMOKE] Any Rep P ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_p;
   v_price_res := preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(
       jsonb_build_object('product_id', v_p, 'row_version', (SELECT pricing_version FROM products WHERE id = v_p),

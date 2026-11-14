@@ -179,7 +179,11 @@ describe('PricingChangePreviewModal', () => {
 
     expect(screen.getByText('Product information')).toBeInTheDocument();
     expect(screen.getByText('Quoting notes')).toBeInTheDocument();
-    expect(screen.getByText('Prefer early-season placement')).toBeInTheDocument();
+    // Once as the quoting note, once as what new quote lines show (blank before: the description).
+    expect(screen.getAllByText('Prefer early-season placement')).toHaveLength(2);
+    expect(screen.getByText('New quote lines show')).toBeInTheDocument();
+    expect(screen.getByText("(the product's description)")).toBeInTheDocument();
+    expect(screen.getByText('Existing quotes keep their notes.')).toBeInTheDocument();
     expect(screen.queryByText('Cost')).not.toBeInTheDocument();
   });
 

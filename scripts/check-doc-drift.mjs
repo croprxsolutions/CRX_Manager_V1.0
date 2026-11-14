@@ -183,9 +183,9 @@ function manualDocChecks(manualDocs) {
 
 // HARD freshness gate (2026-07-16 scaffolding review): the two docs that describe
 // LIVE state must not claim a "Last verified" date OLDER than the newest migration
-// on disk, capped at today's America/Chicago calendar date. A future stamp cannot
-// truthfully force a future verification claim before that business date arrives;
-// on and after that date the normal freshness rule applies. A migration dated after
+// on disk that is already due (dated on or before today's America/Chicago date).
+// A future-dated migration counts only once its date arrives (Mason, 2026-11-09);
+// until then it neither raises the bar nor makes "today" the bar. A migration dated after
 // the stamp means the schema/behavior changed
 // after the doc was last checked — so its freshness promise is stale. This is the
 // forcing function the manual layer lacked: within 48h of shipping, KNOWN_ISSUES
@@ -202,13 +202,11 @@ try {
 } catch { /* keep FAIL */ }
 liveStateFreshness(["CURRENT_STATE.md", "KNOWN_ISSUES.md"], staleStatus);
 function liveStateFreshness(docs, staleStatus) {
-  const newestMigDate = migrations
+  const migrationDates = migrations
     .map((name) => name.match(/^(\d{8})/)?.[1])
-    .filter(Boolean)
-    .sort()
-    .at(-1); // YYYYMMDD of the newest migration
+    .filter(Boolean); // YYYYMMDD of each migration
   const todayChicago = chicagoCalendarStamp();
-  const freshnessDate = manualFreshnessBoundary(newestMigDate, todayChicago);
+  const freshnessDate = manualFreshnessBoundary(migrationDates, todayChicago);
   for (const doc of docs) {
     const rel = `docs/manual/${doc}`;
     if (!existsSync(path.join(ROOT, rel))) continue; // the "stamp present" check above already failed this
@@ -218,7 +216,7 @@ function liveStateFreshness(docs, staleStatus) {
     const fresh = !freshnessDate || stampDate >= freshnessDate;
     row(`manual freshness ${doc}`, `stamp >= freshness boundary (${freshnessDate ?? "none"})`, `stamp ${stampDate}`,
       fresh ? "PASS" : staleStatus,
-      fresh ? "" : `migration ${newestMigDate} requires freshness through ${freshnessDate} (America/Chicago today ${todayChicago}) but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
+      fresh ? "" : `migration ${freshnessDate} (newest one due by America/Chicago today ${todayChicago}) requires freshness through ${freshnessDate} but this doc is older — re-verify it against live state (list_migrations / the live schema), correct anything stale, THEN bump the stamp. Do not bump the date without re-reading.${staleStatus === "WARN" ? " (warning only: this change adds no migration and leaves both docs alone)" : ""}`);
 }
 
 }

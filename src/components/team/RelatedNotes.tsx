@@ -10,6 +10,7 @@ import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import type { LinkedEntityType, TeamNote, NotePriority } from '../../types';
 import type { BadgeVariant } from '../ui/Badge';
+import { toSentryError } from '../../lib/sentryError';
 
 interface RelatedNotesProps {
   entityType: LinkedEntityType;
@@ -63,7 +64,7 @@ export default function RelatedNotes({ entityType, entityId, onCreateTask }: Rel
       setNotes([]);
       setLoadError(true);
       setExpanded(true);
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'fetch', component: 'RelatedNotes', rpc: 'get_notes_for_entity' },
         extra: { context: 'RelatedNotes.load', entityType },
       });

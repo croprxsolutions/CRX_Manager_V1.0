@@ -205,6 +205,14 @@ describe('ProductDetailRoute', () => {
     expect(screen.queryByDisplayValue('X-only edit')).not.toBeInTheDocument();
   });
 
+  it.each(['group', 'not-a-uuid'])('shows not found for /products/%s without asking the database (KI-116)', async (id) => {
+    const router = mountAt(id);
+    expect(await screen.findByText('Product not found')).toBeInTheDocument();
+    expect(mockProductRead).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Products' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/products'));
+  });
+
   it('is the element the page list routes products/:id through', () => {
     const source = readFileSync('src/appPages.tsx', 'utf8');
     expect(source).toMatch(/\{ path: 'products\/:id', element: <ProductDetailRoute \/> \}/);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { assertRpcResult, supabaseUntyped } from './db';
 import { Sentry } from './sentry';
 import type { ProductRatePerAcre } from '../types';
+import { toSentryError } from './sentryError';
 
 // PAR-1 (20261108120000_product_parents): one parent per formulation owns category, use timings and
 // rates; the database copies them onto every size. These RPCs are not in the generated types yet.
@@ -288,7 +289,7 @@ export function useProductParents(reloadToken = 0): { parents: ProductParent[]; 
     getProductParents(null)
       .then((loaded) => { if (!cancelled) setParents(loaded); })
       .catch((error: unknown) => {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'get_product_parents' } });
+        Sentry.captureException(toSentryError(error), { extra: { context: 'get_product_parents' } });
       });
     return () => { cancelled = true; };
   }, [reloadToken]);

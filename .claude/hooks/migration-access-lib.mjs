@@ -44,7 +44,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { stripCommentsQuoteAware, stripFunctionBodiesOnly } from "./live-testdata-lib.mjs";
+import { destructiveMigrationCheck, stripCommentsQuoteAware, stripFunctionBodiesOnly } from "./live-testdata-lib.mjs";
 
 const IDENT = String.raw`(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)`;
 const QNAME = String.raw`${IDENT}(?:\s*\.\s*${IDENT})?`;
@@ -734,12 +734,17 @@ function functionDefinitions(text) {
 // strings, which are deliberately left visible.
 function rowWrite(body) {
   const text = stripCommentsQuoteAware(body).replace(/\s+/g, " ");
-  if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
-  if (/\bdelete\s+from\b/i.test(text)) return "deletes rows (DELETE)";
-  if (/\btruncate\b/i.test(text)) return "empties a table (TRUNCATE)";
-  if (/\bon\s+conflict\b[^;]*?\bdo\s+update\b/i.test(text)) return "overwrites existing rows (INSERT ... ON CONFLICT DO UPDATE)";
-  if (/\bmerge\s+into\b/i.test(text)) return "may overwrite existing rows (MERGE)";
+  // Data loss and dynamic SQL first: they stay Mason's (2026-11-11), so a body
+  // that also UPDATEs must still report them (Codex P1 x4, PR #1799). The body
+  // runs through the SAME check a top-level migration gets, so every form it
+  // knows (DELETE, TRUNCATE, MERGE, DROP TABLE/COLUMN/SCHEMA/TYPE/DOMAIN/...)
+  // counts here too. A check that throws counts as data loss (fail closed).
+  let lost;
+  try { lost = destructiveMigrationCheck(body); } catch { lost = { destructive: true, reason: "the body could not be checked" }; }
+  if (lost.destructive) return `deletes rows (${lost.reason})`;
   if (DYNAMIC_SQL_RE.test(text)) return "runs dynamic SQL that could change existing rows";
+  if (new RegExp(String.raw`\bupdate\s+(?:only\s+)?${QNAME}(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").test(text)) return "changes existing rows (UPDATE)";
+  if (/\bon\s+conflict\b[^;]*?\bdo\s+update\b/i.test(text)) return "overwrites existing rows (INSERT ... ON CONFLICT DO UPDATE)";
   return null;
 }
 
@@ -826,19 +831,23 @@ export function dataRewriteCheck(sql, { history } = {}) {
   const created = createdObjects(statements);
   const hit = (reason) => ({ rewrites: true, reason });
   const existing = (raw) => !created.tables.has(objectKey(raw));
+  // A plain rewrite no longer ends the scan (Codex P1, PR #1799): a delete in a
+  // function called later must still be what this reports.
+  let first = null;
+  const note = (reason) => { if (!first) first = hit(reason); };
 
   for (const statement of statements) {
     const update = new RegExp(String.raw`\bupdate\s+(?:only\s+)?(${QNAME})(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "i").exec(statement);
-    if (update && existing(update[1])) return hit(`it changes existing rows in ${objectKey(update[1])} (UPDATE)`);
+    if (update && existing(update[1])) note(`it changes existing rows in ${objectKey(update[1])} (UPDATE)`);
     if (/\bon\s+conflict\b.*\bdo\s+update\b/i.test(statement)) {
       const into = new RegExp(String.raw`\binsert\s+into\s+(${QNAME})`, "i").exec(statement);
-      if (!into || existing(into[1])) return hit(`it overwrites existing rows in ${into ? objectKey(into[1]) : "a table"} (INSERT ... ON CONFLICT DO UPDATE)`);
+      if (!into || existing(into[1])) note(`it overwrites existing rows in ${into ? objectKey(into[1]) : "a table"} (INSERT ... ON CONFLICT DO UPDATE)`);
     }
     const merge = new RegExp(String.raw`\bmerge\s+into\s+(${QNAME})`, "i").exec(statement);
-    if (merge && existing(merge[1])) return hit(`it may overwrite existing rows in ${objectKey(merge[1])} (MERGE)`);
+    if (merge && existing(merge[1])) note(`it may overwrite existing rows in ${objectKey(merge[1])} (MERGE)`);
     const alter = new RegExp(String.raw`^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(${QNAME})(.*)$`, "i").exec(statement);
     if (alter && existing(alter[1]) && new RegExp(String.raw`\balter\s+(?:column\s+)?${IDENT}\s+(?:set\s+data\s+)?type\b`, "i").test(alter[2])) {
-      return hit(`it converts the existing values of a column in ${objectKey(alter[1])} (ALTER COLUMN ... TYPE)`);
+      note(`it converts the existing values of a column in ${objectKey(alter[1])} (ALTER COLUMN ... TYPE)`);
     }
   }
 
@@ -879,11 +888,58 @@ export function dataRewriteCheck(sql, { history } = {}) {
     if (NO_APPLY_TIME_CALLS_RE.test(statement)) continue;
     for (const raw of callsIn(statement)) calls.push({ raw, via: [] });
   }
+
+  // Triggers (Codex P1, PR #1799): a row write fires every trigger on its table,
+  // so their functions join the walk. Triggers come from this migration and the
+  // history; a later DROP TRIGGER is not tracked, which only over-includes.
+  // Only INSERT/UPDATE triggers: the writes followed here (UPDATE, upsert, MERGE's
+  // update/insert arms) never fire DELETE- or TRUNCATE-only triggers; MERGE's
+  // delete arm is already a delete in rowWrite().
+  const triggerRe = new RegExp(String.raw`\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+${IDENT}\s+((?:before|after|instead\s+of)\b[^;]*?)\bon\s+(${QNAME})[^;]*?\bexecute\s+(?:function|procedure)\s+(${QNAME})\s*\(`, "gi");
+  const triggers = new Map();
+  const addTriggers = (text) => {
+    for (const [, events, ...m] of text.matchAll(triggerRe)) {
+      if (!/\b(?:insert|update)\b/i.test(events)) continue;
+      const table = objectKey(m[0]);
+      if (!triggers.has(table)) triggers.set(table, new Set());
+      triggers.get(table).add(m[1]);
+    }
+  };
+  addTriggers(blankStringLiterals(applyTime));
+  if (Array.isArray(history)) {
+    for (const file of history) {
+      try { addTriggers(blankStringLiterals(stripCommentsQuoteAware(stripFunctionBodiesOnly(String(file.text || "")), { intoDollarBodies: true }))); }
+      catch { return hit("an earlier migration could not be read for triggers, so this check cannot tell what a row change here sets off"); }
+    }
+  }
+  const writeTargets = (text) => [
+    ...text.matchAll(new RegExp(String.raw`\bupdate\s+(?:only\s+)?(${QNAME})(?:\s*\*)?\s+(?:(?:as\s+)?${IDENT}\s+)?set\b`, "gi")),
+    // Any INSERT, not only upserts: an insert trigger can remove rows too (Codex P1).
+    ...text.matchAll(new RegExp(String.raw`\binsert\s+into\s+(${QNAME})`, "gi")),
+    ...text.matchAll(new RegExp(String.raw`\bmerge\s+into\s+(${QNAME})`, "gi")),
+  ].map((m) => objectKey(m[1]));
+  const fired = new Set();
+  // Returns a refusal when an existing table's triggers cannot be known.
+  const fire = (table, via) => {
+    if (fired.has(table)) return null;
+    fired.add(table);
+    if (!Array.isArray(history) && !created.tables.has(table)) {
+      return hit(`it changes rows in ${table}, and without the migration history this check cannot tell whether a trigger on that table deletes data`);
+    }
+    for (const fn of triggers.get(table) || []) calls.push({ raw: fn, via: [...via, `trigger on ${table}`] });
+    return null;
+  };
+  for (const statement of statements) {
+    for (const table of writeTargets(statement)) { const refused = fire(table, []); if (refused) return refused; }
+  }
+
   const seen = new Set();
   while (calls.length) {
     const { raw, via } = calls.shift();
     const key = objectKey(raw);
-    if (seen.has(key) || via.length > 8) continue;
+    if (seen.has(key)) continue;
+    // Too deep to read: fail closed so the owner-approval rule keeps it (Codex P2).
+    if (via.length > 8) return hit(`it runs ${[...via, `${key}()`].join(" → ")} while applying, deeper than this check reads, so it cannot tell whether that changes existing rows`);
     seen.add(key);
     // Earlier overloads stay in play; a definition here replaces the same arity.
     const earlier = fromHistory(key);
@@ -898,13 +954,16 @@ export function dataRewriteCheck(sql, { history } = {}) {
     for (const body of bodies.values()) {
       if (body === null) return hit(`it runs ${named} while applying, and that function's body cannot be read`);
       const write = rowWrite(body);
-      if (write) return hit(`it runs ${named} while applying, which ${write}`);
+      if (write && /deletes rows|empties a table|dynamic SQL/.test(write)) return hit(`it runs ${named} while applying, which ${write}`);
+      if (write) note(`it runs ${named} while applying, which ${write}`);
+      const bodyText = blankStringLiterals(stripCommentsQuoteAware(body));
+      for (const table of writeTargets(bodyText)) { const refused = fire(table, [...via, `${key}()`]); if (refused) return refused; }
       // Literals blanked: a name inside a string (an assertion message, a
       // to_regprocedure() argument) is not a call.
       for (const raw of callsIn(blankStringLiterals(stripCommentsQuoteAware(body)))) calls.push({ raw, via: [...via, `${key}()`] });
     }
   }
-  return { rewrites: false };
+  return first || { rewrites: false };
 }
 
 // `history`: the earlier migration files from readMigrationHistory(). Leave it
@@ -921,14 +980,16 @@ export function accessChangeCheck(sql, { history } = {}) {
   const created = createdObjects(statements);
   const hit = (reason) => ({ changesAccess: true, reason });
 
+  // Dynamic SQL run at apply time (EXECUTE inside a DO block) can do anything,
+  // including grants or deletes this reader cannot see in a string or variable.
+  // Checked across every statement first, so an earlier plain GRANT cannot hide
+  // it (Codex P1, PR #1799). Not the privilege name (`GRANT EXECUTE ON`) or
+  // trigger syntax (`EXECUTE FUNCTION`).
+  if (statements.some((statement) => /\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i.test(statement)
+    && !/^(?:grant|revoke)\b/i.test(statement))) {
+    return hit("it runs dynamic SQL at apply time, which could change access in ways this check cannot read");
+  }
   for (const statement of statements) {
-    // Dynamic SQL run at apply time (EXECUTE inside a DO block) can do anything,
-    // including grants this reader cannot see in a string or variable. Not the
-    // privilege name (`GRANT EXECUTE ON`) or trigger syntax (`EXECUTE FUNCTION`).
-    if (/\bexecute\b(?!\s+(?:on|function|procedure)\b)(?!\s*,)/i.test(statement)
-      && !/^(?:grant|revoke)\b/i.test(statement)) {
-      return hit("it runs dynamic SQL at apply time, which could change access in ways this check cannot read");
-    }
     const schema = protectedSchemaReference(statement);
     if (schema) return hit(`it touches ${schema[1].toLowerCase()}.${schema[2].replace(/"/g, "")} (logins, file access or secrets)`);
 

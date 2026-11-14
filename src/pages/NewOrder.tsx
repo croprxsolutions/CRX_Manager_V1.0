@@ -41,6 +41,7 @@ import { inventoryPositionByProduct } from '../lib/inventoryPositionLookup';
 import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
 import { PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
 import type { Product, Customer, InventoryPositionRow } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 // The order prices from the chosen customer's tier, so the picker reads it with the row.
 const ORDER_CUSTOMER_SELECT = `${CUSTOMER_SEARCH_SELECT}, assigned_tier`;
@@ -275,7 +276,7 @@ export default function NewOrder() {
         validateInventoryPositionShape(positionRows);
         setInventoryByProduct(inventoryPositionByProduct(positionRows));
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'parse_inventory_position' } });
+        Sentry.captureException(toSentryError(err), { tags: { source: 'fetch', action: 'parse_inventory_position' } });
         toast('error', 'Inventory position data was malformed. Please refresh.');
         setInventoryByProduct({});
       }

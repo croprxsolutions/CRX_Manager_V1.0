@@ -15,6 +15,8 @@ const H = vi.hoisted(() => ({
   failing: new Map<string, FailMode>(),
   toast: vi.fn(),
   printed: vi.fn(),
+  dialogProps: {} as Record<string, unknown>,
+  closedRenders: 0,
 }));
 
 function replyFor(table: string): { data: unknown; error: unknown; count: number | null } {
@@ -44,7 +46,16 @@ function query(table: string): Record<string, unknown> {
 
 vi.mock('../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../lib/db')>('../lib/db');
-  const client = { from: (table: string) => query(table === 'invoices_postable' ? 'invoices' : table), rpc: vi.fn() };
+  // get_bill_split_payers answers with every invoice in the selected invoice's group, as the database does.
+  const rpc = (fn: string, args: { p_invoice_id?: string }) => {
+    if (fn !== 'get_bill_split_payers') return Promise.resolve({ data: null, error: { message: `unexpected ${fn}` } });
+    const all = (H.tables.invoices as Array<Record<string, unknown>>) ?? [];
+    const group = all.find((i) => i.id === args.p_invoice_id)?.invoice_group_id;
+    const rows = all.filter((i) => group && i.invoice_group_id === group).map((i) => ({ id: i.id, invoice_number: i.invoice_number,
+      total_amount_cents: i.total_amount_cents, farm_name: (i.customer as { farm_name?: string } | null)?.farm_name ?? null }));
+    return Promise.resolve({ data: rows, error: null, count: rows.length });
+  };
+  const client = { from: (table: string) => query(table === 'invoices_postable' ? 'invoices' : table), rpc };
   return { ...actual, supabase: client, supabaseUntyped: client };
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), captureMessage: vi.fn() } }));
@@ -59,8 +70,10 @@ vi.mock('../lib/invoicePdf', async (importOriginal) => ({
   generateBatchInvoicePdf: async (list: unknown[]) => { H.printed(list); return { doc: {}, failures: [] }; },
 }));
 vi.mock('../components/invoices/InvoicePrintDialog', () => ({
-  default: ({ open, onPrint }: { open: boolean; onPrint: (options: Record<string, never>) => void }) =>
-    (open ? <button type="button" onClick={() => onPrint({})}>Print with defaults</button> : null),
+  default: (props: { open: boolean; onPrint: (options: Record<string, never>) => void }) => {
+    if (props.open) H.dialogProps = props; else H.closedRenders += 1;
+    return props.open ? <button type="button" onClick={() => props.onPrint({})}>Print with defaults</button> : null;
+  },
 }));
 
 import Invoices from './Invoices';
@@ -86,6 +99,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-09T12:00:00'));
   H.failing = new Map();
+  H.closedRenders = 0;
   H.tables = {
     invoices: [posted],
     invoice_items: [line],
@@ -103,6 +117,42 @@ describe('Invoices — Print Selected', () => {
     await printSelected();
     await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
     expect(H.printed.mock.calls[0][0][0]).toMatchObject({ invoice_number: 'CS-1001', customer_address: '9 Barn Rd' });
+  });
+
+  it("prints a Bill Split payer's invoice with the sale's payer table, as its own page does", async () => {
+    const split = { ...posted, invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
+    H.tables.invoices = [
+      { ...split, invoice_number: 'CS-1001-1', total_amount_cents: 6000 },
+      { ...split, id: 'inv-2', invoice_number: 'CS-1001-2', total_amount_cents: 4000, customer: { farm_name: 'Landlord' } },
+    ];
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+    expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
+    await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
+    // Mason, 9 Nov (A): every payer's invoice shows every payer, so batch print ticks the table by default.
+    expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
+    // Mounted only when opened, so its ticked-by-default state is set from this selection, not the empty first load.
+    expect(H.closedRenders).toBe(0);
+    expect(H.printed.mock.calls[0][0][0].shares).toMatchObject([
+      { invoice_number: 'CS-1001-1', customer_name: 'Farmer', split_percentage: 60, amount_cents: 6000 },
+      { invoice_number: 'CS-1001-2', customer_name: 'Landlord', split_percentage: 40, amount_cents: 4000 },
+    ]);
+  });
+
+  it("a payer's misc charge invoice in a Bill Split is printed with the payer table on too", async () => {
+    const split = { ...posted, invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
+    H.tables.invoices = [
+      { ...split, invoice_number: 'CS-1001-1', total_amount_cents: 6000 },
+      { ...split, id: 'inv-2', invoice_number: 'CS-1001-2', total_amount_cents: 4000, customer: { farm_name: 'Landlord' } },
+    ];
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+    expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('checkbox')[1]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    await screen.findByRole('button', { name: 'Print with defaults' });
+    expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
   });
 
   const cases: Array<[string, FailMode]> = [

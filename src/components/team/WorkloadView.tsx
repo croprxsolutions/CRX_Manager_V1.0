@@ -4,6 +4,7 @@ import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
 import Badge from '../ui/Badge';
+import { toSentryError } from '../../lib/sentryError';
 
 interface TeamMemberWorkload {
   id: string;
@@ -47,7 +48,7 @@ export default function WorkloadView() {
         const { data } = await supabase.rpc('get_team_workload');
         if (data) setMembers(assertRpcResult<TeamMemberWorkload[]>(data, 'get_team_workload'));
       } catch (err: unknown) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'WorkloadView.load' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'WorkloadView.load' } });
         toast('error', err instanceof Error ? err.message : 'Failed to load workload data');
       } finally {
         setLoading(false);

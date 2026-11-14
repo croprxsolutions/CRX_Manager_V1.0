@@ -1694,14 +1694,18 @@ function reviewProofValid(data, headSha, nowMs, ranKey, expectedBaseSha, maxAgeM
 // only renamed a migration to a new timestamp, with byte-identical SQL.
 // A "post_apply" carry (Mason, 2026-11-04) keeps the same base too: its one new
 // commit only updated the records after a live migration apply.
+// An "owner_accepted" carry (Mason, 2026-11-10) keeps the same base: the reviewed
+// run found BLOCKER/HIGH findings, Mason accepted every one by `accept <code>`, and
+// the one new commit only adds that DECISION_LOG.md entry (sol-accept-lib.mjs).
 const CARRY_SHA_RE = /^[0-9a-f]{40}$/i;
 export function carriedSolProof(data) {
   const carry = data?.carry;
   return data?.codex_ran === false
     && data.carried_forward === true
     && !!carry && typeof carry === "object"
-    && (carry.mode === "restamp" || carry.mode === "post_apply"
+    && (carry.mode === "restamp" || carry.mode === "post_apply" || carry.mode === "owner_accepted"
       ? carry.from_base === data.base_sha
+        && (carry.mode !== "owner_accepted" || (Array.isArray(data.owner_accepted) && data.owner_accepted.length > 0))
       : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha)
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))

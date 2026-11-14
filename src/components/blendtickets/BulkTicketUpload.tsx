@@ -1,3 +1,4 @@
+import { toSentryError } from '../../lib/sentryError';
 import { useEffect, useState, useRef } from 'react';
 import { Upload, X, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import Button from '../ui/Button';
@@ -242,7 +243,7 @@ export function BulkTicketUpload({ customers, onUploadComplete }: BulkTicketUplo
     }).catch((err) => {
       // Non-fatal: the fallback polling in useOCRProcessor will pick it up.
       Sentry.captureException(
-        err instanceof Error ? err : new Error(String(err)),
+        toSentryError(err),
         {
           level: 'warning',
           extra: { context: 'Edge Function trigger failed — will retry via polling' },
@@ -467,7 +468,7 @@ export function BulkTicketUpload({ customers, onUploadComplete }: BulkTicketUplo
         }
       }
       Sentry.captureException(
-        err instanceof Error ? err : new Error(String(err)),
+        toSentryError(err),
         { extra: { context: 'Upload error', ticketId, definiteRollback } },
       );
       setError(commitStatusUncertain

@@ -1,7 +1,7 @@
 ## 2026-11-08 — Job access ends with the job (KI-01 part C, KI-73, To-Do row 11.4)
 
 Part C of the row 11.4 fix plan in `docs/manual/KNOWN_ISSUES.md`. One new migration,
-`20261217100000_job_access_ends_with_the_job.sql` (not applied), and a checked-in disposable prover
+`20261217100000_job_access_ends_with_the_job.sql` (applied live 2026-11-09, ledger `20261109052957`), and a checked-in disposable prover
 (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). No screen changed. Scope is
 Mason's 2026-10-25 decision (`DECISION_LOG.md`): someone sent to a job sees the entire job while the
 assignment is current.

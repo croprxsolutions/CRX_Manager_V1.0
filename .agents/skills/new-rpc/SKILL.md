@@ -169,6 +169,7 @@ That combination is exactly what `rls-security-reviewer` looks for.
   `SECURITY DEFINER` bypasses RLS and therefore must enforce role/active-profile checks in its body
 - `p_idempotency_key text DEFAULT NULL` — REQUIRED on all mutating functions
 - idempotency lookup MUST include `AND operation = '<function_name>'` — an unscoped lookup is hard-denied by the idempotency hook
+- If the RPC acts on a row that can be reset or re-queued (a status flipped back, an upsert that revives a cancelled row), save which version of the row it acted on (e.g. its reset timestamp) in the result, and decide up front what a retry does when that version changed: refuse it, never act on the newer row or answer for it (PR #1678 took two Sol rounds on this)
 - idempotency_keys columns: `idempotency_key`, `operation`, `result` — NEVER `key`, `entity_type`, `entity_id`
 - `result` column is `jsonb` — NEVER cast to `::text`
 - Deliberate grants on EVERY function: `REVOKE ALL ... FROM PUBLIC, anon;` + `GRANT EXECUTE ... TO authenticated;` — REVOKE FROM PUBLIC alone does NOT de-anon

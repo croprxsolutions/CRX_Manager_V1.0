@@ -6,6 +6,7 @@ import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import {
   buildStoragePath,
   canAccessCustomerDocuments,
+  canDownloadDocument,
   DOCUMENT_BUCKET,
   isServerIssuedPath,
   parseDocumentFileRequest,
@@ -175,8 +176,8 @@ Deno.serve(async (req: Request) => {
     const document = documentRow as
       | { id: string; customer_id: string; storage_path: string; deleted_at: string | null }
       | null;
-    // A removed document answers exactly like a missing one.
-    if (!document || document.deleted_at !== null) {
+    // A removed document answers exactly like a missing one, except to an admin.
+    if (!document || !canDownloadDocument(role, document.deleted_at)) {
       return jsonResponse({ error: "This document is no longer available." }, 404);
     }
     if (!await authorizeCustomer(document.customer_id)) {

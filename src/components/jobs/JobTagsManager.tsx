@@ -10,6 +10,7 @@ import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import type { JobTag } from '../../types';
 import { JOB_TAG_COLORS, DEFAULT_JOB_TAG_COLOR } from './jobTagColors';
+import { toSentryError } from '../../lib/sentryError';
 
 interface JobTagsManagerProps {
   open: boolean;
@@ -88,7 +89,7 @@ export default function JobTagsManager({ open, onClose, tags, onChanged }: JobTa
       if (code === '23505') {
         toast('error', 'A tag with that name already exists');
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobTagsManager.createTag' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'JobTagsManager.createTag' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -123,7 +124,7 @@ export default function JobTagsManager({ open, onClose, tags, onChanged }: JobTa
       if (code === '23505') {
         toast('error', 'A tag with that name already exists');
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobTagsManager.saveTag' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'JobTagsManager.saveTag' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -144,7 +145,7 @@ export default function JobTagsManager({ open, onClose, tags, onChanged }: JobTa
       setDeleteTarget(null);
       onChanged();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobTagsManager.confirmDelete' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'JobTagsManager.confirmDelete' } });
       toast('error', sanitizeError(err));
     }
     setDeleting(false);

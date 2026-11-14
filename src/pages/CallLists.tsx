@@ -13,6 +13,7 @@ import { Sentry } from '../lib/sentry';
 import { formatCents } from '../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import { ALLOWED_CROPS, type CropValue } from '../lib/crops';
+import { toSentryError } from '../lib/sentryError';
 
 type CallListKey = 'prepay' | 'no-recent-contact' | 'stale-quotes' | 'lapsed-products' | 'unassigned-accounts';
 
@@ -477,7 +478,7 @@ export default function CallLists() {
       setRows([]);
       setEnrichmentLoading(false);
       setLoadError(true);
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CallLists.load', list: selectedList } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CallLists.load', list: selectedList } });
       toast('error', 'We could not load this call list. Please retry.');
     } finally {
       if (seq === requestSeq.current) setLoading(false);

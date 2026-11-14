@@ -131,7 +131,7 @@ function GoToBillA() {
   return <button onClick={() => navigate(`/accounts-payable/bills/${BILL_A}`)}>go-to-bill-a</button>;
 }
 
-const OVERAGE_PROMPT = /Why should cumulative billing exceed/i;
+const OVERAGE_PROMPT = /Why should billing exceed what was received or ordered/i;
 
 describe('VendorBillDetail route change with the overage prompt open', () => {
   beforeEach(() => {

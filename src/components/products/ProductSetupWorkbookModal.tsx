@@ -108,9 +108,21 @@ function ParentRatesTabPreview({ rows, previews, saved, busy, blocked, onConfirm
 function SetupTabPreview({ setup, saved, busy, blocked, onConfirm }: {
   setup: SetupPreview; saved: string[] | null; busy: boolean; blocked: boolean; onConfirm: () => void;
 }) {
+  const [onlyQuoteLines, setOnlyQuoteLines] = useState(false);
+  const quoteLineCount = setup.changes.filter((row) => row.quote_line).length;
+  const rows = onlyQuoteLines ? setup.changes.filter((row) => row.quote_line) : setup.changes;
   return (
     <section className="space-y-2 rounded-lg border border-gray-200 p-3" aria-label="Setup tab preview">
       <h3 className="font-semibold text-nav-dark">Setup tab: {plural(setup.changes.length)} to change</h3>
+      {quoteLineCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-50 p-2 text-amber-900">
+          <p>{plural(quoteLineCount)} change what new quote lines show. Existing quotes keep their notes.</p>
+          <label className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" checked={onlyQuoteLines} onChange={(e) => setOnlyQuoteLines(e.target.checked)} />
+            Show only these
+          </label>
+        </div>
+      )}
       {[...setup.stale, ...setup.invalid].map((p) => (
         <p key={p.product_id} className="text-red-700">{p.product_name}: {p.problem}</p>
       ))}
@@ -122,16 +134,26 @@ function SetupTabPreview({ setup, saved, busy, blocked, onConfirm }: {
           <table className="w-full text-left">
             <thead><tr className="text-secondary"><th className="font-medium">Product</th><th className="font-medium">Field</th><th className="font-medium">Now</th><th className="font-medium">New</th></tr></thead>
             <tbody>
-              {setup.changes.flatMap((row) => row.display.map((d) => (
-                <tr key={`${row.product_id}-${d.field}`}><td>{row.product_name}</td><td>{d.field}</td><td>{d.before}</td><td className="font-medium text-nav-dark">{d.after}</td></tr>
-              )))}
+              {rows.flatMap((row) => [
+                ...row.display.map((d) => (
+                  <tr key={`${row.product_id}-${d.field}`}><td>{row.product_name}</td><td>{d.field}</td><td>{d.before}</td><td className="font-medium text-nav-dark">{d.after}</td></tr>
+                )),
+                ...(row.quote_line ? [
+                  <tr key={`${row.product_id}-quote-line`} className="bg-amber-50">
+                    <td>{row.product_name}</td><td>New quote lines show</td>
+                    <td>{row.quote_line.before || '(blank)'}</td><td className="font-medium text-nav-dark">{row.quote_line.after || '(blank)'}</td>
+                  </tr>,
+                ] : []),
+              ])}
             </tbody>
           </table>
         </div>
       )}
       {saved
         ? <p className="text-green-700">Saved: {saved.join(', ')}</p>
-        : <Button onClick={onConfirm} loading={busy} disabled={blocked}>Confirm Setup tab</Button>}
+        : <Button onClick={onConfirm} loading={busy} disabled={blocked}>
+          {quoteLineCount > 0 ? `Confirm Setup tab (${plural(quoteLineCount)} change what customers see)` : 'Confirm Setup tab'}
+        </Button>}
     </section>
   );
 }

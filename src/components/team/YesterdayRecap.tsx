@@ -6,6 +6,7 @@ import { Sentry } from '../../lib/sentry';
 import { useToast } from '../ui/Toast';
 import type { YesterdayRecapData } from '../../types';
 import Badge from '../ui/Badge';
+import { toSentryError } from '../../lib/sentryError';
 
 export default function YesterdayRecap() {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ export default function YesterdayRecap() {
           setExpanded(true);
         }
       } catch (err: unknown) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'YesterdayRecap.fetchRecap' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'YesterdayRecap.fetchRecap' } });
         toast('error', err instanceof Error ? err.message : 'Failed to load yesterday recap');
       } finally {
         setLoading(false);

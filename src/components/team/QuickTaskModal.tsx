@@ -8,6 +8,7 @@ import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 import type { LinkedEntityType, NoteType, NotePriority, Profile } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 interface QuickTaskModalProps {
   open: boolean;
@@ -109,7 +110,7 @@ export default function QuickTaskModal({
       toast('success', 'Task created successfully');
       onClose();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'QuickTaskModal.handleSave' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'QuickTaskModal.handleSave' } });
       const message = err instanceof Error ? err.message : 'Failed to create task';
       toast('error', message);
     } finally {

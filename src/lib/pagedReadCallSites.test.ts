@@ -32,6 +32,7 @@ type CallSite = { file: string; line: number; callback: string };
 const SHARED_FILES = [
   'lib/customerDuplicates.ts',
   'lib/customerStatement.ts',
+  'lib/epaRegistrationSeed.ts',
   'lib/fieldsGeojsonCache.ts',
   'lib/marginFloors.ts',
   'lib/ordersPage.ts',
@@ -40,6 +41,7 @@ const SHARED_FILES = [
   'lib/reconciliation.ts',
   'lib/sellPriceHistory.ts',
   'lib/toteFill.ts',
+  'lib/useVendorNames.ts',
 ];
 
 // Components (under src/components) that page with fetchAllRows: Goal 4 part 2's
@@ -58,6 +60,7 @@ const COMPONENT_FILES = [
   'inventory/TransactionLedgerModal.tsx',
   'invoices/FinanceChargePreviewModal.tsx',
   'orders/BulkOrderImport.tsx',
+  'products/NameBrandCheckSection.tsx',
   'prepay/PrepaymentManagerPanel.tsx',
   'prepay/PrepayWorkspacePanel.tsx',
   'purchase-orders/BulkPOImport.tsx',

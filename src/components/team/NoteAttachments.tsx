@@ -8,6 +8,7 @@ import ConfirmModal from '../ui/ConfirmModal';
 import { PrivatePhotoButton } from '../ui/PrivatePhoto';
 import { teamNotePhotoPath } from '../../lib/privatePhotos';
 import type { TeamNoteAttachment } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 interface NoteAttachmentsProps {
   noteId: string;
@@ -33,7 +34,7 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
       .order('created_at', { ascending: true });
 
     if (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Failed to fetch attachments' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'Failed to fetch attachments' } });
     } else {
       setAttachments(data ?? []);
     }
@@ -59,7 +60,7 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
       try {
         result = await supabase.from('team_note_attachments').delete().eq('id', attachment.id).select();
       } catch (err) {
-        result = { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+        result = { data: null, error: toSentryError(err) };
       }
       if (result.error || !result.data?.length) {
         // A refusal, or a response lost after the delete committed: look again before deciding,
@@ -87,14 +88,14 @@ export default function NoteAttachments({ noteId, refreshKey }: NoteAttachmentsP
         } catch (storageErr) {
           // The photo is already gone from the note; the leftover file is reported with its path
           // so it can be removed later, and is never shown.
-          Sentry.captureException(storageErr instanceof Error ? storageErr : new Error(String(storageErr)), {
+          Sentry.captureException(toSentryError(storageErr), {
             extra: { context: 'Storage delete error: orphaned team-note file', storagePath },
           });
         }
       }
       toast('success', 'Photo deleted');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'Delete attachment error' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'Delete attachment error' } });
       toast('error', 'Failed to delete photo');
     } finally {
       setDeletingId(null);

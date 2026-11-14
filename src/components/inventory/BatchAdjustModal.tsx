@@ -16,6 +16,7 @@ import ClearExpiredIntentButton from '../ClearExpiredIntentButton';
 import { useToast } from '../ui/Toast';
 
 import { Sentry } from '../../lib/sentry';
+import { toSentryError } from '../../lib/sentryError';
 
 export interface AdjustmentItem {
   inventory_id: string;
@@ -326,7 +327,7 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
           // committed, so the row keeps its key.
           outcome = 'uncertain';
           messages[call.p_inventory_id] = sanitizeError(err);
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+          Sentry.captureException(toSentryError(err), {
             extra: { context: 'Batch adjust error', outcome },
           });
         }
@@ -363,7 +364,7 @@ export default function BatchAdjustModal({ open, onClose, items, userId, onSucce
         } catch (err) {
           // The batch stays frozen; retrying it only replays receipts.
           resolveFailed = true;
-          Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+          Sentry.captureException(toSentryError(err), {
             extra: { context: 'Batch adjust resolve failed' },
           });
         }

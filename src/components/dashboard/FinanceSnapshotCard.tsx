@@ -5,6 +5,7 @@ import Card, { CardHeader } from '../ui/Card';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import { formatUSD } from '../../lib/money';
+import { toSentryError } from '../../lib/sentryError';
 
 // F6 — admin-only "Finance Snapshot" on the home Dashboard. Reuses the existing
 // financial_dashboard_summary RPC (the same one /financial-dashboard uses; values
@@ -40,7 +41,7 @@ export default function FinanceSnapshotCard() {
         const res = assertRpcResult<FinRpc>(data, 'financial_dashboard_summary');
         if (!cancelled) setD(res);
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'fetch', action: 'dashboard_finance_snapshot' } });
+        Sentry.captureException(toSentryError(err), { tags: { source: 'fetch', action: 'dashboard_finance_snapshot' } });
         if (!cancelled) setD(null);
       }
     })();

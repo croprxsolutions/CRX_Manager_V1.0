@@ -9,6 +9,7 @@ import {
   validatePricingWorkbookArchive,
 } from './productPricingWorkbook';
 import type { ProductParent } from './productParents';
+import { quoteLineChange } from './quoteNotes';
 import type { ProductRatePerAcre, UseTimingOption } from '../types';
 import type { Json } from '../types/supabase';
 
@@ -139,6 +140,8 @@ export interface SetupChangeRow {
   changes: Partial<Record<SetupField, SetupValue>>;
   /** Before and after as the preview shows them. */
   display: Array<{ field: SetupField; before: string; after: string }>;
+  /** Set when the edit changes what a new quote line shows the customer (quoting note, else description). */
+  quote_line?: { before: string; after: string };
 }
 export interface SetupRowProblem {
   product_id: string;
@@ -587,7 +590,12 @@ export function buildSetupPreview(
     } else if (display.length > 0 && row.setup_fingerprint !== product.setup_fingerprint) {
       preview.stale.push({ product_id: product.product_id, product_name: product.product_name, problem: 'changed by someone else since you downloaded it' });
     } else if (display.length > 0) {
-      preview.changes.push({ product_id: product.product_id, product_name: product.product_name, setup_fingerprint: row.setup_fingerprint, changes, display });
+      const quoteLine = quoteLineChange(product, {
+        quoting_notes: 'quoting_notes' in changes ? changes.quoting_notes as string | null : product.quoting_notes,
+        notes: 'notes' in changes ? changes.notes as string | null : product.notes,
+      });
+      preview.changes.push({ product_id: product.product_id, product_name: product.product_name, setup_fingerprint: row.setup_fingerprint, changes, display,
+        ...(quoteLine ? { quote_line: quoteLine } : {}) });
     }
   }
   return preview;

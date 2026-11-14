@@ -1,3 +1,4 @@
+import { toSentryError } from '../lib/sentryError';
 import { useState, useEffect, useRef , useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Check, X, Plus, Trash2, Image as ImageIcon, AlertCircle, ClipboardCheck, RefreshCw, MapPin, FileText } from 'lucide-react';
@@ -704,7 +705,7 @@ export function BlendTicketDetail() {
       await logActivity({ event: 'blend_ticket_fields_saved', description: `Saved ${payload.length} field assignments for ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id });
       toast('success', `Saved ${payload.length} field assignment${payload.length !== 1 ? 's' : ''}`);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_fields' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_fields' } });
       toast('error', sanitizeError(err));
     }
     setSavingFields(false);
@@ -789,7 +790,7 @@ export function BlendTicketDetail() {
       // reload fails; clearing it here first would leave later edits untracked after a failure.
       await loadTicketData();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'reprocess_ocr' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'reprocess_ocr' } });
       toast('error', sanitizeError(err));
     }
     setReprocessing(false);
@@ -1022,7 +1023,7 @@ export function BlendTicketDetail() {
       logActivity({ event: 'application_record_created', description: `Application record created from blend ticket ${ticket.ticket_number}`, performedBy: profile.id, entityType: 'blend_ticket', entityId: ticket.id, customerId: ticket.customer_id || undefined });
       toast('success', 'Application record created successfully');
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'create_application_record_from_blend_ticket' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'create_application_record_from_blend_ticket' } });
       toast('error', sanitizeError(err));
     } finally {
       setCreatingAppRecord(false);

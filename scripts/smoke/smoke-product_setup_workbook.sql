@@ -49,8 +49,8 @@ BEGIN
   IF v_admin IS NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL: need an active admin';
   END IF;
-  INSERT INTO public.products (product_name, sku, inventory_unit, is_active)
-  VALUES ('[SMOKE] setup workbook', 'SMOKE-SW-' || md5(clock_timestamp()::text), 'gal', true)
+  INSERT INTO public.products (product_name, sku, inventory_unit, is_active, product_form)
+  VALUES ('[SMOKE] setup workbook', 'SMOKE-SW-' || md5(clock_timestamp()::text), 'Gal', true, 'liquid')
   RETURNING id INTO v_product;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);

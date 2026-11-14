@@ -172,7 +172,7 @@ const autonomousLandingChecks = [
   ["no review asking for changes", /no review asks for changes/i],
   ["every required check green", /every required check is green/i],
   ["migrations limited to NON-destructive ones", /NON-destructive migration/i],
-  ["access changes limited to routine grants (Mason, 2026-09-26)", /routine grants only/i],
+  ["data rewrites and access changes land on the proofs (Mason, 2026-11-11)", /rewrites and access changes too; Mason, 2026-11-11/i],
   ["the migration-apply-guard proof gate", /migration-apply-guard proof gate/i],
   ["both reviewer proofs and a content-bound Sol proof", /both reviewer proofs and a content-bound Sol proof/i],
   // 24 hours since Mason's 2026-10-29 decision (was 30 minutes); live state is re-checked at apply.
@@ -188,7 +188,7 @@ const reviewChainChecks = [
   ["never disabling a gate", /never bypass, disable, or weaken hooks/i],
   ["pinned reviewer models only", /never a newer model the gates do not yet accept/i],
   ["the Luna exit bar", /no BLOCKER or HIGH remains and every MED\/LOW is fixed, refuted with evidence, or named as a deferral/i],
-  ["a Sol review for listed risky merges (Mason, 2026-10-30: once, before the PR)", /a merge into `main` needs one clean independent \*\*Sol\*\* high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch, when the PR touches money, inventory, the database[\s\S]*docs\/reference\/sol-required-paths\.md/i],
+  ["a Sol review for listed risky merges (Mason, 2026-10-30: once, before the PR)", /a merge (?:into `main` )?needs one clean independent \*\*Sol\*\* high-effort review, inside 24 hours, of the PR's head or of an earlier commit on its branch, when the PR touches money, inventory, the database[\s\S]*docs\/reference\/sol-required-paths\.md/i],
   ["Sol running before the PR opens", /\*\*Sol on the computer, before the PR opens\*\*/i],
   ["review fixes staying on the same PR", /fixes stay on the same PR/i],
 ];

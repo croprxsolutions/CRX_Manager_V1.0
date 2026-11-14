@@ -73,6 +73,7 @@ import {
 import type { Job, JobStatus, JobTag, GroundCrew, JobBatch } from '../types';
 import type { Json } from '../types/supabase';
 import { aggregateAssignedTo } from '../lib/dispatchWizard';
+import { toSentryError } from '../lib/sentryError';
 
 interface JobChemSummary {
   product_name: string;
@@ -1045,7 +1046,7 @@ export default function Jobs() {
       });
       toast('success', `Printed list of ${displayedJobs.length} job(s)`);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_print_list' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_print_list' } });
       toast('error', sanitizeError(err));
     }
     setPrintingList(false);
@@ -1075,7 +1076,7 @@ export default function Jobs() {
       } catch { /* non-blocking — the PDF already generated */ }
       toast('success', `Generated loader worksheets for ${data.length} job(s)`);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_bulk_loader_worksheet' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_loader_worksheet' } });
       toast('error', sanitizeError(err));
     }
     setLoaderExporting(false);
@@ -1101,7 +1102,7 @@ export default function Jobs() {
       } catch { /* non-blocking — the PDF already generated */ }
       toast('success', 'Loader worksheet generated');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_row_loader_worksheet' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_row_loader_worksheet' } });
       toast('error', sanitizeError(err));
     }
     setRowLoaderId(null);
@@ -1140,7 +1141,7 @@ export default function Jobs() {
       if (profile) logActivity({ event: 'chemical_application_report_printed', description: `Chemical Application Report generated for job ${data.job_number}`, performedBy: profile.id, entityType: 'job', entityId: jobId });
       toast('success', 'Chemical application report generated');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_row_chemical_report' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_row_chemical_report' } });
       toast('error', sanitizeError(err));
     }
     setRowChemReportId(null);
@@ -1174,7 +1175,7 @@ export default function Jobs() {
       if (profile) logActivity({ event: 'applicator_sheet_printed', description: `Original Applicator Report generated for job ${data.job_number}`, performedBy: profile.id, entityType: 'job', entityId: jobId });
       toast('success', 'Applicator sheet generated');
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_row_applicator_sheet' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_row_applicator_sheet' } });
       toast('error', sanitizeError(err));
     } finally {
       setRowSheetId(null);
@@ -1217,7 +1218,7 @@ export default function Jobs() {
         } catch (err) {
           failedJobNumbers.push(job.job_number);
           if (failedJobNumbers.length === 1) {
-            Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+            Sentry.captureException(toSentryError(err), {
               extra: { context: 'jobs_bulk_applicator_sheets', job_id: job.id, job_number: job.job_number },
             });
           }
@@ -1240,7 +1241,7 @@ export default function Jobs() {
       if (failedJobNumbers.length > 0) toast('error', `Failed: ${failedJobNumbers.join(', ')}`);
       setPrintOptionsOpen(false);
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_bulk_applicator_sheets' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_applicator_sheets' } });
       toast('error', sanitizeError(err));
     } finally {
       setSheetExporting(false);
@@ -1316,7 +1317,7 @@ export default function Jobs() {
         toast('success', `Chemical summary generated across ${fetched.length} job(s) (PDF + CSV)`);
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_bulk_chemical_summary' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_chemical_summary' } });
       toast('error', sanitizeError(err));
     }
     setSummaryExporting(false);
@@ -1385,7 +1386,7 @@ export default function Jobs() {
         toast('success', `Projected use generated across ${fetched.length} job(s) (PDF + CSV)`);
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_bulk_projected_use' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_projected_use' } });
       toast('error', sanitizeError(err));
     }
     setProjectedExporting(false);
@@ -1436,7 +1437,7 @@ export default function Jobs() {
         toast('success', `Master mix generated across ${fetched.length} job(s)${capNote}`);
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'jobs_bulk_master_mix' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_master_mix' } });
       toast('error', sanitizeError(err));
     }
     setMasterMixExporting(false);

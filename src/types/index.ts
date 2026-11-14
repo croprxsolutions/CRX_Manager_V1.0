@@ -63,6 +63,16 @@ export interface UseTimingOption {
   category: 'Herbicide' | 'Foliar Fertilizer';
   sort_order: number;
   is_active: boolean;
+  /** Moves on every turn-off or turn-on; sent back so a late click cannot undo a later one (USE-1). */
+  option_version?: number;
+}
+
+/** A crop a use-timing option can name (`product_crop_options`, USE-1). */
+export interface CropOption {
+  code: string;
+  label: string;
+  sort_order: number;
+  is_active: boolean;
 }
 
 export interface Product {
@@ -648,6 +658,8 @@ export interface CommissionSplit {
 }
 
 export interface Customer {
+  /** Standing grower discount, % off product lines on chemical sales (billing plan M4b). Admin only. */
+  standing_discount_pct?: number;
   id: string;
   farm_name: string;
   /** Controlled list, enforced by customers_crops_allowed_check (see src/lib/crops.ts). */
@@ -1041,6 +1053,8 @@ export interface Order {
    * is queued for a manual "Create Split Invoices" pass. Cleared back to false
    * once create_split_invoices_from_order successfully bills it. */
   needs_split_billing?: boolean | null;
+  /** The sale's sales tax box (billing plan M4a); changed only through set_order_sales_tax. */
+  sales_tax?: boolean;
   created_at: string;
   updated_at: string;
   customer?: Customer;
@@ -1302,6 +1316,38 @@ export interface DeliveryItem {
   product?: Product;
 }
 
+/** One brand recorded on a delivery line (delivery_item_brands, 20270104120000). Current when superseded_at is null. */
+export interface DeliveryItemBrand {
+  id: string;
+  delivery_item_id: string;
+  delivery_id: string;
+  product_id: string;
+  /** parent = a parent product's brand, size = a size's own (legacy) brand, typed = typed from the jug. */
+  source: 'parent' | 'size' | 'typed';
+  parent_id: string | null;
+  parent_brand_id: string | null;
+  legacy_brand_id: string | null;
+  brand_name: string;
+  epa_registration: string | null;
+  manufacturer: string | null;
+  signal_word: BrandSignalWord | null;
+  quantity: number;
+  /** Typed picks only: waiting for an admin, linked to a listed brand, or dismissed. */
+  review_state: 'pending' | 'added' | 'dismissed' | null;
+  review_note: 'number_differs_from_list' | null;
+  review_brand_ref: string | null;
+  review_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  entered_by: string | null;
+  entered_at: string;
+  updated_at: string;
+  superseded_at: string | null;
+  superseded_by: string | null;
+  supersede_reason: string | null;
+  superseded_by_event_seq: number | null;
+}
+
 export interface DeliveryPhoto {
   id: string;
   delivery_id: string;
@@ -1475,7 +1521,7 @@ export interface ResolveOfflineActionResult {
   updated_at: string;
 }
 
-export type POStatus = 'draft' | 'submitted' | 'partially_received' | 'fully_received' | 'cancelled';
+export type POStatus = 'draft' | 'submitted' | 'partially_received' | 'fully_received' | 'cancelled' | 'closed';
 
 export interface PurchaseOrder {
   id: string;
@@ -1493,6 +1539,9 @@ export interface PurchaseOrder {
   cancelled_at?: string | null;
   cancelled_by?: string | null;
   cancel_reason?: string | null;
+  closed_at?: string | null;
+  closed_by?: string | null;
+  close_reason?: string | null;
 }
 
 export interface PurchaseOrderItem {
@@ -2048,6 +2097,102 @@ export interface ProductParentIngredient {
   updated_at: string;
 }
 
+/** DM-1b (20270103160000): one Ingredients-tab upload for one parent, waiting for review. Admin read only. */
+export type ChemistryChangeProposalStatus = 'proposed' | 'applied' | 'rejected';
+export type ChemistryProposalDecision = 'apply' | 'apply_delete' | 'reject';
+export interface ChemistryChangeProposal {
+  id: string;
+  parent_id: string;
+  /** The change list in _apply_parent_chemistry's shape (ingredient add / change / retire). */
+  items: Array<Record<string, unknown>>;
+  has_delete: boolean;
+  base_chemistry_version: number;
+  proposal_version: number;
+  status: ChemistryChangeProposalStatus;
+  applied_chemistry_version: number | null;
+  created_by: string;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  updated_at: string;
+}
+
+/** DM-4 (20270105110000): EPA auto-fill. Admin read only; written only by the four EPA lookup functions. */
+export type EpaLinkKind = 'parent' | 'size' | 'parent_brand' | 'legacy_brand';
+export type EpaLookupStatus = 'pending' | 'recorded' | 'abandoned';
+export type EpaLookupFailureReason = 'not_found' | 'transferred' | 'upstream_error' | 'invalid_result';
+export type EpaChemistryProposalStatus = 'proposed' | 'held' | 'committed' | 'rejected' | 'superseded';
+export type EpaProposalHoldReason = 'relinked' | 'chemistry_changed' | 'registration_changed';
+/** Writable: add, add_name_only, fill, confirm, rup_upgrade. Every other class is shown, never written. */
+export type EpaProposalItemClass =
+  | 'add' | 'add_name_only' | 'fill' | 'confirm' | 'rup_upgrade'
+  | 'differs' | 'differs_typed' | 'differs_epa' | 'differs_identity' | 'epa_conflict' | 'ingredient_retired'
+  | 'matches' | 'missing_from_epa';
+export type EpaCommitItemResult = 'written' | 'confirmed' | 'skipped' | 'kept_difference';
+export interface EpaProposalItem {
+  /** 'ing:cas:<cas>', 'ing:name:<name>', 'missing:<ingredient_id>' or 'label:<fact>'. */
+  item_id: string;
+  kind: 'ingredient' | 'label';
+  class: EpaProposalItemClass;
+  epa: unknown;
+  current: unknown;
+  accept_default: boolean;
+  note?: string | null;
+  change?: Record<string, unknown> | null;
+}
+export interface EpaLookup {
+  id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  chemistry_version: number;
+  status: EpaLookupStatus;
+  requested_by: string;
+  requested_at: string;
+  recorded_at: string | null;
+  updated_at: string;
+}
+export interface EpaLookupFailure {
+  id: string;
+  lookup_id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  reason: EpaLookupFailureReason;
+  transferred_to: string | null;
+  detail: string | null;
+  created_by: string;
+  created_at: string;
+}
+export interface EpaChemistryProposal {
+  id: string;
+  lookup_id: string;
+  parent_id: string;
+  epa_registration: string;
+  link_kind: EpaLinkKind;
+  link_id: string;
+  registration_version: number;
+  chemistry_version: number;
+  status: EpaChemistryProposalStatus;
+  proposal_version: number;
+  hold_reason: EpaProposalHoldReason | null;
+  epa_input: Record<string, unknown>;
+  items: EpaProposalItem[];
+  epa_summary: Record<string, unknown>;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  commit_result: Record<string, EpaCommitItemResult> | null;
+  superseded_by_lookup_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProductParentModeOfAction {
   id: string;
   parent_id: string;
@@ -2062,6 +2207,51 @@ export interface ProductParentModeOfAction {
   updated_by: string;
   created_at: string;
   updated_at: string;
+}
+
+/** MOA-1 (20270108100000): one reviewed resistance group of one active ingredient. Written only by set_active_ingredient_modes. */
+export interface IngredientModeOfAction {
+  id: string;
+  ingredient_id: string;
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  source_note: string;
+  status: ChemistryRowStatus;
+  row_version: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One entry of an ingredient's list, as get_ingredient_mode_users returns it and set_active_ingredient_modes takes it. */
+export interface IngredientModeEntry {
+  scheme: ModeOfActionScheme;
+  group_code: string;
+  source_note: string;
+}
+
+/** get_parent_mode_groups: a parent's groups, worked out when read (sheet 3.3). */
+export interface ParentModeGroups {
+  parent_id: string;
+  /** Not bumped by an ingredient-list edit: never use it as the cache key for these groups. */
+  chemistry_version: number;
+  ingredients: {
+    ingredient_id: string;
+    name: string;
+    derived_from: 'from_ingredient' | 'from_acid' | null;
+    acid_name: string | null;
+    schemes: {
+      scheme: ModeOfActionScheme;
+      live: string[];
+      derived: string[];
+      typed: { row_id: string; group_code: string; source: 'typed' | 'epa_lookup' }[];
+      status: 'derived' | 'typed' | 'matches' | 'differs';
+    }[];
+    not_recorded: boolean;
+  }[];
+  summary: { scheme: ModeOfActionScheme; group_code: string; differs: boolean }[];
+  not_recorded_count: number;
 }
 
 export interface ProductParentFertilizerAnalysis {
@@ -2246,6 +2436,229 @@ export interface IngredientChangePreview {
   refusal: string | null;
 }
 
+// RT-1 draft rates (20261229110000_product_rates_draft.sql). Read by nothing in the app until RT-4.
+export type ProductRateBasis = 'per_acre' | 'per_100_gal' | 'per_unit' | 'per_cwt_seed' | 'per_seed_unit';
+export type ProductRateSource = 'label' | 'house_standard';
+export type ProductRateUnitCode = 'fl_oz' | 'pt' | 'qt' | 'gal' | 'dry_oz' | 'lb' | 'g' | 'mg' | 'each';
+export type ProductRateUnitKind = 'volume' | 'weight' | 'each';
+export type ProductRateStatus = 'draft' | 'approved';
+export type ProductRateOrigin = 'derived_house' | 'derived_text' | 'manual';
+export type ProductRateNoteCode =
+  | 'no_rate' | 'unit_unknown' | 'unit_not_for_form' | 'basis_suspect' | 'basis_from_text' | 'text_unparsed'
+  | 'sizes_disagree' | 'stock_units_differ' | 'above_label' | 'value_invalid';
+
+/** product_rate_units: factor is fluid ounces (volume), milligrams (weight) or 1 (each). */
+export interface ProductRateUnit {
+  code: ProductRateUnitCode;
+  kind: ProductRateUnitKind;
+  factor: number;
+  label: string;
+  legacy_spellings: string[];
+}
+
+/** product_rates row (admins only). Rates are below 1e9 with at most 6 decimals (15 significant digits), so the JSON number reads back as the same 6-decimal value; for arithmetic or comparisons convert to exact integer micro-units first, never compute on the raw float. */
+export interface ProductRate {
+  id: string;
+  parent_id: string;
+  basis: ProductRateBasis;
+  source: ProductRateSource;
+  low: number | null;
+  recommended: number | null;
+  high: number | null;
+  unit: ProductRateUnitCode;
+  is_quoting_default: boolean;
+  status: ProductRateStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  origin: ProductRateOrigin;
+  basis_confirmed: boolean;
+  source_text: string | null;
+  over_label_reason: string | null;
+  row_version: number;
+  created_by: string;
+  created_at: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+/** One linked registration a label check could not compare, or one whose maximum the rate exceeds. */
+export interface ProductRateLabelEntry {
+  epa_registration: string;
+  why?: 'registration_missing' | 'no_label_max' | 'max_basis_differs' | 'max_unit_not_comparable';
+  max_label_rate?: number;
+  max_label_rate_unit?: string;
+}
+
+/** The label-maximum check (house rows only; warns, never blocks once a reason is saved). */
+export type ProductRateLabelCheck =
+  | { status: 'not_applicable' }
+  | { status: 'within' }
+  | { status: 'not_checked'; why: 'basis_has_no_label_max' | 'basis_unconfirmed' | 'no_registration' | 'registrations_not_seeded' }
+  | { status: 'not_checked'; why: 'max_not_comparable'; not_checked: ProductRateLabelEntry[] }
+  | { status: 'above'; above: ProductRateLabelEntry[]; not_checked: ProductRateLabelEntry[]; reason_missing: boolean };
+
+/** save_draft_product_rate */
+export interface SaveDraftProductRateResult {
+  rate_id: string;
+  row_version: number;
+  label_check: ProductRateLabelCheck;
+}
+
+/** delete_draft_product_rate */
+export interface DeleteDraftProductRateResult {
+  rate_id: string;
+  deleted: true;
+}
+
+export interface ProductRateDeriveNote {
+  note_code: ProductRateNoteCode;
+  rate_id: string | null;
+  text: string | null;
+  detail: unknown;
+}
+
+export interface ProductRateDerivedRow {
+  rate_id: string;
+  source: ProductRateSource;
+  basis: ProductRateBasis;
+  unit: ProductRateUnitCode;
+  low: number | null;
+  recommended: number | null;
+  high: number | null;
+  is_quoting_default: boolean;
+  basis_confirmed: boolean;
+}
+
+/** derive_draft_product_rates: one entry per parent, in ID order, plus totals. */
+export interface DeriveDraftProductRatesResult {
+  parents: {
+    parent_id: string;
+    outcome: 'derived' | 'skipped_has_rows' | 'skipped_sizes_disagree' | 'nothing_to_derive';
+    rows: ProductRateDerivedRow[];
+    notes: ProductRateDeriveNote[];
+  }[];
+  totals: {
+    parents: number;
+    derived: number;
+    skipped_has_rows: number;
+    skipped_sizes_disagree: number;
+    nothing_to_derive: number;
+    rows: number;
+    notes: number;
+  };
+}
+
+/** get_parent_draft_rates (admin). */
+export interface ParentDraftRates {
+  parent_id: string;
+  rates: (ProductRate & { unit_label: string; unit_kind: ProductRateUnitKind; label_check: ProductRateLabelCheck })[];
+  notes: (ProductRateDeriveNote & { event_id: number; changed_at: string })[];
+}
+
+/** RT-3 (20270104110000): one rate review decision per parent; NULL outcome = undecided. Admin read only. */
+export type ProductRateOutcome = 'approved_default' | 'no_per_acre_default' | 'needs_label_data';
+export interface ProductParentRateOutcome {
+  parent_id: string;
+  outcome: ProductRateOutcome | null;
+  note: string | null;
+  /** Moves on every decision and on every change to the parent's rate rows; an absent row is version 0. */
+  outcome_version: number;
+  decided_by: string | null;
+  decided_at: string | null;
+  updated_at: string;
+}
+
+/** get_rate_review_workbook (admin). Rate values are decimal strings, as stored. */
+export interface RateReviewWorkbook {
+  parents: {
+    parent_id: string;
+    parent_name: string;
+    product_form: string;
+    sizes: string[];
+    outcome: ProductRateOutcome | null;
+    outcome_note: string | null;
+    outcome_version: number;
+    /** The decider's full name, not a profile id. */
+    outcome_decided_by: string | null;
+    outcome_decided_at: string | null;
+    /** Set when a recorded approved_default / no_per_acre_default no longer holds (form or label maximum changed since). */
+    outcome_problem: string | null;
+    rates: {
+      rate_id: string;
+      basis: ProductRateBasis;
+      source: ProductRateSource;
+      low: string | null;
+      recommended: string | null;
+      high: string | null;
+      unit: ProductRateUnitCode;
+      unit_label: string;
+      is_quoting_default: boolean;
+      status: ProductRateStatus;
+      origin: ProductRateOrigin;
+      basis_confirmed: boolean;
+      source_text: string | null;
+      over_label_reason: string | null;
+      row_version: number;
+      /** The approver's full name, not a profile id. */
+      approved_by: string | null;
+      approved_at: string | null;
+      label_check: ProductRateLabelCheck;
+    }[];
+    /** after_values of the latest derivation's notes for this parent. */
+    notes: Record<string, unknown>[];
+  }[];
+  units: { code: ProductRateUnitCode; label: string; kind: ProductRateUnitKind }[];
+  totals: {
+    rates: number; drafts: number; approved: number; per_100_gal: number; per_100_gal_approved: number;
+    parents: number; parents_undecided: number; approved_default: number; no_per_acre_default: number; needs_label_data: number;
+    outcomes_no_longer_valid: number;
+  };
+}
+
+/** One Draft Rates upload row. Values are decimal strings; rate_id null = a new row. */
+export interface RateReviewRateRow {
+  rate_id: string | null;
+  parent_id: string;
+  expected_row_version: number | null;
+  basis: string | null;
+  source: string | null;
+  low: string | null;
+  recommended: string | null;
+  high: string | null;
+  unit: string | null;
+  is_quoting_default: boolean;
+  over_label_reason: string | null;
+  decision: 'approve' | 'reopen' | 'delete' | null;
+  reason: string | null;
+}
+
+/** One Rate Outcomes upload row (only rows the admin edited are sent). */
+export interface RateReviewOutcomeRow {
+  parent_id: string;
+  expected_outcome_version: number;
+  outcome: ProductRateOutcome | null;
+  note: string | null;
+}
+
+export type RateReviewRowStatus = 'unchanged' | 'change' | 'stale' | 'invalid' | 'not_found';
+/** preview_rate_review; commit_rate_review returns the same rows plus counts. */
+export interface RateReviewResult {
+  rates: {
+    /** rate_id / parent_id are absent when the row could not be read at all. */
+    index: number; rate_id?: string | null; parent_id?: string | null; name?: string; status: RateReviewRowStatus;
+    decision?: 'approve' | 'reopen' | 'delete' | null; problem?: string;
+    actions?: ('save' | 'approve' | 'reopen' | 'delete')[] | null; label_check?: ProductRateLabelCheck;
+  }[];
+  outcomes: {
+    index: number; parent_id: string | null; name: string | null; outcome?: ProductRateOutcome | null; note?: string | null;
+    status: RateReviewRowStatus; problem?: string;
+  }[];
+}
+export interface CommitRateReviewResult extends RateReviewResult {
+  rates_changed: number;
+  outcomes_changed: number;
+}
+
 export type BlendTicketStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'needs_review';
 export type BlendTicketReviewStatus = 'unreviewed' | 'approved' | 'rejected';
 export type BlendTicketOrderLinkStatus = 'unlinked' | 'linked';
@@ -2420,7 +2833,8 @@ export interface BlendRecipeItem {
 
 export type InvoiceType = 'chemical_sale' | 'field_application' | 'misc_charge' | 'credit_memo';
 /** invoice_items.charge_type (CHECK invoice_items_charge_type_check, mig 20261021050000). */
-export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other';
+// 'standing_discount' (billing plan M4b) and 'sales_tax' (M4a) are written only by the database; never offered as types to pick.
+export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other' | 'standing_discount' | 'sales_tax';
 export type InvoiceStatus = 'draft' | 'unposted' | 'posted' | 'paid' | 'overdue' | 'voided' | 'cancelled';
 
 export interface Invoice {
@@ -4490,6 +4904,8 @@ export interface RUPSalesRecord {
   compliance_status: 'compliant' | 'warning' | 'non_compliant';
   compliance_notes: string | null;
   season: number | null;
+  /** Brand PR B-1b: the brand this record is for; null on a whole-line record. */
+  brand_name?: string | null;
   invoice_number?: string;
   created_at: string;
 }

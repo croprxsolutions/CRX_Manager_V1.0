@@ -28,6 +28,8 @@ import {
   generateBatchInvoicePdf,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
+  loadBillSplitPayers,
+  readsBillSplitPayers,
   mapInvoicePdfItem,
   type InvoicePdfData,
 } from '../lib/invoicePdf';
@@ -137,6 +139,15 @@ function invoicePdfShares(shares: InvoiceShareRow[]) {
     price_per_acre_cents: s.price_per_acre_cents || null,
     pricing_note: s.pricing_note || null,
   }));
+}
+
+/** The PDF's share table: an invoice's own shares, else a Bill Split payer's sale payers (as its own page prints). */
+async function batchPdfShares(inv: InvoiceRow, shares: InvoiceShareRow[]): Promise<InvoicePdfData['shares']> {
+  if (shares.length > 0) return invoicePdfShares(shares);
+  if (!readsBillSplitPayers(inv) || !inv.invoice_group_id) return undefined;
+  const payers = await loadBillSplitPayers(supabase, inv.id)
+    .catch(() => { throw new InvoiceDetailsUnavailableError(); });
+  return payers.length > 0 ? payers : undefined;
 }
 
 // Re-read the server-owned gate and the version the retry key names: an invoice unposted or
@@ -520,6 +531,7 @@ export default function Invoices() {
       .then((r) => r, detailsUnavailable);
     // A split invoice printed without its shares would hide who owes what.
     if (sharesError || !Array.isArray(shares)) throw new InvoiceDetailsUnavailableError();
+    const pdfShares = await batchPdfShares(inv, shares as InvoiceShareRow[]);
 
     return {
       ...invoiceRowPdfFields(inv),
@@ -530,7 +542,7 @@ export default function Invoices() {
       customer_zip: cust.zip || undefined,
       account_number: cust.account_number || undefined,
       payment_terms: inv.payment_terms || cust.payment_terms || undefined,
-      shares: shares.length > 0 ? invoicePdfShares(shares as InvoiceShareRow[]) : undefined,
+      shares: pdfShares,
       items: groupReturnCreditDisplayItems(inv.invoice_type, (items || []).map(mapInvoicePdfItem)),
       options,
     };
@@ -921,12 +933,10 @@ export default function Invoices() {
   ];
 
   // Determine if batch print dialog needs any shares info
-  const anySelectedHasShares = selectedInvoices.some(
-    (i) => i.invoice_type === 'field_application'
-  );
-  // Identical predicate to anySelectedHasShares — reuse the computed value
-  // instead of scanning the selection a second time.
-  const anySelectedIsFieldApp = anySelectedHasShares;
+  const anySelectedIsFieldApp = selectedInvoices.some((i) => i.invoice_type === 'field_application');
+  // A payer's draft switched to misc charge is still in the split and prints the payer table too.
+  const anySelectedIsBillSplit = selectedInvoices.some((i) => readsBillSplitPayers(i));
+  const anySelectedHasShares = anySelectedIsFieldApp || anySelectedIsBillSplit;
 
   if (loading) {
     return (
@@ -1251,14 +1261,17 @@ export default function Invoices() {
       </Modal>
 
       {/* Batch Print Dialog */}
-      <InvoicePrintDialog
+      {/* Mounted when opened, so its defaults (payer shares ticked for a Bill Split) follow this selection. */}
+      {showBatchPrintDialog && <InvoicePrintDialog
         open={showBatchPrintDialog}
         onClose={() => setShowBatchPrintDialog(false)}
         invoiceType={anySelectedIsFieldApp ? 'field_application' : 'chemical_sale'}
         hasShares={anySelectedHasShares}
+        // Mason, 9 Nov: a Bill Split payer's invoice shows every payer, so the table is on unless unticked.
+        sharesOnByDefault={anySelectedIsBillSplit}
         onPrint={handleBatchPrint}
         loading={printing}
-      />
+      />}
 
       {/* Batch Delete Modal */}
       <BulkDeleteConfirmModal

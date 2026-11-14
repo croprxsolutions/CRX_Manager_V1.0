@@ -58,6 +58,7 @@ DECLARE
   v_suffix   text := substr(md5(random()::text), 1, 8);
   v_customer uuid;
   v_product  uuid;
+  v_pricing  jsonb;
   v_quote    uuid;
   v_sec      uuid;
   v_res      jsonb;
@@ -75,8 +76,28 @@ BEGIN
   -- [E2E] marker satisfies the live-testdata guard; terminal rollback removes it.
   INSERT INTO public.customers (farm_name)
   VALUES ('[E2E] H4 Farm ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name)
-  VALUES ('[E2E] H4 Herbicide ' || v_suffix) RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form)
+  VALUES ('[E2E] H4 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
+  -- Quote lines need a positive cost basis (COST_BASIS_REQUIRED); set it the governed way
+  -- the Products page does ($6 cost, $10 every tier) instead of a priced products INSERT.
+  v_pricing := public.preview_product_pricing_changes(
+    'product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_product,
+      'row_version', (SELECT pricing_version FROM public.products WHERE id = v_product),
+      'pricing_mode', 'price_driven', 'new_cost', '6.00',
+      'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00'
+    )), v_admin, 'smoke-h4-cost-preview-' || v_suffix);
+  IF v_pricing->>'status' IS DISTINCT FROM 'previewed'
+     OR (v_pricing->>'apply_allowed')::boolean IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed cost preview refused: %', v_pricing;
+  END IF;
+  PERFORM public.apply_product_pricing_change_set(
+    (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin,
+    'smoke-h4-cost-apply-' || v_suffix);
+  IF (SELECT current_cost FROM public.products WHERE id = v_product) IS DISTINCT FROM 6.00::numeric THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: governed cost fixture was not applied';
+  END IF;
   INSERT INTO public.quotes (quote_number, customer_id, created_by, status, commission_split)
   VALUES ('E2E-H4-Q-' || v_suffix, v_customer, v_admin, 'sent', '{"splits": []}'::jsonb)
   RETURNING id INTO v_quote;

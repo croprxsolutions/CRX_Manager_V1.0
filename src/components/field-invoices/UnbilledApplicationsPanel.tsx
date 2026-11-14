@@ -22,6 +22,7 @@ import { SkeletonCard } from '../ui/Skeleton';
 import { LoadFailedState } from '../ui/EmptyState';
 import { formatCents as fmt } from '../../lib/money';
 import { fetchAllRows, pageWithList } from '../../lib/pagedRead';
+import { toSentryError } from '../../lib/sentryError';
 
 // Phase 2 of the As-Applied / Field-Invoice build (read-only reconciliation).
 // Surfaces the TWO reliable, actionable "applied but not yet billed" backlogs so
@@ -269,7 +270,7 @@ export default function UnbilledApplicationsPanel() {
       setBillNextReady(remainingJobs.length > 0);
       toast('success', successMessage);
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'transfer_job_to_invoice', jobId: pendingJobInvoice.row.id },
       });
       const resultInvalid = isTransferInvoiceResultInvalid(err);

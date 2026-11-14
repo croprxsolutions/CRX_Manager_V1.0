@@ -12,6 +12,7 @@ import { useToast } from '../ui/Toast';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Modal from '../ui/Modal';
+import { toSentryError } from '../../lib/sentryError';
 
 interface LogInteractionModalProps { open: boolean; onClose: () => void; customerId: string; userId: string; customerName: string; onLogged?: () => void; }
 const types: InteractionType[] = ['call', 'visit', 'meeting', 'text', 'email', 'voicemail'];
@@ -93,7 +94,7 @@ export default function LogInteractionModal({ open, onClose, customerId, userId,
         onClose();
         return;
       }
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'LogInteractionModal.save' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'LogInteractionModal.save' } });
       toast('error', sanitizeError(error));
     } finally { setSaving(false); }
   };

@@ -25,12 +25,14 @@ import { digestIntentPayload, fingerprintIntentPayload, getIdempotencyBindingRej
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { downloadDeliveryPdf } from '../lib/deliveryPdf';
+import { loadDeliveryBrandInfo } from '../lib/deliveryBrandPaper';
+import { receiptBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
 import { sendEmail } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
-import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE, RECEIPT_NOT_SENT_MESSAGE } from '../lib/deliveryCompletionEmail';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
+import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
 import { notifyDeliveryRemainder, notifyDeliveryCompleted } from '../lib/notificationTriggers';
 import { checkRUPCompliance } from '../lib/rupCompliance';
 import StartDeliveryModal from '../components/deliveries/StartDeliveryModal';
@@ -45,7 +47,7 @@ import { formatCents as fmtCents } from '../lib/money';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed, fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
+import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -53,7 +55,14 @@ import RelatedNotes from '../components/team/RelatedNotes';
 import TransactionThread from '../components/ui/TransactionThread';
 import PrivatePhoto, { PrivatePhotoButton } from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { billSplitCompletion, billSplitFailedMessage, createdInvoicesMessage } from '../lib/billSplitCompletion';
 import { ORDER_ITEM_COLUMNS } from '../lib/costFields';
+import { toSentryError } from '../lib/sentryError';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
+import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
+import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
+import { brandWarnings } from '../lib/deliveryBrands';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -91,6 +100,8 @@ interface CreateDeliveryInvoiceResult {
   delivery_id: string;
   invoice_id: string;
   invoice_number: string;
+  /** Every payer's invoice on a Bill Split delivery. */
+  invoice_numbers?: string[] | null;
   total_cents: number;
 }
 
@@ -304,6 +315,13 @@ export default function DeliveryDetail() {
   const canVoid = isAdmin && delivery?.status === 'completed';
   const [fixOpen, setFixOpen] = useState(false);
   const isAssignedDriver = isDriver && profile?.id === delivery?.assigned_driver;
+  // Brand PR B (B-2): which brand went off the truck, saved before completion. Brands never block a completion.
+  const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id
+    && (delivery.status === 'scheduled' || delivery.status === 'in_progress') && (isAdminOrRep || isAssignedDriver));
+  const [correctBrandsOpen, setCorrectBrandsOpen] = useState(false);
+  // An edited correction in the Correct brands dialog asks before leaving too.
+  const [correctionDirty, setCorrectionDirty] = useState(false);
+  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty || correctionDirty);
   const canConfirm = (isAdminOrRep || isAssignedDriver) && delivery?.status === 'scheduled';
   const receiptEmail = customer?.email || receiptRecipient?.email || null;
   // What complete_delivery checks before it completes (migration 20261022075000).
@@ -770,6 +788,11 @@ export default function DeliveryDetail() {
 
   const saveEdit = async () => {
     if (!delivery || !profile) return;
+    // An edit can recreate the delivery's lines, which would orphan unsaved brand choices: save them first.
+    if (brandState.dirty) {
+      toast('error', 'Press Save brands (or clear the unfinished brand choice) first, then save the delivery changes.');
+      return;
+    }
 
     // Validate: if scheduled and items changed, must have at least 1 item with qty > 0
     const isScheduled = delivery.status === 'scheduled';
@@ -816,8 +839,14 @@ export default function DeliveryDetail() {
     if (error) {
       toast('error', sanitizeError(error));
     } else {
-      assertRpcResult(data, 'edit_delivery');
+      const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
       editIdem.resetKeyFor(editScope);
+      // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
+      const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
+        (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
+      if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
+      // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
+      void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
       toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
       setEditing(false);
       fetchDelivery();
@@ -1187,6 +1216,9 @@ export default function DeliveryDetail() {
       ...(driverIssueNotes.trim() ? { p_issue_notes: driverIssueNotes.trim() } : {}),
       ...(usesDeliveredOn && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
       p_evidence: submittedEvidence,
+      // KI-25: the receipt is recorded in the same save and emailed by the server (send-delivery-receipts),
+      // so a dropped signal can no longer lose it. A no-proof record sends no receipt.
+      ...(emailOnComplete && submittedEvidence !== 'no_proof' ? { p_email_receipt: true } : {}),
       // The exact ticket photo the screen shows as saved (the signature's reference comes from the key).
       ...(ticketPhoto ? { p_evidence_ref: ticketPhoto.id } : {}),
       // no_proof: the reason exactly as typed (the server collapses whitespace; an exact retry resends it).
@@ -1222,6 +1254,7 @@ export default function DeliveryDetail() {
       p_issue_notes?: string;
       p_evidence: DeliveryCompletionEvidence;
       p_evidence_ref?: string;
+      p_email_receipt?: boolean;
     } = { ...intentParams, ...(signaturePath ? { p_evidence_ref: signaturePath } : {}), p_idempotency_key: idemKey };
 
     // Goal 5: completing a delivery needs a signal. Nothing is queued to sync later;
@@ -1230,11 +1263,10 @@ export default function DeliveryDetail() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
-    // The receipt address is read while the delivery is still open (a driver may not see the customer),
-    // after the signal check and for at most a few seconds. A no-proof record sends no receipt.
-    const recipient = submittedEvidence !== 'no_proof' && emailOnComplete && !customer?.email
-      ? (receiptRecipient ?? await fetchReceiptRecipientWithin(deliveryId))
-      : null;
+    // Unsaved brand choices are saved first. Anything not saved (left out, refused, overtaken, or brands not
+    // loaded) completes anyway as "not confirmed", which lands on the office's list. The seq is not part of the
+    // completion's key: a retry replays on the key.
+    const brandBaseSeq = await brandState.saveForCompletion();
     // The checks above can take a few seconds; never complete (or upload for) a delivery the user has left.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -1259,7 +1291,7 @@ export default function DeliveryDetail() {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
         signatureUploadError = sigErr;
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Signature upload before delivery completion failed; sending the completion anyway' } });
+        Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Signature upload before delivery completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }
@@ -1274,6 +1306,7 @@ export default function DeliveryDetail() {
       // passed during them, a date of "today" is now a past date and must carry its own timestamp.
       const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
+        p_brand_base_seq: brandBaseSeq,
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, idemKey, () => (
           usesDeliveredOn ? paperDeliveredAt(paperDeliveredOn) : undefined)),
@@ -1312,14 +1345,18 @@ export default function DeliveryDetail() {
         toast('warning', `Delivery completed, but ${shortN} product(s) were short — on-hand inventory went negative. Admins have been notified to review.`);
       }
 
-      if (invoiceNum) {
+      const billSplit = billSplitCompletion(completeResult);
+      if (billSplit.failed) {
+        toast('warning', billSplitFailedMessage(role));
+      } else if (billSplit.numbers.length > 0) {
+        toast('success', `Delivery completed${isPartialDelivery ? ' (partial)' : ''}. Draft invoices ${billSplit.numbers.join(', ')} created.`);
+      } else if (invoiceNum) {
         toast('success', isPartialDelivery
           ? `Delivery completed (partial). Draft invoice ${invoiceNum} created.`
           : `Delivery completed. Draft invoice ${invoiceNum} created.`);
       } else {
         toast('success', isPartialDelivery ? 'Delivery completed (partial quantities)' : 'Delivery completed');
       }
-      if (billSplitFailed(completeResult)) toast('warning', BILL_SPLIT_FAILED_MESSAGE);
       const proofText = submittedEvidence === 'no_proof'
         ? ` (recorded without proof: ${await storedNoProofReason(deliveryId, noProofReason)})`
         : usePaperTicket ? ' (signed paper ticket photo)' : ' (on-screen signature)';
@@ -1350,63 +1387,18 @@ export default function DeliveryDetail() {
       await notifyDeliveryCompleted(
         delivery.id,
         delivery.delivery_number,
-        customer?.farm_name || recipient?.farmName || receiptRecipient?.farmName || 'Unknown',
+        customer?.farm_name || receiptRecipient?.farmName || 'Unknown',
         delivery.assigned_driver,
         delivery.order_id,
         isPartialDelivery
       );
 
-      // === Email customer when delivery is completed (opt-out via checkbox) ===
-      // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
-      // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
-      const sendTo = customer?.email || recipient?.email || receiptRecipient?.email || null;
-      const sendToName = customer?.contact_name ?? recipient?.contactName ?? receiptRecipient?.contactName ?? null;
+      // === Customer receipt (KI-25): recorded with the completion; the server emails it ===
       if (submittedEvidence === 'no_proof') {
         // No customer confirmed this delivery, so no automatic "your delivery was completed" receipt.
         toast('info', 'Recorded without proof. No receipt was emailed; the office can send one later with Email Confirmation.');
-      } else if (emailOnComplete && sendTo) {
-        try {
-          const deliveredLines = items
-            .map((item) => {
-              const qty = isPartialDelivery ? (deliveryQtys[item.id] ?? item.quantity) : item.quantity;
-              return { name: item.product?.product_name || 'Product', qty };
-            })
-            .filter((row) => row.qty > 0);
-
-          // A paper-ticket receipt shows the day on the ticket, matching the backdated delivery.
-          const receiptDate = usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn)
-            ? parseLocalDate(paperDeliveredOn).toLocaleDateString()
-            : new Date().toLocaleDateString();
-          const html = buildDeliveryReceiptHtml({
-            variant: 'completed',
-            deliveryNumber: delivery.delivery_number,
-            contactName: sendToName,
-            dateText: receiptDate,
-            lines: deliveredLines,
-            signedBy: signedBy || null,
-            isPartial: isPartialDelivery,
-          });
-
-          await sendEmail({
-            to: sendTo,
-            subject: `Delivery ${delivery.delivery_number} Completed — Crop RX Solutions`,
-            html,
-            email_type: 'delivery_completed',
-            customer_id: delivery.customer_id,
-            resource_type: 'delivery',
-            resource_id: delivery.id,
-            idempotency_key: `delivery-completed-${delivery.id}`,
-          });
-        } catch (emailErr) {
-          Sentry.captureException(emailErr instanceof Error ? emailErr : new Error(String(emailErr)), { level: 'warning', extra: { context: 'Delivery completion email failed — delivery already succeeded' } });
-          // The delivery already succeeded; say plainly that the receipt did not go out.
-          toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-        }
-      } else if (emailOnComplete) {
-        // The receipt was wanted but no address could be read here. A visible customer with no email
-        // has none on file; otherwise the customer is hidden from this user and the lookup failed or
-        // timed out. Say so instead of skipping it silently.
-        toast('warning', customer ? RECEIPT_NO_EMAIL_ON_FILE_MESSAGE : RECEIPT_NO_EMAIL_MESSAGE);
+      } else if (emailOnComplete && !receiptEmail) {
+        toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
       }
 
       if (signatureRouteIdRef.current === deliveryId) fetchDelivery();
@@ -1428,7 +1420,7 @@ export default function DeliveryDetail() {
         return;
       }
       if (outcome.kind === 'completed_not_replayed') {
-        toast('error', forThisDelivery(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+        toast('error', forThisDelivery(RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
       } else {
         toast('error', forThisDelivery(sanitizeError(error)));
         // The upload had already failed for a reason other than the signal: say what it was.
@@ -1465,9 +1457,11 @@ export default function DeliveryDetail() {
     }
     setSendingEmail(true);
     try {
+      // The current picks, so a brand corrected after completion shows (Brand PR B-3).
+      const brandInfo = await loadDeliveryBrandInfo(delivery.id);
       const deliveredLines = items
         .filter((item) => (item.quantity_delivered ?? item.quantity) > 0)
-        .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity }));
+        .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity, ...brandInfo.get(item.id) }));
 
       // A delivery recorded without proof has no customer signer to show (its signer is office text).
       const html = buildDeliveryReceiptHtml({
@@ -1516,10 +1510,10 @@ export default function DeliveryDetail() {
       );
       createInvoiceIdem.resetKeyFor(delivery.id);
       setCreateInvoiceConfirmOpen(false);
-      toast('success', `Invoice ${result.invoice_number} created`);
+      toast('success', createdInvoicesMessage(result));
       await fetchDelivery();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'create_invoice_for_unbilled_delivery', deliveryId: delivery.id },
       });
       toast('error', sanitizeError(err));
@@ -1585,19 +1579,34 @@ export default function DeliveryDetail() {
 
   // Shared by both layouts. The driver layout used to omit it, so a driver's
   // Complete Delivery tap opened nothing (found during the Goal 5 offline check).
+  // A missing or mismatched brand only warns (Mason, 2026-11-09).
+  const completeBrandWarnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
   const completeConfirmModal = (
-    <ConfirmModal
-      open={completeConfirmOpen}
-      onClose={() => setCompleteConfirmOpen(false)}
-      onConfirm={handleComplete}
-      title="Complete Delivery"
-      message={`${completionEvidence === 'no_proof' ? 'Record this delivery as completed WITHOUT customer proof? Your name and reason are saved with it. ' : ''}${isPartialDelivery
-        ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
-        : 'Complete this delivery? This will update inventory and cannot be undone.'}`}
-      confirmLabel="Complete Delivery"
-      variant="warning"
-      loading={completing}
-    />
+    <>
+      <ConfirmModal
+        open={completeConfirmOpen}
+        onClose={() => setCompleteConfirmOpen(false)}
+        onConfirm={handleComplete}
+        title="Complete Delivery"
+        message={`${completeBrandWarnings.length > 0 ? `${completeBrandWarnings.join(' ')} You can still complete; the office will follow up. ` : ''}${completionEvidence === 'no_proof' ? 'Record this delivery as completed WITHOUT customer proof? Your name and reason are saved with it. ' : ''}${isPartialDelivery
+          ? 'Complete this delivery with partial quantities? This will update inventory and cannot be undone.'
+          : 'Complete this delivery? This will update inventory and cannot be undone.'}`}
+        confirmLabel={completeBrandWarnings.length > 0 ? 'Complete anyway' : 'Complete Delivery'}
+        cancelLabel={completeBrandWarnings.length > 0 ? 'Pick brand' : undefined}
+        variant="warning"
+        loading={completing}
+      />
+      <ConfirmModal
+        open={brandLeaveBlocker.state === 'blocked'}
+        onClose={() => brandLeaveBlocker.reset?.()}
+        onConfirm={() => brandLeaveBlocker.proceed?.()}
+        title="Leave this delivery?"
+        message="Brand choices not saved. Leave anyway?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="warning"
+      />
+    </>
   );
 
   if (isDriver) {
@@ -1784,6 +1793,8 @@ export default function DeliveryDetail() {
             </ul>
           </section>
 
+          {isActive && <DeliveryBrandsPanel state={brandState} busy={completing} />}
+
           {/* How the completion was confirmed: signature, photo proof, or recorded without proof */}
           <CompletionProofCards key={`${delivery.id}:${signedSignatureUrl ?? ''}`} delivery={delivery} signedSignatureUrl={signedSignatureUrl} signatureUrlFailed={signatureUrlFailed} />
 
@@ -1957,18 +1968,17 @@ export default function DeliveryDetail() {
                   </div>
                 </>
               )}
-              {receiptEmail && (
-                <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={emailOnComplete}
-                    onChange={(e) => setEmailOnComplete(e.target.checked)}
-                    className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
-                  />
-                  Email delivery receipt to customer
-                  <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
-                </label>
-              )}
+              {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
+              <label className="flex items-center gap-2 text-sm text-nav-dark cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={emailOnComplete}
+                  onChange={(e) => setEmailOnComplete(e.target.checked)}
+                  className="w-5 h-5 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+                />
+                Email delivery receipt to customer
+                <HelpTip text="If checked, the customer receives an email with the items delivered and who signed (no photos). Uncheck if this is an internal transfer." className="ml-1" />
+              </label>
               {!isOnline && (
                 <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
                   <WifiOff className="h-4 w-4 shrink-0" />
@@ -2162,6 +2172,15 @@ export default function DeliveryDetail() {
                     // Fall back to no signature in PDF
                   }
                 }
+                // Brand PR B-3: the brands under each line, from the current picks.
+                let brandInfo;
+                try {
+                  brandInfo = await loadDeliveryBrandInfo(delivery.id);
+                } catch (err) {
+                  Sentry.captureException(toSentryError(err), { extra: { context: 'delivery_pdf_brands', deliveryId: delivery.id } });
+                  toast('error', 'The delivered brands could not be loaded. Try printing again.');
+                  return;
+                }
                 downloadDeliveryPdf({
                   delivery_number: delivery.delivery_number,
                   order_number: parentOrder?.order_number || '-',
@@ -2184,6 +2203,7 @@ export default function DeliveryDetail() {
                     quantity_delivered: delivery.status === 'completed' ? i.quantity_delivered : undefined,
                     unit_size: i.unit_size || '-',
                     tote_number: i.tote_number || undefined,
+                    brand_notes: receiptBrandNotes({ ...brandInfo.get(i.id), qty: i.quantity_delivered ?? i.quantity }),
                   })),
                 });
               }
@@ -2237,6 +2257,11 @@ export default function DeliveryDetail() {
             {canVoid && delivery.order_id && (
               <Button variant="danger" size="sm" icon={<Wrench className="w-4 h-4" />} showChevron={false} onClick={() => setFixOpen(true)}>
                 Fix Delivery
+              </Button>
+            )}
+            {isAdmin && delivery.status === 'completed' && (
+              <Button variant="secondary" size="sm" showChevron={false} onClick={() => setCorrectBrandsOpen(true)}>
+                Correct brands
               </Button>
             )}
             {isAdminOrRep && delivery.status === 'completed' && delivery.order_id && (
@@ -2653,6 +2678,12 @@ export default function DeliveryDetail() {
         </SectionBand>
       )}
 
+      {(delivery.status === 'scheduled' || delivery.status === 'in_progress') && isAdminOrRep && (brandState.loadFailed || brandState.brands) && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <DeliveryBrandsPanel state={brandState} busy={completing} />
+        </div>
+      )}
+
       {/* Complete Delivery section — admin/sales_rep view when in_progress */}
       {delivery.status === 'in_progress' && isAdminOrRep && (
         <SectionBand id="delivery-complete" icon={<CheckCircle2 className="w-5 h-5" />} title="Complete Delivery">
@@ -2848,7 +2879,8 @@ export default function DeliveryDetail() {
             </div>
           )}
 
-          {receiptEmail && completionEvidence !== 'no_proof' && (
+          {/* Shown whenever a receipt can be asked for, even when this screen cannot see the email. */}
+          {completionEvidence !== 'no_proof' && (
             <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer mb-4">
               <input
                 type="checkbox"
@@ -3048,6 +3080,9 @@ export default function DeliveryDetail() {
 
       {delivery && (
         <FixDeliveryModal open={fixOpen} onClose={() => setFixOpen(false)} deliveryId={delivery.id} deliveryNumber={delivery.delivery_number} />
+      )}
+      {delivery && isAdmin && (
+        <CorrectBrandsModal open={correctBrandsOpen} onClose={() => setCorrectBrandsOpen(false)} deliveryId={delivery.id} onDirtyChange={setCorrectionDirty} />
       )}
 
       {/* Void Delivery Modal */}

@@ -1,5 +1,6 @@
 import { assertRpcResult, hasRpcCode, RpcErrorCodes, supabaseUntyped } from './db';
 import { sanitizeError } from './errorSanitizer';
+import { normalizeBrand, parseNameBrands } from './productNameBrands';
 import type { BrandSignalWord, ProductBrand } from '../types';
 
 /**
@@ -123,21 +124,13 @@ export function productBrandErrorMessage(error: unknown): string {
 
 /**
  * Brand names written inside a product's name, e.g. "Roundup 5.4# Generic (Ag Saver 5.4, Slam 5.4) - 2.5 Gal"
- * → ["Ag Saver 5.4", "Slam 5.4"]. Only suggestions: some parentheses hold notes, not brands, so an admin
- * confirms each one (and types its EPA number) before it is saved. Names already listed are left out.
+ * → ["Ag Saver 5.4", "Slam 5.4"]. Only suggestions: some words in brackets are notes, not brands, so an admin
+ * confirms each one (and types its EPA number) before it is saved. Names already listed are left out. Uses the
+ * same bracket reader as the name-vs-brand check on Label Data Quality, so both agree. A brand the name may have
+ * cut off (e.g. "Bra" in "(Brand A, Bra") is never suggested: the name needs fixing, not a new brand.
  */
 export function suggestBrandNamesFromProductName(productName: string, existingNames: string[] = []): string[] {
-  const taken = new Set(existingNames.map((name) => name.trim().toLowerCase()));
-  const suggestions: string[] = [];
-  for (const match of productName.matchAll(/\(([^()]*)\)/g)) {
-    for (const part of match[1].split(/,|\//)) {
-      const name = part.trim();
-      const key = name.toLowerCase();
-      if (name && !taken.has(key)) {
-        taken.add(key);
-        suggestions.push(name);
-      }
-    }
-  }
-  return suggestions;
+  const taken = new Set(existingNames.map(normalizeBrand));
+  const { brands, maybeCutOff } = parseNameBrands(productName);
+  return brands.filter((name) => name !== maybeCutOff && !taken.has(normalizeBrand(name)));
 }

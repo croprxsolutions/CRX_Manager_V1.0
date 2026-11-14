@@ -22,6 +22,7 @@ import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { Sentry } from '../lib/sentry';
 import { daysSinceBusinessDate, parseLocalDate } from '../lib/dateUtils';
 import type { InventoryPositionRow } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 const OPEN_STATUSES = ['confirmed', 'partially_fulfilled'];
 
@@ -216,7 +217,7 @@ export default function ToShip() {
         }
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'to_ship_inventory_position' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'to_ship_inventory_position' } });
     }
     if (seq !== fetchSeq.current) return;
 

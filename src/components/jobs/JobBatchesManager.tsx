@@ -9,6 +9,7 @@ import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import type { JobBatch } from '../../types';
+import { toSentryError } from '../../lib/sentryError';
 
 interface JobBatchesManagerProps {
   open: boolean;
@@ -68,7 +69,7 @@ export default function JobBatchesManager({ open, onClose, batches, memberCounts
       if (code === '23505') {
         toast('error', 'A batch with that name already exists');
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobBatchesManager.createBatch' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchesManager.createBatch' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -104,7 +105,7 @@ export default function JobBatchesManager({ open, onClose, batches, memberCounts
       if (code === '23505') {
         toast('error', 'A batch with that name already exists');
       } else {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobBatchesManager.saveBatch' } });
+        Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchesManager.saveBatch' } });
         toast('error', sanitizeError(err));
       }
     }
@@ -125,7 +126,7 @@ export default function JobBatchesManager({ open, onClose, batches, memberCounts
       setDeleteTarget(null);
       onChanged();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'JobBatchesManager.confirmDelete' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchesManager.confirmDelete' } });
       toast('error', sanitizeError(err));
     }
     setDeleting(false);

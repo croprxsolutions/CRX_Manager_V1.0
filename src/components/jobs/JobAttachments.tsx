@@ -27,6 +27,7 @@ import {
   getAttachmentDownloadUrl,
   deleteJobAttachment,
 } from '../../lib/jobAttachmentsData';
+import { toSentryError } from '../../lib/sentryError';
 
 interface JobAttachmentsProps {
   jobId: string;
@@ -72,7 +73,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
         setUploaderNames({});
       }
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         tags: { source: 'fetch', action: 'list_job_attachments' },
       });
       toast('error', 'Failed to load attachments. Please try again.');
@@ -117,7 +118,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
         });
         ok += 1;
       } catch (err) {
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+        Sentry.captureException(toSentryError(err), {
           extra: { context: 'Upload job attachment' },
         });
         toast('error', `Upload failed for "${file.name}".`);
@@ -150,7 +151,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
       }
     } catch (err) {
       if (newTab && !newTab.closed) newTab.close();
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'Download job attachment' },
       });
       toast('error', 'Could not open that attachment. Please try again.');
@@ -166,7 +167,7 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
       toast('success', 'Attachment deleted');
       await refresh();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'Delete job attachment' },
       });
       toast('error', 'Could not delete that attachment. You may not have permission.');

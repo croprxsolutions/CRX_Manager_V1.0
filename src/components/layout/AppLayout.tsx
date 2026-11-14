@@ -6,6 +6,8 @@ import TopBar from './TopBar';
 import WorkspaceTabs from './WorkspaceTabs';
 import OfflineBanner from '../ui/OfflineBanner';
 import CommandPalette from '../ui/CommandPalette';
+import WhatsNewDialog from '../ui/WhatsNewDialog';
+import { useAuth } from '../../contexts/AuthContext';
 import { recordPageVisit } from '../../lib/recentPages';
 import { usePageMeta } from '../../hooks/usePageMeta';
 
@@ -13,6 +15,7 @@ export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { title, accent } = usePageMeta();
+  const { profile } = useAuth();
   const location = useLocation();
   // REPLACE = a <Navigate replace> redirect alias committed this pathname,
   // not a user click — lets the visit counter skip the duplicate.
@@ -67,6 +70,7 @@ export default function AppLayout() {
       </div>
       <MobileBottomNav onMoreClick={openMobileNav} moreOpen={mobileOpen} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <WhatsNewDialog userId={profile?.id ?? null} />
     </div>
   );
 }

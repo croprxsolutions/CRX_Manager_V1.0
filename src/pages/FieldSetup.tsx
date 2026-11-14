@@ -48,6 +48,7 @@ import {
 } from '../lib/fieldObstacles';
 import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import type { Field, FieldObstacle, FieldObstacleKind } from '../types';
+import { toSentryError } from '../lib/sentryError';
 
 interface BillingSplit {
   customer_id: string;
@@ -487,7 +488,7 @@ function FieldSetupPage() {
         const rows = await getCachedFieldsGeojson();
         if (active) setOtherFields(rows);
       } catch (error: unknown) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        Sentry.captureException(toSentryError(error), {
           tags: { component: 'FieldSetup', action: 'load_other_field_boundaries' },
         });
         if (active) {
@@ -701,7 +702,7 @@ function FieldSetupPage() {
               setHasSavedBoundary(true);
               setGeometryDirty(false);   // boundary persisted — don't re-measure on a later attribute-only save
             } catch (geoError) {
-              Sentry.captureException(geoError instanceof Error ? geoError : new Error(String(geoError)), { tags: { source: 'critical_action', action: 'set_field_boundary' } });
+              Sentry.captureException(toSentryError(geoError), { tags: { source: 'critical_action', action: 'set_field_boundary' } });
               toast('error', 'Field saved but the boundary could not be measured. Please re-draw and save.');
               persistError = true;
             }
@@ -734,7 +735,7 @@ function FieldSetupPage() {
             saveFieldOverrideIdem.resetKey();
             loadedOverrideRef.current = field.override_acres ?? null;
           } catch (ovError) {
-            Sentry.captureException(ovError instanceof Error ? ovError : new Error(String(ovError)), { tags: { source: 'critical_action', action: 'set_field_override_acres' } });
+            Sentry.captureException(toSentryError(ovError), { tags: { source: 'critical_action', action: 'set_field_override_acres' } });
             toast('error', isNew
               ? `Field saved but the ${field.override_acres} acres to bill could not be applied. Please enter them again and save.`
               : 'Field saved but the billable-acres override could not be applied. Please retry.');
@@ -772,7 +773,7 @@ function FieldSetupPage() {
         }
       }
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'save_field' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'save_field' } });
       toast('error', err instanceof Error ? err.message : 'Failed to save field');
     }
     setSaving(false);
@@ -832,7 +833,7 @@ function FieldSetupPage() {
           toast('warning', `This boundary overlaps ${overlap.field_name} by 80% or more.`);
         }
       } catch (error: unknown) {
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+        Sentry.captureException(toSentryError(error), {
           tags: { component: 'FieldSetup', action: 'check_csb_boundary_overlap' },
         });
       }
@@ -859,7 +860,7 @@ function FieldSetupPage() {
         toast('success', 'Legal description filled from the field boundary');
       }
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { component: 'FieldSetup', action: 'legal_lookup' },
       });
       toast('error', 'Legal lookup unavailable');
@@ -909,7 +910,7 @@ function FieldSetupPage() {
       }
     } catch (error: unknown) {
       if (csbLookupRequestRef.current !== requestId) return;
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { component: 'FieldSetup', action: 'lookup_csb_boundary' },
       });
       toast('error', error instanceof CsbLookupError ? 'USDA boundary lookup is unavailable.' : 'Could not look up the USDA boundary.');
@@ -950,7 +951,7 @@ function FieldSetupPage() {
       toast('success', `USDA boundary added. ${total.toFixed(1)} ac total.`);
       checkCsbOverlap(nextPolygons);
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { component: 'FieldSetup', action: 'adopt_csb_boundary' },
       });
       toast('error', error instanceof CsbAdoptError ? error.message : 'Could not adopt the USDA boundary.');
@@ -1004,7 +1005,7 @@ function FieldSetupPage() {
       setAddObstacleMode(false);
       toast('success', 'Obstacle added');
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { component: 'FieldSetup', action: 'add_field_obstacle' },
       });
       toast('error', 'Could not add obstacle.');
@@ -1027,7 +1028,7 @@ function FieldSetupPage() {
       setObstaclePendingDelete(null);
       toast('success', 'Obstacle deleted');
     } catch (error: unknown) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+      Sentry.captureException(toSentryError(error), {
         tags: { component: 'FieldSetup', action: 'delete_field_obstacle' },
       });
       toast('error', 'Could not delete obstacle.');

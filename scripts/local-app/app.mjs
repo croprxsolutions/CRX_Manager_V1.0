@@ -198,6 +198,14 @@ function withLiveLineEndings(file, sql) {
   if (path.basename(file) === '20261117130000_tote_fill_from_bulk.sql') {
     return `INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;\n${sql}`;
   }
+  // 20261229110000 (RT-1) pins live's fourteen unit_conversions factors, which the schema baseline omits.
+  if (path.basename(file) === '20261229110000_product_rates_draft.sql') {
+    return `INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES
+  ('fl oz', 1, 'liquid'), ('oz', 1, 'both'), ('Oz', 1, 'both'), ('Pt', 16, 'liquid'), ('qt', 32, 'liquid'),
+  ('Qt', 32, 'liquid'), ('Gal', 128, 'liquid'), ('Dry oz', 1, 'dry'), ('Lb', 16, 'dry'), ('LB', 16, 'dry'),
+  ('g', 0.03527396, 'dry'), ('MG', 0.00003527396, 'dry'), ('Ea', 1, 'both'), ('Unit', 1, 'both')
+ON CONFLICT (unit) DO UPDATE SET factor_oz = EXCLUDED.factor_oz;\n${sql}`;
+  }
   // Live also holds validate_product_units with CRLF, which 20261104150000 pins by md5.
   if (path.basename(file) === '20261104150000_product_forms_seed_each.sql') {
     return `DO $live_crlf_validate$ BEGIN

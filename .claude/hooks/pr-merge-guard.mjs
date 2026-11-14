@@ -66,7 +66,8 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "./teammate-comments-lib.mjs";
-import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "./sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
+import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -140,6 +141,14 @@ if (/set_auto_merge$/i.test(toolName) && toolInput.enabled !== false) {
 if (typeof toolInput.command === "string" && /\bapi\s+graphql\b|\/graphql\b/i.test(toolInput.command) && /enablePullRequestAutoMerge/i.test(toolInput.command)) {
   deny("PR MERGE GATE: only Mason turns auto-merge on, from the PR's auto-merge toggle in the app; the GraphQL enablePullRequestAutoMerge mutation is refused for agents.");
 }
+// Agents never approve a pull request (#1838 HIGH 2): the GitHub review tools and any shell or API spelling.
+{
+  // The review's event, not words in its body (Luna); a tool with no event field is checked by its whole input.
+  const approval = /pull_request_review/i.test(toolName) && (typeof toolInput.event === "string" ? /^\s*APPROVE\s*$/i.test(toolInput.event) : /"event"\s*:\s*"APPROVE"/i.test(JSON.stringify(toolInput)))
+    ? prApprovalProblem("review event=APPROVE")
+    : null;
+  if (approval) deny(`PR MERGE GATE: ${approval}.`);
+}
 if (GITHUB_MERGE_TOOL.test(toolName)) {
   requests.push(mcpMergeRequest(toolInput));
 } else if (typeof toolInput.command === "string" && toolInput.command) {
@@ -174,6 +183,8 @@ function collectMergeRequests(scanned) {
   // `--admin` had been carried off into a segment containing no `gh` at all
   // (Codex sol, 2026-09-08, SEC-001).
   for (const segment of splitCommandSegments(scanned)) {
+    const approval = prApprovalProblem(segment);
+    if (approval) deny(`PR MERGE GATE: ${approval}.`);
     // The mergePullRequest mutation is denied by NAME, whatever transport
     // carries it — `gh api graphql`, curl, Invoke-RestMethod, a fetch in a node
     // one-liner. Until 2026-09-01 only the `gh api graphql` spelling was caught
@@ -490,7 +501,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits");
+    viewArgs.push("--json", "number,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -506,9 +517,16 @@ function gateRequest(request) {
   }
   // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
   if (!GATED_MERGE_BASES.includes(base)) return;
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
+  const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
+  if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const migration = stagingMigrationOnGitHub({ baseSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
-    if (migration) deny(`PR MERGE GATE: this merge into staging is refused: ${migration}.`);
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
+    if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
+    const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
+    if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
+    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
+    if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
   }
 
   // ── no merging over an unresolved objection ────────────────────────────────
@@ -530,6 +548,10 @@ function gateRequest(request) {
       "a one-line reason in the thread. Merge only after that."
     );
   }
+
+  // Every PR names what it put off, so the close-out can tell Mason what remains (Mason, 2026-11-09).
+  const followUps = followUpsProblem(pr);
+  if (followUps) deny(followUpsDenial("PR MERGE GATE", request.selector, followUps));
 
   // The Codex GitHub App's review is read at the ALLOW point below, not here.
   // @speed-bump — advisory; deferring it protects the hard gates, it is not one.
@@ -646,7 +668,9 @@ function gateRequest(request) {
           collision_check: "conflict-free merge of main, collision check clean; Mason, 2026-10-21",
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
-        }[carried.mode]}).\n`,
+          owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
+        }[carried.mode]})` +
+        `${carried.mode !== "owner_accepted" && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
       );
     }
     advisoryQueue.push(request);
@@ -671,7 +695,7 @@ function gateRequest(request) {
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
-    `  2. \`git fetch origin\` and merge origin/main into the branch if the head does not contain it (GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
+    `  2. \`git fetch origin\` and merge the PR's base into the branch if the head does not contain it (origin/staging for a PR into staging, never main; GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
     `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of origin/main...HEAD and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +

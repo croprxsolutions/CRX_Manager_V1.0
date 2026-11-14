@@ -20,8 +20,8 @@ import {
 } from 'lucide-react';
 import PhoneHeader from '../components/ui/PhoneHeader';
 import SignatureCanvas from '../components/ui/SignatureCanvas';
+import { billSplitCompletion, billSplitFailedMessage } from '../lib/billSplitCompletion';
 import { supabase, assertRpcResult, sanitizeError, checkMutationResult } from '../lib/db';
-import { BILL_SPLIT_FAILED_MESSAGE, billSplitFailed } from '../lib/deliverySplitBilling';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -30,16 +30,22 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { digestIntentPayload, getIdempotencyBindingRejection } from '../lib/idempotency';
 import { hasSignal, NO_SIGNAL_MESSAGE } from '../lib/connectivity';
 import { countOrdinaryPhotos, countPaperTicketPhotos, countLeftAtSitePhotos, hasPaperTicketPhoto, hasLeftAtSitePhoto, MAX_ORDINARY_DELIVERY_PHOTOS, MAX_PAPER_TICKET_PHOTOS, MAX_LEFT_AT_SITE_PHOTOS, PAPER_TICKET_PHOTO_CAPTION, LEFT_AT_SITE_PHOTO_CAPTION, isValidPaperDeliveredOn, paperDeliveredAt, completedAtForKey } from '../lib/paperTicket';
-import { COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, fetchReceiptRecipient, fetchReceiptRecipientWithin, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
+import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, uploadSignatureImage } from '../lib/deliveryEvidence';
 import type { DeliveryCompletionEvidence, ReceiptRecipient } from '../types';
 import { compressImage } from '../lib/imageCompression';
 import { todayInBusinessTz } from '../lib/dateUtils';
 import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
-import { RECEIPT_NO_EMAIL_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE, RECEIPT_NOT_SENT_MESSAGE, sendDeliveryCompletionEmail } from '../lib/deliveryCompletionEmail';
+import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
+import { toSentryError } from '../lib/sentryError';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
+import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
+import { brandWarnings } from '../lib/deliveryBrands';
 
 interface StopItem {
   id: string;
@@ -117,6 +123,12 @@ export default function FieldStop() {
   // The receipt address when the customer row is hidden from this driver (see fetchReceiptRecipient).
   const [receiptRecipient, setReceiptRecipient] = useState<ReceiptRecipient | null>(null);
   const [autoInvoiceNumber, setAutoInvoiceNumber] = useState<string | null>(null);
+  // Brand PR B (B-2): which brand went off the truck, saved before completion. Never blocks a completion.
+  const brandState = useDeliveryBrands(id, !!delivery && delivery.id === id && (delivery.status === 'scheduled' || delivery.status === 'in_progress'));
+  // Tied to the stop that raised it: on another stop it never shows, so its Complete anyway cannot act there.
+  const [brandWarning, setBrandWarning] = useState<{ stopId: string; list: string[] } | null>(null);
+  const brandWarningList = brandWarning && brandWarning.stopId === id ? brandWarning.list : [];
+  const brandLeaveBlocker = useUnsavedChanges(brandState.dirty && step !== 'done');
 
   // Every photo-list read and local add takes a number; only the newest read may replace the list,
   // so a slow older read can never drop a photo added (or keep one removed) after it started.
@@ -359,6 +371,9 @@ export default function FieldStop() {
     if (completionEvidence === 'left_at_site' && !hasLeftAtSitePhoto(photos)) { toast('error', 'Take a photo of where the delivery was left before completing'); return; }
     if (completionEvidence === 'signature' && !signatureDataUrl) { toast('error', 'Have the customer sign on screen, or use a paper ticket'); return; }
     if (completionEvidence === 'signature' && !isSignatureDataUrl(signatureDataUrl)) { toast('error', INVALID_SIGNATURE_MESSAGE); return; }
+    // A missing or mismatched brand only warns (Mason, 2026-11-09).
+    const warnings = brandWarnings(brandState.brands, brandState.drafts, deliveryQtys);
+    if (warnings.length > 0) { setBrandWarning({ stopId: id!, list: warnings }); return; }
     void handleComplete();
   };
 
@@ -399,6 +414,9 @@ export default function FieldStop() {
       ...(quantitiesJson ? { p_quantities: quantitiesJson } : {}),
       ...(usePaperTicket && paperDeliveredAt(paperDeliveredOn) ? { p_completed_at: paperDeliveredAt(paperDeliveredOn) } : {}),
       p_evidence: completionEvidence,
+      // KI-25: the receipt is recorded in the same save and emailed by the server (send-delivery-receipts),
+      // so a dropped signal can no longer lose it.
+      ...(emailOnComplete ? { p_email_receipt: true } : {}),
       // The exact photo the screen shows as saved (the signature's reference comes from the key).
       ...(evidencePhoto ? { p_evidence_ref: evidencePhoto.id } : {}),
     };
@@ -428,11 +446,10 @@ export default function FieldStop() {
       toast('error', NO_SIGNAL_MESSAGE);
       return;
     }
-    // The receipt address is read while the stop is still open (a driver may not see the customer),
-    // after the signal check and for at most a few seconds, so it never holds up the completion.
-    const recipient = emailOnComplete && !delivery.customer?.email
-      ? (receiptRecipient ?? await fetchReceiptRecipientWithin(id))
-      : null;
+    // Unsaved brand choices are saved first. Anything not saved (left out, refused, overtaken, or brands not
+    // loaded) completes anyway as "not confirmed", which lands on the office's list. The seq is not part of the
+    // completion's key: a retry replays on the key.
+    const brandBaseSeq = await brandState.saveForCompletion();
     // The checks above can take a few seconds; re-check the stop did not change meanwhile.
     // These checks gate only the DISPATCH: once the call is sent, its result is always reconciled.
     const stillSameAttempt = () => {
@@ -454,7 +471,7 @@ export default function FieldStop() {
         await uploadSignatureImage(signaturePath, signatureDataUrl);
       } catch (sigErr) {
         signatureUploadError = sigErr;
-        Sentry.captureException(sigErr instanceof Error ? sigErr : new Error(String(sigErr)), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
+        Sentry.captureException(toSentryError(sigErr), { level: 'warning', extra: { context: 'Field Mode signature upload before completion failed; sending the completion anyway' } });
       }
       if (!stillSameAttempt()) return;
     }
@@ -467,6 +484,7 @@ export default function FieldStop() {
       // passed during them, a ticket dated "today" is now a past date and must carry its own timestamp.
       const { data, error: rpcError } = await supabase.rpc('complete_delivery', {
         ...rpcParams,
+        p_brand_base_seq: brandBaseSeq,
         // A retry of this key resends the first send's value (completedAtForKey).
         p_completed_at: completedAtForKey(sentCompletedAt.current, rpcParams.p_idempotency_key, () => (
           usePaperTicket ? paperDeliveredAt(paperDeliveredOn) : undefined)),
@@ -491,14 +509,18 @@ export default function FieldStop() {
     const finishCompleted = async (result: unknown) => {
       // The signature image went up before the call; the server recorded signature_url itself.
       const autoInvoice = result as { auto_invoice?: { invoice_number?: string } } | null;
-      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || null;
+      // A Bill Split drafts one invoice per payer and no auto_invoice; name them all.
+      const billSplit = billSplitCompletion(result);
+      const invoiceNum = autoInvoice?.auto_invoice?.invoice_number || billSplit.numbers.join(', ') || null;
+      const plural = billSplit.numbers.length > 1;
       // Only the stop still on screen shows the Done step; the follow-ups below run regardless.
       const stillOnStop = activeStopIdRef.current === id;
       if (invoiceNum && stillOnStop) setAutoInvoiceNumber(invoiceNum);
-      toast('success', invoiceNum
-        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice ${invoiceNum} created.`
+      if (billSplit.failed) {
+        toast('warning', forThisStop(billSplitFailedMessage(profile.role)));
+      } else toast('success', invoiceNum
+        ? `Delivery completed${isPartial ? ' (partial)' : ''}. Draft invoice${plural ? 's' : ''} ${invoiceNum} created.`
         : `Delivery completed${isPartial ? ' (partial)' : ''}`);
-      if (billSplitFailed(result)) toast('warning', forThisStop(BILL_SPLIT_FAILED_MESSAGE));
 
       logActivity({
         event: 'delivery_completed',
@@ -518,32 +540,10 @@ export default function FieldStop() {
         }
       }
 
-      await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || recipient?.farmName || receiptRecipient?.farmName || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
+      await notifyDeliveryCompleted(delivery.id, delivery.delivery_number || '', delivery.customer?.farm_name || receiptRecipient?.farmName || 'Unknown', delivery.assigned_driver, delivery.order_id, isPartial);
 
-      // Same opt-in as an on-screen signature. The customer keeps the signed paper ticket; a
-      // guaranteed email needs a server-side receipt queue (open in the Goal 5 plan).
-      const sendTo = delivery.customer?.email || recipient?.email || receiptRecipient?.email || null;
-      if (emailOnComplete && sendTo) {
-        const emailItems = items
-          .map((it) => ({ name: it.product?.product_name || 'Product', qty: isPartial ? (deliveryQtys[it.id] ?? it.quantity) : it.quantity }))
-          .filter((r) => r.qty > 0);
-        const receiptSent = await sendDeliveryCompletionEmail({
-          customerEmail: sendTo,
-          contactName: delivery.customer?.contact_name ?? recipient?.contactName ?? receiptRecipient?.contactName ?? null,
-          deliveryNumber: delivery.delivery_number || '',
-          deliveryId: delivery.id,
-          customerId: delivery.customer_id,
-          items: emailItems,
-          isPartial,
-          signedBy,
-          ...(usePaperTicket && isValidPaperDeliveredOn(paperDeliveredOn) ? { deliveredOn: paperDeliveredOn } : {}),
-        });
-        if (!receiptSent) toast('warning', RECEIPT_NOT_SENT_MESSAGE);
-      } else if (emailOnComplete) {
-        // The receipt was wanted but no address could be read here (on any proof path). A visible
-        // customer with no email has none on file; otherwise the office may still have one.
-        toast('warning', delivery.customer ? RECEIPT_NO_EMAIL_ON_FILE_MESSAGE : RECEIPT_NO_EMAIL_MESSAGE);
-      }
+      // KI-25: the receipt was recorded with the completion; the server emails it (or lists it for the office).
+      if (emailOnComplete && !receiptEmail) toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
 
       if (stillOnStop) setStep('done');
     };
@@ -565,7 +565,7 @@ export default function FieldStop() {
         return;
       }
       if (outcome.kind === 'completed_not_replayed') {
-        toast('error', forThisStop(COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
+        toast('error', forThisStop(RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE));
       } else {
         toast('error', forThisStop(sanitizeError(error)));
         // The upload had already failed for a reason other than the signal: say what it was.
@@ -681,6 +681,7 @@ export default function FieldStop() {
               </li>
             )}
           </ul>
+          <div className="mt-4"><DeliveryBrandsPanel state={brandState} busy={completing} /></div>
           {!hasAnyQty && <p className="text-sm text-amber-800 mt-3 text-center">At least one item needs a quantity above zero.</p>}
           <MainAction disabled={!hasAnyQty} onClick={() => setStep('sign')}>
             {isPartial ? 'Continue with Partial' : 'All Full — Continue'}
@@ -812,12 +813,11 @@ export default function FieldStop() {
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Signed by</dt><dd className="text-nav-dark text-right break-words">{signedBy || '—'}</dd></div>
               <div className="flex justify-between gap-4 px-4 py-2.5"><dt className="font-semibold text-nav-dark">Photos</dt><dd className="text-nav-dark">{photos.length}</dd></div>
             </dl>
-            {receiptEmail && (
-              <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
-                <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
-                Email a receipt to the customer
-              </label>
-            )}
+            {/* Always shown: a receipt is asked for unless unticked, even when this screen cannot see the email. */}
+            <label className="flex items-center gap-3 border-t border-gray-100 px-4 py-2.5 text-base text-nav-dark">
+              <input type="checkbox" checked={emailOnComplete} onChange={(e) => setEmailOnComplete(e.target.checked)} className={CHECKBOX} />
+              Email a receipt to the customer
+            </label>
           </div>
 
           {!isOnline && (
@@ -842,7 +842,7 @@ export default function FieldStop() {
             <p className="text-sm text-secondary mt-1">Signed by {signedBy}</p>
             {autoInvoiceNumber && (
               <p className="inline-flex items-center gap-1 text-sm text-nav-dark mt-3">
-                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice {autoInvoiceNumber} created
+                <FileText className="w-4 h-4 text-secondary" aria-hidden="true" /> Draft invoice{autoInvoiceNumber.includes(',') ? 's' : ''} {autoInvoiceNumber} created
               </p>
             )}
           </div>
@@ -852,6 +852,30 @@ export default function FieldStop() {
         </>
       )}
 
+      <ConfirmModal
+        open={brandWarningList.length > 0}
+        onClose={() => { setBrandWarning(null); setStep('verify'); }}
+        onConfirm={() => {
+          const raisedHere = brandWarning?.stopId === id;
+          setBrandWarning(null);
+          if (raisedHere) void handleComplete();
+        }}
+        title="Brands not complete"
+        message={`${brandWarningList.join(' ')} You can still complete; the office will follow up.`}
+        confirmLabel="Complete anyway"
+        cancelLabel="Pick brand"
+        variant="warning"
+      />
+      <ConfirmModal
+        open={brandLeaveBlocker.state === 'blocked'}
+        onClose={() => brandLeaveBlocker.reset?.()}
+        onConfirm={() => brandLeaveBlocker.proceed?.()}
+        title="Leave this stop?"
+        message="Brand choices not saved. Leave anyway?"
+        confirmLabel="Leave"
+        cancelLabel="Stay"
+        variant="warning"
+      />
     </div>
   );
 }

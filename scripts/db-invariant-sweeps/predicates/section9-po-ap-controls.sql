@@ -222,11 +222,14 @@ WHERE create_wrapper IS NULL
    -- Naming the two exception tokens alone is not enough: a body could raise
    -- them from a condition that never fires. Pin the arithmetic that decides
    -- WHEN they fire — the cumulative sum's composition, the source it is summed
-   -- from, and the 105%-of-PO threshold — so widening the gate is a red row
-   -- rather than a silent policy change.
+   -- from, and the 105% threshold (KI-143: of the limit, which is received value
+   -- capped at the ordered total, or the ordered total before any quantity
+   -- arrives) — so widening the gate is a red row rather than a silent policy change.
    OR strpos(create_wrapper, 'COALESCE(SUM(vb.total_cents), 0)::bigint') = 0
    OR strpos(create_wrapper, 'v_cumulative_total := v_active_billed_total + v_candidate_total') = 0
-   OR strpos(create_wrapper, 'v_cumulative_total * 100 > v_po_total * 105') = 0
+   OR strpos(create_wrapper, 'v_cumulative_total * 100 > v_limit_cents * 105') = 0
+   OR strpos(create_wrapper, 'CASE WHEN v_any_received THEN LEAST(v_received_cents, v_po_total) ELSE v_po_total END') = 0
+   OR strpos(create_wrapper, 'SUM(round(poi.quantity_received * poi.unit_cost * 100))') = 0
    OR (
      create_impl IS NULL
      AND (

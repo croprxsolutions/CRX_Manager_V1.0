@@ -178,6 +178,12 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was billed. This order's lines are split across fields, so it is billed by field. Refresh the page, then choose Create Invoice again"],
   [/^ORDER_INVOICE_EXCEEDS_DELIVERED\b/,
    'Nothing was changed. Product quantities across all invoices for this order cannot exceed completed deliveries. Refresh the invoice and bill only delivered goods. Record advance payments as prepay'],
+  // create_invoice_from_order (20270106100000, KI-76): a line with no unit can't be billed or credited.
+  [/^ORDER_LINE_UNIT_MISSING\b/,
+   'Nothing was billed. A line on this order has no unit. Set each line\'s unit on the order before billing it'],
+  // Posting (20270106100000, KI-76): a sale line still has no unit, so it could never be credited.
+  [/^INVOICE_LINE_UNIT_MISSING\b/,
+   'Nothing was posted. A line on this invoice has no unit. Set the unit on the product, save the draft invoice, then post it again'],
   [/^ORDER_INVOICE_LINE_INVALID\b/,
    'Nothing was changed. This order invoice has an incomplete or invalid line. Each sale line needs a product and nonnegative quantity; each non-product line needs a charge type. Remove and re-add an incomplete line'],
   // cancel_delivery / batch cancel (20261102140000): a completed delivery is undone only by an admin's void.
@@ -221,13 +227,19 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An existing return credit is missing its protected cost source. Void or unapply it and contact support before retrying'],
   [/^RETURN_CREDIT_REVERSAL_EXCEEDS_RECOGNIZED\b/i,
    'This return would reverse more product cost than the related sales invoices recorded. No changes were saved; review the source invoices and earlier return credits'],
+  // Sales tax box (billing plan M4a, 20261231120000).
+  [/^SALES_TAX_NOT_ALLOWED\b/i,
+   "Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved"],
+  [/^SALES_TAX_RATE_MISSING\b/i, 'Set the sales tax rate in Settings first. No changes were saved'],
+  [/^SALES_TAX_STALE\b/i, "This draft's sales tax is out of date. Save it again, then post"],
+  [/^SALES_TAX_ORDER_CLOSED\b/i, "This sale is cancelled or voided, so its sales tax can't change"],
   // Split-billed orders (20261021155000): each payer returns only what its own invoices billed.
   [/^RETURN_QUANTITY_EXCEEDS_BILLED_SHARE\b/i,
-   'This order was split between payers. This customer can return only the quantity billed to them, less their other open returns. No changes were saved'],
+   'This customer can return only the quantity billed to them on posted invoices (a split share or a discounted sale), less their other open returns. No changes were saved'],
   [/^RETURN_SPLIT_SHARE_NOT_BILLED\b/i,
-   'This customer was not billed for this product on the split order, so they cannot return it. No changes were saved'],
+   'This customer has no posted invoice for this product on the order (a split share or a discounted sale), so it cannot be returned. If their invoice for it is still a draft, post it first. No changes were saved'],
   [/^RETURN_CREDIT_EXCEEDS_BILLED_SHARE\b/i,
-   "This return would credit more than this customer was billed for the product on the split order. Check the customer's split invoice and earlier returns. No changes were saved"],
+   "This return would credit more than this customer was billed for the product. Check the customer's invoice and earlier returns. No changes were saved"],
   [/^RETURN_SPLIT_INVOICE_NOT_VISIBLE\b/i,
    "This order was split between payers, and you cannot view this customer's split invoice, so you cannot start their return. Ask an admin to create it. No changes were saved"],
   [/^RETURN_SPLIT_SHARE_REPRICED\b/i,
@@ -328,8 +340,8 @@ export function sanitizeError(error: unknown): string {
     return message.slice('PRODUCT_DEACTIVATION_BLOCKED'.length).replace(/^:\s*/, '').trim()
       || 'This product cannot be turned off while required work is open. Review its blockers.';
   }
-  // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000): the server text after the token is the operator's answer.
-  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
+  // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.
+  const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|USE_TIMING_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
     return `Nothing was saved. ${rateRefusal.charAt(0).toUpperCase()}${rateRefusal.slice(1)}`;
   }

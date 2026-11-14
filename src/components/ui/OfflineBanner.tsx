@@ -15,6 +15,7 @@ import {
 } from '../../lib/offlineQueue';
 import { RETRY_DELAYS_MS, syncPendingActions, type OfflineSyncResult } from '../../lib/offlineSync';
 import OfflineWorkPanel from './OfflineWorkPanel';
+import { toSentryError } from '../../lib/sentryError';
 
 const EMPTY_SUMMARY: OfflineQueueSummary = {
   ownedTotal: 0,
@@ -81,7 +82,7 @@ export default function OfflineBanner() {
         }, 5000);
       }
     } catch (error) {
-      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'Sync failed' } });
+      Sentry.captureException(toSentryError(error), { extra: { context: 'Sync failed' } });
       setSyncError(true);
       setSyncRetryAt(Date.now() + RETRY_DELAYS_MS[0]);
     } finally {

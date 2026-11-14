@@ -29,6 +29,7 @@ import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import type { RebateProgram, RebateClaim, RebateClaimStatus } from '../types';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
+import { toSentryError } from '../lib/sentryError';
 
 type RebatePickerProduct = ProductOptionPresentationModel & {
   vendor: string | null;
@@ -427,7 +428,7 @@ export default function Rebates() {
       if (profile) logActivity({ event: 'rebate_program_deleted', description: `Rebate program "${programName}" deleted`, performedBy: profile.id });
       fetchPrograms();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'delete_rebate_program' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'delete_rebate_program' } });
       toast('error', sanitizeError(err));
     }
   };
@@ -450,7 +451,7 @@ export default function Rebates() {
       if (profile) logActivity({ event: 'rebate_claim_deleted', description: `Rebate claim ${claimNumber} deleted`, performedBy: profile.id });
       fetchClaims();
     } catch (err: unknown) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'delete_rebate_claim' } });
+      Sentry.captureException(toSentryError(err), { extra: { context: 'delete_rebate_claim' } });
       toast('error', sanitizeError(err));
     }
   };

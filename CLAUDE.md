@@ -16,6 +16,7 @@ Route Mason's plain-English requests; he should not need workflow names.
 
 | Need | Workflow |
 |---|---|
+| Plan a money, stock, data, permission or lifecycle change before code | `plan-contract` |
 | Read-only second-model review | `codex-review` from Claude; `claude-review` from Codex |
 | Claude + Codex reconciliation | `agent-pair-review` |
 | Adversarial review | `codex-gauntlet` or `codex-review` |

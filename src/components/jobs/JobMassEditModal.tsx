@@ -20,6 +20,7 @@ import {
   describeChanges,
   loaderInputsValid,
 } from './jobMassEdit';
+import { toSentryError } from '../../lib/sentryError';
 
 /** Minimal shape of a selected job the modal needs (id + current status). */
 export interface MassEditJob {
@@ -174,7 +175,7 @@ export default function JobMassEditModal({
       onApplied();
       onClose();
     } catch (err) {
-      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+      Sentry.captureException(toSentryError(err), {
         extra: { context: 'JobMassEditModal.apply' },
       });
       toast('error', sanitizeError(err));

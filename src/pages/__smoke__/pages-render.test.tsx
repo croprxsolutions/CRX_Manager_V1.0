@@ -216,6 +216,8 @@ const COVERED = new Set<string>([
   'DeliveryDetail',
   'DeliveryRemainders',
   'DispatchBoard',
+  'EpaLookups',
+  'EpaRegistrationSetup',
   'FieldAppSplitInvoiceEditor',
   'FieldApplicationInvoice',
   'FieldProfitability',

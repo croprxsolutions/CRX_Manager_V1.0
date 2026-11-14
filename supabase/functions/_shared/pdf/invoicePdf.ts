@@ -18,7 +18,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
 import { dueDateFromTerms } from "../paymentTerms.ts";
-import { invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
+import { hasRepeatedBrandTrip, invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
 import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
 import {
   ALT_ROW_BG,
@@ -197,9 +197,10 @@ export function groupReturnCreditDisplayItems<T extends ReturnCreditDisplayItem>
  * The product cell: the name, then the delivered brands under it (Brand PR B-3). On a Bill Split payer's invoice the
  * brand amounts are the whole load's, so they read "on the load".
  */
-export function productCellText(item: InvoicePdfItem, data: Pick<InvoicePdfData, 'shares'>): string {
-  const onTheLoad = (data.shares ?? []).some((s) => 'invoice_id' in s && !!(s as BillSplitPayer).invoice_id);
-  return [item.product_name || item.description, ...invoiceBrandNotes(item.brand_lines, onTheLoad)].join('\n');
+export function productCellText(item: InvoicePdfItem, data: Pick<InvoicePdfData, 'bill_split_on_load' | 'items'>): string {
+  return [item.product_name || item.description, ...invoiceBrandNotes(
+    item.brand_lines, item.quantity, data.bill_split_on_load, hasRepeatedBrandTrip(data.items, data.items.indexOf(item)),
+  )].join('\n');
 }
 
 export function isFuelSurchargeLine(item: InvoicePdfItem): boolean {
@@ -356,6 +357,8 @@ export interface InvoicePdfData {
   due_date?: string;
   invoice_type: string;
   status: string;
+  /** Stored invoice type/group/delivery identify a Bill Split even when the payer read is empty. */
+  bill_split_on_load: boolean;
   customer_name: string;
   customer_email?: string;
   customer_phone?: string;
@@ -633,6 +636,7 @@ export async function buildInvoicePdfDataFromRow(
     due_date: pickDue || (termsDue && inv.invoice_date ? dueDateFromTerms(inv.invoice_date, printTerms) : undefined),
     invoice_type: inv.invoice_type || 'field_application',
     status: inv.status || 'draft',
+    bill_split_on_load: isBillSplitInvoice({ invoice_type: inv.invoice_type, invoice_group_id: billingRow?.invoice_group_id, delivery_id: billingRow?.delivery_id }),
     customer_name: inv.customer_name,
     customer_address: custRow?.billing_address || undefined,
     customer_city: custRow?.city || undefined,

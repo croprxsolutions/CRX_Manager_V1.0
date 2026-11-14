@@ -116,6 +116,15 @@ beforeEach(() => {
 });
 
 describe('buildInvoicePdfDataFromRow — #33 list-print re-fetch', () => {
+  it('marks a stored delivery Bill Split for load-labelled brands even when its payer table is not used', async () => {
+    installFromMock({
+      invoice_items: [ONE_LINE],
+      invoice_shares: [{ split_percentage: 100, acres: null, amount_cents: 100000 }],
+      invoices: { invoice_group_id: 'group-1', delivery_id: 'delivery-1' },
+    });
+    expect((await buildInvoicePdfDataFromRow(listRow({ invoice_type: 'chemical_sale' }))).bill_split_on_load).toBe(true);
+  });
+
   it('re-fetches Discount Earned + Terms (+ PO/due/notes) when the list row omits them', async () => {
     // The invoice HAS a saved discount + terms + PO + due + notes in the DB; the list
     // row (which never carries these) leaves them undefined. The builder must surface

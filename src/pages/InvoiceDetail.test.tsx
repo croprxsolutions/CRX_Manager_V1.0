@@ -529,6 +529,89 @@ describe('InvoiceDetail', () => {
     });
   });
 
+  it('shows a partial invoice brand without the whole-load amount in the detail table', async () => {
+    const invoice = {
+      id: 'inv-brand-partial', invoice_number: 'INV-BRAND-PARTIAL', status: 'draft',
+      invoice_type: 'chemical_sale', customer_id: 'cust-1', delivery_id: 'del-1',
+      total_amount_cents: 3000, total_cost_cents: 0, paid_amount_cents: 0,
+      prepay_applied_cents: 0, balance_cents: 3000, invoice_date: '2026-11-13',
+      due_date: null, created_at: '2026-11-13T00:00:00Z',
+    };
+    const lines = [{
+      id: 'line-brand-partial', invoice_id: invoice.id, product_id: 'product-1',
+      description: 'Synthetic Herbicide', quantity: 3, unit_price_cents: 1000,
+      extended_cents: 3000, cost_cents: 0, unit_size: 'gal',
+      brand_lines: [
+        { brand_key: 'a', brand_name: 'Alpha', epa_registration: '1-1', quantity: 2, line_delivered: 5, delivery_item_id: 'di1' },
+        { brand_key: 'b', brand_name: 'Beta', epa_registration: '2-2', quantity: 3, line_delivered: 5, delivery_item_id: 'di1' },
+      ],
+    }];
+    let invoiceCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') return buildChain({ data: ++invoiceCalls <= 2 ? invoice : [], error: null });
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    renderInvoiceDetail(invoice.id);
+    const brand = await screen.findByText('Brand: Alpha (EPA 1-1)');
+    expect(brand).not.toHaveTextContent(' - 2');
+    expect(screen.getByText('Brand: Beta (EPA 2-2)')).toBeInTheDocument();
+    expect(screen.getByText('Full-load brand amounts are on the delivery receipt.')).toBeInTheDocument();
+  });
+
+  it('uses the stored Bill Split identity to show whole-load amounts on a voided payer invoice', async () => {
+    const invoice = {
+      id: 'inv-voided-split', invoice_number: 'INV-SPLIT-VOID', status: 'voided',
+      invoice_type: 'chemical_sale', invoice_group_id: 'group-stored', customer_id: 'cust-1', delivery_id: 'delivery-stored',
+      total_amount_cents: 6000, total_cost_cents: 0, paid_amount_cents: 0,
+      prepay_applied_cents: 0, balance_cents: 6000, invoice_date: '2026-11-13',
+      due_date: null, created_at: '2026-11-13T00:00:00Z',
+    };
+    const lines = [{
+      id: 'line-voided-split', invoice_id: invoice.id, product_id: 'product-1',
+      description: 'Synthetic Herbicide', quantity: 3, unit_price_cents: 2000,
+      extended_cents: 6000, cost_cents: 0, unit_size: 'gal',
+      brand_lines: [{ brand_key: 'a', brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, line_delivered: 5, delivery_item_id: 'di1' }],
+    }];
+    let invoiceCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') return buildChain({ data: ++invoiceCalls <= 2 ? invoice : [], error: null });
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    renderInvoiceDetail(invoice.id);
+    expect(await screen.findByText('Brand: Alpha (EPA 1-1) - 5 on the load')).toBeInTheDocument();
+  });
+
+  it('labels each repeated delivery trip without repeating its whole-load amount', async () => {
+    const invoice = {
+      id: 'inv-repeat-trip', invoice_number: 'INV-REPEAT-TRIP', status: 'draft',
+      invoice_type: 'chemical_sale', customer_id: 'cust-1', delivery_id: 'delivery-1',
+      total_amount_cents: 10000, total_cost_cents: 0, paid_amount_cents: 0,
+      prepay_applied_cents: 0, balance_cents: 10000, invoice_date: '2026-11-13',
+      due_date: null, created_at: '2026-11-13T00:00:00Z',
+    };
+    const tripBrand = { brand_key: 'a', brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, line_delivered: 5, delivery_item_id: 'same-trip' };
+    const lines = [1, 2].map((n) => ({
+      id: `line-trip-${n}`, invoice_id: invoice.id, product_id: 'product-1', description: `Synthetic Herbicide trip ${n}`,
+      quantity: 5, unit_price_cents: 1000, extended_cents: 5000, cost_cents: 0, unit_size: 'gal', brand_lines: [tripBrand],
+    }));
+    let invoiceCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'invoices') return buildChain({ data: ++invoiceCalls <= 2 ? invoice : [], error: null });
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      return buildChain({ data: [], error: null });
+    });
+
+    renderInvoiceDetail(invoice.id);
+    const labels = await screen.findAllByText('Brand: Alpha (EPA 1-1)');
+    expect(labels).toHaveLength(2);
+    expect(screen.getAllByText('Full-load brand amounts are on the delivery receipt.')).toHaveLength(2);
+    expect(screen.queryByText('Brand: Alpha (EPA 1-1) - 5')).not.toBeInTheDocument();
+  });
+
   it('renders the stored penny-exact COGS total for a posted return credit', async () => {
     const invoice = {
       id: 'credit-return-1', invoice_number: 'CM-RETURN-1', status: 'posted',

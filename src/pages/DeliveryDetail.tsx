@@ -1601,7 +1601,7 @@ export default function DeliveryDetail() {
     const stepIndex = DRIVER_STEPS.findIndex((step) => step.status === delivery.status);
     return (
       // `.phone-touch` stretches each HelpTip trigger to 44px; centre its icon in that box.
-      <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
+      <div className="phone-touch -m-4 lg:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
         <PhoneHeader
           title={customer?.farm_name ?? ''}
           eyebrow={

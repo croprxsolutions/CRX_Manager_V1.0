@@ -25,7 +25,7 @@ export default function Breadcrumbs({ items }: BreadcrumbsProps) {
             ) : (
               <button
                 onClick={() => navigate(item.href!)}
-                className="text-crx-green hover:underline hover:text-crx-green-dark transition-colors"
+                className="inline-flex min-h-11 md:min-h-0 items-center text-crx-green hover:underline hover:text-crx-green-dark transition-colors"
               >
                 {item.label}
               </button>

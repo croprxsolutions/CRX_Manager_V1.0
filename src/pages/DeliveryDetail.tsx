@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useLayoutEffect, type ComponentProps } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Phone, MapPin, CheckCircle2, Package, Download, WifiOff,
   Minus, Plus, Pencil, Ban, Camera, UserPlus, AlertTriangle, RefreshCw,
-  PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus, Wrench, Undo2,
+  PlayCircle, Lock, Zap, FileText, Mail, RotateCcw, MessageSquarePlus, Wrench, Undo2, ChevronRight,
 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import PhoneHeader from '../components/ui/PhoneHeader';
@@ -43,7 +43,8 @@ import { countOrdinaryPhotos, countPaperTicketPhotos, hasPaperTicketPhoto, MAX_O
 import type { Json } from '../types/supabase';
 import { compressImage } from '../lib/imageCompression';
 import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
-import { formatCents as fmtCents } from '../lib/money';
+import { formatCentsMinus } from '../lib/money';
+import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -273,11 +274,7 @@ export default function DeliveryDetail() {
   const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string } | null>(null);
 
   // Related invoices (cross-link via shared order)
-  const [relatedInvoices, setRelatedInvoices] = useState<Array<{
-    id: string; invoice_number: string; invoice_date: string; status: string;
-    total_amount_cents: number; order_id: string; delivery_id: string | null;
-    invoice_type: string; deleted_at: string | null;
-  }>>([]);
+  const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
 
   // H5: true when the server's ORDER_NEEDS_SPLIT_BILLING guard would refuse a
   // single backfilled invoice for this delivery's order. Defaults to false and
@@ -438,7 +435,7 @@ export default function DeliveryDetail() {
               .maybeSingle(),
             supabase
               .from('invoices')
-              .select('id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at')
+              .select('id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)')
               .eq('order_id', del.order_id)
               .is('deleted_at', null)
               .order('invoice_date', { ascending: false }),
@@ -498,19 +495,7 @@ export default function DeliveryDetail() {
             setOrderItemContext(ctx);
           }
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
-          setRelatedInvoices(
-            invRes.data.map((inv: Record<string, unknown>) => ({
-              id: inv.id as string,
-              invoice_number: inv.invoice_number as string,
-              invoice_date: inv.invoice_date as string,
-              status: inv.status as string,
-              total_amount_cents: Number(inv.total_amount_cents || 0),
-              order_id: inv.order_id as string,
-              delivery_id: inv.delivery_id as string | null,
-              invoice_type: inv.invoice_type as string,
-              deleted_at: inv.deleted_at as string | null,
-            }))
-          );
+          setRelatedInvoices(invRes.data.map(toRelatedInvoice));
 
           // Fetch sibling deliveries for transaction thread
           const { data: sibDels } = await supabase
@@ -1330,6 +1315,9 @@ export default function DeliveryDetail() {
     // whose identical replay returned the saved result.
     const finishCompleted = async (completeResult: unknown) => {
       // The signature image went up before the call; the server recorded signature_url itself.
+      // Reload first, so the status and the invoices it drafted show at once. The follow-ups below
+      // (notifications, the no-proof reason read) never hold the page on the old state.
+      if (signatureRouteIdRef.current === deliveryId) fetchDelivery();
 
       // Show auto-invoice info if created
       const autoInvoice = completeResult as { auto_invoice?: { invoice_id?: string; invoice_number?: string } } | null;
@@ -1400,8 +1388,6 @@ export default function DeliveryDetail() {
       } else if (emailOnComplete && !receiptEmail) {
         toast('warning', RECEIPT_NO_EMAIL_ON_FILE_MESSAGE);
       }
-
-      if (signatureRouteIdRef.current === deliveryId) fetchDelivery();
     };
 
     let completeResult: unknown;
@@ -1615,7 +1601,7 @@ export default function DeliveryDetail() {
     const stepIndex = DRIVER_STEPS.findIndex((step) => step.status === delivery.status);
     return (
       // `.phone-touch` stretches each HelpTip trigger to 44px; centre its icon in that box.
-      <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
+      <div className="phone-touch -m-4 lg:-m-6 min-h-screen bg-cream pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 [&_[role=button]]:inline-flex [&_[role=button]]:items-center [&_[role=button]]:justify-center">
         <PhoneHeader
           title={customer?.farm_name ?? ''}
           eyebrow={
@@ -2030,12 +2016,14 @@ export default function DeliveryDetail() {
   // ADMIN / SALES REP VIEW (light desktop UI)
   // ═══════════════════════════════════════════════════════════════════════
 
+  // Always there once the delivery is completed, so the page never says nothing about billing.
+  const showInvoicesCard = delivery.status === 'completed' || relatedInvoices.length > 0;
   const jumpSections = [
+    ...(showInvoicesCard ? [{ id: 'delivery-invoices', label: 'Invoices', count: relatedInvoices.length }] : []),
     ...(!editing ? [{ id: 'delivery-products', label: 'Products', count: items.length }] : []),
     ...(delivery.status === 'in_progress' && isAdminOrRep ? [{ id: 'delivery-complete', label: 'Complete' }] : []),
     ...(delivery.status === 'completed' && remainders.length > 0 ? [{ id: 'delivery-remaining', label: 'Remaining', count: remainders.length }] : []),
     { id: 'delivery-photos', label: 'Photos', count: photos.length },
-    ...(relatedInvoices.length > 0 ? [{ id: 'delivery-invoices', label: 'Invoices', count: relatedInvoices.length }] : []),
   ];
 
   return (
@@ -2117,39 +2105,6 @@ export default function DeliveryDetail() {
               >
                 Take Delivery
               </Button>
-            )}
-            {canCreateInvoice && (
-              <Button
-                size="sm"
-                icon={<FileText className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setCreateInvoiceConfirmOpen(true)}
-                disabled={creatingInvoice}
-              >
-                Create Invoice
-              </Button>
-            )}
-            {/* H5: the server would refuse this one. Show it disabled with the
-                reason instead of a button that cannot succeed. */}
-            {splitBillingBlocksInvoice && (
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  icon={<FileText className="w-4 h-4" />}
-                  showChevron={false}
-                  disabled
-                >
-                  Create Invoice
-                </Button>
-                <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
-              </div>
-            )}
-            {isAdmin && delivery?.status === 'completed' && billedOutsideCrxReason !== null && (
-              <div className="flex items-center gap-1 text-sm text-secondary">
-                <FileText className="w-4 h-4" />
-                <span>Billed outside CRX</span>
-                <HelpTip text={billedOutsideCrxReason} />
-              </div>
             )}
             <Button
               variant="secondary"
@@ -2575,6 +2530,20 @@ export default function DeliveryDetail() {
             </Button>
           </div>
         </Card>
+      )}
+
+      {showInvoicesCard && (
+        <DeliveryInvoicesCard
+          invoices={relatedInvoices}
+          deliveryId={delivery.id}
+          unbilled={delivery.status === 'completed' && !hasActiveRelatedInvoice ? {
+            isAdmin,
+            billedOutsideCrxReason,
+            createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
+            creating: creatingInvoice,
+            onCreate: () => setCreateInvoiceConfirmOpen(true),
+          } : null}
+        />
       )}
 
       {/* Issue info for completed deliveries with issues */}
@@ -3020,48 +2989,6 @@ export default function DeliveryDetail() {
         )}
       </SectionBand>
 
-      {/* Related Invoices (cross-link via shared order) */}
-      {relatedInvoices.length > 0 && (
-        <SectionBand id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Related Invoices">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Invoice #</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Date</th>
-                  <th className="px-4 py-2 text-left font-medium text-secondary">Status</th>
-                  <th className="px-4 py-2 text-right font-medium text-secondary">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {relatedInvoices.map((inv) => (
-                  <tr key={inv.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-2">
-                      <button
-                        onClick={() => navigate(`/invoices/${inv.id}`)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        {inv.invoice_number}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2 text-secondary">
-                      {new Date(inv.invoice_date + 'T00:00:00').toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-2">
-                      <Badge variant={statusToBadgeVariant[inv.status] || 'default'} size="sm">
-                        {inv.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-2 text-right font-medium">
-                      {fmtCents(inv.total_amount_cents)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionBand>
-      )}
 
       {/* Start Delivery Modal */}
       <StartDeliveryModal
@@ -3181,9 +3108,9 @@ export default function DeliveryDetail() {
           if (!creatingInvoice) setCreateInvoiceConfirmOpen(false);
         }}
         onConfirm={() => { void handleCreateInvoice(); }}
-        title="Create Invoice"
-        message={`Create a draft invoice for completed delivery ${delivery.delivery_number}?`}
-        confirmLabel="Create Invoice"
+        title="Create an invoice for this delivery?"
+        message={`This makes a draft invoice for completed delivery ${delivery.delivery_number}.`}
+        confirmLabel="Create invoice"
         variant="info"
         loading={creatingInvoice}
       />
@@ -3215,6 +3142,127 @@ const DRIVER_FIELD_CLASS =
   'w-full px-4 py-3 text-base text-nav-dark bg-white border border-gray-300 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green focus:border-crx-green';
 const DRIVER_MAIN_ACTION_CLASS =
   'flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-crx-green font-heading text-xl font-bold text-white hover:bg-crx-green-hover disabled:opacity-50 transition-colors';
+
+interface RelatedInvoice {
+  id: string; invoice_number: string; invoice_date: string; status: string;
+  total_amount_cents: number; order_id: string; delivery_id: string | null;
+  invoice_type: string; deleted_at: string | null;
+  /** The invoice's customer (each payer has its own invoice on a Bill Split). */
+  bill_to: string | null;
+}
+
+/** One row of the related-invoices read, with the invoice's customer as "Bill to". */
+function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
+  return {
+    id: inv.id as string,
+    invoice_number: inv.invoice_number as string,
+    invoice_date: inv.invoice_date as string,
+    status: inv.status as string,
+    total_amount_cents: Number(inv.total_amount_cents || 0),
+    order_id: inv.order_id as string,
+    delivery_id: inv.delivery_id as string | null,
+    invoice_type: inv.invoice_type as string,
+    deleted_at: inv.deleted_at as string | null,
+    bill_to: (inv.customer as { farm_name?: string | null } | null)?.farm_name ?? null,
+  };
+}
+
+/**
+ * Every invoice on the delivery's sale (as the thread above shows), one link per row; this
+ * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
+ * nothing billing this delivery it says so (see UnbilledNote).
+ */
+function DeliveryInvoicesCard({ invoices, deliveryId, unbilled }: {
+  invoices: RelatedInvoice[];
+  deliveryId: string;
+  unbilled: UnbilledNoteProps | null;
+}) {
+  return (
+    <SectionCard id="delivery-invoices" icon={<FileText className="w-5 h-5" />} title="Invoices on this sale">
+      <div className="px-4 py-3 md:px-5">
+        {invoices.length > 0 && (
+          <>
+            <div aria-hidden="true" className="hidden xl:grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_7rem_6.5rem_1rem] gap-x-4 px-3 pb-2 text-xs font-medium text-secondary">
+              <span>Invoice</span><span>Bill to</span><span className="text-right">Total</span><span>Status</span><span />
+            </div>
+            <ul className="divide-y divide-gray-100 border-t border-gray-100">
+              {invoices.map((inv) => <InvoiceRow key={inv.id} invoice={inv} thisDelivery={inv.delivery_id === deliveryId} />)}
+            </ul>
+          </>
+        )}
+        {unbilled && <div className={invoices.length > 0 ? 'mt-3' : ''}><UnbilledNote {...unbilled} /></div>}
+      </div>
+    </SectionCard>
+  );
+}
+
+interface UnbilledNoteProps {
+  isAdmin: boolean;
+  billedOutsideCrxReason: string | null;
+  createInvoice: 'offer' | 'split' | null;
+  creating: boolean;
+  onCreate: () => void;
+}
+
+/**
+ * A completed delivery with no active CRX invoice. Billed outside CRX: the stored reason (admins only). Otherwise
+ * an admin is told nothing is billed and gets Create invoice… under today's condition (or the
+ * disabled split-billing button with its reason); others may not see every invoice (invoices RLS).
+ */
+function UnbilledNote({ isAdmin, billedOutsideCrxReason, createInvoice, creating, onCreate }: UnbilledNoteProps) {
+  // The stored reason is admin-only, as before this card; others get the plain empty text below.
+  if (isAdmin && billedOutsideCrxReason !== null) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3 text-sm text-nav-dark">
+        <FileText className="mt-0.5 h-[18px] w-[18px] shrink-0 text-secondary" aria-hidden="true" />
+        <p className="min-w-0 flex-1"><strong>Billed outside CRX.</strong> {billedOutsideCrxReason}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-900">
+      <AlertTriangle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+      {isAdmin
+        ? <p className="min-w-0 flex-1"><strong>No invoice yet.</strong> This delivery is complete but nothing has been billed.</p>
+        : <p className="min-w-0 flex-1"><strong>No invoices you can see for this delivery.</strong> Ask the office whether it has been billed.</p>}
+      {createInvoice === 'offer' && (
+        <Button variant="secondary" size="sm" showChevron={false} onClick={onCreate} disabled={creating} className="min-h-11 md:min-h-0">
+          Create invoice…
+        </Button>
+      )}
+      {/* H5: the server would refuse this one. Show it disabled with the reason. */}
+      {createInvoice === 'split' && (
+        <span className="flex items-center gap-1">
+          <Button variant="secondary" size="sm" showChevron={false} disabled className="min-h-11 md:min-h-0">Create invoice…</Button>
+          <HelpTip text={SPLIT_BILLING_BLOCK_REASON} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One invoice: a single link. Phone and tablet stack it; xl and up line it up as a table row. */
+function InvoiceRow({ invoice, thisDelivery }: { invoice: RelatedInvoice; thisDelivery: boolean }) {
+  return (
+    <li>
+      <Link
+        to={`/invoices/${invoice.id}`}
+        className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 rounded-lg px-3 py-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-crx-green xl:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_7rem_6.5rem_1rem]"
+      >
+        <span className="order-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 xl:order-none">
+          <span className="truncate font-semibold text-crx-green">{invoice.invoice_number}</span>
+          {thisDelivery && <span className="shrink-0 rounded-full bg-crx-green-light px-2 py-0.5 text-xs font-medium text-crx-green">This delivery</span>}
+        </span>
+        <span className="order-3 truncate text-secondary xl:order-none xl:text-nav-dark">{invoice.bill_to ?? ''}</span>
+        <span className="order-2 text-right font-semibold tabular-nums text-nav-dark xl:order-none">{formatCentsMinus(invoice.total_amount_cents)}</span>
+        <span className="order-4 justify-self-end xl:order-none xl:justify-self-start">
+          <Badge variant={invoiceStatusBadge(invoice.status).variant} size="sm" normalCase>{invoiceStatusBadge(invoice.status).label}</Badge>
+        </span>
+        <ChevronRight className="hidden h-4 w-4 text-secondary xl:block" aria-hidden="true" />
+      </Link>
+    </li>
+  );
+}
 
 /** The shared Style D section band with this screen's padded body. */
 function SectionBand({ children, ...band }: ComponentProps<typeof SectionCard>) {

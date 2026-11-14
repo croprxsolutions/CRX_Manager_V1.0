@@ -10,14 +10,18 @@
  *   - SIGNATURE_IMAGE_MISSING retires the key, so the next tap is a fresh attempt;
  *   - a lost reply on a delivery that turns out completed is resent IDENTICALLY (same key, same
  *     args) and then runs the normal success path (receipt email included).
+ *   - the "Invoices on this sale" card: always there once completed, one link per invoice (this
+ *     delivery's tagged), the empty states (Create invoice… for an admin only; billed outside CRX),
+ *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const SIGNATURE_DATA_URL = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`;
 
-const { auth, mockFrom, mockRpc, mockToast, mockSendEmail, mockUpload, route, tables } = vi.hoisted(() => ({
+const { auth, mockFrom, mockNotifyCompleted, mockRpc, mockToast, mockSendEmail, mockUpload, route, tables } = vi.hoisted(() => ({
+  mockNotifyCompleted: vi.fn(),
   auth: { role: 'admin', profile: { id: 'user-1', role: 'admin' }, deniedPages: [] as string[] },
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
@@ -71,7 +75,7 @@ vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({
-  notifyDeliveryRemainder: vi.fn(), notifyDeliveryCompleted: vi.fn(),
+  notifyDeliveryRemainder: vi.fn(), notifyDeliveryCompleted: mockNotifyCompleted,
 }));
 vi.mock('../lib/connectivity', () => ({ hasSignal: () => Promise.resolve(true), NO_SIGNAL_MESSAGE: 'no signal' }));
 vi.mock('../lib/deliveryPdf', () => ({ downloadDeliveryPdf: vi.fn() }));
@@ -127,6 +131,7 @@ function setRole(role: 'admin' | 'sales_rep' | 'driver') {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockNotifyCompleted.mockImplementation(() => Promise.resolve());
   route.id = 'del-1';
   setRole('admin');
   mockUpload.mockResolvedValue({ data: { path: 'x' }, error: null });
@@ -322,5 +327,139 @@ describe('receipt opt-out when this screen cannot see the customer email (Sol, P
     await waitFor(() => expect(completeRpcCalls()).toHaveLength(1));
     expect(completeRpcCalls()[0][1].p_email_receipt).toBe(true);
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/No customer email was found here/)));
+  });
+});
+
+const ORDER_ID = 'ord-1';
+const INVOICE_ROWS = [
+  { id: 'inv-1', invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', status: 'draft', total_amount_cents: 73483, order_id: ORDER_ID, delivery_id: 'del-1', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Maple Hollow Farms' } },
+  { id: 'inv-2', invoice_number: 'CS-2026-0005-2', invoice_date: '2026-11-06', status: 'posted', total_amount_cents: 68701, order_id: ORDER_ID, delivery_id: 'del-1', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Cedar Ridge Ag' } },
+];
+// An invoice for another delivery on the same sale.
+const OTHER_DELIVERY_INVOICE = { id: 'inv-9', invoice_number: 'CS-2026-0004', invoice_date: '2026-11-01', status: 'posted', total_amount_cents: 10000, order_id: ORDER_ID, delivery_id: 'del-0', invoice_type: 'chemical_sale', deleted_at: null, customer: { farm_name: 'Maple Hollow Farms' } };
+const EMPTY_TEXT = 'No invoice yet. This delivery is complete but nothing has been billed.';
+const REP_EMPTY_TEXT = 'No invoices you can see for this delivery. Ask the office whether it has been billed.';
+const paragraph = (text: string) => (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === text;
+const emptyText = paragraph(EMPTY_TEXT);
+
+function useCompletedDeliveryOnOrder(invoices: unknown[]) {
+  tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', order_id: ORDER_ID }];
+  tables.data.orders = [{ id: ORDER_ID, order_number: 'ORD-2026-0007', quote_id: null }];
+  tables.data.invoices = invoices;
+}
+
+function invoicesCard() {
+  return document.getElementById('delivery-invoices') as HTMLElement;
+}
+
+describe('Invoices on this sale card', () => {
+  it('lists each invoice as one link: number, Bill to, total and a title-case status', async () => {
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    await renderPage();
+    expect(await screen.findByRole('heading', { name: 'Invoices on this sale' })).toBeInTheDocument();
+    const first = await screen.findByRole('link', { name: /CS-2026-0005-1/ });
+    expect(first).toHaveAttribute('href', '/invoices/inv-1');
+    expect(first).toHaveTextContent('Maple Hollow Farms');
+    expect(first).toHaveTextContent('$734.83');
+    expect(first).toHaveTextContent('Draft');
+    const second = screen.getByRole('link', { name: /CS-2026-0005-2/ });
+    expect(second).toHaveAttribute('href', '/invoices/inv-2');
+    expect(second).toHaveTextContent('Cedar Ridge Ag');
+    expect(second).toHaveTextContent('$687.01');
+    expect(second).toHaveTextContent('Posted');
+    expect(invoicesCard()).not.toHaveTextContent(EMPTY_TEXT);
+  });
+
+  it('tags only this delivery\'s invoices with "This delivery"', async () => {
+    useCompletedDeliveryOnOrder([...INVOICE_ROWS, OTHER_DELIVERY_INVOICE]);
+    await renderPage();
+    expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveTextContent('This delivery');
+    expect(screen.getByRole('link', { name: /CS-2026-0005-2/ })).toHaveTextContent('This delivery');
+    expect(screen.getByRole('link', { name: /CS-2026-0004/ })).not.toHaveTextContent('This delivery');
+  });
+
+  it('with only another delivery\'s invoice, an admin still sees the empty text and Create invoice…', async () => {
+    useCompletedDeliveryOnOrder([OTHER_DELIVERY_INVOICE]);
+    await renderPage();
+    await screen.findByText(emptyText);
+    expect(screen.getByRole('button', { name: 'Create invoice…' })).toBeInTheDocument();
+  });
+
+  it('billed outside CRX: shows the stored reason, no empty text and no button', async () => {
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph('Billed outside CRX. Billed in the old system by the office'));
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
+  });
+
+  it('billed outside CRX: an admin sees the stored reason once (no second header note)', async () => {
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph('Billed outside CRX. Billed in the old system by the office'));
+    expect(screen.getAllByText(/Billed outside CRX/)).toHaveLength(1);
+  });
+
+  it('billed outside CRX: a sales rep gets the plain empty text, not the stored reason', async () => {
+    setRole('sales_rep');
+    useCompletedDeliveryOnOrder([]);
+    tables.data.delivery_external_billings = [{ reason: 'Billed in the old system by the office' }];
+    await renderPage();
+    await screen.findByText(paragraph(REP_EMPTY_TEXT));
+    expect(screen.queryByText(/Billed outside CRX/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Billed in the old system/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
+  });
+
+  it('with no invoice, an admin sees the empty text and Create invoice… opens the existing confirm', async () => {
+    useCompletedDeliveryOnOrder([]);
+    await renderPage();
+    await screen.findByText(emptyText);
+    fireEvent.click(screen.getByRole('button', { name: 'Create invoice…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Create an invoice for this delivery?' });
+    expect(within(dialog).getByText('This makes a draft invoice for completed delivery DEL-1.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
+  });
+
+  // Attack LOW-3: drivers cannot read invoices (RLS) and FieldStop tells them billing is not their job.
+  it('a driver on a completed delivery sees no Invoices on this sale card, even with invoices on the sale', async () => {
+    setRole('driver');
+    useCompletedDeliveryOnOrder(INVOICE_ROWS);
+    await renderPage();
+    expect((await screen.findAllByText('DEL-1')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('invoices'));
+    expect(screen.queryByRole('heading', { name: 'Invoices on this sale' })).not.toBeInTheDocument();
+    expect(invoicesCard()).toBeNull();
+    expect(screen.queryByText(paragraph(REP_EMPTY_TEXT))).not.toBeInTheDocument();
+  });
+
+  it('with no invoice, a sales rep is told none he can see, without the button', async () => {
+    setRole('sales_rep');
+    useCompletedDeliveryOnOrder([]);
+    await renderPage();
+    await screen.findByText(paragraph(REP_EMPTY_TEXT));
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create invoice/i })).not.toBeInTheDocument();
+  });
+
+  it('fills right after completion, without waiting for the notifications (No invoices until refresh)', async () => {
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, order_id: ORDER_ID }];
+    tables.data.orders = [{ id: ORDER_ID, order_number: 'ORD-2026-0007', quote_id: null }];
+    tables.data.invoices = [];
+    // The follow-up notifications are slow (or never finish): the page must not wait on them.
+    mockNotifyCompleted.mockImplementation(() => new Promise(() => undefined));
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'complete_delivery') return Promise.resolve({ data: null, error: null });
+      tables.data.deliveries = [{ ...OPEN_DELIVERY, order_id: ORDER_ID, status: 'completed' }];
+      tables.data.invoices = INVOICE_ROWS;
+      return Promise.resolve({ data: { ...COMPLETE_RESULT, bill_split_invoices: [{ invoice_number: 'CS-2026-0005-1' }, { invoice_number: 'CS-2026-0005-2' }] }, error: null });
+    });
+    await renderPage();
+    await signAndFillSigner();
+    await completeAndConfirm();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Draft invoices CS-2026-0005-1, CS-2026-0005-2 created/)));
+    expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveAttribute('href', '/invoices/inv-1');
   });
 });

@@ -105,11 +105,11 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
 
     // OLD-POSTED ($100.00) + OLD-OVERDUE ($100.00): overdue is a posted invoice past due.
-    const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices')).parentElement!;
+    const outstanding = (await screen.findByText('Unpaid on posted and overdue')).parentElement!;
     await waitFor(() => expect(outstanding).toHaveTextContent('$200.00'));
-    const postedTotal = screen.getByText(/posted invoices \(including overdue\)/).parentElement!;
+    const postedTotal = screen.getByText(/posted invoices, overdue included/).parentElement!;
     expect(postedTotal).toHaveTextContent('$200.00');
-    expect(postedTotal).toHaveTextContent('2 posted invoices (including overdue)');
+    expect(postedTotal).toHaveTextContent('2 posted invoices, overdue included');
     expect(screen.getByText(/plus any invoice from an earlier season that is still unposted\s+or unpaid/)).toBeInTheDocument();
   });
 
@@ -124,14 +124,16 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select All' }));
     // Only NEW-DRAFT (this season) is postable / deletable; the Season 2026 draft,
     // unposted and posted / overdue invoices are not selected, so no Void button either.
-    expect(screen.getByRole('button', { name: /Post 1 Selected/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Delete 1/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Void \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Post 1 invoice…' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Delete 1…']);
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText(/not from this season/)).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1 invoice' }));
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
     expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')[0][1]).toMatchObject({ p_invoice_id: 'NEW-DRAFT', p_expected_version: 'v1:NEW-DRAFT' });
   });
@@ -170,7 +172,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
 
     // Select All selects exactly this season's rows in view; it does not carry the
     // hand-ticked older-season row along.
-    expect(screen.getByRole('button', { name: /Post 1 Selected/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Post 1 invoice…' })).toBeInTheDocument();
     expect(rowCheckbox('NEW-DRAFT')).toBeChecked();
     expect(rowCheckbox('OLD-DRAFT')).not.toBeChecked();
     expect(toggleButton()).toHaveTextContent('Deselect All');
@@ -199,10 +201,10 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     fireEvent.click(toggleButton());
 
     // The one this-season row in view, and nothing else.
-    expect(screen.getByRole('button', { name: /Post 1 Selected/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
+    expect(screen.getByRole('button', { name: 'Post 1 invoice…' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1 invoice' }));
     await waitFor(() => expect(postedIds()).toHaveLength(1));
     expect(postedIds()).toEqual(['NEW-UNPOSTED']);
   });
@@ -214,19 +216,19 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     await waitFor(() => expect(screen.getAllByText('NEW-DRAFT').length).toBeGreaterThan(0));
 
     tickRow('NEW-DRAFT');
-    expect(screen.getByRole('button', { name: /Print 1 Selected/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Print 1…' })).toBeInTheDocument();
 
     // Paid only: NEW-PAID is in view, and a paid invoice has no checkbox.
     fireEvent.change(statusFilter(), { target: { value: 'paid' } });
     expect(screen.getAllByText('NEW-PAID').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /Print \d+ Selected/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /(Post|Void) \d+ Selected/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Delete \d+$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Print \d+…$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Post \d+ invoices?…$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
 
     // Back to every status: the hidden selection was dropped, not just hidden.
     fireEvent.change(statusFilter(), { target: { value: '' } });
     expect(rowCheckbox('NEW-DRAFT')).not.toBeChecked();
-    expect(screen.queryByRole('button', { name: /Print \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Print \d+…$/ })).not.toBeInTheDocument();
   });
 
   it('a ticked row hidden by the search box is dropped too, so no bulk button acts on it', async () => {
@@ -234,11 +236,11 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     await waitFor(() => expect(screen.getAllByText('NEW-DRAFT').length).toBeGreaterThan(0));
 
     tickRow('NEW-DRAFT');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search invoices...' }), { target: { value: 'OLD-DRAFT' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search invoice, customer or salesperson' }), { target: { value: 'OLD-DRAFT' } });
     expect(screen.queryByText('NEW-DRAFT')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /(Post|Print) \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Post \d+ invoices?|Print \d+)…$/ })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search invoices...' }), { target: { value: '' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search invoice, customer or salesperson' }), { target: { value: '' } });
     expect(rowCheckbox('NEW-DRAFT')).not.toBeChecked();
   });
 
@@ -250,7 +252,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     tickRow('NEW-DRAFT');
     expect(toggleButton()).toHaveTextContent('Deselect All');
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
-    expect(screen.queryByRole('button', { name: /(Post|Print) \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Post \d+ invoices?|Print \d+)…$/ })).not.toBeInTheDocument();
   });
 
   // Regression: "is anything selected" and the Print count used the raw selection,
@@ -269,9 +271,9 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
 
     tickRow('OLD-DRAFT');
     tickRow('NEW-DRAFT');
-    fireEvent.click(screen.getByRole('button', { name: /Post 2 Selected/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post 2 invoices…' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 2' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Post 2 invoices' }));
 
     await waitFor(() => expect(postedIds()).toHaveLength(2));
     // The reload has landed: OLD-DRAFT is back on screen and NEW-DRAFT is gone.
@@ -280,8 +282,8 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
       expect(screen.queryByText('NEW-DRAFT')).not.toBeInTheDocument();
     });
     // Only the still-loaded failed invoice stays selected and counted.
-    await waitFor(() => expect(screen.getByRole('button', { name: /Post 1 Selected/ })).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Print 1 Selected/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Post 1 invoice…' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Print 1…' })).toBeInTheDocument();
   });
 
   it('Deselect All clears everything, including a hand-ticked older-season invoice', async () => {
@@ -290,11 +292,11 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
 
     tickRow('OLD-DRAFT');
     tickRow('NEW-DRAFT');
-    expect(screen.getByRole('button', { name: /Post 2 Selected/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Post 2 invoices…' })).toBeInTheDocument();
     expect(toggleButton()).toHaveTextContent('Deselect All');
     fireEvent.click(toggleButton());
 
-    expect(screen.queryByRole('button', { name: /Post \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Post \d+ invoices?…$/ })).not.toBeInTheDocument();
     expect(toggleButton()).toHaveTextContent('Select All');
   });
 
@@ -304,7 +306,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
 
     tickRow('OLD-DRAFT');
     fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
-    expect(screen.queryByRole('button', { name: /Post \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Post \d+ invoices?…$/ })).not.toBeInTheDocument();
   });
 
   it('Select All is disabled when every selectable row in view is from an older or unknown season', async () => {
@@ -324,14 +326,14 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     expect(toggleButton()).toHaveTextContent('Select All');
     expect(toggleButton()).toBeDisabled();
     fireEvent.click(toggleButton());
-    expect(screen.queryByRole('button', { name: /Post \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Post \d+ invoices?…$/ })).not.toBeInTheDocument();
 
     // A hand-ticked row can still be cleared with the same button.
     tickRow('NO-SEASON');
     expect(toggleButton()).toHaveTextContent('Deselect All');
     expect(toggleButton()).toBeEnabled();
     fireEvent.click(toggleButton());
-    expect(screen.queryByRole('button', { name: /Post \d+ Selected/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Post \d+ invoices?…$/ })).not.toBeInTheDocument();
   });
 
   it('reads every invoice past the 1,000-row server cap, so the totals count all 1,500', async () => {
@@ -348,9 +350,9 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
 
     // 1,500 posted invoices x $100.00 each: a read stopped at 1,000 rows would show $100,000.00.
-    const outstanding = (await screen.findByText('unpaid balance on posted and overdue invoices', {}, { timeout: 10000 })).parentElement!;
+    const outstanding = (await screen.findByText('Unpaid on posted and overdue', {}, { timeout: 10000 })).parentElement!;
     await waitFor(() => expect(outstanding).toHaveTextContent('$150,000.00'), { timeout: 10000 });
-    expect(screen.getByText(/posted invoices \(including overdue\)/)).toHaveTextContent('1500 posted invoices (including overdue)');
+    expect(screen.getByText(/posted invoices, overdue included/)).toHaveTextContent('1500 posted invoices, overdue included');
     // Read twice: a list that took more than one request is confirmed by a matching second read.
     const pass = [[0, 999], [950, 1949], [1450, 2449]];
     expect(queries.map((q) => (q.range as ReturnType<typeof vi.fn>).mock.calls[0])).toEqual([...pass, ...pass]);
@@ -382,7 +384,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
 
     const row = screen.getAllByText('OLD-DRAFT').map((el) => el.closest('tr')).find(Boolean)!;
     fireEvent.click(within(row).getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Post 1 invoice…' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/This includes 1 invoice\(s\) not from this season \(Season 2026\)/)).toBeInTheDocument();

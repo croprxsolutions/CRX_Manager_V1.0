@@ -940,18 +940,18 @@ describe('CustomerDetail stale whole-record save', () => {
     try {
       const { unmount } = renderDetail();
       await screen.findByDisplayValue('Original Farm');
-      expect(screen.getByLabelText('Pricing Tier')).toBeDisabled();
-      expect(screen.getByLabelText('Credit Limit ($)')).toBeDisabled();
-      expect(screen.getByText(/only an admin can change a customer.s price tier, credit limit and standing discount/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Price tier')).toBeDisabled();
+      expect(screen.getByLabelText('Credit limit')).toBeDisabled();
+      expect(screen.getByText(/only an admin can change the price tier, credit limit and standing discount/i)).toBeInTheDocument();
       unmount();
     } finally {
       mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
     }
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    expect(screen.getByLabelText('Pricing Tier')).toBeEnabled();
-    expect(screen.getByLabelText('Credit Limit ($)')).toBeEnabled();
-    expect(screen.queryByText(/only an admin can change a customer.s price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Price tier')).toBeEnabled();
+    expect(screen.getByLabelText('Credit limit')).toBeEnabled();
+    expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
   });
 
   it('restores the create-form defaults on that jump, not an empty form', async () => {
@@ -1382,8 +1382,9 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
 
   it('an admin changes the customer\'s rate with its own Save', async () => {
     renderDetail();
-    const input = await screen.findByLabelText('Standing discount (%)');
+    const input = await screen.findByLabelText('Standing discount');
     expect(input).toHaveValue(3);
+    expect(input).toHaveAccessibleDescription('%');
     expect(screen.getByRole('button', { name: 'Save discount' })).toBeDisabled();
     fireEvent.change(input, { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
@@ -1396,7 +1397,7 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
 
   it('stays clean after the save under React StrictMode too', async () => {
     render(<StrictMode><MemoryRouter initialEntries={['/customers/customer-1']}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter></StrictMode>);
-    fireEvent.change(await screen.findByLabelText('Standing discount (%)'), { target: { value: '2.5' } });
+    fireEvent.change(await screen.findByLabelText('Standing discount'), { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
     expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
@@ -1404,7 +1405,7 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
 
   it('refuses more than two decimals or over 100 before writing', async () => {
     renderDetail();
-    const input = await screen.findByLabelText('Standing discount (%)');
+    const input = await screen.findByLabelText('Standing discount');
     fireEvent.change(input, { target: { value: '101' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('0 to 100')));
@@ -1430,7 +1431,7 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
       return q;
     });
     renderDetailWithCustomerSwitch();
-    fireEvent.change(await screen.findByLabelText('Standing discount (%)'), { target: { value: '2.5' } });
+    fireEvent.change(await screen.findByLabelText('Standing discount'), { target: { value: '2.5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
     await waitFor(() => expect(updates).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: 'Jump to customer 2' }));
@@ -1441,7 +1442,114 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
   it('a non-admin sees the rate but cannot change it', async () => {
     mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep' };
     renderDetail();
-    expect(await screen.findByLabelText('Standing discount (%)')).toBeDisabled();
+    expect(await screen.findByLabelText('Standing discount')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+  });
+});
+
+describe('CustomerDetail Billing card (billing UI redesign)', () => {
+  const billingCustomer = {
+    ...original, payment_terms: 'Net 30', credit_limit_cents: 2500000, standing_discount_pct: 3,
+    finance_charge_rate: 18, finance_charge_enabled: true, finance_charge_grace_days: 10,
+  };
+  const REP_NOTE = 'Only an admin can change the price tier, credit limit and standing discount.';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    customerIdempotencyState.reset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => billingCustomer as unknown as typeof original);
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockResolvedValue({ data: { customer_id: 'customer-1', row_version: 5 }, error: null });
+  });
+  afterEach(() => { mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' }; });
+
+  async function billingCard() {
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    const card = document.getElementById('customer-billing');
+    if (!card) throw new Error('no Billing card');
+    return card;
+  }
+
+  const savedPayload = () => (mockRpc.mock.calls.find(([name]) => name === 'save_customer')?.[1] as { p_customer_payload: Record<string, unknown> }).p_customer_payload;
+
+  it('sits right after Contact, is in the jump bar, and holds every billing field', async () => {
+    const card = await billingCard();
+    expect(document.getElementById('customer-contact')?.nextElementSibling).toBe(card);
+    expect(within(card).getByRole('heading', { name: 'Billing' })).toBeInTheDocument();
+    const jump = screen.getByRole('navigation', { name: 'Jump to section' });
+    expect(within(jump).getAllByRole('link').map((a) => a.textContent).slice(0, 2)).toEqual(['Contact', 'Billing']);
+
+    for (const label of ['Price tier', 'Credit limit', 'Payment terms', 'Parent customer', 'Standing discount', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(within(card).getByRole('switch', { name: /charge finance charges/i })).toBeChecked();
+    // Moved out of Contact, not copied.
+    const contact = document.getElementById('customer-contact') as HTMLElement;
+    expect(within(contact).queryByLabelText(/tier|credit|discount|finance|grace|terms|parent/i)).not.toBeInTheDocument();
+
+    const discount = within(card).getByLabelText('Standing discount');
+    expect(discount).toHaveValue(3);
+    expect(discount.parentElement).toHaveTextContent('%');
+    expect(within(card).getByText('Saves on its own, right away. Save changes below does not include it.')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Save discount' })).toBeDisabled();
+    expect(within(card).queryByText(REP_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('an admin edits every billing field; Save Changes carries all but the discount', async () => {
+    const card = await billingCard();
+    for (const label of ['Price tier', 'Credit limit', 'Payment terms', 'Standing discount', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeEnabled();
+    }
+    fireEvent.change(within(card).getByLabelText('Price tier'), { target: { value: '2' } });
+    fireEvent.change(within(card).getByLabelText('Credit limit'), { target: { value: '500' } });
+    fireEvent.change(within(card).getByLabelText('Payment terms'), { target: { value: 'Net 15' } });
+    fireEvent.change(within(card).getByLabelText('Standing discount'), { target: { value: '4' } });
+    fireEvent.change(within(card).getByLabelText('Finance charge rate'), { target: { value: '12' } });
+    fireEvent.change(within(card).getByLabelText('Grace period'), { target: { value: '5' } });
+    fireEvent.click(within(card).getByRole('switch', { name: /charge finance charges/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(savedPayload()).toMatchObject({
+      assigned_tier: 2, credit_limit_cents: 50000, payment_terms: 'Net 15',
+      finance_charge_rate: 12, finance_charge_grace_days: 5, finance_charge_enabled: false,
+    });
+    expect(savedPayload()).not.toHaveProperty('standing_discount_pct');
+  });
+
+  it('a sales rep sees the admin note first and the same locked fields as before', async () => {
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+    const card = await billingCard();
+    const note = within(card).getByText(REP_NOTE);
+    const firstField = within(card).getByLabelText('Price tier');
+    expect(note.compareDocumentPosition(firstField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    for (const label of ['Price tier', 'Credit limit', 'Standing discount']) {
+      expect(within(card).getByLabelText(label)).toBeDisabled();
+    }
+    for (const label of ['Payment terms', 'Parent customer', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeEnabled();
+    }
+    expect(within(card).getByRole('switch', { name: /charge finance charges/i })).toBeEnabled();
+    expect(within(card).queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+    expect(within(card).queryByText(/saves on its own/i)).not.toBeInTheDocument();
+
+    // Finance charge fields stay editable by anyone who can edit the form, as today.
+    fireEvent.change(within(card).getByLabelText('Finance charge rate'), { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(savedPayload()).toMatchObject({ finance_charge_rate: 12, assigned_tier: 1, credit_limit_cents: 2500000 });
+  });
+
+  it('keeps the standing discount off the New Customer form', async () => {
+    render(<MemoryRouter initialEntries={['/customers/new']}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Create Customer' });
+    const card = document.getElementById('customer-billing') as HTMLElement;
+    expect(within(card).getByLabelText('Price tier')).toBeEnabled();
+    expect(within(card).queryByLabelText('Standing discount')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
   });
 });

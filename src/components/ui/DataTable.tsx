@@ -24,6 +24,8 @@ interface DataTableProps<T> {
   emptyDescription?: string;
   emptyAction?: ReactNode;
   filters?: ReactNode;
+  /** Shown between the search/filter row and the rows, e.g. a selection bar. */
+  belowFilters?: ReactNode;
   loading?: boolean;
   /** The rows failed to load: say so (with Try again when onRetry is set) instead of the empty message. */
   loadError?: boolean;
@@ -113,6 +115,7 @@ export default function DataTable<T extends Record<string, any>>({
   emptyDescription,
   emptyAction,
   filters,
+  belowFilters,
   loading,
   loadError,
   onRetry,
@@ -160,9 +163,10 @@ export default function DataTable<T extends Record<string, any>>({
   return (
     <div>
       {(searchable || filters || sortableColumns.length > 0) && (
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 mb-4">
           {searchable && (
-            <div className="relative flex-1">
+            // sm:min-w-56 + the row's sm:flex-wrap: wide filters drop to their own line instead of squeezing the search box; self-start keeps its icon centred.
+            <div className="relative flex-1 sm:min-w-56 sm:self-start">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
@@ -180,6 +184,7 @@ export default function DataTable<T extends Record<string, any>>({
           <PhoneSortSelect columns={sortableColumns} sortKey={sortKey} sortDir={sortDir} onChange={setSort} />
         </div>
       )}
+      {belowFilters}
 
       {loading ? (
         <div className="space-y-2">

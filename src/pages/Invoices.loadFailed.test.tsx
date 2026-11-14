@@ -115,7 +115,8 @@ describe('Invoices list', () => {
 
     // Tick the posted invoice and void it; the refresh after the void fails.
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
-    fireEvent.click(await screen.findByRole('button', { name: /^Void 1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Void 1…' }));
     H.rpc.mockResolvedValue({ data: { voided: 1, results: [] }, error: null });
     H.failing.set('invoices', 'error');
     fireEvent.change(await screen.findByPlaceholderText(/reason for voiding/), { target: { value: 'Duplicate invoice' } });
@@ -125,5 +126,6 @@ describe('Invoices list', () => {
     expect(screen.queryByText('CS-1001')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Void|Print|Post|Delete) \d/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import TransactionThread from './TransactionThread';
 
@@ -101,5 +101,21 @@ describe('TransactionThread', () => {
     expect(screen.getByText('O-200').closest('a')).toHaveAttribute('href', '/orders/o1');
     expect(screen.getByText('D-300').closest('a')).toHaveAttribute('href', '/deliveries/d1');
     expect(screen.getByText('INV-400').closest('a')).toHaveAttribute('href', '/invoices/i1');
+  });
+
+  it('every chip and dropdown row is 44px tall below md', () => {
+    renderThread({
+      quoteId: 'q1', quoteNumber: 'Q-100', orderId: 'o1', orderNumber: 'O-200',
+      deliveries: [{ id: 'd1', number: 'D-301' }, { id: 'd2', number: 'D-302' }],
+      invoices: [{ id: 'i1', number: 'INV-400' }],
+      currentEntity: 'order',
+    });
+    for (const label of ['Q-100', 'O-200', 'INV-400']) {
+      expect(screen.getByText(label).closest('a')?.className).toMatch(/min-h-11 md:min-h-0/);
+    }
+    const dropdown = screen.getByText('2 Deliveries').closest('button')!;
+    expect(dropdown.className).toMatch(/min-h-11 md:min-h-0/);
+    fireEvent.click(dropdown);
+    expect(screen.getByText('D-301').closest('a')?.className).toMatch(/min-h-11 md:min-h-0/);
   });
 });

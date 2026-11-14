@@ -159,6 +159,27 @@ describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
     await waitFor(() => expect(input).toBeEnabled());
   });
 
+  it('comes first in Billing, with a % on the field and a live example that hides while the rate is invalid', async () => {
+    await renderPage();
+    const billing = document.getElementById('settings-billing') as HTMLElement;
+    const parts = within(billing).getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(parts).toEqual(['Sales tax', 'Automatic invoice drafts', 'Fuel surcharge', 'Reminders and quote defaults']);
+
+    const input = screen.getByLabelText('Sales tax rate');
+    expect(input.parentElement).toHaveTextContent('%');
+    const example = (text: string) => screen.queryByText((_, el) => el?.tagName === 'P' && el.textContent === `Example: a $100.00 taxed sale adds ${text}`);
+    expect(example('$6.25')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '7.5' } });
+    expect(example('$7.50')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '6.125' } });
+    expect(example('$6.13')).toBeInTheDocument();
+    for (const bad of ['6.25%', '', '100', '6.1234']) {
+      fireEvent.change(input, { target: { value: bad } });
+      expect(screen.queryByText(/^Example: a \$100\.00 taxed sale/)).not.toBeInTheDocument();
+    }
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
   it('refuses a rate that is not a plain percentage before saving', async () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Sales tax rate'), { target: { value: '6.25%' } });

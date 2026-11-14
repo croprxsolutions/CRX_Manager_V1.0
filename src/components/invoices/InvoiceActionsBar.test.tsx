@@ -9,6 +9,13 @@ const openMore = () => fireEvent.click(screen.getByRole('button', { name: 'More 
 const menuNames = () => screen.getAllByRole('menuitem').map((el) => el.textContent);
 
 describe('InvoiceActionsBar', () => {
+  it('publishes its height for the update notice while shown, and clears it when gone', () => {
+    const { unmount } = render(<InvoiceActionsBar save={act()} print={act()} post={{ ...act(), dirty: false }} />);
+    expect(document.documentElement.style.getPropertyValue('--page-bar-h')).toMatch(/^\d+px$/);
+    unmount();
+    expect(document.documentElement.style.getPropertyValue('--page-bar-h')).toBe('');
+  });
+
   it('draft: Save changes, Print…, and Post invoice… as the one main button', () => {
     const post = act();
     render(<InvoiceActionsBar save={act()} print={act()} post={{ ...post, dirty: false }} />);

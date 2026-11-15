@@ -365,6 +365,7 @@ function makeQuoteFixture(status: 'draft' | 'sent' | 'accepted' = 'draft', rowVe
     quote_number: 'Q-version-test',
     customer_id: 'customer-1',
     customer: QUOTE_FIXTURE_CUSTOMER,
+    created_by: 'user-1',
     tier: 1,
     valid_days: 30,
     header_notes: 'Version test header',
@@ -509,6 +510,133 @@ async function pickCustomerThenReleaseField(held: ReturnType<typeof holdFieldRea
 }
 
 describe('QuoteBuilder', () => {
+  it.each([
+    { role: 'sales_rep', creator: 'other-user', locked: true },
+    { role: 'sales_rep', creator: null, locked: true },
+    { role: 'sales_rep', creator: 'user-1', locked: false },
+    { role: 'admin', creator: 'other-user', locked: false },
+  ])('keeps draft edits creator/admin-only: $role, creator $creator', async ({ role, creator, locked }) => {
+    authState.role = role;
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, created_by: creator, salesman_id: 'user-1' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    const notes = await screen.findByPlaceholderText('Notes visible at the top of the quote...');
+    const save = screen.getByRole('button', { name: 'Save Draft' });
+    for (const control of [save, notes, screen.getByRole('combobox', { name: 'Customer' }),
+      screen.getByLabelText('Units needed'), screen.getByPlaceholderText('Section name'),
+      screen.getByRole('button', { name: 'Add Item' }), screen.getByRole('button', { name: 'Add Section' })]) {
+      if (locked) expect(control).toBeDisabled(); else expect(control).toBeEnabled();
+    }
+    if (locked) {
+      expect(screen.getByText(/Only this draft’s creator or an admin can edit it/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Preview Quote' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Book as Order' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Cancel Quote' })).not.toBeInTheDocument();
+      fireEvent.click(save);
+      expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(false);
+    }
+    expect(screen.getByRole('button', { name: 'Download PDF' })).toBeEnabled();
+  });
+
+  it('keeps Schedule Job working on another rep’s planned draft without saving the draft', async () => {
+    authState.role = 'sales_rep';
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, created_by: 'other-user', is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({
+      data: name === 'create_job_from_quote_section' ? { job_id: 'job-1881' } : null, error: null,
+    }));
+    renderQuoteBuilder(quote.id);
+    const schedule = await screen.findByRole('button', { name: 'Schedule Job' });
+    expect(schedule).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    fireEvent.click(schedule);
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule Anyway' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_job_from_quote_section', expect.objectContaining({
+      p_quote_id: quote.id, p_section_id: section.id, p_performed_by: 'user-1',
+    })));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(false);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/jobs/job-1881'));
+  });
+
+  it('keeps another rep’s revised booking price edits available', async () => {
+    authState.role = 'sales_rep';
+    const fixture = makeQuoteFixture('sent', 7);
+    const quote = { ...fixture.quote, status: 'revised', created_by: 'other-user' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    expect(await screen.findByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    expect(screen.getByLabelText('Price per unit')).toBeEnabled();
+    expect(screen.queryByText(/Only this draft’s creator/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create Order/ })).toBeEnabled();
+  });
+
+  it('lets a rep create a draft, follow the saved route and keep editing and saving it', async () => {
+    authState.role = 'sales_rep';
+    const fixture = makeQuoteFixture('draft', 7);
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? fixture.quote
+      : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : table === 'customers' ? [{ ...QUOTE_FIXTURE_CUSTOMER, default_commission_split: { splits: [] } }] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'save_quote'
+      ? { quote_id: fixture.quote.id, row_version: 7, item_ids: {} }
+      : name === 'generate_quote_number' ? 'Q-new-owner' : null, error: null }));
+    const router = createMemoryRouter([{ path: '/quotes/new', element: <QuoteBuilder /> },
+      { path: '/quotes/:id', element: <QuoteBuilder /> }], { initialEntries: ['/quotes/new'] });
+    mockNavigate.mockImplementation((path: string) => { void router.navigate(path); });
+    const view = render(<RouterProvider router={router} />);
+    try {
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Farm' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Farm/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add one' }));
+    fireEvent.click(screen.getByRole('button', { name: /Select Product/ }));
+    const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+    fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getByRole('button', { name: /^Product/ }));
+    fireEvent.change(screen.getByLabelText('Units needed'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/quotes/${fixture.quote.id}`));
+    const notes = await screen.findByDisplayValue(fixture.quote.header_notes);
+    expect(notes).toBeEnabled();
+    expect(screen.getByLabelText('Units needed')).toBeEnabled();
+    expect(screen.queryByText(/Only this draft’s creator/)).not.toBeInTheDocument();
+    fireEvent.change(notes, { target: { value: 'Own follow-up edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'save_quote')).toHaveLength(2));
+    expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.objectContaining({ p_quote_id: fixture.quote.id,
+      p_quote_payload: expect.objectContaining({ header_notes: 'Own follow-up edit' }) }));
+    } finally {
+      view.unmount();
+      mockNavigate.mockReset();
+      router.dispose();
+    }
+  });
+
+  it('refuses an already-open Book as Order confirmation after admin access changes to a non-owner rep', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, created_by: 'other-user' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : [], error: null }));
+    const view = renderQuoteBuilder(quote.id);
+    fireEvent.click(await screen.findByRole('button', { name: 'Book as Order' }));
+    await screen.findByRole('dialog', { name: 'Book as Order' });
+    authState.role = 'sales_rep';
+    view.rerender(<MemoryRouter initialEntries={[`/quotes/${quote.id}/edit`]}><Routes>
+      <Route path="/quotes/:id/edit" element={<QuoteBuilder />} />
+    </Routes></MemoryRouter>);
+    const dialog = await screen.findByRole('dialog', { name: 'Book as Order' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Book as Order' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Only this draft’s creator or an admin can edit it.'));
+    expect(mockRpc.mock.calls.some(([name]) => ['save_quote', 'create_quote_version', 'convert_quote_to_order'].includes(name))).toBe(false);
+  });
+
   it.each(['admin', 'sales_rep'])('uses line-rounded totals in the %s save payload without exposing costs', async (role) => {
     authState.role = role;
     const { quote, product: baseProduct, section, item } = makeQuoteFixture('draft', 7);

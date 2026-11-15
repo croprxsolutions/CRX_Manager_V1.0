@@ -136,6 +136,7 @@ type CalcMode = 'rate_acres' | 'units_direct';
 // The server independently fingerprints the full request, so the exact reason
 // remains bound to the idempotency receipt rather than being trusted from the key.
 const MAX_REVERT_REASON_LENGTH = 500;
+const DRAFT_EDIT_PERMISSION_MESSAGE = 'Only this draft’s creator or an admin can edit it.';
 
 interface LocalItem {
   _key: string;
@@ -537,6 +538,7 @@ export default function QuoteBuilder() {
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
   // before anything loads, so it cannot tell a loaded quote from a failed first load.
   const [installedQuoteId, setInstalledQuoteId] = useState<string | null>(null);
+  const [loadedQuoteOwner, setLoadedQuoteOwner] = useState<{ quoteId: string; createdBy: string | null } | null>(null);
   // Scoped by the quote this save actually TARGETS. F1 makes an ambiguous reply
   // RETAIN this key, and QuoteBuilder does not remount when only `:id` changes (no
   // `<x>/:id` route in src/App.tsx carries a `key` prop). Page-wide, an unresolved
@@ -814,12 +816,15 @@ export default function QuoteBuilder() {
 
   // Status-based guards
   const currentStatus = status || 'draft';
-  const canEdit = ['draft', 'revised'].includes(currentStatus);
+  const isAdmin = profile?.role === 'admin';
+  const draftEditLocked = isEditing && currentStatus === 'draft' && !isAdmin
+    && (!profile?.id || loadedQuoteOwner?.quoteId !== id || loadedQuoteOwner?.createdBy !== profile.id);
+  const canEdit = !draftEditLocked && ['draft', 'revised'].includes(currentStatus);
   // Codex round-7 P2: include 'sent' so a frozen sent quote can still be re-emailed —
   // "Preview Quote" is the only route to the Email-to-Grower button, and
   // handleEmailToGrower explicitly supports re-sending an already-sent quote and
   // creates a newly confirmed version snapshot before every send.
-  const canSend = ['draft', 'revised', 'sent'].includes(currentStatus);
+  const canSend = !draftEditLocked && ['draft', 'revised', 'sent'].includes(currentStatus);
   // The server conversion RPC deliberately resumes an accepted Quote that has
   // no Order and returns the existing Order when one already exists. Keeping
   // accepted Quotes convertible gives a sales rep a safe retry path when a
@@ -832,10 +837,9 @@ export default function QuoteBuilder() {
   // Quote lifecycle terminal/reopen actions (roadmap #5). The status-transition
   // trigger allows: draft/sent/revised → cancelled; sent/revised → declined;
   // accepted/declined/expired/cancelled → sent (admin revert RPC only).
-  const isAdmin = profile?.role === 'admin';
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); Customer View hides them for an admin too.
   const hideCost = customerView || !isAdmin;
-  const canCancel = isEditing && ['draft', 'sent', 'revised'].includes(currentStatus);
+  const canCancel = isEditing && !draftEditLocked && ['draft', 'sent', 'revised'].includes(currentStatus);
   const canDecline = isEditing && ['sent', 'revised'].includes(currentStatus);
   // "Close — fulfilled by application" is only for a PLANNED open booking (the
   // application channel), in parity with the close_quote_as_applied RPC
@@ -1427,6 +1431,7 @@ export default function QuoteBuilder() {
     }
     setQuoteId(q.id);
     setInstalledQuoteId(q.id);
+    setLoadedQuoteOwner({ quoteId: q.id, createdBy: q.created_by ?? null });
     setQuoteLoadFailedId(null);
     setQuoteNumber(q.quote_number);
     setCustomerId(q.customer_id);
@@ -2201,6 +2206,10 @@ export default function QuoteBuilder() {
       toast('error', 'This quote has not finished loading. Refresh the page before saving so your changes go to the right quote.');
       return null;
     }
+    if (draftEditLocked) {
+      toast('error', DRAFT_EDIT_PERMISSION_MESSAGE);
+      return null;
+    }
     if (!customerId) {
       toast('error', customerLoadError ?? 'Please select a customer');
       return null;
@@ -2659,6 +2668,7 @@ export default function QuoteBuilder() {
       if (!quoteId || !isEditing) {
         setQuoteId(savedQuoteId);
         setInstalledQuoteId(savedQuoteId);
+        setLoadedQuoteOwner({ quoteId: savedQuoteId, createdBy: profile.id });
       }
       // The database priced a line from the catalog as it is now, which changed since this page
       // loaded, so the lines and totals shown are not the saved ones. The save stands, but no
@@ -3161,6 +3171,7 @@ export default function QuoteBuilder() {
   // #3 Stage A: email the quote PDF to the grower via the send-email Edge Function.
   // The Edge Function records the send in email_log and dedupes on the idempotency key.
   const handleEmailToGrower = async () => {
+    if (draftEditLocked) { toast('error', DRAFT_EDIT_PERMISSION_MESSAGE); return; }
     if (!quoteId) { toast('warning', 'Save the quote before emailing it.'); return; }
     if (quoteVersionRecoveryRequiredRef.current) {
       staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
@@ -4356,7 +4367,7 @@ export default function QuoteBuilder() {
               Preview Quote
             </Button>
           )}
-          {isEditing && quoteId && currentStatus === 'draft' && !isDirty && (
+          {isEditing && quoteId && currentStatus === 'draft' && !draftEditLocked && !isDirty && (
             <Button
               variant="secondary"
               icon={<ShoppingCart className="w-4 h-4" />}
@@ -4517,7 +4528,13 @@ export default function QuoteBuilder() {
         <GuardrailBanner warning={staleWarning} onDismiss={dismissStaleWarning} />
       )}
 
-      {isEditing && !canEdit && currentStatus !== 'sent' && (
+      {draftEditLocked && (
+        <div role="status" className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm">
+          {DRAFT_EDIT_PERMISSION_MESSAGE} You can still use available job actions.
+        </div>
+      )}
+
+      {isEditing && !canEdit && !draftEditLocked && currentStatus !== 'sent' && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm">
           This quote is in <strong>{currentStatus}</strong> status and cannot be edited.
         </div>
@@ -4958,6 +4975,7 @@ export default function QuoteBuilder() {
         </div>
       )}
 
+      <fieldset disabled={draftEditLocked} className="min-w-0">
       <Card>
         <CardHeader title="Quote" accent="Details" />
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -4974,6 +4992,7 @@ export default function QuoteBuilder() {
               select={QUOTE_CUSTOMER_SELECT}
               placeholder="Select a customer..."
               ariaLabel="Customer"
+              disabled={draftEditLocked}
             />
             {customerLoadError && (
               <p role="alert" className="mt-1 text-sm text-red-600">{customerLoadError}</p>
@@ -5065,6 +5084,7 @@ export default function QuoteBuilder() {
           />
         </div>
       </Card>
+      </fieldset>
 
       {rupWarnings.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -5102,6 +5122,7 @@ export default function QuoteBuilder() {
                   </span>
                   <input
                     value={sec.section_name}
+                    disabled={draftEditLocked}
                     onChange={(e) => updateSectionName(sec._key, e.target.value)}
                     className="text-sm font-semibold font-heading text-nav-dark bg-transparent border-none outline-none focus:ring-0 flex-1"
                     placeholder="Section name"
@@ -5130,6 +5151,7 @@ export default function QuoteBuilder() {
                         <label className="text-xs text-secondary whitespace-nowrap flex items-center">Needed By:<HelpTip text="This is when the customer needs the product — different from the quote expiration. Used for inventory forecasting and delivery scheduling." className="ml-1" /></label>
                         <input
                           type="date"
+                          disabled={draftEditLocked}
                           value={sec.needed_by_date || ''}
                           onChange={(e) => updateSectionField(sec._key, 'needed_by_date', e.target.value || null)}
                           className="text-sm border border-gray-200 rounded px-2 py-1"
@@ -5171,6 +5193,7 @@ export default function QuoteBuilder() {
                       customerId={customerId || null}
                       placeholder="Search fields..."
                       ariaLabel={`Field for ${sec.section_name || 'section'}`}
+                      disabled={draftEditLocked}
                       className="w-[180px]"
                     />
                   </div>
@@ -5182,6 +5205,7 @@ export default function QuoteBuilder() {
                     icon={<Plus className="w-3 h-3" />}
                     showChevron={false}
                     onClick={() => addItem(sec._key)}
+                    disabled={draftEditLocked}
                   >
                     Add Item
                   </Button>
@@ -5202,6 +5226,7 @@ export default function QuoteBuilder() {
                       onClick={() => removeSection(sec._key)}
                       className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                       aria-label="Remove section"
+                      disabled={draftEditLocked}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -5211,7 +5236,7 @@ export default function QuoteBuilder() {
             </div>
 
             {!isCollapsed && (
-              <>
+              <fieldset disabled={draftEditLocked} className="min-w-0">
               {/* Section Header Notes — above items table */}
               <div className="px-5 pb-2">
                 <div className="flex items-center gap-1 mb-1">
@@ -5598,7 +5623,7 @@ export default function QuoteBuilder() {
                   </table>
                 )}
               </div>
-              </>
+              </fieldset>
             )}
           </Card>
         );
@@ -5610,6 +5635,7 @@ export default function QuoteBuilder() {
           icon={<Plus className="w-4 h-4" />}
           showChevron={false}
           onClick={addSection}
+          disabled={draftEditLocked}
         >
           Add Section
         </Button>
@@ -5622,6 +5648,7 @@ export default function QuoteBuilder() {
           </label>
           <textarea
             value={footerNotes}
+            disabled={draftEditLocked}
             onChange={(e) => setFooterNotes(e.target.value)}
             rows={2}
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
@@ -5848,7 +5875,7 @@ export default function QuoteBuilder() {
             variant="secondary"
             icon={<CheckCircle className="w-4 h-4" />}
             onClick={handleMarkPresented}
-            disabled={status !== 'draft' && status !== 'revised'}
+            disabled={draftEditLocked || (status !== 'draft' && status !== 'revised')}
           >
             Mark as Presented
           </Button>
@@ -5859,6 +5886,7 @@ export default function QuoteBuilder() {
             showChevron={false}
             onClick={handleEmailToGrower}
             loading={emailingGrower}
+            disabled={draftEditLocked}
           >
             Email to Grower
           </Button>

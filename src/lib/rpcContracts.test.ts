@@ -2884,6 +2884,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20270104110000',
   '20270105110000',
   '20270106110000',
+  '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
 /**

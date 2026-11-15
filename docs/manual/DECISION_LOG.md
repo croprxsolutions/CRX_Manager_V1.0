@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.
 **Why:** a save can remain unanswered indefinitely, so tying recovery to a number of replies could strand the admin.
 **What this forbids/implies:** keep the exact saved key and 24-hour receipt window for retries; require a fresh-workbook check and explicit confirmation before clearing. An old request may still finish.
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
 
 ## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
 

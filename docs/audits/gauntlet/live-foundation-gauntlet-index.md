@@ -1,5 +1,7 @@
 # CRX Live Foundation Gauntlet Index
 
+2026-11-14 scoped run: [Chemical sales quoting and invoicing](2026-11-14-chemical-sales-quoting-invoicing.md) completed with findings after repairing test setup and historical proofs. Field application excluded; this does not advance the numbered whole-app queue below.
+
 Read-only queue for the recurring CRX Live Foundation Gauntlet. Each run reviews one section against current repo code plus live Supabase database structure only, writes one dated report, updates this index, then stops.
 
 Last updated: 2026-08-23

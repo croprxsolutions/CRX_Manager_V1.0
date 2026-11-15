@@ -4,7 +4,7 @@
 -- No data backfill, role/policy expansion, quoting reader or rate cutover change.
 -- idempotency-body-check: exempt — private helpers use commit_rate_review's existing receipt and child keys.
 -- actor-binding-check: exempt — private helpers receive the actor from the existing admin-only commit wrapper.
-BEGIN;
+-- The migration runner supplies the transaction, including its ledger write.
 
 DO $preflight$
 DECLARE expected record; actual record;
@@ -289,4 +289,3 @@ END;
 $postflight$;
 
 NOTIFY pgrst, 'reload schema';
-COMMIT;

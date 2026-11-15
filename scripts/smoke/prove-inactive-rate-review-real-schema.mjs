@@ -3,9 +3,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { fileProblems, wrapperSql } from '../../.github/scripts/db-apply.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CANDIDATE = '20270110110000_inactive_rate_review_cleanup.sql';
@@ -45,6 +46,8 @@ export async function proveInactiveRateReview(container) {
     (SELECT jsonb_agg(to_jsonb(e) ORDER BY e.id) FROM public.product_rate_draft_events e),
     ${includeReceipts ? '(SELECT jsonb_agg(to_jsonb(k) ORDER BY k.idempotency_key) FROM public.idempotency_keys k)' : 'NULL::jsonb'})::text);`);
   const migration = readFileSync(path.join(ROOT, 'supabase/migrations', CANDIDATE), 'utf8').replaceAll('\r\n','\n');
+  const stem = CANDIDATE.slice(0, -4);
+  assert.deepEqual(fileProblems(stem, Buffer.from(migration)), [], 'candidate must fit the staging transaction runner');
   const predecessor = readFileSync(path.join(ROOT, 'supabase/migrations/20270104110000_product_rate_review.sql'), 'utf8').replaceAll('\r\n','\n');
   const names = ['_product_rate_review_lock','_product_rate_review_approve','_product_rate_review_outcome','get_rate_review_workbook'];
   const definitions = names.map((name) => {
@@ -137,7 +140,7 @@ export async function proveInactiveRateReview(container) {
     assert.equal(oldResponse.status,200,oldResponse.body);
     assert.deepEqual(JSON.parse(oldResponse.body),oldJson);
     assert.notEqual(rest({p_include_inactive:true}).status,200,'new argument must be absent before install');
-    sql(migration);
+    sql(wrapperSql({stem, text:migration, run:true, sha:createHash('sha256').update(migration).digest('hex')}));
     assert.equal(snapshot(),beforeInstall,'candidate must not backfill data');
     let historyResponse;
     for(let i=0;i<50;i++){historyResponse=rest({p_include_inactive:true});if(historyResponse.status===200)break;await new Promise((resolve)=>setTimeout(resolve,100));}

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `50db4e57b5567a661f4ffe0562cc20ec9904fc58ca64851a172e73d2c26708a7`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `708df3b13c19d0c64951d991d5d62422b7520fdfa1f46c65ddc85a36890f9371`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
 
 Compatibility note: an exact same-code duplicate typed in one product save previously reached the active-row lookup and raised `CHEMISTRY_ROW_EXISTS`; the candidate identifies the duplicate earlier and raises `CHEMISTRY_DUPLICATE_CHANGE`. This intentionally changes the error prefix, while keeping the same codes and refusal outcome. Current `src` has no matcher for either prefix.
 
@@ -59,7 +59,7 @@ BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public.set_active_ingredient_modes(uuid,jsonb,jsonb,text,text)'::regprocedure), chr(13), '')) <> '5eba773ccda8fc45a7124d0b83072728' THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: set_active_ingredient_modes body changed';
   END IF;
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._apply_parent_chemistry(uuid,jsonb,text,text,text)'::regprocedure), chr(13), '')) <> '6a865aa091ff4cd844dce84fe846fbed' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._apply_parent_chemistry(uuid,jsonb,text,text,text)'::regprocedure), chr(13), '')) <> '983fe84c21497b64fe328afe11ec9b01' THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: _apply_parent_chemistry body changed';
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._moa_group_code_key(text)'::regprocedure), chr(13), '')) <> 'e08977b06c92c1fa0a46a862a1ba8247' THEN

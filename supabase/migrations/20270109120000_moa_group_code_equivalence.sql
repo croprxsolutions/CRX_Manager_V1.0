@@ -467,6 +467,24 @@ BEGIN
     IF v_entry ? 'ref' THEN v_refs := v_refs || jsonb_build_object(v_entry->>'ref', v_res->'ingredient_id'); END IF;
   END LOOP;
 
+  -- Same-request typed MOA duplicates refuse before any active-row lookup, so both submitted spellings are named.
+  IF p_mode <> 'epa' THEN
+    FOR v_entry IN SELECT e FROM jsonb_array_elements(p_changes) e
+        WHERE e->>'kind' = 'mode_of_action' AND COALESCE(e->>'action', 'add') = 'add' LOOP
+      v_code := upper(btrim(v_entry->>'group_code'));
+      CONTINUE WHEN v_code IS NULL OR v_code = '' OR (v_entry->>'scheme') IS NULL; -- the main loop refuses the shape
+      v_moa_key := CASE WHEN v_entry ? 'ingredient_ref' THEN v_refs->>(v_entry->>'ingredient_ref')
+                        ELSE public._chemistry_uuid(v_entry->'ingredient_id', 'ingredient_id')::text END
+        || ':' || (v_entry->>'scheme') || ':' || public._moa_group_code_key(v_code);
+      IF v_moa_seen ? v_moa_key THEN
+        RAISE EXCEPTION 'CHEMISTRY_DUPLICATE_CHANGE: % % and % % name the same mode of action in this save',
+          v_entry->>'scheme', v_moa_seen->>v_moa_key, v_entry->>'scheme', v_code;
+      END IF;
+      v_moa_seen := v_moa_seen || jsonb_build_object(v_moa_key, v_code);
+    END LOOP;
+    v_moa_seen := '{}'::jsonb; -- the main loop rebuilds it as each add is applied
+  END IF;
+
   FOR v_entry, v_ord IN SELECT e, o FROM jsonb_array_elements(p_changes) WITH ORDINALITY AS t(e, o) LOOP
     v_kind := v_entry->>'kind';
     v_action := COALESCE(v_entry->>'action', 'add');

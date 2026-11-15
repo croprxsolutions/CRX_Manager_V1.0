@@ -307,6 +307,16 @@ BEGIN
     GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
     IF v_err NOT LIKE 'CHEMISTRY_DUPLICATE_CHANGE:%' OR position('HRAC M1' in v_err)=0 OR position('HRAC M01' in v_err)=0 THEN RAISE; END IF;
   END;
+  -- Same-request aliases are named even when one of them is already the active stored spelling.
+  BEGIN
+    PERFORM public.set_parent_chemistry('${parent}',v_version,
+      '[{"kind":"mode_of_action","ingredient_id":"${ing2}","scheme":"HRAC","group_code":"M01"},{"kind":"mode_of_action","ingredient_id":"${ing2}","scheme":"HRAC","group_code":"M1"}]'::jsonb,
+      'moa-product-request-alias-active-proof');
+    RAISE EXCEPTION 'MOA_PROOF: product writer accepted two aliases of an active row in one request';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err = MESSAGE_TEXT;
+    IF v_err NOT LIKE 'CHEMISTRY_DUPLICATE_CHANGE:%' OR position('HRAC M1' in v_err)=0 OR position('HRAC M01' in v_err)=0 THEN RAISE; END IF;
+  END;
   BEGIN
     INSERT INTO public.product_parent_modes_of_action(parent_id,ingredient_id,scheme,group_code,created_by,updated_by)
       VALUES ('${parent}','${ing2}','HRAC','M1','${uid}','${uid}');

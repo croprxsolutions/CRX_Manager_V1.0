@@ -12,6 +12,7 @@ import type { ProductParent } from './productParents';
 import { quoteLineChange } from './quoteNotes';
 import type { ProductRatePerAcre, UseTimingOption } from '../types';
 import type { Json } from '../types/supabase';
+import { addChemistryWorkbookSheets, parseChemistryWorkbook, type ParsedChemistryWorkbook, type SetupWorkbookChemistryExport } from './productSetupChemistryWorkbook';
 
 /**
  * WP-PM-11a-2: the setup workbook, separate from the price workbook. A Setup tab for product details
@@ -25,7 +26,8 @@ const PARENT_RATES_WORKBOOK_SHEET = 'Parent Rates';
 const MANIFEST_SHEET = '_crx_manifest';
 // v2 (PAR-1): grouped sizes take their category, use timings and rates from their parent. A v1
 // download predates that, so it is refused as a whole.
-const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v2';
+const SETUP_WORKBOOK_FORMAT_VERSION = 'crx-product-setup-v3';
+const COMPATIBLE_SETUP_WORKBOOK_FORMAT_VERSIONS = new Set(['crx-product-setup-v2', SETUP_WORKBOOK_FORMAT_VERSION]);
 const OLD_SETUP_WORKBOOK_FORMAT_VERSIONS = new Set(['crx-product-setup-v1']);
 /** The most rows one tab's save (and set_product_rates) takes at once. */
 export const MAX_SETUP_WORKBOOK_SAVE_ROWS = 2000;
@@ -170,6 +172,7 @@ export interface ParsedSetupWorkbook {
   parentRateRows: ParentRateUploadRow[];
   /** The grouping of the downloaded products when the file was made. */
   membershipHash: string;
+  chemistry: ParsedChemistryWorkbook;
 }
 
 /** Grouped size id -> its parent's name. */
@@ -296,7 +299,7 @@ async function styleSheet(sheet: Worksheet, headers: readonly string[], rowCount
  * and a hidden manifest. Grey columns and cells are for reference only.
  */
 export async function generateSetupWorkbook(
-  exported: SetupWorkbookExport, options: readonly UseTimingOption[], parents: readonly ProductParent[],
+  exported: SetupWorkbookExport, options: readonly UseTimingOption[], parents: readonly ProductParent[], chemistry?: SetupWorkbookChemistryExport,
 ): Promise<Blob> {
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
@@ -363,6 +366,8 @@ export async function generateSetupWorkbook(
     ['membership_hash', await setupMembershipHash([...downloaded], parents)],
   ]);
 
+  if (chemistry) addChemistryWorkbookSheets(workbook, chemistry);
+
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([new Uint8Array(buffer as unknown as ArrayBuffer)], { type: PRICING_WORKBOOK_MIME });
 }
@@ -405,7 +410,7 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
   if (OLD_SETUP_WORKBOOK_FORMAT_VERSIONS.has(formatVersion)) {
     throw new PricingWorkbookFormatError('This setup workbook was downloaded before products were grouped under parents. Download a new workbook.');
   }
-  if (formatVersion !== SETUP_WORKBOOK_FORMAT_VERSION) {
+  if (!COMPATIBLE_SETUP_WORKBOOK_FORMAT_VERSIONS.has(formatVersion)) {
     throw new PricingWorkbookFormatError('This is not a current CRX setup workbook. Download a fresh one.');
   }
   const count = (key: string) => {
@@ -460,7 +465,9 @@ export async function parseSetupWorkbook(arrayBuffer: ArrayBuffer): Promise<Pars
         expected,
       };
     });
-  return { setupRows, rateRows, parentRateRows, membershipHash };
+  const chemistry = formatVersion === SETUP_WORKBOOK_FORMAT_VERSION
+    ? parseChemistryWorkbook(workbook) : { weightRows: [], ingredientRows: [], issues: [], openProposalParentIds: [] };
+  return { setupRows, rateRows, parentRateRows, membershipHash, chemistry };
 }
 
 /** Parent Rates rows the person edited, compared with what they downloaded. */

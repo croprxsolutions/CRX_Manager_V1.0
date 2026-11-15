@@ -1,6 +1,6 @@
 import { sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
-import { CHEMISTRY_SOURCES, ChemistrySaveUncertain, ingredientLine, parseAmount, refusalCode } from '../../lib/productChemistry';
+import { CHEMISTRY_SOURCES, ChemistrySaveUncertain, chemistryAuthorizationMessage, ingredientLine, isChemistryAuthorizationRefusal, parseAmount, refusalCode } from '../../lib/productChemistry';
 import type {
   ActiveIngredientSummary, ChemistrySource, ChemistryStrengthBasis, ChemistryStrengthUnit, ModeOfActionScheme, ParentChemistryIngredientRow,
 } from '../../types';
@@ -31,9 +31,13 @@ export const nextKey = () => { draftKey += 1; return draftKey; };
 /** A save the database refused by name, or one whose outcome is unknown (its record is kept for "finish"). */
 export function reportSaveError(error: unknown, toast: (type: 'error' | 'warning', message: string) => void): Exclude<SaveOutcome, 'saved'> {
   if (error instanceof ChemistrySaveUncertain) {
-    Sentry.captureException(errorOf(error.cause), { extra: { context: 'chemistry_save_uncertain' } });
+    if (!error.authorizationRefusal) Sentry.captureException(errorOf(error.cause), { extra: { context: 'chemistry_save_uncertain' } });
     toast('warning', error.message);
     return 'uncertain';
+  }
+  if (isChemistryAuthorizationRefusal(error)) {
+    toast('error', chemistryAuthorizationMessage(false));
+    return 'refused';
   }
   toast('error', sanitizeError(error));
   const code = refusalCode(error);

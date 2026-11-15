@@ -8,6 +8,7 @@ vi.mock('./db', () => ({
 
 import {
   casValid, centsText, plainRefusal, ChemistrySaveUncertain, costReasonText, finishChemistrySave, pendingSaves, refusalCode, startChemistrySave,
+  isChemistryAuthorizationRefusal,
 } from './productChemistry';
 
 describe('chemistry helpers', () => {
@@ -83,6 +84,93 @@ describe('unfinished chemistry saves (retry key kept until the outcome is known)
     expect(pendingSaves('user-a', 'p')).toEqual([]);
   });
 
+  it.each([
+    [{ code: '42501', message: 'permission denied' }],
+    [{ code: 'PGRST301', message: 'JWT expired' }],
+    [{ code: 'PGRST302', message: 'missing bearer token' }],
+    [{ code: 'PGRST303', message: 'JWT claims validation failed' }],
+    [{ code: 'P0001', message: 'AUTH_REQUIRED: sign in again' }],
+    [{ code: 'P0001', message: 'ADMIN_REQUIRED: administrator access is required' }],
+  ])('treats a first authorization refusal as final and clears its fresh key: %o', async (error) => {
+    rpc.mockResolvedValueOnce({ data: null, error });
+    await expect(startChemistrySave('user-a', 'setup-workbook-chemistry', 'commit_ingredients_tab',
+      { p_rows: [{ parent_id: 'parent-a', name: 'Active A', cas: null }] }, 'Save Ingredients tab'))
+      .rejects.toMatchObject(error);
+    expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it.each([
+    [{ code: '42501', message: 'permission denied' }],
+    [{ code: 'PGRST301', message: 'JWT expired' }],
+    [{ code: 'PGRST302', message: 'missing bearer token' }],
+    [{ code: 'PGRST303', message: 'JWT claims validation failed' }],
+    [{ code: 'P0001', message: 'AUTH_REQUIRED: sign in again' }],
+    [{ code: 'P0001', message: 'ADMIN_REQUIRED: administrator access is required' }],
+  ])('retains and then finishes a known-prior intent after authorization refusal: %o', async (error) => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const args = { p_rows: [{ parent_id: 'parent-a', name: 'Active A', cas: null }] };
+    await expect(startChemistrySave('user-a', 'setup-workbook-chemistry', 'commit_ingredients_tab', args, 'Save Ingredients tab'))
+      .rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', 'setup-workbook-chemistry');
+    const storedBytes = window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`);
+    rpc.mockResolvedValueOnce({ data: null, error });
+    const refusal = await finishChemistrySave(record).catch((caught: unknown) => caught);
+    expect(refusal).toMatchObject({ authorizationRefusal: true, cause: error });
+    expect(isChemistryAuthorizationRefusal(refusal)).toBe(true);
+    expect(window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`)).toBe(storedBytes);
+    rpc.mockResolvedValueOnce({ data: { saved: true }, error: null });
+    await expect(finishChemistrySave(record)).resolves.toEqual({ saved: true });
+    expect(rpc).toHaveBeenLastCalledWith('commit_ingredients_tab', { ...args, p_idempotency_key: record.key });
+    expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
+  });
+
+  it('reuses the exact intent after a lost committed proposal reply and an authorization refusal', async () => {
+    let committedProposals = 0;
+    const committedReceipt = { data: { status: 'proposed', proposal_id: 'proposal-once' }, error: null };
+    rpc.mockImplementationOnce(async () => {
+      committedProposals += 1;
+      throw new TypeError('Failed to fetch');
+    });
+    const args = { p_rows: [{ parent_id: 'parent-a', expected_chemistry_version: 2, row_id: null, name: 'Active A', cas: null }] };
+    await expect(startChemistrySave('user-a', 'setup-workbook-chemistry', 'commit_ingredients_tab', args, 'Save Ingredients tab'))
+      .rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', 'setup-workbook-chemistry');
+    const storedBytes = window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`);
+    const callArgs = { ...args, p_idempotency_key: record.key };
+    expect(rpc).toHaveBeenNthCalledWith(1, 'commit_ingredients_tab', callArgs);
+
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST303', message: 'JWT claims validation failed' } });
+    await expect(finishChemistrySave(record)).rejects.toMatchObject({ authorizationRefusal: true, cause: { code: 'PGRST303' } });
+    expect(window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`)).toBe(storedBytes);
+
+    rpc.mockResolvedValueOnce(committedReceipt);
+    await expect(finishChemistrySave(record)).resolves.toEqual(committedReceipt.data);
+    expect(rpc).toHaveBeenNthCalledWith(2, 'commit_ingredients_tab', callArgs);
+    expect(rpc).toHaveBeenNthCalledWith(3, 'commit_ingredients_tab', callArgs);
+    expect(committedProposals).toBe(1);
+    expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
+  });
+
+  it('keeps a prior request through a non-auth PostgREST refusal before retrying its receipt', async () => {
+    const args = { p_rows: [{ parent_id: 'parent-a', name: 'Active A', cas: null }] };
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(startChemistrySave('user-a', 'setup-workbook-chemistry', 'commit_ingredients_tab', args, 'Save Ingredients tab'))
+      .rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', 'setup-workbook-chemistry');
+    const storedBytes = window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`);
+
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST202', message: 'Could not find the function in the schema cache' } });
+    await expect(finishChemistrySave(record)).rejects.toMatchObject({ authorizationRefusal: false });
+    expect(isChemistryAuthorizationRefusal({ code: 'PGRST202', message: 'Could not find the function in the schema cache' })).toBe(false);
+    expect(window.localStorage.getItem(`crx:chemistry-pending:v1:${record.key}`)).toBe(storedBytes);
+
+    rpc.mockResolvedValueOnce({ data: { saved: true }, error: null });
+    await expect(finishChemistrySave(record)).resolves.toEqual({ saved: true });
+    expect(rpc).toHaveBeenLastCalledWith('commit_ingredients_tab', { ...args, p_idempotency_key: record.key });
+    expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
+  });
+
   it('keeps the record when the database answers with no data (it may have committed)', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: null });
     await expect(startChemistrySave('user-a', 'p', 'set_parent_chemistry', {}, 'Entry')).rejects.toBeInstanceOf(ChemistrySaveUncertain);
@@ -104,5 +192,21 @@ describe('unfinished chemistry saves (retry key kept until the outcome is known)
       key: 'k1', userId: 'user-a', scope: 'p', rpc: 'post_invoice', args: {}, label: 'x', createdAt: 1,
     }));
     expect(pendingSaves('user-a', 'p')).toEqual([]);
+  });
+
+  it.each([
+    ['commit_weights_tab', { p_rows: [{ kind: 'density', subject_id: 'p1', expected_version: 0, value: 8.75, unit: 'lb_per_gal', source: 'label', source_note: null }] }],
+    ['commit_ingredients_tab', { p_rows: [{ parent_id: 'p1', expected_chemistry_version: 0, row_id: null, name: 'Test', cas: null }] }],
+    ['promote_chemistry_proposal', { p_proposal_id: 'proposal-1', p_expected_proposal_version: 1, p_decision: 'reject' }],
+  ] as const)('keeps the exact retry request and calls %s', async (rpcName, args) => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(startChemistrySave('user-a', 'setup-workbook-chemistry', rpcName, args, 'Workbook')).rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', 'setup-workbook-chemistry');
+    const key = record.key;
+    expect(rpc).toHaveBeenCalledWith(rpcName, { ...args, p_idempotency_key: key });
+    rpc.mockResolvedValueOnce({ data: { status: 'saved' }, error: null });
+    await finishChemistrySave(record);
+    expect(rpc).toHaveBeenLastCalledWith(rpcName, { ...args, p_idempotency_key: key });
+    expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
   });
 });

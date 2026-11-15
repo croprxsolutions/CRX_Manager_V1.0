@@ -153,6 +153,18 @@ describe('RateReviewWorkbookModal', () => {
     click.mockRestore();
   });
 
+  it('does not describe its own in-flight save as an earlier unanswered request', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    let finishCommit!: (receipt: unknown) => void;
+    H.commit.mockImplementation(() => new Promise((resolve) => { finishCommit = resolve; }));
+    await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('region', { name: 'Earlier rate review recovery' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/earlier Confirm got no reply/i)).not.toBeInTheDocument();
+    await act(async () => finishCommit({ rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] }));
+  });
+
   it('drops the preview after a refused commit so the next try checks again', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     H.commit.mockRejectedValue(new Error('RATE_REVIEW_REFUSED: nothing was saved. Atrazine 4L: changed'));
@@ -226,7 +238,6 @@ describe('RateReviewWorkbookModal', () => {
     const first = await uploadFile();
     fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
     await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
-    const stored = JSON.parse(sessionStorage.getItem('crx:pending-retry:rate-review:u1')!);
     first.unmount();
     render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
     expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
@@ -236,10 +247,9 @@ describe('RateReviewWorkbookModal', () => {
     expect(H.commit).toHaveBeenCalledOnce();
     expect(await screen.findByRole('button', { name: 'I checked the fresh workbook' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeDisabled();
-    const recovered = JSON.parse(sessionStorage.getItem('crx:pending-retry:rate-review:u1')!);
-    expect(recovered.key).toBe(stored.key);
-    expect(recovered.request).toEqual(stored.request);
-    expect(recovered.needsCheck).toBe(true);
+    // The matching old receipt is authoritative, so the current copy keeps only a cautious
+    // in-memory reminder and never fabricates a new stored retry record.
+    expect(sessionStorage.getItem('crx:pending-retry:rate-review:u1')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
     fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
     expect(screen.getByRole('button', { name: 'Upload and preview' })).toBeEnabled();
@@ -306,6 +316,51 @@ describe('RateReviewWorkbookModal', () => {
     expect(H.commit).toHaveBeenCalledTimes(3);
   });
 
+  it('does not let an older same-key refusal clear a newer retry fence', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    let refuseOld!: () => void;
+    H.commit.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      refuseOld = () => reject(new Error('RATE_REVIEW_REFUSED: old dispatch refusal'));
+    })).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const first = await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    const name = 'crx:pending-retry:rate-review:u1';
+    const dispatchA = JSON.parse(sessionStorage.getItem(name)!);
+    first.unmount();
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(2));
+    const dispatchB = JSON.parse(sessionStorage.getItem(name)!);
+    expect(dispatchB.key).toBe(dispatchA.key);
+    expect(dispatchB.sentAt).toBe(dispatchA.sentAt);
+    expect(dispatchB.dispatchFence).not.toBe(dispatchA.dispatchFence);
+    const unchangedB = sessionStorage.getItem(name);
+    await act(async () => refuseOld());
+    expect(sessionStorage.getItem(name)).toBe(unchangedB);
+    expect(JSON.parse(sessionStorage.getItem(name)!).dispatchFence).toBe(dispatchB.dispatchFence);
+  });
+
+  it('does not recreate an unanswered reminder when a late reply follows a settled same-key success', async () => {
+    let loseOld!: () => void;
+    H.commit.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      loseOld = () => reject(new TypeError('Failed to fetch'));
+    })).mockResolvedValueOnce({ rates_changed: 1, outcomes_changed: 0, rates: [], outcomes: [] });
+    const first = await uploadFile();
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    first.unmount();
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    expect(await screen.findByText(/Saved 1 rate and 0 outcomes/)).toBeInTheDocument();
+    const name = 'crx:pending-retry:rate-review:u1';
+    expect(sessionStorage.getItem(name)).toBeNull();
+    await act(async () => loseOld());
+    expect(sessionStorage.getItem(name)).toBeNull();
+    expect(screen.queryByText(/Your earlier Confirm may still finish/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload and preview' })).toBeEnabled();
+  });
+
   it('keeps the uncertain intent for a hand check when a later replay is refused', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     H.commit.mockRejectedValueOnce(new TypeError('Failed to fetch'))
@@ -365,6 +420,42 @@ describe('RateReviewWorkbookModal', () => {
     storage.mockRestore();
   });
 
+  it('does not send or mutate a hidden record when Confirm cannot inspect browser storage', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    await uploadFile();
+    const name = 'crx:pending-retry:rate-review:u1';
+    const hiddenDamaged = '{hidden retry bytes';
+    sessionStorage.setItem(name, hiddenDamaged);
+    const get = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const realRemove = Storage.prototype.removeItem;
+    let writes = 0;
+    let removals = 0;
+    const readSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === name) throw new Error('storage denied');
+      return get.call(this, key);
+    });
+    const writeSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === name) writes += 1;
+      return realSet.call(this, key, value);
+    });
+    const removeSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === name) removals += 1;
+      return realRemove.call(this, key);
+    });
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+      await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('could not be checked')));
+      expect(H.commit).not.toHaveBeenCalled();
+      expect(writes).toBe(0);
+      expect(removals).toBe(0);
+      readSpy.mockRestore();
+      expect(sessionStorage.getItem(name)).toBe(hiddenDamaged);
+    } finally {
+      readSpy.mockRestore(); writeSpy.mockRestore(); removeSpy.mockRestore();
+    }
+  });
+
   it('refuses the first send when its written retry record cannot be read back', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     await uploadFile();
@@ -407,7 +498,7 @@ describe('RateReviewWorkbookModal', () => {
     expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeDisabled();
   });
 
-  it('refuses to restore a damaged rate row instead of rendering or retrying it', () => {
+  it('keeps a damaged rate row hidden and available for an explicit checked clear', async () => {
     const name = 'crx:pending-retry:rate-review:u1';
     sessionStorage.setItem(name, JSON.stringify({ key: 'old-key', sentAt: Date.now(), request: {
       actorId: 'u1', upload: { ...upload, rates: [null] },
@@ -416,7 +507,29 @@ describe('RateReviewWorkbookModal', () => {
     render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
     expect(screen.queryByLabelText('Rate review preview')).not.toBeInTheDocument();
     expect(H.commit).not.toHaveBeenCalled();
+    expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
+    expect(sessionStorage.getItem(name)).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
     expect(sessionStorage.getItem(name)).toBeNull();
+  });
+
+  it('refreshes a failed damaged-record clear from the now-valid stored retry', async () => {
+    const name = 'crx:pending-retry:rate-review:u1';
+    const damaged = '{damaged retry bytes';
+    sessionStorage.setItem(name, damaged);
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+    sessionStorage.setItem(name, JSON.stringify({ key: 'recovered-key', sentAt: Date.now(), request: {
+      actorId: 'u1', upload, preview: { rates: [{ index: 0, status: 'change' }], outcomes: [] },
+    } }));
+    fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
+    expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+    expect(screen.queryByText(/unreadable.*rows are unavailable/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Browser storage could not be checked/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload and preview' })).toBeDisabled();
+    expect(JSON.parse(sessionStorage.getItem(name)!).key).toBe('recovered-key');
   });
 
   it('restores a valid pending review whose downloaded versions are zero', async () => {
@@ -429,6 +542,108 @@ describe('RateReviewWorkbookModal', () => {
     render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
     expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
     expect(H.commit).not.toHaveBeenCalled();
+  });
+
+  it('restores a hidden valid record when storage reads recover, without sending from the upload action', async () => {
+    const name = 'crx:pending-retry:rate-review:u1';
+    sessionStorage.setItem(name, JSON.stringify({ key: 'hidden-key', sentAt: Date.now(), request: {
+      actorId: 'u1', upload, preview: { rates: [{ index: 0, status: 'change' }], outcomes: [] },
+    } }));
+    const get = Storage.prototype.getItem;
+    let failFirstRead = true;
+    const storage = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === name && failFirstRead) { failFirstRead = false; throw new Error('storage denied'); }
+      return get.call(this, key);
+    });
+    try {
+      render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+      expect(await screen.findByText(/Browser storage could not be checked/)).toBeInTheDocument();
+      const file = new File(['fresh'], 'review.xlsx');
+      Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+      fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+      expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+      expect(screen.queryByText(/No request can be sent until it can be checked safely/)).not.toBeInTheDocument();
+      // One explanation (in the preview), plus the recovery region's clear button; not the same warning twice.
+      expect(screen.queryByText(/Your earlier Confirm may still finish/)).not.toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Earlier rate review recovery' })).toContainElement(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+      expect(H.parse).not.toHaveBeenCalled();
+      expect(H.commit).not.toHaveBeenCalled();
+      expect(JSON.parse(sessionStorage.getItem(name)!).key).toBe('hidden-key');
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
+  it('restores a different readable stored intent before showing rows or offering its clear action', async () => {
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    await uploadFile();
+    const name = 'crx:pending-retry:rate-review:u1';
+    const storedUpload = { ...upload, rates: [upload.rates[0]], outcomes: [] };
+    const storedRequest = { actorId: 'u1', upload: storedUpload, preview: { rates: [{ index: 0, status: 'change' }], outcomes: [] } };
+    sessionStorage.setItem(name, JSON.stringify({ key: 'different-key', sentAt: Date.now(), request: storedRequest }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
+    expect(await screen.findByText(/Preview: 1 edited rate, 0 edited outcomes/)).toBeInTheDocument();
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('found and restored')));
+    expect(screen.getByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Earlier rate review recovery' })).not.toHaveTextContent(/Your earlier Confirm may still finish/);
+    expect(H.commit).not.toHaveBeenCalled();
+    expect(JSON.parse(sessionStorage.getItem(name)!).request).toEqual(storedRequest);
+    fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
+    expect(sessionStorage.getItem(name)).toBeNull();
+  });
+
+  it('shows a hidden damaged record after storage reads recover and preserves its bytes', async () => {
+    const name = 'crx:pending-retry:rate-review:u1';
+    const damaged = '{hidden unreadable synthetic rate data';
+    sessionStorage.setItem(name, damaged);
+    const get = Storage.prototype.getItem;
+    let failFirstRead = true;
+    const storage = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === name && failFirstRead) { failFirstRead = false; throw new Error('storage denied'); }
+      return get.call(this, key);
+    });
+    try {
+      render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+      expect(await screen.findByText(/Browser storage could not be checked/)).toBeInTheDocument();
+      const file = new File(['fresh'], 'review.xlsx');
+      Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+      fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+      expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Browser storage could not be checked/)).not.toBeInTheDocument();
+      expect(H.parse).not.toHaveBeenCalled();
+      expect(H.commit).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(name)).toBe(damaged);
+      fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'I checked; clear reminder' }));
+      expect(sessionStorage.getItem(name)).toBeNull();
+    } finally {
+      storage.mockRestore();
+    }
+  });
+
+  it('clears a stale storage warning when a fresh inspection confirms no pending record', async () => {
+    H.parse.mockResolvedValue(upload);
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
+    const name = 'crx:pending-retry:rate-review:u1';
+    const get = Storage.prototype.getItem;
+    let failFirstRead = true;
+    const storage = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === name && failFirstRead) { failFirstRead = false; throw new Error('storage denied'); }
+      return get.call(this, key);
+    });
+    try {
+      render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+      expect(await screen.findByText(/Browser storage could not be checked/)).toBeInTheDocument();
+      const file = new File(['fresh'], 'review.xlsx');
+      Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+      fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+      expect(await screen.findByText(/Preview: 2 edited rates/)).toBeInTheDocument();
+      expect(screen.queryByText(/Browser storage could not be checked/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Confirm rate review/ })).toBeEnabled();
+    } finally {
+      storage.mockRestore();
+    }
   });
 
   it('shows no other admin a previous admin’s unanswered preview', async () => {

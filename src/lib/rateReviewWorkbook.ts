@@ -248,6 +248,7 @@ function readRows<H extends string>(sheet: Worksheet | undefined, name: string, 
       });
     });
     if (problems.length === problemCount) rows.push(row);
+    else collectReadableChoices(row, name, problems);
   }
   return rows;
 }
@@ -265,6 +266,32 @@ function parseDecision(text: string, where: string): RateReviewRateRow['decision
   if (value === '') return null;
   if (value === 'approve' || value === 'reopen' || value === 'delete') return value;
   throw new PricingWorkbookFormatError(`${where}: decision must be approve, reopen, delete or blank.`);
+}
+
+function parseOutcome(text: string, where: string): ProductRateOutcome | null {
+  const outcome = blankToNull(text.toLowerCase());
+  if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
+    throw new PricingWorkbookFormatError(`${where}: outcome must be ${OUTCOMES.join(', ')} or blank.`);
+  }
+  return outcome as ProductRateOutcome | null;
+}
+
+const hasActivityLabel = (activity: string | undefined) => activity === 'active' || activity === 'inactive';
+const missingActivityLabel = (where: string) => `${where} is missing its activity label. Download a fresh workbook.`;
+
+/** Unreadable rows are never uploaded; validate only choices whose cells were read successfully. */
+function collectReadableChoices(row: { sheetRow: number; row_state?: string; parent_activity?: string; decision?: string; is_quoting_default?: string; outcome?: string; reconfirm?: string; parent_name?: string }, sheet: string, problems: string[]) {
+  const where = `${sheet} row ${row.sheetRow}`;
+  const { decision, is_quoting_default: quotingDefault, outcome, reconfirm } = row;
+  // v3 only (v2 has no parent_activity column); a downloaded row always has its hidden row_state.
+  if (typeof row.parent_activity === 'string' && row.row_state && !hasActivityLabel(row.parent_activity)) problems.push(missingActivityLabel(where));
+  if (sheet === RATES_SHEET) {
+    if (typeof decision === 'string') collectRowProblem(problems, () => parseDecision(decision, where));
+    if (typeof quotingDefault === 'string') collectRowProblem(problems, () => parseYesNo(quotingDefault, where));
+  } else if (sheet === OUTCOMES_SHEET) {
+    if (typeof outcome === 'string') collectRowProblem(problems, () => parseOutcome(outcome, `${where} (${row.parent_name ?? 'unknown parent'})`));
+    if (typeof reconfirm === 'string') collectRowProblem(problems, () => parseYesNo(reconfirm, where, 'reconfirm'));
+  }
 }
 
 /** Marks a parent name two parents share, so a new rate is never sent to the wrong one. */
@@ -304,36 +331,37 @@ function outcomeDownloadState(row: OutcomeSheetRow): OutcomeDownloadState {
 }
 
 function addInactiveOutcomeProblems(problems: string[], check: {
-  row: OutcomeSheetRow; saved: OutcomeDownloadState; outcome: string | null; note: string | null;
+  row: OutcomeSheetRow; saved: OutcomeDownloadState; outcome: string | null | undefined; note: string | null;
   downloadedNote: string | null; reconfirm: boolean | undefined;
 }) {
   const { row, saved, outcome, note, downloadedNote, reconfirm } = check;
   if (saved.is_active !== false) return;
   const where = `Rate Outcomes row ${row.sheetRow} (${row.parent_name})`;
-  if (reconfirm === true || (outcome !== null && outcome !== saved.outcome)) {
+  // An unreadable outcome (undefined) has its own error; checks that depend on it are skipped.
+  if (reconfirm === true || (outcome != null && outcome !== saved.outcome)) {
     problems.push(`${where}: inactive parents are history only; clear the recorded outcome or leave it unchanged. They cannot be given a new outcome or reconfirmed.`);
   }
   if (saved.outcome !== null && outcome === null && note !== null) {
     problems.push(`${where}: clear the note together with the recorded outcome.`);
   }
-  if (outcome === saved.outcome && note !== downloadedNote) {
+  if (outcome !== undefined && outcome === saved.outcome && note !== downloadedNote) {
     problems.push(`${where}: inactive history notes can only be cleared together with their outcome.`);
   }
 }
 
 /** An edited Rate Outcomes row, or null when it matches the download. */
-function parseOutcomeRow(row: OutcomeSheetRow): { edited: OutcomeUpload | null; reconfirm: boolean; downloaded: string | null; active?: boolean } {
-  const saved = outcomeDownloadState(row);
+function parseOutcomeRow(row: OutcomeSheetRow, v3: boolean): { edited: OutcomeUpload | null; reconfirm: boolean; downloaded: string | null; active?: boolean } {
   const problems: string[] = [];
-  const outcome = blankToNull(row.outcome.toLowerCase());
-  if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
-    problems.push(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
-  }
+  const labelled = !v3 || hasActivityLabel(row.parent_activity);
+  if (!labelled) problems.push(missingActivityLabel(`Rate Outcomes row ${row.sheetRow}`));
+  // An unlabelled v3 row would also fail as damaged; report the label once, not both for one cell.
+  const saved = labelled ? collectRowProblem(problems, () => outcomeDownloadState(row)) : undefined;
+  const outcome = collectRowProblem(problems, () => parseOutcome(row.outcome, `Rate Outcomes row ${row.sheetRow} (${row.parent_name})`));
   const note = blankToNull(row.note);
-  const downloadedNote = saved.note?.trim() || null;
   const reconfirm = collectRowProblem(problems, () => parseYesNo(row.reconfirm, `Rate Outcomes row ${row.sheetRow}`, 'reconfirm'));
-  addInactiveOutcomeProblems(problems, { row, saved, outcome, note, downloadedNote, reconfirm });
-  if (problems.length > 0 || reconfirm === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
+  const downloadedNote = saved?.note?.trim() || null;
+  if (saved !== undefined) addInactiveOutcomeProblems(problems, { row, saved, outcome, note, downloadedNote, reconfirm });
+  if (problems.length > 0 || saved === undefined || outcome === undefined || reconfirm === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
   if (reconfirm && (saved.outcome === null || outcome !== saved.outcome || note !== downloadedNote)) {
     throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow}: Reconfirm needs an unchanged recorded outcome and note. To change either cell, leave Reconfirm blank.`);
   }
@@ -363,10 +391,7 @@ function readOutcomeSheet(sheet: Worksheet | undefined, problems: string[], head
     collectRowProblem(problems, () => {
       if (seenParents.has(row.parent_id)) throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} repeats another row. Do not copy rows. Download a fresh workbook.`);
       seenParents.add(row.parent_id);
-      const parsed = parseOutcomeRow(row);
-      if (v3 && row.parent_activity !== 'active' && row.parent_activity !== 'inactive') {
-        throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow} is missing its activity label. Download a fresh workbook.`);
-      }
+      const parsed = parseOutcomeRow(row, v3);
       if (parsed.active === false) { inactiveParentIds.push(row.parent_id); inactiveNames.add(key); }
       if (parsed.edited) outcomes.push(parsed.edited);
       if (parsed.reconfirm) reconfirmed.set(row.parent_id, row.sheetRow);
@@ -416,6 +441,11 @@ function addInactiveRateProblems(problems: string[], check: {
 }) {
   const { where, parentName, saved, decision, reason, valuesChanged } = check;
   if (saved.is_active !== false) return;
+  // An unreadable decision (undefined) has its own error; checks that depend on it are skipped.
+  if (decision === undefined) {
+    if (valuesChanged) problems.push(`${where} (${parentName}): inactive parents are history only. Rate values cannot change.`);
+    return;
+  }
   if (decision === null && reason !== null) {
     problems.push(`${where} (${parentName}): a reason is only accepted with an allowed inactive cleanup decision.`);
   }
@@ -455,10 +485,10 @@ function parseRateRow(row: SheetRow<(typeof V3_RATE_HEADERS)[number]>, parentByN
   if (row.rate_id === '' && row.row_state === '') {
     return parseAddedRateRow({ row, parentByName, inactiveNames, parentNamesIncomplete, values, decision, isDefault, reason, problems });
   }
-  if (v3 && row.parent_activity !== 'active' && row.parent_activity !== 'inactive') {
-    throw new PricingWorkbookFormatError(`${where} is missing its activity label. Download a fresh workbook.`);
-  }
-  const saved = collectRowProblem(problems, () => rateDownloadState(row, where));
+  const labelled = !v3 || hasActivityLabel(row.parent_activity);
+  if (!labelled) problems.push(missingActivityLabel(where));
+  // An unlabelled v3 row would also fail as damaged; report the label once, not both for one cell.
+  const saved = labelled ? collectRowProblem(problems, () => rateDownloadState(row, where)) : undefined;
   if (saved === undefined || (saved.is_active !== false && (decision === undefined || isDefault === undefined))) {
     throw new PricingWorkbookFormatError(problems.join('\n'));
   }

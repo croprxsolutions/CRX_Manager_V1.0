@@ -2,7 +2,7 @@
 
 Completed-delivery brand corrections copy server-owned review and original-entry provenance when name, EPA and manufacturer match; amount-only changes do not require another office review. The original snapshots stay historical and events describe the actual new rows. The dependent screen correction is included in the same delivery branch as this database behavior.
 
-Proof: `node output/priority-integrity-behavior-check.mjs <owned-B1b-prover-container>` after the existing invoice-brand real-schema baseline prover. The explicit container must be network-disabled and use the pinned Supabase PostgreSQL major version. Every candidate apply and fixture transaction rolls back. Also run `scripts/smoke/smoke-delivery-completion-evidence.sql` with the candidate in the same local transaction; expected result `SMOKE_PASS_ROLLBACK`.
+Proof: `node scripts/smoke/prove-priority-integrity-behavior.mjs <owned-B1b-prover-container>` after the existing invoice-brand real-schema baseline prover. The explicit container must be network-disabled and use the pinned Supabase PostgreSQL major version. Every candidate apply and fixture transaction rolls back. Also run `scripts/smoke/smoke-delivery-completion-evidence.sql` with the candidate in the same local transaction; expected result `SMOKE_PASS_ROLLBACK`.
 
 Preflight refuses drift in function bodies, overloads, owners, grants, search paths, actor nullability and the existing rate-reason constraint. Each target database checks its own saved reasons; valid reasons do not block apply, invalid ones stop without a rewrite. The helper is shared by all three reason writers and the CHECK; a later helper change must revalidate that CHECK.
 

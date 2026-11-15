@@ -15,6 +15,11 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.
 **Why:** official codes can use different zero-padding by scheme, and a save must not silently replace a stored spelling or substitute an alternate submitted spelling. The comparison-only product summary may fold equivalent groups using an existing source spelling, as specified in the contract.
 **What this forbids/implies:** compare equivalent codes for duplicates and matching, but preserve stored/requested spelling and refuse an active alternate spelling before any write.
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
 
 ## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
 

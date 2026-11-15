@@ -231,6 +231,7 @@ function readRows<H extends string>(sheet: Worksheet | undefined, name: string, 
       });
     });
     if (problems.length === problemCount) rows.push(row);
+    else collectReadableChoices(row, name, problems);
   }
   return rows;
 }
@@ -248,6 +249,27 @@ function parseDecision(text: string, where: string): RateReviewRateRow['decision
   if (value === '') return null;
   if (value === 'approve' || value === 'reopen' || value === 'delete') return value;
   throw new PricingWorkbookFormatError(`${where}: decision must be approve, reopen, delete or blank.`);
+}
+
+function parseOutcome(text: string, where: string): ProductRateOutcome | null {
+  const outcome = blankToNull(text.toLowerCase());
+  if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
+    throw new PricingWorkbookFormatError(`${where}: outcome must be ${OUTCOMES.join(', ')} or blank.`);
+  }
+  return outcome as ProductRateOutcome | null;
+}
+
+/** Unreadable rows are never uploaded; validate only choices whose cells were read successfully. */
+function collectReadableChoices(row: { sheetRow: number; decision?: string; is_quoting_default?: string; outcome?: string; reconfirm?: string; parent_name?: string }, sheet: string, problems: string[]) {
+  const where = `${sheet} row ${row.sheetRow}`;
+  const { decision, is_quoting_default: quotingDefault, outcome, reconfirm } = row;
+  if (sheet === RATES_SHEET) {
+    if (typeof decision === 'string') collectRowProblem(problems, () => parseDecision(decision, where));
+    if (typeof quotingDefault === 'string') collectRowProblem(problems, () => parseYesNo(quotingDefault, where));
+  } else if (sheet === OUTCOMES_SHEET) {
+    if (typeof outcome === 'string') collectRowProblem(problems, () => parseOutcome(outcome, `${where} (${row.parent_name ?? 'unknown parent'})`));
+    if (typeof reconfirm === 'string') collectRowProblem(problems, () => parseYesNo(reconfirm, where, 'reconfirm'));
+  }
 }
 
 /** Marks a parent name two parents share, so a new rate is never sent to the wrong one. */
@@ -284,16 +306,13 @@ function outcomeDownloadState(row: OutcomeSheetRow): OutcomeDownloadState {
 
 /** An edited Rate Outcomes row, or null when it matches the download. */
 function parseOutcomeRow(row: OutcomeSheetRow): { edited: OutcomeUpload | null; reconfirm: boolean; downloaded: string | null } {
-  const saved = outcomeDownloadState(row);
   const problems: string[] = [];
-  const outcome = blankToNull(row.outcome.toLowerCase());
-  if (outcome != null && !(OUTCOMES as readonly string[]).includes(outcome)) {
-    problems.push(`Rate Outcomes row ${row.sheetRow} (${row.parent_name}): outcome must be ${OUTCOMES.join(', ')} or blank.`);
-  }
+  const saved = collectRowProblem(problems, () => outcomeDownloadState(row));
+  const outcome = collectRowProblem(problems, () => parseOutcome(row.outcome, `Rate Outcomes row ${row.sheetRow} (${row.parent_name})`));
   const note = blankToNull(row.note);
-  const downloadedNote = saved.note?.trim() || null;
   const reconfirm = collectRowProblem(problems, () => parseYesNo(row.reconfirm, `Rate Outcomes row ${row.sheetRow}`, 'reconfirm'));
-  if (problems.length > 0 || reconfirm === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
+  if (problems.length > 0 || saved === undefined || outcome === undefined || reconfirm === undefined) throw new PricingWorkbookFormatError(problems.join('\n'));
+  const downloadedNote = saved.note?.trim() || null;
   if (reconfirm && (saved.outcome === null || outcome !== saved.outcome || note !== downloadedNote)) {
     throw new PricingWorkbookFormatError(`Rate Outcomes row ${row.sheetRow}: Reconfirm needs an unchanged recorded outcome and note. To change either cell, leave Reconfirm blank.`);
   }

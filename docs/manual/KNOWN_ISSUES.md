@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-14 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-15 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md)) | 99 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md)) | 108 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -524,6 +524,11 @@ invoice (`_save_field_app_invoice_impl_20260714`, `resolve_field_app_chemical_pr
 line on the field with no status, customer or deleted filter). After a revision that changed a price and was not
 re-sent, either can bill the unsent price (with `20261029120000`, PR #1203, in the live ledger as version `20261031130629`, a price change recorded by `save_quote` is the agreed price and needs no re-send); the field-application lookup can also take a draft, declined or deleted
 quote's price. Fix: read the price from the version last sent (or refuse like the lock), with a real-schema proof.
+Narrowed and widened 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex F3 and
+Claude C-9). With `20261029120000`, a logged approved price change needs no re-send. A hard-deleted quote probably
+cascades away. But the field-app lookup is `ORDER BY qi.id LIMIT 1` over UUIDs, so it is effectively random, not
+"first". It also has no season filter: last season's quote, or another grower's quote on the same field, can price
+this year's invoice. Fix: pick the eligible quote by customer, status and season. Repair step 4 (To-Do 0.17).
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
 **LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
@@ -638,6 +643,27 @@ RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; n
 invoice is un-posted, edited and re-posted after its size's number changed, the restricted-use record uses the new
 number, not the one it was sold under. Live behavior today; REG-1 step 2 does not change it. The fix is to
 send each kept line's stored number in that function (a large money function re-issue), so it waits for Mason's call.
+Fix it together with KI-157, where every invoice PDF reads the live product name, EPA number and form (2026-11-13
+[Product Master review](../audits/2026-11-13-product-master-review.md), repair step 3).
+
+### KI-156 — A field-application invoice books the grower-share chemical's cost in the wrong unit
+**MED · OPEN · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1) · unassigned**
+In `_save_field_app_invoice_impl_20260714` (latest body `20260904180000_invoice_season_follows_invoice_date.sql`), the
+`v_chem_qty_a > 0` branch (chemical included in the grower's share) adds `safe_cents_qty(v_qa_unit_cost, v_chem_qty_a)`.
+That multiplies the cost per sold unit by a quantity in the rate unit, with no conversion. Example: 16 oz/ac × 100 ac
+of a $30/gal product costs $375 but is booked as 1,600 × $30 = $48,000 in `invoices.total_cost_cents`. The customer's
+bill is right ($0 line); margin, P&L and possibly commission are wrong. The billed branch was fixed by PARKED-010
+(`field_app_priced_quantity`); this branch was not. Live-verified body; 0 such lines live yet. The split field-app path
+was not traced. Fix: convert like the billed branch, with a real-schema proof. Repair step 3 (To-Do 0.17).
+
+### KI-157 — Invoice PDFs print the product's current name, not the name it was sold under
+**MED · OPEN · money/documents · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-2) · unassigned**
+`supabase/functions/_shared/pdf/invoicePdf.ts` uses `row.product?.product_name || description` (~L100, printed ~L196
+and ~L1431). It also falls back to the live product's EPA number and form when the line's own is blank (~L113, ~L115).
+Renaming a product in Product Master therefore changes every old posted invoice PDF and re-sent email, against the rule
+that historical invoices are preserved. The quote PDF and applicator sheet also read live names (LOW). Fix: print the
+line's stored name, EPA number and form; together with KI-117. The PDF code is in a shared Edge Function file, so the
+fix needs an Edge deploy with Mason's approval. Repair step 3 (To-Do 0.17).
 
 ### KI-118 — REG-1 step 2 deferrals: late restricted-use lines and small record gaps
 **LOW · OPEN, named deferrals · restricted-use records · found 2026-11-10 (REG-1 step 2 contract and reviews)**
@@ -911,6 +937,9 @@ The value bug itself is fixed (closed list, item 21). What remains is D12 item 7
 Reports Inventory Cost total as a value at price-list cost, not a book or accounting value. The same applies to margin
 and profit figures built on the saved pricing cost: label them "margin at saved pricing cost", since that cost is not
 necessarily what the supplier bill said ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 7).
+Also (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-10): the per-row Inventory Cost
+report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.tsx`) still list negative and $0-cost
+rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
 **MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
@@ -918,6 +947,13 @@ necessarily what the supplier bill said ([business logic review](../audits/2026-
 lines take `products.unit_size`, not the stock unit (`PurchaseOrderDetail.tsx` ~L2154). Live: 4 of 102 received lines
 were in a different unit and 44 had a blank unit. D12 moves purchasing back into CRX before the season. Fix: fill a
 blank unit from the stock unit, refuse a mismatch with no conversion, default new lines to `inventory_unit`.
+Widened 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), C-3 and Codex F1): 43
+blank and 4 different of 102 received lines (re-counted live), and **4 open PO lines** still carry a different unit.
+These include 9,000 "Dry oz" on the "MG" product (Mason: the quantity is right and the label is wrong) and an EA line
+on a KI-137 product. Receiving them today adds the typed number. The on-order recompute
+(`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
+`inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
+are KI-158. Do not convert historical balances; fix them from counts (KI-29).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
 **MED (data) · OPEN · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · unassigned**
@@ -925,24 +961,37 @@ Products `0b2e713b` and `17ccc5ba` have stock and rate unit Lb and container uni
 jug's money; their purchases were "EA". Selling or receiving by the pound would be wildly wrong. On-hand 0, one order
 line each. May already be on Mason's private unit-mismatch list (KI-30). Fix: Mason confirms the sales unit (To-Do
 decision 24), then a reviewed unit correction.
+**Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
+Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
+(repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
 
 ### KI-138 — Stored tier margins disagree with stored prices on a few products
 **LOW · OPEN · pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #6) · unassigned**
 Product `8b9c7b32`'s stored Tier 1 margin is about 6 points off its price, and a legacy-mode recalculation would
 reprice it; `a21ff506` is a cent off; 8 products have a stale `tier1_gross_margin`. Fix: a reviewed data fix
 recomputing margins from prices; consider failing closed instead of defaulting to `legacy_margin`.
+Re-checked 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md)): 587 of 588 margins
+consistent, 1 outlier. Related catalog gaps found the same day, all for Mason (To-Do decision 27): 3 products have
+Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and 12 have no container size.
 
 ### KI-139 — "Reconcile negative inventory" can overwrite any row, not just negative ones
 **LOW · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #7) · unassigned**
 `_reconcile_negative_inventory_replay_impl_20261015` sets any row to any number of 0 or more with no count behind it,
 against "negatives fixed only from the count". Admin-only and logged. Fix: refuse when on-hand is not below zero, or
 require a completed count line.
+Also (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-13): `adjust_inventory`
+refuses any result below zero, so a −10 row cannot be partly fixed by +5. That pushes staff to this looser tool. Fix
+both together.
 
 ### KI-140 — Per-acre price treats unknown units as 1 oz and mixes liquid with dry
 **LOW (latent) · OPEN · pricing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #8) · unassigned**
 `product_price_per_acre` uses factor 1 for a unit not in `unit_conversions` and never checks liquid vs dry, giving a
 confident wrong price. Only the 2 KI-114 products mismatch today. Fix: return NULL when a unit is unknown or the types
 differ.
+Widened 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-8): `save_quote`'s server
+math (`_save_quote_below_cost_impl_20260810`, `20261104130000` ~L620-656, `COALESCE(factor_oz,1)`) has the same
+fallback. That is the real money path; only the quote screen's unit picker keeps other units out today. It is part of
+the units batch (To-Do 0.17): refuse an unknown or wrong-type unit in both places.
 
 ### KI-141 — Retiring an inventory row ignores open purchase orders
 **LOW · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #9) · unassigned**
@@ -955,6 +1004,59 @@ above 0.
 `complete_delivery` always recomputes the order status (fulfilled / partially fulfilled), even when the order is
 cancelled. The app cannot reach this today, because `cancel_order` cancels open deliveries first, but no database
 rule stops it. Fix: in a new migration, leave a cancelled order's status alone (or refuse the completion).
+
+### KI-158 — Orders and deliveries move stock without checking units
+**MED · OPEN · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · unassigned**
+The order-side twin of KI-136. New order lines default to `products.unit_size`, not `inventory_unit`
+(`_fill_order_line_unit`, `20270106100000`; the quote-to-order prebook copies the same). Delivery completion subtracts
+`delivery_items.quantity` with no unit check. So a product sold per case or each but stocked per gallon or pound loses
+"1" per case from stock. Live 2026-11-13: 2 active products have `unit_size` ≠ `inventory_unit`; **6 order lines and 9
+delivery lines** carry a unit different from the stock unit. Also, 25 `inventory.unit_size` labels are blank or
+misspelled; screens prefer `products.inventory_unit`. Fix: default and fill to the stock unit, and refuse or convert a
+mismatch, in the same units batch as KI-136 (repair step 1, To-Do 0.17).
+
+### KI-159 — Cancelling a received return writes a history row both stock checks read with the wrong sign
+**MED (latent) · OPEN · inventory/returns · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-5) · unassigned**
+`_cancel_return_intent_impl_20260812` (in `20260827041500…`) writes `'returned', -restocked_quantity`. Both
+"stock matches history" checks (`src/lib/reconciliation.ts` ~L174-195 and the KI-108 SQL in `20270103150000`, plus
+`scripts/smoke/prove-ki108-…`) take `abs()` of `returned` rows. Example: a return restocks 10 and is then cancelled.
+Real stock nets to 0, but the check expects +20 and reports a false mismatch. A KI-108-style "trust the history"
+repair would then **add 20 phantom units**. Live-verified body; 0 such rows yet. Fix: write an `adjusted` row on
+cancel, or teach both checks the sign. Also add stock-vs-history to the database sweep. Must land before any repeat of
+a history-based repair (repair step 2, To-Do 0.17).
+
+### KI-160 — Two stock counts open on the same product apply the same correction twice
+**MED (latent) · OPEN · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · unassigned**
+`_complete_cycle_count_impl` adds the stored `variance` to current on-hand, and nothing stops two open counts on one
+inventory row: no unique or partial index on `cycle_counts` or `cycle_count_items` (live-verified). Example: counts A
+and B both record +10 on a shelf going from 90 to 100; after both complete, stock is 110. Named out of scope in the
+KI-134 contract, with no KI until now. Smaller: admins hold a column UPDATE grant on `cycle_count_items.variance`,
+which bypasses the KI-134 baseline. Count creation is also three browser requests (`CycleCounts.tsx` ~L246-292), so a
+failed create leaves an empty open count. 0 open counts today. Fix: one open count per row, variance written only by
+the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count.
+
+### KI-161 — Delivery editing does not re-check the edited line against its order line
+**MED · OPEN · deliveries · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-7) · unassigned**
+When a delivery is edited, the database does not confirm that each line still matches the product and unit of the
+order line it fills, or that an order line is used once. The normal screens send consistent lines, so this is not
+reachable from the app UI. Live 2026-11-13: 0 affected delivery lines. Detail is held back until the fix is live
+(public security write-up rule); it is in Mason's local copy of the review. Fix: add the lineage checks in the edit
+path and tighten direct line writes, in a new migration. Repair step 5 (To-Do 0.17).
+
+### KI-162 — The Receiving Log filters by UTC date
+**LOW · OPEN · purchasing/reports · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-11) · unassigned**
+`get_receiving_log` (`20261113110000` ~L99-100) compares `received_at::date`. The database runs in UTC and the function
+sets no zone (live-verified), so a receipt after about 6-7 PM Central files under the next day. The KI-18 batches
+missed it. Fix: use the Chicago date, as KI-18 did. Repair step 5 (To-Do 0.17).
+
+### KI-163 — Small stock-history gaps
+**LOW · OPEN · inventory · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-15, C-16) · unassigned**
+(1) Quick-delivery cancel (`_cancel_delivery_replay_impl_20261015`) clamps `quantity_prebooked` at 0 but logs a
+`released` row for the full amount, so reservation history can disagree with the figure. (2) Count rounding in
+`update_cycle_count_item` (`20270103170000`) can leave up to 0.005 on 4-decimal bulk rows. (3) Return and
+application-reversal history rows are linked to their source only by note text (`reverse_application_record`). (4) One
+fully received PO's header total is 1¢ off the sum of its 39 lines (rounding order). Fix opportunistically.
+Repair step 5 (To-Do 0.17).
 
 ## Customers, purchasing and settings
 
@@ -1002,6 +1104,9 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 Reversing a receipt locks the PO line before the PO; creating or editing a vendor bill locks the vendor, then the PO.
 Two people doing both at once on the same PO could make one of them wait and fail with a retryable error. Fix: take
 the PO lock first in the reversal path, in a new migration.
+Same class (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-12): delivery and job
+completion (`_complete_delivery_authorized_impl`, `_complete_job_replay_impl_20261015`) lock stock rows in no fixed
+order. Two multi-product completions at once can deadlock, and one retries. Fix: lock in product-id order.
 
 ### KI-151 — Changing PO line costs is still checked against the ordered value
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
@@ -1236,6 +1341,20 @@ event (Mason, 2026-11-10, DECISION_LOG): Sentry gets the error type and title, s
 the user id, breadcrumb categories and path-only urls. The title is the only free text, and tokens are removed whole
 before figures are blanked. Extra, other contexts, request query, headers and cookies, the serialized copy and breadcrumb
 messages and data are never sent, for errors and performance samples alike (checked against a local Sentry stand-in).
+
+### KI-164 — Stock and pricing proofs that cannot run, and a stale cost-review record
+**LOW (proof) · OPEN · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+Several proofs did not complete on 2026-11-13, so those workflows are not certified:
+- The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
+- The cycle-count, tote-fill and PO close-short provers refuse newer dependent migrations before their scenarios.
+- The pricing browser proof fails on an ambiguous Password locator, then on a removed Change Note field.
+
+The live `cost-exposure-review` predicate fails on 5 changed signatures (`complete_delivery`,
+`start_and_complete_delivery`, `create_invoice_from_order`, `create_split_invoices_from_order`,
+`process_offline_action`). A manual check by both reviewers found no cost leak; the review hashes are stale.
+Stock-vs-history is checked only in the browser integrity report and a one-off script, not by the database sweep
+(KI-159). No tests cover KI-156 to KI-162. Fix: repair the fixtures alongside each repair step, refresh the review
+hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
 ---
 

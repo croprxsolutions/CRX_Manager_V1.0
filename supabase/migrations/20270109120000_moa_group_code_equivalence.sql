@@ -60,6 +60,14 @@ BEGIN
                     AND indisunique AND indisvalid) THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_PREFLIGHT: existing exact indexes missing or invalid';
   END IF;
+  -- Unchanged ON CONFLICT clauses infer these exact indexes; refuse a same-named index with a drifted definition.
+  -- 'public.' is stripped because pg_get_indexdef qualifies names according to the current search_path.
+  IF replace(pg_get_indexdef('public.active_ingredient_modes_of_action_one_active'::regclass), 'public.', '')
+        IS DISTINCT FROM 'CREATE UNIQUE INDEX active_ingredient_modes_of_action_one_active ON active_ingredient_modes_of_action USING btree (ingredient_id, scheme, group_code) WHERE (status = ''active''::text)'
+     OR replace(pg_get_indexdef('public.product_parent_modes_of_action_one_active'::regclass), 'public.', '')
+        IS DISTINCT FROM 'CREATE UNIQUE INDEX product_parent_modes_of_action_one_active ON product_parent_modes_of_action USING btree (parent_id, ingredient_id, scheme, group_code) WHERE (status = ''active''::text)' THEN
+    RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_PREFLIGHT: existing exact index definition drift';
+  END IF;
 
   SELECT count(*), COALESCE(sum(cardinality(ids)),0), left(string_agg(ingredient_id::text || '/' || scheme || ':' || array_to_string(ids, ','), '; '), 3500)
     INTO v_ing_count, v_ing_rows, v_ing_ids

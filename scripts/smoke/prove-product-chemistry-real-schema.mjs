@@ -45,7 +45,7 @@ const MOA_EQUIVALENCE_TOUCH_PINS = new Map([
   ['20270107100000_epa_long_name_keeps_cas_match.sql', '856f92a9decd3b806e584b2630370b1390e518d5cea3002909626735fd88a484'],
   ['20270108100000_ingredient_modes_of_action.sql', '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107'],
   ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
-  ['20270109120000_moa_group_code_equivalence.sql', '8a74b4493aab32a5d3576dc22799f3bd4308278d3be4eb34b53e3746c5fe637a'],
+  ['20270109120000_moa_group_code_equivalence.sql', '50db4e57b5567a661f4ffe0562cc20ec9904fc58ca64851a172e73d2c26708a7'],
 ]);
 // These access/data migrations are deliberately represented as applied, not replayed, in the established
 // MOA prover because their reviewed behavior depends on the live Storage policy population.

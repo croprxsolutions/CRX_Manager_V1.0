@@ -34,7 +34,7 @@ const MOA_EQUIVALENCE_MODE = process.argv.includes('--moa-equivalence');
 const MOA_DEPENDENCY_SHA256_LF = '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107';
 const MOA_OVERLAYS = [
   ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
-  ['20270109120000_moa_group_code_equivalence.sql', '8a74b4493aab32a5d3576dc22799f3bd4308278d3be4eb34b53e3746c5fe637a'],
+  ['20270109120000_moa_group_code_equivalence.sql', '50db4e57b5567a661f4ffe0562cc20ec9904fc58ca64851a172e73d2c26708a7'],
 ];
 // Taha 2026-11-12 (#1810): an over-long EPA name still matches by CAS. Applied right after the candidate.
 const PARKED = new Set([

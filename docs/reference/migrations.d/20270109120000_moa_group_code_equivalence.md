@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `8a74b4493aab32a5d3576dc22799f3bd4308278d3be4eb34b53e3746c5fe637a`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `50db4e57b5567a661f4ffe0562cc20ec9904fc58ca64851a172e73d2c26708a7`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
 
 Compatibility note: an exact same-code duplicate typed in one product save previously reached the active-row lookup and raised `CHEMISTRY_ROW_EXISTS`; the candidate identifies the duplicate earlier and raises `CHEMISTRY_DUPLICATE_CHANGE`. This intentionally changes the error prefix, while keeping the same codes and refusal outcome. Current `src` has no matcher for either prefix.
 
@@ -64,6 +64,12 @@ BEGIN
   END IF;
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._moa_group_code_key(text)'::regprocedure), chr(13), '')) <> 'e08977b06c92c1fa0a46a862a1ba8247' THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: _moa_group_code_key body changed';
+  END IF;
+  IF replace(pg_get_indexdef('public.active_ingredient_modes_of_action_canonical_one_active'::regclass), 'public.', '')
+        IS DISTINCT FROM 'CREATE UNIQUE INDEX active_ingredient_modes_of_action_canonical_one_active ON active_ingredient_modes_of_action USING btree (ingredient_id, scheme, _moa_group_code_key(group_code) COLLATE "C") WHERE (status = ''active''::text)'
+     OR replace(pg_get_indexdef('public.product_parent_modes_of_action_canonical_one_active'::regclass), 'public.', '')
+        IS DISTINCT FROM 'CREATE UNIQUE INDEX product_parent_modes_of_action_canonical_one_active ON product_parent_modes_of_action USING btree (parent_id, ingredient_id, scheme, _moa_group_code_key(group_code) COLLATE "C") WHERE (status = ''active''::text)' THEN
+    RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: canonical index definition changed';
   END IF;
 END
 $rb_guard$;

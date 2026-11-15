@@ -1,6 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-13 (America/Chicago), for the live ledger (latest live row `20261113011216`) and Edge Function versions; quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
+**Last verified:** 2026-11-14 (America/Chicago), for the live ledger (latest live row `20261113011216`) and Edge Function versions; quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature
@@ -284,7 +284,7 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
-- **Live Edge Function versions, read 2026-11-13 Central:** `create-user` v28, `setup-blend-tickets-storage` v22,
+- **Live Edge Function versions, read 2026-11-13 Central (unchanged 2026-11-14):** `create-user` v28, `setup-blend-tickets-storage` v22,
   `process-blend-ticket` v31, `process-document` v24, `send-email` v31, `reset-user-password` v19, `epa-lookup` v10,
   `customer-document-files` v6, `send-delivery-receipts` v4, all ACTIVE. Since the 2026-11-10 read, three moved:
   `epa-lookup` v9 → v10 (last updated 2026-11-12 11:21 AM Central, the day DM-4 part 2, PR #1836, merged), and

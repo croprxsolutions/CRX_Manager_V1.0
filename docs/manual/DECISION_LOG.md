@@ -10,6 +10,12 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
+
 ## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
 
 **Decision (Mason, in session, 2026-11-13: "ok make sure that is in our docs", accepting the recommendation of: profit report = invoiced, rep's payout = customer paid, and a partial customer payment releases the matching share of commission).** Three rules: (1) a commission counts against profit (Bottom Line P&L, Monthly Summary) in the period its sale is invoiced, split by the share billed (entry below); (2) a commission becomes payable to the rep only once the customer has paid for that sale (confirms the 2026-11-09 decision in CRX Notes, "commission after discount"); (3) a partial customer payment makes the same share of that sale's commission payable; the rest waits for the rest of the money.

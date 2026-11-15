@@ -19,7 +19,7 @@ const rate = (o: Partial<Rate>): Rate => ({
 });
 const exported: RateReviewWorkbook = {
   parents: [{
-    parent_id: P1, parent_name: 'Atrazine 4L', product_form: 'liquid', sizes: ['Atrazine 4L 2.5 gal'],
+    parent_id: P1, parent_name: 'Atrazine 4L', is_active: true, product_form: 'liquid', sizes: ['Atrazine 4L 2.5 gal'],
     outcome: null, outcome_note: null, outcome_version: 2, outcome_decided_by: null, outcome_decided_at: null, outcome_problem: null,
     rates: [rate({}), rate({ rate_id: R2, source: 'label', low: '1.00', high: '2.0', recommended: null, is_quoting_default: false, row_version: 1,
       status: 'approved', approved_by: 'Mason', approved_at: '2026-11-11T10:00:00Z', label_check: { status: 'not_applicable' } })],
@@ -27,7 +27,8 @@ const exported: RateReviewWorkbook = {
   }],
   units: [{ code: 'fl_oz' as Rate['unit'], label: 'fl oz', kind: 'volume' }],
   totals: { rates: 2, drafts: 1, approved: 1, per_100_gal: 0, per_100_gal_approved: 0, parents: 1, parents_undecided: 1,
-    approved_default: 0, no_per_acre_default: 0, needs_label_data: 0, outcomes_no_longer_valid: 0 },
+    approved_default: 0, no_per_acre_default: 0, needs_label_data: 0, outcomes_no_longer_valid: 0,
+    inactive_parents: 0, inactive_rates: 0, inactive_approved: 0, inactive_outcomes: 0 },
 };
 
 type Wb = import('exceljs').Workbook;
@@ -51,6 +52,117 @@ const set = (wb: Wb, sheet: string, row: number, header: string, value: unknown)
 };
 
 describe('rate review workbook', () => {
+  it('writes v3 with read-only activity snapshots and refuses altered or missing activity', async () => {
+    const inactive = { ...exported, parents: [{ ...exported.parents[0], is_active: false }] };
+    const blob = await generateRateReviewWorkbook(inactive);
+    const ExcelJS = await loadExcelJs();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await blob.arrayBuffer());
+    expect(wb.getWorksheet('Draft Rates')!.getCell(2, 20).value).toBe('inactive');
+    expect(wb.getWorksheet('Draft Rates')!.getCell(2, 13).fill).toMatchObject({ fgColor: { argb: 'FFF2F4F3' } });
+    expect(wb.getWorksheet('Draft Rates')!.getCell(2, 18).fill).toMatchObject({ fgColor: { argb: 'FFEAF7EF' } });
+    const tampered = roundTrip((book) => set(book, 'Draft Rates', 2, 'parent_activity', 'active'), inactive);
+    await expect(tampered).rejects.toThrow('is damaged');
+    const missing = roundTrip((book) => { book.getWorksheet('Draft Rates')!.getRow(1).getCell(20).value = null; }, inactive);
+    await expect(missing).rejects.toThrow("columns do not match");
+    const missingState = roundTrip((book) => {
+      const cell = book.getWorksheet('Draft Rates')!.getCell(2, 2);
+      const state = JSON.parse(String(cell.value)); delete state.is_active;
+      cell.value = JSON.stringify(state);
+    }, inactive);
+    await expect(missingState).rejects.toThrow('is damaged');
+    const blankActivity = roundTrip((book) => set(book, 'Rate Outcomes', 2, 'parent_activity', ''), inactive);
+    await expect(blankActivity).rejects.toThrow('is damaged');
+    const changedStatus = roundTrip((book) => set(book, 'Draft Rates', 2, 'status', 'approved'), inactive);
+    await expect(changedStatus).rejects.toThrow('is damaged');
+  });
+
+  it('limits inactive rows to cleanup and prevents name-only additions from resolving to inactive groups', async () => {
+    const inactive = { ...exported, parents: [{ ...exported.parents[0], is_active: false }] };
+    await expect(roundTrip((wb) => set(wb, 'Draft Rates', 2, 'recommended', '14'), inactive)).rejects.toThrow('inactive parents are history only');
+    await expect(roundTrip((wb) => set(wb, 'Draft Rates', 2, 'decision', 'approve'), inactive)).rejects.toThrow('inactive parents are history only');
+    expect((await roundTrip((wb) => set(wb, 'Draft Rates', 3, 'decision', 'reopen'), inactive)).rates[0])
+      .toMatchObject({ parent_id: P1, decision: 'reopen' });
+    expect((await roundTrip((wb) => set(wb, 'Draft Rates', 2, 'decision', 'delete'), inactive)).rates[0])
+      .toMatchObject({ parent_id: P1, decision: 'delete' });
+    const invalidRate = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'recommended', '14');
+      set(wb, 'Draft Rates', 2, 'reason', 'reason without a decision');
+    }, inactive);
+    await expect(invalidRate).rejects.toThrow('a reason is only accepted with an allowed inactive cleanup decision');
+    await expect(invalidRate).rejects.toThrow('inactive parents are history only. Rate values cannot change');
+    await expect(roundTrip((wb) => {
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Atrazine 4L');
+      set(wb, 'Draft Rates', 4, 'recommended', '12');
+    }, inactive)).rejects.toThrow('Inactive groups are history only and cannot receive new rates');
+    const decided = { ...inactive, parents: [{ ...inactive.parents[0], outcome: 'approved_default' as const }] };
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', ''), decided)).resolves.toMatchObject({
+      outcomes: [{ parent_id: P1, outcome: null }],
+    });
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes'), decided)).rejects.toThrow('cannot be given a new outcome or reconfirmed');
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', 'needs_label_data'), inactive)).rejects.toThrow('cannot be given a new outcome or reconfirmed');
+    expect((await roundTrip(undefined, inactive)).inactive_parent_ids).toEqual([P1]);
+    const retainedOutcome = { ...inactive, parents: [{ ...inactive.parents[0], outcome: 'approved_default' as const, outcome_note: 'kept' }] };
+    expect(await roundTrip(undefined, retainedOutcome)).toEqual({ rates: [], outcomes: [], recorded: { [P1]: 'approved_default' }, inactive_parent_ids: [P1] });
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', 'needs_label_data'), retainedOutcome))
+      .rejects.toThrow('cannot be given a new outcome or reconfirmed');
+    await expect(roundTrip((wb) => set(wb, 'Rate Outcomes', 2, 'outcome', ''), retainedOutcome))
+      .rejects.toThrow('clear the note together with the recorded outcome');
+    const invalidOutcome = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes');
+      set(wb, 'Rate Outcomes', 2, 'note', 'replacement note');
+    }, retainedOutcome);
+    await expect(invalidOutcome).rejects.toThrow('They cannot be given a new outcome or reconfirmed');
+    await expect(invalidOutcome).rejects.toThrow('inactive history notes can only be cleared together with their outcome');
+    expect((await roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'outcome', '');
+      set(wb, 'Rate Outcomes', 2, 'note', '');
+    }, retainedOutcome)).outcomes).toEqual([{ sheetRow: 2, parent_name: 'Atrazine 4L', parent_id: P1,
+      expected_outcome_version: 2, outcome: null, note: null }]);
+  });
+
+  it('resolves a same-name new rate to the active parent when inactive history shares the name', async () => {
+    const P2 = '22222222-1111-4111-8111-111111111111';
+    const collision = { ...exported, parents: [exported.parents[0], {
+      ...exported.parents[0], parent_id: P2, is_active: false, rates: [], outcome: 'needs_label_data' as const,
+    }] };
+    const parsed = await roundTrip((wb) => {
+      set(wb, 'Draft Rates', 4, 'parent_name', 'Atrazine 4L');
+      set(wb, 'Draft Rates', 4, 'recommended', '12');
+    }, collision);
+    expect(parsed.rates[0]).toMatchObject({ rate_id: null, parent_id: P1 });
+  });
+
+  it('accepts an edited legacy v2 workbook under its original headers and hidden state', async () => {
+    const blob = await generateRateReviewWorkbook(exported);
+    const ExcelJS = await loadExcelJs();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await blob.arrayBuffer());
+    const stripActivity = (name: string) => {
+      const sheet = wb.getWorksheet(name)!;
+      sheet.spliceColumns(sheet.columnCount, 1);
+      for (let row = 2; row <= sheet.rowCount; row += 1) {
+        const cell = sheet.getCell(row, 2);
+        if (!cell.value) continue;
+        const state = JSON.parse(String(cell.value));
+        delete state.status; delete state.is_active;
+        cell.value = JSON.stringify(state);
+      }
+    };
+    stripActivity('Draft Rates');
+    stripActivity('Rate Outcomes');
+    wb.getWorksheet('_crx_manifest')!.getCell(1, 2).value = 'crx-rate-review-v2';
+    const setLegacy = (sheet: string, row: number, header: string, value: string) => {
+      const ws = wb.getWorksheet(sheet)!;
+      const col = (ws.getRow(1).values as string[]).indexOf(header);
+      ws.getCell(row, col).value = value;
+    };
+    setLegacy('Draft Rates', 2, 'recommended', '14');
+    const parsed = await parseRateReviewWorkbook(new Uint8Array(await wb.xlsx.writeBuffer()).buffer);
+    expect(parsed.rates).toMatchObject([{ parent_id: P1, recommended: '14' }]);
+    expect(parsed).toEqual({ rates: [expect.objectContaining({ recommended: '14' })], outcomes: [], recorded: {} });
+  });
+
   it('reports independent semantic mistakes on one rate row, then accepts the corrected row', async () => {
     const invalid = roundTrip((wb) => {
       set(wb, 'Draft Rates', 2, 'decision', 'approved');

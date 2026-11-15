@@ -20,9 +20,121 @@ export interface PendingRetry<T> {
   expired?: boolean;
   /** Set when the server refused this key's receipt: the send may have made an order. */
   needsCheck?: boolean;
+  /** Local dispatch generation. Never sent to the server. */
+  dispatchFence?: string;
 }
 
+export type RetryInspection<T> =
+  | { kind: 'absent' }
+  | { kind: 'valid'; pending: PendingRetry<T> }
+  | { kind: 'damaged' }
+  | { kind: 'unknown' };
+
 const storageKey = (name: string) => `crx:pending-retry:${name}`;
+
+function hasValidRetryEnvelope<T>(pending: PendingRetry<T>, isValidRequest: (request: unknown) => request is T, actorId?: string) {
+  return typeof pending.key === 'string' && pending.key.length > 0 && typeof pending.sentAt === 'number'
+    && Number.isFinite(pending.sentAt) && isValidRequest(pending.request)
+    && (!('needsCheck' in pending) || typeof pending.needsCheck === 'boolean')
+    && (!('dispatchFence' in pending) || (typeof pending.dispatchFence === 'string' && pending.dispatchFence.length > 0))
+    && (!('expired' in pending) || typeof pending.expired === 'boolean')
+    && (actorId === undefined || (pending.request as { actorId?: unknown })?.actorId === actorId);
+}
+
+/** Non-deleting inspection for callers that must preserve corrupt data for a manual check. */
+export function inspectPendingRetry<T>(
+  name: string,
+  isValidRequest: (request: unknown) => request is T,
+  actorId?: string,
+): RetryInspection<T> {
+  try {
+    const raw = sessionStorage.getItem(storageKey(name));
+    if (raw === null) return { kind: 'absent' };
+    let value: unknown;
+    try { value = JSON.parse(raw); } catch { return { kind: 'damaged' }; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'damaged' };
+    const pending = value as PendingRetry<T>;
+    if (!hasValidRetryEnvelope(pending, isValidRequest, actorId)) return { kind: 'damaged' };
+    const age = Date.now() - pending.sentAt;
+    return { kind: 'valid', pending: { ...pending, expired: pending.needsCheck === true || age < 0 || age > RECEIPT_LIFETIME_MS } };
+  } catch { return { kind: 'unknown' }; }
+}
+
+/** Writes only when the key is still absent in this synchronous read/compare/write step. */
+export function createPendingRetryIfAbsent<T>(name: string, pending: PendingRetry<T>): boolean {
+  try {
+    const key = storageKey(name);
+    if (sessionStorage.getItem(key) !== null) return false;
+    sessionStorage.setItem(key, JSON.stringify(pending));
+    return sessionStorage.getItem(key) === JSON.stringify(pending);
+  } catch { return false; }
+}
+
+/** Updates a valid matching dispatch without an await between inspection and write. */
+export function updatePendingRetryIfMatching<T>(args: {
+  name: string;
+  isValidRequest: (request: unknown) => request is T;
+  key: string;
+  actorId: string;
+  request: T;
+  fence: string | undefined;
+  update: (current: PendingRetry<T>) => PendingRetry<T>;
+}): boolean {
+  try {
+    const { name, isValidRequest, key, actorId, request, fence, update } = args;
+    const storage = storageKey(name);
+    const raw = sessionStorage.getItem(storage);
+    if (raw === null) return false;
+    const inspected = inspectPendingRetry(name, isValidRequest, actorId);
+    if (inspected.kind !== 'valid' || sessionStorage.getItem(storage) !== raw) return false;
+    const current = inspected.pending;
+    if (current.key !== key || current.dispatchFence !== fence
+      || JSON.stringify(current.request) !== JSON.stringify(request)) return false;
+    sessionStorage.setItem(storage, JSON.stringify(update(current)));
+    return true;
+  } catch { return false; }
+}
+
+/** Clears a valid exact operation; success receipts may settle any dispatch fence for that operation. */
+export function clearPendingRetryIfMatching<T>(args: {
+  name: string;
+  isValidRequest: (request: unknown) => request is T;
+  key: string;
+  actorId: string;
+  request: T;
+  fence?: string;
+}): boolean {
+  try {
+    const { name, isValidRequest, key, actorId, request, fence } = args;
+    const storage = storageKey(name);
+    const raw = sessionStorage.getItem(storage);
+    if (raw === null) return true;
+    const inspected = inspectPendingRetry(name, isValidRequest, actorId);
+    if (inspected.kind !== 'valid' || sessionStorage.getItem(storage) !== raw) return false;
+    const current = inspected.pending;
+    if (current.key !== key || (fence !== undefined && current.dispatchFence !== fence)
+      || JSON.stringify(current.request) !== JSON.stringify(request)) return false;
+    sessionStorage.removeItem(storage);
+    return sessionStorage.getItem(storage) === null;
+  } catch { return false; }
+}
+
+/** Clears damaged bytes only if the same damaged value remains; raw bytes never leave this helper. */
+export function clearDamagedPendingRetryIfUnchanged<T>(
+  name: string,
+  isValidRequest: (request: unknown) => request is T,
+  actorId?: string,
+): boolean {
+  try {
+    const storage = storageKey(name);
+    const first = sessionStorage.getItem(storage);
+    if (first === null) return true;
+    const inspected = inspectPendingRetry(name, isValidRequest, actorId);
+    if (inspected.kind !== 'damaged' || sessionStorage.getItem(storage) !== first) return false;
+    sessionStorage.removeItem(storage);
+    return sessionStorage.getItem(storage) === null;
+  } catch { return false; }
+}
 
 export function loadPendingRetry<T>(
   name: string,

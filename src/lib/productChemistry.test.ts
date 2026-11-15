@@ -210,3 +210,84 @@ describe('unfinished chemistry saves (retry key kept until the outcome is known)
     expect(pendingSaves('user-a', 'setup-workbook-chemistry')).toEqual([]);
   });
 });
+
+// Regression guard for the product-page chemistry saves (entry, correction, cost reference, ingredient list):
+// widening send() for the setup workbook must not change what these send or how they settle.
+describe('product-page chemistry saves keep their request and settling rules', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    rpc.mockReset();
+  });
+
+  const PRODUCT_PAGE_SAVES = [
+    ['set_parent_chemistry', 'parent-1', { p_parent_id: 'parent-1', p_expected_version: 3, p_changes: [{ kind: 'ingredient', action: 'add' }] }],
+    ['correct_parent_chemistry', 'parent-1', { p_parent_id: 'parent-1', p_expected_version: 3, p_changes: [], p_reason: 'label fix' }],
+    ['set_parent_cost_reference', 'parent-1', { p_parent_id: 'parent-1', p_expected_version: 3, p_reference_product_id: 'size-1' }],
+    ['save_active_ingredient', 'ingredients', { p_ingredient_id: null, p_fields: { name: 'Glyphosate', cas: '1071-83-6' } }],
+    ['retire_active_ingredient', 'ingredients', { p_ingredient_id: 'ing-1', p_expected_version: 2 }],
+    ['reactivate_active_ingredient', 'ingredients', { p_ingredient_id: 'ing-1', p_expected_version: 2 }],
+  ] as const;
+
+  it.each(PRODUCT_PAGE_SAVES)('%s: sends one call with its own name, args and a fresh key, then clears the record', async (name, scope, args) => {
+    rpc.mockResolvedValueOnce({ data: { ok: true }, error: null });
+    await expect(startChemistrySave('user-a', scope, name, args, 'Save')).resolves.toEqual({ ok: true });
+    expect(rpc).toHaveBeenCalledOnce();
+    const [calledName, params] = rpc.mock.calls[0];
+    expect(calledName).toBe(name);
+    expect(Object.keys(params).sort()).toEqual([...Object.keys(args), 'p_idempotency_key'].sort());
+    expect(params).toMatchObject(args);
+    expect(typeof params.p_idempotency_key).toBe('string');
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it.each(PRODUCT_PAGE_SAVES)('%s: an empty reply goes through assertRpcResult and keeps the record', async (name, scope, args) => {
+    rpc.mockResolvedValueOnce({ data: null, error: null });
+    await expect(startChemistrySave('user-a', scope, name, args, 'Save')).rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    expect(pendingSaves('user-a', scope)).toHaveLength(1);
+  });
+
+  it.each(PRODUCT_PAGE_SAVES)('%s: a named refusal is rethrown as-is and clears the record', async (name, scope, args) => {
+    const refusal = { code: 'P0001', message: 'CHEMISTRY_STALE: reload' };
+    rpc.mockResolvedValueOnce({ data: null, error: refusal });
+    const caught = await startChemistrySave('user-a', scope, name, args, 'Save').catch((error: unknown) => error);
+    expect(caught).toBe(refusal);
+    expect(pendingSaves('user-a', scope)).toEqual([]);
+  });
+
+  it.each(PRODUCT_PAGE_SAVES)('%s: a lost reply keeps the record and Finish save resends the identical request', async (name, scope, args) => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(startChemistrySave('user-a', scope, name, args, 'Save')).rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', scope);
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'CHEMISTRY_STALE: reload' } });
+    await expect(finishChemistrySave(record)).rejects.toMatchObject({ message: 'CHEMISTRY_STALE: reload' });
+    expect(rpc.mock.calls[1]).toEqual(rpc.mock.calls[0]);
+    expect(rpc.mock.calls[1]).toEqual([name, { ...args, p_idempotency_key: record.key }]);
+    expect(pendingSaves('user-a', scope)).toEqual([]);
+  });
+
+  it.each([
+    [{ code: '42501', message: 'permission denied' }],
+    [{ code: 'PGRST301', message: 'JWT expired' }],
+    [{ code: 'P0001', message: 'ADMIN_REQUIRED: administrator access is required' }],
+  ])('a first product-page save refused for login or role is final, as before: %o', async (error) => {
+    rpc.mockResolvedValueOnce({ data: null, error });
+    const caught = await startChemistrySave('user-a', 'parent-1', 'set_parent_chemistry', {}, 'Entry').catch((e: unknown) => e);
+    expect(caught).toBe(error);
+    expect(pendingSaves('user-a', 'parent-1')).toEqual([]);
+  });
+
+  // Widened on purpose: a Finish save refused for login/role or by PostgREST cannot prove the first send did nothing.
+  it.each([
+    [{ code: '42501', message: 'permission denied' }, true],
+    [{ code: 'PGRST301', message: 'JWT expired' }, true],
+    [{ code: 'PGRST202', message: 'Could not find the function' }, false],
+  ])('a product-page Finish save refused by %o keeps its record', async (error, authorization) => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(startChemistrySave('user-a', 'parent-1', 'correct_parent_chemistry', { p_parent_id: 'parent-1' }, 'Fix'))
+      .rejects.toBeInstanceOf(ChemistrySaveUncertain);
+    const [record] = pendingSaves('user-a', 'parent-1');
+    rpc.mockResolvedValueOnce({ data: null, error });
+    await expect(finishChemistrySave(record)).rejects.toMatchObject({ authorizationRefusal: authorization, cause: error });
+    expect(pendingSaves('user-a', 'parent-1')).toEqual([record]);
+  });
+});

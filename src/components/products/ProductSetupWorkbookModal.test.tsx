@@ -315,6 +315,29 @@ describe('ProductSetupWorkbookModal parent rates', () => {
     expect(H.previewParentRates).toHaveBeenCalledOnce();
   });
 
+  it('keeps Rates and Parent Rates retries on their own keys: one finishing never clears or reuses the other', async () => {
+    H.saveRates.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce({ changed_count: 1 });
+    H.setParentRates.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce({ changed_count: 1 });
+    await upload(await setupMembershipHash([SIZE], [parent]), [editedParent], undefined, [editedRate]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Rates tab' }));
+    await waitFor(() => expect(H.saveRates).toHaveBeenCalledOnce());
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Parent Rates tab' }));
+    await waitFor(() => expect(H.setParentRates).toHaveBeenCalledOnce());
+    const ratesCall = H.saveRates.mock.calls[0];
+    const parentCall = H.setParentRates.mock.calls[0];
+    expect(ratesCall[0].idempotencyKey).not.toBe(parentCall[1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Parent Rates tab' }));
+    await waitFor(() => expect(H.setParentRates).toHaveBeenCalledTimes(2));
+    expect(H.setParentRates.mock.calls[1]).toEqual(parentCall);
+    expect(await screen.findByText('Saved rates for 1 parent.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Rates tab' }));
+    await waitFor(() => expect(H.saveRates).toHaveBeenCalledTimes(2));
+    expect(H.saveRates.mock.calls[1]).toEqual(ratesCall);
+    expect(await screen.findByText('Saved rates for 1 product.')).toBeInTheDocument();
+  });
+
   it('does not let a previous actor preview clear the current Parent Rates retry', async () => {
     const membershipHash = await setupMembershipHash([SIZE], [parent]);
     const setupPreview = { changes: [{ product_id: SIZE, product_name: 'Atrazine 4L 2.5 gal', setup_fingerprint: 'fp',

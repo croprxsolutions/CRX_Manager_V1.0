@@ -365,7 +365,8 @@ function RateReviewModalBody({ fileRef, busy, blocked, onDownload, onFile, total
       {fileError && <WorkbookFileProblems key={fileError} error={fileError} />}
       {nothingEdited && <p className="text-secondary">No edits in this file. Change a rate, decision or outcome, then upload it again.</p>}
       {(damaged || storageUnknown || (pending && !commitInFlight)) && <section aria-label="Earlier rate review recovery" className="rounded-lg border border-amber-300 p-3 text-amber-900">
-        <p>{damaged ? 'An earlier rate review reminder is unreadable. Its rows are unavailable here. Check a fresh workbook before clearing it.' : storageUnknown ? 'Browser storage could not be checked. No request can be sent until it can be checked safely.' : 'Your earlier Confirm may still finish. Check a fresh workbook before clearing this reminder.'}</p>
+        {/* The preview below already explains an unanswered Confirm in detail; don't say it twice. */}
+        {(damaged || storageUnknown || !upload || nothingEdited || saved) && <p>{damaged ? 'An earlier rate review reminder is unreadable. Its rows are unavailable here. Check a fresh workbook before clearing it.' : storageUnknown ? 'Browser storage could not be checked. No request can be sent until it can be checked safely.' : 'Your earlier Confirm may still finish. Check a fresh workbook before clearing this reminder.'}</p>}
         {(damaged || pending) && <Button variant="secondary" onClick={onStartClear} disabled={busy}>I checked the fresh workbook</Button>}
       </section>}
       {upload && !nothingEdited && <ReviewPreview upload={upload} preview={preview} saved={saved} pending={pending}

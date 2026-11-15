@@ -499,7 +499,9 @@ describe('RateReviewWorkbookModal', () => {
       fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
       expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
       expect(screen.queryByText(/No request can be sent until it can be checked safely/)).not.toBeInTheDocument();
-      expect(screen.getByText(/Your earlier Confirm may still finish/)).toBeInTheDocument();
+      // One explanation (in the preview), plus the recovery region's clear button; not the same warning twice.
+      expect(screen.queryByText(/Your earlier Confirm may still finish/)).not.toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'Earlier rate review recovery' })).toContainElement(screen.getByRole('button', { name: 'I checked the fresh workbook' }));
       expect(H.parse).not.toHaveBeenCalled();
       expect(H.commit).not.toHaveBeenCalled();
       expect(JSON.parse(sessionStorage.getItem(name)!).key).toBe('hidden-key');
@@ -518,7 +520,8 @@ describe('RateReviewWorkbookModal', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Confirm rate review/ }));
     expect(await screen.findByText(/Preview: 1 edited rate, 0 edited outcomes/)).toBeInTheDocument();
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('found and restored')));
-    expect(screen.getByRole('region', { name: 'Earlier rate review recovery' })).toHaveTextContent(/Your earlier Confirm may still finish/);
+    expect(screen.getByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Earlier rate review recovery' })).not.toHaveTextContent(/Your earlier Confirm may still finish/);
     expect(H.commit).not.toHaveBeenCalled();
     expect(JSON.parse(sessionStorage.getItem(name)!).request).toEqual(storedRequest);
     fireEvent.click(screen.getByRole('button', { name: 'I checked the fresh workbook' }));

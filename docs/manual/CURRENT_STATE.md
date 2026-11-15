@@ -1,7 +1,6 @@
 # CRX Manager — Current State
 
-**Last verified:** 2026-11-15 (America/Chicago), live ledger only (latest row `20261113011216`).
-Edge Function versions retain 2026-11-14; quote cost-visibility rules retain 2026-10-30; archived ledger evidence retains its original dates.
+**Last verified:** 2026-11-15 (America/Chicago), for the live ledger (latest live row `20261113011216`); Edge Function versions 2026-11-14; quote cost-visibility rules 2026-10-30; ledger 2026-10-29.
 Evidence for each re-check is in the changelog note (`docs/changelog.d/`) of the PR that set the date; live ledger reads are the timestamped captures in `docs/reference/migration-history.md`; the notes kept here until 2026-10-29 are in [`archive/verification-notes-2026-10.md`](archive/verification-notes-2026-10.md).
 Every other section keeps its own date; nothing below was re-certified by that read.
 **Update triggers:** re-read the ledger after any live apply; refresh the rest when a major feature

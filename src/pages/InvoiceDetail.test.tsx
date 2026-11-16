@@ -2310,6 +2310,16 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
     const sent = (saveCall?.[1].p_items as Array<{ charge_type: string | null }>).map((it) => it.charge_type);
     expect(sent).toEqual([null, 'freight']);
   });
+
+  // Review LOW: after an unsaved edit the discount and tax lines are the saved ones, worked out again on save.
+  it('says the discount and tax lines update on save while there are unsaved edits', async () => {
+    renderInvoiceDetail('inv-disc');
+    const worked = await screen.findByRole('region', { name: 'Worked out for you' });
+    expect(within(worked).queryByText('Updates when you save')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Unit price for Herbicide'), { target: { value: '110.00' } });
+    expect(await within(worked).findByText('Updates when you save')).toBeInTheDocument();
+    for (const amount of within(worked).getAllByTestId('invoice-line-amount')) expect(amount.className).toContain('text-secondary');
+  });
 });
 
 // Billing UI (Nov 13): the page shows one main action per status and puts the rest under More.
@@ -2454,6 +2464,40 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(amounts[1]).toHaveAttribute('data-cents', '4500');
     });
 
+    // Sol HIGH-1: an older untyped line with no product can hold a quantity (the charge-line CHECK holds only typed
+    // lines to quantity 1), so its box is the unit price and the quantity and line total show beside it.
+    const oldFreight = { id: 'it-5', order_item_id: null, product_id: null, description: 'Old freight', quantity: 3, unit_price_cents: 2500, extended_cents: 7500, sort_order: 4, charge_type: null };
+
+    it('a charge with a quantity other than 1 labels its box Unit price and shows quantity x price = line total', async () => {
+      load(draft, [...withCharges.slice(0, 2), oldFreight]);
+      renderInvoiceDetail();
+      const box = await screen.findByLabelText('Unit price for Old freight');
+      expect(box).toHaveValue(25);
+      expect(screen.getByText('3 × $25.00 = $75.00')).toBeInTheDocument();
+      // A one-amount charge keeps its Amount box and no sum.
+      expect(screen.getByLabelText('Amount for Delivery to home farm')).toHaveValue(45);
+      expect(screen.queryByText(/1 × \$45\.00/)).not.toBeInTheDocument();
+    });
+
+    // Sol MED-3: the line the page lists under Charges is a charge in Amount due too, not a product.
+    it('Amount due counts an untyped line with no product as a charge, as the lines card lists it', async () => {
+      load({ ...posted, total_amount_cents: 9500, balance_cents: 9500 }, [lines[0], oldFreight]);
+      renderInvoiceDetail();
+      const due = await screen.findByRole('region', { name: 'Amount due' });
+      await waitFor(() => expect(due.textContent).toMatch(/Products\$20\.00Charge\$75\.00Invoice total\$95\.00/));
+    });
+
+    // Claude MED-2: Total - Paid - Credit applied = Balance due, signed as the database's balance takes it.
+    for (const [type, total, balance, shown] of [['chemical_sale', 100000, 70000, '$300.00'], ['credit_memo', -50000, -20000, '\u2212$300.00']] as const) {
+      it(`Amount due shows the credit applied on a ${type}, so the rows add up to the balance`, async () => {
+        const one = [{ ...lines[0], quantity: 1, unit_price_cents: total, extended_cents: total }];
+        load({ ...posted, invoice_type: type, total_amount_cents: total, credit_applied_cents: 30000, balance_cents: balance }, one);
+        renderInvoiceDetail();
+        const due = await screen.findByRole('region', { name: 'Amount due' });
+        expect((await within(due).findByText('Credit applied')).parentElement).toHaveTextContent(shown);
+      });
+    }
+
     it('a from-scratch misc charge invoice shows only Charges', async () => {
       load({ ...draft, invoice_type: 'misc_charge', order_id: null, delivery_id: null }, [withCharges[1]]);
       renderInvoiceDetail();
@@ -2500,7 +2544,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       // Preflight, full read, the group's versions (a list), then the order lookup for the payer shares.
       if (table === 'invoices') {
         reads += 1;
-        return buildChain({ data: reads === 3 ? [{ id: 'inv-123', invoice_post_version: 'v1' }, { id: 'inv-124', invoice_post_version: 'v1' }] : grouped, error: null });
+        return buildChain({ data: reads === 3 ? [{ id: 'inv-123', invoice_post_version: 'v1', status: 'draft' }, { id: 'inv-124', invoice_post_version: 'v1', status: 'posted' }] : grouped, error: null });
       }
       if (table === 'invoice_items') return buildChain({ data: lines, error: null });
       return buildChain({ data: [], error: null });
@@ -2521,6 +2565,34 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     const whoPays = screen.getByRole('region', { name: 'Who pays' });
     expect(within(whoPays).getByRole('link', { name: 'INV-0500-2' })).toHaveAttribute('href', '/invoices/inv-124');
     expect(within(whoPays).getByText(/this invoice/)).toBeInTheDocument();
+    // Review LOW: with no order there is no sibling read, so the other payer's status comes from the group read.
+    expect(within(whoPays).getByText('Posted')).toBeInTheDocument();
+  });
+
+  // Review LOW: on a sale where a line has its own payers, the share is of the billed totals, not one split of
+  // every line, so the subtitle names the payer without a percentage (as the lines card does).
+  it('a split payer subtitle leaves out the percentage when a line on the sale has its own payers', async () => {
+    const grouped = { ...draft, order_id: 'ord-1', delivery_id: 'del-1', invoice_group_id: 'grp-1', customer: { farm_name: 'Maple Hollow Farms' } };
+    let reads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      // Preflight, full read, the order's invoices, then the group's versions.
+      if (table === 'invoices') {
+        reads += 1;
+        return buildChain({ data: reads >= 3 ? [{ id: 'inv-123', invoice_number: 'INV-0500-1', invoice_post_version: 'v1' }] : grouped, error: null });
+      }
+      if (table === 'invoice_items') return buildChain({ data: lines, error: null });
+      if (table === 'orders') return buildChain({ data: { id: 'ord-1', order_number: 'SO-0001' }, error: null });
+      if (table === 'order_item_shares') return buildChain({ data: null, error: null, count: 2 } as { data: unknown; error: unknown });
+      return buildChain({ data: [], error: null });
+    });
+    const payer = (n: number, name: string) => ({
+      invoice_id: `inv-12${n}`, invoice_number: `INV-0500-${n - 2}`, customer_name: name, split_percentage: 50, acres: null, amount_cents: 2000,
+    });
+    vi.mocked(loadBillSplitPayers).mockResolvedValueOnce([payer(3, 'Maple Hollow Farms'), payer(4, 'Cedar Ridge Ag')]);
+    renderInvoiceDetail();
+    expect(await screen.findByText('Split invoice 1 of 2')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/^Maple Hollow Farms · /)).toBeInTheDocument());
+    expect(screen.queryByText(/pays 50%/)).not.toBeInTheDocument();
   });
 
   it('a split payer subtitle rounds the share as the payer table does, never 33.333333%', async () => {

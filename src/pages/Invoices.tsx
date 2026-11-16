@@ -778,7 +778,7 @@ export default function Invoices() {
       </span>
     ) : null;
 
-  // Phone layout of one invoice (InvoicesPhone boards): the same values and formatting as the table's columns.
+  // Phone layout of one invoice (the phone boards): the same values and formatting as the table's columns.
   const invoiceMobileRow = (row: InvoiceRow) => (
     <div className={`flex items-start gap-1 px-4 py-2 ${selected.has(row.id) ? 'bg-crx-green-tint' : ''}`}>
       {/* A 44px tap area around the small checkbox; a spacer keeps rows aligned without one. */}
@@ -815,6 +815,44 @@ export default function Invoices() {
     </div>
   );
 
+  // The customer link and peek: the Bill to column from xl, and inside the Invoice cell below it.
+  const billTo = (row: InvoiceRow) => (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          navigate(`/customers/${row.customer_id}`);
+        }}
+        className="min-w-0 break-words text-left font-medium text-nav-dark hover:text-crx-green hover:underline"
+      >
+        {row.customer_name}
+      </button>
+      {row.customer_id && canPeekCustomer && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setDrawerCustomer({ id: row.customer_id, name: row.customer_name }); }}
+          title="Peek customer"
+          aria-label={`Peek ${row.customer_name}`}
+          className="p-0.5 rounded text-gray-300 hover:text-crx-green hover:bg-crx-green-light transition-colors"
+        >
+          <PanelRightOpen className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+
+  const saleLink = (row: InvoiceRow) =>
+    row.order_number && row.order_id ? (
+      <button
+        onClick={(e) => { e.stopPropagation(); navigate(`/orders/${row.order_id}`); }}
+        className="whitespace-nowrap text-crx-green hover:underline font-medium"
+        title="Open the source order"
+      >
+        {row.order_number}
+      </button>
+    ) : (
+      <span className="text-gray-400">—</span>
+    );
+
   const xlOnly = 'hidden xl:table-cell';
   const columns: Column<InvoiceRow>[] = [
     {
@@ -835,8 +873,9 @@ export default function Invoices() {
               <span title="Quick Delivery"><Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" /></span>
             )}
           </div>
-          {/* Below xl the Bill to column is hidden, so the customer shows here. */}
-          <div className="text-nav-dark xl:hidden">{row.customer_name}</div>
+          {/* Below xl the Bill to and Sale columns are hidden, so their links show here. */}
+          <div className="xl:hidden">{billTo(row)}</div>
+          {row.order_number && row.order_id && <div className="xl:hidden text-sm">Sale {saleLink(row)}</div>}
           {splitMark(row)}
         </div>
       ),
@@ -846,47 +885,14 @@ export default function Invoices() {
       header: 'Bill to',
       sortable: true,
       className: xlOnly,
-      render: (row) => (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/customers/${row.customer_id}`);
-            }}
-            className="font-medium text-nav-dark hover:text-crx-green hover:underline"
-          >
-            {row.customer_name}
-          </button>
-          {row.customer_id && canPeekCustomer && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setDrawerCustomer({ id: row.customer_id, name: row.customer_name }); }}
-              title="Peek customer"
-              aria-label={`Peek ${row.customer_name}`}
-              className="p-0.5 rounded text-gray-300 hover:text-crx-green hover:bg-crx-green-light transition-colors"
-            >
-              <PanelRightOpen className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      ),
+      render: (row) => billTo(row),
     },
     {
       key: 'order_number',
       header: 'Sale',
       sortable: true,
       className: xlOnly,
-      render: (row) =>
-        row.order_number && row.order_id ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); navigate(`/orders/${row.order_id}`); }}
-            className="whitespace-nowrap text-crx-green hover:underline font-medium"
-            title="Open the source order"
-          >
-            {row.order_number}
-          </button>
-        ) : (
-          <span className="text-gray-400">—</span>
-        ),
+      render: (row) => saleLink(row),
     },
     {
       key: 'invoice_type',
@@ -960,13 +966,13 @@ export default function Invoices() {
   // Email, Void and Delete stay admin only, each counted as before; Post and Print stay admin or sales rep.
   const moreItems: ActionMenuItem[] = [];
   if (isAdmin && selectedEmailable.length > 0) {
-    moreItems.push({ id: 'email', label: `Email ${selectedEmailable.length}…`, icon: <Mail className="h-4 w-4" />, onAction: () => setShowEmailModal(true), disabled: emailing });
+    moreItems.push({ id: 'email', label: `Email ${selectedEmailable.length}…`, icon: <Mail className="h-4 w-4" />, onAction: () => setShowEmailModal(true), disabled: emailing || posting });
   }
   if (isAdmin && selectedVoidable.length > 0) {
-    moreItems.push({ id: 'void', label: `Void ${selectedVoidable.length}…`, icon: <Ban className="h-4 w-4" />, onAction: () => setShowVoidModal(true), danger: true });
+    moreItems.push({ id: 'void', label: `Void ${selectedVoidable.length}…`, icon: <Ban className="h-4 w-4" />, onAction: () => setShowVoidModal(true), danger: true, disabled: posting });
   }
   if (isAdmin && selectedDeletable.length > 0) {
-    moreItems.push({ id: 'delete', label: `Delete ${selectedDeletable.length}…`, icon: <Trash2 className="h-4 w-4" />, onAction: () => setShowDeleteModal(true), danger: true });
+    moreItems.push({ id: 'delete', label: `Delete ${selectedDeletable.length}…`, icon: <Trash2 className="h-4 w-4" />, onAction: () => setShowDeleteModal(true), danger: true, disabled: posting });
   }
   const pill = (on: boolean) =>
     `inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${

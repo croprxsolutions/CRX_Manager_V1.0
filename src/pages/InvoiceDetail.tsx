@@ -30,7 +30,7 @@ import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isChargeLine, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
 import { formatCents as fmt, formatCentsMinus } from '../lib/money';
 import { formatSharePct, invoiceStatusBadge, statusLabel } from '../lib/statusLabel';
@@ -261,6 +261,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [shares, setShares] = useState<InvoiceShare[]>([]);
   const [billSplitPayers, setBillSplitPayers] = useState<BillSplitPayer[]>([]);
+  // A line on the sale has its own payers: the shares are of the billed totals, not one split of every line.
+  const [payersByLine, setPayersByLine] = useState(false);
+  // Each split group member's status, for Who pays when there is no order (and so no sibling read).
+  const [groupStatuses, setGroupStatuses] = useState<Record<string, string>>({});
 
   // Void modal
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -781,10 +785,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
 
     // A split invoice posts its whole group: keep every member's version as this load saw it.
     const groupVersions: Record<string, string | null> = { [invoiceId]: data.invoice_post_version ?? null };
+    const statuses: Record<string, string> = {};
     if (data.invoice_group_id) {
       const { data: members, error } = await supabase
         .from(INVOICES_POSTABLE)
-        .select(`id, ${INVOICE_POST_VERSION_COLUMNS}`)
+        .select(`id, status, ${INVOICE_POST_VERSION_COLUMNS}`)
         .eq('invoice_group_id', data.invoice_group_id)
         .is('deleted_at', null);
       if (isStale()) return;
@@ -792,8 +797,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       if (!Array.isArray(members)) throw new Error('The split group read returned no list');
       // A member without an id (impossible; the view types make id nullable) would be left out of
       // the map, and post_invoice_group then refuses the changed membership.
-      for (const m of members) if (m.id && m.id !== invoiceId) groupVersions[m.id] = m.invoice_post_version ?? null;
+      for (const m of members) {
+        if (m.id && m.id !== invoiceId) groupVersions[m.id] = m.invoice_post_version ?? null;
+        if (m.id && m.status) statuses[m.id] = m.status;
+      }
     }
+    setGroupStatuses(statuses);
 
     // Fetch items
     const { data: rawItemData, error: itemError } = await supabase
@@ -862,6 +871,17 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       ? await loadBillSplitPayers(supabase, invoiceId)
       : [];
     if (isStale()) return;
+    let byLine = false;
+    if (payers.length > 1 && data.order_id) {
+      const lineShares = await supabase
+        .from('order_item_shares')
+        .select('id, order_items!inner(order_id)', { count: 'exact', head: true })
+        .eq('order_items.order_id', data.order_id);
+      if (isStale()) return;
+      // Display only: an unread count leaves the percentage out rather than show a possibly false one.
+      byLine = !!lineShares.error || typeof lineShares.count !== 'number' || lineShares.count > 0;
+    }
+    setPayersByLine(byLine);
     setBillSplitPayers(payers);
 
     // Fetch write-offs
@@ -2045,8 +2065,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     ? items
     : groupReturnCreditDisplayItems(invoice.invoice_type, items);
 
-  // Amount due: the lines' own sum, split into products, charges, discount and tax (display only).
-  const breakdown = invoiceBreakdown(items);
+  // Amount due: the lines' own sum, split into products, charges, discount and tax (display only), by the same
+  // charge-line rule as the lines card below.
+  const breakdown = invoiceBreakdown(items, takesCharges);
   // The total Amount due shows: the saved total, as the PDF prints it; a new invoice has none yet, so its lines add up.
   const amountDueTotalCents = isNew ? breakdown.totalCents : invoice.total_amount_cents || 0;
   const marginCents = invoiceMarginCents(items, totalCostCents);
@@ -2059,7 +2080,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const typeLabel = ((t) => t.charAt(0).toUpperCase() + t.slice(1))((invoice.invoice_type || '').replace(/_/g, ' '));
   const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const subtitle = [
-    thisPayer && billSplitPayers.length > 1 ? `${thisPayer.customer_name} pays ${formatSharePct(thisPayer.split_percentage)}` : customerName,
+    thisPayer && billSplitPayers.length > 1
+      ? (payersByLine ? thisPayer.customer_name : `${thisPayer.customer_name} pays ${formatSharePct(thisPayer.split_percentage)}`)
+      : customerName,
     typeLabel,
     invoice.invoice_date && shortDate(new Date(invoice.invoice_date.split('T')[0] + 'T00:00:00')),
     invoice.posted_at && `Posted ${shortDate(new Date(invoice.posted_at))}`,
@@ -2067,8 +2090,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // The lines in three groups, each keeping its index into items (displayItems is items while editable).
   const lineRows = displayItems.map((item, idx) => ({ item, idx }));
   const workedRows = lineRows.filter(({ item }) => isComputedChargeLine(item.charge_type));
-  const chargeRows = lineRows.filter(({ item }) => !isComputedChargeLine(item.charge_type)
-    && (item.charge_type || (takesCharges && !item.product_id)));
+  const chargeRows = lineRows.filter(({ item }) => !isComputedChargeLine(item.charge_type) && isChargeLine(item, takesCharges));
   const productRows = lineRows.filter((row) => !workedRows.includes(row) && !chargeRows.includes(row));
   const hasTotes = displayItems.some((i) => i.tote_number);
   const changePrice = (idx: number, value: string) => {
@@ -2233,6 +2255,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               writtenOffCents={(invoice as { write_off_cents?: number | null }).write_off_cents || 0}
               paidCents={isNew ? null : invoice.paid_amount_cents || 0}
               prepayCents={invoice.prepay_applied_cents || 0}
+              // The balance takes credit applied off an invoice and adds it back on a credit memo (20260711021000).
+              creditAppliedCents={(invoice.invoice_type === 'credit_memo' ? -1 : 1) * (invoice.credit_applied_cents || 0)}
               balanceCents={invoice.balance_cents || 0}
               // Cost is admin-only (Mason, 2026-10-15).
               admin={isAdmin ? { costCents: totalCostCents, marginCents, marginPct } : null}
@@ -2258,7 +2282,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                     invoiceNumber: payer.invoice_number ?? '',
                     pct: payer.split_percentage,
                     totalCents: payer.amount_cents,
-                    status: payer.invoice_id === id ? invoice.status : siblingInvoices.find((s) => s.id === payer.invoice_id)?.status,
+                    status: payer.invoice_id === id ? invoice.status
+                      : siblingInvoices.find((s) => s.id === payer.invoice_id)?.status ?? groupStatuses[payer.invoice_id],
                     isThis: payer.invoice_id === id,
                   }))}
                   saleHref={parentOrder ? `/orders/${parentOrder.id}` : undefined}
@@ -2691,9 +2716,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           {!item.billing_line_id ? (
                             <input
                               type="number"
-                              // The box holds the unit price; the line's total (quantity 1 for a typed charge) is on data-cents.
+                              // The box holds the unit price; the line's total is on data-cents. A typed charge is quantity 1
+                              // (invoice_items_charge_line_shape_chk), so its box is the amount; an older untyped line may not be.
                               data-testid="invoice-line-amount" data-kind="charge" data-cents={item.extended_cents}
-                              aria-label={`Amount for ${item.description || 'charge'}`}
+                              aria-label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
                               value={(item.unit_price_cents / 100).toFixed(2)}
                               onChange={(e) => changePrice(idx, e.target.value)}
                               min={0}
@@ -2712,6 +2738,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
+                          )}
+                          {item.quantity !== 1 && (
+                            <p className="col-span-2 text-xs tabular-nums text-secondary sm:col-span-4">
+                              {item.quantity} × {formatCentsMinus(item.unit_price_cents)} = {formatCentsMinus(item.extended_cents)}
+                            </p>
                           )}
                         </div>
                       ) : (
@@ -2749,10 +2780,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         </span>
                       </span>
                     </span>
-                    <span data-testid="invoice-line-amount" data-kind="worked" className="whitespace-nowrap font-semibold tabular-nums text-nav-dark">{formatCentsMinus(item.extended_cents)}</span>
+                    <span data-testid="invoice-line-amount" data-kind="worked" className={`whitespace-nowrap font-semibold tabular-nums ${hasUnsavedChanges ? 'text-secondary' : 'text-nav-dark'}`}>{formatCentsMinus(item.extended_cents)}</span>
                   </li>
                 ))}
               </ul>
+              {/* The database works these out again on save; until then they are the saved ones. */}
+              {hasUnsavedChanges && <p className="text-xs text-secondary">Updates when you save</p>}
             </section>
           )}
 

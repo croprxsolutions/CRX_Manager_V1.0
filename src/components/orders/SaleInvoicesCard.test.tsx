@@ -4,8 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import SaleInvoicesCard, { activeTotalCents } from './SaleInvoicesCard';
 
 const invoices = [
-  { id: 'inv-1', number: 'CS-2026-0005-1', payerName: 'Maple Hollow Farms', sharePct: 50, status: 'draft', total: 734.83, balance: 734.83 },
-  { id: 'inv-2', number: 'CS-2026-0005-2', payerName: 'Cedar Ridge Ag', sharePct: 50, status: 'draft', total: 687.01, balance: 687.01 },
+  { id: 'inv-1', number: 'CS-2026-0005-1', payerName: 'Maple Hollow Farms', sharePct: 50, status: 'draft', totalCents: 73483, balanceCents: 73483 },
+  { id: 'inv-2', number: 'CS-2026-0005-2', payerName: 'Cedar Ridge Ag', sharePct: 50, status: 'draft', totalCents: 68701, balanceCents: 68701 },
 ];
 
 function renderCard(props: Partial<Parameters<typeof SaleInvoicesCard>[0]> = {}) {
@@ -35,10 +35,10 @@ describe('SaleInvoicesCard', () => {
     renderCard({ invoices: [
       { ...invoices[0], status: 'voided' },
       { ...invoices[1], status: 'posted' },
-      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Pine Flats', status: 'draft', total: 687.01, balance: 687.01 },
+      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Pine Flats', status: 'draft', totalCents: 68701, balanceCents: 68701 },
     ] });
     expect(screen.getByText('$1,374.02')).toBeInTheDocument();
-    expect(activeTotalCents([{ status: 'draft', total: 0.1 }, { status: 'draft', total: 0.2 }, { status: 'cancelled', total: 5 }])).toBe(30);
+    expect(activeTotalCents([{ status: 'draft', totalCents: 10 }, { status: 'draft', totalCents: 20 }, { status: 'cancelled', totalCents: 500 }])).toBe(30);
   });
 
   it('asks before posting the drafts, listing each one', async () => {
@@ -77,8 +77,8 @@ describe('SaleInvoicesCard', () => {
 
   it('keeps the invoice type when it is not a sale, and what has been paid', () => {
     renderCard({ invoices: [
-      { ...invoices[0], status: 'posted', paid: 200, balance: 534.83 },
-      { id: 'cm-1', number: 'CM-0001', payerName: 'Maple Hollow Farms', status: 'posted', total: -150, balance: -150, typeLabel: 'Credit memo' },
+      { ...invoices[0], status: 'posted', paidCents: 20000, balanceCents: 53483 },
+      { id: 'cm-1', number: 'CM-0001', payerName: 'Maple Hollow Farms', status: 'posted', totalCents: -15000, balanceCents: -15000, typeLabel: 'Credit memo' },
     ] });
     const row = screen.getByRole('link', { name: /CS-2026-0005-1/ });
     expect(within(row).getByText('Paid $200.00')).toBeInTheDocument();
@@ -88,13 +88,18 @@ describe('SaleInvoicesCard', () => {
 
   it('status pills follow the shared invoice palette: Paid darker than Posted, Overdue amber', () => {
     renderCard({ invoices: [
-      { ...invoices[0], status: 'paid', balance: 0 },
+      { ...invoices[0], status: 'paid', balanceCents: 0 },
       { ...invoices[1], status: 'posted' },
-      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Maple Hollow Farms', status: 'overdue', total: 10, balance: 10 },
+      { id: 'inv-3', number: 'CS-2026-0005-3', payerName: 'Maple Hollow Farms', status: 'overdue', totalCents: 1000, balanceCents: 1000 },
     ] });
     expect(screen.getByText('Paid').className).toContain('bg-emerald-200');
     expect(screen.getByText('Posted').className).toContain('bg-emerald-100');
     expect(screen.getByText('Overdue').className).toContain('bg-amber-100');
+  });
+
+  it('a posted invoice nothing has been paid on still shows what is due', () => {
+    renderCard({ invoices: [{ ...invoices[0], status: 'posted' }] });
+    expect(within(screen.getByRole('link', { name: /CS-2026-0005-1/ })).getByText('$734.83 due')).toBeInTheDocument();
   });
 
   it('keeps a share to two decimals', () => {

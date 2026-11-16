@@ -104,8 +104,9 @@ describe('FieldStop billing lines', () => {
     await reachReview();
     const box = await screen.findByText('What happens next');
     expect(box.closest('div')?.parentElement).toHaveTextContent(
-      "Stock comes off the truck. The office gets a draft invoice to check. You don't need to do anything about billing.",
+      "Stock comes off the truck. The office takes care of billing, so you don't need to do anything about it.",
     );
+    expect(box.closest('div')?.parentElement).not.toHaveTextContent(/draft invoice/i);
     expect(screen.queryByText(/Inventory will be deducted/)).not.toBeInTheDocument();
   });
 

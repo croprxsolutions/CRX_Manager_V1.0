@@ -5,7 +5,7 @@
  * new column set. The role tests pin today's rules: Post and Print for admins and
  * sales reps, Email / Void / Delete for admins only, each counted as before.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { buildInMemoryQuery } from '../test-utils/inMemoryQuery';
@@ -73,6 +73,8 @@ describe('Invoices list redesign', () => {
     vi.setSystemTime(new Date('2026-10-09T12:00:00'));
     H.from.mockImplementation((table: string) => buildInMemoryQuery(table === 'invoices' ? ROWS : []));
   });
+
+  afterEach(() => { vi.useRealTimers(); });
 
   describe('the Ready to post tile is a visible, removable filter', () => {
     it('toggles the filter, says "Showing these" and shows a chip that clears it', async () => {
@@ -186,6 +188,32 @@ describe('Invoices list redesign', () => {
       expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
       expect(within(rowOf('CS-DRAFT')).getByRole('checkbox')).not.toBeChecked();
     });
+  });
+
+  // Review MED 3: two writes must not race on the same draft while a batch Post runs.
+  it('disables Void and Delete in More while a batch Post is running', async () => {
+    H.rpc.mockImplementation(() => ({ throwOnError: () => new Promise(() => {}) }));
+    await renderList();
+    tick('CS-DRAFT');
+    fireEvent.click(within(bar()).getByRole('button', { name: 'Post 1 invoice…' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Post 1 invoice' }));
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('post_invoice', expect.anything()));
+    fireEvent.click(within(bar()).getByRole('button', { name: 'More' }));
+    expect(await screen.findByRole('menuitem', { name: 'Delete 1…' })).toHaveAttribute('data-disabled', 'true');
+  });
+
+  // Review MED 5: below xl the Bill to and Sale columns are hidden; their links live in the Invoice cell.
+  it('keeps the customer link, peek and Sale link inside the Invoice cell below xl', async () => {
+    H.from.mockImplementation((table: string) => buildInMemoryQuery(
+      table === 'invoices' ? [invoice({ invoice_number: 'CS-LINKED', status: 'draft', order_id: 'ord-1' })]
+        : table === 'orders' ? [{ id: 'ord-1', order_number: 'ORD-0007' }] : [],
+    ));
+    render(<MemoryRouter><Invoices /></MemoryRouter>);
+    await waitFor(() => expect(screen.getAllByText('CS-LINKED').length).toBeGreaterThan(0));
+    const cell = rowOf('CS-LINKED').querySelector('td:nth-child(2)') as HTMLElement;
+    expect(within(cell).getByRole('button', { name: 'Maple Hollow Farms' })).toBeInTheDocument();
+    expect(within(cell).getByRole('button', { name: 'ORD-0007' })).toBeInTheDocument();
+    expect(within(cell).getByRole('button', { name: 'Peek Maple Hollow Farms' })).toBeInTheDocument();
   });
 
   describe('the post confirm', () => {

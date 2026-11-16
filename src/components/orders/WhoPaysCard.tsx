@@ -4,18 +4,21 @@ import { Check, Lock, Plus, Trash2, User } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
-import { formatUSD as fmt } from '../../lib/money';
-import { sharesLeft } from '../../lib/billSplitLock';
+import { formatCents } from '../../lib/money';
+import { sharesLeft, sharesOverHundred } from '../../lib/billSplitLock';
 import { formatSharePct } from '../../lib/statusLabel';
 
-/** A card payer. `amount` is their live share of the products in dollars, when the page has it exactly. */
-export type WhoPaysShare = { id: string; customerName: string; pct: number; amount?: number };
+/** A saved card payer. */
+export type WhoPaysShare = { id: string; customerId: string; customerName: string; pct: number };
+/** A card as the split bills it. */
+export type CardSplit = Array<{ customer_id: string; pct: number }>;
 
 interface Props {
+  mainCustomerId: string;
   mainCustomerName: string;
   shares: WhoPaysShare[];
-  /** Dollars of products this split bills (lines with their own payers left out). */
-  productsTotal: number;
+  /** Each payer's live cents of the products for a card, billed line by line as the split writer does (cardLiveCents). */
+  liveCents: (card: CardSplit) => Map<string, number>;
   lock: { text: string; href?: string; linkLabel?: string } | null;
   /** A field split bills the sale instead of this card. */
   fieldSplitBills: boolean;
@@ -24,6 +27,8 @@ interface Props {
   /** Resolves true once the payer is saved, so the form closes; false keeps what was typed. */
   onAdd: (customerId: string, pct: number) => void | Promise<boolean>;
   onRemove: (shareId: string) => void;
+  /** Drops the customer picked in `customerPicker`: called when the form opens and on Cancel. */
+  clearPick: () => void;
   customerPicker: ReactNode;
   /** The customer chosen in `customerPicker`. */
   picked?: { id: string; name: string } | null;
@@ -36,7 +41,7 @@ interface Props {
 const COLORS = ['#1a7a50', '#8fc3a8', '#4f9d78', '#c7e3d3', '#2e5e47', '#a9c9b8'];
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-type Row = { key: string; name: string; pct: number; amount: number; main?: boolean; shareId?: string };
+type Row = { key: string; name: string; pct: number; cents: number; main?: boolean; shareId?: string };
 type LockInfo = NonNullable<Props['lock']>;
 
 function PayerBar({ rows }: { rows: Row[] }) {
@@ -101,9 +106,9 @@ function WhoPaysHeader({ adding, payers }: { adding: boolean; payers: number }) 
   );
 }
 
-function AddPayerForm({ customerPicker, pct, setPct, saving, preview, describe, canSubmit, onCancel, onSubmit }: {
+function AddPayerForm({ customerPicker, pct, setPct, saving, preview, overBy, describe, canSubmit, onCancel, onSubmit }: {
   customerPicker: ReactNode; pct: string; setPct: (v: string) => void; saving: boolean;
-  preview: Row[] | null; describe: (r: Row) => string; canSubmit: boolean; onCancel: () => void; onSubmit: () => void;
+  preview: Row[] | null; overBy: number | null; describe: (r: Row) => string; canSubmit: boolean; onCancel: () => void; onSubmit: () => void;
 }) {
   return (
     <>
@@ -121,6 +126,7 @@ function AddPayerForm({ customerPicker, pct, setPct, saving, preview, describe, 
           </span>
         </label>
       </div>
+      {overBy !== null && <p role="alert" className="text-sm text-red-600">The shares would pass 100%. {formatSharePct(overBy)} is left for this payer.</p>}
       {preview && (
         <>
           <span className="text-xs font-semibold uppercase tracking-wide text-secondary">Preview</span>
@@ -190,8 +196,8 @@ function LineSplitDetails({ open, children }: { open?: boolean; children: ReactN
 
 /** Who pays for a sale: the main customer keeps whatever the other payers' percents leave. */
 export default function WhoPaysCard({
-  mainCustomerName, shares, productsTotal, lock, fieldSplitBills, canEdit, saving,
-  onAdd, onRemove, customerPicker, picked, someLinesOwnSplit, lineSplit,
+  mainCustomerId, mainCustomerName, shares, liveCents, lock, fieldSplitBills, canEdit, saving,
+  onAdd, onRemove, clearPick, customerPicker, picked, someLinesOwnSplit, lineSplit,
 }: Props) {
   // The payer count when the form opened: a reload that brings a new payer (even after a failed reply) closes it.
   const [openedAt, setOpenedAt] = useState<number | null>(null);
@@ -199,31 +205,33 @@ export default function WhoPaysCard({
   const [removing, setRemoving] = useState<WhoPaysShare | null>(null);
   const editable = canEdit && !lock;
   const adding = openedAt === shares.length && editable;
-  const totalCents = Math.round(productsTotal * 100);
 
-  // Each payer's cents: the page's exact live figure, else floor(cents x percent) as the split writer bills one line.
-  // The main customer takes the rest, as _bill_split_line_shares does.
+  // One row per customer, each with the cents the split bills them line by line. The main customer keeps whatever
+  // the other payers leave, so a share they hold themselves folds into their row (as cardLiveCents bills it).
   const rowsFor = (list: Array<WhoPaysShare & { shareId?: string }>): Row[] => {
-    const payers = list.map((s) => ({
-      key: s.id, name: s.customerName, pct: s.pct, shareId: s.shareId,
-      cents: s.amount != null ? Math.round(s.amount * 100) : Number((BigInt(totalCents) * BigInt(Math.round(s.pct * 1_000_000))) / 100_000_000n),
-    }));
-    const left = sharesLeft(list.map((s) => s.pct));
-    const mainCents = totalCents - payers.reduce((sum, p) => sum + p.cents, 0);
-    const main = left > 0 ? [{ key: 'main', name: mainCustomerName, pct: round2(left), amount: mainCents / 100, main: true }] : [];
-    return [...main, ...payers.map((p) => ({ ...p, pct: round2(p.pct), amount: p.cents / 100 }))];
+    const cents = liveCents(list.map((s) => ({ customer_id: s.customerId, pct: s.pct })));
+    const others = list.filter((s) => s.customerId !== mainCustomerId);
+    const mainPct = sharesLeft(others.map((s) => s.pct));
+    const own = list.find((s) => s.customerId === mainCustomerId);
+    const main = mainPct > 0
+      ? [{ key: 'main', name: mainCustomerName, pct: round2(mainPct), cents: cents.get(mainCustomerId) ?? 0, main: true, shareId: own?.shareId }]
+      : [];
+    return [...main, ...others.map((s) => ({ key: s.id, name: s.customerName, pct: round2(s.pct), cents: cents.get(s.customerId) ?? 0, shareId: s.shareId }))];
   };
 
   const saved = rowsFor(shares.map((s) => ({ ...s, shareId: s.id })));
   const typed = parseFloat(pct);
-  const preview = adding && picked && typed > 0
-    ? rowsFor([...shares, { id: 'new', customerName: picked.name, pct: typed }])
+  // The database refuses a card over 100%, so the form says so instead of previewing it.
+  const over = typed > 0 && sharesOverHundred([...shares.map((s) => s.pct), typed]);
+  const preview = adding && picked && typed > 0 && !over
+    ? rowsFor([...shares, { id: 'new', customerId: picked.id, customerName: picked.name, pct: typed }])
     : null;
 
   const openAdd = () => {
     // The card should reach 100%, so the next payer starts at exactly what's left.
     const left = sharesLeft(shares.map((s) => s.pct));
     setPct(shares.length > 0 && left > 0 ? String(left) : '');
+    clearPick();
     setOpenedAt(shares.length);
   };
   const submit = async () => {
@@ -236,7 +244,7 @@ export default function WhoPaysCard({
 
   const subLine = (r: Row) => {
     const parts = [r.main ? 'Main customer' : '', r.main && preview ? 'keeps the rest' : ''];
-    if (!fieldSplitBills) parts.push(`about ${fmt(r.amount)} of products${someLinesOwnSplit ? ' on lines that follow this split' : ''}`);
+    if (!fieldSplitBills) parts.push(`about ${formatCents(r.cents)} of products${someLinesOwnSplit ? ' on lines that follow this split' : ''}`);
     return parts.filter(Boolean).join(' · ');
   };
 
@@ -246,7 +254,8 @@ export default function WhoPaysCard({
     if (adding) {
       return (
         <AddPayerForm customerPicker={customerPicker} pct={pct} setPct={setPct} saving={saving} preview={preview} describe={subLine}
-          canSubmit={!!picked && typed > 0} onCancel={() => setOpenedAt(null)} onSubmit={() => void submit()} />
+          overBy={over ? sharesLeft(shares.map((s) => s.pct)) : null}
+          canSubmit={!!picked && typed > 0 && !over} onCancel={() => { setOpenedAt(null); clearPick(); }} onSubmit={() => void submit()} />
       );
     }
     if (shares.length === 0) {
@@ -266,7 +275,7 @@ export default function WhoPaysCard({
         {lock && <LockNote lock={lock} />}
 
         {fieldSplitBills && (
-          <p className="text-sm text-amber-700">This sale is split by field below, so the field split decides who pays.</p>
+          <p className="text-sm text-amber-700">This sale is split by field, so the field split decides who pays.</p>
         )}
 
         {body()}
@@ -279,7 +288,9 @@ export default function WhoPaysCard({
         onClose={() => setRemoving(null)}
         onConfirm={() => { if (removing) onRemove(removing.id); setRemoving(null); }}
         title={`Remove ${removing?.customerName ?? ''}?`}
-        message={`Their ${removing ? round2(removing.pct) : ''}% goes back to ${mainCustomerName}, the main customer.`}
+        message={removing?.customerId === mainCustomerId
+          ? `${mainCustomerName} is the main customer, so they still pay whatever the other payers leave.`
+          : `Their ${removing ? round2(removing.pct) : ''}% goes back to ${mainCustomerName}, the main customer.`}
         cancelLabel="Keep payer"
         confirmLabel="Remove payer"
       />

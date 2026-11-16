@@ -832,7 +832,7 @@ export default function FieldStop() {
             <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-crx-green" aria-hidden="true" />
             <p className="text-sm text-secondary">
               <strong className="block text-base text-nav-dark">What happens next</strong>
-              Stock comes off the truck. The office gets a draft invoice to check. You don&apos;t need to do anything about billing.
+              Stock comes off the truck. The office takes care of billing, so you don&apos;t need to do anything about it.
             </p>
           </div>
 

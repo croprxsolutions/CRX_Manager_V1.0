@@ -42,29 +42,16 @@ describe('UpdatePrompt', () => {
     expect(updateServiceWorker).toHaveBeenCalledWith(true);
   });
 
-  it('Later hides it, and it stays hidden after a remount in the same session', async () => {
+  it('Later hides it for now, stores nothing, and a reload shows it again', async () => {
     const first = render(<UpdatePrompt />);
     fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
     expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
-    expect(sessionStorage.getItem('crx-update-later')).not.toBeNull();
+    expect(sessionStorage.length).toBe(0);
     expect(updateServiceWorker).not.toHaveBeenCalled();
 
     first.unmount();
     render(<UpdatePrompt />);
-    expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
-  });
-
-  it('still shows and still hides on Later when session storage throws', async () => {
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
-    try {
-      render(<UpdatePrompt />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
-      expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
-    } finally {
-      getItem.mockRestore();
-      setItem.mockRestore();
-    }
+    expect(await screen.findByTestId('update-prompt')).toBeInTheDocument();
   });
 
   // Sentry CRX-MANAGER-1G: a rejected hourly update check surfaced as an unhandled rejection.

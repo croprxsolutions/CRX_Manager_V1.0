@@ -1,17 +1,24 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import WhoPaysCard from './WhoPaysCard';
+import { cardLiveCents } from '../../lib/billSplitLock';
+
+// The page's live amounts: the split writer's line-by-line cents over these lines.
+const lines = (...totals: number[]) => (card: Parameters<typeof cardLiveCents>[2]) =>
+  cardLiveCents(totals.map((t, i) => ({ id: `l${i}`, total_price: t })), new Set(), card, 'cust-1');
 
 const base = {
+  mainCustomerId: 'cust-1',
   mainCustomerName: 'Maple Hollow Farms',
-  shares: [{ id: 's1', customerName: 'Cedar Ridge Ag', pct: 35 }],
-  productsTotal: 1333.2,
+  shares: [{ id: 's1', customerId: 'cust-2', customerName: 'Cedar Ridge Ag', pct: 35 }],
+  liveCents: lines(1333.2),
   lock: null,
   fieldSplitBills: false,
   canEdit: true,
   saving: false,
   onAdd: vi.fn(),
   onRemove: vi.fn(),
+  clearPick: vi.fn(),
   customerPicker: <span>picker</span>,
 };
 
@@ -34,7 +41,7 @@ describe('WhoPaysCard', () => {
     const third = 'Maple Hollow Farms North Unit Irrigated Acres Holding Company'.padEnd(60, 'x').slice(0, 60);
     expect([main, second, third].map((n) => n.length)).toEqual([60, 60, 60]);
     render(<WhoPaysCard {...base} mainCustomerName={main}
-      shares={[{ id: 's1', customerName: second, pct: 33.33 }, { id: 's2', customerName: third, pct: 33.33 }]} />);
+      shares={[{ id: 's1', customerId: 'cust-2', customerName: second, pct: 33.33 }, { id: 's2', customerId: 'cust-3', customerName: third, pct: 33.33 }]} />);
     expect(screen.getByText('3 payers · 100%')).toBeInTheDocument();
     expect(within(row(main)).getByText('33.34%')).toBeInTheDocument();
     expect(within(row(second)).getByText('33.33%')).toBeInTheDocument();
@@ -70,7 +77,7 @@ describe('WhoPaysCard', () => {
 
   it('field split note', () => {
     render(<WhoPaysCard {...base} fieldSplitBills />);
-    expect(screen.getByText('This sale is split by field below, so the field split decides who pays.')).toBeInTheDocument();
+    expect(screen.getByText('This sale is split by field, so the field split decides who pays.')).toBeInTheDocument();
     expect(screen.queryByText(/about \$/)).not.toBeInTheDocument();
   });
 
@@ -85,6 +92,51 @@ describe('WhoPaysCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add payer' }));
     expect(onAdd).toHaveBeenCalledWith('c2', 35);
     expect(await screen.findByRole('button', { name: 'Add a payer' })).toBeInTheDocument();
+  });
+
+  it('the preview bills each line on its own, as the invoices will', () => {
+    // 33.33% of 10c, 20c and 5c floors to 3c, 6c and 1c: 10c. The whole 35c split at once would give 11c.
+    render(<WhoPaysCard {...base} shares={[]} liveCents={lines(0.1, 0.2, 0.05)} picked={{ id: 'cust-2', name: 'Cedar Ridge Ag' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a payer' }));
+    fireEvent.change(screen.getByLabelText('Share'), { target: { value: '33.33' } });
+    expect(within(row('Cedar Ridge Ag')).getByText('about $0.10 of products')).toBeInTheDocument();
+    expect(within(row('Maple Hollow Farms')).getByText('Main customer · keeps the rest · about $0.25 of products')).toBeInTheDocument();
+  });
+
+  it('refuses a share that would take the card past 100%, saying what is left', () => {
+    const onAdd = vi.fn();
+    render(<WhoPaysCard {...base} picked={{ id: 'cust-3', name: 'Birch Lane Co' }} onAdd={onAdd} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a payer' }));
+    fireEvent.change(screen.getByLabelText('Share'), { target: { value: '70' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('The shares would pass 100%. 65% is left for this payer.');
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add payer' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Share'), { target: { value: '65' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add payer' })).toBeEnabled();
+  });
+
+  it('drops the picked customer when the form opens and on Cancel', () => {
+    const clearPick = vi.fn();
+    render(<WhoPaysCard {...base} clearPick={clearPick} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add a payer' }));
+    expect(clearPick).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(clearPick).toHaveBeenCalledTimes(2);
+  });
+
+  it('a share the main customer holds folds into their row, and removing it says they still pay the rest', () => {
+    const onRemove = vi.fn();
+    render(<WhoPaysCard {...base} onRemove={onRemove} liveCents={lines(100)}
+      shares={[{ id: 's0', customerId: 'cust-1', customerName: 'Maple Hollow Farms', pct: 30 }, { id: 's1', customerId: 'cust-2', customerName: 'Cedar Ridge Ag', pct: 40 }]} />);
+    expect(screen.getByText('2 payers · 100%')).toBeInTheDocument();
+    expect(screen.getAllByText('Maple Hollow Farms')).toHaveLength(1);
+    expect(within(row('Maple Hollow Farms')).getByText('60%')).toBeInTheDocument();
+    expect(within(row('Maple Hollow Farms')).getByText('Main customer · about $60.00 of products')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Maple Hollow Farms' }));
+    expect(screen.getByText('Maple Hollow Farms is the main customer, so they still pay whatever the other payers leave.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove payer' }));
+    expect(onRemove).toHaveBeenCalledWith('s0');
   });
 
   it('keeps the form open when the add was refused', async () => {

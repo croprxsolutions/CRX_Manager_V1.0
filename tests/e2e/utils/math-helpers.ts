@@ -20,7 +20,12 @@ export function parseDollars(text: string | null | undefined): number {
   const cleaned = text.trim();
   if (!cleaned) return 0;
 
-  const isNegative = cleaned.startsWith('-') || cleaned.startsWith('(');
+  // Negative: a leading minus or parenthesis, or a minus before the first "$" after label text
+  // ("Invoice total\u2212$5.00" or "Invoice total \u2212 $5.00" when a caller falls back to a row's whole text). The
+  // invoice page shows a true minus sign, U+2212 (Billing UI, Nov 13), which may be spaced; an ASCII hyphen must touch
+  // the "$", so a separator ("Paid - $5.00") or a minus after the first amount ("$1.00 - $5.00") is not a sign.
+  const isNegative = cleaned.startsWith('-') || cleaned.startsWith('\u2212') || cleaned.startsWith('(')
+    || /^[^$]*(?:-|\u2212\s*)\$/.test(cleaned);
   // Strip everything except digits and decimal point
   const digits = cleaned.replace(/[^0-9.]/g, '');
   if (!digits) return 0;

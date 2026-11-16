@@ -2822,10 +2822,11 @@ function registryMigrationHighWater(): string {
 // their files reached main just after that refresh had already moved the boundary past them.
 // 20261231200000, 20261231210000 and 20261231220000 (REG-1 Step 2, #1746) were added on 2026-11-10:
 // all three applied live and the registry refresh after it moved the boundary past them.
-// 20261231110000 (M4b standing discount, #1752) and 20261231120000 (M4a sales tax, #1767) were added on
+// 20270109100100 (M4b standing discount, #1752) and 20270109100200 (M4a sales tax, #1767; restamped from
+// 20261231110000 and 20261231120000 on 2026-11-16) were added on
 // 2026-11-11 when staging took main: both are local candidates, not applied live, and main's REG-1 refresh
 // had moved the boundary to 20261231220000, past them.
-// 20270103190000 (sales tax rep fix, #1809) joined them on 2026-11-12 in the back-merge: staging-only, not
+// 20270109100300 (sales tax rep fix, #1809; restamped from 20270103190000 on 2026-11-16) joined them on 2026-11-12 in the back-merge: staging-only, not
 // applied live, and main's registry refresh had moved the boundary to 20270106110000, past it.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20260831160000',
@@ -2874,13 +2875,13 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20261215110000',
   '20261222100000',
   '20261229110000',
-  '20261231110000',
-  '20261231120000',
+  '20270109100100',
+  '20270109100200',
   '20261231200000',
   '20261231210000',
   '20261231220000',
   '20270103160000',
-  '20270103190000',
+  '20270109100300',
   '20270104110000',
   '20270105110000',
   '20270106110000',
@@ -3201,10 +3202,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
  * when the registry refresh moved the high-water past both live migrations.
  */
 const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
-  // M4a sales tax (local candidate 20261231120000): trigger function, never an RPC.
+  // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
-  // M4b standing discount (local candidate 20261231110000): trigger functions and their recompute helper, never RPCs.
+  // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
   _standing_discount_after_line_change_20261231:
@@ -3289,6 +3290,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
+  _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per credited line pool of a posted return credit (skips one already frozen) or clears them when the credit leaves posted; every API-role EXECUTE is revoked',
+  trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger and immediate clear trigger on invoices for credit memos, both call _freeze_credit_sales_tax_20270109; never an RPC, every API-role EXECUTE is revoked',
   // 20270106110000 (Brand PR B part B-1b, local candidate): private helpers. Prune once applied and the types carry them.
   _delivery_brand_event_recopy: 'B-1b trigger function (20270106110000): deferred constraint trigger on delivery_brand_events, re-copies brand snapshots onto open draft invoices when the writing transaction commits; runs only as a trigger, every API-role EXECUTE is revoked',
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',

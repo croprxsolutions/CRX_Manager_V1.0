@@ -114,6 +114,8 @@ describe('LabelAdjuvantsModal', () => {
   it('no row yet: saves "none on the label" with version null (creates it)', async () => {
     H.rpc.mockResolvedValue(receipt);
     await openEditor(undefined);
+    // A blank statement left behind does not block "none".
+    fireEvent.click(screen.getByRole('button', { name: 'Add a statement' }));
     fireEvent.click(screen.getByLabelText('None on the label'));
     fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'label has none' } });
     fireEvent.click(saveButton());

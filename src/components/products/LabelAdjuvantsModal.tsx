@@ -42,7 +42,8 @@ const toEntry = (d: Draft): LabelAdjuvant => {
 function problem(none: boolean, drafts: Draft[], reason: string): string | null {
   if (!none && drafts.length === 0) return 'Add a statement, or tick "None on the label".';
   if (drafts.length > 50) return 'At most 50 statements.';
-  for (const [i, d] of drafts.entries()) {
+  // "None on the label" saves [], so hidden statements are not checked.
+  for (const [i, d] of none ? [] : drafts.entries()) {
     const types = typesOf(d);
     const n = `Statement ${i + 1}`;
     if (types.length === 0) return `${n}: pick at least one adjuvant type.`;

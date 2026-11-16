@@ -142,6 +142,9 @@ GRANT EXECUTE ON FUNCTION public._invoice_line_tax_shares_20270109(uuid) TO serv
 -- 2. A return credit's tax, frozen in whole cents when it posts ----------------------------------------------------
 -- One row per credited line pool: an order line (line_key = order_item_id), or a source invoice's lines with no
 -- order line, charges or hand-billed products (line_key = that invoice). Never recomputed; leaving posted removes the credit's rows.
+-- The pool for an order line is everything that customer was billed for it, at every rate, because a return credit is
+-- PRICED from that same blend (_return_customer_line_share): two lots at 6.25% and 8.875% are credited at one blended
+-- unit price (-6653 cents each in the proof, not -6572 and -6734), so the blended tax is exactly what the credit refunds.
 CREATE TABLE public.credit_memo_sales_tax (
   invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
   line_key uuid NOT NULL,
@@ -157,7 +160,7 @@ COMMENT ON TABLE public.credit_memo_sales_tax IS
   'The sales tax a posted return credit memo refunds inside its line amounts (issue #1868), in whole cents per credited line pool, worked out once when it posts and never recomputed, so a later invoice or posting cannot change an earlier month. Written only by _freeze_credit_sales_tax_20270109.';
 
 ALTER TABLE public.credit_memo_sales_tax ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.credit_memo_sales_tax FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.credit_memo_sales_tax FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.credit_memo_sales_tax TO authenticated;
 GRANT SELECT ON public.credit_memo_sales_tax TO service_role;
 
@@ -588,6 +591,7 @@ BEGIN
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public.trg_freeze_credit_sales_tax_20270109()'::regprocedure)
        IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
      OR has_table_privilege('authenticated', 'public.credit_memo_sales_tax', 'INSERT, UPDATE, DELETE')
+     OR has_table_privilege('service_role', 'public.credit_memo_sales_tax', 'INSERT, UPDATE, DELETE, TRUNCATE')
      OR NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.credit_memo_sales_tax'::regclass)
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._invoice_sales_tax_cents_20270109(uuid)'::regprocedure)
        IS DISTINCT FROM ARRAY['postgres=X/postgres', 'service_role=X/postgres']::aclitem[] THEN

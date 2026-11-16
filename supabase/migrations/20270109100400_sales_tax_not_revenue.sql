@@ -80,6 +80,11 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'SALES_TAX_NOT_REVENUE_PREFLIGHT: drifted: %', v_bad;
   END IF;
+  -- one version of each setter only, so a call without the key reaches the one given the default below
+  IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+        AND proname IN ('set_invoice_standing_discount', 'set_order_sales_tax')) <> 2 THEN
+    RAISE EXCEPTION 'SALES_TAX_NOT_REVENUE_PREFLIGHT: another overload of a setter exists';
+  END IF;
 END
 $preflight$;
 
@@ -183,18 +188,30 @@ CREATE FUNCTION public._invoice_sales_tax_cents_20270109(p_invoice_id uuid)
 AS $function$
   -- A return credit rounds on the running total of the sale's credits for that customer (earlier credits in the
   -- reports' statuses, then this one), so a full return refunds exactly the tax billed however many credits it took.
-  -- ponytail: each credit re-reads the earlier ones (quadratic in one sale's credits for one customer; a handful
-  -- in practice). A window over the period's credits if a sale ever carries hundreds.
-  WITH me AS (
-    SELECT i.id, i.invoice_type, i.order_id, i.customer_id, i.created_at,
-           public._credit_sales_tax_unrounded_20270109(i.id) AS unrounded
-      FROM public.invoices i WHERE i.id = p_invoice_id
+  -- ponytail: each credit re-reads the earlier ones, and each of those steps through its lines (roughly cubic in
+  -- one sale's credits for one customer; a handful in practice). A window over the period's credits if a sale
+  -- ever carries hundreds.
+  -- The sale a credit belongs to: its own order, else the order of the invoice its first credited line came from.
+  WITH credits AS (
+    SELECT x.id, x.customer_id, x.created_at, x.status, x.deleted_at,
+           COALESCE(x.order_id, (SELECT si.order_id
+                                   FROM public.invoice_items ci
+                                   JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
+                                   JOIN public.invoices si ON si.id = s.invoice_id
+                                  WHERE ci.invoice_id = x.id
+                                  ORDER BY ci.id LIMIT 1)) AS sale_id
+      FROM public.invoices x
+     WHERE x.invoice_type = 'credit_memo'
+       AND x.customer_id = (SELECT i.customer_id FROM public.invoices i WHERE i.id = p_invoice_id)
+  ), me AS (
+    SELECT c.id, c.sale_id, c.customer_id, c.created_at,
+           public._credit_sales_tax_unrounded_20270109(c.id) AS unrounded
+      FROM credits c WHERE c.id = p_invoice_id
   ), before AS (
     SELECT COALESCE(sum(public._credit_sales_tax_unrounded_20270109(x.id)), 0) AS unrounded
-      FROM public.invoices x, me
-     WHERE me.invoice_type = 'credit_memo' AND me.unrounded <> 0 AND me.order_id IS NOT NULL
-       AND x.invoice_type = 'credit_memo' AND x.id <> me.id
-       AND x.order_id = me.order_id AND x.customer_id = me.customer_id
+      FROM credits x, me
+     WHERE me.unrounded <> 0 AND me.sale_id IS NOT NULL
+       AND x.id <> me.id AND x.sale_id = me.sale_id
        AND x.deleted_at IS NULL AND x.status IN ('posted', 'overdue', 'paid')
        AND (x.created_at, x.id) < (me.created_at, me.id)
   )

@@ -184,8 +184,9 @@ A flow the test copy cannot run is recorded as owed, not passed.
 
 **Answered 2026-11-15:** the earlier question 2, yes (product page now, quote warning after Taha's quote work); the earlier question 3, **admins or sales reps** fill them, by hand as labels are reviewed.
 
-**NEEDS MASON - DECISION REQUIRED (1 of 1): is this the right type list?**
-NIS, COC, HSOC, MSO, HS-MSO, Vegetable oil, AMS, UAN, Water conditioner, Drift reduction, Deposition aid, Defoamer, and Other (typed). **Recommended: yes**; add or remove any you never see on your labels. It does not hold up building: "Other" takes any label wording, and the list can change later in a small screen PR.
+**Answered 2026-11-15 (Mason: "Yes, list is right"): the type list** is NIS, COC, HSOC, MSO, HS-MSO, Vegetable oil, AMS, UAN, Water conditioner, Drift reduction, Deposition aid, Defoamer, and Other (typed). It lives in the editor and can change later in a small screen PR.
+
+**No questions remain open.** Building still waits for Mason to approve this sheet in chat.
 
 **Moved out of the questions (Sol, 2026-11-15):** tagging the 46 adjuvant products with a type is not needed for USE-2 and is listed in section 6 as a later step.
 

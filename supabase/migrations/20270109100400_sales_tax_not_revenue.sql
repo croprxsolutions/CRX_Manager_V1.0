@@ -140,8 +140,8 @@ REVOKE ALL ON FUNCTION public._invoice_line_tax_shares_20270109(uuid) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public._invoice_line_tax_shares_20270109(uuid) TO service_role;
 
 -- 2. A return credit's tax, frozen in whole cents when it posts ----------------------------------------------------
--- One row per credited line pool: an order line (line_key = order_item_id), or a source invoice's lines with no
--- order line, charges or hand-billed products (line_key = that invoice). Never recomputed; leaving posted removes the credit's rows.
+-- One row per credited line pool: an order line (line_key = order_item_id), or one billed line with no order line,
+-- a charge or a hand-billed product (line_key = that invoice line). Never recomputed; leaving posted removes the credit's rows.
 -- The pool for an order line is everything that customer was billed for it, at every rate, because a return credit is
 -- PRICED from that same blend (_return_customer_line_share): two lots at 6.25% and 8.875% are credited at one blended
 -- unit price (-6653 cents each in the proof, not -6572 and -6734), so the blended tax is exactly what the credit refunds.
@@ -212,9 +212,9 @@ BEGIN
     RETURN;  -- already frozen (posted -> overdue -> paid keeps it)
   END IF;
   FOR v_key IN
-    -- a credited line with no order line (a charge, or a product billed by hand) pools with its source invoice's
-    -- other lines that have no order line
-    SELECT COALESCE(src.order_item_id, src.invoice_id) AS line_key, src.order_item_id IS NULL AS is_charge,
+    -- a credited line with no order line (a charge, or a product billed by hand) pools on its own source line, at
+    -- that line's own whole-cent tax share
+    SELECT COALESCE(src.order_item_id, src.id) AS line_key, src.order_item_id IS NULL AS is_charge,
            sum(ii.extended_cents) AS cents
       FROM public.invoice_items ii
       JOIN public.invoice_items src ON src.id = ii.return_credit_source_item_id
@@ -231,7 +231,7 @@ BEGIN
        AND i.status IN ('posted', 'overdue', 'paid')
        AND COALESCE(i.posted_at, i.created_at) <= v_inv.booked_at
        AND CASE WHEN v_key.is_charge
-                THEN i.id = v_key.line_key AND b.order_item_id IS NULL
+                THEN b.id = v_key.line_key AND b.order_item_id IS NULL
                 ELSE i.id IN (SELECT o.invoice_id FROM public.invoice_items o WHERE o.order_item_id = v_key.line_key)
                      AND b.order_item_id = v_key.line_key AND b.quantity > 0 AND b.product_id IS NOT NULL
            END;
@@ -303,8 +303,10 @@ AS $function$
   -- (a 'sales_tax' line exists only on a chemical sale: guard_sales_tax_line_scope_20261231 refuses it elsewhere)
   SELECT COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
                     WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax'), 0)::bigint
-       -- a posted return credit: the tax frozen when it posted (negative)
-       + COALESCE((SELECT sum(c.tax_cents) FROM public.credit_memo_sales_tax c WHERE c.invoice_id = p_invoice_id), 0)::bigint;
+       -- a posted return credit (still a credit memo): the tax frozen when it posted (negative)
+       + COALESCE((SELECT sum(c.tax_cents) FROM public.credit_memo_sales_tax c
+                     JOIN public.invoices i ON i.id = c.invoice_id AND i.invoice_type = 'credit_memo'
+                    WHERE c.invoice_id = p_invoice_id), 0)::bigint;
 $function$;
 REVOKE ALL ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) TO service_role;

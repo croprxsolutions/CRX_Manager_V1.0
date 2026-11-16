@@ -647,7 +647,7 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 [Product Master review](../audits/2026-11-13-product-master-review.md), repair step 3).
 
 ### KI-156 — A field-application invoice books the grower-share chemical's cost in the wrong unit
-**MED · FIX IN REVIEW (branch `claude/pm-grower-share-cost`, migration `20270111130000`, not applied) · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1)**
+**MED · FIX IN REVIEW (branch `claude/pm-grower-share-cost`, migrations `20270111130000` and `20270111140000`, not applied) · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1)**
 In `_save_field_app_invoice_impl_20260714` (latest body `20260904180000_invoice_season_follows_invoice_date.sql`), the
 `v_chem_qty_a > 0` branch (chemical included in the grower's share) adds `safe_cents_qty(v_qa_unit_cost, v_chem_qty_a)`.
 That multiplies the cost per sold unit by a quantity in the rate unit, with no conversion. Example: 16 oz/ac × 100 ac
@@ -662,12 +662,13 @@ billed line's message, stores the line in that unit and costs the stored quantit
 amounts and the billed branch are unchanged; the printed grower-share line shows the converted quantity. The split field-app saver refuses grower-price fields and the generic invoice
 saver refuses to re-save these invoices, so neither has the bug. Proof:
 `node scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs`. Close when applied live.
-Found while proving (live, read-only, 2026-11-15): no field-app save path declares a below-cost context, so the below-cost
-wall (`_enforce_below_cost_line`) refuses every field-app save whose grower-share line is a costed catalog product
-(`BELOW_COST_CONTEXT_REQUIRED`; a sales rep would also hit `BELOW_COST_ADMIN_REQUIRED`). That is why live has none of
-these lines, and why the wrong cost has not reached live. Unblocking it needs a business rule (who may approve a $0
-"included in grower share" chemical line, as the blend-ticket path does: admin plus a written reason) and is not part
-of this fix; the prover declares that context to reach the cost math.
+Found while proving (live, read-only, 2026-11-15): no field-app save path declared a below-cost context, so the
+below-cost wall (`_enforce_below_cost_line`) refused every field-app save whose grower-share line is a costed product
+(`BELOW_COST_CONTEXT_REQUIRED`; a sales rep also `BELOW_COST_ADMIN_REQUIRED`). That is why live has none of these lines.
+Mason's rule (2026-11-15, "Admins and reps"): an active admin or sales rep may save it. Fix in review, same branch:
+`20270111140000_grower_share_line_saves_for_admins_and_reps.sql` declares a `field_app_grower_share` context around
+that $0 line only; the wall lets it through for an admin or rep (no approval row) and judges every other below-cost
+line exactly as before. Proven by the same prover (cases N, G, RG). Close when both migrations are applied live.
 
 ### KI-157 — Invoice PDFs print the product's current name, not the name it was sold under
 **MED · OPEN · money/documents · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-2) · unassigned**

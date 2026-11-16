@@ -10,7 +10,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'e439630f97142a45928b93820df714d0', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '3dae067adcdd506b5865f3be09d903df', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

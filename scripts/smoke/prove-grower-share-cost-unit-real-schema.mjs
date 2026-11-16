@@ -277,7 +277,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const LIVE_MD5 = '29d699a8b0698424345a78e9aac9dcd1';
 const FIX_MD5 = 'c3df537c2540a3bbc3f39ddc16c09166';
-const SAVES_MD5 = 'e439630f97142a45928b93820df714d0';
+const SAVES_MD5 = '3dae067adcdd506b5865f3be09d903df';
 const GUARD_LIVE_MD5 = '3708388e22f081fd5b70ce8f89492aaf';
 const GUARD_SAVES_MD5 = '1c421de75f20d9244a06d29428d1f99a';
 const GUARD = "'public._enforce_below_cost_line()'::regprocedure";
@@ -494,7 +494,11 @@ async function main() {
   const billedTyped = save([loc(FB, 100)], [chem({ product_id: GAL, cost_cents: 2000, manual_override: true, unit_price_cents: 5000 })], ADMIN, false);
   assert.equal(costOf(billedTyped), 25000, `G: an admin's typed cost on a billed line is kept (12.5 Gal x 2000): ${billedTyped}`);
   const manualG = save([loc(FG, 100)], [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })], ADMIN, false);
-  assert.equal(costOf(manualG), 0, `G: an admin's manual grower-share line (no product) books the server cost 0, not the typed 3000: ${manualG}`);
+  // Mason, 2026-11-16 ("Yes, allow it"): a line with no product has no server cost, so an admin's typed cost stands.
+  assert.equal(costOf(manualG), 37500, `G: an admin's manual grower-share line (no product) books the typed 3000 (12.5 Gal x 3000): ${manualG}`);
+  assert.match(lineOf(manualG, 'KI156 manual — included'), /\|12\.5000\|Gal\|0\|0\|3000\|1600\.0000\|oz$/, manualG);
+  const manualRep = save([loc(FG, 100)], [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })], REP, false);
+  assert.equal(costOf(manualRep), 0, `G: a rep's manual grower-share line (no product) books 0, not the typed 3000: ${manualRep}`);
   refusedSave([loc(FG, 50), loc(FB, 50, 1)], [UNDER], /BELOW_COST_CONTEXT_REQUIRED/, ADMIN, false);
   // The save rebuilds the invoice it is given: an ordinary draft (chemical sale) is refused before any line is touched.
   for (const [inv, uid] of [[SALE, ADMIN], [SALE, REP], [GFAPP, ADMIN]]) {
@@ -503,7 +507,7 @@ async function main() {
       /FIELD_APP_INVOICE_REQUIRED: invoice .* is not a field application invoice/, uid);
   }
   assert.equal(okProbe(`${saveSql([loc(FG, 50), loc(FB, 50, 1)], [UNDER])}\nRESET ROLE;\n${APPROVALS}`, ADMIN), '1', 'G: mixed save with a reason records only the billed line');
-  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, no approval row); an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason only it is recorded`);
+  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, no approval row); an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books the typed cost (37500), a rep's books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason only it is recorded`);
   normalWall('after the follow-up');
 
   // RG: the follow-up's rollback.

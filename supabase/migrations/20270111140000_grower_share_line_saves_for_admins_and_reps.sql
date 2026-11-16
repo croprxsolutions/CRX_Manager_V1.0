@@ -409,10 +409,13 @@ BEGIN
         END LOOP;
 
         IF v_chem_qty_a > 0 THEN
-          -- KI-156 (Mason, 2026-11-16): a grower-share chemical's cost is ALWAYS the server cost, even for an admin:
-          -- the product's current cost per its sold unit, and 0 for a line with no product. A typed cost_cents is
-          -- ignored here (billed lines below still take an admin's cost).
-          v_qa_unit_cost := CASE WHEN (v_chem->>'product_id') IS NOT NULL THEN COALESCE(v_srv_cost, 0) ELSE 0 END;
+          -- KI-156 (Mason, 2026-11-16): a grower-share chemical with a product is ALWAYS costed at the server cost,
+          -- even for an admin: the product's current cost per its sold unit; a typed cost_cents is ignored. A
+          -- hand-typed line with no product has no server cost: an admin's typed cost stands ("Yes, allow it"),
+          -- anyone else's books 0.
+          v_qa_unit_cost := CASE WHEN (v_chem->>'product_id') IS NOT NULL THEN COALESCE(v_srv_cost, 0)
+                                 WHEN is_admin() THEN COALESCE((v_chem->>'cost_cents')::bigint, 0)
+                                 ELSE 0 END;
           -- KI-156: cost_cents is per the product's SOLD unit (inventory_unit); on a line with no
           -- product it is per the unit the line is entered in (unit_size, which the screen keeps
           -- equal to the rate unit). Convert the applied amount (rate unit) into that unit before
@@ -1035,7 +1038,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'e439630f97142a45928b93820df714d0', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '3dae067adcdd506b5865f3be09d903df', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

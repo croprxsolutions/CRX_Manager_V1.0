@@ -670,8 +670,9 @@ Mason's rule (2026-11-15, "Admins and reps"): an active admin or sales rep may s
 that $0 line only; the wall lets it through for an admin or rep (no approval row) and judges every other below-cost
 line exactly as before. It also refuses to rebuild a non-field-application invoice passed to the field-app save
 (`FIELD_APP_INVOICE_REQUIRED`). Mason decided 2026-11-16: grower-share cost is always the server cost, even for
-admins. The grower-share line ignores a typed `cost_cents` and books the product's current cost (0 for a line with no
-product); billed lines still take an admin's cost. Proven by the same prover (cases N, G, RG). Close when both migrations are applied live.
+admins. A grower-share line with a product ignores a typed `cost_cents` and books the product's current cost; a
+hand-typed line with no product books an admin's typed cost (Mason, 2026-11-16: "Yes, allow it"), 0 for anyone else;
+billed lines still take an admin's cost. Proven by the same prover (cases N, G, RG). Close when both migrations are applied live.
 
 ### KI-157 — Invoice PDFs print the product's current name, not the name it was sold under
 **MED · OPEN · money/documents · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-2) · unassigned**

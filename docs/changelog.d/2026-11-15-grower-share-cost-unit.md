@@ -24,9 +24,10 @@
   quote line) is refused or approved exactly as before; applicators and anyone else are still refused.
   The same file makes the field-app save refuse to rebuild an existing invoice (or group member) that is not a field-application
   invoice (`FIELD_APP_INVOICE_REQUIRED`, with a plain message); it never checked the type of the invoice it rewrites.
-  Mason decided 2026-11-16: grower-share cost is always the server cost, even for admins. The grower-share line
-  ignores a typed `cost_cents` and books the product's current cost per its sold unit (0 for a line with no
-  product); billed lines still take an admin's typed cost.
+  Mason decided 2026-11-16: grower-share cost is always the server cost, even for admins. A grower-share line with a
+  product ignores a typed `cost_cents` and books the product's current cost per its sold unit; billed lines still take
+  an admin's typed cost. A hand-typed grower-share line with no product books an admin's typed cost ("Yes, allow it",
+  2026-11-16) and 0 for anyone else.
 - Proof: `node scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs` (GROWER_SHARE_COST_UNIT_PROOF_PASS).
   Rollback: `scripts/smoke/grower-share-line-saves-reverse.sql` then `scripts/smoke/grower-share-cost-unit-reverse.sql`
   (both proven; each restores its bodies by md5).

@@ -129,7 +129,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     expect(screen.queryByRole('button', { name: /Void \d+ Selected/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).queryByText(/not from this season/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
     await waitFor(() => expect(mockRpc.mock.calls.filter(([name]) => name === 'post_invoice')).toHaveLength(1));
@@ -201,7 +201,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     // The one this-season row in view, and nothing else.
     expect(screen.getByRole('button', { name: /Post 1 Selected/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Post 1' }));
     await waitFor(() => expect(postedIds()).toHaveLength(1));
     expect(postedIds()).toEqual(['NEW-UNPOSTED']);
@@ -270,7 +270,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     tickRow('OLD-DRAFT');
     tickRow('NEW-DRAFT');
     fireEvent.click(screen.getByRole('button', { name: /Post 2 Selected/ }));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Post 2' }));
 
     await waitFor(() => expect(postedIds()).toHaveLength(2));
@@ -384,7 +384,7 @@ describe('Invoices list — season window after the Oct 1 rollover', () => {
     fireEvent.click(within(row).getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /Post 1 Selected/ }));
 
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByText(/This includes 1 invoice\(s\) not from this season \(Season 2026\)/)).toBeInTheDocument();
   });
 });

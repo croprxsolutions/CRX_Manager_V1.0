@@ -78,7 +78,7 @@ services:
     # Only so app.mjs can remove this container's default route.
     cap_add: [NET_ADMIN]
     volumes:
-      - ./kong.yml:/kong.yml:ro
+      - ${LOCAL_KONG_CONFIG:-./kong.yml}:/kong.yml:ro
     ports:
       - 127.0.0.1:${LOCAL_API_PORT}:8000
       - 127.0.0.1:${LOCAL_DB_PORT}:5432

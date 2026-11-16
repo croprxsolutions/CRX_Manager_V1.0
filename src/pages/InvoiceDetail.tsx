@@ -27,7 +27,8 @@ import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
+import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
+import PriceInput from '../components/invoices/PriceInput';
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
@@ -108,7 +109,6 @@ interface LineItem {
   brand_lines?: unknown;
 }
 
-const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
 
 /** What Record Payment validated: the only values the duplicate check reads and the save sends. */
 interface PaymentEntry {
@@ -237,6 +237,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Add Product's by-id tier lookup: a single flight, bound to the invoice and customer it was
   // asked for. The ref holds the in-flight lookup's token (0 = none); switching invoices clears it.
   const addingProductRef = useRef(0);
+  // Price boxes holding a typed price that can't be saved (PriceInput), so Save can name the line instead of saving.
+  const priceProblemsRef = useRef(new Map<string, { label: string; message: string }>());
+  const notePriceProblem = useCallback((id: string, problem: { label: string; message: string } | null) => {
+    if (problem) priceProblemsRef.current.set(id, problem); else priceProblemsRef.current.delete(id);
+  }, []);
   const addProductLookupSeqRef = useRef(0);
   const [addingProduct, setAddingProduct] = useState(false);
   const invoiceCustomerIdRef = useRef<string | null>(null);
@@ -1181,6 +1186,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Save invoice
   const handleSave = async () => {
     if (addingProductRef.current) return;
+    const priceProblem = priceProblemsRef.current.values().next().value;
+    if (priceProblem) { toast('error', `${priceProblem.label}: ${priceProblem.message}`); return; }
     if (paymentTerms === 'Custom date…' && !customDueDate) {
       toast('error', 'Choose a custom due date before saving.');
       return;
@@ -2096,16 +2103,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const chargeRows = lineRows.filter(({ item }) => !isComputedChargeLine(item.charge_type) && isChargeLine(item, takesCharges));
   const productRows = lineRows.filter((row) => !workedRows.includes(row) && !chargeRows.includes(row));
   const hasTotes = displayItems.some((i) => i.tote_number);
-  const changePrice = (idx: number, value: string) => {
-    const cents = parseDollarsToCentsSigned(value);
-    // null = a third decimal digit. Refuse the keystroke; never store
-    // a $0 unit price that only the below-cost prompt would question.
-    if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
-    // The unsigned parser flips "-100" to +$100, which would bill a credit
-    // as a charge (Sol, PR #983). Refuse a negative price instead.
-    if (cents < 0) { toast('error', NEGATIVE_PRICE_MESSAGE); return; }
-    updateItem(idx, 'unit_price_cents', cents);
-  };
   const priceSourcePill = (item: LineItem) => (
     item.price_source === 'quoted' ? <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700" title={item.quoted_price_cents != null ? `Program price: ${fmt(item.quoted_price_cents)}` : undefined}>Quoted price</span>
       : item.price_source === 'tier' ? <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600" title="Using customer tier pricing">Tier price</span>
@@ -2634,13 +2631,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         <td className="flex flex-col gap-1 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
                           {lineLabel('Unit price')}
                           {rowEditable(item) && !item.billing_line_id ? (
-                            <input
-                              type="number"
-                              aria-label={`Unit price for ${name || 'line'}`}
-                              value={(item.unit_price_cents / 100).toFixed(2)}
-                              onChange={(e) => changePrice(idx, e.target.value)}
-                              min={0}
-                              step={0.01}
+                            <PriceInput
+                              label={`Unit price for ${name || 'line'}`}
+                              cents={item.unit_price_cents}
+                              onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
+                              onProblem={notePriceProblem}
                               className={lineInput.replace('xl:w-24', 'xl:w-28')}
                             />
                           ) : (
@@ -2718,16 +2713,14 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                             className={`${chargeInput} col-span-2 sm:col-span-1`}
                           />
                           {!item.billing_line_id ? (
-                            <input
-                              type="number"
+                            <PriceInput
                               // The box holds the unit price; the line's total is on data-cents. A typed charge is quantity 1
                               // (invoice_items_charge_line_shape_chk), so its box is the amount; an older untyped line may not be.
-                              data-testid="invoice-line-amount" data-kind="charge" data-cents={item.extended_cents}
-                              aria-label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
-                              value={(item.unit_price_cents / 100).toFixed(2)}
-                              onChange={(e) => changePrice(idx, e.target.value)}
-                              min={0}
-                              step={0.01}
+                              testProps={{ 'data-testid': 'invoice-line-amount', 'data-kind': 'charge', 'data-cents': item.extended_cents }}
+                              label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
+                              cents={item.unit_price_cents}
+                              onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
+                              onProblem={notePriceProblem}
                               className={chargeInput}
                             />
                           ) : (

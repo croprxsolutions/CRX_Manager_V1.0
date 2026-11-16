@@ -18,7 +18,9 @@ export type BadgeVariant =
   | 'violet'
   | 'rose'
   | 'teal'
-  | 'orange';
+  | 'orange'
+  // A paid invoice (invoiceStatusBadge in src/lib/statusLabel.ts).
+  | 'paid';
 
 export interface BadgeProps {
   variant?: BadgeVariant;
@@ -48,6 +50,8 @@ const variantClasses: Record<BadgeVariant, string> = {
   rose: 'bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-200',
   teal: 'bg-teal-100 text-teal-800 ring-1 ring-inset ring-teal-200',
   orange: 'bg-orange-100 text-orange-800 ring-1 ring-inset ring-orange-200',
+  // A paid invoice: darker than Posted's green so the two read apart.
+  paid: 'bg-emerald-200 text-emerald-900 ring-1 ring-inset ring-emerald-300',
 };
 
 const dotClasses: Record<BadgeVariant, string> = {
@@ -68,6 +72,7 @@ const dotClasses: Record<BadgeVariant, string> = {
   rose: 'bg-rose-600',
   teal: 'bg-teal-600',
   orange: 'bg-orange-600',
+  paid: 'bg-emerald-700',
 };
 
 // eslint-disable-next-line react-refresh/only-export-components

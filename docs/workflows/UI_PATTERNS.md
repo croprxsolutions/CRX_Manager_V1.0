@@ -161,7 +161,7 @@ For pages with bulk actions (select rows -> perform action):
 ### Components used
 1. `useRowSelection` hook — manages selected row IDs
 2. `createCheckboxColumn` — adds a checkbox column to the table
-3. `BulkActionBar` — shows action buttons, auto-hides when 0 selected
+3. `BulkActionBar` — shows action buttons, auto-hides when 0 selected. Redesigned screens pass `bar` for the green-tint strip above the list (Quotes); `createCheckboxColumn`'s optional `getLabel` names each row checkbox, and a header checkbox can replace a "Select All" button
 4. `BulkDeleteConfirmModal` — confirmation dialog for destructive bulk actions
 
 ### Smart export fallback
@@ -292,7 +292,7 @@ Currently used for: `team_notes`, `team_note_comments`, `notifications`, `note_a
 Rules for new pages and for any page a screen-cleanup PR touches. Existing pages that break them are not wrong to leave alone; fix them one screen at a time, with Mason's approval of the change list.
 
 ### Page header
-- Every office page opens with `PageHeader` (`src/components/ui/PageHeader.tsx`): a title, an optional `crx-green` accent word, a one-line subtitle, and the page's actions on the right.
+- Every office page opens with `PageHeader` (`src/components/ui/PageHeader.tsx`): a title, an optional `crx-green` accent word, a one-line subtitle, and the page's actions on the right. Sanctioned exception: the Quotes list hand-builds the same markup so that on phones the title and New quote share a row (description hidden, Import quotes in a ⋯ menu).
 - At most one primary (green) button per header, and it sits rightmost. Other actions are secondary or ghost buttons.
 - Detail pages (one quote, one customer) put `Breadcrumbs` above the header so the way back is obvious.
 - Below 768px the actions wrap under the title; don't hide them.
@@ -335,7 +335,7 @@ The rules for screens built or redesigned with the kit in `src/components/ui/`. 
 ### Choice lists and dates
 - Use `Dropdown` and never a browser `<select>` on any redesigned screen. `size="sm"` is 36px, for dense desktop use only and never on phone screens. It calls `onChange(value)` with the value, not a native change event. The old `Select.tsx` stays for now because its callers read native change events; each screen moves over in its own module round.
 - Use `DatePicker` and never `<input type="date">`. Values are plain `'YYYY-MM-DD'` strings (or null) with no JS `Date`. The field shows typeable numeric segments (for example 9/30/2027). Presets such as "Season end" appear as chips in the calendar and as a pill in the field when the value matches.
-- Every field keeps a fixed helper line for help, a warning or an error, so nothing below it moves when a message appears.
+- Every field keeps a fixed helper line for help, a warning or an error, so nothing below it moves when a message appears. Filter bars are the exception: `Dropdown inline` drops the helper line, shows the label inside the trigger, and is a pill on phones; `active` tints it green while it narrows the list (ignored with `error`).
 - Touch targets are 44px below 768px and 40px above (`h-11 md:h-10` and similar). Everything is reachable by keyboard with a visible focus ring.
 - There are no field-border or danger tokens in `src/index.css`. Use `border-gray-300` and `red-600` / `red-700`, as `Input.tsx` does. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order decides which wins.
 
@@ -351,7 +351,8 @@ The rules for screens built or redesigned with the kit in `src/components/ui/`. 
 ### Status badges
 - `Badge` capitalises its label by default. Pass `normalCase` when the label is already written as it should appear ("Closed short").
 - Status labels on redesigned screens are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)". Stored status values do not change.
-- A badge is a soft pill with a word, never colour alone, and never brand green. The status dot arrives with the quote screens (PR 2).
+- A badge is a soft pill with a word, never colour alone, and never brand green.
+- Quote screens map statuses with `quoteBadgeVariant` (`src/lib/quoteStatusLabel.ts`), a quote-only palette, and pass `dot`. Every other screen keeps `statusToBadgeVariant` until its own module round.
 
 ### Confirming, saving and results
 - Confirm before costly actions (removing a line with data, declining, cancelling, closing a booking, deleting) with `ConfirmModal`. The title is a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK").

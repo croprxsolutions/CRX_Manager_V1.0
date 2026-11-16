@@ -180,7 +180,7 @@ export const NAME_BRAND_GROUP_LABELS: Record<NameBrandGroup, string> = {
   disagrees: 'Name and brand list disagree',
   no_list: 'Brands in the name, no brand list yet',
   no_name_brands: 'Brand list, no brands in the name',
-  unclosed_only: 'Bracket not closed in the name',
+  unclosed_only: 'Only problem: bracket not closed',
 };
 
 const GROUP_ORDER: NameBrandGroup[] = ['disagrees', 'no_list', 'no_name_brands', 'unclosed_only'];

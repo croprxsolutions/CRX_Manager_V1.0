@@ -40,10 +40,10 @@ export default function RecordVersionConflictDialog({ open, entityLabel, onKeepE
       open={open}
       onClose={onKeepEditing}
       onConfirm={() => { void handleReload(); }}
-      title={`${label} needs a refresh before saving`}
+      title={`Reload this ${entityLabel} before saving?`}
       message={reloadFailed
-        ? `Reload could not finish. Your unsaved ${entityLabel} edits are still available; check your connection and try again.`
-        : `This ${entityLabel} may have changed in another workflow, or its current version could not be confirmed. Reload to review the saved version before trying again. Your unsaved edits stay available until you choose Reload.`}
+        ? `Reload could not finish. Your unsaved ${entityLabel} edits are still here. Check your connection and try again.`
+        : `This ${entityLabel} may have changed in another workflow, or its version could not be confirmed. Reload to see the saved version, then save again. Your edits stay here until you reload.`}
       confirmLabel={`Reload ${label}`}
       cancelLabel="Keep editing"
       variant="warning"

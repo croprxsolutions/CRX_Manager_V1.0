@@ -19,6 +19,13 @@ beforeEach(() => {
   mockRpc.mockResolvedValue({ data: null, error: new Error('unavailable') });
 });
 
+// The recipient control is a kit Dropdown: a trigger button that opens a listbox.
+const recipientTrigger = (n: number) => screen.getByRole('button', { name: new RegExp(`Recipient for split ${n}`) });
+function openRecipients(n: number) {
+  fireEvent.click(recipientTrigger(n));
+  return screen.getAllByRole('option');
+}
+
 const defaultValue: CommissionSplit = {
   splits: [{ recipient: 'Mason Wells', percentage: 50 }],
 };
@@ -51,8 +58,9 @@ describe('CommissionSplitEditor', () => {
     };
     render(<CommissionSplitEditor value={value} onChange={() => {}} />);
 
-    const selects = screen.getAllByRole('combobox');
-    expect(selects).toHaveLength(2);
+    expect(recipientTrigger(1)).toHaveTextContent('Mason Wells');
+    expect(recipientTrigger(2)).toHaveTextContent('Chance Tuttle');
+    expect(screen.queryByRole('button', { name: /Recipient for split 3/ })).not.toBeInTheDocument();
   });
 
   it('shows total percentage', () => {
@@ -107,14 +115,14 @@ describe('CommissionSplitEditor', () => {
     });
   });
 
-  it('calls onChange when recipient is changed via select', () => {
+  it('calls onChange when recipient is changed via the dropdown', () => {
     const onChange = vi.fn();
     render(
       <CommissionSplitEditor value={defaultValue} onChange={onChange} />
     );
 
-    const select = screen.getByLabelText('Recipient for split 1');
-    fireEvent.change(select, { target: { value: 'Chance Tuttle' } });
+    openRecipients(1);
+    fireEvent.click(screen.getByRole('option', { name: 'Chance Tuttle' }));
     // Fallback options carry no profile id; the DB stamps it at save time.
     expect(onChange).toHaveBeenCalledWith({
       splits: [{ recipient: 'Chance Tuttle', recipient_user_id: null, percentage: 50 }],
@@ -134,16 +142,14 @@ describe('CommissionSplitEditor', () => {
       <CommissionSplitEditor value={defaultValue} onChange={onChange} />
     );
 
+    // The live list replaces the fallback once the RPC answers.
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('list_commission_recipients'));
     await waitFor(() => {
-      const select = screen.getByLabelText('Recipient for split 1');
-      expect(
-        Array.from(select.querySelectorAll('option')).map((o) => o.textContent)
-      ).toContain('Chance Tuttle');
+      expect(openRecipients(1).map((o) => o.textContent)).toEqual(['Chance Tuttle', 'Mason Wells']);
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
     });
-
-    fireEvent.change(screen.getByLabelText('Recipient for split 1'), {
-      target: { value: 'Chance Tuttle' },
-    });
+    openRecipients(1);
+    fireEvent.click(screen.getByRole('option', { name: 'Chance Tuttle' }));
     expect(onChange).toHaveBeenCalledWith({
       splits: [
         {
@@ -195,11 +201,9 @@ describe('CommissionSplitEditor', () => {
       <CommissionSplitEditor value={defaultValue} onChange={() => {}} />
     );
 
-    const select = screen.getByLabelText('Recipient for split 1');
-    const optionValues = Array.from(select.querySelectorAll('option')).map(
-      (o) => o.getAttribute('value')
-    );
-    expect(optionValues).not.toContain('__other__');
+    const optionNames = openRecipients(1).map((o) => o.textContent);
+    expect(optionNames).toHaveLength(4);
+    expect(optionNames).not.toContain('Other');
     expect(screen.queryByPlaceholderText('Enter recipient name')).not.toBeInTheDocument();
   });
 
@@ -208,10 +212,8 @@ describe('CommissionSplitEditor', () => {
       <CommissionSplitEditor value={defaultValue} onChange={() => {}} />
     );
 
-    const select = screen.getByLabelText('Recipient for split 1');
-    const options = select.querySelectorAll('option');
-    // "Select recipient..." + 4 RECIPIENTS
-    expect(options).toHaveLength(5);
+    // The 4 fallback recipients; "Select recipient..." is now the trigger's placeholder, not an option.
+    expect(openRecipients(1)).toHaveLength(4);
   });
 
   it('loads recipient options from list_commission_recipients when available', async () => {
@@ -228,13 +230,16 @@ describe('CommissionSplitEditor', () => {
     );
 
     await waitFor(() => {
-      const select = screen.getByLabelText('Recipient for split 1');
-      const labels = Array.from(select.querySelectorAll('option')).map(
-        (o) => o.textContent
-      );
+      const labels = openRecipients(1).map((o) => o.textContent);
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
       expect(labels).toContain('Clayton Wells');
       expect(mockRpc).toHaveBeenCalledWith('list_commission_recipients');
     });
+  });
+
+  it('disables the recipient dropdown when the form is locked', () => {
+    render(<CommissionSplitEditor value={defaultValue} onChange={() => {}} disabled />);
+    expect(recipientTrigger(1)).toBeDisabled();
   });
 
   it('keeps a legacy non-list recipient visible and selected', () => {
@@ -243,7 +248,7 @@ describe('CommissionSplitEditor', () => {
     };
     render(<CommissionSplitEditor value={value} onChange={() => {}} />);
 
-    const select = screen.getByLabelText('Recipient for split 1') as HTMLSelectElement;
-    expect(select.value).toBe('Old Custom Partner');
+    expect(recipientTrigger(1)).toHaveTextContent('Old Custom Partner');
+    expect(openRecipients(1).map((o) => o.textContent)).toContain('Old Custom Partner');
   });
 });

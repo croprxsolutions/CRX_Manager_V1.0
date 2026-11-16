@@ -51,7 +51,7 @@ const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE,
 const TOUCHED = /(purchase_order|receive_po_items|receiving_record|_recompute_po_on_order|_enforce_po_status_transition|_guard_po_delete|_guard_closed_po|create_vendor_bill|check_idempotency_intent|_bind_replay_receipt_20261015|_replay_fingerprint_20261015)/i;
 // A later file breaks this proof only by redefining what it relies on; calling or naming it (shared retry
 // helpers, comments, CASE lists) does not. Definitions of functions, tables, triggers and policies count.
-const REDEFINED = new RegExp(String.raw`(CREATE(s+ORs+REPLACE)?|ALTER|DROP)s+(FUNCTION|TABLE)s+(IFs+(NOTs+)?EXISTSs+)?(ONLYs+)?(public.)?"?[a-z_0-9]*${TOUCHED.source}|(CREATE|ALTER|DROP)s+(ORs+REPLACEs+)?(TRIGGER|POLICY)s[^;]*?ONs+(public.)?"?[a-z_0-9]*${TOUCHED.source}`, 'i');
+const REDEFINED = new RegExp(String.raw`(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+(FUNCTION|TABLE)\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?[a-z_0-9]*${TOUCHED.source}|(CREATE|ALTER|DROP)\s+(OR\s+REPLACE\s+)?(TRIGGER|POLICY)\s[^;]*?\bON\s+(public\.)?"?[a-z_0-9]*${TOUCHED.source}`, 'i');
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

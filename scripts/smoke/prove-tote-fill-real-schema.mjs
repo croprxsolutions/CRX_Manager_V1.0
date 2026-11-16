@@ -46,7 +46,7 @@ const TOUCHED = /(tote_fill|inventory_transactions_transaction_type_check|produc
 // function, not the tote_fill_* ledger types a later report reads). Later PAR-2 files
 // call the _product_parent_* helpers and insert members; only a redefinition or a table change (alter, drop, create) can
 // change what this proof proved.
-const REDEFINED = /((CREATE(s+ORs+REPLACE)?|ALTER|DROP)s+(FUNCTION|TABLE)s+(IFs+(NOTs+)?EXISTSs+)?(public.)?"?[a-z_0-9]*tote_fill|inventory_transactions_transaction_type_check|(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+FUNCTION\s+(IF\s+EXISTS\s+)?(public\.)?"?(_product_parent_replay|_product_parent_require_admin|_product_parent_reason|is_admin|is_active_profile|check_idempotency|save_idempotency)\b|(ALTER|DROP|CREATE)\s+TABLE\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?(product_parent_members|product_parents|inventory|inventory_transactions)\b)/i;
+const REDEFINED = /((CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+(FUNCTION|TABLE)\s+(IF\s+(NOT\s+)?EXISTS\s+)?(public\.)?"?[a-z_0-9]*tote_fill|inventory_transactions_transaction_type_check|(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+FUNCTION\s+(IF\s+EXISTS\s+)?(public\.)?"?(_product_parent_replay|_product_parent_require_admin|_product_parent_reason|is_admin|is_active_profile|check_idempotency|save_idempotency)\b|(ALTER|DROP|CREATE)\s+TABLE\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?(product_parent_members|product_parents|inventory|inventory_transactions)\b)/i;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'

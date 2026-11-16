@@ -104,8 +104,10 @@ AS $function$
     SELECT order_item_id, customer_id, min(source_invoice_id::text)::uuid AS any_source, sum(extended_cents) AS cents
       FROM credit GROUP BY order_item_id, customer_id, CASE WHEN order_item_id IS NULL THEN source_invoice_id END
   ), billed AS (
-    -- what that customer was billed for that order line, after discount and with its tax share (same lines and
-    -- statuses as the return price), and each lot's tax at its own invoice's tax / total
+    -- what that customer was billed for that order line, after discount and WITH its tax share (same lines and
+    -- statuses as the return price), and each lot's tax at its own invoice's tax / total. Both sides include tax:
+    -- _standing_discount_net_cents_20261231 adds the line's tax share, and the credit's cents are priced from it.
+    -- So $100 at 6.25% (10625) + $100 at 8.875% (10888) returned in full (21513) refunds 625 + 888 = 1513.
     SELECT k.order_item_id, k.customer_id,
            sum(public._standing_discount_net_cents_20261231(b.id)::numeric) AS billed_cents,
            sum(public._standing_discount_net_cents_20261231(b.id)::numeric
@@ -158,6 +160,7 @@ AS $function$
        AND x.deleted_at IS NULL AND x.status IN ('posted', 'overdue', 'paid')
        AND (x.created_at, x.id) < (me.created_at, me.id)
   )
+  -- (a 'sales_tax' line exists only on a chemical sale: guard_sales_tax_line_scope_20261231 refuses it elsewhere)
   SELECT COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
                     WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax'), 0)::bigint
        + COALESCE((SELECT (round(b.unrounded + me.unrounded) - round(b.unrounded))::bigint

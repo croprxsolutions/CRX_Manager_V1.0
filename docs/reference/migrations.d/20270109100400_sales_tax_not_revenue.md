@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Issue #1868 (Sol HIGH, MED): `20270109100400_sales_tax_not_revenue.sql` (SQL sha256: `993ed45a9570ee4b36ec3cf2e8444eff3802a09ccaeb9c5df4c779107f6045aa`). Sales tax stops counting as revenue in the two profit reports, and the two billing setters get `DEFAULT NULL` on `p_idempotency_key`.
+**LOCAL CANDIDATE — NOT APPLIED.** Issue #1868 (Sol HIGH, MED): `20270109100400_sales_tax_not_revenue.sql` (SQL sha256: `b030098735d26c1000b60be1dc5ac4c027e6995410e05443492d79bf6a8bfaf0`). Sales tax stops counting as revenue in the two profit reports, and the two billing setters get `DEFAULT NULL` on `p_idempotency_key`.
 
 **Why.** A taxed chemical sale's invoice total includes its `sales_tax` line (`20270109100200_sales_tax_checkbox`). `get_monthly_summary` (Month-End Close) and the P&L report (`get_bottom_line_pnl` → `_get_bottom_line_pnl_cost_impl_20261019`) summed invoice totals as revenue, so a $100 sale with $6.25 tax showed $106.25 revenue and $6.25 too much gross margin.
 

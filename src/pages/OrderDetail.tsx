@@ -1449,7 +1449,7 @@ export default function OrderDetail() {
   const deliveredValue = items.reduce((sum, i) => sum + lineCents(Math.min(i.quantity_delivered, i.total_units_needed), i.price_per_unit), 0);
   // "All delivered" only when every line is; a rounded percent caps at 99 while anything remains.
   const allDelivered = items.every((i) => i.quantity_delivered >= i.total_units_needed);
-  const deliveredPct = orderedValue > 0 ? (allDelivered ? 100 : Math.min(99, Math.round((deliveredValue / orderedValue) * 100))) : null;
+  const deliveredPct = Number.isFinite(orderedValue) && Number.isFinite(deliveredValue) && orderedValue > 0 ? (allDelivered ? 100 : Math.min(99, Math.round((deliveredValue / orderedValue) * 100))) : null;
   const showSectionNames = sections.length > 1 || sections[0] !== 'General';
   const pill = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-sm font-medium';
   const lineInput = 'w-full xl:w-24 px-2 py-1 min-h-11 md:min-h-0 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';

@@ -114,6 +114,11 @@ describe('SaleInvoicesCard', () => {
     expect(row.queryByText(/due$/)).toBeNull();
   });
 
+  it('a voided or cancelled invoice shows no due line', () => {
+    renderCard({ invoices: [{ ...invoices[0], status: 'voided', balanceCents: 73483 }, { ...invoices[1], status: 'cancelled', balanceCents: 1000 }] });
+    expect(screen.queryByText(/due$/)).toBeNull();
+  });
+
   it('keeps a share to two decimals', () => {
     renderCard({ invoices: [{ ...invoices[0], sharePct: 33.333333 }] });
     expect(screen.getByText('Maple Hollow Farms · 33.33%')).toBeInTheDocument();

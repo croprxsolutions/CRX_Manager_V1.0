@@ -78,8 +78,8 @@ export default function SaleInvoicesCard({
                     <span className="flex flex-none flex-col items-end gap-1">
                       <strong className="tabular-nums text-nav-dark">{formatCents(inv.totalCents)}</strong>
                       {(inv.paidCents ?? 0) > 0 && <span className="text-xs tabular-nums text-crx-green">Paid {formatCents(inv.paidCents!)}</span>}
-                      {/* Once posted: anything still owed (the whole total included) or a credit balance. Nothing when settled. */}
-                      {!isDraft(inv.status) && inv.balanceCents !== 0 && (
+                      {/* Once posted: anything still owed (the whole total included) or a credit balance. Nothing when settled, voided or cancelled. */}
+                      {!isDraft(inv.status) && inv.status !== 'voided' && inv.status !== 'cancelled' && inv.balanceCents !== 0 && (
                         <span className={`text-xs tabular-nums ${inv.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>
                           {inv.balanceCents > 0 ? `${formatCents(inv.balanceCents)} due` : `${formatCents(-inv.balanceCents)} credit`}
                         </span>

@@ -235,16 +235,21 @@ export function centsTimesQuantity(cents: number, quantityText: string | number)
 }
 
 /**
- * Exact cents for `quantity × dollars`, both as plain decimals, rounded half away from zero like
- * PostgreSQL's ROUND(numeric). No binary float: $1.005 × 1 is 101¢, $12,345,678,901.23 × 1 stays exact.
- * Anything that isn't a plain decimal (exponent notation, NaN) gives 0.
+ * Exact cents for `quantity × dollars`, both decimals (a JS number's exponent form such as 1e-7 is read
+ * exactly too), rounded half away from zero like PostgreSQL's ROUND(numeric). No binary float.
+ * Not a number → 0. A result past Number.MAX_SAFE_INTEGER cents → NaN (no neighbouring cent, as in
+ * centsTimesQuantity).
  */
 export function quantityTimesDollarsCents(quantity: string | number, dollars: string | number): number {
   const parse = (v: string | number) => {
-    const m = PLAIN_DECIMAL.exec(String(v ?? '').trim());
+    const m = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(v ?? '').trim());
     if (!m || (m[2] === '' && (m[3] ?? '') === '')) return null;
     const frac = m[3] || '';
-    return { n: BigInt((m[2] || '0') + frac) * (m[1] === '-' ? -1n : 1n), scale: frac.length };
+    const exp = Number(m[4] ?? 0);
+    let n = BigInt((m[2] || '0') + frac) * (m[1] === '-' ? -1n : 1n);
+    let scale = frac.length - exp;
+    if (scale < 0) { n *= 10n ** BigInt(-scale); scale = 0; }
+    return { n, scale };
   };
   const q = parse(quantity), d = parse(dollars);
   if (!q || !d) return 0;
@@ -252,5 +257,6 @@ export function quantityTimesDollarsCents(quantity: string | number, dollars: st
   const denom = 10n ** BigInt(q.scale + d.scale);
   const abs = product < 0n ? -product : product;
   const rounded = abs / denom + ((abs % denom) * 2n >= denom ? 1n : 0n);
+  if (rounded > BigInt(Number.MAX_SAFE_INTEGER)) return Number.NaN;
   return Number(product < 0n ? -rounded : rounded);
 }

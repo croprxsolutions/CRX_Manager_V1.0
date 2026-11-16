@@ -174,15 +174,16 @@ export function stampProblems({ added, base, head, changed = [], onMain = [], ma
 // already run, so its ledger row is renamed instead of running the SQL a second time. A restamp is a
 // file the ledger lacks whose sha256 matches exactly one row (after the baseline, holding SQL) that has
 // no file left and the same name after the stamp, with an older stamp, AND whose old file git shows was
-// deleted holding those same bytes (deleted(name) = sha256 of the old file as it was deleted, or null), so
-// the rename comes from a delete plus an add in the repo, not from ledger likeness alone (Sol, #1837).
+// deleted holding those same bytes in the change that added the new file (deleted(from, to) = sha256 of the
+// old file as that change deleted it, or null), so the rename comes from one delete plus add in the repo,
+// not from ledger likeness or an old, unrelated delete (Sol, #1837).
 const slug = (n) => n.slice(15);
 export function planRestamps({ stored, files, highWater, deleted }) {
   const fileless = [...stored].filter(([n, h]) => h && NAME.test(n) && n.slice(0, 14) > highWater && !files.has(n));
   const pairs = [];
   for (const [to, sha] of files) {
     if (stored.has(to) || !NAME.test(to)) continue;
-    const rows = fileless.filter(([n, h]) => h === sha && slug(n) === slug(to) && n.slice(0, 14) < to.slice(0, 14) && deleted(n) === sha);
+    const rows = fileless.filter(([n, h]) => h === sha && slug(n) === slug(to) && n.slice(0, 14) < to.slice(0, 14) && deleted(n, to) === sha);
     if (rows.length === 1) pairs.push({ from: rows[0][0], to, sha });
   }
   // A row two files could claim, or a file two rows could match, is ambiguous: neither is renamed.
@@ -377,11 +378,15 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   // sha256 of a migration file as this branch held it just before it left (needs full history), or null.
   // Staging's own first-parent line: the PR's merge commit, diffed against staging, so an edit on the PR
   // branch before the delete, or a restamp made inside a merge, still reads what staging ran (attack run, #1837).
-  const deleted = (stem) => {
-    const p = `supabase/migrations/${stem}.sql`;
+  // The same change must add the new file (it is in that commit and not in its first parent).
+  const deleted = (from, to) => {
+    const [p, q] = [from, to].map((n) => `supabase/migrations/${n}.sql`);
+    const git = (...a) => execFileSync('git', a, { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] });
+    const has = (ref) => { try { git('cat-file', '-e', ref); return true; } catch { return false; } };
     try {
-      const c = execFileSync('git', ['log', '-1', '--first-parent', '-m', '--format=%H', '--diff-filter=D', 'HEAD', '--', p], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      return c ? sha256(execFileSync('git', ['show', `${c}^:${p}`], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] })) : null;
+      const c = git('log', '-1', '--first-parent', '-m', '--format=%H', '--diff-filter=D', 'HEAD', '--', p).toString().trim().split('\n')[0];
+      if (!c || !has(`${c}:${q}`) || has(`${c}^:${q}`)) return null;
+      return sha256(git('show', `${c}^:${p}`));
     } catch { return null; }
   };
   const restamps = renameRestamps ? planRestamps({ stored, files: postFiles, highWater, deleted }) : [];

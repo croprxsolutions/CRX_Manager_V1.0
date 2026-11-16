@@ -39,7 +39,7 @@ applied on staging, sit below main's newest (`20270109100000`), so they are rest
   ordinary file's new name as a one-shot is refused too, so live never only records it (attack run).
 - **HIGH (Sol): the staging rename comes from git, not ledger likeness alone.** A row is renamed only if git
   shows its old file leaving `staging`'s own first-parent line holding the same bytes (the job now checks out
-  the full history). That reads what staging ran even if the PR edited the file before deleting it, or
+  the full history), in the same change that adds the new file (an old, unrelated delete doesn't count). That reads what staging ran even if the PR edited the file before deleting it, or
   restamped it inside a merge, and also allows only the staging ref (`renameTargetProblem`). A fileless row that was never a file in the repo blocks instead of being silently renamed.
 - **Anything unclean blocks:** a new file holding the exact SQL of any ledger row (a copy, or a new slug), and
   a backward restamp (MED 1 and 2).

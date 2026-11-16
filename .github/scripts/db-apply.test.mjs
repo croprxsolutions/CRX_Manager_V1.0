@@ -239,6 +239,7 @@ test('planRestamps: anything short of a clean restamp runs (or stops) as before'
   assert.deepEqual(one([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')], ['20270102000001_m4b', H('a')]]), [], 'two files could match');
   assert.deepEqual(one([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')]], () => null), [], 'git shows no delete of the old file (Sol, #1837): no rename');
   assert.deepEqual(one([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')]], () => H('d')), [], 'the old file was deleted holding other bytes: no rename');
+  assert.deepEqual(one([['20261231110000_m4b', H('a')]], [['20270102000000_m4b', H('a')]], (from, to) => (to === '20270102000000_m4b' ? null : H('a'))), [], 'the delete came with another change, not this add: no rename (Sol, #1837)');
 });
 test('unmatchedRestamps: a restamp that is not clean blocks instead of running again (Mason, 2026-11-12)', () => {
   const highWater = '20260727174805';

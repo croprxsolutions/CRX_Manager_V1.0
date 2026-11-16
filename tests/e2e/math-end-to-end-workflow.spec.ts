@@ -190,15 +190,11 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
 
     if (tableCount > 0) {
       // Look for line item totals in the table
-      const totalElements = page.locator('text=Total Price, text=Grand Total, text=Total').first();
-      const totalVisible = await totalElements.isVisible({ timeout: 3000 }).catch(() => false);
-      if (totalVisible) {
-        const parent = totalElements.locator('..');
-        const dollarEl = parent.locator('.font-mono, .font-medium, .font-semibold').first();
-        const dollarVisible = await dollarEl.isVisible({ timeout: 2000 }).catch(() => false);
-        if (dollarVisible) {
-          state.quoteTotalCents = parseDollars(await dollarEl.textContent());
-        }
+      // The quote total lives in the summary strip: dt "Quote total" + dd value.
+      const dollarEl = page.getByRole('region', { name: 'Summary' }).locator('dt:text-is("Quote total") + dd').first();
+      const dollarVisible = await dollarEl.isVisible({ timeout: 3000 }).catch(() => false);
+      if (dollarVisible) {
+        state.quoteTotalCents = parseDollars(await dollarEl.textContent());
       }
     }
 
@@ -231,13 +227,13 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         const h2 = page.locator('h2.font-semibold, h1.font-semibold').first();
         state.orderNumber = ((await h2.textContent()) ?? '').trim();
 
-        // Get order total from summary
-        const totalPriceLabel = page.locator('text=Total Price').first();
+        // Get order total from summary (Billing UI, Nov 13: the sale page tile is "Sale total", the order's total_price)
+        const totalPriceLabel = page.locator('text=Sale total').first();
         const totalVisible = await totalPriceLabel
           .isVisible({ timeout: 5000 })
           .catch(() => false);
         if (totalVisible) {
-          const val = await summaryValue(page, 'Total Price');
+          const val = await summaryValue(page, 'Sale total');
           state.orderTotalCents = parseDollars(val);
         }
 

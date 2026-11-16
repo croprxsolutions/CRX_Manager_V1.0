@@ -381,7 +381,7 @@ describe('Returns loading and retry behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: /RMA-A/ }));
     await screen.findByRole('heading', { name: 'Return: RMA-A' });
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    const firstApproveDialog = await screen.findByRole('dialog', { name: 'Approve Return' });
+    const firstApproveDialog = await screen.findByRole('alertdialog', { name: 'Approve Return' });
     fireEvent.click(within(firstApproveDialog).getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'network response lost after commit'));
 
@@ -392,7 +392,7 @@ describe('Returns loading and retry behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: /RMA-A/ }));
     await screen.findByRole('heading', { name: 'Return: RMA-A' });
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    const retryApproveDialog = await screen.findByRole('dialog', { name: 'Approve Return' });
+    const retryApproveDialog = await screen.findByRole('alertdialog', { name: 'Approve Return' });
     fireEvent.click(within(retryApproveDialog).getByRole('button', { name: 'Approve' }));
 
     await waitFor(() => expect(approveCalls).toBe(2));

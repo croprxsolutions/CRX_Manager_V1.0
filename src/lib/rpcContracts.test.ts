@@ -2759,9 +2759,10 @@ function registryMigrationHighWater(): string {
 // the staging-only M4 candidates below the applied-name high-water; production
 // has not applied these definitions, so their staging overlay stays explicit.
 const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
-  '20261231110000',
-  '20261231120000',
-  '20270103190000',
+  '20270109100100',
+  '20270109100200',
+  '20270109100300',
+  '20270109100400',
 ]);
 
 /**
@@ -2949,10 +2950,10 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _sync_product_vendor_copy:
     "private product-copy synchronizer called by sync_product_vendor_from_links trigger; live catalog denies EXECUTE to anon, authenticated, and service_role",
 
-  // M4a sales tax (local candidate 20261231120000): trigger function, never an RPC.
+  // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
-  // M4b standing discount (local candidate 20261231110000): trigger functions and their recompute helper, never RPCs.
+  // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',
   _standing_discount_after_line_change_20261231:
@@ -3010,6 +3011,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
+  _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per credited line pool of a posted return credit (skips one already frozen) or clears them when the credit leaves posted; every API-role EXECUTE is revoked',
+  trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger and immediate clear trigger on invoices for credit memos, both call _freeze_credit_sales_tax_20270109; never an RPC, every API-role EXECUTE is revoked',
   // Brand PR B part B-1b private helpers, applied live 2026-11-12; these remain internal to the recopy workflow.
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',
   _invoice_brand_recopy_invoice: 'internal B-1b helper (20270106110000): called only by _invoice_brand_recopy and the backfill; rewrites only the derived brand snapshot on one open draft; every API-role EXECUTE is revoked',

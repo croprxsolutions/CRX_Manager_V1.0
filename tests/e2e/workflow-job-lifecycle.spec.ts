@@ -100,7 +100,7 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
 
     // Handle UnsavedChangesModal race condition — React state batching may
     // not flush isDirty=false before the route blocker fires
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try { await leaveBtn.click({ timeout: 3000 }); } catch { /* no modal */ }
 
     // Wait for navigation to the saved job detail page (/jobs/{uuid})
@@ -395,7 +395,7 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
     await waitForPage(page, 8000);
 
     // Handle UnsavedChangesModal race condition if it appears
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try { await leaveBtn.click({ timeout: 3000 }); } catch { /* no modal */ }
 
     // Check if we navigated to an invoice page

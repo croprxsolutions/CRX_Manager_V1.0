@@ -196,6 +196,14 @@ describe('generateYearEndSummaryPdf', () => {
     expect(hasSeason).toBe(true);
   });
 
+  it('prints the season months joined by "to", with no dash', async () => {
+    await generateYearEndSummaryPdf(makeSummaryData());
+    const printed = mockDoc.text.mock.calls.map((c) => c[0]).flat().filter((s): s is string => typeof s === 'string');
+    const range = printed.find((s) => / to /.test(s) && /2026/.test(s));
+    expect(range).toMatch(/^\S+ 2026 to \S+ 2026$/);
+    expect(printed.join(' ')).not.toMatch(/[—–]/);
+  });
+
   it('handles empty product usage', async () => {
     const doc = await generateYearEndSummaryPdf(makeSummaryData({ product_usage: [] }));
     expect(doc).toBe(mockDoc);

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 const { updateServiceWorker, registerOptions } = vi.hoisted(() => ({
@@ -19,21 +19,39 @@ vi.mock('virtual:pwa-register/react', () => ({
 import UpdatePrompt from './UpdatePrompt';
 
 describe('UpdatePrompt', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    updateServiceWorker.mockClear();
+  });
+
   it('shows a prominent update action above the mobile bottom navigation', async () => {
     window.innerWidth = 375;
     render(<UpdatePrompt />);
 
-    const updateButton = await screen.findByRole('button', { name: 'Update now' });
+    expect(await screen.findByText('A new version of CRX is ready')).toBeInTheDocument();
+    const updateButton = await screen.findByRole('button', { name: 'Reload' });
     const prompt = screen.getByTestId('update-prompt');
 
     expect(updateButton).toHaveClass('min-h-11', 'bg-crx-green');
     expect(prompt).toHaveClass(
-      'bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]',
+      'bottom-[calc(3.5rem+max(1rem,var(--page-bar-h,0px))+env(safe-area-inset-bottom)+0.75rem)]',
       'md:bottom-4'
     );
 
     fireEvent.click(updateButton);
     expect(updateServiceWorker).toHaveBeenCalledWith(true);
+  });
+
+  it('Later hides it for now, stores nothing, and a reload shows it again', async () => {
+    const first = render(<UpdatePrompt />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Later' }));
+    expect(screen.queryByTestId('update-prompt')).not.toBeInTheDocument();
+    expect(sessionStorage.length).toBe(0);
+    expect(updateServiceWorker).not.toHaveBeenCalled();
+
+    first.unmount();
+    render(<UpdatePrompt />);
+    expect(await screen.findByTestId('update-prompt')).toBeInTheDocument();
   });
 
   // Sentry CRX-MANAGER-1G: a rejected hourly update check surfaced as an unhandled rejection.

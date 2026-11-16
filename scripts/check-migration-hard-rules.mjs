@@ -42,6 +42,16 @@
 //   "is this file in the list" proves nothing either way. Taking a MAXIMUM over
 //   the stamps needs no per-file match and is unaffected by that mismatch.
 //
+// RESTAMPS OF A MIGRATION THAT NEVER REACHED MAIN (2026-11-16, #1868)
+//   On staging a migration can sit below the high-water above without being live: it waits on staging
+//   while main (and live) moves past its stamp. Mason's restamp (ship.md, 2026-11-04) then moves it to a
+//   newer stamp with byte-identical SQL. That deletion is not an edit of an applied migration when the old
+//   file never appears in origin/main's history (main is what live runs; the staging job renames its ledger
+//   row, #1837). A shallow clone, or a git error while checking main, counts as "on main".
+//   Only an exact pair counts: one deleted and one added file, the same git blob, the same name after the
+//   stamp, a newer stamp, and several pairs in the same order. Without a readable origin/main nothing is
+//   exempt (fail closed). Each exemption is printed.
+//
 // WHAT COUNTS AS A NEW TABLE
 //   Every CREATE TABLE in an ADDED migration file or a revised pending
 //   migration that still exists at HEAD, except TEMP/TEMPORARY tables. Pending
@@ -235,6 +245,29 @@ export function parseNameStatus(raw) {
   return entries;
 }
 
+/**
+ * Deleted migrations that are byte-identical restamps of a file not on main.
+ * deleted/added: migration paths; blob(ref, path): git blob id or null; everOnMain(path): true when the
+ * file appears anywhere in main's history, or when that can't be read. Returns [{ from, to }].
+ */
+export function stagingOnlyRestamps({ deleted, added, blob, base, head, everOnMain }) {
+  const name = (p) => path.posix.basename(p);
+  const slug = (p) => name(p).slice(15);
+  const stamp = (p) => migrationVersion(p);
+  const pairs = [];
+  for (const from of deleted) {
+    if (!stamp(from) || everOnMain(from)) continue;
+    const b = blob(base, from);
+    if (!b) continue;
+    const to = added.filter((a) => stamp(a) && slug(a) === slug(from) && stamp(a) > stamp(from) && blob(head, a) === b);
+    if (to.length === 1) pairs.push({ from, to: to[0] });
+  }
+  const clean = pairs.filter((p) => pairs.filter((q) => q.to === p.to).length === 1);
+  const byFrom = [...clean].sort((a, b) => a.from.localeCompare(b.from)).map((p) => name(p.to)).join();
+  const byTo = clean.map((p) => name(p.to)).sort().join();
+  return byFrom === byTo ? clean : [];
+}
+
 // ---------------------------------------------------------------------------
 // Git plumbing
 // ---------------------------------------------------------------------------
@@ -290,12 +323,30 @@ export function runDiffCheck({ repoRoot, base, head: headRef, log = console.log 
     'diff', '--name-status', '--no-renames', '-z', mergeBase, head, '--', MIGRATIONS_DIR,
   ]);
   const entries = parseNameStatus(rawStatus);
-  const { protectedChanges, pendingChanges, added } = classifyMigrationChanges(entries, highWater);
+  const classified = classifyMigrationChanges(entries, highWater);
+  const { pendingChanges, added } = classified;
+  const blob = (ref, relPath) => { try { return git(repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}:${relPath}`]).trim() || null; } catch { return null; } };
+  const restamps = stagingOnlyRestamps({
+    deleted: classified.protectedChanges.filter((c) => c.status === 'D').map((c) => c.path),
+    added, blob, base: mergeBase, head, everOnMain: (relPath) => {
+      // Fail closed: a shallow clone (history may be missing), no origin/main, or any git error counts as "on main".
+      try { if (git(repoRoot, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') return true; } catch { return true; }
+      const main = resolveCommit(repoRoot, 'origin/main');
+      if (!main) return true;
+      // --full-history: no merge simplification can hide a commit that held the file.
+      try { return git(repoRoot, ['log', '-1', '--full-history', '--format=%H', main, '--', relPath]).trim() !== ''; } catch { return true; }
+    },
+  });
+  const restamped = new Set(restamps.map((r) => r.from));
+  const protectedChanges = classified.protectedChanges.filter((c) => !(c.status === 'D' && restamped.has(c.path)));
 
   log(`MIGRATION HARD RULES: comparing ${mergeBase.slice(0, 12)} (merge-base) -> ${head.slice(0, 12)}`);
   log(`  applied high-water mark (from base registry): ${highWater ?? 'UNREADABLE — treating every base migration as applied'}`);
   log(`  migrations added: ${added.length}, revised in pending band: ${pendingChanges.length}, applied-and-changed: ${protectedChanges.length}`);
 
+  for (const r of restamps) {
+    log(`  ↻ restamp of a migration not on main (byte-identical, newer stamp; not an applied-migration delete): ${r.from} -> ${r.to}`);
+  }
   let ok = true;
   for (const change of protectedChanges) {
     ok = false;

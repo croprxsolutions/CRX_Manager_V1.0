@@ -2217,7 +2217,7 @@ export default function PurchaseOrderDetail() {
                                     ...newItems[idx],
                                     product_id: p.id,
                                     product_name: p.product_name || 'Unnamed product',
-                                    unit_size: p.unit_size || '',
+                                    unit_size: p.inventory_unit || p.unit_size || '',
                                     product: p,
                                   };
                                   setEditItems(newItems);

@@ -65,6 +65,12 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
+  it('explains a unit-rule refusal (20270111110000) without the raw token', () => {
+    const sentence = 'this purchase order line is in "Gallon" but the product is stocked in "Gal". Enter the quantity in Gal.';
+    expect(sanitizeError({ code: '23514', message: `LINE_UNIT_NOT_STOCK_UNIT: ${sentence}` }))
+      .toBe(`Nothing was saved. ${sentence}`);
+  });
+
   // The RAISE texts of 20261105190000_sale_lines_refuse_missing_price.sql with the product filled in.
   it.each([
     ['QUOTE_PRICE_MISSING', "Atrazine 4L has no price for this quote's tier, so its line would show $0. Type a price on the line, or set the product's prices first (give it a $0 price if you give it away)."],

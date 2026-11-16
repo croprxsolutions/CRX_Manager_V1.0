@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCents, formatExactCents, formatExactUSD, formatUSD, centsToDollarInput, centsTimesQuantity, isExactDecimalText, quantitySurvivesSave, sameExactDecimal } from './money';
+import { formatCents, formatExactCents, formatExactUSD, formatUSD, centsToDollarInput, centsTimesQuantity, isExactDecimalText, quantitySurvivesSave, sameExactDecimal, quantityTimesDollarsCents } from './money';
 
 /**
  * money.ts is the canonical formatter for a codebase where money is stored as
@@ -305,5 +305,18 @@ describe('centsTimesQuantity — exact parity with the server safe_cents_qty', (
       expect(sameExactDecimal('0.3', '0.30000000000000004')).toBe(false);
       expect(sameExactDecimal('-2.5', '2.5')).toBe(false);
     });
+  });
+});
+
+describe('quantityTimesDollarsCents', () => {
+  it('is exact where binary float is not', () => {
+    expect(quantityTimesDollarsCents(1, 1.005)).toBe(101);
+    expect(quantityTimesDollarsCents(1, 1.0049999999999)).toBe(100);
+    expect(quantityTimesDollarsCents(1, 12345678901.23)).toBe(1234567890123);
+    expect(quantityTimesDollarsCents('0.3', '0.05')).toBe(2); // 1.5¢ rounds away from zero
+  });
+  it('gives 0 for anything that is not a plain decimal', () => {
+    expect(quantityTimesDollarsCents('1e3', 1)).toBe(0);
+    expect(quantityTimesDollarsCents(Number.NaN, 1)).toBe(0);
   });
 });

@@ -140,8 +140,8 @@ REVOKE ALL ON FUNCTION public._invoice_line_tax_shares_20270109(uuid) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public._invoice_line_tax_shares_20270109(uuid) TO service_role;
 
 -- 2. A return credit's tax, frozen in whole cents when it posts ----------------------------------------------------
--- One row per credited line pool: an order line (line_key = order_item_id), or a source invoice's charges
--- (line_key = that invoice). Never recomputed; leaving posted removes the credit's rows.
+-- One row per credited line pool: an order line (line_key = order_item_id), or a source invoice's lines with no
+-- order line, charges or hand-billed products (line_key = that invoice). Never recomputed; leaving posted removes the credit's rows.
 CREATE TABLE public.credit_memo_sales_tax (
   invoice_id uuid NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
   line_key uuid NOT NULL,
@@ -190,6 +190,9 @@ BEGIN
   IF NOT FOUND OR v_inv.invoice_type IS DISTINCT FROM 'credit_memo' THEN
     RETURN;
   END IF;
+  -- one freeze or clear per customer at a time, so a credit never freezes against one being cleared
+  -- (ponytail: per customer; a per-line-pool lock if credits ever queue up)
+  PERFORM pg_advisory_xact_lock(hashtextextended('credit_memo_sales_tax:' || v_inv.customer_id::text, 0));
   IF v_inv.deleted_at IS NOT NULL OR v_inv.status NOT IN ('posted', 'overdue', 'paid') THEN
     DELETE FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id;
     RETURN;
@@ -197,9 +200,9 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id) THEN
     RETURN;  -- already frozen (posted -> overdue -> paid keeps it)
   END IF;
-  -- ponytail: one credit per customer at a time (a per-line-pool lock if credits ever queue up)
-  PERFORM pg_advisory_xact_lock(hashtextextended('credit_memo_sales_tax:' || v_inv.customer_id::text, 0));
   FOR v_key IN
+    -- a credited line with no order line (a charge, or a product billed by hand) pools with its source invoice's
+    -- other lines that have no order line
     SELECT COALESCE(src.order_item_id, src.invoice_id) AS line_key, src.order_item_id IS NULL AS is_charge,
            sum(ii.extended_cents) AS cents
       FROM public.invoice_items ii
@@ -217,7 +220,7 @@ BEGIN
        AND i.status IN ('posted', 'overdue', 'paid')
        AND COALESCE(i.posted_at, i.created_at) <= v_inv.booked_at
        AND CASE WHEN v_key.is_charge
-                THEN i.id = v_key.line_key AND b.product_id IS NULL
+                THEN i.id = v_key.line_key AND b.order_item_id IS NULL
                 ELSE i.id IN (SELECT o.invoice_id FROM public.invoice_items o WHERE o.order_item_id = v_key.line_key)
                      AND b.order_item_id = v_key.line_key AND b.quantity > 0 AND b.product_id IS NOT NULL
            END;

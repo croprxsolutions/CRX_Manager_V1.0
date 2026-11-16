@@ -38,7 +38,7 @@ import { Sentry } from '../lib/sentry';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
-import { formatUSD as fmt } from '../lib/money';
+import { formatUSD as fmt, quantityTimesDollarsCents } from '../lib/money';
 import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -1444,8 +1444,7 @@ export default function OrderDetail() {
     salesmanName && `Sales: ${salesmanName}`,
   ].filter(Boolean).join(' · ');
   // Delivered share of the products, by value in whole cents.
-  // toPrecision(12) drops binary-float noise first, so $1.005 × 1 is 101¢, not 100¢ (display only).
-  const lineCents = (units: number, price: number) => Math.round(Number((units * price * 100).toPrecision(12)));
+  const lineCents = (units: number, price: number) => quantityTimesDollarsCents(units, price);
   const orderedValue = items.reduce((sum, i) => sum + lineCents(i.total_units_needed, i.price_per_unit), 0);
   const deliveredValue = items.reduce((sum, i) => sum + lineCents(Math.min(i.quantity_delivered, i.total_units_needed), i.price_per_unit), 0);
   // "All delivered" only when every line is; a rounded percent caps at 99 while anything remains.

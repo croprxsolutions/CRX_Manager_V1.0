@@ -457,7 +457,16 @@ function rulesCases() {
     DELETE FROM public.order_items WHERE id = '${GAL_OI}';
     UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';
     SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'Qt');
-  console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal, and saves once none are; blanking the unit with lines open is refused too');
+  refusedProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
+    DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.products SET inventory_unit = 'Tote', unit_size = 'Tote' WHERE id = '${GAL}';`, /PRODUCT_STOCK_UNIT_UNKNOWN: "Tote" is not a known unit/);
+  // A product with no stock unit (none live) takes a blank line but refuses a typed unit.
+  refusedProbe(`SET session_replication_role = replica;
+    UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';
+    SET session_replication_role = origin;
+    INSERT INTO public.purchase_order_items (purchase_order_id, product_id, unit_size, quantity_ordered, unit_cost)
+      VALUES ('${PO2}', '${GAL}', 'Gal', 1, 1);`, /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Gal" but the product has no stock unit/);
+  console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal, and saves once none are; blanking the unit with lines open is refused too; an unknown stock unit ("Tote") is refused; a product with no stock unit refuses a typed line unit');
 
   // A legacy mismatched open line (written before the rules) is refused at receiving; nothing moves.
   const LEGACY = id('b41');
@@ -516,13 +525,15 @@ function quoteCases() {
   okProbe(line('OZ', 10));
   okProbe(line('bogus', 10, 'units_direct'));
   refusedProbe(line('bogus', 10, 'other_mode'), /QUOTE_RATE_UNIT_UNKNOWN/);
+  refusedProbe(line('Lb', 10), /QUOTE_RATE_UNIT_WRONG_TYPE: rate unit "Lb" is a dry unit but this product is stocked in "Gal" \(liquid\)/);
+  okProbe(line('Ea', 10));
   // A seed/each line with a blank rate unit is filled from the stock unit by the older guard first, then saves.
   // (product guards off for the one setup write only: the container has no seed unit rows to validate against)
   assert.equal(okProbe(`SET session_replication_role = replica;
     UPDATE public.products SET product_form = 'seed', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${GAL}';
     SET session_replication_role = origin;
 ${line(null, 10).replace(/;$/, ' RETURNING rate_unit;')}`), 'Lb');
-  console.log('[case] 7 a quote line (any mode but units-direct) with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, a units-direct line, and a blank-unit seed line (filled from its stock unit first) save');
+  console.log('[case] 7 a quote line (any mode but units-direct) with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, a units-direct line, a count unit (Ea), and a blank-unit seed line (filled from its stock unit first) save; a dry rate unit (Lb) on a liquid product is refused');
 }
 
 function rollbackCases() {

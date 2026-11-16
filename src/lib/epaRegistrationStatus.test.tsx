@@ -117,7 +117,7 @@ describe('useCancelledRegistrations', () => {
     const { result } = renderHook(() => useCancelledRegistrations(['524-475']));
     expect(result.current.lookup).toBe('checking');
     await act(async () => { answer(reply([cancelledRow('524-475')])); });
-    expect(result.current).toEqual({ key: '524-475', lookup: 'done', cancelled: new Map([['524-475', null]]) });
+    expect(result.current).toEqual({ key: '524-475', lookup: 'done', cancelled: new Map([['524-475', null]]), rows: new Map([['524-475', cancelledRow('524-475')]]) });
   });
 
   it('failed read: failed', async () => {

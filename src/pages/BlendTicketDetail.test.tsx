@@ -954,7 +954,7 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     const createInvoice = await screen.findByRole('button', { name: 'Create Invoice' });
     await waitFor(() => expect(createInvoice).toBeEnabled());
     fireEvent.click(createInvoice);
-    const confirm = await screen.findByRole('dialog');
+    const confirm = await screen.findByRole('alertdialog');
     fireEvent.click(within(confirm).getByRole('button', { name: /create invoice/i }));
     await waitFor(() => {
       expect(mockRpc.mock.calls.some(([name]) => name === 'create_invoice_from_blend_ticket')).toBe(true);
@@ -1032,10 +1032,10 @@ describe('BlendTicketDetail — Phase 1 contract', () => {
     const createInvoice = await screen.findByRole('button', { name: 'Create Invoice' });
     await waitFor(() => expect(createInvoice).toBeEnabled());
     fireEvent.click(createInvoice);
-    const confirm = await screen.findByRole('dialog');
+    const confirm = await screen.findByRole('alertdialog');
     fireEvent.click(within(confirm).getByRole('button', { name: /create invoice/i }));
 
-    const approval = await screen.findByRole('dialog', { name: 'Approve below-cost price' });
+    const approval = await screen.findByRole('dialog', { name: 'Approve a below-cost price?' });
     expect(within(approval).getByText(/billed free of charge/)).toBeInTheDocument();
     // Every $0 product the one reason approves is listed (Mason, 2026-10-20).
     expect(within(approval).getByText(/covers every product below/)).toBeInTheDocument();

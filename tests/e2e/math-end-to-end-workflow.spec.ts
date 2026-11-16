@@ -14,6 +14,7 @@ import {
   waitForPageStable,
   assertCentsEqual,
 } from './utils/math-helpers';
+import { amountDueCents, invoiceLineAmounts, linesCardTotalCents } from './utils/invoice-lines';
 
 // Shared state across serial tests
 const state = {
@@ -190,15 +191,11 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
 
     if (tableCount > 0) {
       // Look for line item totals in the table
-      const totalElements = page.locator('text=Total Price, text=Grand Total, text=Total').first();
-      const totalVisible = await totalElements.isVisible({ timeout: 3000 }).catch(() => false);
-      if (totalVisible) {
-        const parent = totalElements.locator('..');
-        const dollarEl = parent.locator('.font-mono, .font-medium, .font-semibold').first();
-        const dollarVisible = await dollarEl.isVisible({ timeout: 2000 }).catch(() => false);
-        if (dollarVisible) {
-          state.quoteTotalCents = parseDollars(await dollarEl.textContent());
-        }
+      // The quote total lives in the summary strip: dt "Quote total" + dd value.
+      const dollarEl = page.getByRole('region', { name: 'Summary' }).locator('dt:text-is("Quote total") + dd').first();
+      const dollarVisible = await dollarEl.isVisible({ timeout: 3000 }).catch(() => false);
+      if (dollarVisible) {
+        state.quoteTotalCents = parseDollars(await dollarEl.textContent());
       }
     }
 
@@ -231,13 +228,13 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         const h2 = page.locator('h2.font-semibold, h1.font-semibold').first();
         state.orderNumber = ((await h2.textContent()) ?? '').trim();
 
-        // Get order total from summary
-        const totalPriceLabel = page.locator('text=Total Price').first();
+        // Get order total from summary (Billing UI, Nov 13: the sale page tile is "Sale total", the order's total_price)
+        const totalPriceLabel = page.locator('text=Sale total').first();
         const totalVisible = await totalPriceLabel
           .isVisible({ timeout: 5000 })
           .catch(() => false);
         if (totalVisible) {
-          const val = await summaryValue(page, 'Total Price');
+          const val = await summaryValue(page, 'Sale total');
           state.orderTotalCents = parseDollars(val);
         }
 
@@ -344,15 +341,21 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
     const h1 = page.locator('h1').first();
     state.invoiceNumber = ((await h1.textContent()) ?? '').trim();
 
-    // Look for line items table
-    const lineItemsHeading = page.locator('text=Line Items').first();
+    // Look for line items table (Billing UI, Nov 13: the card is "What this invoice bills"; its table holds the
+    // product lines, while charges and the worked-out discount and tax lines sit below it)
+    const lineItemsHeading = page.getByRole('heading', { name: 'What this invoice bills' }).first();
     const hasLineItems = await lineItemsHeading.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (hasLineItems) {
-      // Find the table below the "Line Items" heading
-      const table = page.locator('table').first();
+      // Find the product table inside that card, and its columns by header
+      const linesCard = page.locator('section[aria-labelledby="invoice-lines-title"]');
+      const table = linesCard.locator('table').first();
       const bodyRows = table.locator('tbody tr');
       const rowCount = await bodyRows.count();
+      const headers = (await table.locator('thead th').allTextContents()).map((h) => h.trim());
+      const qtyCol = headers.indexOf('Qty');
+      const priceCol = headers.indexOf('Unit price');
+      const amountCol = headers.indexOf('Amount');
 
       let recalcSubtotal = 0;
       const lineItems: { qty: number; priceCents: number; extendedCents: number }[] = [];
@@ -362,28 +365,28 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         const cellCount = await cells.count();
         if (cellCount < 4) continue;
 
-        // Columns: Product | Qty | Unit Price | Extended | (delete)
-        // Qty and Unit Price may be <input> elements in edit mode
+        // Columns: Product | (Vendor) | Qty | Unit price | (Tote #) | Amount (with the remove button)
+        // Qty and Unit price may be <input> elements in edit mode
         let qty = 0;
-        const qtyInput = cells.nth(1).locator('input').first();
+        const qtyInput = cells.nth(qtyCol).locator('input').first();
         const qtyInputVisible = await qtyInput.isVisible({ timeout: 500 }).catch(() => false);
         if (qtyInputVisible) {
           qty = parseFloat(await qtyInput.inputValue() || '0') || 0;
         } else {
-          qty = parseQuantity((await cells.nth(1).textContent()) ?? '');
+          qty = parseQuantity((await cells.nth(qtyCol).textContent()) ?? '');
         }
 
         let priceCents = 0;
-        const priceInput = cells.nth(2).locator('input').first();
+        const priceInput = cells.nth(priceCol).locator('input').first();
         const priceInputVisible = await priceInput.isVisible({ timeout: 500 }).catch(() => false);
         if (priceInputVisible) {
           const dollarVal = parseFloat(await priceInput.inputValue() || '0') || 0;
           priceCents = Math.round(dollarVal * 100);
         } else {
-          priceCents = parseDollars((await cells.nth(2).textContent()) ?? '');
+          priceCents = parseDollars((await cells.nth(priceCol).textContent()) ?? '');
         }
 
-        const extendedCents = parseDollars((await cells.nth(3).textContent()) ?? '');
+        const extendedCents = parseDollars((await cells.nth(amountCol).textContent()) ?? '');
 
         if (qty > 0 && priceCents > 0) {
           lineItems.push({ qty, priceCents, extendedCents });
@@ -395,27 +398,35 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
         }
       }
 
-      // Get displayed subtotal from the summary card
-      const subtotalLabel = page.locator('text=Subtotal').first();
-      const subtotalVisible = await subtotalLabel.isVisible({ timeout: 3000 }).catch(() => false);
-      if (subtotalVisible && lineItems.length > 0) {
-        const subtotalParent = subtotalLabel.locator('..');
-        const subtotalVal = subtotalParent.locator('.font-medium').first();
-        const displayedSubtotal = parseDollars(await subtotalVal.textContent());
-
-        // Verify sum of extended = displayed subtotal
-        assertCentsEqual(recalcSubtotal, displayedSubtotal, 2,
-          `Sum of line items ($${(recalcSubtotal / 100).toFixed(2)}) should match subtotal ($${(displayedSubtotal / 100).toFixed(2)})`);
-        state.invoiceTotalCents = displayedSubtotal;
+      // Every line the invoice shows (product rows, Charges, and the "Worked out for you" discount and tax)
+      // must add up to Amount due's "Invoice total", as the old all-lines table did to "Subtotal".
+      const allLines = await invoiceLineAmounts(page);
+      const invoiceTotal = await amountDueCents(page, 'Invoice total');
+      if (invoiceTotal !== null && lineItems.length > 0) {
+        assertCentsEqual(allLines.totalCents, invoiceTotal, 2,
+          `Products + charges + worked-out lines ($${(allLines.totalCents / 100).toFixed(2)}) should match Invoice total ($${(invoiceTotal / 100).toFixed(2)})`);
+        state.invoiceTotalCents = invoiceTotal;
       }
 
-      // Get tfoot total and verify it matches subtotal
-      const tfootTotal = table.locator('tfoot td').last();
-      const tfootVisible = await tfootTotal.isVisible({ timeout: 2000 }).catch(() => false);
-      if (tfootVisible && recalcSubtotal > 0) {
-        const tfootCents = parseDollars(await tfootTotal.textContent());
-        assertCentsEqual(tfootCents, recalcSubtotal, 2,
-          'Table footer total should match sum of line items');
+      // Extra check: the product rows add up to "Products" in Amount due
+      const displayedProducts = await amountDueCents(page, 'Products');
+      if (displayedProducts !== null && lineItems.length > 0) {
+        assertCentsEqual(recalcSubtotal, displayedProducts, 2,
+          `Sum of product lines ($${(recalcSubtotal / 100).toFixed(2)}) should match Products ($${(displayedProducts / 100).toFixed(2)})`);
+      }
+
+      // The lines card ends with "Invoice total" ("Lines total" when it differs from the saved total; the old table footer): it must match the lines above it
+      const footerCents = await linesCardTotalCents(page);
+      if (footerCents !== null && recalcSubtotal > 0) {
+        assertCentsEqual(footerCents, allLines.totalCents, 2,
+          'Lines card total should match the sum of its lines');
+        // And against Amount due itself, not only the lines it was summed from, when the card says "Invoice total"
+        // ("Lines total" means the lines differ from the saved total, e.g. unsaved edits).
+        const footerLabel = ((await page.locator('section[aria-labelledby="invoice-lines-title"]')
+          .getByText(/^(Invoice|Lines) total$/).first().textContent()) ?? '').trim();
+        if (footerLabel === 'Invoice total' && invoiceTotal !== null) {
+          assertCentsEqual(footerCents, invoiceTotal, 2, 'Lines card Invoice total should match Amount due Invoice total');
+        }
       }
     }
 
@@ -508,16 +519,17 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
       const visible = await el.isVisible({ timeout: 2000 }).catch(() => false);
       if (!visible) return 0;
       const parent = el.locator('..');
-      const valueEl = parent.locator('.font-medium, .font-semibold, .text-crx-green, .text-red-600').first();
+      const valueEl = parent.locator('.tabular-nums, .font-medium, .font-semibold, .text-crx-green, .text-red-600').first();
       const valVisible = await valueEl.isVisible({ timeout: 2000 }).catch(() => false);
       if (!valVisible) return 0;
       return parseDollars(await valueEl.textContent());
     };
 
-    const subtotal = await getVal('Subtotal');
+    // Billing UI (Nov 13): Amount due shows "Invoice total" (the old "Subtotal", all lines); "Prepay applied" only when above 0
+    const subtotal = await getVal('Invoice total');
     const paid = await getVal('Paid');
-    const prepay = await getVal('Prepay Applied');
-    const balance = await getVal('Balance Due');
+    const prepay = await getVal('Prepay applied');
+    const balance = await getVal('Balance due');
 
     // If we have meaningful values, verify the balance formula
     if (subtotal > 0) {

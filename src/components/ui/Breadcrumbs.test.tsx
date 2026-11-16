@@ -51,4 +51,9 @@ describe('Breadcrumbs', () => {
     renderBreadcrumbs([{ label: 'Home' }]);
     expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument();
   });
+
+  it('links are 44px tall below md', () => {
+    renderBreadcrumbs([{ label: 'Orders', href: '/orders' }, { label: 'ORD-1234' }]);
+    expect(screen.getByRole('button', { name: 'Orders' }).className).toMatch(/min-h-11 md:min-h-0/);
+  });
 });

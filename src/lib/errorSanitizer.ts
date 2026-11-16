@@ -228,7 +228,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'An existing return credit is missing its protected cost source. Void or unapply it and contact support before retrying'],
   [/^RETURN_CREDIT_REVERSAL_EXCEEDS_RECOGNIZED\b/i,
    'This return would reverse more product cost than the related sales invoices recorded. No changes were saved; review the source invoices and earlier return credits'],
-  // Sales tax box (billing plan M4a, 20261231120000).
+  // Sales tax box (billing plan M4a, 20270109100200).
   [/^SALES_TAX_NOT_ALLOWED\b/i,
    "Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved"],
   [/^SALES_TAX_RATE_MISSING\b/i, 'Set the sales tax rate in Settings first. No changes were saved'],

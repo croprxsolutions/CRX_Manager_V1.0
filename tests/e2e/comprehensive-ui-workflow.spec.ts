@@ -140,7 +140,7 @@ async function getUserId(page: Page): Promise<string> {
 }
 
 async function dismissLeaveDialog(page: Page) {
-  const leaveBtn = page.getByRole('button', { name: 'Leave' });
+  const leaveBtn = page.getByRole('button', { name: 'Discard changes' });
   if (await leaveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await leaveBtn.click();
     await waitForPageStable(page, 1000);
@@ -407,8 +407,8 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
       const prod = prods[i];
       const expectedQty = quantities[i];
 
-      // Click "Add Item"
-      const addBtn = page.getByRole('button', { name: /Add Item/i }).first();
+      // Click "Add one" (empty section) or "Add product"
+      const addBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
       if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
         await addBtn.scrollIntoViewIfNeeded();
         await addBtn.click();
@@ -443,7 +443,7 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
 
       // Set units needed
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      const unitsInputs = page.locator('input[aria-label="Units needed"]');
+      const unitsInputs = page.locator('input[aria-label="Quantity"]');
       const unitsInput = unitsInputs.nth(i);
       if (await unitsInput.isVisible({ timeout: 2000 }).catch(() => false)) {
         await unitsInput.fill(String(expectedQty));
@@ -544,27 +544,15 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
     if (!S.quoteId) test.skip();
     await nav(page, `/quotes/${S.quoteId}`);
 
-    // Look for planned/is_planned toggle checkbox
-    const plannedCheckbox = page.locator('input[type="checkbox"]').filter({ hasText: /planned/i }).first();
-    const plannedLabel = page.getByText(/Planned Program/i).first();
-    if (await plannedLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
-      // Check if checkbox near the label is unchecked
-      const checkbox = plannedLabel.locator('..').locator('input[type="checkbox"]').first();
-      if (await checkbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const isChecked = await checkbox.isChecked();
-        if (!isChecked) {
-          await checkbox.click();
-          await waitForPageStable(page, 1000);
-          // Save
-          await btnIfVisible(page, /Save Draft/i);
-          await waitForPageStable(page, 2000);
-        }
-      }
-    } else if (await plannedCheckbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const isChecked = await plannedCheckbox.isChecked();
-      if (!isChecked) {
-        await plannedCheckbox.click();
+    // Look for the Planned program switch (Details card)
+    const plannedSwitch = page.getByRole('switch', { name: /Planned program/ });
+    if (await plannedSwitch.isVisible({ timeout: 3000 }).catch(() => false)) {
+      if (!(await plannedSwitch.isChecked())) {
+        // The switch input is visually hidden; its label toggles it, as a user would click it.
+        await page.getByText('Planned program', { exact: true }).click();
         await waitForPageStable(page, 1000);
+        expect(await plannedSwitch.isChecked()).toBe(true);
+        // Save
         await btnIfVisible(page, /Save Draft/i);
         await waitForPageStable(page, 2000);
       }

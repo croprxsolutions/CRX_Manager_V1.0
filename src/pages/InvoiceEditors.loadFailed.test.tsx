@@ -146,7 +146,7 @@ describe('Invoice Detail', () => {
 
     H.failing.delete('invoice_items');
     tryAgain();
-    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeInTheDocument();
     expect(screen.queryAllByDisplayValue('Widget 2.5 GL').length + screen.queryAllByText('Widget 2.5 GL').length).toBeGreaterThan(0);
   });
 
@@ -198,7 +198,7 @@ describe('Invoice Detail', () => {
     H.failing.delete('invoice_items');
     H.tables.invoice_items = [{ ...line, id: 'ii2', description: 'Gadget 1 GL', product: { product_name: 'Gadget 1 GL' } }];
     // The newest load finishes first, showing the new lines.
-    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeInTheDocument();
     expect(screen.queryAllByText('Gadget 1 GL').length + screen.queryAllByDisplayValue('Gadget 1 GL').length).toBeGreaterThan(0);
     // Then the first load's line read answers, with the lines of the moment it was asked.
     expect(H.held.length).toBe(1);
@@ -215,7 +215,7 @@ describe('Invoice Detail', () => {
     open();
     H.functions.save_invoice = 'inv1';
     H.failing.set('save_invoice', 'held');
-    fireEvent.click(await screen.findByRole('button', { name: /^Save$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
     // The save is out; move to another invoice whose line read is out too.
     await waitFor(() => expect(H.held.length).toBe(1));
     const other = { ...invoice, order_id: 'o1', id: 'inv2', invoice_number: 'INV-1002' };
@@ -230,7 +230,7 @@ describe('Invoice Detail', () => {
     // Then the second invoice's line read answers: the second invoice shows.
     H.failing.delete('invoice_items');
     await act(async () => { release(); });
-    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeInTheDocument();
     expect(screen.getAllByText('INV-1002').length).toBeGreaterThan(0);
   });
 
@@ -246,7 +246,7 @@ describe('Invoice Detail', () => {
   it("opening another invoice whose lines fail never shows the first invoice's lines", async () => {
     loaded();
     open();
-    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeInTheDocument();
 
     const other = { ...invoice, id: 'inv2', invoice_number: 'INV-1002' };
     H.tables.invoices = [other];

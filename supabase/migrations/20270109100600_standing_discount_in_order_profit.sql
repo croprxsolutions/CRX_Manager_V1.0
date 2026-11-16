@@ -87,7 +87,7 @@ AS $function$
    WHERE b.order_item_id = p_order_item_id
      AND b.product_id IS NOT NULL AND b.charge_type IS NULL
      AND sh.item_id = b.id
-     AND i.invoice_type = 'chemical_sale' AND i.deleted_at IS NULL AND i.status <> 'voided'
+     AND i.invoice_type = 'chemical_sale' AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')
      AND (p_customer_id IS NULL OR i.customer_id = p_customer_id)
      AND EXISTS (SELECT 1 FROM public.invoice_items d WHERE d.invoice_id = i.id AND d.charge_type = 'standing_discount');
 $function$;
@@ -101,12 +101,11 @@ CREATE FUNCTION public._order_standing_discount_20270109(p_order_id uuid)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT round(COALESCE(sum(d.extended_cents), 0) / 100.0, 2)
-    FROM public.invoice_items d
-    JOIN public.invoices i ON i.id = d.invoice_id
-   WHERE i.order_id = p_order_id
-     AND d.charge_type = 'standing_discount'
-     AND i.invoice_type = 'chemical_sale' AND i.deleted_at IS NULL AND i.status <> 'voided';
+  -- the sum of its order lines' shares (Sol MED): a product billed by hand isn't an order line, so its share of an
+  -- invoice's discount stays out here, exactly as it stays out of the line-level reports
+  SELECT COALESCE(sum(public._order_item_standing_discount_20270109(oi.id)), 0)
+    FROM public.order_items oi
+   WHERE oi.order_id = p_order_id;
 $function$;
 REVOKE ALL ON FUNCTION public._order_standing_discount_20270109(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._order_standing_discount_20270109(uuid) TO service_role;
@@ -123,7 +122,8 @@ DECLARE
   -- KI-18: the business day is America/Chicago; the session clock is UTC.
   v_today date := (now() AT TIME ZONE 'America/Chicago')::date;
 BEGIN
-  IF NOT public.is_admin() THEN
+  -- IS NOT TRUE: a NULL from is_admin() refuses too (Sol BLOCKER on the re-emitted check)
+  IF public.is_admin() IS NOT TRUE THEN
     RAISE EXCEPTION 'permission denied: admin role required';
   END IF;
 
@@ -674,6 +674,7 @@ BEGIN
                -- margin on what is billed after the discount (Luna MED)
                'total_margin_pct', CASE WHEN t.total_price + d.cents > 0
                                         THEN ROUND((t.total_profit + d.cents) / (t.total_price + d.cents) * 100, 2)
+                                        WHEN d.cents < 0 THEN 0   -- discounted to nothing billed (Sol MED)
                                         ELSE t.total_margin_pct END))
         INTO v_out
         FROM public.orders t

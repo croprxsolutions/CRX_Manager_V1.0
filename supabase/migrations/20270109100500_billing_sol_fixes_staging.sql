@@ -242,8 +242,11 @@ BEGIN
     END IF;
   ELSE
     -- (E) the first override keeps the drafted rate it replaces, so "the customer's rate" can bring it back
-    INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by, set_at)
-    VALUES (v_inv.id, p_pct, v_actor, now())
+    -- (E) a draft with no row yet was drafted at the customer's rate (what the recompute records), so that is the
+    -- drafted rate an override replaces (Luna HIGH)
+    INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by, set_at, drafted_rate_pct)
+    VALUES (v_inv.id, p_pct, v_actor, now(),
+            COALESCE((SELECT c.standing_discount_pct FROM customers c WHERE c.id = v_inv.customer_id), 0))
     ON CONFLICT (invoice_id) DO UPDATE SET
       drafted_rate_pct = COALESCE(invoice_standing_discount_rates.drafted_rate_pct,
                                   CASE WHEN invoice_standing_discount_rates.set_by IS NULL

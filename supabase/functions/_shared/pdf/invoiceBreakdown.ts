@@ -1,5 +1,5 @@
-// Pure and import-free so the browser app and the Deno invoice PDF share one breakdown.
-// Amounts are integer cents.
+// Pure and import-free, so the Deno invoice PDF can share it with the browser app (nothing under supabase/functions
+// imports it yet; the invoice page's Amount due card does). Amounts are integer cents.
 
 export const CHARGE_TYPE_LABELS: Readonly<Record<string, string>> = {
   freight: 'Freight',
@@ -12,8 +12,17 @@ export const CHARGE_TYPE_LABELS: Readonly<Record<string, string>> = {
 
 interface BreakdownLine {
   extended_cents: number;
+  product_id?: string | null;
   charge_type?: string | null;
   description?: string | null;
+}
+
+/**
+ * A charge line: a typed charge, or, on an invoice that takes charges, an older untyped line with no product.
+ * The database agrees: the standing discount's base is product_id set and charge_type null (20261231110000).
+ */
+export function isChargeLine(line: { product_id?: string | null; charge_type?: string | null }, productlessIsCharge: boolean): boolean {
+  return !!line.charge_type || (productlessIsCharge && !line.product_id);
 }
 
 export interface InvoiceBreakdown {
@@ -24,17 +33,20 @@ export interface InvoiceBreakdown {
   totalCents: number;
 }
 
-/** A product line is any line without a charge_type. The database writes the discount and tax descriptions (e.g. "Sales tax 6.25%"). */
-export function invoiceBreakdown(lines: ReadonlyArray<BreakdownLine>): InvoiceBreakdown {
+/**
+ * A product line is any line that is not a charge line (isChargeLine). An untyped charge line reads "Charge", as the
+ * invoice page labels it. The database writes the discount and tax descriptions (e.g. "Sales tax 6.25%").
+ */
+export function invoiceBreakdown(lines: ReadonlyArray<BreakdownLine>, productlessIsCharge = false): InvoiceBreakdown {
   const out: InvoiceBreakdown = { productsCents: 0, charges: [], discount: null, tax: null, totalCents: 0 };
   for (const line of lines) {
     const type = line.charge_type;
     out.totalCents += line.extended_cents;
-    if (!type) {
+    if (!isChargeLine(line, productlessIsCharge)) {
       out.productsCents += line.extended_cents;
       continue;
     }
-    const typeLabel = CHARGE_TYPE_LABELS[type] ?? '';
+    const typeLabel = type ? CHARGE_TYPE_LABELS[type] ?? '' : 'Charge';
     if (type === 'standing_discount' || type === 'sales_tax') {
       const key = type === 'sales_tax' ? 'tax' : 'discount';
       const prior = out[key];

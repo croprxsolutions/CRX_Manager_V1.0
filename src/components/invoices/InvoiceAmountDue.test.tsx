@@ -92,6 +92,28 @@ describe('InvoiceAmountDue', () => {
     expect(screen.queryByText('Written off')).not.toBeInTheDocument();
   });
 
+  // Claude MED-2: the balance subtracts credit applied (20260711021000), so Total - Paid - Credit = Balance must show.
+  it('shows Credit applied, signed as the balance takes it, only when some was applied', () => {
+    const one = { productsCents: 100000, charges: [], discount: null, tax: null, totalCents: 100000 };
+    const { rerender } = render(<InvoiceAmountDue {...base} breakdown={one} totalCents={100000} creditAppliedCents={30000} balanceCents={70000} />);
+    expect(screen.getByRole('region', { name: 'Amount due' }).textContent).toMatch(/Invoice total\$1,000\.00Paid\$0\.00Credit applied\$300\.00Balance due\$700\.00/);
+    // A credit memo's balance rises by what it applied: -$500 less -$300 is -$200.
+    const memo = { productsCents: -50000, charges: [], discount: null, tax: null, totalCents: -50000 };
+    rerender(<InvoiceAmountDue {...base} breakdown={memo} totalCents={-50000} creditAppliedCents={-30000} balanceCents={-20000} />);
+    expect(screen.getByText('Credit applied').parentElement).toHaveTextContent('\u2212$300.00');
+    rerender(<InvoiceAmountDue {...base} creditAppliedCents={0} />);
+    expect(screen.queryByText('Credit applied')).not.toBeInTheDocument();
+  });
+
+  // Sol MED-4: with unsaved edits the total is the saved one, but cost and margin follow the edited lines.
+  it('says cost and margin include unsaved changes while the total is still the saved one', () => {
+    const admin = { costCents: 55590, marginCents: 9070, marginPct: 14.0 };
+    const { rerender } = render(<InvoiceAmountDue {...base} dirty admin={admin} />);
+    expect(screen.getByText('Cost and margin include your unsaved changes')).toBeInTheDocument();
+    rerender(<InvoiceAmountDue {...base} admin={admin} />);
+    expect(screen.queryByText('Cost and margin include your unsaved changes')).not.toBeInTheDocument();
+  });
+
   it('a new invoice has no Paid or Balance due yet', () => {
     render(<InvoiceAmountDue {...base} paidCents={null} />);
     expect(screen.queryByText('Paid')).not.toBeInTheDocument();

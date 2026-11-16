@@ -9,7 +9,7 @@ DROP TRIGGER a1_line_unit_is_stock_unit ON public.order_items;
 DROP TRIGGER a1_line_unit_is_stock_unit ON public.delivery_items;
 DROP TRIGGER a1_line_unit_is_stock_unit ON public.purchase_order_items;
 DROP TRIGGER a1_product_unit_keeps_open_lines ON public.products;
-DROP TRIGGER a1_quote_item_known_units ON public.quote_items;
+DROP TRIGGER trg_h_quote_item_known_units ON public.quote_items;
 DROP FUNCTION public._enforce_line_stock_unit();
 DROP FUNCTION public._refuse_stock_unit_change_with_open_lines();
 DROP FUNCTION public._refuse_unknown_quote_rate_unit();

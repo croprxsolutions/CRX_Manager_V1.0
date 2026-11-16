@@ -451,12 +451,12 @@ function rulesCases() {
   const LIFT = 'ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;';
   refusedProbe(`${LIFT} UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`,
     /PRODUCT_UNIT_HAS_OPEN_LINES: this product's stock unit cannot change to "Qt" while these are open in another unit: .*(PO U-PO2|order U-O2)/);
+  refusedProbe(`${LIFT} UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';`,
+    /PRODUCT_UNIT_HAS_OPEN_LINES: this product's stock unit cannot change to "" while/);
   assert.equal(okProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
     DELETE FROM public.order_items WHERE id = '${GAL_OI}';
     UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';
     SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'Qt');
-  refusedProbe(`${LIFT} UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';`,
-    /PRODUCT_UNIT_HAS_OPEN_LINES: this product's stock unit cannot change to "" while/);
   console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal, and saves once none are; blanking the unit with lines open is refused too');
 
   // A legacy mismatched open line (written before the rules) is refused at receiving; nothing moves.
@@ -515,7 +515,14 @@ function quoteCases() {
   okProbe(line('bogus', 0));
   okProbe(line('OZ', 10));
   okProbe(line('bogus', 10, 'units_direct'));
-  console.log('[case] 7 a rate-mode quote line with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, and a units-direct line save');
+  refusedProbe(line('bogus', 10, 'other_mode'), /QUOTE_RATE_UNIT_UNKNOWN/);
+  // A seed/each line with a blank rate unit is filled from the stock unit by the older guard first, then saves.
+  // (product guards off for the one setup write only: the container has no seed unit rows to validate against)
+  assert.equal(okProbe(`SET session_replication_role = replica;
+    UPDATE public.products SET product_form = 'seed', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${GAL}';
+    SET session_replication_role = origin;
+${line(null, 10).replace(/;$/, ' RETURNING rate_unit;')}`), 'Lb');
+  console.log('[case] 7 a quote line (any mode but units-direct) with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, a units-direct line, and a blank-unit seed line (filled from its stock unit first) save');
 }
 
 function rollbackCases() {
@@ -527,7 +534,7 @@ function rollbackCases() {
   const r1 = apply('rules-rev.sql'); assert.equal(r1.status, 0, r1.output);
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE proname = 'product_price_per_acre';"), fnBefore, "live's per-acre body is back");
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit';"), 1);
-  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'a1\_%unit%';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'a1\_%unit%' OR tgname = 'trg_h_quote_item_known_units';"), 0);
   // A later write refuses the data reverse (checked on a rolled-back copy).
   const later = probe(`INSERT INTO public.order_items (order_id, product_id, unit_size, total_units_needed, quantity_remaining, price_per_unit)
       VALUES ('${O2}', '${CORN}', 'Ea', 1, 1, 125);

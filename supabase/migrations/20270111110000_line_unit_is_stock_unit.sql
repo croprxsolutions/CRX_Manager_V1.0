@@ -185,7 +185,7 @@ AS $function$
 DECLARE
   v_stock text;
 BEGIN
-  IF COALESCE(NEW.calc_mode, 'rate_acres') <> 'rate_acres' OR COALESCE(NEW.actual_rate, 0) = 0
+  IF NEW.calc_mode IS NOT DISTINCT FROM 'units_direct' OR COALESCE(NEW.actual_rate, 0) = 0
      OR NEW.product_id IS NULL THEN
     RETURN NEW;
   END IF;
@@ -210,7 +210,8 @@ $function$;
 
 REVOKE ALL ON FUNCTION public._refuse_unknown_quote_rate_unit() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER a1_quote_item_known_units
+-- Named to fire after trg_guard_seed_each_quote_item_units, which fills a blank seed rate unit first.
+CREATE TRIGGER trg_h_quote_item_known_units
   BEFORE INSERT OR UPDATE OF product_id, rate_unit, calc_mode, actual_rate ON public.quote_items
   FOR EACH ROW EXECUTE FUNCTION public._refuse_unknown_quote_rate_unit();
 
@@ -237,17 +238,17 @@ BEGIN
       FROM public.purchase_order_items l JOIN public.purchase_orders po ON po.id = l.purchase_order_id
      WHERE l.product_id = NEW.id AND po.status IN ('draft', 'submitted', 'partially_received')
        AND COALESCE(l.quantity_received, 0) < COALESCE(l.quantity_ordered, 0)
-       AND NOT public._unit_matches_stock_unit(l.unit_size, v_new)
+       AND (v_new IS NULL OR NOT public._unit_matches_stock_unit(l.unit_size, v_new))
     UNION
     SELECT 'order ' || o.order_number
       FROM public.order_items l JOIN public.orders o ON o.id = l.order_id
      WHERE l.product_id = NEW.id AND o.status IN ('confirmed', 'partially_fulfilled')
-       AND NOT public._unit_matches_stock_unit(l.unit_size, v_new)
+       AND (v_new IS NULL OR NOT public._unit_matches_stock_unit(l.unit_size, v_new))
     UNION
     SELECT 'delivery ' || d.delivery_number
       FROM public.delivery_items l JOIN public.deliveries d ON d.id = l.delivery_id
      WHERE l.product_id = NEW.id AND d.status IN ('scheduled', 'in_progress')
-       AND NOT public._unit_matches_stock_unit(l.unit_size, v_new)
+       AND (v_new IS NULL OR NOT public._unit_matches_stock_unit(l.unit_size, v_new))
   ) s;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'PRODUCT_UNIT_HAS_OPEN_LINES: this product''s stock unit cannot change to "%" while these are open in another unit: %',
@@ -282,7 +283,7 @@ END IF;
 END;
 $blank_fill$;
 
--- Postflight: no open line holds another unit (the data correction ran first), so receiving, delivering and the
+-- Postflight: no open line is blank (a blank counts as matching any stock unit in the guards) or holds another unit (the data correction ran first), so receiving, delivering and the
 -- on-order total all count in the stock unit.
 DO $postflight$
 DECLARE
@@ -300,12 +301,12 @@ BEGIN
     SELECT 'order line ' || l.id
       FROM public.order_items l JOIN public.orders o ON o.id = l.order_id JOIN public.products p ON p.id = l.product_id
      WHERE o.status IN ('confirmed', 'partially_fulfilled')
-       AND NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')))
+       AND (COALESCE(btrim(l.unit_size), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
     UNION ALL
     SELECT 'delivery line ' || l.id
       FROM public.delivery_items l JOIN public.deliveries d ON d.id = l.delivery_id JOIN public.products p ON p.id = l.product_id
      WHERE d.status IN ('scheduled', 'in_progress')
-       AND NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')))
+       AND (COALESCE(btrim(l.unit_size), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
   ) s;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270111100000 first): %', v_bad;

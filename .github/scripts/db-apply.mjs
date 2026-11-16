@@ -374,7 +374,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   const stored = new Map(query(dbUrl, "SELECT name || '|' || coalesce(encode(sha256(convert_to(statements[1], 'UTF8')), 'hex'), '') FROM supabase_migrations.schema_migrations")
     .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
   // Staging only: a restamped file's old name already ran here, so its row is renamed, not run again.
-  const postFiles = renameRestamps ? new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))])) : null;
+  const postFiles = new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))]));
   // sha256 of a migration file as this branch held it just before it left (needs full history), or null.
   // Staging's own first-parent line: the PR's merge commit, diffed against staging, so an edit on the PR
   // branch before the delete, or a restamp made inside a merge, still reads what staging ran (attack run, #1837).
@@ -390,7 +390,8 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
     } catch { return null; }
   };
   const restamps = renameRestamps ? planRestamps({ stored, files: postFiles, highWater, deleted }) : [];
-  const unmatched = renameRestamps ? unmatchedRestamps({ stored, files: postFiles, highWater, restamps }) : [];
+  // Always checked: without RENAME_RESTAMPS nothing is renamed, so anything restamp-like blocks (Luna, #1837).
+  const unmatched = unmatchedRestamps({ stored, files: postFiles, highWater, restamps });
   if (unmatched.length) throw new Error(`STOPPED before applying anything: ${unmatched.join(', ')} look(s) like a restamp or copy of a migration this database already ran, but no clean restamp matches (the SQL differs from what ran here, the old row holds no SQL, git shows no delete of the old file with these bytes, the new stamp is older, or more than one file or row could match), so it would run a second time. Restamp with the exact same bytes, one file per migration, in one commit. A row holding no SQL: put the old file back for one staging run (BACKFILL fills the row), then restamp again.`);
   const ledgerNames = new Set([...stored.keys(), ...restamps.map((r) => r.to)]);
   // Applied files must still be what was applied. postBaseline needs the file, so a restamped row's old

@@ -206,6 +206,38 @@ describe('checkInventoryLedger', () => {
     expect(checkInventoryLedger(inventory, transactions)).toEqual([]);
   });
 
+  it('reads a cancelled return as a removal (KI-159)', () => {
+    const inventory: InventoryRow[] = [
+      { id: 'inv1', product_id: 'p1', product_name: 'Product A', quantity_available: 0 },
+    ];
+    // Return receipt writes +10, its cancellation writes -10: stock nets to 0, not 20.
+    const transactions: InventoryTransactionRow[] = [
+      { product_id: 'p1', transaction_type: 'returned', quantity: 10 },
+      { product_id: 'p1', transaction_type: 'returned', quantity: -10 },
+    ];
+    expect(checkInventoryLedger(inventory, transactions)).toEqual([]);
+    const wrong = [{ ...inventory[0], quantity_available: 20 }];
+    expect(checkInventoryLedger(wrong, transactions)).toEqual([
+      { check: 'inventory_ledger', entity: 'Product A', entityId: 'p1', expected: 0, actual: 20, delta: 20 },
+    ]);
+  });
+
+  it('compares a product once, summed over its warehouse rows', () => {
+    // 10 at A and 20 at B, history 30: neither row is flagged (each used to be compared with 30).
+    const inventory: InventoryRow[] = [
+      { id: 'invA', product_id: 'p1', product_name: 'Product A', quantity_available: 10 },
+      { id: 'invB', product_id: 'p1', product_name: 'Product A', quantity_available: 20 },
+    ];
+    const transactions: InventoryTransactionRow[] = [
+      { product_id: 'p1', transaction_type: 'received', quantity: 30 },
+    ];
+    expect(checkInventoryLedger(inventory, transactions)).toEqual([]);
+    const off = [inventory[0], { ...inventory[1], quantity_available: 25 }];
+    expect(checkInventoryLedger(off, transactions)).toEqual([
+      { check: 'inventory_ledger', entity: 'Product A', entityId: 'p1', expected: 30, actual: 35, delta: 5 },
+    ]);
+  });
+
   it('handles signed adjustments', () => {
     const inventory: InventoryRow[] = [
       { id: 'inv1', product_id: 'p1', product_name: 'Product A', quantity_available: 85 },
@@ -242,7 +274,7 @@ describe('checkInventoryLedger', () => {
     expect(checkInventoryLedger(afterUndo, [...transactions, ...undo])).toEqual([]);
     // A fill the ledger missed shows up on the Bulk row (the tote has no rows, so it is skipped).
     expect(checkInventoryLedger(afterFill, transactions.slice(0, 1))).toEqual([
-      expect.objectContaining({ entityId: 'i1', expected: 4000, actual: 2940 }),
+      expect.objectContaining({ entityId: 'bulk', expected: 4000, actual: 2940 }),
     ]);
   });
 

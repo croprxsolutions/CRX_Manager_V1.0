@@ -57,6 +57,7 @@ This runner makes those queries **standing executable gates** that run **before*
 | `quote-versions-rpc-owned.sql` | `quote_versions` has no browser write path; only the owner-side RPC writes version snapshots | **zero** |
 | `return-credit-intent-binding.sql` | the six return RPC entry points and the shared credit-reversal helper are the exact reviewed actor/intent wrappers | **zero** |
 | `section9-po-ap-controls.sql` | PO on-order cache equals the open PO remainder; browsers cannot mutate vendors or vendor bills; active bills do not reference deleted vendors or draft/cancelled POs; the remediated AP RPCs keep their fail-closed controls | **zero** |
+| `stock-matches-history.sql` | a product's stock (summed over its warehouse rows) differs from its signed movement history; `returned` is signed (KI-159) | **zero** |
 
 The `fin-*.sql` predicates (money identities) are documented separately in
 [`FIN-README.md`](FIN-README.md).
@@ -115,7 +116,8 @@ output contains, and the difference decides where that output may be pasted:
   `fin-invoice-balance-identity`, `fin-money-whole-cents` (order numbers and amounts),
   `fin-po-receipt-identity` (PO numbers, product names, and quantities), `fin-prepay-balance`,
   `fin-quote-override-survival`, `fin-vendor-bill-balance-identity` (bill numbers and cent
-  amounts), and `product-name-vs-return-policy`. `dispatch-sync-nonqualifying-profile` and
+  amounts), `product-name-vs-return-policy`, and `stock-matches-history` (product names and
+  quantities). `dispatch-sync-nonqualifying-profile` and
   `section9-po-ap-controls` also read business rows but emit only opaque ids.
 
 **Never paste raw business-data sweep output into a tracked file, a commit message, an issue, or a

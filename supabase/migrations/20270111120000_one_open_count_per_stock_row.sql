@@ -1,0 +1,123 @@
+-- KI-160 (part): two stock counts can never correct the same stock row twice.
+-- Product Master repair step 2 (To-Do 0.17), contract docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR B.
+--
+-- WHY: _complete_cycle_count_impl adds each item's stored variance to current on-hand. Nothing stopped two
+-- in-progress counts holding the same inventory row (or one count holding it twice), so two +10 corrections on a
+-- shelf going 90 -> 100 ended at 110. A closed count could also be set back to in progress (or to completed) by a
+-- direct admin update and completed or reversed again, applying its variance twice.
+--
+-- WHAT:
+--   1. One in-progress count per warehouse (partial unique index).
+--   2. A stock row may sit on only one item of any in-progress count (trigger on cycle_count_items, serialized by a
+--      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one).
+--   3. A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (trigger on
+--      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen.
+-- NOT HERE (left open in KI-160): the direct `variance` UPDATE grant on cycle_count_items, and the three-request
+-- count creation in CycleCounts.tsx (a failed create leaves an empty open count, which Cancel clears).
+--
+-- EXISTING ROWS (live 2026-11-15, read-only): 17 counts, all cancelled; 0 in progress.
+-- PREFLIGHT refuses if any warehouse has two in-progress counts, or any stock row is on two in-progress items.
+-- ROLLBACK: scripts/smoke/one-open-count-reverse.sql (drops the two triggers, their functions and the index).
+
+SET LOCAL lock_timeout = '10s';
+-- Holds off count and line writes until commit, so the preflight's view stays true while the guards are created.
+LOCK TABLE public.cycle_counts, public.cycle_count_items IN SHARE ROW EXCLUSIVE MODE;
+
+DO $preflight$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.cycle_counts WHERE status = 'in_progress'
+             GROUP BY warehouse HAVING count(*) > 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_OPEN_COUNTS: a warehouse has two in-progress counts; finish or cancel one first';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.cycle_count_items i JOIN public.cycle_counts c ON c.id = i.cycle_count_id
+              WHERE c.status = 'in_progress' AND i.inventory_id IS NOT NULL
+              GROUP BY i.inventory_id HAVING count(*) > 1) THEN
+    RAISE EXCEPTION 'PREFLIGHT_OPEN_COUNTS: a stock row is on two in-progress count items; finish or cancel one first';
+  END IF;
+  IF to_regprocedure('public._cycle_count_item_one_open_row()') IS NOT NULL
+     OR to_regprocedure('public._cycle_count_no_reopen()') IS NOT NULL THEN
+    RAISE EXCEPTION 'PREFLIGHT_OPEN_COUNTS: the KI-160 functions already exist';
+  END IF;
+END;
+$preflight$;
+
+CREATE UNIQUE INDEX cycle_counts_one_open_per_warehouse
+  ON public.cycle_counts (warehouse) WHERE status = 'in_progress';
+
+CREATE FUNCTION public._cycle_count_item_one_open_row()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_other text;
+BEGIN
+  IF NEW.inventory_id IS NULL
+     OR (TG_OP = 'UPDATE' AND NEW.inventory_id IS NOT DISTINCT FROM OLD.inventory_id) THEN
+    RETURN NEW;
+  END IF;
+  -- Serializes every claim on this stock row, so the check below sees a concurrent claim once it commits.
+  -- shortcut: relies on READ COMMITTED (a fresh snapshot after the lock), which every app and RPC path uses; a direct
+  -- REPEATABLE READ session could still slip a second claim in.
+  PERFORM pg_advisory_xact_lock(hashtextextended('cycle_count_inventory:' || NEW.inventory_id::text, 0));
+  SELECT c.count_number INTO v_other
+    FROM public.cycle_count_items o
+    JOIN public.cycle_counts c ON c.id = o.cycle_count_id
+   WHERE o.inventory_id = NEW.inventory_id
+     AND o.id IS DISTINCT FROM NEW.id
+     AND c.status = 'in_progress'
+   LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_ROW_ALREADY_OPEN: This stock row is already on open count %; finish or cancel that count first.',
+      COALESCE(v_other, '(no number)') USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._cycle_count_item_one_open_row() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_cycle_count_item_one_open_row
+  BEFORE INSERT OR UPDATE OF inventory_id ON public.cycle_count_items
+  FOR EACH ROW EXECUTE FUNCTION public._cycle_count_item_one_open_row();
+
+CREATE FUNCTION public._cycle_count_no_reopen()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status
+     AND NOT (OLD.status = 'in_progress' AND NEW.status IN ('completed', 'cancelled')
+              OR OLD.status = 'completed' AND NEW.status = 'cancelled') THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count % is % and cannot become %; a count only moves forward. Start a new count instead.',
+      OLD.count_number, OLD.status, NEW.status USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._cycle_count_no_reopen() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER trg_cycle_count_no_reopen
+  BEFORE UPDATE OF status ON public.cycle_counts
+  FOR EACH ROW EXECUTE FUNCTION public._cycle_count_no_reopen();
+
+DO $postflight$
+BEGIN
+  IF (SELECT count(*) FROM pg_trigger
+       WHERE (tgrelid, tgname) IN (('public.cycle_count_items'::regclass, 'trg_cycle_count_item_one_open_row'),
+                                   ('public.cycle_counts'::regclass, 'trg_cycle_count_no_reopen'))
+         AND tgenabled = 'O') <> 2
+     OR NOT EXISTS (SELECT 1 FROM pg_index
+                     WHERE indexrelid = to_regclass('public.cycle_counts_one_open_per_warehouse')
+                       AND indrelid = 'public.cycle_counts'::regclass AND indisunique
+                       AND pg_get_expr(indpred, indrelid) LIKE '%in_progress%')
+     OR NOT EXISTS (SELECT 1 FROM pg_proc
+                     WHERE oid = 'public._cycle_count_item_one_open_row()'::regprocedure AND prosecdef
+                       AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_OPEN_COUNTS: the KI-160 guards are not all in place';
+  END IF;
+END;
+$postflight$;

@@ -1,0 +1,13 @@
+**LOCAL CANDIDATE — NOT APPLIED.** Stock history integrity PR B (To-Do 0.17, KI-160 part): `20270111120000_one_open_count_per_stock_row.sql` (SQL sha256: `4d0e4628d210eacfe20263adb568d4640180128c093ebad209fe85cd60b38b0c`). KI-160: two stock counts could correct one stock row twice (`_complete_cycle_count_impl` adds each line's stored variance to current on hand), and a closed count could be set back to in progress by a direct update and completed again.
+
+**What changes.** (1) Partial unique index `cycle_counts_one_open_per_warehouse` on `cycle_counts(warehouse) WHERE status = 'in_progress'`. (2) `_cycle_count_item_one_open_row()` (SECURITY DEFINER, `search_path = public, pg_temp`, no grants) behind `trg_cycle_count_item_one_open_row` BEFORE INSERT OR UPDATE OF inventory_id on `cycle_count_items`: takes a transaction advisory lock on the inventory row, then refuses (`CYCLE_COUNT_ROW_ALREADY_OPEN`, 23514) if another item of any in-progress count (the same count included) already holds that row. (3) `_cycle_count_no_reopen()` (invoker, no grants) behind `trg_cycle_count_no_reopen` BEFORE UPDATE OF status on `cycle_counts`: allows only in progress -> completed or cancelled and completed -> cancelled, refusing any other status change (`CYCLE_COUNT_REOPEN_FORBIDDEN`, 23514), so a count cannot be reopened or re-completed and reversed twice. Complete, cancel and reverse are unchanged and only move a count forward. No data changes; no RPC or grant changes.
+
+**Who may call.** Both trigger functions: EXECUTE revoked from PUBLIC, anon, authenticated and service_role.
+
+**Preflight.** One transaction, `lock_timeout` 10s, `cycle_counts` and `cycle_count_items` locked SHARE ROW EXCLUSIVE until commit; refuses if any warehouse has two in-progress counts, any stock row is on two in-progress items, or either function already exists. Live 2026-11-15 (read-only): 17 counts, all cancelled. Postflight checks both triggers are enabled and the index exists.
+
+**Proof.** `scripts/smoke/prove-one-open-count-real-schema.mjs` (real migrated schema; before and after; concurrent claims; complete, cancel and reverse still work; the stock-matches-history sweep stays clean; rollback). Prints `ONE_OPEN_COUNT_PROOF_PASS`.
+
+**Rollback.** `scripts/smoke/one-open-count-reverse.sql` (drops both triggers, both functions and the index; no data changes).
+
+**Left open (KI-160).** The direct `variance` UPDATE grant on `cycle_count_items`, and the three-request count creation in `CycleCounts.tsx` (an empty open count left by a failed create now blocks a new count at that warehouse until it is cancelled).

@@ -977,6 +977,7 @@ export const KNOWN_SWEEP_PREDICATES = new Map([
   ["09b24ce34cc1c13ad3939a4270a5dbef647ef0aef80cbba8861fd625edd6d0ce", "secdef-searchpath.sql"],
   ["6b8c4da26da112e6b536bf1d2b9424f7552c10438c1b37680355027167b638c4", "section9-po-ap-controls.sql"],
   ["f0bd806a01f9114345eb47a0e1523e54a9e5ef7d2e8b40dfbd47f278bfe4503b", "status-literals.sql"],
+  ["24160c515c6c7d2e337d3205290f72ee6a1ae82688d42b177ecf97549c83fcc9", "stock-matches-history.sql"],
   ["dbaa1cfe6d3d81ca66c8f44ac9085d8b9c47e507733cd708c4de2ead823b53c1", "ungated-secdef-mutators.sql"],
 ]);
 // <<< END GENERATED PREDICATE FINGERPRINTS

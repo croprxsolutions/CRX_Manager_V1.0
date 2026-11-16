@@ -393,6 +393,12 @@ export interface InvoicePdfData {
   // Shares/Splits
   shares?: InvoicePdfShare[];
 
+  /**
+   * Whether the invoice takes charge lines, so an older untyped line with no product is a charge (invoiceBreakdown.ts
+   * isChargeLine). The invoice page passes its own takesCharges; the builder works it out the same way.
+   */
+  takes_charge_lines?: boolean;
+
   // Finance charges on this invoice. Informational: the charge's own invoice already holds it in its balance
   // (20260803221244), so it is never added to balance_cents.
   finance_charge_cents?: number;
@@ -558,7 +564,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id, credit_applied_cents')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id, credit_applied_cents, order_id, blend_ticket_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -584,7 +590,7 @@ export async function buildInvoicePdfDataFromRow(
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
     diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
-    credit_applied_cents?: number | null;
+    credit_applied_cents?: number | null; order_id?: string | null; blend_ticket_id?: string | null;
   } | null;
   const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
       && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
@@ -669,12 +675,26 @@ export async function buildInvoicePdfDataFromRow(
     paid_amount_cents: inv.paid_amount_cents || 0,
     prepay_applied_cents: inv.prepay_applied_cents || 0,
     write_off_cents: inv.write_off_cents || 0,
+    takes_charge_lines: takesChargeLines(inv.invoice_type, billingRow),
     credit_applied_cents: (inv.credit_applied_cents !== undefined ? inv.credit_applied_cents : billingRow?.credit_applied_cents) || 0,
     balance_cents: inv.balance_cents || 0,
     // #33: informational Discount Earned line (does NOT change total/balance).
     discount_earned_cents: pickDiscount || 0,
     options,
   };
+}
+
+/**
+ * Mirrors InvoiceDetail's takesCharges (src/pages/InvoiceDetail.tsx): an invoice with no order and no delivery behind it
+ * (20261021050000), or a chemical sale backed by an order or a delivery and not a blend ticket (20261108160000).
+ */
+function takesChargeLines(
+  type: string | null | undefined,
+  row: { order_id?: string | null; delivery_id?: string | null; blend_ticket_id?: string | null } | null,
+): boolean {
+  const backed = !!(row?.order_id || row?.delivery_id);
+  if (type === 'misc_charge') return !backed;
+  return type === 'chemical_sale' && (!backed || !row?.blend_ticket_id);
 }
 
 function uniqNonEmpty(values: Array<string | null | undefined>): string[] {
@@ -834,7 +854,7 @@ interface Page {
 export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfData): JsPDFWithAutoTable {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as JsPDFWithAutoTable;
   const company = data.company ?? DEFAULT_COMPANY_INFO;
-  const breakdown = invoiceBreakdown(data.items);
+  const breakdown = invoiceBreakdown(data.items, !!data.takes_charge_lines);
   const p: Page = {
     doc, data, autoTable,
     opts: data.options ?? { show_shares: true, show_price_per_acre: true, show_epa_registration: true },
@@ -1375,7 +1395,11 @@ function drawWhoPays(p: Page, payers: InvoicePdfShare[]): void {
   const pct = Math.round(payers.reduce((sum, s) => sum + s.split_percentage, 0) * 10000) / 10000;
   const cents = payers.reduce((sum, s) => sum + s.amount_cents, 0);
   body.push(bold(['Delivery total', '', fmtShare(pct), fmt(cents)], { lineWidth: 0 }));
-  drawTable(p, ['Payer', 'Invoice', 'Share', 'Amount'], body, { 0: { cellWidth: 'auto' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+  // Taha, 16 Nov: the % is the order's split (12 Nov), so it is named "Order split" unless it is each payer's share of
+  // the dollars (no order split read, loadBillSplitPayers), when "Share" is true.
+  const billed = billSplitPayerShares(payers.map((s) => ({ id: '', invoice_number: s.invoice_number ?? null, total_amount_cents: s.amount_cents })));
+  const isShare = payers.every((s) => billed.find((b) => b.invoice_number === s.invoice_number)?.split_percentage === s.split_percentage);
+  drawTable(p, ['Payer', 'Invoice', isShare ? 'Share' : 'Order split', 'Amount'], body, { 0: { cellWidth: 'auto' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
     { left: Q_MARGIN_X, right: p.pageW - Q_MARGIN_X - width });
 }
 

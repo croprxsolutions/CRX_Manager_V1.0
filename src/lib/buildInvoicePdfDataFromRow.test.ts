@@ -373,3 +373,18 @@ describe('buildInvoicePdfDataFromRow: credits applied', () => {
     expect(data.credit_applied_cents).toBe(5000);
   });
 });
+
+// The PDF labels untyped no-product lines as charges on the invoices the invoice page does (InvoiceDetail takesCharges).
+describe('buildInvoicePdfDataFromRow: which invoices take charge lines', () => {
+  it.each([
+    ['a from-scratch misc charge', { invoice_type: 'misc_charge' }, {}, true],
+    ['a from-scratch chemical sale', { invoice_type: 'chemical_sale' }, {}, true],
+    ['a chemical sale with a delivery', { invoice_type: 'chemical_sale' }, { delivery_id: 'del-1' }, true],
+    ['a chemical sale with a blend ticket', { invoice_type: 'chemical_sale' }, { order_id: 'ord-1', blend_ticket_id: 'bt-1' }, false],
+    ["a payer's misc charge on a delivery", { invoice_type: 'misc_charge' }, { delivery_id: 'del-1' }, false],
+    ['a field application', { invoice_type: 'field_application' }, {}, false],
+  ])('%s', async (_name, row, billing, takes) => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: billing });
+    expect((await buildInvoicePdfDataFromRow(listRow(row))).takes_charge_lines).toBe(takes);
+  });
+});

@@ -2168,7 +2168,7 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     try {
       await printWithCustomerRead(() => buildChain({ data: { billing_address: '9 Barn Rd' }, error: null }));
       await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(
-        expect.objectContaining({ total_amount_cents: 2000, credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200 }),
+        expect.objectContaining({ total_amount_cents: 2000, credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200, takes_charge_lines: true }),
       ));
     } finally {
       Object.assign(savedInvoice, { credit_applied_cents: 0, write_off_cents: 0, balance_cents: 2000 });

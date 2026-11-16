@@ -1895,6 +1895,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       // Review #1873: the PDF's rows add up to the balance only with the write-off and the credit applied.
       write_off_cents: (invoice as { write_off_cents?: number | null }).write_off_cents ?? 0,
       credit_applied_cents: invoice.credit_applied_cents ?? 0,
+      takes_charge_lines: takesCharges,
       balance_cents: invoice.balance_cents ?? 0,
       options,
     };

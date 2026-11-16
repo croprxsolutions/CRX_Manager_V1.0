@@ -1039,7 +1039,8 @@ describe('invoice PDF in the quote style', () => {
     await generateInvoicePdf(split());
     expect(texts()).toContain('WHO PAYS FOR THIS DELIVERY');
     const payers = (await tables()).find((t) => t.head[0] === 'Payer')!;
-    expect(payers.head).toEqual(['Payer', 'Invoice', 'Share', 'Amount']);
+    // Taha, 16 Nov: the order's 50/50 split prints, named "Order split" so it isn't read as a share of the dollars.
+    expect(payers.head).toEqual(['Payer', 'Invoice', 'Order split', 'Amount']);
     expect(payers.body).toEqual([
       ['Maple Hollow Farms (this invoice)', 'CS-2026-0005-1', '50%', '$734.83'],
       ['Cedar Ridge Ag', 'CS-2026-0005-2', '50%', '$687.01'],
@@ -1256,5 +1257,43 @@ describe('review #1873: the printed amounts agree and add up', () => {
     await generateInvoicePdf(moneyFixtures.chemicalSaleSplit);
     expect(textColorBefore('POSTED')).toEqual([90, 90, 90]);
     expect(textColorBefore('$629.83')).toEqual([26, 122, 80]);
+  });
+});
+
+describe("review #1873, Taha's answers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.getNumberOfPages.mockReturnValue(1);
+  });
+  const payerHead = async () => vi.mocked((await import('jspdf-autotable')).default).mock.calls
+    .map(([, o]) => (o as { head: string[][] }).head[0]).find((h) => h[0] === 'Payer')!;
+
+  it('names the column "Share" when each payer\'s % is their share of the dollars (no order split behind it)', async () => {
+    const shares = [
+      { ...moneyFixtures.chemicalSaleSplit.shares![0], split_percentage: 51.68 },
+      { ...moneyFixtures.chemicalSaleSplit.shares![1], split_percentage: 48.32 },
+    ];
+    await generateInvoicePdf({ ...moneyFixtures.chemicalSaleSplit, shares });
+    expect(await payerHead()).toEqual(['Payer', 'Invoice', 'Share', 'Amount']);
+  });
+
+  // B2's rule (invoiceBreakdown.ts isChargeLine): on an invoice that takes charge lines, an older untyped line with
+  // no product is a charge, not a product.
+  it('labels an untyped line with no product "Charge" on an invoice that takes charges', async () => {
+    await generateInvoicePdf({ ...moneyFixtures.miscCharge, takes_charge_lines: true, items: [
+      makeItem({ product_name: 'Soil sampling', description: 'Soil sampling', product_id: null, charge_type: null, extended_cents: 12000 }),
+    ], total_amount_cents: 12000, paid_amount_cents: 0, balance_cents: 12000 });
+    expect(valueAfter('Charge')).toBe('$120.00');
+    expect(texts()).not.toContain('Products');
+  });
+
+  it('keeps an untyped line with a product, or on an invoice that takes no charges, as Products', async () => {
+    const item = makeItem({ product_id: null, charge_type: null, extended_cents: 12000 });
+    await generateInvoicePdf({ ...moneyFixtures.miscCharge, takes_charge_lines: false, items: [item], total_amount_cents: 12000, paid_amount_cents: 0, balance_cents: 12000 });
+    expect(valueAfter('Products')).toBe('$120.00');
+    vi.clearAllMocks();
+    await generateInvoicePdf({ ...moneyFixtures.miscCharge, takes_charge_lines: true, items: [{ ...item, product_id: 'p-1' }], total_amount_cents: 12000, paid_amount_cents: 0, balance_cents: 12000 });
+    expect(valueAfter('Products')).toBe('$120.00');
   });
 });

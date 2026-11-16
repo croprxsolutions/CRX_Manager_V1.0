@@ -444,6 +444,10 @@ export default function OrderDetail() {
     // A payer picked on one sale must not be one click from being added to the next.
     setNewShareCustomerId('');
     setNewShareCustomerName('');
+    // Nor may the last sale's payers and invoices show (with Remove buttons) under the next sale while it loads.
+    setShares([]);
+    setLineShares([]);
+    setInvoices([]);
   }, [id]);
 
   // Kept apart from the reset above: fetchOrder is also rebuilt when the signed-in role
@@ -1043,6 +1047,11 @@ export default function OrderDetail() {
   };
 
   const handleRemoveShare = async (shareId: string) => {
+    // Only a payer of the sale on screen now: a dialog opened during navigation must not delete another sale's share.
+    if (!shares.some((s) => s.id === shareId && s.order_id === activeOrderIdRef.current)) {
+      toast('error', 'That payer belongs to another sale. Nothing was removed.');
+      return;
+    }
     setSavingShares(true);
     try {
       const result = await supabase.from('order_shares').delete().eq('id', shareId).select();

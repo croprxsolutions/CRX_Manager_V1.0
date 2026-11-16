@@ -12,12 +12,13 @@
 --      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one).
 --   3. A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (trigger on
 --      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen.
---   4. Signed-in users lose direct UPDATE on cycle_counts (table and every column). The app never updates the table
---      directly; complete, cancel and reverse are SECURITY DEFINER RPCs. Without this, an admin's direct write could
---      mark a completed count cancelled with no reversal (stock stays changed, Reverse then refuses).
--- The live grant before this file: UPDATE on cycle_counts to authenticated (table level), restored by the rollback.
--- NOT HERE (left open in KI-160): the direct `variance` UPDATE grant on cycle_count_items, and the three-request
--- count creation in CycleCounts.tsx (a failed create leaves an empty open count, which Cancel clears).
+--   4. Signed-in users lose direct UPDATE on cycle_counts and cycle_count_items (table and every column). The app
+--      never updates either table directly; saving a line (update_cycle_count_item), complete, cancel and reverse are
+--      SECURITY DEFINER RPCs. Without this, an admin's direct write could mark a completed count cancelled with no
+--      reversal, or set a line's stored variance to any number, which Complete then adds to on-hand.
+-- The live grants before this file: UPDATE on both tables to authenticated (table level), restored by the rollback.
+-- NOT HERE (left open in KI-160): the three-request count creation in CycleCounts.tsx (a failed create leaves an
+-- empty open count, which Cancel clears).
 --
 -- EXISTING ROWS (live 2026-11-15, read-only): 17 counts, all cancelled; 0 in progress.
 -- PREFLIGHT refuses if any warehouse has two in-progress counts, or any stock row is on two in-progress items.
@@ -114,6 +115,9 @@ CREATE TRIGGER trg_cycle_count_no_reopen
 REVOKE UPDATE ON public.cycle_counts FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, count_number, warehouse, status, notes, initiated_by, started_at, completed_by, completed_at,
   created_at, item_revision) ON public.cycle_counts FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, variance_pct,
+  is_counted, counted_by, counted_at, notes, created_at) ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
 
 DO $postflight$
 BEGIN
@@ -129,7 +133,9 @@ BEGIN
                      WHERE oid = 'public._cycle_count_item_one_open_row()'::regprocedure AND prosecdef
                        AND proconfig @> ARRAY['search_path=public, pg_temp'])
      OR has_any_column_privilege('authenticated', 'public.cycle_counts', 'UPDATE')
-     OR has_any_column_privilege('anon', 'public.cycle_counts', 'UPDATE') THEN
+     OR has_any_column_privilege('anon', 'public.cycle_counts', 'UPDATE')
+     OR has_any_column_privilege('authenticated', 'public.cycle_count_items', 'UPDATE')
+     OR has_any_column_privilege('anon', 'public.cycle_count_items', 'UPDATE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_OPEN_COUNTS: the KI-160 guards are not all in place';
   END IF;
 END;

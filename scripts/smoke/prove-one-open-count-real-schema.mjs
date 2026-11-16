@@ -409,14 +409,17 @@ async function main() {
     VALUES ('${cc1}', '${PRODUCTS.p1}', '${inv(PRODUCTS.p1)}', 0);`, 'CYCLE_COUNT_ROW_ALREADY_OPEN');
   refused('P2 one statement twice', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
     VALUES ('${ccN}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2, NORTH)}', 0), ('${ccN}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_ALREADY_OPEN');
-  refused('P2 move onto an open row', `UPDATE public.cycle_count_items SET inventory_id = '${inv(PRODUCTS.p2)}'
+  refusedAsOwner('P2 move onto an open row', `UPDATE public.cycle_count_items SET inventory_id = '${inv(PRODUCTS.p2)}'
     WHERE id = '${itemOn(ccN, PRODUCTS.p1)}';`, 'CYCLE_COUNT_ROW_ALREADY_OPEN');
-  refused('P2 reparent onto another count', `UPDATE public.cycle_count_items SET cycle_count_id = '${ccN}'
+  refusedAsOwner('P2 reparent onto another count', `UPDATE public.cycle_count_items SET cycle_count_id = '${ccN}'
     WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`, 'CYCLE_COUNT_ITEM_REPARENT_FORBIDDEN');
   refusedAsOwner('P2 repeatable read', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
     VALUES ('${cc1}', '${PRODUCTS.p1}', '${inv(PRODUCTS.p1, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_CLAIM_ISOLATION', 'BEGIN ISOLATION LEVEL REPEATABLE READ;');
-  ok('P2 unrelated edit', `UPDATE public.cycle_count_items SET notes = 'shelf 3' WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`);
-  console.log('[case] P2 a stock row already on an open count is refused on another count, twice on one count, twice in one statement, and as a move; a move onto another count and a repeatable-read claim are refused; an unrelated edit of the line saves');
+  refused('P2 admin moves a line directly', `UPDATE public.cycle_count_items SET inventory_id = '${inv(PRODUCTS.p2)}'
+    WHERE id = '${itemOn(ccN, PRODUCTS.p1)}';`, 'permission denied for table cycle_count_items');
+  psql(`UPDATE public.cycle_count_items SET notes = 'shelf 3' WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`);
+  assert.equal(scalar(`SELECT notes FROM public.cycle_count_items WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`), 'shelf 3', 'P2: an unrelated edit (owner) saves');
+  console.log('[case] P2 a stock row already on an open count is refused on another count, twice on one count, twice in one statement, and as a move (trigger, as owner); a move onto another count and a repeatable-read claim are refused; a signed-in admin cannot move a line directly; an unrelated owner edit of the line saves');
 
   // P3: two concurrent claims on one row (North's p2 row, on no open item yet) from two open counts: exactly one wins.
   raw(`INSERT INTO public.warehouses (name, is_active) SELECT 'South Barn', true WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'South Barn');`);
@@ -430,12 +433,13 @@ async function main() {
   cancel(ccS);
   console.log('[case] P3 two concurrent claims on one stock row from two open counts: exactly one commits, the other is refused');
 
-  // P4: completing still works and moves stock once; the sweep still matches.
+  // P4: completing still works and moves stock once; the sweep still matches. A line's variance is only set by the RPC.
+  refused('P4 admin sets a line variance directly', `UPDATE public.cycle_count_items SET variance = 20 WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`, 'permission denied for table cycle_count_items');
   save(cc1, PRODUCTS.p1, 95);
   complete(cc1);
   assert.equal(onHand(PRODUCTS.p1), 95, 'P4: counted 95 of 100 -> 95');
   assert.equal(sweepRows(), 'none', 'P4: the count left stock and history in step');
-  console.log('[case] P4 completing a count still works: counted 95 of 100 ends at 95, and stock still matches history');
+  console.log('[case] P4 a signed-in admin cannot write a line variance directly; completing a count still works: counted 95 of 100 ends at 95, and stock still matches history');
 
   // P5: a closed count never reopens (cancelled or completed); a new count at the warehouse may start.
   refusedAsOwner('P5 reopen completed', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is completed and cannot become in_progress');

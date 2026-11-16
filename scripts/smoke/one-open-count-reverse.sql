@@ -10,4 +10,5 @@ DROP FUNCTION public._cycle_count_item_one_open_row();
 DROP FUNCTION public._cycle_count_no_reopen();
 DROP INDEX public.cycle_counts_one_open_per_warehouse;
 GRANT UPDATE ON public.cycle_counts TO authenticated;
+GRANT UPDATE ON public.cycle_count_items TO authenticated;
 COMMIT;

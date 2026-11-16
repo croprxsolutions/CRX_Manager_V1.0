@@ -34,7 +34,10 @@ function Row({ label, cents, className = 'text-secondary' }: { label: string; ce
   );
 }
 
-/** Admin only. While there are unsaved edits the total is the saved one, but cost and margin follow the edited lines. */
+/**
+ * Admin only. While there are unsaved edits the total is the saved one, but cost and margin follow the edited lines;
+ * the discount and tax lines are the database's, worked out again only on save.
+ */
 function CostAndMargin({ costCents, marginCents, marginPct, dirty }: NonNullable<Props['admin']> & { dirty: boolean }) {
   return (
     <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 rounded-lg bg-gray-50 px-3 py-2 text-secondary">
@@ -42,7 +45,7 @@ function CostAndMargin({ costCents, marginCents, marginPct, dirty }: NonNullable
       <span>Margin <span className={`font-medium tabular-nums ${marginCents > 0 ? 'text-crx-green' : 'text-red-600'}`}>
         {fmt(marginCents)}{marginPct != null && ` · ${marginPct.toFixed(1)}%`}
       </span></span>
-      {dirty && <span className="w-full text-xs">Cost and margin include your unsaved changes</span>}
+      {dirty && <span className="w-full text-xs">Cost and margin include your unsaved line edits; discount and tax update when you save.</span>}
     </div>
   );
 }

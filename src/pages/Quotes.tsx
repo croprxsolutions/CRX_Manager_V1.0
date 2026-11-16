@@ -407,14 +407,16 @@ export default function Quotes() {
     return true;
   });
 
+  // Select-all and the bulk actions only see rows the search leaves visible.
+  const visible = applyTableSearchSort(filtered, SEARCH_KEYS, search, null, 'asc');
   const { selected, toggleSelect, toggleAll, clearSelection, selectedCount, selectedRows, allSelected } =
     useRowSelection({
-      data: filtered,
+      data: visible,
       getId: (q) => q.id,
       isSelectable: (q) => DELETABLE.includes(q.status),
     });
 
-  const hasSelectable = filtered.some((q) => DELETABLE.includes(q.status));
+  const hasSelectable = visible.some((q) => DELETABLE.includes(q.status));
   const someSelected = selectedCount > 0 && !allSelected;
   // The header checkbox selects the same rows the old "Select All" button did (draft, sent, revised).
   const checkboxCol: Column<QuoteRow> = {
@@ -434,7 +436,7 @@ export default function Quotes() {
 
   const filtersActive = !!statusFilter || plannedFilter;
   const clearFilters = () => { setStatusFilter(''); setPlannedFilter(false); };
-  const shownCount = applyTableSearchSort(filtered, SEARCH_KEYS, search, null, 'asc').length;
+  const shownCount = visible.length;
 
   // ─── Bulk action handlers ───────────────────────────────────
   const handleExportCSV = () => {

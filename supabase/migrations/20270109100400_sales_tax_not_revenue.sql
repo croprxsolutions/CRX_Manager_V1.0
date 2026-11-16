@@ -122,6 +122,9 @@ AS $function$
        AND i.invoice_type <> 'credit_memo'
        AND i.deleted_at IS NULL
        AND i.status IN ('posted', 'overdue', 'paid')
+       -- only lots already posted when the credit was made (the return was priced from those), so a later
+       -- invoice for the same order line never changes an earlier credit's tax
+       AND i.posted_at <= (SELECT cm.created_at FROM public.invoices cm WHERE cm.id = p_invoice_id)
      GROUP BY k.order_item_id, k.customer_id
   )
   SELECT COALESCE((
@@ -147,6 +150,8 @@ CREATE FUNCTION public._invoice_sales_tax_cents_20270109(p_invoice_id uuid)
 AS $function$
   -- A return credit rounds on the running total of the sale's credits for that customer (earlier credits in the
   -- reports' statuses, then this one), so a full return refunds exactly the tax billed however many credits it took.
+  -- ponytail: each credit re-reads the earlier ones (quadratic in one sale's credits for one customer; a handful
+  -- in practice). A window over the period's credits if a sale ever carries hundreds.
   WITH me AS (
     SELECT i.id, i.invoice_type, i.order_id, i.customer_id, i.created_at,
            public._credit_sales_tax_unrounded_20270109(i.id) AS unrounded

@@ -144,7 +144,7 @@ A warm neutral base carrying a single deep green.
 - **Field Edge** (gray-300): input and secondary-button borders. There is no `field-border` token in `src/index.css`; use `border-gray-300`, as `Input.tsx` does.
 
 ### Status (Tailwind stock, not brand)
-Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a white card with a gray hairline border and a 24px round icon chip (success emerald-50 fill with an emerald-700 icon, error red-50/red-700, info sky-50/sky-800, warning amber-50/amber-800). Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`.
+Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed, amber for warning/pending, red for error/overdue/voided, blue for info/sent/scheduled, orange for expired, gray for draft/default. Badges are `100` fill, `800` text and a `200` inset ring; toasts are a white card with a gray hairline border and a 24px round icon chip (success emerald-50 fill with an emerald-700 icon, error red-50/red-700, info sky-50/sky-800, warning amber-50/amber-800). Map statuses through `statusToBadgeVariant` in `src/components/ui/Badge.tsx`, using status values from `.claude/schema-registry.json`. Quote screens are the exception: they use `quoteBadgeVariant` (`src/lib/quoteStatusLabel.ts`), a quote-only palette from the redesign boards (draft slate, sent sky, revised violet, accepted emerald, declined rose, expired amber, cancelled gray, Fulfilled teal, Closed short orange). Other screens keep `statusToBadgeVariant` until their own module round.
 - **Danger Red** (red-600, hover red-700): destructive buttons, error text and danger menu items (red-700 text in `ActionMenu`). There is no `danger` token in `src/index.css`; use `red-600` / `red-700` as `Input.tsx` does.
 
 ### Named Rules
@@ -164,8 +164,9 @@ Badges and toasts use fixed Tailwind 3 pairs: emerald for success/paid/completed
 **Character:** a condensed, slightly agricultural-industrial heading face over a neutral, highly legible UI sans. Headings stay compact so long record names fit; body text stays plain.
 
 ### Hierarchy
-- **Page title** (Barlow 600, 1.5rem): one per page through `PageHeader`; the phone top bar uses 1.125rem rising to 1.25rem on desktop.
-- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`) and modal titles (`text-xl`, `md:text-2xl`).
+- **Page title** (Barlow 600, 1.5rem): one per page through `PageHeader`; the phone top bar uses 1.125rem rising to 1.25rem on desktop. Sanctioned exception: the Quotes list builds the same markup by hand, because on phones its title and New quote share one row.
+- **Section title** (Barlow 600, 1.125rem): card headers (`CardHeader`).
+- **Modal title** (Barlow 600, `text-xl` rising to `md:text-2xl`): the `Modal` heading.
 - **Accent word** (Barlow 300, crx-green): the second half of a split heading.
 - **Body** (Inter 400, 0.875rem): almost all UI text, tables included.
 - **Label** (Inter 500, 0.875rem, Slate Ink): form labels, tabs, buttons.
@@ -192,7 +193,7 @@ Mostly flat, with soft ambient shadows that separate white surfaces from the cre
 - **Card** (`shadow-card`): resting cards.
 - **Card hover** (`shadow-card-hover`): only on cards that are clickable (`Card hover`).
 - **Small** (`shadow-sm`, pinned to Tailwind 3): filled buttons.
-- **Large / extra large** (`shadow-lg`, `shadow-xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
+- **Large / extra large** (`shadow-lg`, `shadow-2xl`): toasts and modal panels, over a `bg-black/50` backdrop with no blur.
 
 ## Shapes
 
@@ -207,7 +208,7 @@ All shared pieces live in `src/components/ui/` and `src/components/layout/`. Use
 - **States:** colour transitions over 150ms; disabled is 50% opacity; `loading` swaps the icon for a spinner. Pass `showChevron` only on a button that goes to another page or the next step; Save and other in-place actions never show the › arrow.
 
 ### Status badges (`Badge`)
-Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant`; never colour a status ad hoc. A badge is a soft pill with a word, never colour alone; the status dot arrives with the quote screens (PR 2). Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
+Fully round pills, 0.75rem medium text. Pick the variant via `statusToBadgeVariant` (or `quoteBadgeVariant` on quote screens); never colour a status ad hoc. Opt-in extras: `dot` puts a small status dot before the label (quote screens use it), and the hue variants `slate`, `sky`, `violet`, `rose`, `teal` and `orange` exist for the quote palette. Both leave existing badges unchanged. A badge is a soft pill with a word, never colour alone. Labels are capitalised by default; pass `normalCase` when the label is already written as it should appear ("Closed short"). On redesigned screens the labels are "Closed short" and "Fulfilled", not "Closed — Short" or "Fulfilled (Applied)"; the stored status values do not change.
 
 ### Cards (`Card`, `CardHeader`)
 White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off with `padding={false}` for tables). `CardHeader` gives a section title with an optional accent word and a right-aligned action.
@@ -216,7 +217,7 @@ White, 0.75rem corners, hairline border, card shadow, 1.25rem padding (turn off 
 On redesigned screens, choice lists use `Dropdown` and dates use `DatePicker` (below); the old `Select` stays for now because its callers read native change events, and each screen moves over in its own module round. White, 1px Field Edge border, 0.5rem corners, Slate Ink label above. Focus: crx-green border plus a 2px crx-green ring at 20%. Error: red-500 border and red-600 helper text. Required fields show a red-600 asterisk. Placeholders are gray-500. Each field keeps a fixed helper line (`min-h-5`) for help, a warning or an error, so nothing below it moves when a message appears. When a state changes a colour, choose the class conditionally (`cond ? 'a' : 'b'`) instead of stacking two colour classes: Tailwind's CSS order, not the order in the string, decides which one wins.
 
 ### Dropdown (`Dropdown`)
-The one choice list, built on React Aria Components. Props: `value` (string or null), `onChange(value)`, `options` (`{ value, label, description?, disabled? }`), `label` or `aria-label`, `placeholder`, `helper`, `error`, `disabled`, `size` (`md` default, `sm`). It gives an `onChange` with the value, not a native change event. Use it on any redesigned screen; never a browser `<select>`. The trigger is 44px below 768px and 40px above (`h-11 md:h-10`). `size="sm"` is 36px and for dense desktop use only, never on phone screens.
+The one choice list, built on React Aria Components. Props: `value` (string or null), `onChange(value)`, `options` (`{ value, label, description?, disabled? }`), `label` or `aria-label`, `placeholder`, `helper`, `error`, `disabled`, `size` (`md` default, `sm`). It gives an `onChange` with the value, not a native change event. Use it on any redesigned screen; never a browser `<select>`. The trigger is 44px below 768px and 40px above (`h-11 md:h-10`). `size="sm"` is 36px and for dense desktop use only, never on phone screens. For filter bars pass `inline`: the label sits inside the trigger as a muted prefix ("Status  All"), the control sizes to its content, it is a pill below 768px, and it drops the fixed helper line (so `helper` and `error` text are not shown). `active` tints an inline filter green while it narrows the list; it is ignored when `error` is set.
 
 ### Date picker (`DatePicker`)
 The one date field. `value` and `onChange` are plain `'YYYY-MM-DD'` strings (or null), with no JS `Date`; "today" is Chicago time. The field shows React Aria's typeable numeric segments (for example 9/30/2027) and opens a calendar. Pass `presets` (`{ label, value }`, such as "Season end") to show them as chips in the calendar and as a pill in the field when the value matches. Also takes `minValue`, `label` or `aria-label`, `helper`, `error` and `disabled`. Use it for every date; never `<input type="date">`.
@@ -240,7 +241,7 @@ A row of round pills under the top bar that link between sibling pages of one wo
 Sidebar: charcoal, gray-400 items that turn white on hover, active item marked by a 3px crx-green-on-dark bar on its left edge and a crx-green-on-dark icon. Top bar: translucent cream with blur, page title with accent. Bottom nav (phones): icons over short labels, active item in crx-green.
 
 ### Tables (`DataTable`, `EditableDataTable`, `MobileCardList`)
-Header row on Cream Shadow at 50% with Slate Ink medium labels and Lucide sort arrows; 0.875rem body. On phones, show records as `MobileCardList` cards instead of wide tables. A column's `headerExtra` holds a `HelpTip` beside the sortable header. Numbers are right-aligned in Inter with tabular figures; never monospace for money.
+Header row on Cream Shadow at 50% with Slate Ink medium labels and Lucide sort arrows; 0.875rem body. On phones, show records as `MobileCardList` cards instead of wide tables. A column's `headerExtra` holds a `HelpTip` beside the sortable header. Opt-in: `phoneSearchPlaceholder` gives the phone layout (with `mobileRow`) a shorter search placeholder while the accessible name stays `searchPlaceholder`; `createCheckboxColumn`'s `getLabel` names each row checkbox ("Select Q-0001"); `BulkActionBar`'s `bar` shows the selection as a green-tint strip above the list with full-size buttons (Quotes uses it; other pages keep the classic header look). Numbers are right-aligned in Inter with tabular figures; never monospace for money.
 
 ### Feedback (`Toast`, `ConfirmModal`, `Modal`, `EmptyState`, `Skeleton`)
 Use toasts for results and errors, `ConfirmModal` for every confirmation, `Modal` for forms, `EmptyState` for empty or failed lists, and `Skeleton` for loading. Never use the browser's `window.confirm` or `alert`. Every server action shows progress (a spinner and "Saving…" on the button) and then a toast that says what happened, including "nothing changed". `ConfirmModal` titles are a question, the message says what changes in numbers, and the button repeats the action ("Remove line", never "OK"). `EmptyState` is a Lucide icon in a soft green circle, one bold line, one helpful line and the next action; an inline empty ("First time for this customer") is a small muted icon and text. Loading is skeleton rows shaped like the content, never a lone spinner in the middle of a page.

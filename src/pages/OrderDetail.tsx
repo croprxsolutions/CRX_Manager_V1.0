@@ -40,6 +40,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt, quantityTimesDollarsCents } from '../lib/money';
 import { billingM4Enabled } from '../lib/billingFeatures';
+import { salesTaxToast } from '../lib/salesTaxToast';
 import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -831,15 +832,9 @@ export default function OrderDetail() {
       if (error) throw error;
       const result = assertRpcResult<{ drafts_updated?: number; drafts_kept?: string[] }>(data, 'set_order_sales_tax');
       salesTaxIdem.resetKeyFor(scope);
-      const drafts = result.drafts_updated ?? 0;
-      // Split drafts the save path can't edit keep their tax until the group is voided and redrafted.
-      const kept = result.drafts_kept?.length ?? 0;
-      if (kept) toast('info', `Sales tax ${next ? 'on' : 'off'}${drafts ? ` (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)` : ''}. ${kept} split draft${kept === 1 ? '' : 's'} can't be edited and keep${kept === 1 ? 's' : ''} ${kept === 1 ? 'its' : 'their'} tax until the group is voided and redrafted.`);
-      else if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
-      else {
-        const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
-        toast('info', `Sales tax ${next ? 'on' : 'off'}. New invoices for this sale will${next ? '' : ' not'} be taxed${hasPosted ? '; posted invoices keep their tax' : ''}.`);
-      }
+      const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
+      const [kind, message] = salesTaxToast(next, result.drafts_updated ?? 0, result.drafts_kept?.length ?? 0, hasPosted);
+      toast(kind, message);
       await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_order_sales_tax' } });

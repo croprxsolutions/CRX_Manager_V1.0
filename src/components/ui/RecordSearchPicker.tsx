@@ -261,7 +261,7 @@ export default function RecordSearchPicker<T extends { id: string }>({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder={placeholder ?? `Search ${noun}...`}
-          className="w-full pl-9 pr-9 py-2 text-base md:text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500"
+          className="w-full pl-9 pr-11 md:pr-9 py-2 text-base md:text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500"
         />
         {value && !disabled && (
           <button
@@ -269,7 +269,8 @@ export default function RecordSearchPicker<T extends { id: string }>({
             aria-label={clearLabel ?? `Clear ${singular(noun)}`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={clear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+            // 44 px hit area on a phone; the small box from 768 px.
+            className="absolute right-0 top-1/2 -translate-y-1/2 inline-flex h-11 w-11 items-center justify-center text-gray-400 hover:text-gray-600 md:right-2 md:h-auto md:w-auto md:p-1"
           >
             <X className="w-4 h-4" />
           </button>

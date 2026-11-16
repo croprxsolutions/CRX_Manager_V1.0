@@ -17,6 +17,12 @@ describe('ActionMenu', () => {
     expect(items[1].onAction).toHaveBeenCalledTimes(1);
   });
 
+  it('a long menu gets the thin scrollbar and scroll shadows', () => {
+    render(<ActionMenu label="More actions" items={make()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menu')).toHaveClass('scroll-thin', 'scroll-shadows');
+  });
+
   it('danger items come last', () => {
     render(<ActionMenu label="More actions" items={make()} />);
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }));

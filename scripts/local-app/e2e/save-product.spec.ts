@@ -51,7 +51,7 @@ test('signs in, saves a test product, and the save survives a reload, on localho
   await expect(page.getByText('Product created')).toBeVisible();
   // The app can ask about unsaved changes just after a successful create, on some runs only.
   await expect(async () => {
-    const leave = page.getByRole('button', { name: 'Leave' });
+    const leave = page.getByRole('button', { name: 'Discard changes' });
     if (await leave.isVisible()) await leave.click();
     await expect(page).toHaveURL(/\/products$/, { timeout: 500 });
   }).toPass();

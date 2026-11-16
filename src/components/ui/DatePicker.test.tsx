@@ -90,6 +90,16 @@ describe('DatePicker', () => {
     expect(screen.getByText('Season end')).toBeInTheDocument();
   });
 
+  it.each([
+    ['error', 'Pick a later day', 'focus-within:ring-red-200', 'crx-green/20'],
+    ['no error', undefined, 'focus-within:ring-crx-green/20', 'red-200'],
+  ])('field focus ring uses one colour (%s)', (_case, error, has, lacks) => {
+    render(<DatePicker label="Expires" value="2027-09-30" onChange={vi.fn()} error={error} />);
+    const field = screen.getByRole('button', { name: /calendar/i }).parentElement!;
+    expect(field.className).toContain(has);
+    expect(field.className).not.toContain(lacks);
+  });
+
   it('keyboard: arrow keys move the focused day, Enter picks it', () => {
     const onChange = vi.fn();
     render(<Harness initial="2027-09-30" onChange={onChange} />);

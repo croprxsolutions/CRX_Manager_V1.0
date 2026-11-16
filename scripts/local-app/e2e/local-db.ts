@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROJECT, Refused, assertLocalDockerEndpoint } from '../target.mjs';
+import { PROJECT, STATE_FOLDER, IS_SALES_GAUNTLET, Refused, assertLocalDockerEndpoint } from '../target.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 
@@ -18,6 +18,9 @@ function localDockerHost(): string {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
+    if (IS_SALES_GAUNTLET && resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== resolve(here, 'compose.yaml')) {
+      throw new Refused('The sales test stack belongs to another checkout. Nothing was changed.');
+    }
   }
   return host;
 }
@@ -25,7 +28,7 @@ function localDockerHost(): string {
 /** Runs SQL in the local test database as its owner, after the target checks, and returns the output. */
 export function localSql(input: string): string {
   return execFileSync('docker', [
-    '-H', localDockerHost(), 'compose', '-p', PROJECT, '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, '.state/local.env'),
+    '-H', localDockerHost(), 'compose', '-p', PROJECT, '-f', resolve(here, 'compose.yaml'), '--env-file', resolve(here, STATE_FOLDER, 'local.env'),
     'exec', '-T', 'db', 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1',
   ], { input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 }

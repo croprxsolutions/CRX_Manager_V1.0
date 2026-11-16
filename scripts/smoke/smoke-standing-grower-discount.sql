@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a standing grower discount comes off product lines, per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261231110000_standing_grower_discount (billing plan M4b).
+-- Migration 20270109100100_standing_grower_discount (billing plan M4b).
 --   A  A 3% customer's delivery invoice drafts at products less 3% (rounded half up to the cent)
 --   B  A $45.00 freight charge is not discounted
 --   C  Re-saving the draft as the screen sends it (its discount line included) never discounts twice

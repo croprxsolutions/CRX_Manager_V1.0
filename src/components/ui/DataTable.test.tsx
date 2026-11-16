@@ -255,6 +255,17 @@ describe('DataTable phone layout', () => {
     }
   });
 
+  it('phoneSort={false} leaves the sort to the page (no native select)', () => {
+    stubPhone();
+    try {
+      render(<DataTable data={data} columns={columns} mobileRow={phoneRow} phoneSort={false} />);
+      expect(screen.queryByRole('combobox', { name: 'Sort by' })).not.toBeInTheDocument();
+      expect(screen.getByText('phone Alice')).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('works where the media query only has the older addListener (Safari before 14)', () => {
     const addListener = vi.fn();
     vi.stubGlobal('matchMedia', () => ({ matches: true, addListener, removeListener: vi.fn() }));

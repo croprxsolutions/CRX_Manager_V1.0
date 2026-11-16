@@ -105,8 +105,8 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
     await customerSelect.selectOption({ index: 1 }); // first real customer
     await waitForPage(page, 1000);
 
-    // Click "Add Item" in Section 1
-    const addItemBtn = page.locator('button:has-text("Add Item")').first();
+    // Click "Add one" in Section 1 (an empty section); later lines use "Add product"
+    const addItemBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
     await expect(addItemBtn).toBeVisible({ timeout: 5000 });
     await addItemBtn.click();
     await waitForPage(page, 500);
@@ -145,9 +145,10 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await rateInput.fill('2');
     }
     // S2-1 validation requires rate_unit when actual_rate > 0
-    const rateUnitSelect = page.locator('select[aria-label="Rate unit"]').first();
+    const rateUnitSelect = page.getByRole('button', { name: /Rate unit/ }).first();
     if (await rateUnitSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await rateUnitSelect.selectOption({ index: 1 }); // first real unit (e.g., Gal)
+      await rateUnitSelect.click();
+      await page.getByRole('option').nth(1).click(); // first real unit (e.g., Gal)
     }
 
     // Add second item
@@ -187,9 +188,10 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await rateInputs.nth(1).fill('1');
     }
     // S2-1 validation requires rate_unit when actual_rate > 0
-    const rateUnitSelects = page.locator('select[aria-label="Rate unit"]');
+    const rateUnitSelects = page.getByRole('button', { name: /Rate unit/ });
     if (await rateUnitSelects.nth(1).isVisible({ timeout: 2000 }).catch(() => false)) {
-      await rateUnitSelects.nth(1).selectOption({ index: 1 }); // first real unit
+      await rateUnitSelects.nth(1).click();
+      await page.getByRole('option').nth(1).click(); // first real unit
     }
 
     // Pre-save verification: "Select Product" buttons should be GONE (replaced by product names)
@@ -297,7 +299,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await page.waitForURL(/\/orders\/[0-9a-f]{8}-/, { timeout: 15000 });
     } catch {
       // If URL didn't change, check for UnsavedChangesModal "Leave" button
-      const leaveBtn = page.locator('button:has-text("Leave")');
+      const leaveBtn = page.locator('button:has-text("Discard changes")');
       if (await leaveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
         await leaveBtn.click();
         await page.waitForURL(/\/orders\/[0-9a-f]{8}-/, { timeout: 15000 });
@@ -486,7 +488,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
     await submitBtn.click();
 
     // Handle UnsavedChanges dialog (setIsDirty/navigate race condition)
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try {
       await leaveBtn.click({ timeout: 5000 });
     } catch {
@@ -650,7 +652,7 @@ test.describe.serial('Admin Full Lifecycle — Quote to Return', () => {
       await submitBtn.click();
 
       // Handle UnsavedChanges dialog
-      const leaveBtn = page.locator('button:has-text("Leave")');
+      const leaveBtn = page.locator('button:has-text("Discard changes")');
       try {
         await leaveBtn.click({ timeout: 5000 });
       } catch {

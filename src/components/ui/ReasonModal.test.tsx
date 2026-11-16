@@ -48,4 +48,13 @@ describe('ReasonModal', () => {
     expect(onConfirm).toHaveBeenCalledWith('physical stock confirmed');
     act(() => root.unmount());
   });
+
+  it('shows an icon circle in the header, a Go back button and a red go-ahead for a warning', () => {
+    const onClose = vi.fn();
+    render(<ReasonModal {...props} onClose={onClose} open variant="warning" onConfirm={vi.fn()} />);
+    expect(document.querySelector('[data-modal-icon]')).toHaveClass('bg-amber-50', 'text-amber-700');
+    expect(screen.getByRole('button', { name: 'Force' }).className).toContain('bg-red-600');
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

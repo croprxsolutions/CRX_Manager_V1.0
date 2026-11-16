@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Fragment, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Save,
   Send,
@@ -8,14 +8,14 @@ import {
   Trash2,
   Search,
   ChevronDown,
-  ChevronUp,
+  ChevronRight,
   Download,
   AlertTriangle,
   Pencil,
-  History,
   RotateCcw,
   Eye,
   EyeOff,
+  Check,
   CheckCircle,
   Copy,
   CalendarClock,
@@ -23,10 +23,15 @@ import {
   XCircle,
   Ban,
   Undo2,
-  MoreHorizontal,
+  ArrowLeft,
+  Clock,
+  Lock,
 } from 'lucide-react';
-import Card, { CardHeader } from '../components/ui/Card';
-import LastChargedPrices from '../components/quotes/LastChargedPrices';
+import Card from '../components/ui/Card';
+import Tabs from '../components/ui/Tabs';
+import { LastChargedPricesCard } from '../components/quotes/LastChargedPrices';
+import PdfPagePreview from '../components/quotes/PdfPagePreview';
+import { useLastChargedPrices } from '../hooks/useLastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
 import { QuoteCreditStatus, TierMismatchNote } from '../components/quotes/QuoteCustomerChecks';
@@ -92,11 +97,19 @@ import { adaptQuoteVersionList, orderedQuoteVersionHistory, type QuoteVersionRow
 import { resendRequiredMessage, samePrice, sentItemsOf, sentLineState, unsentQuoteChange, type PriceLockLine, type QuotePriceChange } from '../lib/quotePriceLock';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import HelpTip from '../components/ui/HelpTip';
+import Dropdown from '../components/ui/Dropdown';
+import DatePicker from '../components/ui/DatePicker';
+import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
+import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
+import { useIsBelowXl, useIsPhone } from '../hooks/useIsPhone';
+import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../lib/quoteBuilderView';
+import { formatChargedOn } from '../lib/lastChargedPrices';
+import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
-import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
+import { FullToteOnlyBadge, PolicyBadge, normalizeReturnPolicy, productPackageText, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
 import { useProductParents } from '../lib/productParents';
@@ -199,6 +212,51 @@ interface ActivePlannedHold {
   product_id: string;
   quantity: number;
   expires_at: string | null;
+}
+
+// The line table's "no unit" choice (the old select's "--" option).
+const NO_UNIT = '__none__';
+// Text-link buttons in the Products tab: 44 px tall below 768 px; from 768 px a 40 px hit area
+// (an invisible ::after) so the link does not stretch its row.
+// Real box (no pseudo area) for links that sit next to each other, so hit areas can't overlap.
+const LINK_BOX = 'min-h-11 md:inline-flex md:min-h-10 md:items-center';
+const LINK_HIT = "relative min-h-11 md:min-h-0 after:absolute after:inset-x-0 after:top-1/2 after:h-10 after:-translate-y-1/2 after:content-['']";
+// Number boxes in the line table and cards: 44 px below 768 px, 40 px above.
+const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+// A number and its unit in one box: the input on the left, the unit on a cream strip on the right.
+// The caller adds the border colour (the input's hand-set states tint the whole box).
+const UNIT_BOX = 'flex w-full min-w-0 h-11 md:h-10 items-stretch overflow-hidden rounded-lg border focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20';
+const UNIT_BOX_INPUT = 'w-full min-w-0 flex-1 bg-transparent px-1.5 text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none';
+const UNIT_STRIP = 'shrink-0 flex items-center border-l border-gray-200 bg-cream px-2 text-sm text-secondary';
+// The unit Dropdown as the box's right end: its trigger loses its own border and fills the strip.
+// The box clips the trigger's ring, so keyboard focus (RAC's data-focus-visible) tints it and draws an inset ring.
+const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cream [&_button]:h-full [&_button]:rounded-none [&_button]:border-0 [&_button]:bg-transparent [&_button]:gap-0.5 [&_button]:px-1.5 [&_button_svg]:h-3.5 [&_button_svg]:w-3.5 [&_button[data-focus-visible]]:bg-crx-green-tint [&_button[data-focus-visible]]:ring-2 [&_button[data-focus-visible]]:ring-inset [&_button[data-focus-visible]]:ring-crx-green/40';
+
+// One muted line under a quote line's product name: SKU, family and package, the fields
+// ProductOptionDetails shows, without their labels. Missing ones are left out.
+function productMetaLine(p: ProductOptionPresentationModel): string {
+  return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
+}
+
+// The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
+function quoteTotals(sections: LocalSection[]) {
+  let totalPrice = 0;
+  let totalCost = 0;
+  let totalProfit = 0;
+  sections.forEach((sec) => {
+    sec.items.forEach((item) => {
+      totalPrice += item.total_price;
+      totalCost += item.current_cost * (item.total_units_needed || 0);
+      totalProfit += item.profit;
+    });
+  });
+  const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
+  return {
+    totalPrice: Math.round(totalPrice * 100) / 100,
+    totalCost: Math.round(totalCost * 100) / 100,
+    totalProfit: Math.round(totalProfit * 100) / 100,
+    totalMarginPct: Math.round(totalMarginPct * 100) / 100,
+  };
 }
 
 interface CostAlert {
@@ -628,6 +686,10 @@ export default function QuoteBuilder() {
   const [productQuery, setProductQuery] = useState('');
   const [keepProductPickerOpen, setKeepProductPickerOpen] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  // Products tab: the line waiting on "Remove this line?", and which notes are open for editing.
+  const [removeLineTarget, setRemoveLineTarget] = useState<{ sectionKey: string; itemKey: string } | null>(null);
+  const [openSectionNotes, setOpenSectionNotes] = useState<Set<string>>(new Set());
+  const [editingLineNote, setEditingLineNote] = useState<string | null>(null);
   const [rupWarnings, setRupWarnings] = useState<string[]>([]);
   const [quoteVersions, setQuoteVersions] = useState<QuoteVersion[]>([]);
   const [unreadableQuoteVersions, setUnreadableQuoteVersions] = useState<UnreadableQuoteVersion[]>([]);
@@ -662,7 +724,7 @@ export default function QuoteBuilder() {
   );
   const [selectedVersion, setSelectedVersion] = useState<QuoteVersion | null>(null);
   const [compareMode, setCompareMode] = useState(false);
-  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState('products');
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [confirmRewindOpen, setConfirmRewindOpen] = useState(false);
   const [revising, setRevising] = useState(false);
@@ -704,11 +766,20 @@ export default function QuoteBuilder() {
 
   // Transaction thread: related orders, deliveries, invoices from this quote
   const [threadOrders, setThreadOrders] = useState<{ id: string; order_number: string; deliveries: { id: string; delivery_number: string }[]; invoices: { id: string; invoice_number: string }[] }[]>([]);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
+  const [markingPresented, setMarkingPresented] = useState(false);
+  // The columns the shown preview was drawn with; the effect below redraws when the chips change.
+  const previewColumnsKeyRef = useRef<string | null>(null);
+  const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
+  // Bumped per Preview click and on a move to another quote, so a late first build never opens or
+  // replaces the preview. A layout effect, so it moves on commit with routeQuoteIdRef.
+  const previewRunRef = useRef(0);
+  useLayoutEffect(() => {
+    previewRunRef.current += 1;
+  }, [id]);
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
 
   // Quote template state
   const [quoteTemplates, setQuoteTemplates] = useState<QuoteTemplate[]>([]);
@@ -717,10 +788,9 @@ export default function QuoteBuilder() {
   const [templateDescription, setTemplateDescription] = useState('');
   const [showRolloverModal, setShowRolloverModal] = useState(false);
   const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
-  const [createOrderMenuOpen, setCreateOrderMenuOpen] = useState(false);
-  const [moreActionsOpen, setMoreActionsOpen] = useState(false);
-  const createOrderMenuRef = useRef<HTMLDivElement>(null);
-  const moreActionsRef = useRef<HTMLDivElement>(null);
+  const isPhone = useIsPhone();
+  // The line table needs 1280 px (at 1024 with the sidebar open its number boxes cut values off); below that each line is a card.
+  const lineCards = useIsBelowXl();
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -815,6 +885,8 @@ export default function QuoteBuilder() {
   // Status-based guards
   const currentStatus = status || 'draft';
   const canEdit = ['draft', 'revised'].includes(currentStatus);
+  // Save keeps a revised quote revised (Save changes); everything else saves as a draft.
+  const savesAsRevised = isEditing && currentStatus === 'revised';
   // Codex round-7 P2: include 'sent' so a frozen sent quote can still be re-emailed —
   // "Preview Quote" is the only route to the Email-to-Grower button, and
   // handleEmailToGrower explicitly supports re-sending an already-sent quote and
@@ -833,6 +905,13 @@ export default function QuoteBuilder() {
   // trigger allows: draft/sent/revised → cancelled; sent/revised → declined;
   // accepted/declined/expired/cancelled → sent (admin revert RPC only).
   const isAdmin = profile?.role === 'admin';
+  const staffSeesLastCharged = !customerView && (isAdmin || profile?.role === 'sales_rep');
+  const lastChargedLines = sections.flatMap((section) => section.items.map((item) => ({
+    productId: item.product_id,
+    productName: item.product?.product_name ?? 'Product',
+  })));
+  // Loads on page load and when the customer or product set changes, whichever tab shows.
+  const lastCharged = useLastChargedPrices(customerId, lastChargedLines, staffSeesLastCharged);
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); Customer View hides them for an admin too.
   const hideCost = customerView || !isAdmin;
   const canCancel = isEditing && ['draft', 'sent', 'revised'].includes(currentStatus);
@@ -860,43 +939,35 @@ export default function QuoteBuilder() {
   const canRevert = isEditing && isAdmin && ['accepted', 'declined', 'expired', 'cancelled'].includes(currentStatus);
   const revertLabel = currentStatus === 'accepted' ? 'Un-accept' : 'Reopen';
 
+  // The form compared as one value, so an edit typed back to what was saved makes the quote clean
+  // again (Save turns off, no "Unsaved changes") instead of staying changed.
+  const formSnapshot = useMemo(
+    () => JSON.stringify([customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]),
+    [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned],
+  );
+  const cleanSnapshotRef = useRef('');
+
+  // Whatever is on screen when the quote turns clean (loaded, saved, reverted) is "no changes".
+  // Declared before the check below so it runs first in the same commit.
   useEffect(() => {
-    if (!createOrderMenuOpen && !moreActionsOpen) return;
+    if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the quote turns clean, not on every edit
+  }, [isDirty]);
 
-    const closeMenusOnOutsideClick = (event: MouseEvent) => {
-      if (
-        !createOrderMenuRef.current?.contains(event.target as Node)
-        && !moreActionsRef.current?.contains(event.target as Node)
-      ) {
-        setCreateOrderMenuOpen(false);
-        setMoreActionsOpen(false);
-      }
-    };
-    const closeMenusOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCreateOrderMenuOpen(false);
-        setMoreActionsOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', closeMenusOnOutsideClick);
-    document.addEventListener('keydown', closeMenusOnEscape);
-    return () => {
-      document.removeEventListener('mousedown', closeMenusOnOutsideClick);
-      document.removeEventListener('keydown', closeMenusOnEscape);
-    };
-  }, [createOrderMenuOpen, moreActionsOpen]);
-
-  // Mark dirty whenever user changes form data (after initial load)
+  // Dirty = the form differs from the last clean state (after initial load)
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    if (suppressDirtyUntilReloadSettlesRef.current) return;
-    if (skipNextDirtyRef.current) {
-      skipNextDirtyRef.current = false;
+    // Changes the page makes itself while loading are the saved state.
+    if (!initialLoadDone.current || suppressDirtyUntilReloadSettlesRef.current) {
+      cleanSnapshotRef.current = formSnapshot;
       return;
     }
-    setIsDirty(true);
-  }, [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+      return;
+    }
+    setIsDirty(formSnapshot !== cleanSnapshotRef.current);
+  }, [formSnapshot, isDirty]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that
@@ -1875,14 +1946,22 @@ export default function QuoteBuilder() {
     // A new choice: send it again even where an earlier one was saved.
     savedLineIdsRef.current.forEach((saved) => { saved.todayApplied = false; });
     useTierUndoRef.current = new Map();
-    setSections((prev) =>
-      prev.map((sec) => ({
-        ...sec,
-        items: sec.items.map((item) => (item.product_id
-          ? recalcItem({ ...item, price_override: null, use_todays_price: true }, tier)
-          : item)),
-      }))
-    );
+    const toToday = (secs: LocalSection[]) => secs.map((sec) => ({
+      ...sec,
+      items: sec.items.map((item) => (item.product_id
+        ? recalcItem({ ...item, price_override: null, use_todays_price: true }, tier)
+        : item)),
+    }));
+    setSections(toToday);
+    // The message only: the same repricing of the lines on screen (it keeps every line, in order),
+    // so line i before pairs with line i after; totals by the page's own rule.
+    const after = toToday(sections);
+    const beforeLines = sections.flatMap((sec) => sec.items);
+    const changedCount = after.flatMap((sec) => sec.items)
+      .filter((item, i) => Math.round(item.price_per_unit * 100) !== Math.round(beforeLines[i].price_per_unit * 100))
+      .length;
+    const message = todaysPricesMessage({ changedCount, beforeTotal: totals.totalPrice, afterTotal: quoteTotals(after).totalPrice, tier });
+    toast(changedCount > 0 ? 'success' : 'info', `${message.title}. ${message.body}`);
   };
 
   const handleCustomerChangeRef = useLatestRef(handleCustomerChange);
@@ -2112,6 +2191,22 @@ export default function QuoteBuilder() {
     );
   };
 
+  // Decision 4: a line with a product, a quantity or any other entered value asks first; an untouched line goes at once.
+  const requestRemoveItem = (sectionKey: string, item: LocalItem) => {
+    if (lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed, edited: hasUserEnteredItemValues(item) })) {
+      setRemoveLineTarget({ sectionKey, itemKey: item._key });
+    } else {
+      removeItem(sectionKey, item._key);
+    }
+  };
+
+  // "Edit note" from a line's menu: focus the note once the menu has closed and handed focus back.
+  useEffect(() => {
+    if (!editingLineNote) return;
+    const frame = requestAnimationFrame(() => document.getElementById(`line-note-${editingLineNote}`)?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [editingLineNote]);
+
   const toggleSectionCollapse = (key: string) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
@@ -2124,25 +2219,7 @@ export default function QuoteBuilder() {
     });
   };
 
-  const totals = useMemo(() => {
-    let totalPrice = 0;
-    let totalCost = 0;
-    let totalProfit = 0;
-    sections.forEach((sec) => {
-      sec.items.forEach((item) => {
-        totalPrice += item.total_price;
-        totalCost += item.current_cost * (item.total_units_needed || 0);
-        totalProfit += item.profit;
-      });
-    });
-    const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
-    return {
-      totalPrice: Math.round(totalPrice * 100) / 100,
-      totalCost: Math.round(totalCost * 100) / 100,
-      totalProfit: Math.round(totalProfit * 100) / 100,
-      totalMarginPct: Math.round(totalMarginPct * 100) / 100,
-    };
-  }, [sections]);
+  const totals = useMemo(() => quoteTotals(sections), [sections]);
 
   // KI-82: after a save, show an admin the cost the database recorded for each saved line. A new
   // line, or one switched to another product, is stamped at today's cost, which may have moved since
@@ -2366,6 +2443,7 @@ export default function QuoteBuilder() {
     if (previousAttempt && previousAttempt.key === idemKey) {
       saveAttemptAtMs = previousAttempt.atMs;
     } else {
+      // eslint-disable-next-line react-hooks/purity -- runs inside the async saveQuote handler, not during render
       saveAttemptAtMs = Date.now();
       saveQuoteAttemptClockRef.current.set(saveQuoteIntentScope, { key: idemKey, atMs: saveAttemptAtMs });
     }
@@ -2501,7 +2579,7 @@ export default function QuoteBuilder() {
         // rolls back, and the retry is never sent — so unlike the lost-reply
         // case below, the outcome is known and the message may say so.
         if (reason !== null && editingSessionChanged()) {
-          toast('error', `Quote ${quoteNumberAtSend || 'you were editing'} was not saved. The below-cost approval finished after you left that quote, so it was not applied — reopen the quote and save again.`);
+          toast('error', `Quote ${quoteNumberAtSend || 'you were editing'} was not saved. The below-cost approval finished after you left that quote, so it was not applied. Reopen the quote and save again.`);
           throw new BelowCostApprovalHandledError();
         }
         return supabase.rpc('save_quote', withBelowCostReason('save_quote', {
@@ -2600,7 +2678,7 @@ export default function QuoteBuilder() {
         // resolution, and the reload path releases the key deliberately.
         if (!editingSessionChanged()) {
           toast('error', saveQuoteIntentScope === 'new'
-            ? 'The save came back without an ID, so it is unknown whether this quote was created. Press Save Draft again WITHOUT reloading — the retry replays the same request, so the server returns the original result instead of creating a second quote.'
+            ? 'The save came back without an ID, so it is unknown whether this quote was created. Press Save Draft again WITHOUT reloading. The retry replays the same request, so the server returns the original result instead of creating a second quote.'
             : 'The quote save came back without an ID, so its outcome is unknown. Reload the quote before making further changes.');
         }
         return null;
@@ -2713,10 +2791,11 @@ export default function QuoteBuilder() {
     setSaving(true);
     // Always unlock the form (it is locked while saving), whatever the steps below throw.
     try {
-      const result = await saveQuote('draft');
+      // A revised quote is a live booking and the server refuses revised -> draft: its edits save as revised.
+      const result = await saveQuote(savesAsRevised ? 'revised' : 'draft');
       if (result) {
         setIsDirty(false);
-        toast('success', 'Quote saved as draft');
+        toast('success', savesAsRevised ? 'Changes saved. Send the quote again when it is ready.' : 'Quote saved as draft');
         trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
           message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
           data: { quoteId: result, quoteNumber, customer: selectedCustomer?.farm_name ?? '' },
@@ -2794,8 +2873,7 @@ export default function QuoteBuilder() {
   };
 
   // Create from template handler
-  const handleSelectTemplate = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const templateId = e.target.value;
+  const handleSelectTemplate = async (templateId: string) => {
     if (!templateId || !customerId || !profile) return;
     // One key per customer until a quote is confirmed: this RPC checks only the key, so an edited retry after a
     // lost reply must replay the quote it already created rather than create a second one.
@@ -2826,7 +2904,7 @@ export default function QuoteBuilder() {
     });
     if (error) {
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_FULLY_DRAWN)) {
-        toast('error', 'This booking is fully drawn — all quantities are already on orders. Nothing left to roll over.');
+        toast('error', 'This booking is fully drawn. All quantities are already on orders. Nothing left to roll over.');
       } else {
         toast('error', 'Failed to roll over quote');
       }
@@ -2834,56 +2912,59 @@ export default function QuoteBuilder() {
     }
     const result = assertRpcResult<{ quote_id: string; quote_number: string; season: number; remainder_rollover: boolean }>(data, 'rollover_quote_to_season');
     rolloverIdem.resetKeyFor(rollScope);
-    toast('success', `Rolled over to season ${result.season} — ${result.quote_number}`);
+    toast('success', `Rolled over to season ${result.season}: ${result.quote_number}`);
     navigate(`/quotes/${result.quote_id}`);
   };
+
+  // Download and the preview print the same data (the email builds its own, with the stored expiry).
+  const buildQuotePdfData = () => ({
+    quote_number: quoteNumber,
+    customer_name: selectedCustomer?.farm_name || 'Customer',
+    customer_email: selectedCustomer?.email || undefined,
+    customer_phone: selectedCustomer?.phone || undefined,
+    customer_address: selectedCustomer?.billing_address || undefined,
+    sales_rep_name: profile?.full_name || 'Sales Rep',
+    created_at: new Date().toISOString(),
+    expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
+    tier,
+    header_notes: headerNotes || undefined,
+    footer_notes: footerNotes || undefined,
+    sections: sections.map((sec) => ({
+      section_name: sec.section_name,
+      section_notes: sec.section_notes || undefined,
+      section_header_notes: sec.section_header_notes || undefined,
+      items: sec.items
+        .filter((i) => i.product_id)
+        .map((i) => ({
+          product_name: i.product?.product_name || '',
+          category: i.product?.category || '',
+          notes: i.notes || undefined,
+          suggested_rate: i.product?.suggested_rate || undefined,
+          actual_rate: i.actual_rate || 0,
+          rate_unit: i.rate_unit || '',
+          acres: i.acres || 0,
+          total_units_needed: i.total_units_needed || 0,
+          inventory_unit: i.product?.inventory_unit || undefined,
+          unit_size: i.product?.unit_size || undefined,
+          price_per_unit: i.price_per_unit,
+          price_unit: i.price_unit || undefined,
+          price_per_acre: i.price_per_acre || undefined,
+          total_price: i.total_price,
+        })),
+    })),
+    totals: {
+      totalPrice: totals.totalPrice,
+      totalCost: totals.totalCost,
+      totalProfit: totals.totalProfit,
+      avgMargin: totals.totalMarginPct,
+    },
+  });
 
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
     await runCriticalAction({
       action: async () => {
-        await downloadQuotePdf({
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            section_header_notes: sec.section_header_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                category: i.product?.category || '',
-                notes: i.notes || undefined,
-                suggested_rate: i.product?.suggested_rate || undefined,
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                inventory_unit: i.product?.inventory_unit || undefined,
-                unit_size: i.product?.unit_size || undefined,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                price_per_acre: i.price_per_acre || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        }, customColumns || getTemplateColumns(selectedTemplateId));
+        await downloadQuotePdf(buildQuotePdfData(), customColumns || getTemplateColumns(selectedTemplateId));
       },
       toast,
       successMessage: 'PDF downloaded',
@@ -2898,7 +2979,7 @@ export default function QuoteBuilder() {
     if (savedId) {
       setStatus('revised');
       setIsDirty(false);
-      toast('success', 'Quote is now in revised mode — you can edit and re-send.');
+      toast('success', 'Quote is now in revised mode. You can edit and re-send.');
     }
     setRevising(false);
   };
@@ -2931,7 +3012,7 @@ export default function QuoteBuilder() {
       if (orderDrawsRes.error) throw orderDrawsRes.error;
       if (jobDrawsRes.error) throw jobDrawsRes.error;
       if ((orderDrawsRes.data && orderDrawsRes.data.length > 0) || (jobDrawsRes.data && jobDrawsRes.data.length > 0)) {
-        toast('warning', `This booking has partial draw-downs or job reservations — close it from its orders/jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
+        toast('warning', `This booking has partial draw-downs or job reservations. Close it from its orders or jobs (draw or cancel the remaining balance) before you ${verb} the quote.`);
         return;
       }
       const previousRowVersion = quoteRowVersionRef.current;
@@ -2955,7 +3036,7 @@ export default function QuoteBuilder() {
         entityType: 'quote',
         entityId: id,
       });
-      toast('success', `Quote ${newStatus} — any inventory holds were released.`);
+      toast('success', `Quote ${newStatus}. Any inventory holds were released.`);
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'mutation', action: `quote_${newStatus}` } });
       toast('error', sanitizeError(err));
@@ -3000,15 +3081,15 @@ export default function QuoteBuilder() {
       const warnings = result.warnings || [];
       if (rowVersionConfirmed) {
         toast('success', warnings.length > 0
-          ? `Booking closed — fulfilled by application. ${warnings.join('. ')}.`
-          : 'Booking closed — fulfilled by application.');
+          ? `Booking closed as fulfilled by application. ${warnings.join('. ')}.`
+          : 'Booking closed as fulfilled by application.');
       } else if (warnings.length > 0) {
         toast('warning', `Booking close warnings: ${warnings.join('. ')}.`);
       }
     } catch (err) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'mutation', action: 'close_quote_as_applied' } });
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('warning', 'This booking is no longer open — refresh the page to see its current status.');
+        toast('warning', 'This booking is no longer open. Refresh the page to see its current status.');
       } else {
         toast('error', sanitizeError(err));
       }
@@ -3062,7 +3143,7 @@ export default function QuoteBuilder() {
       if (hasRpcCode(err, RpcErrorCodes.BOOKING_HAS_ACTIVE_JOBS)) {
         toast('warning', 'This booking still has scheduled or in-progress jobs. Cancel or complete them first, then close the booking as short.');
       } else if (hasRpcCode(err, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('warning', 'This booking is no longer open — refresh the page to see its current status.');
+        toast('warning', 'This booking is no longer open. Refresh the page to see its current status.');
       } else {
         toast('error', sanitizeError(err));
       }
@@ -3129,46 +3210,12 @@ export default function QuoteBuilder() {
   const handlePreviewQuote = async () => {
     await runCriticalAction({
       action: async () => {
-        const pdfData = {
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        };
-        const doc = await generateQuotePdf(pdfData);
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-        setPreviewPdfUrl(url);
+        const columns = customColumns || getTemplateColumns(selectedTemplateId);
+        const run = ++previewRunRef.current;
+        const doc = await generateQuotePdf(buildQuotePdfData(), columns);
+        if (run !== previewRunRef.current) return;
+        previewColumnsKeyRef.current = columns.join(',');
+        setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
       toast,
@@ -3189,7 +3236,7 @@ export default function QuoteBuilder() {
     // Codex P1: an existing quote with unsaved edits still has quoteId, so the
     // emailed PDF would render local edits the DB + version history don't have —
     // the grower would get an unreproducible quote. Block until saved.
-    if (isDirty) { toast('warning', 'You have unsaved changes — save the quote before emailing it.'); return; }
+    if (isDirty) { toast('warning', 'You have unsaved changes. Save the quote before emailing it.'); return; }
     if (!selectedCustomer?.email) { toast('error', 'This customer has no email address on file.'); return; }
     if (!profile) { toast('error', 'You must be signed in to send a quote.'); return; }
     setEmailingGrower(true);
@@ -3379,8 +3426,7 @@ export default function QuoteBuilder() {
       );
       resetCreateVersionAttempt();
       setShowPreviewModal(false);
-      if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-      setPreviewPdfUrl(null);
+      setPreviewPdfBlob(null);
       setIsDirty(false);
       fetchVersions();
       try {
@@ -3391,7 +3437,7 @@ export default function QuoteBuilder() {
         Sentry.captureException(logError instanceof Error ? logError : new Error(String(logError)), { tags: { source: 'activity_log', action: 'quote_presented' } });
       }
       if (rowVersionConfirmed) {
-        toast('success', `Quote marked as presented (V${ver.version_number})`);
+        toast('success', `Quote marked as presented (version ${ver.version_number})`);
       }
       // Book-as-Order chains from this boolean. A committed sent transition
       // with an unconfirmed token must stop before customer/order conversion,
@@ -3417,13 +3463,13 @@ export default function QuoteBuilder() {
     { key: 'product', label: 'Product' },
     { key: 'category', label: 'Category' },
     { key: 'notes', label: 'Notes' },
-    { key: 'sug_rate', label: 'Sug. Rate' },
-    { key: 'actual_rate', label: 'Actual Rate' },
+    { key: 'sug_rate', label: 'Suggested rate' },
+    { key: 'actual_rate', label: 'Rate' },
     { key: 'rate_unit', label: 'Unit' },
     { key: 'acres', label: 'Acres' },
-    { key: 'qty', label: 'Qty' },
+    { key: 'qty', label: 'Quantity' },
     { key: 'unit_size', label: 'Container' },
-    { key: 'price_unit', label: 'Price/Unit' },
+    { key: 'price_unit', label: 'Price' },
     { key: 'price_per_acre', label: '$/Acre' },
     { key: 'total_price', label: 'Total' },
   ] as const;
@@ -3432,6 +3478,33 @@ export default function QuoteBuilder() {
     const t = pdfTemplates.find((p) => p.id === templateId);
     return t ? (t.columns as string[]) : ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
   };
+
+  // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
+  const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
+  const activePdfColumnsKey = activePdfColumns.join(',');
+  const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
+  useEffect(() => {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+      setPreviewRebuild('idle');
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(async () => {
+      setPreviewRebuild('updating');
+      try {
+        const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
+        if (stale) return;
+        previewColumnsKeyRef.current = activePdfColumnsKey;
+        setPreviewPdfBlob(doc.output('blob'));
+        setPreviewRebuild('idle');
+      } catch (err) {
+        // Keep the last good preview; Download and Email build their own PDF.
+        if (!stale) setPreviewRebuild('failed');
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'read', action: 'preview_quote_pdf' } });
+      }
+    }, 200);
+    return () => { stale = true; clearTimeout(timer); };
+  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;
@@ -3511,7 +3584,7 @@ export default function QuoteBuilder() {
     }
     if (!data) return;
     resetRestoreVersionAttempt();
-    toast('success', `Restored from V${versionNumber ?? selectedVersion?.version_number ?? '?'}`);
+    toast('success', `Restored from version ${versionNumber ?? selectedVersion?.version_number ?? '?'}`);
     setConfirmRestore(null);
     setSelectedVersion(null);
     // The restore rewrote every line, so the held line ids no longer name them.
@@ -3531,7 +3604,7 @@ export default function QuoteBuilder() {
     // create a job with ZERO locations (no acres, nothing to apply chemicals on
     // or dispatch). Block here rather than let that job get created.
     if (!sec.field_id) {
-      toast('error', 'Select a Field for this section before scheduling a job — a job needs a location to apply chemicals on and to dispatch.');
+      toast('error', 'Select a Field for this section before scheduling a job. A job needs a location to apply chemicals on and to dispatch.');
       return;
     }
     setSchedulingJobSectionKey(sectionKey);
@@ -3715,7 +3788,7 @@ export default function QuoteBuilder() {
       drawDownIdem.resetKeyFor(drawScope);
       clearPendingRetry(drawPendingName);
       setPendingDraw(null);
-      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? ' — booking fully drawn' : ' — booking stays open'}`
+      toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? '. Booking fully drawn' : '. Booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
       if (result.warnings && result.warnings.length > 0) {
         result.warnings.forEach((w) => toast('warning', `Inventory: ${w}`));
@@ -3776,7 +3849,7 @@ export default function QuoteBuilder() {
           clearPendingRetry(drawPendingName);
           setPendingDraw(null);
           setShowDrawModal(false);
-          toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made — opening that order now.');
+          toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made. Opening that order now.');
           navigate(`/orders/${committedOrderId}`);
           setDrawing(false);
           return;
@@ -3823,7 +3896,7 @@ export default function QuoteBuilder() {
         // (e.g. another draw landed from a second tab) — surface it as-is.
         toast('error', errMsg);
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed — only sent or revised quotes can be drawn down.');
+        toast('error', 'This booking is closed. Only sent or revised quotes can be drawn down.');
       } else if (hasRpcCode(error, RpcErrorCodes.EMPTY_DRAW)) {
         toast('warning', 'Enter a quantity for at least one product');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_QUANTITY_INVALID)) {
@@ -3848,7 +3921,7 @@ export default function QuoteBuilder() {
       } else if (hasRpcCode(error, RpcErrorCodes.DRAW_ALLOCATION_MISMATCH)) {
         // Safety net, not an operator mistake: the draw refused rather than
         // billing units it could not match to a booked price.
-        toast('error', `${errMsg} — nothing was drawn. Check the quote's booked quantities, then try again.`);
+        toast('error', `${errMsg}. Nothing was drawn. Check the quote's booked quantities, then try again.`);
       } else {
         toast('error', errMsg);
       }
@@ -3930,13 +4003,13 @@ export default function QuoteBuilder() {
         if (orderDrawRes.error) throw orderDrawRes.error;
         if (jobDrawRes.error) throw jobDrawRes.error;
         if ((orderDrawRes.data && orderDrawRes.data.length > 0) || (jobDrawRes.data && jobDrawRes.data.length > 0)) {
-          toast('warning', 'This booking has partial draw-downs or job reservations — use "Partial Order" to draw the remaining balance instead of converting.');
+          toast('warning', 'This booking has partial draw-downs or job reservations. Use "Partial Order" to draw the remaining balance instead of converting.');
           setConverting(false);
           return;
         }
       } catch (error: unknown) {
         Sentry.captureException(error, { tags: { source: 'critical_action', action: 'convert_quote_draw_check' } });
-        toast('error', 'Could not verify the booking balance — please try again');
+        toast('error', 'Could not verify the booking balance. Please try again');
         setConverting(false);
         return;
       }
@@ -3980,7 +4053,7 @@ export default function QuoteBuilder() {
       }
       const alreadyConverted = result.status === 'already_converted';
       if (alreadyConverted) {
-        toast('info', 'This booking was already converted — opening the existing order.');
+        toast('info', 'This booking was already converted. Opening the existing order.');
       } else {
         toast('success', `Order ${result.order_number || ''} created`);
       }
@@ -4079,12 +4152,12 @@ export default function QuoteBuilder() {
         }
 
         if (createdOrderId) {
-          toast('success', 'The order was created — opening it');
+          toast('success', 'The order was created. Opening it');
           setIsDirty(false);
           skipUnsavedPromptRef.current = true;
           navigate(`/orders/${createdOrderId}`);
         } else {
-          toast('warning', 'The quote was accepted, but its order could not be found — check the Orders page');
+          toast('warning', 'The quote was accepted, but its order could not be found. Check the Orders page');
           try {
             await fetchQuote(savedId);
           } catch (refetchError) {
@@ -4099,7 +4172,7 @@ export default function QuoteBuilder() {
         // The conversion RPC is transactional, so a genuine failure leaves the
         // status unchanged. A recovery write is only safe after a successful
         // read proves the quote was not accepted.
-        toast('warning', 'Could not verify the outcome — check the Orders page before retrying; the quote status was left unchanged.');
+        toast('warning', 'Could not verify the outcome. Check the Orders page before retrying. The quote status was left unchanged.');
         setConverting(false);
         return;
       }
@@ -4107,9 +4180,9 @@ export default function QuoteBuilder() {
       // Friendly mapping for the booking guards (server-side backstop for the
       // pre-check above — e.g. a draw landed from another tab mid-convert).
       if (hasRpcCode(error, RpcErrorCodes.BOOKING_PARTIALLY_DRAWN)) {
-        toast('warning', 'This booking has partial draw-downs — use "Partial Order" to draw the remaining balance instead of converting.');
+        toast('warning', 'This booking has partial draw-downs. Use "Partial Order" to draw the remaining balance instead of converting.');
       } else if (hasRpcCode(error, RpcErrorCodes.BOOKING_CLOSED)) {
-        toast('error', 'This booking is closed — only sent or revised quotes can be converted.');
+        toast('error', 'This booking is closed. Only sent or revised quotes can be converted.');
       } else if (hasRpcCode(error, RpcErrorCodes.QUOTE_RESEND_REQUIRED)) {
         toast('error', resendRequiredMessage(error));
       } else if (hasRpcCode(error, RpcErrorCodes.COST_BASIS_REQUIRED)) {
@@ -4224,311 +4297,267 @@ export default function QuoteBuilder() {
   // The quote cannot be edited while a save or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
   const formLocked = saving || converting || drawing;
+  // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
+  // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
+  // the job link and Schedule job still work.
+  const readOnly = isEditing && !canEdit;
+  const editLocked = formLocked || readOnly;
+
+  // Header actions (spec "Actions by state"). Each action keeps today's show and enable
+  // conditions and handler; only where it sits changes.
+  const primary = primaryAction({ isNew: !isEditing, status: currentStatus, unsentChange, canConvert, canDraw });
+  const showSaveDraft = !isEditing || canEdit; // elsewhere Save draft was always disabled
+  const showCreateOrder = isEditing && (canConvert || canDraw);
+  const showRevise = isEditing && currentStatus === 'sent';
+  const pdfVisible = primary === null && !isPhone; // closed quotes: Download PDF is the visible action
+  const createOrderItems: ActionMenuItem[] = [
+    {
+      id: 'convert', label: 'Convert whole booking', icon: <ShoppingCart className="w-4 h-4" />,
+      onAction: () => setConfirmConvertOpen(true),
+      disabled: !canConvert || converting,
+      disabledReason: canConvert ? undefined : 'Whole-booking conversion is available after the quote is sent or revised.',
+    },
+    {
+      id: 'draw', label: 'Draw part of booking…', icon: <PackageOpen className="w-4 h-4" />,
+      onAction: () => { openDrawDownModal(); },
+      disabled: !canDraw || drawLoading,
+      disabledReason: canDraw ? undefined : 'Partial draw-down is available after the quote is sent or revised.',
+    },
+  ];
+  const moreItems: ActionMenuItem[] = [
+    ...(!pdfVisible ? [{ id: 'pdf', label: 'Download PDF', icon: <Download className="w-4 h-4" />, onAction: handleDownloadPdf }] : []),
+    {
+      id: 'customer-view', label: customerView ? 'Leave customer view' : 'Customer view (hide costs)',
+      icon: customerView ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />,
+      onAction: () => setCustomerView(!customerView),
+    },
+    ...(quoteId ? [{ id: 'template', label: 'Save as template', icon: <Copy className="w-4 h-4" />, onAction: () => setShowSaveTemplateModal(true) }] : []),
+    ...(quoteId ? [{ id: 'rollover', label: 'Roll over to next season', icon: <RotateCcw className="w-4 h-4" />, onAction: () => setShowRolloverModal(true) }] : []),
+    ...(isEditing && !!quoteId && currentStatus === 'draft' && !isDirty ? [{
+      id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
+      onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
+    }] : []),
+    ...(canRevert ? [{
+      id: 'revert', label: revertLabel, icon: <Undo2 className="w-4 h-4" />,
+      onAction: () => { setRevertReason(''); setShowRevertModal(true); }, disabled: reverting,
+    }] : []),
+    // The phone top bar has no room for secondaries, so they join the menu there.
+    ...(isPhone && showRevise ? [{ id: 'revise', label: revising ? 'Revising…' : 'Revise quote', icon: <Pencil className="w-4 h-4" />, onAction: handleReviseQuote, disabled: revising }] : []),
+    ...(isPhone && showCreateOrder && primary !== 'createOrder' ? createOrderItems.map((item) => ({ ...item, group: 'Create order' })) : []),
+    ...(canCloseApplied ? [{
+      id: 'close-applied', label: 'Close as applied (we applied the product)', icon: <CheckCircle className="w-4 h-4" />, group: 'Close this booking',
+      onAction: () => setConfirmCloseAppliedOpen(true), disabled: closingApplied,
+    }] : []),
+    ...(canCloseShort ? [{
+      id: 'close-short', label: "Close short (grower won't take the rest)", icon: <PackageOpen className="w-4 h-4" />, group: 'Close this booking',
+      onAction: () => setConfirmCloseShortOpen(true), disabled: closingShort,
+    }] : []),
+    ...(canDecline ? [{
+      id: 'decline', label: 'Decline quote', icon: <XCircle className="w-4 h-4" />, danger: true,
+      onAction: () => setConfirmDeclineOpen(true), disabled: statusActionLoading,
+    }] : []),
+    ...(canCancel ? [{
+      id: 'cancel', label: 'Cancel quote', icon: <Ban className="w-4 h-4" />, danger: true,
+      onAction: () => setConfirmCancelOpen(true), disabled: statusActionLoading,
+    }] : []),
+  ];
+  const moreMenu = <ActionMenu label="More actions" items={moreItems} />;
+  const createOrderMenu = (variant: 'primary' | 'secondary') => (
+    <ActionMenu label="Create order" items={createOrderItems} trigger={{ text: 'Create order', variant, icon: <ShoppingCart className="w-4 h-4" /> }} />
+  );
+  const tall = 'h-11 md:h-10';
+  const saveDraftButton = (className = '') => (
+    <Button
+      variant="secondary"
+      icon={<Save className="w-4 h-4" />}
+      onClick={handleSaveDraft}
+      loading={saving}
+      // Nothing to save until something changes: repeated clicks would only resend the same quote.
+      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving)}
+      title={!isDirty && !saving ? 'No changes to save' : undefined}
+      className={`${tall} ${className}`}
+    >
+      {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}
+    </Button>
+  );
+  const previewButton = (variant: 'primary' | 'secondary') => (
+    <Button variant={variant} icon={<Eye className="w-4 h-4" />} onClick={handlePreviewQuote} className={tall}>
+      Preview &amp; send
+    </Button>
+  );
+  const greenAction = primary === 'preview' && canSend
+    ? previewButton('primary')
+    : primary === 'createOrder' && showCreateOrder
+      ? createOrderMenu('primary')
+      : null;
+  const statusBadge = isEditing && (
+    <Badge normalCase dot variant={quoteBadgeVariant(currentStatus)}>{quoteStatusLabel(currentStatus)}</Badge>
+  );
+  const plannedChip = isPlanned && <Badge normalCase variant="warning">Planned</Badge>;
+  const unsavedNote = isDirty && (
+    <span className="inline-flex items-center gap-1.5 text-sm text-amber-800">
+      <Clock className="w-4 h-4" aria-hidden="true" />
+      Unsaved changes
+    </span>
+  );
+  // A new quote's number, held until its first save.
+  const pendingNumber = !isEditing && quoteNumber && <span className="text-secondary tabular-nums">{quoteNumber}</span>;
+  const retryNumber = !isEditing && !quoteNumber && !quoteNumberLoading && (
+    <Button variant="secondary" size="sm" icon={<RotateCcw className="w-4 h-4" />} onClick={generateQuoteNumber} className={tall}>
+      Retry quote number
+    </Button>
+  );
+  const subline = [
+    selectedCustomer?.farm_name,
+    `Tier ${tier}`,
+    `Expires ${parseLocalDate(chosenExpiryDate ?? seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+  ].filter(Boolean).join(' · ');
+  const title = isEditing ? (quoteNumber || 'Quote') : 'New quote';
+  // Summary strip: the totals memo and the booking settlement, as the Totals and Settlement cards show them.
+  const settlement = isEditing && canDraw && bookingSettlement?.found ? bookingSettlement : null;
+  // Each tab shows exactly when its old card did.
+  const tabAvailable: Record<string, boolean> = {
+    products: true,
+    balance: settlement !== null,
+    last: staffSeesLastCharged && !!customerId && lastChargedLines.some((line) => !!line.productId),
+    history: isEditing && savedVersionCount > 0,
+  };
+  // A tab that goes away while selected sends the page back to Products for good (not just for now).
+  if (!tabAvailable[activeTab]) setActiveTab('products');
+  const shownTab = tabAvailable[activeTab] ? activeTab : 'products';
+  const settlementHasPrepay = (settlement?.prepay_remaining_cents ?? 0) > 0 || (settlement?.prepay_earmarked_cents ?? 0) > 0;
+  const settlementEmpty = !settlementHasPrepay && (settlement?.lines?.length ?? 0) === 0;
+  const productCount = sections.reduce((sum, sec) => sum + sec.items.length, 0);
+  const bookedCents = settlement?.booked_cents ?? 0;
+  const drawnPct = bookedCents > 0 ? Math.min(100, Math.max(0, Math.round(((settlement?.drawn_cents ?? 0) / bookedCents) * 100))) : 0;
+  const summaryFigures: { label: string; value: ReactNode }[] = [{ label: 'Quote total', value: fmt(totals.totalPrice) }];
+  if (!hideCost) {
+    summaryFigures.push(
+      { label: 'Total cost', value: fmt(totals.totalCost) },
+      { label: 'Profit · margin', value: <>{fmt(totals.totalProfit)} <span className="text-[15px] font-medium text-secondary">· {totals.totalMarginPct.toFixed(1)}%</span></> },
+    );
+  }
+  if (settlement) {
+    summaryFigures.push(
+      { label: 'Booked', value: formatCents(settlement.booked_cents ?? 0) },
+      { label: 'Drawn', value: formatCents(settlement.drawn_cents ?? 0) },
+      { label: 'Left to draw', value: formatCents(settlement.remaining_cents ?? 0) },
+    );
+  }
+  const drawnBar = settlement && (
+    <div role="progressbar" aria-label="Drawn of booked" aria-valuemin={0} aria-valuemax={100} aria-valuenow={drawnPct} className="h-1.5 rounded-full bg-cream-dark">
+      <div className="h-1.5 rounded-full bg-crx-green" style={{ width: `${drawnPct}%` }} />
+    </div>
+  );
+  // Desktop: one row of cells split by 1px rules. Phone: a stacked card.
+  const summaryStrip = (
+    <section aria-label="Summary" className={isPhone ? 'rounded-xl border border-gray-200 bg-white p-3.5' : 'overflow-hidden rounded-xl border border-gray-200 bg-gray-200'}>
+      <dl className={isPhone ? 'flex flex-col gap-2' : 'flex flex-wrap gap-px'}>
+        {summaryFigures.map((f, i) => (
+          <div key={f.label} className={isPhone ? 'flex items-baseline justify-between gap-3' : 'flex flex-[1_1_10rem] flex-col gap-0.5 bg-white px-4 py-3.5'}>
+            <dt className={`text-secondary ${isPhone && i > 0 ? 'text-sm' : 'text-[13px]'}`}>{f.label}</dt>
+            {/* A dl item holds only dt/dd, so the desktop bar sits inside the dd. */}
+            <dd className={`tabular-nums text-nav-dark ${isPhone && i > 0 ? 'text-sm font-medium' : 'text-[22px] font-semibold leading-tight'}`}>
+              {f.value}
+              {!isPhone && f.label === 'Left to draw' && <div className="mt-1.5">{drawnBar}</div>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {isPhone && drawnBar && <div className="mt-2.5">{drawnBar}</div>}
+    </section>
+  );
+  const hasBottomBar = isPhone && (showSaveDraft || !!greenAction);
+  // The shared component carries its own mb-4; the wrapper drops it inside the header.
+  const thread = isEditing && threadOrders.length > 0 && (
+    <div className="[&>div]:mb-0">
+      <TransactionThread
+        quoteId={quoteId || undefined}
+        quoteNumber={quoteNumber || undefined}
+        orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
+        deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
+        invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
+        currentEntity="quote"
+        currentEntityId={quoteId || undefined}
+      />
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      <Breadcrumbs items={[
-        { label: 'Quotes', href: '/quotes' },
-        { label: isEditing ? (quoteNumber || 'Quote') : 'New Quote' },
-      ]} />
-      {isEditing && threadOrders.length > 0 && (
-        <TransactionThread
-          quoteId={quoteId || undefined}
-          quoteNumber={quoteNumber || undefined}
-          orders={threadOrders.map(o => ({ id: o.id, number: o.order_number }))}
-          deliveries={threadOrders.flatMap(o => o.deliveries.map(d => ({ id: d.id, number: d.delivery_number })))}
-          invoices={threadOrders.flatMap(o => o.invoices.map(i => ({ id: i.id, number: i.invoice_number })))}
-          currentEntity="quote"
-          currentEntityId={quoteId || undefined}
-        />
-      )}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold font-heading text-nav-dark">
-            Quote <span className="split-heading-accent">Builder</span>
-          </h1>
-          {quoteNumber && (
-            <span className="text-sm text-secondary font-mono">{quoteNumber}</span>
-          )}
-          {isEditing && (
-            <Badge variant={statusToBadgeVariant[status] || 'default'}>
-              {status === 'closed_by_application' ? 'Fulfilled (Applied)' : status === 'closed_short' ? 'Closed — Short' : status}
-            </Badge>
-          )}
-          <label className="flex items-center gap-2 text-sm ml-4">
-            <input
-              type="checkbox"
-              checked={isPlanned}
-              onChange={(e) => setIsPlanned(e.target.checked)}
-              className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
-              disabled={formLocked || (!canEdit && isEditing)}
-            />
-            <span className="font-medium">Planned Program</span>
-            <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="ml-1" />
-          </label>
-          {isPlanned && (
-            <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">
-              Planned
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {!isEditing && !quoteNumber && !quoteNumberLoading && (
-            <Button
-              variant="secondary"
-              icon={<RotateCcw className="w-4 h-4" />}
-              showChevron={false}
-              onClick={generateQuoteNumber}
-            >
-              Retry quote number
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            icon={<Save className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleSaveDraft}
-            loading={saving}
-            disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
-          >
-            Save Draft
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<Download className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleDownloadPdf}
-          >
-            Download PDF
-          </Button>
-          <div
-            className="relative"
-            ref={moreActionsRef}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setMoreActionsOpen(false);
-              }
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setMoreActionsOpen((open) => !open)}
-              aria-label="More actions"
-              aria-haspopup="menu"
-              aria-expanded={moreActionsOpen}
-              className="inline-flex items-center justify-center rounded-lg border border-gray-200 p-2 text-secondary transition-colors hover:border-crx-green hover:text-crx-green"
-            >
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-            {moreActionsOpen && (
-              <div role="menu" className="absolute right-0 z-30 mt-2 w-60 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setCustomerView(!customerView);
-                    setMoreActionsOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                >
-                  {customerView ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  Customer View
-                </button>
-                {quoteId && (
-                  <>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowSaveTemplateModal(true);
-                        setMoreActionsOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                    >
-                      <Copy className="w-4 h-4" />
-                      Save as Template
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setShowRolloverModal(true);
-                        setMoreActionsOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      Roll Over to New Season
-                    </button>
-                  </>
-                )}
-              </div>
+    // Scroll margins keep a focused control clear of the sticky bars: TopBar + quote header above
+    // (about 112 px on a phone, up to about 210 px on desktop), MobileBottomNav + bottom bar below (about 115 px).
+    <div className="space-y-4 [&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mt-32 md:[&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mt-56 max-md:[&_:is(a,button,input,select,textarea,[role=spinbutton],[tabindex])]:scroll-mb-32">
+      {isPhone ? (
+        <>
+          {/* top-14 = TopBar phone height (h-14); -mx-4 -mt-4 undo AppLayout main padding (p-4). */}
+          <div data-testid="quote-header" className="sticky top-14 z-20 -mx-4 -mt-4 flex h-14 items-center gap-1 border-b border-gray-200 bg-white px-1">
+            <Link to="/quotes" aria-label="Back to quotes" className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-nav-dark">
+              <ArrowLeft className="w-5 h-5" aria-hidden="true" />
+            </Link>
+            <h1 className="min-w-0 flex-1 truncate font-heading text-[22px] font-semibold text-nav-dark">{title}</h1>
+            {canSend && (
+              <button type="button" aria-label="Preview and send" onClick={handlePreviewQuote} className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-nav-dark">
+                <Eye className="w-5 h-5" aria-hidden="true" />
+              </button>
             )}
+            {moreMenu}
           </div>
-          {canSend && (
-            <Button
-              variant="primary"
-              icon={<Eye className="w-4 h-4" />}
-              onClick={handlePreviewQuote}
-            >
-              Preview Quote
-            </Button>
-          )}
-          {isEditing && quoteId && currentStatus === 'draft' && !isDirty && (
-            <Button
-              variant="secondary"
-              icon={<ShoppingCart className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmBookAsOrderOpen(true)}
-              loading={bookingAsOrder}
-            >
-              Book as Order
-            </Button>
-          )}
-          {isEditing && (canConvert || canDraw) && (
-            <div
-              className="relative"
-              ref={createOrderMenuRef}
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                  setCreateOrderMenuOpen(false);
-                }
-              }}
-            >
-              <Button
-                variant="primary"
-                icon={<ShoppingCart className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setCreateOrderMenuOpen((open) => !open)}
-                aria-haspopup="menu"
-                aria-expanded={createOrderMenuOpen}
-              >
-                Create Order ▾
-              </Button>
-              {createOrderMenuOpen && (
-                <div role="menu" className="absolute right-0 z-30 mt-2 w-64 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canConvert || converting}
-                    title={canConvert ? undefined : 'Whole-booking conversion is available after the quote is sent or revised.'}
-                    onClick={() => {
-                      setConfirmConvertOpen(true);
-                      setCreateOrderMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    Convert whole booking
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!canDraw || drawLoading}
-                    title={canDraw ? undefined : 'Partial draw-down is available after the quote is sent or revised.'}
-                    onClick={() => {
-                      openDrawDownModal();
-                      setCreateOrderMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-nav-dark hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <PackageOpen className="w-4 h-4" />
-                    Draw part of booking…
-                  </button>
-                </div>
-              )}
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {pendingNumber}
+              {statusBadge}
+              {plannedChip}
+              {unsavedNote}
+              {retryNumber}
             </div>
-          )}
-          {isEditing && currentStatus === 'sent' && (
-            <Button
-              variant="secondary"
-              icon={<Pencil className="w-4 h-4" />}
-              showChevron={false}
-              onClick={handleReviseQuote}
-              loading={revising}
-            >
-              Revise Quote
-            </Button>
-          )}
-          {canCloseApplied && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<CheckCircle className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setConfirmCloseAppliedOpen(true)}
-                loading={closingApplied}
-              >
-                Close — Applied
-              </Button>
-              <HelpTip text="Use this when WE applied this booking's product for the customer (job applications), instead of delivering it. It closes the booking as fulfilled by application and releases any un-applied product back to free inventory. The customer was already billed through each job's application invoice — this never bills again." className="ml-1" />
-            </>
-          )}
-          {canCloseShort && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<PackageOpen className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setConfirmCloseShortOpen(true)}
-                loading={closingShort}
-              >
-                Close — Short
-              </Button>
-              <HelpTip text="Use this when the customer walked away from this booking (or took only part of it) and won't take the rest. It closes the booking and releases the un-fulfilled remainder back to free inventory. Any product already drawn was billed on its order — this never bills again. This is the way to close a booking that Decline/Cancel refuse because it was partially drawn." className="ml-1" />
-            </>
-          )}
-          {canDecline && (
-            <Button
-              variant="secondary"
-              icon={<XCircle className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmDeclineOpen(true)}
-              loading={statusActionLoading}
-            >
-              Decline
-            </Button>
-          )}
-          {canCancel && (
-            <Button
-              variant="ghost"
-              icon={<Ban className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setConfirmCancelOpen(true)}
-              loading={statusActionLoading}
-            >
-              Cancel Quote
-            </Button>
-          )}
-          {canRevert && (
-            <>
-              <Button
-                variant="secondary"
-                icon={<Undo2 className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => { setRevertReason(''); setShowRevertModal(true); }}
-                loading={reverting}
-              >
-                {revertLabel}
-              </Button>
-              <HelpTip text="Reopens this quote to “sent” so it can be edited, re-sent, or converted again. Admin only. Blocked if an order was already created from an accepted quote." className="ml-1" />
-            </>
-          )}
-          {isEditing && savedVersionCount > 0 && (
-            <>
-              <Button
-                variant="ghost"
-                icon={<History className="w-4 h-4" />}
-                showChevron={false}
-                onClick={() => setShowVersionHistory(!showVersionHistory)}
-              >
-                Versions ({savedVersionCount})
-              </Button>
-              <HelpTip text="Every time you send or revise, a snapshot is saved. You can compare versions side-by-side or restore an older version if needed." className="ml-1" />
-            </>
-          )}
+            {selectedCustomer?.farm_name && <span className="text-base font-semibold text-nav-dark break-words">{selectedCustomer.farm_name}</span>}
+          </div>
+          {thread}
+        </>
+      ) : (
+        // top-16 = TopBar height (md:h-16); -mx/-mt undo AppLayout main padding (p-4, lg:p-6). Not sticky on short landscape screens.
+        <div data-testid="quote-header" className="[@media(min-height:600px)]:sticky top-16 z-20 -mx-4 -mt-4 lg:-mx-6 lg:-mt-6 flex flex-col gap-2.5 border-b border-gray-200 bg-cream/95 px-4 py-3.5 backdrop-blur lg:px-6">
+          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1">
+            <Breadcrumbs items={[
+              { label: 'Quotes', href: '/quotes' },
+              { label: isEditing ? (quoteNumber || 'Quote') : 'New quote' },
+            ]} />
+            {thread}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="font-heading text-3xl font-semibold leading-tight text-nav-dark">{title}</h1>
+                {pendingNumber}
+                {retryNumber}
+                {statusBadge}
+                {plannedChip}
+                {unsavedNote}
+              </div>
+              <p className="text-secondary">{subline}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {showRevise && (
+                <Button variant="secondary" icon={<Pencil className="w-4 h-4" />} onClick={handleReviseQuote} loading={revising} className={tall}>
+                  Revise quote
+                </Button>
+              )}
+              {canSend && primary !== 'preview' && previewButton('secondary')}
+              {showSaveDraft && saveDraftButton()}
+              {showCreateOrder && primary !== 'createOrder' && createOrderMenu('secondary')}
+              {pdfVisible && (
+                <Button variant="secondary" icon={<Download className="w-4 h-4" />} onClick={handleDownloadPdf} className={tall}>
+                  Download PDF
+                </Button>
+              )}
+              {greenAction}
+              {moreMenu}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {summaryStrip}
 
       {/* Covers a stale warning left active when the convert-confirm modal closes; draw-down no longer raises it. */}
       {!confirmConvertOpen && (
@@ -4536,43 +4565,30 @@ export default function QuoteBuilder() {
       )}
 
       {isEditing && !canEdit && currentStatus !== 'sent' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 text-sm">
-          This quote is in <strong>{currentStatus}</strong> status and cannot be edited.
-        </div>
+        <Notice tone="warn" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span>This quote is in <strong>{quoteStatusLabel(currentStatus)}</strong> status and cannot be edited.</span>
+        </Notice>
       )}
 
       {isEditing && currentStatus === 'sent' && !canEdit && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm flex items-center justify-between">
-          <span>This quote has been sent. Click <strong>Revise Quote</strong> to make changes, then re-send.</span>
-        </div>
+        <Notice tone="info" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span>This quote has been sent. Click <strong>Revise quote</strong> to make changes, then re-send.</span>
+        </Notice>
       )}
 
       {isEditing && currentStatus === 'revised' && priceLocked && (lastSentVersion || unsentChange === 'unreadable') && (
-        <div
+        <Notice
           role="status"
-          className={`rounded-lg border p-3 text-sm flex flex-wrap items-center justify-between gap-2 ${
-            unsentChange ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}
-        >
-          <span>
-            {unsentChange === 'unreadable' || !lastSentVersion
-              ? 'The version last sent to the customer cannot be shown here. '
-              : unsentChange === 'customer'
-                ? `The customer changed after V${lastSentVersion.version_number} was sent. `
-                : unsentChange === 'prices'
-                  ? `Prices or lines changed after V${lastSentVersion.version_number} was sent. `
-                  : `Prices stay as sent in V${lastSentVersion.version_number} unless you change them. `}
-            {unsentChange
-              ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
-              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
-          </span>
-          <span className="flex flex-wrap gap-2">
+          tone={unsentChange ? 'warn' : 'info'}
+          icon={unsentChange ? <AlertTriangle className="h-4.5 w-4.5" aria-hidden="true" /> : <Lock className="h-4.5 w-4.5" aria-hidden="true" />}
+          actions={<>
             <Button
               variant="secondary"
               size="sm"
               showChevron={false}
               onClick={applyTodaysPricesToAllLines}
               disabled={!canEdit || formLocked}
+              className={tall}
             >
               Use today&apos;s prices
             </Button>
@@ -4584,19 +4600,34 @@ export default function QuoteBuilder() {
                 icon={<RotateCcw className="w-3.5 h-3.5" />}
                 onClick={() => setConfirmRewindOpen(true)}
                 disabled={formLocked}
+                className={tall}
               >
-                Rewind to V{lastSentVersion.version_number}
+                Rewind to version {lastSentVersion.version_number}
               </Button>
             )}
+          </>}
+        >
+          <span>
+            {unsentChange === 'unreadable' || !lastSentVersion
+              ? 'The version last sent to the customer cannot be shown here.'
+              : unsentChange === 'customer'
+                ? `The customer changed after version ${lastSentVersion.version_number} was sent.`
+                : unsentChange === 'prices'
+                  ? `Prices or lines changed after version ${lastSentVersion.version_number} was sent.`
+                  : `Prices stay as sent in version ${lastSentVersion.version_number} unless you change them.`}
           </span>
-        </div>
+          <HelpTip
+            text={unsentChange
+              ? 'Send the revised quote to the customer before converting it, drawing from it or scheduling a job.'
+              : 'A price you change applies without a re-send; a higher one needs the grower\u2019s OK. Quantity and note changes need no re-send.'}
+          />
+        </Notice>
       )}
 
       {customerView && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-crx-green/20 rounded-lg text-sm text-crx-green font-medium">
-          <EyeOff className="w-4 h-4" />
-          Customer View — cost, profit, and margin columns hidden
-        </div>
+        <Notice tone="brand" icon={<EyeOff className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span className="font-medium">Customer view: cost, profit, and margin columns hidden</span>
+        </Notice>
       )}
 
       {/* Booking settlement (roadmap #6c): open-booking position. Read-only. */}
@@ -4608,38 +4639,878 @@ export default function QuoteBuilder() {
           />
         </Card>
       )}
-      {isEditing && canDraw && bookingSettlement?.found && (
-        <Card>
-          <CardHeader title="Booking" accent="Settlement" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-            <div>
-              <div className="text-secondary">Booked</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.booked_cents ?? 0)}</div>
+      <fieldset disabled={editLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
+      {!id && quoteTemplates.length > 0 && (
+        <div className="max-w-sm">
+          <Dropdown
+            label="Start from a template"
+            value={null}
+            placeholder="Blank quote"
+            onChange={handleSelectTemplate}
+            options={quoteTemplates.map((t) => ({ value: t.id, label: t.template_name }))}
+            helper={!customerId && 'Select a customer first to use a template'}
+            disabled={formLocked}
+          />
+        </div>
+      )}
+
+      {/* RAC controls ignore the disabled fieldset, so each one also takes editLocked. */}
+      <Card>
+        <h2 className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
+        <div className="grid grid-cols-1 gap-x-5 gap-y-1 md:grid-cols-2 lg:grid-cols-4">
+          <div className="md:col-span-2">
+            <label htmlFor="quote-customer" className="block text-sm font-medium text-secondary mb-1">
+              Customer
+            </label>
+            {/* Active customers only, as the old list loaded. */}
+            <CustomerSearchPicker<QuoteCustomer>
+              id="quote-customer"
+              value={customerId}
+              selectedLabel={selectedCustomer?.farm_name ?? ''}
+              onSelect={handleCustomerChange}
+              select={QUOTE_CUSTOMER_SELECT}
+              placeholder="Select a customer..."
+              ariaLabel="Customer"
+              disabled={editLocked}
+            />
+            <div className="min-h-5">
+              {customerLoadError && (
+                <p role="alert" className="mt-1 text-sm text-red-600">{customerLoadError}</p>
+              )}
+              {fieldLoadError && unresolvedFieldIds.length > 0 && (
+                <p role="alert" className="mt-1 text-sm text-red-600">{fieldLoadError}</p>
+              )}
+              {productsLoadFailed && (
+                <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
+              )}
+              {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
             </div>
-            <div>
-              <div className="text-secondary">Drawn</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.drawn_cents ?? 0)}</div>
-            </div>
-            <div>
-              <div className="text-secondary">Remaining to draw</div>
-              <div className="font-semibold text-nav-dark">{formatCents(bookingSettlement.remaining_cents ?? 0)}</div>
-            </div>
-            {/* Prepaid cell hidden while there is no earmarked prepay — the booking-prepay
-                earmark engine is shelved (docs/roadmap/shelved-earmark-engine/), so this
-                reads 0 for now and lights up automatically when the engine returns. */}
-            {((bookingSettlement.prepay_remaining_cents ?? 0) > 0 || (bookingSettlement.prepay_earmarked_cents ?? 0) > 0) && (
-              <div>
-                <div className="text-secondary">Prepaid (remaining)</div>
-                <div className="font-semibold text-crx-green">{formatCents(bookingSettlement.prepay_remaining_cents ?? 0)}</div>
+          </div>
+          <div data-testid="tier-field">
+            <Dropdown
+              label="Pricing tier"
+              value={String(tier)}
+              onChange={(v) => applyTier(parseInt(v))}
+              options={[1, 2, 3].map((n) => ({ value: String(n), label: `Tier ${n}` }))}
+              disabled={editLocked}
+            />
+            {/* The note takes the Dropdown's empty helper line (mt-1 + min-h-5). */}
+            {!customerView && tierMismatch && (
+              <div className="-mt-5">
+                <TierMismatchNote
+                  tier={tier}
+                  assignedTier={assignedTier}
+                  acknowledged={tierChosen}
+                  onUseAssigned={() => applyTier(assignedTier, true)}
+                  onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
+                />
               </div>
             )}
           </div>
-          {(bookingSettlement.prepay_earmarked_cents ?? 0) > 0 && (
+          <div className="flex flex-col">
+            <Dropdown
+              label="Expires"
+              value={chosenExpiryDate ? 'date' : 'season'}
+              onChange={(v) => {
+                const pickDate = v === 'date';
+                pickedBeforeValidDaysRef.current = pickDate && !validDaysLoadedRef.current;
+                setChosenExpiryDate(pickDate ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null);
+              }}
+              options={[
+                { value: 'season', label: `${parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)` },
+                { value: 'date', label: 'Pick a date' },
+              ]}
+              helper={!chosenExpiryDate && status !== 'draft' && 'A change applies when the quote is sent again.'}
+              disabled={editLocked}
+            />
+            {chosenExpiryDate && (
+              <DatePicker
+                aria-label="Expiry date"
+                value={chosenExpiryDate}
+                minValue={todayInBusinessTz()}
+                onChange={(v) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(v || seasonEnd); }}
+                helper={status !== 'draft' && 'A change applies when the quote is sent again.'}
+                disabled={editLocked}
+              />
+            )}
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
+          <CommissionSplitEditor
+            label="Commission split"
+            value={commissionSplit}
+            onChange={(val) => {
+              commissionSplitTouchedRef.current = true;
+              setCommissionSplit(val);
+            }}
+            disabled={editLocked}
+          />
+          <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
+            <Switch
+              label="Planned program"
+              description="Holds product for a grower who hasn't committed yet."
+              isSelected={isPlanned}
+              onChange={setIsPlanned}
+              isDisabled={formLocked || (!canEdit && isEditing)}
+            />
+            <HelpTip text="Mark as Planned if the customer intends to buy but hasn't committed yet. This reserves inventory with a hold so it's not sold to someone else. Set the Needed By date so you can forecast when product will move." className="mt-2" />
+          </div>
+          <label className="flex flex-col gap-1 text-sm font-medium text-secondary">
+            Note at the top of the quote
+            <textarea
+              value={headerNotes}
+              onChange={(e) => setHeaderNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-normal text-nav-dark border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              placeholder="Notes visible at the top of the quote..."
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-secondary">
+            Note at the bottom of the quote
+            <textarea
+              value={footerNotes}
+              onChange={(e) => setFooterNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 text-sm font-normal text-nav-dark border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+              placeholder="Notes visible at the bottom of the quote (terms, disclaimers, etc.)..."
+            />
+          </label>
+        </div>
+      </Card>
+
+      {rupWarnings.length > 0 && (
+        <Notice tone="warn" icon={<AlertTriangle className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <div className="flex flex-col gap-1">
+            {rupWarnings.map((w, i) => <p key={i}>{w}</p>)}
+          </div>
+        </Notice>
+      )}
+
+      </fieldset>
+
+      <Tabs
+        ariaLabel="Quote sections"
+        activeKey={shownTab}
+        onChange={setActiveTab}
+        tabs={[
+          {
+            key: 'products',
+            label: 'Products',
+            count: productCount,
+            content: (
+              <fieldset disabled={formLocked} aria-busy={formLocked} className="min-w-0 space-y-4 pt-4">
+      {sections.map((sec) => {
+        const isCollapsed = collapsedSections.has(sec._key);
+        const sectionTotal = sec.items.reduce((s, i) => s + i.total_price, 0);
+        // A section with a note shows it; the link opens an empty one. Focus keeps it open while it is cleared.
+        const sectionNoteOpen = !!sec.section_header_notes || openSectionNotes.has(sec._key);
+        const openSectionNote = () => setOpenSectionNotes((prev) => (prev.has(sec._key) ? prev : new Set(prev).add(sec._key)));
+
+        // Each line's controls are built once and laid out as a table row (1024 px and up) or a card.
+        // What one line needs before its cells are drawn.
+        const linePriceFacts = (item: LocalItem) => {
+          const prod =
+            item.product ||
+            products.find((p) => p.id === item.product_id);
+          const todayPrice = prod ? getTierPrice(prod, tier) : null;
+          const todayPriceOffer = priceLocked && canEdit
+            && todayPrice != null
+            && Math.round(todayPrice * 100) !== Math.round(item.price_per_unit * 100)
+            ? todayPrice
+            : null;
+          const sentState = priceLocked && lastSentVersion && item.product_id
+            ? sentLineState(lastSentItems, priceLockLineOf(item))
+            : null;
+          const sentHint = sentState == null || !lastSentVersion
+            ? null
+            : sentState.kind === 'new'
+              ? `New since version ${lastSentVersion.version_number}`
+              : `Sent at ${formatCents(sentState.sentCents)}`;
+          const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
+          const costHint = costAlert?.below_cost
+            ? "Below today's cost: converting needs an admin's approval."
+            : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
+          return { prod, todayPrice, todayPriceOffer, sentState, sentHint, costAlert, costHint };
+        };
+        const lineProductFacts = (item: LocalItem, { prod }: ReturnType<typeof linePriceFacts>) => {
+          const openPicker = () => {
+            setProductSearchOpen({
+              sectionKey: sec._key,
+              itemKey: item._key,
+            });
+            setProductQuery('');
+          };
+          // Only from Last charged data already loaded for this customer and these products.
+          const charged = lastCharged.state;
+          const charge = staffSeesLastCharged && prod && charged.status === 'loaded' ? charged.byProduct.get(item.product_id) ?? null : undefined;
+          const lastChargeText = charge === undefined
+            ? null
+            : charge
+              ? `Last charged ${formatCents(charge.unit_price_cents)}${charge.unit_size ? ` / ${charge.unit_size}` : ''} on ${formatChargedOn(charge.charged_on)}`
+              : 'First time for this customer';
+          const defaultNote = prod ? preferredQuoteNotes(prod) : null;
+          const noteEditing = editingLineNote === item._key;
+          const allowNoUnit = prod?.product_form !== 'seed' && prod?.product_form !== 'each';
+          const unitChoices = rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit);
+          // A unit the list no longer offers stays listed, so the line still shows what it holds.
+          const unitOptions = (current: string | null, label: (unit: string) => string) => [
+            ...(allowNoUnit ? [{ value: NO_UNIT, label: '--' }] : []),
+            ...unitChoices.map((uc) => ({ value: uc.unit, label: label(uc.unit) })),
+            ...(current && !unitChoices.some((uc) => uc.unit === current) ? [{ value: current, label: label(current) }] : []),
+          ];
+          return { openPicker, charged, charge, lastChargeText, defaultNote, noteEditing, allowNoUnit, unitChoices, unitOptions };
+        };
+        const lineFacts = (item: LocalItem) => {
+          const priceFacts = linePriceFacts(item);
+          return { ...priceFacts, ...lineProductFacts(item, priceFacts) };
+        };
+        type LineFacts = ReturnType<typeof lineFacts>;
+
+        const lineProduct = (item: LocalItem, { prod, openPicker, lastChargeText, defaultNote, noteEditing }: LineFacts) => {
+          return (
+            <div className="min-w-0">
+              {prod ? (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  className={`${LINK_HIT} text-left font-medium text-nav-dark break-words hover:text-crx-green`}
+                >
+                  {prod.product_name}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  className={`${LINK_HIT} inline-flex items-center gap-1 font-medium text-crx-green hover:underline`}
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  Select product
+                </button>
+              )}
+              {prod && (
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary" data-product-id={prod.id}>
+                  {productMetaLine(prod) && <span className="min-w-0 break-words">{productMetaLine(prod)}</span>}
+                  <PolicyBadge policy={normalizeReturnPolicy(prod.return_policy)} />
+                  {prod.is_full_tote_only && <FullToteOnlyBadge />}
+                </div>
+              )}
+              {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}
+              {lastChargeText && <p className="mt-0.5 text-xs text-secondary">{lastChargeText}</p>}
+              {noteEditing ? (
+                <div className="mt-1.5">
+                  <textarea
+                    id={`line-note-${item._key}`}
+                    value={item.notes || ''}
+                    onChange={(e) => updateItem(sec._key, item._key, { notes: e.target.value || null })}
+                    rows={2}
+                    placeholder="Product notes..."
+                    aria-label="Line note"
+                    className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setEditingLineNote(null)}
+                    className={`${LINK_BOX} text-xs font-medium text-crx-green hover:underline`}
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : item.notes && (
+                <p className="mt-1 text-xs italic text-secondary break-words">Note: {item.notes}</p>
+              )}
+              {defaultNote && item.notes !== defaultNote && (
+                <button
+                  type="button"
+                  onClick={() => updateItem(sec._key, item._key, { notes: defaultNote })}
+                  title="Reset to default"
+                  className={`${LINK_BOX} text-xs font-medium text-crx-green hover:underline`}
+                >
+                  Reset note
+                </button>
+              )}
+            </div>
+          );
+        };
+
+        // The sent, cost and "Use today" hints under a line price.
+        const linePriceHints = (item: LocalItem, { todayPriceOffer, sentHint, costAlert, costHint }: LineFacts) => (
+          !customerView && (sentHint || todayPriceOffer != null || costHint) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs">
+              {sentHint && <span className="text-amber-700">{sentHint}</span>}
+              {costHint && (
+                <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
+              )}
+              {todayPriceOffer != null && (
+                <>
+                  {(sentHint || costHint) && <span aria-hidden="true" className="text-secondary">·</span>}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // A new choice: send it again even if an earlier one was saved.
+                      const saved = savedLineIdsRef.current.get(item._key);
+                      if (saved) saved.todayApplied = false;
+                      useTierUndoRef.current.delete(item._key);
+                      updateItem(sec._key, item._key, {
+                        price_override: null,
+                        use_todays_price: true,
+                      });
+                    }}
+                    disabled={editLocked}
+                    className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
+                  >
+                    Use today {fmt(todayPriceOffer)}
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        );
+        const linePrice = (item: LocalItem, f: LineFacts) => {
+          const { prod, allowNoUnit, unitOptions } = f;
+          return (
+            <>
+              <div className={`${UNIT_BOX} ${
+                item.price_override != null
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-gray-300 bg-white'
+              }`}>
+                <input
+                  type="number"
+                  value={item.price_per_unit || ''}
+                  onChange={(e) => {
+                    const val = e.target.value ? parseFloat(e.target.value) : 0;
+                    // A manual price is one that differs from what the line
+                    // would otherwise take: its saved price on a sent quote,
+                    // else today's tier price.
+                    const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
+                      ?? (prod ? getTierPrice(prod, tier) : 0);
+                    const isOverride = Math.abs(val - basePrice) > 0.001;
+                    updateItem(sec._key, item._key, {
+                      price_override: isOverride ? val : null,
+                      price_per_unit: val,
+                    });
+                  }}
+                  aria-label="Price per unit"
+                  // A stated $0 tier price shows as 0.00, not as a missing price.
+                  placeholder={prod ? '0.00' : undefined}
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
+                <Dropdown
+                  aria-label="Price unit"
+                  noHelperRow
+                  value={item.price_unit || (allowNoUnit ? NO_UNIT : null)}
+                  onChange={(v) =>
+                    updateItem(sec._key, item._key, {
+                      price_unit: v === NO_UNIT ? null : v || null,
+                    })
+                  }
+                  options={unitOptions(item.price_unit, (unit) => `/ ${unit}`)}
+                  placeholder="--"
+                  disabled={editLocked}
+                  className={UNIT_SELECT}
+                />
+              </div>
+              {item.price_override != null && (
+                <p className="mt-1 text-xs text-amber-800">
+                  Set by hand ·{' '}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateItem(sec._key, item._key, {
+                        price_override: null,
+                      })
+                    }
+                    title={priceLocked
+                      ? 'Reset to the price saved on this line'
+                      : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
+                    aria-label="Reset the manual price"
+                    className={`${LINK_BOX} font-semibold text-crx-green hover:underline`}
+                  >
+                    Reset
+                  </button>
+                </p>
+              )}
+              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
+              {!customerView && prod && item.price_override == null && !item.price_per_unit
+                && isTierPriceMissing(prod, tier) && (
+                <p role="status" className="mt-1 flex items-center gap-1 text-xs text-amber-800">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  No tier {tier} price. Type one.
+                </p>
+              )}
+              {!customerView && priceLocked && (() => {
+                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
+                return raise && (
+                  <label className="mt-1 flex items-start gap-1.5 text-xs text-amber-800">
+                    <input
+                      type="checkbox"
+                      checked={item.grower_confirmed_cents === raise.toCents}
+                      disabled={editLocked}
+                      onChange={(e) => updateItem(sec._key, item._key, {
+                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
+                      })}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-crx-green"
+                    />
+                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
+                  </label>
+                );
+              })()}
+              {linePriceHints(item, f)}
+            </>
+          );
+        };
+
+        const linePerAcre = (item: LocalItem) => `${item.price_per_acre != null ? fmt(item.price_per_acre) : '–'} / acre`;
+        const lineParts = (item: LocalItem, n: number) => {
+          const f = lineFacts(item);
+          const { prod, openPicker, allowNoUnit, unitOptions } = f;
+          const product = lineProduct(item, f);
+          const rate = (
+            <>
+              <div className={`${UNIT_BOX} border-gray-300 bg-white`}>
+                <input
+                  type="number"
+                  value={item.actual_rate ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      actual_rate: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'rate_acres',
+                    })
+                  }
+                  aria-label="Actual rate"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
+                <Dropdown
+                  aria-label="Rate unit"
+                  noHelperRow
+                  value={item.rate_unit || (allowNoUnit ? NO_UNIT : null)}
+                  onChange={(v) =>
+                    updateItem(sec._key, item._key, {
+                      rate_unit: v === NO_UNIT ? null : v || null,
+                    })
+                  }
+                  options={unitOptions(item.rate_unit, (unit) => unit)}
+                  placeholder="--"
+                  disabled={editLocked}
+                  className={UNIT_SELECT}
+                />
+              </div>
+              {item.oz_per_acre != null && (
+                <p className="mt-1 text-xs text-secondary tabular-nums">{item.oz_per_acre.toFixed(2)} oz/acre</p>
+              )}
+            </>
+          );
+          const acres = (
+            <input
+              type="number"
+              value={item.acres ?? ''}
+              onChange={(e) =>
+                updateItem(sec._key, item._key, {
+                  acres: e.target.value
+                    ? parseFloat(e.target.value)
+                    : null,
+                  acres_source: 'typed',
+                  calc_mode: item.calc_mode === 'units_direct'
+                    ? 'units_direct' // keep units_direct if typing acres alongside units
+                    : 'rate_acres',
+                })
+              }
+              aria-label="Acres"
+              className={`${LINE_INPUT} border-gray-300`}
+              step="any"
+              min={0}
+            />
+          );
+          const quantity = (
+            <>
+              <div className={`${UNIT_BOX} ${
+                item.calc_mode === 'units_direct'
+                  ? 'border-crx-green bg-crx-green-tint'
+                  : 'border-gray-300 bg-white'
+              }`}>
+                <input
+                  type="number"
+                  value={item.total_units_needed ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      total_units_needed: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'units_direct',
+                    })
+                  }
+                  aria-label="Quantity"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
+                {prod?.inventory_unit && <span className={UNIT_STRIP}>{prod.inventory_unit}</span>}
+              </div>
+              {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
+            </>
+          );
+          const price = linePrice(item, f);
+          // Admin only, never in Customer view (hideCost): cost when quoted beside today's, then profit and margin.
+          const cost = !hideCost && (
+            <div>
+              <QuoteLineCost
+                quotedCost={item.current_cost}
+                // A line not yet quoted (new, or switched to another product)
+                // already shows today's cost.
+                todayCost={holdsQuotedCost(item, item.product_id, savedLineIdByKey.get(item._key))
+                  ? prod?.current_cost ?? null
+                  : null}
+                pricePerUnit={item.price_per_unit}
+              />
+              <div className="mt-0.5 font-medium text-crx-green tabular-nums whitespace-nowrap">
+                {fmt(item.profit)} · {pct(item.net_margin)}
+              </div>
+            </div>
+          );
+          const menu = (
+            <ActionMenu
+              label={`Actions for line ${n} in ${sec.section_name || 'Untitled section'}`}
+              disabled={editLocked}
+              items={[
+                ...(prod ? [{ id: 'change', label: 'Change product', onAction: openPicker }] : []),
+                { id: 'note', label: item.notes ? 'Edit note' : 'Add note', onAction: () => setEditingLineNote(item._key) },
+                {
+                  id: 'remove',
+                  label: lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed, edited: hasUserEnteredItemValues(item) }) ? 'Remove line…' : 'Remove line',
+                  icon: <Trash2 className="w-4 h-4" />,
+                  danger: true,
+                  onAction: () => requestRemoveItem(sec._key, item),
+                },
+              ]}
+            />
+          );
+          const perAcre = linePerAcre(item);
+          return { prod, product, rate, acres, quantity, price, perAcre, cost, menu };
+        };
+
+        return (
+          <Card key={sec._key} padding={false}>
+            <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 md:px-4 ${isCollapsed ? '' : 'border-b border-cream-dark'}`}>
+              <button
+                type="button"
+                onClick={() => toggleSectionCollapse(sec._key)}
+                className="h-11 w-11 md:h-10 md:w-10 shrink-0 inline-flex items-center justify-center rounded-md text-secondary hover:bg-gray-100"
+                aria-label={isCollapsed ? 'Expand section' : 'Collapse section'}
+                aria-expanded={!isCollapsed}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-4.5 h-4.5" />
+                ) : (
+                  <ChevronDown className="w-4.5 h-4.5" />
+                )}
+              </button>
+              <input
+                value={sec.section_name}
+                onChange={(e) => updateSectionName(sec._key, e.target.value)}
+                aria-label="Section name"
+                disabled={readOnly}
+                className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-10 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
+                placeholder="Section name"
+              />
+              <div className="order-last md:order-none w-full md:w-auto flex flex-wrap items-center gap-2">
+                <div className="flex w-full sm:w-auto items-center gap-2">
+                  <span className="text-xs text-secondary whitespace-nowrap">Field</span>
+                  {/* Active fields only (the customer's, once one is chosen), as the old list loaded. */}
+                  <FieldSearchPicker<FieldOption>
+                    value={sec.field_id || ''}
+                    selectedLabel={(sec.field_id && fields[sec.field_id]?.field_name) || ''}
+                    onSelect={(field) => handleSectionFieldChange(sec._key, field)}
+                    select={QUOTE_FIELD_SELECT}
+                    customerId={customerId || null}
+                    placeholder="Search fields..."
+                    ariaLabel={`Field for ${sec.section_name || 'section'}`}
+                    disabled={readOnly}
+                    className="min-w-0 flex-1 sm:flex-none sm:w-56"
+                  />
+                </div>
+                {/* U13 (#111): per-section job badge: a section that already has a
+                    scheduled job links straight to it (and the Schedule job button
+                    hides, since a 2nd job per section is rejected server-side). */}
+                {sec.id && sectionJobs[sec.id] && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/jobs/${sectionJobs[sec.id as string].id}`)}
+                    className="shrink-0 min-h-11 md:min-h-10"
+                    title="Open the job scheduled from this section"
+                  >
+                    <Badge variant={statusToBadgeVariant[sectionJobs[sec.id as string].status] || 'info'}>
+                      Job {sectionJobs[sec.id as string].job_number}
+                    </Badge>
+                  </button>
+                )}
+                {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
+                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
+                    Schedule job
+                  </Button>
+                )}
+                {scheduleBlockedAccepted && quoteId && sec.id && sec.items.length > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs text-secondary">
+                    <XCircle className="w-3 h-3 text-orange-500" />
+                    Sold, make a standalone job
+                    <HelpTip text="This booking was accepted and converted to a chemical sale (order). To do field work, create a standalone job from the Jobs page. Scheduling from a sold booking would double-count the product." />
+                  </span>
+                )}
+              </div>
+              {/* Always shown; on a phone it shares the first row with the name and the caption is read, not shown. */}
+              <div className="ml-auto flex shrink-0 flex-col items-end leading-tight">
+                <span className="text-xs text-secondary max-md:sr-only">Section total</span>
+                <strong className="text-[17px] md:text-lg font-semibold text-nav-dark tabular-nums whitespace-nowrap">{fmt(sectionTotal)}</strong>
+              </div>
+              {sections.length > 1 && (
+                <ActionMenu
+                  label={`Actions for section ${sec.section_name || 'Untitled section'}`}
+                  disabled={editLocked}
+                  items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
+                />
+              )}
+              {isPlanned && (
+                <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
+                  <div className="w-full sm:w-52">
+                    <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
+                      Needed by
+                      <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
+                    </div>
+                    <DatePicker
+                      aria-label="Needed by"
+                      value={sec.needed_by_date || null}
+                      onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
+                      disabled={editLocked}
+                    />
+                  </div>
+                  {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
+                  {quoteId && activePlannedHolds.length > 0 && (
+                    <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
+                      {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
+                        const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
+                        if (holds.length === 0) return null;
+                        const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
+                        const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
+                          if (hold.expires_at == null) return earliest;
+                          return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
+                        }, null);
+                        const unit = products.find((product) => product.id === productId)?.inventory_unit;
+                        const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
+                        return (
+                          <span key={productId}>
+                            Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
+                              <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
+                            ) : 'no expiry (no needed-by date)'}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {!isCollapsed && (
+              <fieldset disabled={readOnly} className="min-w-0">
+              {/* Section note: prints above the section's products on the PDF. Its link sits in the footer. */}
+              {sectionNoteOpen && (
+                <div className="px-3 md:px-4 pt-2">
+                  <div className="pb-1">
+                    <div className="mb-1 flex items-center gap-1 text-xs text-secondary">
+                      <span id={`section-note-${sec._key}`}>Note for this section (prints above its products)</span>
+                      <HelpTip text="These notes print above the items in the PDF. Use for delivery instructions like 'Apply before 10am' or 'Requires cool storage'." />
+                    </div>
+                    <textarea
+                      value={sec.section_header_notes || ''}
+                      onChange={(e) => updateSectionField(sec._key, 'section_header_notes', e.target.value || null)}
+                      id={`section-note-input-${sec._key}`}
+                      onFocus={openSectionNote}
+                      aria-labelledby={`section-note-${sec._key}`}
+                      rows={2}
+                      placeholder="Section notes for grower (shown above products on PDF)..."
+                      className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
+                    />
+                  </div>
+                </div>
+              )}
+              {sec.items.length === 0 ? (
+                <p className="px-3 md:px-4 pt-2 pb-4 text-sm text-secondary">
+                  No products yet.{readOnly ? null : ' '}
+                  {!readOnly && <button
+                    type="button"
+                    onClick={() => addItem(sec._key)}
+                    className={`${LINK_HIT} text-crx-green hover:underline font-medium`}
+                  >
+                    Add one
+                  </button>}
+                </p>
+              ) : lineCards ? (
+                // Below 1024 px: one card per line. Fields sit 2 across on a phone and 4 across from 768 px,
+                // once the card has the room (36rem; not with the sidebar open at 768 px).
+                <div className="mt-2 divide-y divide-cream-dark border-t border-cream-dark">
+                  {sec.items.map((item, idx) => {
+                    const line = lineParts(item, idx + 1);
+                    return (
+                      <article
+                        key={item._key}
+                        aria-label={line.prod ? `Line ${idx + 1}, ${line.prod.product_name}` : `Line ${idx + 1}`}
+                        className="@container px-3 py-3.5 md:px-4 space-y-3"
+                      >
+                        <div className="flex items-start gap-2">
+                          <span aria-hidden="true" className="mt-2.5 md:mt-0 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cream-dark text-xs font-semibold text-secondary tabular-nums">{idx + 1}</span>
+                          <div className="flex-1 min-w-0">{line.product}</div>
+                          {line.menu}
+                        </div>
+                        <div className="grid grid-cols-2 md:@min-[36rem]:grid-cols-4 gap-x-2.5 gap-y-3">
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate per acre</span>{line.rate}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Acres</span>{line.acres}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Quantity</span>{line.quantity}</div>
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Price</span>{line.price}</div>
+                        </div>
+                        <div className="flex items-end justify-between gap-3 border-t border-cream-dark pt-2.5">
+                          <div className="min-w-0 text-[13px] text-secondary">
+                            <div className="tabular-nums">{line.perAcre}</div>
+                            {line.cost}
+                          </div>
+                          <strong className="shrink-0 text-lg font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                // 1024 px and up: fixed columns that fit the card, Product takes what is left and wraps.
+                // The number columns widen once the card is 72rem. overflow-x-auto only guards a zoomed page.
+                // relative: the sr-only header is absolutely positioned and must stay inside this wrapper.
+                <div className="@container relative mt-2 overflow-x-auto">
+                  <table className="w-full table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-9 @min-[72rem]:w-10" />
+                      <col />
+                      <col className="w-29 @min-[72rem]:w-39" />
+                      <col className="w-17 @min-[72rem]:w-23" />
+                      <col className="w-24 @min-[72rem]:w-33" />
+                      <col className="w-33 @min-[72rem]:w-42" />
+                      <col className="w-24 @min-[72rem]:w-28" />
+                      {!hideCost && <col className="w-32 @min-[72rem]:w-33" />}
+                      <col className="w-12" />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-t border-cream-dark bg-cream/60 text-left text-xs text-secondary">
+                        <th scope="col" className="py-2.5 pl-3 pr-1 font-medium md:pl-4">#</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Product</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Rate per acre</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Acres</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Quantity</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Price</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Total</th>
+                        {!hideCost && <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Cost · margin</th>}
+                        <th scope="col" className="py-2.5 px-1"><span className="sr-only">Line actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sec.items.map((item, idx) => {
+                        const line = lineParts(item, idx + 1);
+                        return (
+                          <tr key={item._key} className="border-t border-cream-dark align-top">
+                            <td className="py-3 pl-3 pr-1 pt-5 text-xs text-secondary tabular-nums md:pl-4">{idx + 1}</td>
+                            <td className="py-3 px-1.5 break-words">{line.product}</td>
+                            <td className="py-3 px-1.5">{line.rate}</td>
+                            <td className="py-3 px-1.5">{line.acres}</td>
+                            <td className="py-3 px-1.5">{line.quantity}</td>
+                            <td className="py-3 px-1.5">{line.price}</td>
+                            <td className="py-3 px-1.5 pt-5 text-right">
+                              <div className="font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</div>
+                              <div className="mt-1 text-xs text-secondary tabular-nums">{line.perAcre}</div>
+                            </td>
+                            {/* Fixed columns: the cost's no-wrap parts may wrap rather than run into the next column. */}
+                            {!hideCost && <td className="py-3 px-1.5 pt-5 text-right text-xs [&_*]:whitespace-normal">{line.cost}</td>}
+                            <td className="py-2 px-1 text-right">{line.menu}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!readOnly && (sec.items.length > 0 || !sectionNoteOpen) && (
+                <div className="flex flex-col gap-1 border-t border-cream-dark px-3 py-3 md:flex-row md:items-center md:gap-4 md:px-4">
+                  {sec.items.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      icon={<Plus className="w-4 h-4" />}
+                      showChevron={false}
+                      onClick={() => addItem(sec._key)}
+                      className="min-h-11 w-full md:min-h-10 md:w-auto"
+                    >
+                      Add product
+                    </Button>
+                  )}
+                  {!sectionNoteOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openSectionNote();
+                        // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
+                        requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
+                      }}
+                      className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 self-start px-2 text-left text-sm font-medium text-crx-green hover:underline md:self-auto"
+                    >
+                      <Plus className="w-3.5 h-3.5 shrink-0" />
+                      Add a note for this section
+                    </button>
+                  )}
+                </div>
+              )}
+              </fieldset>
+            )}
+          </Card>
+        );
+      })}
+
+      {!readOnly && <button
+        type="button"
+        onClick={addSection}
+        className="w-full flex items-center md:justify-center gap-3 rounded-xl border-[1.5px] border-dashed border-gray-300 px-4 py-4 text-left text-nav-dark transition-colors hover:border-crx-green hover:bg-crx-green-tint disabled:opacity-50"
+      >
+        <span className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-full bg-crx-green-light text-crx-green">
+          <Plus className="w-4 h-4" aria-hidden="true" />
+        </span>
+        <span className="flex flex-col leading-snug">
+          <span className="font-semibold">Add a section</span>
+          <span className="text-[13px] text-secondary">Group products by field or timing, like &quot;Spring pre-emerge&quot;. Each section gets its own total on the PDF.</span>
+        </span>
+      </button>}
+              </fieldset>
+            ),
+          },
+          ...(settlement ? [{
+            key: 'balance',
+            label: isPhone ? 'Booking' : 'Booking balance',
+            content: <div className="pt-4"><Card>
+          {settlementEmpty && <p className="text-sm text-secondary">Nothing booked on this quote yet.</p>}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            {/* Prepaid cell hidden while there is no earmarked prepay — the booking-prepay
+                earmark engine is shelved (docs/roadmap/shelved-earmark-engine/), so this
+                reads 0 for now and lights up automatically when the engine returns. */}
+            {((settlement.prepay_remaining_cents ?? 0) > 0 || (settlement.prepay_earmarked_cents ?? 0) > 0) && (
+              <div>
+                <div className="text-secondary">Prepaid (remaining)</div>
+                <div className="font-semibold text-crx-green">{formatCents(settlement.prepay_remaining_cents ?? 0)}</div>
+              </div>
+            )}
+          </div>
+          {(settlement.prepay_earmarked_cents ?? 0) > 0 && (
             <div className="mt-2 text-xs text-secondary">
-              Prepay earmarked {formatCents(bookingSettlement.prepay_earmarked_cents ?? 0)} · applied {formatCents(bookingSettlement.prepay_applied_cents ?? 0)}
+              Prepay earmarked {formatCents(settlement.prepay_earmarked_cents ?? 0)} · applied {formatCents(settlement.prepay_applied_cents ?? 0)}
             </div>
           )}
-          {bookingSettlement.lines && bookingSettlement.lines.length > 0 && (
+          {settlement.lines && settlement.lines.length > 0 && (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -4651,13 +5522,13 @@ export default function QuoteBuilder() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bookingSettlement.lines.map((ln) => (
+                  {settlement.lines.map((ln) => (
                     (() => {
                       const unit = products.find((product) => product.id === ln.product_id)?.inventory_unit;
                       const suffix = unit ? ` ${unit}` : '';
                       return (
                         <tr key={ln.product_id} className="border-b border-gray-50">
-                          <td className="px-2 py-1">{ln.product_name ?? '—'}</td>
+                          <td className="px-2 py-1">{ln.product_name ?? '–'}</td>
                           <td className="px-2 py-1 text-right">{ln.booked_qty}{suffix}</td>
                           <td className="px-2 py-1 text-right">{ln.drawn_qty}{suffix}</td>
                           <td className="px-2 py-1 text-right">{ln.remaining_qty}{suffix}</td>
@@ -4669,12 +5540,18 @@ export default function QuoteBuilder() {
               </table>
             </div>
           )}
-        </Card>
-      )}
-
-      {showVersionHistory && savedVersionCount > 0 && (
-        <Card>
-          <CardHeader title="Version" accent="History" />
+        </Card></div>,
+          }] : []),
+          ...(tabAvailable.last ? [{
+            key: 'last',
+            label: 'Last charged',
+            content: <div className="pt-4"><LastChargedPricesCard products={lastCharged.products} state={lastCharged.state} onRetry={lastCharged.retry} /></div>,
+          }] : []),
+          ...(tabAvailable.history ? [{
+            key: 'history',
+            label: 'History',
+            count: savedVersionCount,
+            content: <div className="pt-4"><Card>
           {/* Version list */}
           <div className="divide-y divide-gray-100">
             {orderedVersionHistory.map((entry) => {
@@ -4862,7 +5739,7 @@ export default function QuoteBuilder() {
                     showChevron={false}
                     onClick={() => setCompareMode(false)}
                   >
-                    Exit Compare
+                    Exit compare
                   </Button>
                   <Button
                     size="sm"
@@ -4916,9 +5793,9 @@ export default function QuoteBuilder() {
                         <tr className="border-b border-gray-200 text-secondary">
                           <th className="text-left py-1 pr-2">Product</th>
                           <th className="text-right py-1 px-2">V{selectedVersion.version_number} Price</th>
-                          <th className="text-right py-1 px-2">Current Price</th>
+                          <th className="text-right py-1 px-2">Current price</th>
                           <th className="text-right py-1 px-2">V{selectedVersion.version_number} Total</th>
-                          <th className="text-right py-1 pl-2">Current Total</th>
+                          <th className="text-right py-1 pl-2">Current total</th>
                           <th className="text-right py-1 pl-2">Status</th>
                         </tr>
                       </thead>
@@ -4953,758 +5830,11 @@ export default function QuoteBuilder() {
               })()}
             </div>
           )}
-        </Card>
-      )}
+        </Card></div>,
+          }] : []),
+        ]}
+      />
 
-      <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
-      {!id && quoteTemplates.length > 0 && (
-        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-          <label className="text-sm font-medium">Start from Template:</label>
-          <select
-            onChange={handleSelectTemplate}
-            defaultValue=""
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
-          >
-            <option value="">Blank Quote</option>
-            {quoteTemplates.map((t) => (
-              <option key={t.id} value={t.id}>{t.template_name}</option>
-            ))}
-          </select>
-          {!customerId && (
-            <span className="text-xs text-secondary">Select a customer first to use a template</span>
-          )}
-        </div>
-      )}
-
-      <Card>
-        <CardHeader title="Quote" accent="Details" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label htmlFor="quote-customer" className="block text-sm font-medium text-secondary mb-1">
-              Customer
-            </label>
-            {/* Active customers only, as the old list loaded. */}
-            <CustomerSearchPicker<QuoteCustomer>
-              id="quote-customer"
-              value={customerId}
-              selectedLabel={selectedCustomer?.farm_name ?? ''}
-              onSelect={handleCustomerChange}
-              select={QUOTE_CUSTOMER_SELECT}
-              placeholder="Select a customer..."
-              ariaLabel="Customer"
-            />
-            {customerLoadError && (
-              <p role="alert" className="mt-1 text-sm text-red-600">{customerLoadError}</p>
-            )}
-            {fieldLoadError && unresolvedFieldIds.length > 0 && (
-              <p role="alert" className="mt-1 text-sm text-red-600">{fieldLoadError}</p>
-            )}
-            {productsLoadFailed && (
-              <p role="alert" className="mt-1 text-sm text-red-600">Products failed to load. Refresh the page before adding products or saving this quote.</p>
-            )}
-            {!customerView && selectedCustomer && <QuoteCreditStatus customerId={selectedCustomer.id} />}
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-secondary mb-1">
-              Pricing Tier
-            </label>
-            <select
-              value={tier}
-              onChange={(e) => applyTier(parseInt(e.target.value))}
-              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            >
-              <option value={1}>Tier 1</option>
-              <option value={2}>Tier 2</option>
-              <option value={3}>Tier 3</option>
-            </select>
-            {!customerView && tierMismatch && (
-              <TierMismatchNote
-                tier={tier}
-                assignedTier={assignedTier}
-                acknowledged={tierChosen}
-                onUseAssigned={() => applyTier(assignedTier, true)}
-                onAcknowledge={(checked) => setTierChoice(checked ? tierChoiceKey(id, customerId, tier, assignedTier) : '')}
-              />
-            )}
-          </div>
-          <div>
-            <label htmlFor="quote-expires" className="block text-sm font-medium text-secondary mb-1">
-              Expires
-            </label>
-            <select
-              id="quote-expires"
-              value={chosenExpiryDate ? 'date' : 'season'}
-              onChange={(e) => {
-                const pickDate = e.target.value === 'date';
-                pickedBeforeValidDaysRef.current = pickDate && !validDaysLoadedRef.current;
-                setChosenExpiryDate(pickDate ? pickedExpiryStart(todayInBusinessTz(), quoteValidDays, seasonEnd) : null);
-              }}
-              className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            >
-              <option value="season">
-                {parseLocalDate(seasonEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} (season end)
-              </option>
-              <option value="date">Pick a date</option>
-            </select>
-            {chosenExpiryDate && (
-              <input
-                type="date"
-                aria-label="Expiry date"
-                value={chosenExpiryDate}
-                min={todayInBusinessTz()}
-                onChange={(e) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(e.target.value || seasonEnd); }}
-                className="mt-2 w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-              />
-            )}
-            {status !== 'draft' && (
-              <p className="mt-1 text-xs text-secondary">A change applies when the quote is sent again.</p>
-            )}
-          </div>
-          <div className="sm:col-span-2 lg:col-span-4">
-            <CommissionSplitEditor
-              value={commissionSplit}
-              onChange={(val) => {
-                commissionSplitTouchedRef.current = true;
-                setCommissionSplit(val);
-              }}
-            />
-          </div>
-        </div>
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-secondary mb-1">
-            Header Notes
-          </label>
-          <textarea
-            value={headerNotes}
-            onChange={(e) => setHeaderNotes(e.target.value)}
-            rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            placeholder="Notes visible at the top of the quote..."
-          />
-        </div>
-      </Card>
-
-      {rupWarnings.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-sm text-amber-800">
-              {rupWarnings.map((w, i) => <p key={i}>{w}</p>)}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {sections.map((sec) => {
-        const isCollapsed = collapsedSections.has(sec._key);
-        const sectionTotal = sec.items.reduce((s, i) => s + i.total_price, 0);
-
-        return (
-          <Card key={sec._key} padding={false}>
-            <div className="p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1">
-                  <button
-                    onClick={() => toggleSectionCollapse(sec._key)}
-                    className="p-1 rounded hover:bg-gray-100 text-secondary"
-                    aria-label={isCollapsed ? 'Expand section' : 'Collapse section'}
-                  >
-                    {isCollapsed ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronUp className="w-4 h-4" />
-                    )}
-                  </button>
-                  <span className="text-xs font-mono text-gray-400 w-6">
-                    {sec.sort_order}
-                  </span>
-                  <input
-                    value={sec.section_name}
-                    onChange={(e) => updateSectionName(sec._key, e.target.value)}
-                    className="text-sm font-semibold font-heading text-nav-dark bg-transparent border-none outline-none focus:ring-0 flex-1"
-                    placeholder="Section name"
-                  />
-                  {/* U13 (#111): per-section job badge — a section that already has a
-                      scheduled job links straight to it (and the Schedule Job button
-                      below hides, since a 2nd job per section is rejected server-side). */}
-                  {sec.id && sectionJobs[sec.id] && (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/jobs/${sectionJobs[sec.id as string].id}`)}
-                      className="shrink-0"
-                      title="Open the job scheduled from this section"
-                    >
-                      <Badge variant={statusToBadgeVariant[sectionJobs[sec.id as string].status] || 'info'}>
-                        Job {sectionJobs[sec.id as string].job_number}
-                      </Badge>
-                    </button>
-                  )}
-                  <span className="text-sm font-mono text-secondary">
-                    {fmt(sectionTotal)}
-                  </span>
-                  {isPlanned && (
-                    <>
-                      <div className="flex items-center gap-2 ml-2">
-                        <label className="text-xs text-secondary whitespace-nowrap flex items-center">Needed By:<HelpTip text="This is when the customer needs the product — different from the quote expiration. Used for inventory forecasting and delivery scheduling." className="ml-1" /></label>
-                        <input
-                          type="date"
-                          value={sec.needed_by_date || ''}
-                          onChange={(e) => updateSectionField(sec._key, 'needed_by_date', e.target.value || null)}
-                          className="text-sm border border-gray-200 rounded px-2 py-1"
-                        />
-                      </div>
-                      {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
-                      {quoteId && activePlannedHolds.length > 0 && (
-                        <div className="ml-2 flex flex-col items-start gap-0.5 text-xs text-secondary">
-                          {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
-                            const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
-                            if (holds.length === 0) return null;
-                            const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
-                            const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
-                              if (hold.expires_at == null) return earliest;
-                              return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
-                            }, null);
-                            const unit = products.find((product) => product.id === productId)?.inventory_unit;
-                            const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
-                            return (
-                              <span key={productId}>
-                                Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
-                                  <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
-                                ) : 'no expiry (no needed-by date)'}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  )}
-                  <div className="flex items-center gap-2 ml-2">
-                    <label className="text-xs text-secondary whitespace-nowrap">Field:</label>
-                    {/* Active fields only (the customer's, once one is chosen), as the old list loaded. */}
-                    <FieldSearchPicker<FieldOption>
-                      value={sec.field_id || ''}
-                      selectedLabel={(sec.field_id && fields[sec.field_id]?.field_name) || ''}
-                      onSelect={(field) => handleSectionFieldChange(sec._key, field)}
-                      select={QUOTE_FIELD_SELECT}
-                      customerId={customerId || null}
-                      placeholder="Search fields..."
-                      ariaLabel={`Field for ${sec.section_name || 'section'}`}
-                      className="w-[180px]"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Plus className="w-3 h-3" />}
-                    showChevron={false}
-                    onClick={() => addItem(sec._key)}
-                  >
-                    Add Item
-                  </Button>
-                  {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
-                    <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3 h-3" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key}>
-                      Schedule Job
-                    </Button>
-                  )}
-                  {scheduleBlockedAccepted && quoteId && sec.id && sec.items.length > 0 && (
-                    <span className="inline-flex items-center gap-1 text-xs text-secondary">
-                      <XCircle className="w-3 h-3 text-orange-500" />
-                      Sold — make a standalone job
-                      <HelpTip text="This booking was accepted and converted to a chemical sale (order). To do field work, create a standalone job from the Jobs page — scheduling from a sold booking would double-count the product." />
-                    </span>
-                  )}
-                  {sections.length > 1 && (
-                    <button
-                      onClick={() => removeSection(sec._key)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                      aria-label="Remove section"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {!isCollapsed && (
-              <>
-              {/* Section Header Notes — above items table */}
-              <div className="px-5 pb-2">
-                <div className="flex items-center gap-1 mb-1">
-                  <span className="text-xs text-secondary">Section Header Notes</span>
-                  <HelpTip text="These notes print above the items in the PDF. Use for delivery instructions like 'Apply before 10am' or 'Requires cool storage'." className="ml-1" />
-                </div>
-                <textarea
-                  value={sec.section_header_notes || ''}
-                  onChange={(e) => updateSectionField(sec._key, 'section_header_notes', e.target.value || null)}
-                  rows={2}
-                  placeholder="Section notes for grower (shown above products on PDF)..."
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none"
-                />
-              </div>
-              <div className="overflow-x-auto">
-                {sec.items.length === 0 ? (
-                  <div className="px-5 pb-5">
-                    <p className="text-sm text-secondary">
-                      No items in this section.{' '}
-                      <button
-                        onClick={() => addItem(sec._key)}
-                        className="text-crx-green hover:underline font-medium"
-                      >
-                        Add one
-                      </button>
-                    </p>
-                  </div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-t border-gray-100 text-left text-xs text-secondary uppercase tracking-wide">
-                        <th className="px-5 py-3 font-medium w-8">#</th>
-                        <th className="px-3 py-3 font-medium min-w-[200px]">Product</th>
-                        <th className="px-3 py-3 font-medium">Price/Unit</th>
-                        {!hideCost && <th className="px-3 py-3 font-medium">Cost quoted / today</th>}
-                        <th className="px-3 py-3 font-medium">Sug. Rate</th>
-                        <th className="px-3 py-3 font-medium">Actual Rate</th>
-                        <th className="px-3 py-3 font-medium">Unit</th>
-                        <th className="px-3 py-3 font-medium">Acres</th>
-                        <th className="px-3 py-3 font-medium">Oz/Acre</th>
-                        <th className="px-3 py-3 font-medium">$/Acre</th>
-                        <th className="px-3 py-3 font-medium">Units Needed</th>
-                        <th className="px-3 py-3 font-medium">Total</th>
-                        <th className="px-3 py-3 font-medium min-w-[140px]">Notes</th>
-                        {!hideCost && <th className="px-3 py-3 font-medium">Profit</th>}
-                        {!hideCost && <th className="px-3 py-3 font-medium">Margin</th>}
-                        <th className="px-3 py-3 font-medium w-10" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sec.items.map((item) => {
-                        const prod =
-                          item.product ||
-                          products.find((p) => p.id === item.product_id);
-                        const todayPrice = prod ? getTierPrice(prod, tier) : null;
-                        const todayPriceOffer = priceLocked && canEdit
-                          && todayPrice != null
-                          && Math.round(todayPrice * 100) !== Math.round(item.price_per_unit * 100)
-                          ? todayPrice
-                          : null;
-                        const sentState = priceLocked && lastSentVersion && item.product_id
-                          ? sentLineState(lastSentItems, priceLockLineOf(item))
-                          : null;
-                        const sentHint = sentState == null || !lastSentVersion
-                          ? null
-                          : sentState.kind === 'new'
-                            ? `New since V${lastSentVersion.version_number}`
-                            : `Sent at ${formatCents(sentState.sentCents)}`;
-                        const costAlert = isAdmin ? undefined : costAlerts.get(savedLineIdByKey.get(item._key)?.id ?? '');
-                        const costHint = costAlert?.below_cost
-                          ? "Below today's cost: converting needs an admin's approval."
-                          : costAlert?.cost_rose ? 'Cost has gone up since this was quoted.' : null;
-                        return (
-                          <tr
-                            key={item._key}
-                            className="border-t border-gray-50 hover:bg-crx-green-tint transition-colors"
-                          >
-                            <td className="px-5 py-2 font-mono text-gray-400 text-xs">
-                              {item.sort_order}
-                            </td>
-                            <td className="px-3 py-2">
-                              {prod ? (
-                                <button
-                                  onClick={() => {
-                                    setProductSearchOpen({
-                                      sectionKey: sec._key,
-                                      itemKey: item._key,
-                                    });
-                                    setProductQuery('');
-                                  }}
-                                  className="text-left"
-                                >
-                                  <p className="font-medium text-nav-dark truncate max-w-[200px]">
-                                    {prod.product_name}
-                                  </p>
-                                  <ProductOptionDetails product={prod} />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setProductSearchOpen({
-                                      sectionKey: sec._key,
-                                      itemKey: item._key,
-                                    });
-                                    setProductQuery('');
-                                  }}
-                                  className="text-crx-green hover:underline font-medium flex items-center gap-1"
-                                >
-                                  <Search className="w-3 h-3" />
-                                  Select Product
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  value={item.price_per_unit || ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value ? parseFloat(e.target.value) : 0;
-                                    // A manual price is one that differs from what the line
-                                    // would otherwise take: its saved price on a sent quote,
-                                    // else today's tier price.
-                                    const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
-                                      ?? (prod ? getTierPrice(prod, tier) : 0);
-                                    const isOverride = Math.abs(val - basePrice) > 0.001;
-                                    updateItem(sec._key, item._key, {
-                                      price_override: isOverride ? val : null,
-                                      price_per_unit: val,
-                                    });
-                                  }}
-                                  aria-label="Price per unit"
-                                  // A stated $0 tier price shows as 0.00, not as a missing price.
-                                  placeholder={prod ? '0.00' : undefined}
-                                  className={`w-20 px-2 py-1 text-sm font-mono border rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green ${
-                                    item.price_override != null
-                                      ? 'border-amber-400 bg-amber-50'
-                                      : 'border-gray-200'
-                                  }`}
-                                  step="any"
-                                  min={0}
-                                />
-                                {item.price_override != null && (
-                                  <button
-                                    onClick={() =>
-                                      updateItem(sec._key, item._key, {
-                                        price_override: null,
-                                      })
-                                    }
-                                    title={priceLocked
-                                      ? 'Reset to the price saved on this line'
-                                      : `Reset to tier ${tier} price: ${fmt(prod ? getTierPrice(prod, tier) : 0)}`}
-                                    aria-label="Reset the manual price"
-                                    className="p-0.5 rounded text-amber-500 hover:text-amber-700 hover:bg-amber-100 transition-colors"
-                                  >
-                                    <RotateCcw className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                              {/* Early warning only: the database refuses this line on save (QUOTE_PRICE_MISSING) */}
-                              {!customerView && prod && item.price_override == null && !item.price_per_unit
-                                && isTierPriceMissing(prod, tier) && (
-                                <p role="status" className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
-                                  <AlertTriangle className="w-3 h-3 shrink-0" />
-                                  No tier {tier} price. Type one.
-                                </p>
-                              )}
-                              {!customerView && priceLocked && (() => {
-                                const raise = priceRaise(savedLineIdByKey.get(item._key), item);
-                                return raise && (
-                                  <label className="mt-0.5 flex items-center gap-1 text-xs text-amber-800">
-                                    <input
-                                      type="checkbox"
-                                      checked={item.grower_confirmed_cents === raise.toCents}
-                                      disabled={formLocked}
-                                      onChange={(e) => updateItem(sec._key, item._key, {
-                                        grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
-                                      })}
-                                    />
-                                    Grower agreed to {formatCents(raise.toCents)} (was {formatCents(raise.fromCents)})
-                                  </label>
-                                );
-                              })()}
-                              {!customerView && (sentHint || todayPriceOffer != null || costHint) && (
-                                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs">
-                                  {sentHint && <span className="text-amber-700">{sentHint}</span>}
-                                  {costHint && (
-                                    <span className={costAlert?.below_cost ? 'text-red-600' : 'text-amber-700'}>{costHint}</span>
-                                  )}
-                                  {todayPriceOffer != null && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        // A new choice: send it again even if an earlier one was saved.
-                                        const saved = savedLineIdsRef.current.get(item._key);
-                                        if (saved) saved.todayApplied = false;
-                                        useTierUndoRef.current.delete(item._key);
-                                        updateItem(sec._key, item._key, {
-                                          price_override: null,
-                                          use_todays_price: true,
-                                        });
-                                      }}
-                                      disabled={formLocked}
-                                      className="text-crx-green hover:underline disabled:opacity-50"
-                                    >
-                                      Use today {fmt(todayPriceOffer)}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                              <select
-                                value={item.price_unit || ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    price_unit: e.target.value || null,
-                                  })
-                                }
-                                aria-label="Price unit"
-                                className="w-20 px-1 py-0.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green mt-0.5"
-                              >
-                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
-                                  .map((uc) => (
-                                    <option key={uc.id} value={uc.unit}>
-                                      per {uc.unit}
-                                    </option>
-                                  ))}
-                              </select>
-                            </td>
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-secondary">
-                                <QuoteLineCost
-                                  quotedCost={item.current_cost}
-                                  // A line not yet quoted (new, or switched to another product)
-                                  // already shows today's cost.
-                                  todayCost={holdsQuotedCost(item, item.product_id, savedLineIdByKey.get(item._key))
-                                    ? prod?.current_cost ?? null
-                                    : null}
-                                  pricePerUnit={item.price_per_unit}
-                                />
-                              </td>
-                            )}
-                            <td className="px-3 py-2 text-secondary">
-                              {item.suggested_rate || '-'}
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.actual_rate ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    actual_rate: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    calc_mode: 'rate_acres',
-                                  })
-                                }
-                                aria-label="Actual rate"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2">
-                              <select
-                                value={item.rate_unit || ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    rate_unit: e.target.value || null,
-                                  })
-                                }
-                                aria-label="Rate unit"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                              >
-                                {prod?.product_form !== 'seed' && prod?.product_form !== 'each' && <option value="">--</option>}
-                                {rateUnitOptionsForProduct(unitConversions, prod?.product_form, prod?.inventory_unit)
-                                  .map((uc) => (
-                                    <option key={uc.id} value={uc.unit}>
-                                      {uc.unit}
-                                    </option>
-                                  ))}
-                              </select>
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.acres ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    acres: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    acres_source: 'typed',
-                                    calc_mode: item.calc_mode === 'units_direct'
-                                      ? 'units_direct' // keep units_direct if typing acres alongside units
-                                      : 'rate_acres',
-                                  })
-                                }
-                                aria-label="Acres"
-                                className="w-20 px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green"
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono text-secondary">
-                              {item.oz_per_acre != null
-                                ? item.oz_per_acre.toFixed(2)
-                                : '-'}
-                            </td>
-                            <td className="px-3 py-2 font-mono text-secondary">
-                              {item.price_per_acre != null
-                                ? fmt(item.price_per_acre)
-                                : '-'}
-                            </td>
-                            <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                value={item.total_units_needed ?? ''}
-                                onChange={(e) =>
-                                  updateItem(sec._key, item._key, {
-                                    total_units_needed: e.target.value
-                                      ? parseFloat(e.target.value)
-                                      : null,
-                                    calc_mode: 'units_direct',
-                                  })
-                                }
-                                aria-label="Units needed"
-                                className={`w-20 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30 focus:border-crx-green font-mono ${
-                                  item.calc_mode === 'units_direct'
-                                    ? 'border-crx-green bg-crx-green-tint'
-                                    : 'border-gray-200'
-                                }`}
-                                step="any"
-                                min={0}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-mono font-medium text-nav-dark">
-                              {fmt(item.total_price)}
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-1">
-                                <textarea
-                                  value={item.notes || ''}
-                                  onChange={(e) => updateItem(sec._key, item._key, { notes: e.target.value || null })}
-                                  rows={1}
-                                  placeholder="Product notes..."
-                                  className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:ring-1 focus:ring-crx-green/20 resize-none"
-                                />
-                                {prod && preferredQuoteNotes(prod)
-                                  && item.notes !== preferredQuoteNotes(prod) && (
-                                  <button
-                                    onClick={() => updateItem(sec._key, item._key, { notes: preferredQuoteNotes(prod) })}
-                                    title="Reset to default"
-                                    className="text-xs text-crx-green hover:underline whitespace-nowrap"
-                                  >
-                                    Reset
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-emerald-600">
-                                {fmt(item.profit)}
-                              </td>
-                            )}
-                            {!hideCost && (
-                              <td className="px-3 py-2 font-mono text-secondary">
-                                {pct(item.net_margin)}
-                              </td>
-                            )}
-                            <td className="px-3 py-2">
-                              <button
-                                onClick={() => removeItem(sec._key, item._key)}
-                                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                                aria-label="Remove line item"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-              </>
-            )}
-          </Card>
-        );
-      })}
-
-      <div className="flex justify-center">
-        <Button
-          variant="secondary"
-          icon={<Plus className="w-4 h-4" />}
-          showChevron={false}
-          onClick={addSection}
-        >
-          Add Section
-        </Button>
-      </div>
-
-      <Card>
-        <div>
-          <label className="block text-sm font-medium text-secondary mb-1">
-            Footer Notes
-          </label>
-          <textarea
-            value={footerNotes}
-            onChange={(e) => setFooterNotes(e.target.value)}
-            rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-            placeholder="Notes visible at the bottom of the quote (terms, disclaimers, etc.)..."
-          />
-        </div>
-      </Card>
-      </fieldset>
-
-      {/* To-Do 0.3: what this customer was charged before. Staff only; never in Customer View. */}
-      {!customerView && (isAdmin || profile?.role === 'sales_rep') && (
-        <LastChargedPrices
-          // A new customer starts a new card, so the last customer's prices never show for a moment.
-          key={customerId}
-          customerId={customerId}
-          lines={sections.flatMap((section) => section.items.map((item) => ({
-            productId: item.product_id,
-            productName: item.product?.product_name ?? 'Product',
-          })))}
-        />
-      )}
-
-      <Card>
-        <CardHeader title="Quote" accent="Totals" />
-        <div className={`grid grid-cols-2 ${hideCost ? 'sm:grid-cols-1' : 'sm:grid-cols-4'} gap-4`}>
-          <div>
-            <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-              Total Price
-            </p>
-            <p className="text-xl font-semibold font-heading text-nav-dark font-mono">
-              {fmt(totals.totalPrice)}
-            </p>
-          </div>
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Total Cost
-              </p>
-              <p className="text-xl font-semibold font-heading text-secondary font-mono">
-                {fmt(totals.totalCost)}
-              </p>
-            </div>
-          )}
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Total Profit
-              </p>
-              <p className="text-xl font-semibold font-heading text-emerald-600 font-mono">
-                {fmt(totals.totalProfit)}
-              </p>
-            </div>
-          )}
-          {!hideCost && (
-            <div>
-              <p className="text-xs text-secondary uppercase tracking-wide mb-1">
-                Overall Margin
-              </p>
-              <p className="text-xl font-semibold font-heading text-crx-green font-mono">
-                {totals.totalMarginPct.toFixed(1)}%
-              </p>
-            </div>
-          )}
-        </div>
-      </Card>
 
       <Modal
         open={productSearchOpen !== null}
@@ -5732,7 +5862,7 @@ export default function QuoteBuilder() {
               onChange={(e) => setKeepProductPickerOpen(e.target.checked)}
               className="rounded border-gray-300 text-crx-green focus:ring-crx-green"
             />
-            Keep open &mdash; add several
+            Keep open to add several
           </label>
           <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
             {filteredProducts.length === 0 ? (
@@ -5773,8 +5903,28 @@ export default function QuoteBuilder() {
       <Modal
         open={confirmConvertOpen}
         onClose={() => { if (!converting) setConfirmConvertOpen(false); }}
-        title="Convert to"
-        accent="Order"
+        title="Convert to order?"
+        footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              showChevron={false}
+              onClick={() => setConfirmConvertOpen(false)}
+              disabled={converting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              icon={<ShoppingCart className="w-4 h-4" />}
+              onClick={handleConvertToOrder}
+              loading={converting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              {converting ? 'Creating order…' : 'Create order'}
+            </Button>
+          </div>
+        }
       >
         <div className="space-y-4">
           <GuardrailBanner warning={staleWarning} onDismiss={dismissStaleWarning} />
@@ -5783,109 +5933,110 @@ export default function QuoteBuilder() {
             {selectedCustomer?.farm_name || 'the customer'} with all line items. The
             quote status will be updated to accepted.
           </p>
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              showChevron={false}
-              onClick={() => setConfirmConvertOpen(false)}
-              disabled={converting}
-            >
-              Cancel
-            </Button>
-            <Button
-              icon={<ShoppingCart className="w-4 h-4" />}
-              onClick={handleConvertToOrder}
-              loading={converting}
-            >
-              Create Order
-            </Button>
-          </div>
         </div>
       </Modal>
 
       <Modal
         open={showPreviewModal}
-        onClose={() => { setShowPreviewModal(false); if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl); }}
-        title="Quote"
-        accent="Preview"
+        onClose={() => { setShowPreviewModal(false); setPreviewPdfBlob(null); }}
+        title="Preview and send"
+        subtitle={selectedCustomer?.farm_name ? `${quoteNumber} for ${selectedCustomer.farm_name}` : quoteNumber}
+        size="wide"
       >
-        {/* PDF Column Template Picker */}
-        <div className="flex items-center gap-3 mb-3">
-          <select
-            value={selectedTemplateId || ''}
-            onChange={(e) => { setSelectedTemplateId(e.target.value); setCustomColumns(null); }}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
-          >
-            {pdfTemplates.map((t) => (
-              <option key={t.id} value={t.id}>{t.template_name}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowColumnPicker(!showColumnPicker)}
-            className="text-sm text-crx-green hover:underline"
-          >
-            {showColumnPicker ? 'Hide Columns' : 'Customize Columns'}
-          </button>
-        </div>
-        {showColumnPicker && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
-            {AVAILABLE_PDF_COLUMNS.map((col) => {
-              const activeColumns = customColumns || getTemplateColumns(selectedTemplateId);
-              const isActive = activeColumns.includes(col.key);
-              return (
-                <label key={col.key} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isActive}
-                    onChange={() => {
-                      const cols = [...activeColumns];
-                      if (isActive) cols.splice(cols.indexOf(col.key), 1);
-                      else cols.push(col.key);
-                      setCustomColumns(cols);
-                    }}
-                  />
-                  {col.label}
-                </label>
-              );
-            })}
+        {/* Phone: pages, then options, with the actions pinned at the bottom. md+: pages left, options and actions in a 360px side panel. */}
+        <div className="-mx-6 -my-5 flex h-[calc(100%+2.5rem)] flex-col md:grid md:grid-cols-[minmax(0,1fr)_360px] md:grid-rows-[minmax(0,1fr)_auto]">
+          <div className="min-h-0 flex-1 overflow-y-auto md:contents">
+            <div className="bg-cream-dark p-4 md:row-span-2 md:overflow-y-auto md:p-7">
+              {previewRebuild === 'failed' && (
+                <p className="mb-3 text-sm text-secondary">Preview could not update. Download and email use the columns you picked.</p>
+              )}
+              <div role="status" aria-live="polite" className={previewRebuild === 'updating' ? 'mb-3 text-xs text-secondary' : 'sr-only'}>
+                {previewRebuild === 'updating' ? 'Updating preview…' : ''}
+              </div>
+              {previewPdfBlob && <PdfPagePreview blob={previewPdfBlob} title={`Quote ${quoteNumber}`} />}
+            </div>
+            <div className="flex flex-col gap-5 p-4 md:overflow-y-auto md:border-l md:border-gray-200 md:px-6 md:py-5">
+              <Dropdown
+                label="PDF layout"
+                value={selectedTemplateId}
+                placeholder="Default layout"
+                onChange={(v) => { setSelectedTemplateId(v); setCustomColumns(null); }}
+                options={pdfTemplates.map((t) => ({ value: t.id, label: t.template_name }))}
+                noHelperRow
+              />
+              <fieldset className="flex min-w-0 flex-col gap-2.5">
+                <legend className="mb-2.5 text-sm font-medium text-secondary">Columns on the PDF</legend>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_PDF_COLUMNS.map((col) => {
+                    const isActive = activePdfColumns.includes(col.key);
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => {
+                          const cols = [...activePdfColumns];
+                          if (isActive) cols.splice(cols.indexOf(col.key), 1);
+                          else cols.push(col.key);
+                          setCustomColumns(cols);
+                        }}
+                        className={`inline-flex h-11 items-center rounded-full border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:h-10 ${isActive ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
+                      >
+                        {col.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-sm text-secondary">The preview updates as you pick.</p>
+              </fieldset>
+              <div className="flex flex-col gap-1.5 rounded-lg border border-cream-dark bg-cream p-3.5 text-sm">
+                <span className="font-medium text-nav-dark">Sending to</span>
+                <span className="break-all text-nav-dark">{selectedCustomer?.email || 'No email address on file'}</span>
+                {lastQuoteEmailAt && (
+                  <span className="inline-flex items-center gap-1.5 text-crx-green">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Last emailed {new Date(lastQuoteEmailAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-        <div className="h-[60vh]">
-          <iframe src={previewPdfUrl || ''} className="w-full h-full border rounded-lg" title="Quote PDF Preview" />
-        </div>
-        <div className="flex justify-end gap-3 mt-4 pt-4 border-t">
-          <Button
-            variant="secondary"
-            icon={<Download className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleDownloadPdf}
-          >
-            Download PDF
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<CheckCircle className="w-4 h-4" />}
-            onClick={handleMarkPresented}
-            disabled={status !== 'draft' && status !== 'revised'}
-          >
-            Mark as Presented
-          </Button>
-          <HelpTip text="Marks the quote as sent WITHOUT emailing &mdash; use when you presented it in person" className="ml-1" />
-          <Button
-            variant="primary"
-            icon={<Send className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleEmailToGrower}
-            loading={emailingGrower}
-          >
-            Email to Grower
-          </Button>
-          {lastQuoteEmailAt && (
-            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-              Emailed {new Date(lastQuoteEmailAt).toLocaleDateString()} ✓
-            </span>
-          )}
-          <HelpTip text="Emails the quote PDF to the grower and logs it" className="ml-1" />
+          <div className="flex shrink-0 flex-col gap-2.5 border-t border-gray-200 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:border-l md:px-6 md:pb-5">
+            <Button
+              variant="primary"
+              icon={<Send className="w-4 h-4" />}
+              onClick={handleEmailToGrower}
+              loading={emailingGrower}
+              className="h-11 w-full"
+            >
+              {emailingGrower ? 'Sending…' : 'Email to grower'}
+            </Button>
+            <div className="flex gap-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  setMarkingPresented(true);
+                  try { await handleMarkPresented(); } finally { setMarkingPresented(false); }
+                }}
+                loading={markingPresented}
+                disabled={status !== 'draft' && status !== 'revised'}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                {markingPresented ? 'Marking…' : 'Mark as presented'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Download className="w-4 h-4" />}
+                onClick={handleDownloadPdf}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                Download
+              </Button>
+            </div>
+            <p className="text-xs text-secondary">Mark as presented records the quote as sent without emailing, for quotes you hand over in person.</p>
+          </div>
         </div>
       </Modal>
 
@@ -5896,10 +6047,19 @@ export default function QuoteBuilder() {
       />
 
       {showSaveTemplateModal && (
-        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as Template">
+        <Modal open={showSaveTemplateModal} onClose={() => setShowSaveTemplateModal(false)} title="Save as template" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowSaveTemplateModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTemplate} disabled={!templateName.trim()} className="min-h-11 w-full sm:w-auto">
+              Save template
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Template Name</label>
+              <label className="block text-sm font-medium mb-1">Template name</label>
               <input
                 value={templateName}
                 onChange={(e) => setTemplateName(e.target.value)}
@@ -5917,27 +6077,25 @@ export default function QuoteBuilder() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
               />
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowSaveTemplateModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveTemplate}
-                disabled={!templateName.trim()}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                Save Template
-              </button>
-            </div>
           </div>
         </Modal>
       )}
 
       {showDrawModal && (
-        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create Order from Booking">
+        <Modal open={showDrawModal} onClose={() => setShowDrawModal(false)} title="Create order from booking" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowDrawModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => handleDrawDown()}
+              disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              {drawing ? 'Creating…' : 'Create order'}
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Enter how much of each booked product to send now. The quote keeps the
@@ -5950,15 +6108,16 @@ export default function QuoteBuilder() {
                   Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}) did not finish
                   and may have gone through, but it can no longer be finished safely. Check the orders on this booking before drawing again.
                 </p>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => {
                     clearPendingRetry(drawPendingName);
                     setPendingDraw(null);
                   }}
-                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg"
+                  className="shrink-0 min-h-11 md:min-h-10"
                 >
                   I checked
-                </button>
+                </Button>
               </div>
             )}
             {pendingDraw && !pendingDraw.expired && (
@@ -5967,13 +6126,14 @@ export default function QuoteBuilder() {
                   Your last Partial Order here ({new Date(pendingDraw.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}) got no reply,
                   so it may already have gone through. Finish it to get that order: it is made once, never twice.
                 </p>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => handleDrawDown(pendingDraw)}
                   disabled={drawing}
-                  className="shrink-0 px-3 py-1.5 bg-crx-green text-white rounded-lg disabled:opacity-50"
+                  className="shrink-0 min-h-11 md:min-h-10"
                 >
                   Finish it
-                </button>
+                </Button>
               </div>
             )}
             {drawLoading ? (
@@ -6015,6 +6175,7 @@ export default function QuoteBuilder() {
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}
                               onChange={(e) => setRow({ qty: e.target.value })}
+                              aria-label={`Quantity to draw for ${row.product_name}`}
                               className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
                             />
                             {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}
@@ -6025,8 +6186,8 @@ export default function QuoteBuilder() {
                         <tr className="border-b last:border-0">
                           <td colSpan={5} className="pb-2 text-xs text-secondary">
                             <p>
-                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : '—'},
-                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : '—'}. The extra goes on its own order at:
+                              {over}{row.unit ? ` ${row.unit}` : ''} over the booking. Booked {row.bookedPrice != null ? formatUSD(row.bookedPrice) : 'not set'},
+                              {' '}today {row.todayPrice != null ? formatUSD(row.todayPrice) : 'not set'}. The extra goes on its own order at:
                             </p>
                             <div className="mt-1 flex gap-4">
                               {(['today', 'booked'] as const).map((choice) => (
@@ -6052,27 +6213,21 @@ export default function QuoteBuilder() {
                 </table>
               </div>
             )}
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowDrawModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDrawDown()}
-                disabled={drawing || drawLoading || !drawRows.some((r) => (parseFloat(r.qty) || 0) > 0)}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                {drawing ? 'Creating…' : 'Create Order'}
-              </button>
-            </div>
           </div>
         </Modal>
       )}
 
       {showRolloverModal && (
-        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll Over to New Season">
+        <Modal open={showRolloverModal} onClose={() => setShowRolloverModal(false)} title="Roll over to new season" footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => setShowRolloverModal(false)} className="min-h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button onClick={handleRollover} className="min-h-11 w-full sm:w-auto">
+              Roll over
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Creates a new draft quote with the same products and program structure,
@@ -6080,27 +6235,13 @@ export default function QuoteBuilder() {
               Need dates will be reset.
             </p>
             <div>
-              <label className="block text-sm font-medium mb-1">Target Season</label>
+              <label className="block text-sm font-medium mb-1">Target season</label>
               <input
                 type="number"
                 value={rolloverSeason}
                 onChange={(e) => setRolloverSeason(parseInt(e.target.value))}
                 className="w-32 px-3 py-2 text-sm border border-gray-200 rounded-lg"
               />
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowRolloverModal(false)}
-                className="px-4 py-2 text-sm border rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRollover}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg"
-              >
-                Roll Over
-              </button>
             </div>
           </div>
         </Modal>
@@ -6127,21 +6268,49 @@ export default function QuoteBuilder() {
             setConfirmRewindOpen(false);
             await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
           }}
-          title={`Rewind to V${lastSentVersion.version_number}`}
-          message={`Put this quote back to V${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
-          confirmLabel={`Rewind to V${lastSentVersion.version_number}`}
+          title={`Rewind to version ${lastSentVersion.version_number}?`}
+          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          confirmLabel={`Rewind to version ${lastSentVersion.version_number}`}
           variant="info"
           icon={RotateCcw}
         />
       )}
 
+      {/* Decision 4: names the product and its amount, and the quote total without the line (the page's totals rule). */}
+      {(() => {
+        const target = removeLineTarget && sections.find((sec) => sec._key === removeLineTarget.sectionKey)
+          ?.items.find((item) => item._key === removeLineTarget.itemKey);
+        if (!removeLineTarget || !target) return null;
+        const prod = target.product || products.find((p) => p.id === target.product_id);
+        const unit = prod?.inventory_unit;
+        const quantity = target.total_units_needed ? `, ${target.total_units_needed.toLocaleString()}${unit ? ` ${unit}` : ''}` : '';
+        const totalAfter = quoteTotals(sections.map((sec) => (sec._key === removeLineTarget.sectionKey
+          ? { ...sec, items: sec.items.filter((item) => item._key !== removeLineTarget.itemKey) }
+          : sec))).totalPrice;
+        return (
+          <ConfirmModal
+            open
+            onClose={() => setRemoveLineTarget(null)}
+            onConfirm={() => {
+              removeItem(removeLineTarget.sectionKey, removeLineTarget.itemKey);
+              setRemoveLineTarget(null);
+            }}
+            title="Remove this line?"
+            message={`${prod?.product_name ?? 'This line'}${quantity}, ${fmt(target.total_price)}. The quote total drops to ${fmt(totalAfter)}.`}
+            confirmLabel="Remove line"
+            cancelLabel="Keep line"
+            variant="danger"
+          />
+        );
+      })()}
+
       <ConfirmModal
         open={confirmBookAsOrderOpen}
         onClose={() => setConfirmBookAsOrderOpen(false)}
         onConfirm={handleBookAsOrder}
-        title="Book as Order"
+        title="Book as order?"
         message="Mark this quote as sent and convert it to an order now?"
-        confirmLabel="Book as Order"
+        confirmLabel="Book as order"
         variant="info"
         icon={ShoppingCart}
         loading={bookingAsOrder || converting}
@@ -6151,9 +6320,9 @@ export default function QuoteBuilder() {
         open={confirmDeclineOpen}
         onClose={() => setConfirmDeclineOpen(false)}
         onConfirm={() => setTerminalStatus('declined')}
-        title="Decline Quote"
-        message={`Mark quote ${quoteNumber} as declined? This releases any inventory holds and is terminal — an admin can reopen it later if needed.`}
-        confirmLabel="Decline Quote"
+        title="Decline this quote?"
+        message={`Mark quote ${quoteNumber} as declined? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
+        confirmLabel="Decline quote"
         variant="danger"
         icon={XCircle}
         loading={statusActionLoading}
@@ -6163,9 +6332,10 @@ export default function QuoteBuilder() {
         open={confirmCancelOpen}
         onClose={() => setConfirmCancelOpen(false)}
         onConfirm={() => setTerminalStatus('cancelled')}
-        title="Cancel Quote"
-        message={`Cancel quote ${quoteNumber}? This releases any inventory holds and is terminal — an admin can reopen it later if needed.`}
-        confirmLabel="Cancel Quote"
+        title="Cancel this quote?"
+        cancelLabel="Keep quote"
+        message={`Cancel quote ${quoteNumber}? This releases any inventory holds. It is final, though an admin can reopen it later if needed.`}
+        confirmLabel="Cancel quote"
         variant="danger"
         icon={Ban}
         loading={statusActionLoading}
@@ -6175,9 +6345,9 @@ export default function QuoteBuilder() {
         open={confirmCloseAppliedOpen}
         onClose={() => setConfirmCloseAppliedOpen(false)}
         onConfirm={handleCloseAsApplied}
-        title="Close — Fulfilled by Application"
-        message={`Close booking ${quoteNumber} as fulfilled by application (WE applied the product for the customer)? Any product still un-applied is released back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
-        confirmLabel="Close Booking"
+        title="Close booking as applied?"
+        message={`Close booking ${quoteNumber} as fulfilled by application. We applied the product for the customer. Any product still unapplied goes back to free inventory. The customer was already billed through each job's application invoice, so this never bills again. This is terminal.`}
+        confirmLabel="Close booking"
         icon={CheckCircle}
         loading={closingApplied}
       />
@@ -6186,9 +6356,9 @@ export default function QuoteBuilder() {
         open={confirmCloseShortOpen}
         onClose={() => setConfirmCloseShortOpen(false)}
         onConfirm={handleCloseAsShort}
-        title="Close — Short (customer walked away)"
-        message={`Close booking ${quoteNumber} short? Use this when the customer won't take the rest of this booking. The un-fulfilled remainder is released back to free inventory. Any product already drawn was billed on its order, so this never bills again. This is terminal. (If jobs are still scheduled against this booking, cancel or complete them first.)`}
-        confirmLabel="Close Booking"
+        title="Close booking short?"
+        message={`Close booking ${quoteNumber} short? Use this when the customer won't take the rest of this booking (the customer walked away). The un-fulfilled remainder is released back to free inventory. Any product already drawn was billed on its order, so this never bills again. This is terminal. (If jobs are still scheduled against this booking, cancel or complete them first.)`}
+        confirmLabel="Close booking"
         icon={PackageOpen}
         loading={closingShort}
       />
@@ -6198,13 +6368,31 @@ export default function QuoteBuilder() {
         onClose={() => setConfirmDraftScheduleKey(null)}
         onConfirm={() => { const k = confirmDraftScheduleKey; setConfirmDraftScheduleKey(null); if (k) handleScheduleJob(k); }}
         title="Schedule job from a draft booking?"
-        message="This booking is still a draft — it hasn't been sent to the customer yet. You can schedule a job now, but the booking and its pricing may still change before it's sent. Continue?"
-        confirmLabel="Schedule Anyway"
+        message="This booking is still a draft and hasn't been sent to the customer yet. You can schedule a job now, but the booking and its pricing may still change before it's sent. Continue?"
+        confirmLabel="Schedule anyway"
         icon={CalendarClock}
       />
 
       {showRevertModal && (
-        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} Quote`}>
+        <Modal open={showRevertModal} onClose={() => { if (!reverting) { setShowRevertModal(false); setRevertReason(''); } }} title={`${revertLabel} quote`} footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => { setShowRevertModal(false); setRevertReason(''); }}
+              disabled={reverting}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRevertStatus}
+              disabled={reverting || !revertReason.trim()}
+              className="min-h-11 w-full sm:w-auto"
+            >
+              {reverting ? 'Reopening…' : revertLabel}
+            </Button>
+          </div>
+        }>
           <div className="space-y-4">
             <p className="text-sm text-secondary">
               Reopens quote {quoteNumber} back to <strong>sent</strong> so it can be edited,
@@ -6227,22 +6415,6 @@ export default function QuoteBuilder() {
                 {revertReason.length}/{MAX_REVERT_REASON_LENGTH}
               </p>
             </div>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setShowRevertModal(false); setRevertReason(''); }}
-                disabled={reverting}
-                className="px-4 py-2 text-sm border rounded-lg disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRevertStatus}
-                disabled={reverting || !revertReason.trim()}
-                className="px-4 py-2 text-sm bg-crx-green text-white rounded-lg disabled:opacity-50"
-              >
-                {reverting ? 'Reopening…' : revertLabel}
-              </button>
-            </div>
           </div>
         </Modal>
       )}
@@ -6251,11 +6423,45 @@ export default function QuoteBuilder() {
         open={duplicateOrderConfirmOpen}
         onClose={() => setDuplicateOrderConfirmOpen(false)}
         onConfirm={executeConvertToOrder}
-        title="Duplicate Order Warning"
+        title="Convert anyway?"
         message={duplicateOrderMsg}
-        confirmLabel="Convert Anyway"
+        confirmLabel="Convert anyway"
         variant="warning"
       />
+
+      {/* Phone: sticky above MobileBottomNav (min-h-11 + 1px border + safe area); -mx-4 undoes AppLayout main p-4.
+          It sits in the page flow, so it never covers the last content. */}
+      {hasBottomBar && (
+        <div data-testid="quote-bottom-bar" className="sticky bottom-[calc(2.75rem+1px+env(safe-area-inset-bottom))] z-20 -mx-4 flex gap-2 border-t border-gray-200 bg-white px-4 pb-3.5 pt-2.5 shadow-[0_-1px_4px_rgba(0,0,0,0.08)]">
+          {showSaveDraft && saveDraftButton('flex-1')}
+          {greenAction && <div className="flex flex-[1.4] [&>*]:w-full">{greenAction}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const NOTICE_TONES = {
+  info: 'bg-blue-50 border-blue-100 text-blue-900',
+  warn: 'bg-amber-50 border-amber-200 text-amber-800',
+  brand: 'bg-crx-green-tint border-crx-green/20 text-crx-green',
+} as const;
+
+/** One-line page notice: icon, text (long help behind a HelpTip in the text), then its actions. */
+function Notice({ tone, icon, actions, role, children }: {
+  tone: keyof typeof NOTICE_TONES;
+  icon: ReactNode;
+  actions?: ReactNode;
+  role?: 'status';
+  children: ReactNode;
+}) {
+  return (
+    <div role={role} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-2.5 text-sm ${NOTICE_TONES[tone]}`}>
+      <div className="flex min-w-0 flex-[1_1_20rem] items-start gap-2">
+        <span className="mt-0.5 shrink-0">{icon}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1">{children}</div>
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

@@ -62,7 +62,7 @@ export function drawCompanyBlock(doc: jsPDF, company: CompanyInfo, top: number, 
   doc.setFontSize(8.25);
   const tagline = companyTaglineHeader(company).split("  •  ")[0];
   const address = company.address.trim() || DEFAULT_COMPANY_INFO.address;
-  for (const line of [tagline, ...(doc.splitTextToSize(address, colW) as string[]), company.phone]) {
+  for (const line of [tagline, address, company.phone].flatMap((text) => doc.splitTextToSize(text, colW) as string[])) {
     y += 12;
     doc.text(line, Q_MARGIN_X, y);
   }

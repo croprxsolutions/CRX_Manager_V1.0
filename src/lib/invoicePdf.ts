@@ -410,6 +410,9 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   totalRow('Subtotal:', fmt(data.total_amount_cents));
   if (data.paid_amount_cents > 0) totalRow('Payments:', `-${fmt(data.paid_amount_cents)}`);
   if (data.prepay_applied_cents > 0) totalRow('Prepay Applied:', `-${fmt(data.prepay_applied_cents)}`);
+  // Review #1873: the rows add up to BALANCE DUE as invoices.balance_cents does (a credit memo's credit used is +).
+  const credit = data.credit_applied_cents ?? 0;
+  if (credit > 0) totalRow('Credits Applied:', fmt(data.invoice_type === 'credit_memo' ? credit : -credit));
   if ((data.write_off_cents ?? 0) > 0) totalRow('Write-off:', `-${fmt(data.write_off_cents ?? 0)}`);
   if (data.finance_charge_cents && data.finance_charge_cents > 0) totalRow('Finance Charges:', fmt(data.finance_charge_cents));
 

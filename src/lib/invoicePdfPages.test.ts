@@ -6,7 +6,7 @@ import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import { drawInvoicePdf, type InvoicePdfData } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
-type Drawn = { text: string; page: number; x: number; y: number };
+type Drawn = { text: string; page: number; x: number; y: number; width: number };
 
 /** A real jsPDF that records each text call with the page it lands on. */
 function recordingPdf(log: Drawn[]): typeof jsPDF {
@@ -14,7 +14,7 @@ function recordingPdf(log: Drawn[]): typeof jsPDF {
     const doc = new jsPDF(...args);
     const text = doc.text.bind(doc);
     doc.text = ((value: string | string[], x: number, y: number, ...rest: unknown[]) => {
-      for (const line of [value].flat()) log.push({ text: line, page: doc.getCurrentPageInfo().pageNumber, x, y });
+      for (const line of [value].flat()) log.push({ text: line, page: doc.getCurrentPageInfo().pageNumber, x, y, width: doc.getTextWidth(line) });
       return (text as (...a: unknown[]) => jsPDF)(value, x, y, ...rest);
     }) as typeof doc.text;
     return doc;
@@ -59,5 +59,37 @@ describe('invoice PDF page breaks (real jsPDF)', () => {
     expect(note.page).toBe(lastPage);
     expect(note.y).toBeGreaterThan(doc.lastAutoTable.finalY);
     expect(at(`Page ${lastPage} of ${lastPage}`).page).toBe(lastPage);
+  });
+});
+
+// Review #1873 LOW: long values wrap inside the page instead of running off its right edge.
+describe('invoice PDF long values (real jsPDF)', () => {
+  const long = 'North Bottom Ground by the Creek Crossing West of the Grain Bins Section Fourteen';
+  const data: InvoicePdfData = {
+    invoice_number: 'INV-2026-0042', invoice_date: '2026-11-06', invoice_type: 'field_application', status: 'posted',
+    customer_name: 'Test Farm', customer_address: `RR 2 Box 14, ${long}`, customer_city: 'Testville', customer_state: 'IL', customer_zip: '62000',
+    crop_type: 'Corn', total_acres: 91.9, field_names: [long, `${long} Two`],
+    items: [{ description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 }],
+    shares: [
+      { customer_name: `Test Grower Partnership ${long}`, split_percentage: 50, acres: 45.95, amount_cents: 500 },
+      { customer_name: `Second Test Grower ${long}`, split_percentage: 50, acres: 45.95, amount_cents: 500 },
+    ],
+    total_amount_cents: 1000, total_cost_cents: 0, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 1000,
+    company: { name: 'Test Ag Co', phone: `555-0199 office, 555-0100 shop, 555-0111 after hours, ask for ${long}`, email: '', address: '' },
+    options: { show_shares: true, show_price_per_acre: false, show_epa_registration: true },
+  };
+
+  it('wraps the bill-to street, the crop and fields line, the growers line and the company phone', () => {
+    const log: Drawn[] = [];
+    const doc = drawInvoicePdf({ jsPDF: recordingPdf(log), autoTable }, data);
+    const right = doc.internal.pageSize.getWidth() - 42;
+    const drawn = log.filter((d) => d.page === 1 && d.y < 300 && d.text.includes('Creek'));
+    expect(drawn.length).toBeGreaterThan(5); // street, fields, growers and phone each took more than one line
+    for (const d of drawn) expect(d.x + d.width).toBeLessThanOrEqual(right + 0.5);
+    // The company block keeps to its column, left of the logo.
+    const companyColumn = (doc.internal.pageSize.getWidth() - 84 - 32) / 3;
+    const companyLines = log.filter((d) => d.page === 1 && d.x === 42 && d.y < 110);
+    expect(companyLines.some((d) => d.text.includes('Creek'))).toBe(true);
+    for (const d of companyLines) expect(d.width).toBeLessThanOrEqual(companyColumn + 0.5);
   });
 });

@@ -110,6 +110,17 @@ Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved 
   assert(text.includes("Make checks payable to Crop RX Solutions, Inc."), "PDF does not name the legal payee");
 });
 
+// Review #1873 MED 2: the emailed PDF reads the credit applied, so its totals add up to the balance.
+Deno.test("an emailed invoice prints the credit applied between its total and its balance", async () => {
+  const tables = { ...invoiceTables(), invoices: [{ ...invoiceTables().invoices[0], credit_applied_cents: 2_000, balance_cents: 8_000 }] };
+  const data = await loadInvoicePdfData(fakeDb(tables), "inv-1");
+  assertEquals(data.credit_applied_cents, 2_000);
+  const text = pdfText(drawInvoicePdf({ jsPDF, autoTable }, data));
+  for (const printed of ["Credits applied", "-$20.00", "$80.00"]) {
+    assert(text.includes(printed), `PDF does not print ${printed}`);
+  }
+});
+
 Deno.test("any failed invoice read refuses instead of drawing a PDF with parts missing", async () => {
   for (const table of ["invoices", "profiles", "customers", "invoice_items", "invoice_shares", "app_settings"]) {
     let refused = false;

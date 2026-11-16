@@ -449,8 +449,8 @@ describe('generateInvoicePdf', () => {
     expect((fuelRow as string[]).some((cell) => /\/AC\b/.test(cell))).toBe(false);
     // No "1.00 AC" Total-Applied mislabel.
     expect((fuelRow as string[]).some((cell) => /\bAC\b/.test(cell))).toBe(false);
-    // The Unit Price cell is the plain dollar amount "200.00" (no slash, no unit).
-    expect((fuelRow as string[]).includes('200.00')).toBe(true);
+    // The Unit Price cell is the plain dollar amount "$200.00" (no slash, no unit; whole cents, review #1873 MED 4).
+    expect((fuelRow as string[]).includes('$200.00')).toBe(true);
   });
 
   it('renders a Fuel Surcharge line as a flat amount (no "AC") — legacy layout', async () => {
@@ -906,9 +906,17 @@ const PRINTED_BEFORE: Record<string, string[]> = {
 const B = PRINTED_BEFORE;
 const PRINTED_AFTER: Record<string, string[]> = {
   fieldApplication: [
-    ...B.fieldApplication.slice(0, 22), // the table, price per acre, grower shares, the finance strip: unchanged
+    // the table; unit prices now print from whole cents with a "$" (review #1873 MED 4), as the chemical sale's do
+    B.fieldApplication[0], B.fieldApplication[1], '$18.50', B.fieldApplication[3],
+    B.fieldApplication[4], '$24.00', B.fieldApplication[6],
+    B.fieldApplication[7], '$8.00', B.fieldApplication[9],
+    '$23.25', // price per acre, from whole cents with a "$" (MED 4)
+    ...B.fieldApplication.slice(11, 21), // total, grower shares, the finance strip's charge
+    '$1,525.00', // Net Due is the balance due (review #1873 HIGH 1): the balance already holds the finance charge
     '$2,790.00', // added: the Subtotal row (one row, the lines' sum), above Invoice total
-    ...B.fieldApplication.slice(22), // Invoice total (was "Subtotal"), payments, prepay, write-off, finance, balance, discount earned
+    ...B.fieldApplication.slice(22, 26), // Invoice total (was "Subtotal"), payments, prepay, write-off
+    // removed: B[26], the "+Finance charges" totals row (HIGH 1: it is not added to the balance)
+    ...B.fieldApplication.slice(27), // balance, discount earned
   ],
   chemicalSaleSplit: [
     ...B.chemicalSaleSplit.slice(0, 12), // three products and the Freight line (quantity, price, amount)
@@ -938,7 +946,7 @@ const PRINTED_AFTER: Record<string, string[]> = {
 const LABELLED: Record<string, Array<[string, string]>> = {
   fieldApplication: [
     ['Subtotal', '$2,790.00'], ['Invoice total', '$2,790.00'], ['Payments', '-$1,000.00'], ['Prepay applied', '-$250.00'],
-    ['Write-off', '-$15.00'], ['Finance charges', '$12.50'], ['Net Due (INV-2026-0001):', '$1,537.50'],
+    ['Write-off', '-$15.00'], ['Finance Charges (included in the balance due)', '$12.50'], ['Net Due (INV-2026-0001):', '$1,525.00'],
     ['Balance due', '$1,525.00'], ['Discount earned (if paid early)', '$20.00'],
   ],
   chemicalSaleSplit: [
@@ -1157,5 +1165,96 @@ describe('invoice PDF in the quote style', () => {
     await generateInvoicePdf(moneyFixtures.chemicalSaleSplit);
     expect(texts()).toContain('Products');
     expect(texts()).not.toContain('Subtotal');
+  });
+});
+
+describe('review #1873: the printed amounts agree and add up', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.getNumberOfPages.mockReturnValue(1);
+  });
+
+  const legacy = { show_shares: true, show_price_per_acre: true, show_epa_registration: true, format: 'legacy' as const };
+  const textColorBefore = (text: string) => {
+    const at = mockDoc.text.mock.calls.findIndex((c) => c[0] === text);
+    const when = mockDoc.text.mock.invocationCallOrder[at];
+    const colours = mockDoc.setTextColor.mock.calls.filter((_, i) => mockDoc.setTextColor.mock.invocationCallOrder[i] < when);
+    return colours[colours.length - 1];
+  };
+
+  // HIGH 1: the database keeps a finance charge in the balance of its own invoice (20260803221244 stopped
+  // net_due_cents adding it a second time), so Net Due is the balance due.
+  it('Net Due equals Balance due on an invoice with finance charges', async () => {
+    await generateInvoicePdf(moneyFixtures.fieldApplication);
+    expect(valueAfter('Net Due (INV-2026-0001):')).toBe('$1,525.00');
+    expect(valueAfter('Net Due (INV-2026-0001):')).toBe(valueAfter('Balance due'));
+    expect(texts()).not.toContain('Finance charges'); // no "+" row between the total and the balance
+  });
+
+  // MED 2: balance_cents = total - paid - prepay - write-off - credit applied (a credit memo: + credit used).
+  it('prints a signed Credits applied row, so Total - payments - credits = Balance due', async () => {
+    await generateInvoicePdf(makeInvoiceData({
+      invoice_type: 'chemical_sale', items: [makeItem({ extended_cents: 100000 })],
+      total_amount_cents: 100000, paid_amount_cents: 0, credit_applied_cents: 20000, balance_cents: 80000,
+    }));
+    expect(valueAfter('Invoice total')).toBe('$1,000.00');
+    expect(valueAfter('Credits applied')).toBe('-$200.00');
+    expect(valueAfter('Balance due')).toBe('$800.00');
+  });
+
+  it("a credit memo's Credits applied row is positive: using the credit brings its balance up toward $0", async () => {
+    await generateInvoicePdf({ ...moneyFixtures.creditMemo, credit_applied_cents: 1000, balance_cents: -2975 });
+    expect(valueAfter('Invoice total')).toBe('-$39.75');
+    expect(valueAfter('Credits applied')).toBe('$10.00');
+    expect(valueAfter('Balance due')).toBe('-$29.75');
+  });
+
+  it('prints no Credits applied row when none was applied', async () => {
+    await generateInvoicePdf(moneyFixtures.chemicalSaleSplit);
+    expect(texts()).not.toContain('Credits applied');
+  });
+
+  it('Old Print prints the Credits applied row too', async () => {
+    await generateInvoicePdf(makeInvoiceData({ options: legacy, total_amount_cents: 18500, credit_applied_cents: 5000, balance_cents: 13500 }));
+    expect(valueAfter('Credits Applied:')).toBe('-$50.00');
+    expect(valueAfter('BALANCE DUE:')).toBe('$135.00');
+  });
+
+  // MED 4: whole cents divided once and rounded half away from zero, as the database's round(..., 2) does.
+  it.each([
+    [1005, 10, '$1.01'],
+    [35, 10, '$0.04'], // float dollars printed $0.03
+    [279000, 120, '$23.25'],
+  ])('price per acre from whole cents: %i cents over %i acres prints %s', async (cents, acres, printed) => {
+    await generateInvoicePdf(makeInvoiceData({
+      items: [makeItem({ extended_cents: cents })], total_amount_cents: cents, balance_cents: cents, total_acres: acres,
+      options: { show_shares: false, show_price_per_acre: true, show_epa_registration: true },
+    }));
+    expect(texts()).toContain(`Price per acre: ${printed}`);
+  });
+
+  it('a field application unit price prints from whole cents', async () => {
+    await generateInvoicePdf(makeInvoiceData({ items: [makeItem({ unit_price_cents: 1005, gl_lb_unit: 'GL' })] }));
+    const products = vi.mocked((await import('jspdf-autotable')).default).mock.calls
+      .map(([, o]) => o as { head: string[][]; body: string[][] }).find((o) => o.head[0][0] === 'Product')!;
+    expect(products.body[0]).toContain('$10.05 GL');
+  });
+
+  // LOW: a forwarded void must not look live.
+  it.each([['voided', [220, 38, 38]], ['cancelled', [31, 31, 31]]])('a %s invoice prints its status loud and its balance not in green', async (status, colour) => {
+    await generateInvoicePdf({ ...moneyFixtures.chemicalSaleSplit, status });
+    const label = status.toUpperCase();
+    expect(textColorBefore(label)).toEqual(colour);
+    const sizes = mockDoc.setFontSize.mock.calls.filter((_, i) =>
+      mockDoc.setFontSize.mock.invocationCallOrder[i] < mockDoc.text.mock.invocationCallOrder[mockDoc.text.mock.calls.findIndex((c) => c[0] === label)]);
+    expect(sizes[sizes.length - 1][0]).toBeGreaterThanOrEqual(12);
+    expect(textColorBefore('$629.83')).not.toEqual([26, 122, 80]);
+  });
+
+  it('a posted invoice keeps its quiet status and the green balance', async () => {
+    await generateInvoicePdf(moneyFixtures.chemicalSaleSplit);
+    expect(textColorBefore('POSTED')).toEqual([90, 90, 90]);
+    expect(textColorBefore('$629.83')).toEqual([26, 122, 80]);
   });
 });

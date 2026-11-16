@@ -1872,6 +1872,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       total_cost_cents: invoice.total_cost_cents ?? items.reduce((s, i) => s + (i.is_application_fee ? i.cost_cents : Math.round(i.cost_cents * i.quantity)), 0),
       paid_amount_cents: invoice.paid_amount_cents ?? 0,
       prepay_applied_cents: invoice.prepay_applied_cents ?? 0,
+      // Review #1873: the PDF's rows add up to the balance only with the write-off and the credit applied.
+      write_off_cents: (invoice as { write_off_cents?: number | null }).write_off_cents ?? 0,
+      credit_applied_cents: invoice.credit_applied_cents ?? 0,
       balance_cents: invoice.balance_cents ?? 0,
       options,
     };

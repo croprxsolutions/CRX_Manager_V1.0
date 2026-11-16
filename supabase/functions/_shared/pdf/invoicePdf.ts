@@ -26,7 +26,7 @@ import {
   drawCompanyBlock, drawLogo, drawPageFooters, Q_CONTENT_BOTTOM, Q_CONTINUED_TOP, Q_LOGO_RATIO, Q_LOGO_WIDTH, Q_MARGIN_TOP,
   Q_MARGIN_X, Q_MUTED, Q_NOTE_BG, Q_TABLE, Q_TEXT, Q_TOTALS_RULE, Q_TOTALS_WIDTH,
 } from "./quoteStyle.ts";
-import { CRX_GREEN, formatCents as fmt, type JsPDFWithAutoTable, type PdfLib } from "./theme.ts";
+import { CRX_GREEN, formatCents as fmt, type JsPDFWithAutoTable, type PdfLib, RED } from "./theme.ts";
 
 type AutoTable = PdfLib["autoTable"];
 
@@ -369,6 +369,8 @@ export interface InvoicePdfData {
   paid_amount_cents: number;
   prepay_applied_cents: number;
   write_off_cents?: number;
+  /** invoices.credit_applied_cents: credit memos applied to this invoice (on a credit memo, the credit it has given). */
+  credit_applied_cents?: number;
   balance_cents: number;
   // #33: owner-entered early-pay "Discount Earned" (bigint cents). INFORMATIONAL —
   // printed as a labeled line but NEVER subtracted from total/balance (no double-count;
@@ -391,7 +393,8 @@ export interface InvoicePdfData {
   // Shares/Splits
   shares?: InvoicePdfShare[];
 
-  // Finance charges on this invoice
+  // Finance charges on this invoice. Informational: the charge's own invoice already holds it in its balance
+  // (20260803221244), so it is never added to balance_cents.
   finance_charge_cents?: number;
 
   // Source reference
@@ -448,6 +451,8 @@ export interface InvoiceRowForPdf {
   paid_amount_cents?: number | null;
   prepay_applied_cents?: number | null;
   write_off_cents?: number | null;
+  /** Optional: a list caller omits it and the builder reads it with the billing fields. */
+  credit_applied_cents?: number | null;
   balance_cents: number;
 }
 
@@ -553,7 +558,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id, credit_applied_cents')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -579,6 +584,7 @@ export async function buildInvoicePdfDataFromRow(
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
     diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
+    credit_applied_cents?: number | null;
   } | null;
   const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
       && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
@@ -663,6 +669,7 @@ export async function buildInvoicePdfDataFromRow(
     paid_amount_cents: inv.paid_amount_cents || 0,
     prepay_applied_cents: inv.prepay_applied_cents || 0,
     write_off_cents: inv.write_off_cents || 0,
+    credit_applied_cents: (inv.credit_applied_cents !== undefined ? inv.credit_applied_cents : billingRow?.credit_applied_cents) || 0,
     balance_cents: inv.balance_cents || 0,
     // #33: informational Discount Earned line (does NOT change total/balance).
     discount_earned_cents: pickDiscount || 0,
@@ -884,13 +891,17 @@ function drawHeader(p: Page, company: CompanyInfo): void {
   doc.setTextColor(...Q_TEXT);
   doc.text('Invoice', pageW / 2, titleY, { align: 'center' });
   if (data.status) {
-    titleY += 12;
-    doc.setFontSize(7.5);
-    doc.setTextColor(...Q_MUTED);
+    // A voided or cancelled invoice says so loudly, so a forwarded copy never looks live.
+    const dead = isDeadStatus(data.status);
+    titleY += dead ? 16 : 12;
+    doc.setFontSize(dead ? 12 : 7.5);
+    doc.setTextColor(...(data.status === 'voided' ? RED : dead ? Q_TEXT : Q_MUTED));
     doc.text(data.status.toUpperCase(), pageW / 2, titleY, { align: 'center' });
   }
   p.y = Math.max(companyY, titleY, drawInvoiceDetails(p, top, colW));
 }
+
+const isDeadStatus = (status: string) => status === 'voided' || status === 'cancelled';
 
 function invoiceDetails(data: InvoicePdfData): Array<[string, string]> {
   const rows: Array<[string, string | undefined]> = [
@@ -953,10 +964,12 @@ function drawBillTo(p: Page): void {
   doc.setFont('helvetica', 'normal');
   const city = data.customer_city || data.customer_state
     ? [data.customer_city, [data.customer_state, data.customer_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
-  for (const line of [data.customer_address, city, data.customer_phone]) {
-    if (!line) continue;
-    y += 13;
-    doc.text(line, x, y);
+  for (const value of [data.customer_address, city, data.customer_phone]) {
+    if (!value) continue;
+    for (const line of doc.splitTextToSize(value, contentWidth(p) / 2 - 27) as string[]) {
+      y += 13;
+      doc.text(line, x, y);
+    }
   }
   const payer = thisPayer(p);
   if (payer) {
@@ -1090,11 +1103,13 @@ function drawFieldContext(p: Page): void {
   const lines: Array<[string, 'bold' | 'normal']> = [[desc, 'bold'], [diluent, 'normal'], [growers, 'normal']];
   doc.setFontSize(8.25);
   doc.setTextColor(...Q_TEXT);
-  for (const [line, weight] of lines) {
-    if (!line) continue;
+  for (const [text, weight] of lines) {
+    if (!text) continue;
     doc.setFont('helvetica', weight);
-    p.y += 13;
-    doc.text(line, Q_MARGIN_X, p.y);
+    for (const line of doc.splitTextToSize(text, contentWidth(p)) as string[]) {
+      p.y += 13;
+      doc.text(line, Q_MARGIN_X, p.y);
+    }
   }
 }
 
@@ -1108,10 +1123,10 @@ function fieldApplicationRow(item: InvoicePdfItem, data: InvoicePdfData, showEpa
       : item.is_application_fee ? `${fmtNum(item.quantity, 2)} AC` : '';
   const glLb = item.total_applied_gl_lb != null ? `${fmtNum(item.total_applied_gl_lb, 4)} ${item.gl_lb_unit || ''}` : '';
   const unitPrice = isFuel
-    ? `${fmtNum(item.unit_price_cents / 100, 2)}`
+    ? fmt(item.unit_price_cents)
     : item.is_application_fee
-      ? `${fmtNum(item.unit_price_cents / 100, 2)} AC`
-      : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`;
+      ? `${fmt(item.unit_price_cents)} AC`
+      : `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
   return [
     productCellText(item, data),
     ...(showEpa ? [invoiceLineEpaText(item.brand_lines, item.epa_registration)] : []),
@@ -1129,13 +1144,15 @@ function drawFieldApplicationLayout(p: Page): void {
   drawTable(p, head, tableItems(p).map((item) => fieldApplicationRow(item, data, showEpa)), numberColumns(head.length, 5));
 
   if (opts.show_price_per_acre && data.total_acres && data.total_acres > 0) {
-    const pricePerAcre = data.total_amount_cents / 100 / data.total_acres;
+    // Whole cents, rounded half away from zero as the database's round(total / acres, 2) does.
+    const perAcre = data.total_amount_cents / data.total_acres;
+    const pricePerAcreCents = Math.sign(perAcre) * Math.round(Math.abs(perAcre));
     if (p.y + 18 > p.bottom) newPage(p);
     p.y += 14;
     doc.setFontSize(8.25);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...Q_MUTED);
-    doc.text(`Price per acre: ${fmtNum(pricePerAcre, 2)}`, Q_MARGIN_X + 4.5, p.y);
+    doc.text(`Price per acre: ${fmt(pricePerAcreCents)}`, Q_MARGIN_X + 4.5, p.y);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...Q_TEXT);
     doc.text(`Total ${fmt(data.total_amount_cents)}`, p.pageW - Q_MARGIN_X - 4.5, p.y, { align: 'right' });
@@ -1213,12 +1230,14 @@ function drawFinanceStrip(p: Page): void {
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...Q_TEXT);
   doc.text('FIN', Q_MARGIN_X, p.y);
-  doc.text('Finance Charges', Q_MARGIN_X + 60, p.y);
+  doc.text('Finance Charges (included in the balance due)', Q_MARGIN_X + 60, p.y);
   doc.text(fmt(finance), right, p.y, { align: 'right' });
   p.y += 14;
   doc.setFont('helvetica', 'bold');
+  // The balance already holds the charge (20260803221244 stopped the statement adding it twice), so Net Due is the
+  // balance due, the same amount the totals print.
   doc.text(`Net Due (${data.invoice_number}):`, Q_MARGIN_X + 60, p.y);
-  doc.text(fmt(data.balance_cents + finance), right, p.y, { align: 'right' });
+  doc.text(fmt(data.balance_cents), right, p.y, { align: 'right' });
 }
 
 // ── Totals and who pays ──────────────────────────────────────────────────
@@ -1234,13 +1253,17 @@ function breakdownRows(p: Page): Array<[string, string]> {
   return [...products, ...others].map(({ label, cents }) => [label || 'Other charges', fmt(cents)]);
 }
 
-/** What came off or went on after the invoice total, as the old totals box printed it. */
+/**
+ * What came off the invoice total, so the rows add up to Balance due as invoices.balance_cents does:
+ * total - paid - prepay - write-off - credit applied (a credit memo's credit used brings its balance up toward 0).
+ */
 function paymentRows(data: InvoicePdfData): Array<[string, string]> {
+  const credit = data.credit_applied_cents ?? 0;
   const rows: Array<[string, string, number]> = [
     ['Payments', `-${fmt(data.paid_amount_cents)}`, data.paid_amount_cents],
     ['Prepay applied', `-${fmt(data.prepay_applied_cents)}`, data.prepay_applied_cents],
+    ['Credits applied', fmt(data.invoice_type === 'credit_memo' ? credit : -credit), credit],
     ['Write-off', `-${fmt(data.write_off_cents ?? 0)}`, data.write_off_cents ?? 0],
-    ['Finance charges', fmt(data.finance_charge_cents ?? 0), data.finance_charge_cents ?? 0],
   ];
   return rows.filter(([, , cents]) => cents > 0).map(([label, value]) => [label, value]);
 }
@@ -1324,7 +1347,7 @@ function drawBalanceDue(p: Page, x: number): void {
   doc.setTextColor(...Q_TEXT);
   doc.text('Balance due', x, p.y + 16);
   doc.setFontSize(13.5);
-  doc.setTextColor(...CRX_GREEN);
+  doc.setTextColor(...(isDeadStatus(data.status) ? Q_TEXT : CRX_GREEN));
   doc.text(fmt(data.balance_cents), p.pageW - Q_MARGIN_X, p.y + 16, { align: 'right' });
   p.y += 22;
   // #33: the early-pay Discount Earned is shown but never taken off the balance, so Balance due still

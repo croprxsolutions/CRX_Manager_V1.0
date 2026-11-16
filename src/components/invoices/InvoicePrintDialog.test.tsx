@@ -136,6 +136,28 @@ describe('InvoicePrintDialog', () => {
     for (const c of choices) expect(c).toBeEnabled();
   });
 
+  // Review #1873 MED 5: a download can't be dismissed and then land anyway.
+  it('Cancel, the close button and Escape do nothing while a download runs', () => {
+    const onClose = vi.fn();
+    render(<InvoicePrintDialog {...defaultProps} onClose={onClose} loading />);
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('starts from the default choices each time it opens', () => {
+    const onPrint = vi.fn();
+    const { rerender } = render(<InvoicePrintDialog {...defaultProps} onPrint={onPrint} />);
+    fireEvent.click(screen.getByRole('radio', { name: /old print/i }));
+    const checkboxes = screen.getAllByRole('checkbox');
+    fireEvent.click(checkboxes[checkboxes.length - 1]);
+    rerender(<InvoicePrintDialog {...defaultProps} onPrint={onPrint} open={false} />);
+    rerender(<InvoicePrintDialog {...defaultProps} onPrint={onPrint} open />);
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
+    expect(onPrint).toHaveBeenCalledWith({ show_shares: true, show_price_per_acre: true, show_epa_registration: true, format: 'current' });
+  });
+
   it('names the layouts as two radio cards in one radio group, Current first and selected', () => {
     render(<InvoicePrintDialog {...defaultProps} />);
     expect(screen.getByRole('radiogroup', { name: 'Layout' })).toBeInTheDocument();
@@ -164,12 +186,12 @@ describe('InvoicePrintDialog', () => {
 
     it('lists both file names for two invoices', () => {
       render(<InvoicePrintDialog {...defaultProps} invoiceNumbers={batch(2)} />);
-      expect(screen.getByText('You will get 2 files: CS-1.pdf and CS-2.pdf.')).toBeInTheDocument();
+      expect(screen.getByText('You will get up to 2 files: CS-1.pdf and CS-2.pdf.')).toBeInTheDocument();
     });
 
     it('lists the first two and counts the rest for more than two', () => {
       render(<InvoicePrintDialog {...defaultProps} invoiceNumbers={batch(5)} />);
-      expect(screen.getByText('You will get 5 files: CS-1.pdf, CS-2.pdf and 3 more.')).toBeInTheDocument();
+      expect(screen.getByText('You will get up to 5 files: CS-1.pdf, CS-2.pdf and 3 more.')).toBeInTheDocument();
     });
 
     it('passes the same option values as a single print', () => {

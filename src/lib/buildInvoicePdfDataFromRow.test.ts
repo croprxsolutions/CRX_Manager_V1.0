@@ -358,3 +358,18 @@ describe('buildBatchInvoicePdfData — skip and name a bad invoice', () => {
     expect(batchInvoicePrintToast(0, many).message).toContain('INV-0, INV-1, INV-2, INV-3, INV-4 and 3 more');
   });
 });
+
+// Review #1873 MED 2: the PDF prints a Credits applied row, so every print path must carry the amount.
+describe('buildInvoicePdfDataFromRow: credits applied', () => {
+  it('reads the credit applied from the invoice when the list row omits it', async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ balance_cents: 80000 }));
+    expect(data.credit_applied_cents).toBe(20000);
+  });
+
+  it("the caller's amount wins over the re-fetch", async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ credit_applied_cents: 5000 }));
+    expect(data.credit_applied_cents).toBe(5000);
+  });
+});

@@ -407,6 +407,8 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; details: string[] } | null>(null);
   const importIdempotencyKeysRef = useRef(new Map<string, string>());
+  // Bumped when the file changes or the dialog closes, so a check of the old file that finishes late is dropped.
+  const parseRunRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputId = useId();
   const isPhone = useIsPhone();
@@ -430,6 +432,11 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
     importIdempotencyKeysRef.current.delete(importIdempotencyScope(quoteNumber, payloadScope));
   };
 
+  const cancelParse = () => {
+    parseRunRef.current += 1;
+    setParsing(false);
+  };
+
   // One handler for the file input and the drop zone. Returns false when the file is refused.
   const selectFile = (selectedFile: File | undefined): boolean => {
     if (selectedFile) {
@@ -443,6 +450,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
         toast('error', 'Invalid file type. Please upload a CSV, PDF, or image file.');
         return false;
       }
+      cancelParse();
       setFile(selectedFile);
       setValidation(null);
       setUploadResults(null);
@@ -524,6 +532,8 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
   const handleParse = async () => {
     if (!file) return;
+    const parseRun = ++parseRunRef.current;
+    const isStale = () => parseRun !== parseRunRef.current;
     setValidation(null);
     setParsing(true);
 
@@ -531,12 +541,14 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
       // Route: CSV → client-side parser, PDF/Image → Vision OCR
       if (!isCSVFile(file)) {
         const ocrResult = await parseWithVisionOCR(file);
+        if (isStale()) return;
         setValidation(ocrResult);
         setParsing(false);
         return;
       }
 
       const text = await file.text();
+      if (isStale()) return;
       const { headers, rows, rowNumbers } = parseQuoteOrderCsv(text);
 
       if (rows.length === 0) {
@@ -655,6 +667,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
 
       setValidation(rejectPartiallyInvalidQuoteGroups(validRows, invalid));
     } catch (error) {
+      if (isStale()) return;
       if (!(error instanceof QuoteOrderCsvError)) {
         Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
           extra: { context: 'BulkQuoteImport.parseCSVFile' },
@@ -999,6 +1012,7 @@ export default function BulkQuoteImport({ open, onClose, onSuccess }: BulkQuoteI
   };
 
   const handleClose = () => {
+    cancelParse();
     setFile(null);
     setValidation(null);
     setUploadResults(null);

@@ -76,4 +76,38 @@ describe('PdfPagePreview', () => {
     expect(screen.queryByRole('img', { name: 'Quote Q-1, page 1 of 1' })).not.toBeInTheDocument();
     expect([oldPage.width, oldPage.height]).toEqual([0, 0]);
   });
+
+  it('keeps the last good pages, with a short note, when the replacement PDF cannot be drawn', async () => {
+    pdfWithPages(1);
+    const { rerender } = render(<PdfPagePreview blob={new Blob(['%PDF-a'])} title="Quote Q-1" />);
+    const oldPage = await screen.findByRole('img', { name: 'Quote Q-1, page 1 of 1' }) as HTMLCanvasElement;
+
+    getDocument.mockReturnValue({ promise: Promise.reject(new Error('bad pdf')), destroy });
+    rerender(<PdfPagePreview blob={new Blob(['%PDF-b'])} title="Quote Q-1" />);
+
+    expect(await screen.findByText(/preview could not update/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Quote Q-1, page 1 of 1' })).toBe(oldPage);
+    expect(oldPage.width).toBeGreaterThan(0);
+    expect(screen.queryByText(/preview could not be shown/i)).not.toBeInTheDocument();
+
+    // The next good PDF clears the note.
+    pdfWithPages(2);
+    rerender(<PdfPagePreview blob={new Blob(['%PDF-c'])} title="Quote Q-1" />);
+    await waitFor(() => expect(screen.getAllByRole('img', { name: /of 2$/ })).toHaveLength(2));
+    expect(screen.queryByText(/preview could not update/i)).not.toBeInTheDocument();
+  });
+
+  it('caps the drawing scale at 2x on denser screens, fitted to the pane width', async () => {
+    const dpr = window.devicePixelRatio;
+    Object.defineProperty(window, 'devicePixelRatio', { value: 3, configurable: true });
+    try {
+      pdfWithPages(1);
+      render(<PdfPagePreview blob={new Blob(['%PDF'])} title="Quote Q-1" />);
+      const canvas = await screen.findByRole('img', { name: 'Quote Q-1, page 1 of 1' }) as HTMLCanvasElement;
+      // jsdom has no layout, so the pane falls back to 612 CSS px.
+      expect([canvas.width, canvas.height]).toEqual([1224, 1584]);
+    } finally {
+      Object.defineProperty(window, 'devicePixelRatio', { value: dpr, configurable: true });
+    }
+  });
 });

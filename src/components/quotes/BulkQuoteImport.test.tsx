@@ -905,6 +905,42 @@ describe('BulkQuoteImport', () => {
     expect(screen.getByRole('button', { name: /import 0 quote/i })).toBeDisabled();
     expect(mocks.rpc).not.toHaveBeenCalledWith('save_quote', expect.anything());
   });
+
+  it('drops a late check of the old file after a new file is chosen, so Import saves only the new file', async () => {
+    const { container } = render(<BulkQuoteImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const header = 'quote_number,customer_farm_name,product_name,acres';
+    const csvA = `${header}\nQ-OLD-A,North Farm,Roundup,10`;
+    const csvB = `${header}\nQ-NEW-B,North Farm,Roundup,10`;
+    let finishA: (text: string) => void = () => {};
+    const fileA = new File([csvA], 'first.csv', { type: 'text/csv' });
+    Object.defineProperty(fileA, 'text', { value: () => new Promise<string>((done) => { finishA = done; }) });
+    const fileB = new File([csvB], 'second.csv', { type: 'text/csv' });
+    Object.defineProperty(fileB, 'text', { value: () => Promise.resolve(csvB) });
+
+    fireEvent.change(input, { target: { files: [fileA] } });
+    await screen.findByText(/first\.csv/i);
+    fireEvent.click(screen.getByRole('button', { name: /check file/i }));
+    fireEvent.change(input, { target: { files: [fileB] } });
+    await screen.findByText(/second\.csv/i);
+
+    finishA(csvA);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(/Q-OLD-A/)).not.toBeInTheDocument();
+    const check = screen.getByRole('button', { name: /check file/i });
+    expect(check).toBeEnabled();
+
+    fireEvent.click(check);
+    await screen.findByText(/Q-NEW-B/);
+    expect(screen.queryByText(/Q-OLD-A/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /import 1 quote/i }));
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    const saved = mocks.rpc.mock.calls
+      .filter(([name]) => name === 'save_quote')
+      .map(([, args]) => (args as { p_quote_payload: { quote_number: string } }).p_quote_payload.quote_number);
+    expect(saved).toEqual(['Q-NEW-B']);
+  });
+
   describe('three-step layout', () => {
     it('downloads a sample CSV whose every column parses, failing only on unknown customers', async () => {
       let sample: Blob | undefined;

@@ -19,7 +19,7 @@ function releaseCanvases(canvases: HTMLCanvasElement[]) {
 /** Shows each page of a PDF as a canvas sized to the pane (crisp on high-DPI screens). */
 export default function PdfPagePreview({ blob, title }: { blob: Blob; title: string }) {
   const pagesRef = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'stale'>('loading');
 
   useEffect(() => {
     const host = pagesRef.current;
@@ -40,7 +40,9 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
         const pdf = await task.promise;
         // ponytail: sized once per PDF; a resized window scales the bitmap until the next render.
         const cssWidth = host.parentElement?.clientWidth || 612;
-        const dpr = window.devicePixelRatio || 1;
+        // Capped at 2x: a 3x phone would hold 2.25x the pixels per page for no visible gain.
+        // ponytail: every page is kept as a bitmap; render only visible pages if long quotes still run out of memory.
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
         for (let n = 1; n <= pdf.numPages; n++) {
           const page = await pdf.getPage(n);
           if (cancelled) return;
@@ -63,10 +65,9 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
         setStatus('ready');
       } catch {
         if (cancelled) return;
-        releaseCanvases([...host.children] as HTMLCanvasElement[]);
-        host.replaceChildren();
         releaseCanvases(drawn);
-        setStatus('error');
+        // Keep the last good pages, if any, and say they are out of date.
+        setStatus(host.hasChildNodes() ? 'stale' : 'error');
       }
     })();
     return () => {
@@ -90,6 +91,11 @@ export default function PdfPagePreview({ blob, title }: { blob: Blob; title: str
 
   return (
     <div className="mx-auto flex w-full max-w-[816px] flex-col gap-6">
+      {status === 'stale' && (
+        <p role="alert" className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-secondary">
+          The preview could not update. Download the PDF to see the latest version.
+        </p>
+      )}
       <div ref={pagesRef} className="contents" />
       {status === 'loading' && (
         <div role="status">

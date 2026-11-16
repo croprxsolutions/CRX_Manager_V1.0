@@ -771,6 +771,12 @@ export default function QuoteBuilder() {
   // The columns the shown preview was drawn with; the effect below redraws when the chips change.
   const previewColumnsKeyRef = useRef<string | null>(null);
   const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
+  // Bumped per Preview click and on a move to another quote, so a late first build never opens or
+  // replaces the preview. A layout effect, so it moves on commit with routeQuoteIdRef.
+  const previewRunRef = useRef(0);
+  useLayoutEffect(() => {
+    previewRunRef.current += 1;
+  }, [id]);
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
@@ -3205,7 +3211,9 @@ export default function QuoteBuilder() {
     await runCriticalAction({
       action: async () => {
         const columns = customColumns || getTemplateColumns(selectedTemplateId);
+        const run = ++previewRunRef.current;
         const doc = await generateQuotePdf(buildQuotePdfData(), columns);
+        if (run !== previewRunRef.current) return;
         previewColumnsKeyRef.current = columns.join(',');
         setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);

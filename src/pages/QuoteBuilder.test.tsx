@@ -6118,6 +6118,46 @@ describe('QuoteBuilder', () => {
         expect(screen.getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'C');
       });
 
+      it("drops a late first preview: quote A's after the page moves to quote B, and an older click's", async () => {
+        const fixture = makeQuoteFixture('draft', 7);
+        const quoteA = { ...fixture.quote, customer: QUOTE_FIXTURE_CUSTOMER };
+        const quoteB = { ...quoteA, id: 'quote-b', quote_number: 'Q-b', header_notes: 'Quote B header' };
+        let quoteReads = 0;
+        mockFrom.mockImplementation((table: string) => buildChain({
+          data: table === 'quotes'
+            ? (quoteReads++ === 0 ? quoteA : quoteB)
+            : table === 'quote_sections'
+              ? [fixture.section]
+              : table === 'quote_items'
+                ? [fixture.item]
+                : table === 'customers'
+                  ? [QUOTE_FIXTURE_CUSTOMER]
+                  : table === 'products'
+                    ? [fixture.product]
+                    : [],
+          error: null,
+        }));
+        renderQuoteBuilderWithQuoteSwitch(quoteA.id, quoteB.id);
+        const a = deferred();
+        mockGenerateQuotePdf.mockImplementationOnce(() => a.promise as never);
+        fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
+        fireEvent.click(screen.getByRole('link', { name: 'Jump to quote B' }));
+        await screen.findByDisplayValue('Quote B header');
+        await act(async () => { a.resolve(tagged('A')); });
+        expect(screen.queryByRole('dialog', { name: 'Preview and send' })).not.toBeInTheDocument();
+
+        // On B, two quick clicks: the first build lands last and must not replace the second.
+        const first = deferred();
+        mockGenerateQuotePdf.mockImplementationOnce(() => first.promise as never).mockImplementationOnce(() => tagged('B2'));
+        const preview = screen.getByRole('button', { name: 'Preview & send' });
+        fireEvent.click(preview);
+        fireEvent.click(preview);
+        const dialog = await screen.findByRole('dialog', { name: 'Preview and send' });
+        expect(within(dialog).getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'B2');
+        await act(async () => { first.resolve(tagged('B1')); });
+        expect(within(dialog).getByTestId('pdf-preview')).toHaveAttribute('data-tag', 'B2');
+      });
+
       it('keeps the last good pages and says so when a rebuild fails, then clears on success', async () => {
         serveAt('draft');
         mockGenerateQuotePdf.mockImplementationOnce(() => tagged('A'));

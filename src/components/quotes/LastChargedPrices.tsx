@@ -1,64 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History } from 'lucide-react';
 import Card, { CardHeader } from '../ui/Card';
+import { History } from 'lucide-react';
 import { LoadFailedState } from '../ui/EmptyState';
 import { formatCents } from '../../lib/money';
-import { Sentry } from '../../lib/sentry';
-import { fetchLastChargedPrices, formatChargedOn, formatChargedTier } from '../../lib/lastChargedPrices';
-import type { LastChargedPrice } from '../../types';
+import { formatChargedOn, formatChargedTier } from '../../lib/lastChargedPrices';
+import { useLastChargedPrices, type LastChargedLine, type LastChargedState } from '../../hooks/useLastChargedPrices';
 
-export interface LastChargedLine {
-  productId: string;
-  productName: string;
-}
-
-// A result remembers the product list it was loaded for, so a changed list shows "Loading" at once
-// instead of the old result (where a newly added product would read "Never charged" for a moment).
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'failed'; productKey: string }
-  | { status: 'loaded'; productKey: string; byProduct: Map<string, LastChargedPrice> };
+export type { LastChargedLine };
 
 /**
  * "What did we charge this customer before?" (To-Do 0.3): for each product on the quote, the last
  * price charged to this customer, with its tier and date. Shown to admins and sales reps, never in
- * Customer View or on the PDF. Read-only: it never changes a quote price.
+ * Customer View or on the PDF. Read-only: it never changes a quote price. The page loads the data
+ * (useLastChargedPrices) and renders this card from it; the default export loads its own.
  */
-export default function LastChargedPrices({ customerId, lines }: { customerId: string; lines: LastChargedLine[] }) {
-  // One row per product, in quote order; a product on two lines has one last charge.
-  const products = useMemo(() => {
-    const seen = new Map<string, LastChargedLine>();
-    for (const line of lines) {
-      if (line.productId && !seen.has(line.productId)) seen.set(line.productId, line);
-    }
-    return [...seen.values()];
-  }, [lines]);
-  const productKey = products.map((p) => p.productId).join(',');
-  const [loadState, setState] = useState<LoadState>({ status: 'loading' });
-  const state: LoadState = loadState.status !== 'loading' && loadState.productKey !== productKey
-    ? { status: 'loading' }
-    : loadState;
-  const [attempt, setAttempt] = useState(0);
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
-
-  useEffect(() => {
-    if (!customerId || productKey === '') return;
-    let cancelled = false;
-    setState({ status: 'loading' });
-    fetchLastChargedPrices(customerId, productKey.split(','))
-      .then((byProduct) => { if (!cancelled) setState({ status: 'loaded', productKey, byProduct }); })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
-          extra: { context: 'get_last_charged_prices' },
-        });
-        setState({ status: 'failed', productKey });
-      });
-    return () => { cancelled = true; };
-  }, [customerId, productKey, attempt]);
-
-  if (!customerId || products.length === 0) return null;
-
+export function LastChargedPricesCard({ products, state, onRetry }: {
+  products: LastChargedLine[];
+  state: LastChargedState;
+  onRetry: () => void;
+}) {
   return (
     <Card>
       <CardHeader title="Last" accent="Charged" />
@@ -72,7 +31,7 @@ export default function LastChargedPrices({ customerId, lines }: { customerId: s
         <p className="text-sm text-secondary" role="status">Loading last charged prices…</p>
       )}
       {state.status === 'failed' && (
-        <LoadFailedState title="Last charged prices could not be loaded" onRetry={retry} />
+        <LoadFailedState title="Last charged prices could not be loaded" onRetry={onRetry} />
       )}
       {state.status === 'loaded' && (
         <div className="overflow-x-auto">
@@ -116,4 +75,11 @@ export default function LastChargedPrices({ customerId, lines }: { customerId: s
       )}
     </Card>
   );
+}
+
+/** Loads and renders the card on its own. */
+export default function LastChargedPrices({ customerId, lines }: { customerId: string; lines: LastChargedLine[] }) {
+  const { products, state, retry } = useLastChargedPrices(customerId, lines);
+  if (!customerId || products.length === 0) return null;
+  return <LastChargedPricesCard products={products} state={state} onRetry={retry} />;
 }

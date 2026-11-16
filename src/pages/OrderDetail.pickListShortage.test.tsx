@@ -128,7 +128,8 @@ async function printPickList(): Promise<PickListData> {
     </MemoryRouter>,
   );
 
-  fireEvent.click(await screen.findByRole('button', { name: /Print Pick List/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Print' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Pick list PDF' }));
   await waitFor(() => expect(mockDownloadPickList).toHaveBeenCalled());
   return mockDownloadPickList.mock.calls[0][0] as PickListData;
 }

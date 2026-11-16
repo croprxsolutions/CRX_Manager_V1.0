@@ -162,6 +162,10 @@ export const RpcErrorCodes = {
   PRODUCT_BRANDS_BELONG_TO_PARENT: 'PRODUCT_BRANDS_BELONG_TO_PARENT',
   // Raised by the screen, not SQL: the size joined, left or moved parents since its brand list loaded.
   PRODUCT_BRANDS_PARENT_CHANGED: 'PRODUCT_BRANDS_PARENT_CHANGED',
+  // Delivery brands (20270104120000): someone else saved this delivery's brands since the screen loaded,
+  // and a correction that would change a posted invoice.
+  BRAND_PICKS_CHANGED: 'BRAND_PICKS_CHANGED',
+  INVOICE_POSTED: 'INVOICE_POSTED',
   COST_BASIS_REQUIRED: 'COST_BASIS_REQUIRED',
   COST_BASIS_CENTS_REQUIRED: 'COST_BASIS_CENTS_REQUIRED',
   DRAW_ALLOCATION_MISMATCH: 'DRAW_ALLOCATION_MISMATCH',

@@ -84,6 +84,7 @@ const Compliance = lazy(() => import('./pages/Compliance'));
 const LabelReview = lazy(() => import('./pages/LabelReview'));
 const LabelDataQuality = lazy(() => import('./pages/LabelDataQuality'));
 const EpaRegistrationSetup = lazy(() => import('./pages/EpaRegistrationSetup'));
+const EpaLookups = lazy(() => import('./pages/EpaLookups'));
 const WatchdogExceptions = lazy(() => import('./pages/WatchdogExceptions'));
 const OfflineWorkReview = lazy(() => import('./pages/OfflineWorkReview'));
 const OfficeCockpit = lazy(() => import('./pages/OfficeCockpit'));
@@ -415,6 +416,10 @@ export const APP_PAGES = [
   {
     key: 'epa-registration-setup', label: 'EPA Registration Setup', category: 'Compliance & Records', roles: ['admin'],
     routes: [{ path: 'epa-registration-setup', element: <EpaRegistrationSetup /> }],
+  },
+  {
+    key: 'epa-lookups', label: 'EPA Lookups', category: 'Compliance & Records', roles: ['admin'],
+    routes: [{ path: 'epa-lookups', element: <EpaLookups /> }],
   },
   {
     key: 'blend-tickets', label: 'Blend Tickets (OCR)', category: 'Compliance & Records', roles: ['admin', 'sales_rep'],

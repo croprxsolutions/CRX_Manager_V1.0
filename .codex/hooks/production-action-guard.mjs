@@ -65,7 +65,7 @@ import {
   teammateCommentsTruncatedDenial,
   teammateCommentsUnreadableDenial,
 } from "../../.claude/hooks/teammate-comments-lib.mjs";
-import { GATED_MERGE_BASES, solRiskOnGitHub, stagingMigrationOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
+import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
@@ -646,7 +646,7 @@ function resolvePullRequest({ request, repoDir, runGh }) {
   // baseRefOid is GitHub's CURRENT tip of the base branch — the commit the merge
   // will actually land on. Without it the gate falls back to local origin/main,
   // which can be stale (Codex P1, 2026-07-25).
-  args.push("--json", "baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
+  args.push("--json", "number,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
   if (request.repo) args.push("--repo", request.repo);
   const data = JSON.parse(runGh(args, repoDir));
   // baseRefOid is required only for main-bound merges; gatePullRequestMerge
@@ -709,14 +709,16 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
   // pipeline, the risky-diff classification and the exact-SHA proof. Codex round
   // 6 found this; PR #502 established the class. See codexAppAdvisory().
 
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
+  const notAgents = agentMergeProblem(base, normalize(pullRequest.headRefName));
+  if (notAgents) return denied(`CODEX PRODUCTION GATE: this merge is refused: ${notAgents}.`);
   if (base === "staging") {
-    const migration = stagingMigrationOnGitHub({
-      baseSha: pullRequest.baseRefOid,
-      headSha: pullRequest.headRefOid,
-      repo: request.repo,
-      gh: (args) => runGh(args, repoDir),
-    });
-    if (migration) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${migration}.`);
+    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pullRequest.baseRefOid, headSha: pullRequest.headRefOid, repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    if (backMerge) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${backMerge}.`);
+    const frozen = releaseFreezeProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir) });
+    if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
+    const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid, baseSha: pullRequest.baseRefOid });
+    if (destructive) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${destructive}.`);
   }
   // Main's PR #560 migrated this gate from "no approval" to "an active
   // objection", matching the Claude side. Taking main's predicate: the denial
@@ -1291,6 +1293,9 @@ export function evaluateProductionAction({
     }
     return { blocked: false };
   }
+  // Agents never approve a pull request (#1838 HIGH 2).
+  const approval = prApprovalProblem(command);
+  if (approval) return denied(`CODEX PRODUCTION GATE: ${approval}.`);
   // A command handed to another program as one argument — `bash -c "…"`,
   // `cmd /c "…"`, `pwsh -Command "…"`, `pwsh -EncodedCommand …`, `eval`,
   // `Invoke-Expression`, `Start-Process`, a `&{ … }` block — is one word to every

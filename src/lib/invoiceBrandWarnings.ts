@@ -1,0 +1,153 @@
+// Brand PR B-3: the brand warnings shown before an invoice posts. They warn and never block: posting records what the
+// saved lines carry (Mason, Q5). The rules mirror the database's (20270106110000 _invoice_line_brand_alloc and
+// get_epa_sales_to_check), so a line warned "no RUP record" here is the line the register skips and lists.
+// shortcut: billed-above is summed over the lines given (this invoice, or its Bill Split group), and on an order-wide
+// invoice (no delivery of its own) only the trips its saved brands name are compared with today's picks, so a later
+// trip for the order is not seen; another invoice billing the same order line is not read here either (Mason,
+// 2026-11-12, Sol r2: accepted, the warning stays a best effort). The database lists those cases on Sales to check
+// after posting.
+import {
+  brandLinesDelivered,
+  brandSplitMismatch,
+  fmtBrandQty,
+  parseBrandLines,
+} from '../../supabase/functions/_shared/brandNotes.ts';
+
+export interface BrandWarningLine {
+  label: string;
+  quantity: number;
+  order_item_id: string | null;
+  product_id: string | null;
+  /** The invoice's own delivery, when it bills one. */
+  delivery_id: string | null;
+  brand_lines: unknown;
+}
+
+/** A delivery line's current picks (get_delivery_brands). */
+export interface DeliveryPickLine {
+  delivery_id: string;
+  delivery_item_id: string;
+  order_item_id: string | null;
+  product_id: string | null;
+  /** quantity_delivered, else quantity. */
+  delivered: number;
+  picks: Array<{ id: string; brand_name: string; epa_registration: string | null; quantity: number; review_state: string | null }>;
+}
+
+export interface BrandWarnings {
+  /** Lines that get no RUP record (Q6 problems). */
+  noRecord: string[];
+  /** Lines listed for follow-up; they are recorded by the usual restricted-use rule. */
+  followUp: string[];
+}
+
+const tenThousandths = (v: unknown) => Math.round(Number(v) * 10000);
+
+/** The deliveries whose current picks are read before warning: every delivery a line's brands or invoice covers. */
+export function brandDeliveryIds(lines: BrandWarningLine[]): string[] {
+  const ids = new Set<string>();
+  for (const l of lines) {
+    if (l.delivery_id && l.order_item_id && l.product_id) ids.add(l.delivery_id);
+    for (const e of parseBrandLines(l.brand_lines) ?? []) if (e.delivery_id) ids.add(e.delivery_id);
+  }
+  return [...ids];
+}
+
+type Entries = NonNullable<ReturnType<typeof parseBrandLines>>;
+
+const groupKey = (l: BrandWarningLine) => (l.order_item_id && l.product_id ? `${l.order_item_id}|${l.product_id}` : null);
+
+/** The payer group: lines billing the same order line and product share what was delivered (ten-thousandths). */
+function billedByGroup(lines: BrandWarningLine[]): Map<string, number> {
+  const billed = new Map<string, number>();
+  for (const l of lines) {
+    const k = groupKey(l);
+    if (k && l.quantity > 0) billed.set(k, (billed.get(k) ?? 0) + tenThousandths(l.quantity));
+  }
+  return billed;
+}
+
+/** A covered trip as the snapshot names it: what it delivered, then each pick (id, brand, number, amount) or "-". */
+const tripKey = (itemId: unknown, delivered: unknown) => `${itemId}|${tenThousandths(delivered)}`;
+const pickKey = (trip: string, p: { id?: unknown; brand_name?: unknown; epa_registration?: unknown; quantity?: unknown }) =>
+  `${trip}|${p.id}|${p.brand_name}|${p.epa_registration ?? ''}|${tenThousandths(p.quantity)}`;
+
+/**
+ * The saved brands no longer say what the picks say (a Bill Split draft is never re-copied after a correction):
+ * posting records nothing for the line and lists it as brand_lines_stale (20270106110000 compares the whole snapshot).
+ */
+function brandsChanged(l: BrandWarningLine, entries: Entries | null, current: DeliveryPickLine[]): boolean {
+  const ofLine = (c: DeliveryPickLine) => c.order_item_id === l.order_item_id && c.product_id === l.product_id
+    && tenThousandths(c.delivered) > 0;
+  const own = (c: DeliveryPickLine) => c.delivery_id === l.delivery_id && ofLine(c);
+  // No brands saved: stale once a pick exists on the invoice's own delivery line.
+  if (entries === null || entries.length === 0) return !!l.delivery_id && current.some((c) => own(c) && c.picks.length > 0);
+  const named = new Set(entries.map((e) => e.delivery_item_id));
+  const covered = current.filter((c) => (l.delivery_id ? own(c) : named.has(c.delivery_item_id) && ofLine(c)));
+  const saved = entries.map((e) => {
+    const trip = tripKey(e.delivery_item_id, e.line_delivered);
+    return e.brand_key === 'n:' ? `${trip}|-` : pickKey(trip, { ...e, id: e.pick_id });
+  }).sort();
+  const today = covered.flatMap((c) => {
+    const trip = tripKey(c.delivery_item_id, c.delivered);
+    return c.picks.length === 0 ? [`${trip}|-`] : c.picks.map((p) => pickKey(trip, p));
+  }).sort();
+  return saved.join(',') !== today.join(',');
+}
+
+function pickFollowUps(label: string, entries: Entries, pendingTypedPickIds: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.brand_key === 'n:') continue;
+    if (!e.epa_registration) out.push(`${label}: EPA number not recorded for ${e.brand_name || 'a brand'} (uses the product's EPA number)`);
+    if (e.typed && e.pick_id && pendingTypedPickIds.has(e.pick_id)) {
+      out.push(`${label}: Brand typed at delivery, not yet checked (${e.brand_name || 'unnamed'})`);
+    }
+  }
+  return out;
+}
+
+export function invoiceBrandWarnings(lines: BrandWarningLine[], current: DeliveryPickLine[]): BrandWarnings {
+  const noRecord: string[] = [];
+  const followUp: string[] = [];
+  const billed = billedByGroup(lines);
+  const pendingTypedPickIds = new Set(current.flatMap((c) => c.picks.filter((p) => p.review_state === 'pending').map((p) => p.id)));
+  for (const l of lines) {
+    const entries = parseBrandLines(l.brand_lines);
+    if (!(l.quantity > 0)) continue;
+    if (l.order_item_id && l.product_id && brandsChanged(l, entries, current)) {
+      noRecord.push(`${l.label}: Brands changed since this invoice was made`);
+      continue;
+    }
+    if (entries === null) continue;
+    if (entries.length === 0 || entries.some((e) => e.brand_key === 'n:')) {
+      followUp.push(`${l.label}: Brand not recorded (uses the product's EPA number)`);
+    }
+    if (entries.length === 0) continue;
+    followUp.push(...pickFollowUps(l.label, entries, pendingTypedPickIds));
+    const mismatch = brandSplitMismatch(entries);
+    if (mismatch) {
+      noRecord.push(`${l.label}: Split does not match delivered (${mismatch} recorded)`);
+      continue;
+    }
+    const delivered = brandLinesDelivered(entries);
+    const k = groupKey(l);
+    const total = k ? billed.get(k) ?? 0 : tenThousandths(l.quantity);
+    const amounts = `(${fmtBrandQty(total / 10000)} billed, ${fmtBrandQty(delivered / 10000)} delivered)`;
+    if (total > delivered) noRecord.push(`${l.label}: Billed above delivered ${amounts}`);
+    else if (total < delivered) followUp.push(`${l.label}: Quantity changed from delivered ${amounts}`);
+  }
+  return { noRecord, followUp };
+}
+
+/** The text added to the Post confirm, or null when nothing needs saying. */
+export function brandPostWarningText(w: BrandWarnings): string | null {
+  const parts: string[] = [];
+  if (w.noRecord.length > 0) {
+    parts.push(`These lines get NO RUP sales record and are listed on Sales to check: ${w.noRecord.join('; ')}.`);
+  }
+  if (w.followUp.length > 0) {
+    parts.push(`Brand follow-ups to check: ${w.followUp.join('; ')}.`);
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
+}

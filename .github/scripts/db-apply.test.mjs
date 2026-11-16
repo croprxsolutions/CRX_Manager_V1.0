@@ -271,3 +271,10 @@ test('stampProblems: a restamp is not an edit, and its new stamp must still be t
   assert.deepEqual(stampProblems({ added: ['20270102000000_m4b.sql'], base, head, changed: [] }), []);
   assert.match(stampProblems({ added: ['20261231115900_m4b.sql'], base, head: ['20261231115900_m4b.sql', ...base.slice(1)], changed: [] })[0], /not newer/);
 });
+test('stampProblems: into staging, a new migration must also be newer than main (a hotfix may have gone live first)', () => {
+  const base = ['20270101000000_a.sql'];
+  const mainFiles = ['20270101000000_a.sql', '20270105000000_hotfix.sql'];
+  assert.match(stampProblems({ added: ['20270103000000_x.sql'], base, head: [...base, '20270103000000_x.sql'], mainFiles })[0], /newest migration on main/);
+  assert.deepEqual(stampProblems({ added: ['20270106000000_x.sql'], base, head: [...base, '20270106000000_x.sql'], mainFiles }), []);
+  assert.deepEqual(stampProblems({ added: ['20270105000000_hotfix.sql'], base, head: [...base, '20270105000000_hotfix.sql'], mainFiles, onMain: ['20270105000000_hotfix.sql'] }), [], 'the back-merge brings main\'s own file');
+});

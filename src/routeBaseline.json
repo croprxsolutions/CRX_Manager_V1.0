@@ -462,6 +462,22 @@
         "driver, dispatch denied": "/ shows / (index)"
       }
     },
+    "/epa-lookups": {
+      "url": "/epa-lookups",
+      "pageKey": "epa-lookups",
+      "page": {
+        "type": "lazy pages/EpaLookups"
+      },
+      "access": {
+        "admin": "/epa-lookups shows /epa-lookups",
+        "sales_rep": "/ shows / (index)",
+        "sales_rep, epa-lookups denied": "/ shows / (index)",
+        "applicator": "/ shows / (index)",
+        "applicator, epa-lookups denied": "/ shows / (index)",
+        "driver": "/ shows / (index)",
+        "driver, epa-lookups denied": "/ shows / (index)"
+      }
+    },
     "/epa-registration-setup": {
       "url": "/epa-registration-setup",
       "pageKey": "epa-registration-setup",
@@ -4157,6 +4173,15 @@
         ]
       },
       {
+        "key": "epa-lookups",
+        "path": "/epa-lookups",
+        "label": "EPA Lookups",
+        "category": "Compliance & Records",
+        "roles": [
+          "admin"
+        ]
+      },
+      {
         "key": "blend-tickets",
         "path": "/blend-tickets",
         "label": "Blend Tickets (OCR)",
@@ -4321,6 +4346,7 @@
           "label-review",
           "label-data-quality",
           "epa-registration-setup",
+          "epa-lookups",
           "blend-tickets",
           "dashboard",
           "office-cockpit",

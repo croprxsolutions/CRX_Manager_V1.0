@@ -44,6 +44,9 @@ import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { checkRUPCompliance, rupRegisterDisposition, RUP_POST_CHECK_FAILED_MESSAGE } from '../lib/rupCompliance';
 import { GROUP_CHECK_FAILED, groupMemberRupFinding, type GroupMemberRupInput } from '../lib/splitGroupPostChecks';
+import { brandDeliveryIds, brandPostWarningText, invoiceBrandWarnings, type BrandWarningLine } from '../lib/invoiceBrandWarnings';
+import { invoiceBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
+import { loadDeliveryPicks } from '../lib/deliveryBrandPaper';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { invoiceDateTooFarProblem, latestInvoiceDate, todayInBusinessTz, parseLocalDate } from '../lib/dateUtils';
 import { dueDateFromTerms } from '../lib/paymentTerms';
@@ -96,6 +99,8 @@ interface LineItem {
   gl_lb_unit: string | null;
   epa_registration: string | null;
   product_form: string | null;
+  /** Brand PR B-3: the delivered brands as saved (read-only; set by the database on every save). */
+  brand_lines?: unknown;
 }
 
 const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
@@ -336,6 +341,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // B1 (deep-dive H1): RUP warning surfaced in the post-confirm when the buyer
   // has no valid applicator license — posting is the legal point of sale.
   const [rupPostWarning, setRupPostWarning] = useState<string | null>(null);
+  // Brand PR B-3: brand warnings on the same confirm ("Post anyway"); never a gate.
+  const [brandPostWarning, setBrandPostWarning] = useState<string | null>(null);
 
   // ── Post binds the saved, reviewed invoice (Goal 3, migration 20261022022000) ──────────────
   // post_invoice / post_invoice_group post what is SAVED, and refuse if the saved invoice (or a
@@ -416,6 +423,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
     }
     postIdem.resetKey();
     let warning: string | null = null;
+    // Brand PR B-3: the saved lines' delivered brands. With no unsaved edits (checked above) `items` is the saved copy.
+    let brandLines: BrandWarningLine[] = items.map((it) => ({
+      label: it.product_name || it.description || 'line',
+      quantity: Number(it.quantity),
+      order_item_id: it.order_item_id ?? null,
+      product_id: it.product_id,
+      delivery_id: invoice?.delivery_id ?? null,
+      brand_lines: it.brand_lines,
+    }));
     // A RUP finding is a warning on the confirm, not a gate. A check that could not run
     // is different: it stops here with RUP_POST_CHECK_FAILED_MESSAGE, so an unchecked
     // RUP sale never reaches the confirm looking clean.
@@ -431,7 +447,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         // this screen loaded, the post would be refused, so reload now and show what would post.
         const { data: grp, error: grpError } = await supabase
           .from(INVOICES_POSTABLE)
-          .select(`id, invoice_number, customer_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id)`)
+          .select(`id, invoice_number, customer_id, delivery_id, ${INVOICE_POST_VERSION_COLUMNS}, invoice_items(product_id, order_item_id, description, quantity, brand_lines)`)
           .eq('invoice_group_id', invoice.invoice_group_id)
           .is('deleted_at', null);
         if (grpError || !Array.isArray(grp)) {
@@ -457,6 +473,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
           }
           if (finding) parts.push(finding);
         }
+        brandLines = (grp as Array<{ invoice_number: string; delivery_id: string | null; invoice_items: Array<{ product_id: string | null; order_item_id: string | null; description: string | null; quantity: number | null; brand_lines: unknown }> | null }>)
+          .flatMap((m) => (m.invoice_items ?? []).map((it) => ({
+            label: `${m.invoice_number} ${it.description || 'line'}`,
+            quantity: Number(it.quantity ?? 0),
+            order_item_id: it.order_item_id,
+            product_id: it.product_id,
+            delivery_id: m.delivery_id,
+            brand_lines: it.brand_lines,
+          })));
         if (parts.length > 0) {
           warning = `Posting this invoice group posts every invoice in it. Restricted-use products without a valid license — ${parts.join('; ')}. These will be recorded in the RUP sales register.`;
         }
@@ -487,7 +512,19 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       stopUnchecked();
       return;
     }
+    // The current picks: saved brands that no longer match them, and typed brands still waiting for the office's check.
+    // A read that fails stops here, as the RUP check does.
+    let brandWarning: string | null;
+    try {
+      const picks = await loadDeliveryPicks(brandDeliveryIds(brandLines));
+      brandWarning = brandPostWarningText(invoiceBrandWarnings(brandLines, picks));
+    } catch (err) {
+      Sentry.captureException(toSentryError(err), { extra: { context: 'brand_post_check' } });
+      toast('error', 'The delivered brands could not be checked, so the invoice was not posted. Try again.');
+      return;
+    }
     setRupPostWarning(warning);
+    setBrandPostWarning(brandWarning);
     setShowPostConfirm(true);
   };
 
@@ -809,6 +846,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         gl_lb_unit: ((it as Record<string, unknown>).gl_lb_unit as string) ?? null,
         epa_registration: ((it as Record<string, unknown>).epa_registration as string) ?? null,
         product_form: ((it as Record<string, unknown>).product_form as string) ?? null,
+        brand_lines: (it as Record<string, unknown>).brand_lines ?? null,
       })) as LineItem[]
     );
 
@@ -2593,6 +2631,10 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                           )}
                         </>
                       )}
+                      {/* Brand PR B-3: the delivered brands, read-only (as of the last save). */}
+                      {invoiceBrandNotes(item.brand_lines, billSplitPayers.length > 1).map((note) => (
+                        <div key={note} className="text-xs text-secondary">{note}</div>
+                      ))}
                     </td>
                     {showVendors && (
                       <td className="py-2 pr-4 text-secondary">
@@ -3003,11 +3045,11 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
         onClose={() => setShowPostConfirm(false)}
         onConfirm={() => { setShowPostConfirm(false); handlePost(); }}
         title="Post Invoice"
-        message={rupPostWarning
-          ? `${rupPostWarning} Post this invoice anyway? This will lock amounts and start AR aging.`
+        message={rupPostWarning || brandPostWarning
+          ? `${[rupPostWarning, brandPostWarning].filter(Boolean).join(' ')} Post this invoice anyway? This will lock amounts and start AR aging.`
           : 'Post this invoice? This will lock amounts and start AR aging.'}
-        confirmLabel="Post Invoice"
-        variant={rupPostWarning ? 'danger' : 'warning'}
+        confirmLabel={rupPostWarning || brandPostWarning ? 'Post anyway' : 'Post Invoice'}
+        variant={rupPostWarning || brandPostWarning ? 'danger' : 'warning'}
         icon={AlertTriangle}
         loading={posting}
       />

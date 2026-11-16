@@ -26,10 +26,12 @@ import {
   fmtNum,
   InvoiceLinesUnavailableError,
   isFuelSurchargeLine,
+  productCellText,
   type InvoicePdfData,
   type InvoicePrintOptions,
   type InvoiceRowForPdf,
 } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { invoiceLineEpaText } from '../../supabase/functions/_shared/brandNotes.ts';
 
 export {
   assertInvoiceLinesLoaded,
@@ -308,16 +310,17 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
         : item.is_application_fee
           ? `${fmtNum(item.unit_price_cents / 100, 2)}/AC`
           : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`.trim();
+      const product = productCellText(item, data);
       return showEpa
-        ? [item.product_name || item.description, item.epa_registration || '', rateStr, totalApplied, unitPrice, fmt(item.extended_cents)]
-        : [item.product_name || item.description, rateStr, totalApplied, unitPrice, fmt(item.extended_cents)];
+        ? [product, invoiceLineEpaText(item.brand_lines, item.epa_registration), rateStr, totalApplied, unitPrice, fmt(item.extended_cents)]
+        : [product, rateStr, totalApplied, unitPrice, fmt(item.extended_cents)];
     });
   } else {
     // Chemical-sale / misc legacy: Qty | Description | Unit | Amount
     head = [['Qty', 'Description', 'Unit Price', 'Amount']];
     body = data.items.map((item) => [
       fmtNum(item.quantity, 2),
-      item.product_name || item.description,
+      productCellText(item, data),
       fmt(item.unit_price_cents),
       fmt(item.extended_cents),
     ]);

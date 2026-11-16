@@ -233,16 +233,14 @@ export function decisionLogEntry({ record, accepted }) {
     "",
     `**Decision (Mason, owner-accepted by \`accept <code>\` reply, ${day}).** Sol's review of PR #${pr} at \`${head}\` ` +
       `(base \`${String(record.base_sha).slice(0, 12)}\`) found ${record.findings.length} BLOCKER/HIGH finding(s). ` +
-      "Mason accepted each one as a business non-issue, so the PR may land without fixing them.",
+      "Mason accepted each one as a business non-issue; they are left unfixed.",
     ...accepted.flatMap((a) => [
       `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
         `text sha256 \`${textHash(a.payload.finding.text)}\` (the wording stays with the proof, not here)`,
       `  Mason's reason: ${a.reason} (ref ${String(a.payload.nonce).slice(0, 12)})`,
     ]),
-    "",
-    "**What this implies:** the owner-accepted Sol proof covers that review plus the one commit that adds this entry, " +
-      "and carries like any Sol proof (a clean main merge, a restamp, the post-apply records). " +
-      "Any later change on the Sol list needs a normal Sol review.",
+    // A record of his decision only: wording about what the proof covers or carries read as
+    // reviewer steering, and a later full Sol run flagged it as prompt injection (#1731 round 8).
     "",
     "",
   ].join("\n");

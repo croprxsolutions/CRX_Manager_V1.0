@@ -42,12 +42,12 @@ way you'd explain something to a smart non-technical business partner.
  │  Browser / phone (PWA — installable, works offline-ish)     │
  │  React 19 + TypeScript + Vite + Tailwind CSS                │
  └───────────────────────────┬───────────────────────────────────┘
-                              │  PR merged into protected `main`
+                              │  feature PR → `staging`; weekly release → `main`
                               ▼
  ┌─────────────────────────────────────────────────────────────┐
  │  Vercel — hosts the built static app + auto-deploys on merge │
- │  A PR merge to `main` = a production deploy. There is no     │
- │  staging environment; direct pushes to main are blocked.      │
+ │  `staging` deploys the staging site (own Supabase);          │
+ │  `main` deploys production (weekly release/hotfix).           │
  └───────────────────────────┬───────────────────────────────────┘
                               │  HTTPS (Supabase JS client)
                               ▼
@@ -65,10 +65,12 @@ way you'd explain something to a smart non-technical business partner.
   CSS. Packaged as a PWA (Progressive Web App — an installable, app-like
   website) via `vite-plugin-pwa` (see `vite.config.ts`). Error/performance
   monitoring via Sentry.
-- **Hosting/deploy**: Vercel. **Merging a pull request into `main` deploys to
-  production** — there is no separate staging step. Since 2026-07-14 `main` is
-  protected, so nobody can push to it directly; see the protected delivery path in
-  `AGENTS.md` and `.claude/commands/ship.md`.
+- **Hosting/deploy**: Vercel. Feature PRs merge into `staging`, which deploys the
+  staging site with its own Supabase project (test data only). **Production deploys
+  when the weekly release PR (`release/next`) or a hotfix merges into `main`**, and
+  Taha or Mason merges those. Since 2026-07-14 `main` is protected, so nobody can
+  push to it directly; see the protected delivery path in `AGENTS.md` and
+  `.claude/commands/ship.md` › Staging.
 - **Backend**: Supabase, which bundles a Postgres database, authentication,
   file storage, "Edge Functions" (small serverless Deno programs — see §6),
   and `pg_cron` (a Postgres extension that runs SQL on a schedule — see §7).

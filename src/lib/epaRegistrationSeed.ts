@@ -81,7 +81,14 @@ export interface SaleToCheck {
   saved_number: string | null;
   quantity: number;
   captured_rup_status: string | null;
-  reason: 'not_captured' | 'restricted_use_to_record' | 'no_epa_number' | 'now_restricted_use' | 'not_reviewed';
+  reason: 'not_captured' | 'restricted_use_to_record' | 'no_epa_number' | 'now_restricted_use' | 'not_reviewed'
+    | 'brand_no_epa_number' | 'brand_split_mismatch' | 'overlapping_invoices' | 'payer_split_changed'
+    | 'billed_above_delivered' | 'brand_lines_stale' | 'brand_not_recorded';
+  /** Brand PR B-1b: set on a row about one brand of a line; null on a row about the whole line. */
+  brand_key: string | null;
+  brand_name: string | null;
+  /** The brand's share of the line's quantity; null on a whole-line row. */
+  allocated_quantity: number | null;
 }
 
 export async function getEpaSalesToCheck(): Promise<SaleToCheck[]> {

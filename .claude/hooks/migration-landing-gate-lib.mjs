@@ -29,6 +29,7 @@ import {
   headContainsBaseOnGitHub,
   proofSearchDirs,
   proofValid,
+  newestCheckRollup,
   pullRequestChecksGreen,
   pullRequestReviewBlocked,
 } from "./codex-push-lib.mjs";
@@ -40,7 +41,7 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { readTeammateComments, teammateCommentsDenial } from "./teammate-comments-lib.mjs";
+import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
 // A live apply accepts the same 24-hour exact-head Sol proof as the merge gates
@@ -73,6 +74,22 @@ export function tahaHoldProblem(pr, now = Date.now()) {
   const waitMin = Math.ceil((TAHA_HOLD_MS - Math.max(0, now - opened)) / 60_000);
   return `Taha's 4-hour review hold is still on (ship.md Step 8 item 4a): the PR opened ${Math.floor(Math.max(0, now - opened) / 60_000)} minutes ago and Taha (TahaKhanAbdalli) has not posted a review or comment on it. ` +
     `Wait about ${waitMin} more minutes or for his review, then re-run. Mason's chat approval does not lift this hold.`;
+}
+
+// #1838 (Taha's choice, 13 Nov 2026): an agent applies a release or hotfix migration live only while Taha is there
+// to merge right after, so live never runs the old app on the new database for long. His go-ahead is a PR comment
+// from his own account (Mason's is the one his agents share), naming the PR's current head, at most 30 minutes old.
+export const READY_WINDOW_MS = 30 * 60_000;
+export function readyToMergeProblem({ comments, head, now = Date.now() }) {
+  if (!Array.isArray(comments)) return "GitHub did not list the PR's comments, so Taha's go-ahead cannot be checked (fail closed).";
+  const fresh = comments.some((c) => {
+    const m = READY_TO_MERGE_LINE.exec(String(c?.body ?? ""));
+    const at = Date.parse(String(c?.createdAt ?? ""));
+    return m && String(c?.author?.login ?? "").trim().toLowerCase() === TAHA_LOGIN &&
+      String(head).toLowerCase().startsWith(m[1].toLowerCase()) && Number.isFinite(at) && now - at <= READY_WINDOW_MS && at - now <= 60_000;
+  });
+  return fresh ? null
+    : `Taha hasn't given the go-ahead for this head: he comments \`Ready to merge: ${String(head).slice(0, 12)}\` on the PR when he's there to merge right after, and an agent applies within 30 minutes of it (ship.md › Staging). Ask him, then retry.`;
 }
 
 function refuse(why) {
@@ -142,6 +159,22 @@ export function evaluateLandingGate({
   }
 }
 
+// Mason's agents, 2026-11-12 (#1838 HIGH 1): a hotfix migration applied live with a stamp above a migration that
+// is waiting on staging for the release makes that one older than live's newest, so live's ordering guard refuses
+// it on release day. Only waiting migrations stamped above main's newest count: one stamped below it is already
+// out of order and needs its own restamp. null when the hotfix stamp is fine, otherwise why not.
+// RELEASE_FLOW switched on (Taha, 13 Nov 2026, 05:16:22 UTC).
+export const RELEASE_FLOW_ON_AT = "2026-11-13T05:16:22Z";
+
+export function hotfixStampProblem({ stamp, mainFiles, stagingFiles }) {
+  const stampOf = (f) => (/^(\d{14})_/.exec(String(f)) || [])[1];
+  const onMain = new Set(mainFiles);
+  const mainTop = mainFiles.map(stampOf).filter(Boolean).sort().pop() || "";
+  const waiting = stagingFiles.filter((f) => !onMain.has(f)).map(stampOf).filter((s) => s && s > mainTop).sort();
+  if (!waiting.length || stamp < waiting[0]) return null;
+  return `its stamp ${stamp} is not below ${waiting[0]}, a migration waiting on staging for the release, so live would refuse that one on release day. Restamp this hotfix between main's newest (${mainTop}) and ${waiting[0]}: node scripts/next-migration-stamp.mjs --hotfix --live <live high-water>`;
+}
+
 function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessionId }) {
   const OUT = (error) => error?.constructor?.name === "OutOfTime";
 
@@ -188,25 +221,91 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   let pr;
   try {
     pr = JSON.parse(gh(["pr", "view", branch, "--json",
-      "number,url,state,baseRefName,baseRefOid,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
+      "number,url,state,isCrossRepository,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,author,createdAt,comments"]));
   } catch (error) {
     if (OUT(error)) throw error;
     return refuse(`could not find or read the open pull request for branch "${branch}" (${error?.message || error}).`);
   }
   const number = pr?.number ? `#${pr.number}` : "the pull request";
   if (String(pr?.state || "").toUpperCase() !== "OPEN") return refuse(`${number} is not open.`);
-  // Migrations do not go through staging yet (sol-risk-lib.mjs stagingMigrationProblem).
+  // Staging-first: a migration PR into staging is never applied live before its merge; the
+  // staging database job applies it after the merge, and live gets it at release time. Only a
+  // PR into main (the release PR or a hotfix, below) is applied live before its merge (ship.md › Staging).
   if (String(pr?.baseRefName || "").toLowerCase() !== "main") {
-    return refuse(`${number} does not target main. A migration is applied live only from a PR into main, never one into staging or another branch (ship.md Step 5).`);
+    return refuse(`${number} does not target main. A migration PR into staging is not applied live before its merge: the staging database job applies it after the merge, and live gets it at release time (ship.md › Staging). Only the release PR or a hotfix PR into main is applied live first.`);
+  }
+  // Into main, only the weekly release (release/next) and a hotfix are applied live before their merge
+  // (Mason's Decision A, 2026-11-12: his agents apply a release's migrations from the release PR, in stamp
+  // order). Any other branch into main is not allowed at all.
+  // #1838 LOW 1: a fork's release/next or hotfix/<name> is not this repository's.
+  if (pr?.isCrossRepository !== false) return refuse(`${number} comes from a fork, or GitHub didn't say it doesn't; only this repository's branches are applied live.`);
+  const headRef = String(pr?.headRefName || "");
+  if (headRef !== "release/next" && !/^hotfix\/[^/]+$/.test(headRef)) {
+    return refuse(`${number} is not the release PR (release/next) or a hotfix/<name> PR. Into main, only those are applied live before their merge; feature work goes to staging (ship.md › Staging).`);
+  }
+  if (headRef !== "release/next") {
+    let trees;
+    try {
+      // Documented route: the directory's tree id from the contents API, then that tree (no ref:path ids).
+      const names = (branch) => {
+        const dirSha = String(gh(["api", `repos/{owner}/{repo}/contents/supabase?ref=${branch}`, "--jq", '.[] | select(.path == "supabase/migrations" and .type == "dir") | .sha'])).trim();
+        if (!/^[0-9a-f]{40}$/i.test(dirSha)) throw new Error(`no supabase/migrations directory on ${branch}`);
+        return String(gh(["api", `repos/{owner}/{repo}/git/trees/${dirSha}`, "--jq", "if .truncated then error(\"truncated\") else .tree[].path end"])).split(/\r?\n/).filter(Boolean);
+      };
+      // Migrations in open PRs into staging wait for the release too (Sol): one GraphQL read for all of them.
+      const open = JSON.parse(String(gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f",
+        "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(baseRefName:\"staging\",states:OPEN,first:100){totalCount nodes{files(first:100){totalCount nodes{path}}}}}}"])));
+      const prs = open?.data?.repository?.pullRequests;
+      if (!Array.isArray(prs?.nodes) || prs.totalCount > prs.nodes.length || prs.nodes.some((n) => !Array.isArray(n?.files?.nodes) || n.files.totalCount > n.files.nodes.length)) {
+        throw new Error("the open staging PRs' files were cut short or unreadable");
+      }
+      const pending = prs.nodes.flatMap((n) => n.files.nodes.map((f) => String(f?.path ?? ""))).filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map((f) => f.split("/").pop());
+      trees = { mainFiles: names("main"), stagingFiles: [...names("staging"), ...pending] };
+    } catch (error) {
+      if (OUT(error)) throw error;
+      return refuse(`could not list the migrations on main and staging to check this hotfix's stamp against the release (${error?.message || error}); fail closed.`);
+    }
+    if (!trees.mainFiles.length || !trees.stagingFiles.length) return refuse("GitHub listed no migrations on main or staging (fail closed).");
+    const stampProblem = hotfixStampProblem({ stamp: stem.slice(0, 14), ...trees });
+    if (stampProblem) return refuse(`${number}: ${stampProblem}`);
   }
   if (String(pr?.headRefOid || "").toLowerCase() !== head.toLowerCase()) {
     return refuse(`${number}'s head on GitHub (${String(pr?.headRefOid || "?").slice(0, 12)}) is not this checkout's HEAD (${head.slice(0, 12)}) — push, or pull, so the reviewed commit is the one applied.`);
   }
   const hold = tahaHoldProblem(pr, now);
   if (hold) return refuse(`${number}: ${hold}`);
+  const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
+  if (ready) return refuse(`${number}: ${ready}`);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);
+  }
+  // The name alone proves nothing: main's release guard checks that release/next is exactly staging + main
+  // (plus the bot's version files) and that a hotfix carries no unreleased staging work. Its run on this
+  // head must be there and green, not merely absent. A PR could add a job with that name, or edit the
+  // workflow: both are under .github/, which needs a code owner's review on main, and mergeStateStatus
+  // (CLEAN, checked above) is not CLEAN without it.
+  const guard = (newestCheckRollup(pr?.statusCheckRollup) || []).filter((c) => c?.__typename === "CheckRun" && c?.workflowName === "Release flow" && c?.name === "Release flow guard (main)");
+  if (!guard.length || !guard.every((c) => String(c.status || "").toUpperCase() === "COMPLETED" && String(c.conclusion || "").toUpperCase() === "SUCCESS")) {
+    return refuse(`${number} has no green "Release flow guard (main)" check, so it is not proven to carry only what it should. Wait for it, or fix what it reports.`);
+  }
+  // Sol, #1838: before switch-on the guard passed without checking anything, so only a run started after it counts.
+  if (!guard.every((c) => Date.parse(String(c.startedAt || "")) > Date.parse(RELEASE_FLOW_ON_AT))) {
+    return refuse(`${number}'s "Release flow guard (main)" result is from before the release flow was switched on (${RELEASE_FLOW_ON_AT}), when it checked nothing. Re-run that check, then retry.`);
+  }
+  // #1838 HIGH 2: GitHub runs the PR's own copy of the workflows, so a PR that changes .github/workflows could
+  // change (or imitate) the guard it is judged by. Its migrations wait until that change has been reviewed onto main.
+  let workflowsHere;
+  let workflowsOnMain;
+  try {
+    workflowsHere = String(git(["rev-parse", "HEAD:.github/workflows"])).trim();
+    workflowsOnMain = String(gh(["api", "repos/{owner}/{repo}/contents/.github?ref=main", "--jq", '.[] | select(.name == "workflows" and .type == "dir") | .sha'])).trim();
+  } catch (error) {
+    if (OUT(error)) throw error;
+    return refuse(`could not compare ${number}'s .github/workflows with main's (${error?.message || error}); fail closed.`);
+  }
+  if (!/^[0-9a-f]{40}$/i.test(workflowsHere) || workflowsHere !== workflowsOnMain) {
+    return refuse(`${number} changes .github/workflows, the checks it is judged by, so its migrations are not applied by an agent. Taha or Mason reviews that change onto main first (or applies by hand).`);
   }
   // A money PR needs a completed CodeRabbit review of its head before it merges
   // (Mason, 2026-10-21), so it needs one before its migration applies too —
@@ -315,6 +414,22 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   if (!headContainsBase) {
     return refuse(`${number}'s head ${head.slice(0, 12)} does not contain its base ${baseSha.slice(0, 12)}, or GitHub could not confirm it — merge origin/main into the branch, push, and re-run the checks and the Sol review.`);
+  }
+  // Sol (#1838): the guard proved this release head equals staging + main when it ran. If staging has moved since
+  // (and the bot hasn't refreshed release/next yet), that proof is stale: the head must still contain staging's tip.
+  if (headRef === "release/next") {
+    let stagingTip = "";
+    let fresh = false;
+    try {
+      stagingTip = String(gh(["api", "repos/{owner}/{repo}/commits/staging", "--jq", ".sha"])).trim();
+      fresh = /^[0-9a-f]{40}$/i.test(stagingTip) && headContainsBaseOnGitHub({ baseSha: stagingTip, headSha: head, gh });
+    } catch (error) {
+      if (OUT(error)) throw error;
+      fresh = false;
+    }
+    if (!fresh) {
+      return refuse(`${number}'s head ${head.slice(0, 12)} does not contain staging's tip ${stagingTip.slice(0, 12) || "(unreadable)"}: staging moved after the release guard ran. Wait for the bot to refresh release/next (no staging merges during the release), then re-run the checks and Sol.`);
+    }
   }
   let proven = false;
   for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {

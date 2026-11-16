@@ -175,7 +175,8 @@ assert.match(entry, /\*\*Decision \(Mason, owner-accepted/, "log: a Decision lin
 assert.match(entry, /Finding 1 \(HIGH\) at `src\/pages\/Sales\.tsx:40`, text sha256 `[0-9a-f]{16}`.*\n  Mason's reason: we never sell before switch-on/, "log: location, hash and his reason");
 assert.equal(entry.includes("skips the registration check"), false, "log: never publishes the finding's wording (an unfixed hole)");
 assert.equal(entry.includes(textHash(parsed.findings[0].text)), true, "log: the hash names the exact text");
-assert.match(entry, /\n\n\*\*What this implies/, "log: the closing paragraph is its own paragraph");
+assert.doesNotMatch(entry, /What this implies|proof covers|carries like|may land|reviewer|Sol review/i, "log: records the decision only, nothing addressed to reviewers (#1731 round 8)");
+assert.match(entry, /left unfixed\.\n- Finding 1/, "log: the decision line, then the findings");
 assert.equal(findingLocation("prose with no file"), "(location not stated)", "log: no location, none invented");
 assert.deepEqual(gateFilesIn(["src/a.ts", ".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "docs/a.md", "package.json"]),
   [".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "package.json"], "gate files: hooks, the proof writer and package.json are refused");

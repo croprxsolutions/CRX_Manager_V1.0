@@ -497,6 +497,7 @@ export default function Compliance() {
       key: 'product_name',
       header: 'Product',
       sortable: true,
+      render: (r) => (r.brand_name ? `${r.product_name} (${r.brand_name})` : r.product_name),
     },
     {
       key: 'epa_registration',
@@ -777,6 +778,7 @@ export default function Compliance() {
                           { key: 'sale_date', header: 'Sale Date' },
                           { key: 'buyer_name', header: 'Buyer Name' },
                           { key: 'product_name', header: 'Product' },
+                          { key: 'brand_name', header: 'Brand' },
                           { key: 'epa_registration', header: 'EPA Reg #' },
                           { key: 'quantity', header: 'Quantity' },
                           { key: 'unit', header: 'Unit' },
@@ -843,7 +845,7 @@ export default function Compliance() {
                 loading={loading || rupLoading}
                 searchable
                 searchPlaceholder="Search RUP sales..."
-                searchKeys={['buyer_name', 'product_name', 'epa_registration', 'buyer_certification_number']}
+                searchKeys={['buyer_name', 'product_name', 'brand_name', 'epa_registration', 'buyer_certification_number']}
                 emptyTitle="No RUP sales records"
                 emptyDescription="RUP sales records are auto-generated when invoices with RUP products are posted."
               />

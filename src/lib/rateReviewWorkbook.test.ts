@@ -51,6 +51,56 @@ const set = (wb: Wb, sheet: string, row: number, header: string, value: unknown)
 };
 
 describe('rate review workbook', () => {
+  it('reports readable semantic errors beside malformed cells on the same row', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'low', { formula: '1+1', result: 2 });
+      set(wb, 'Draft Rates', 2, 'decision', 'approved');
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'maybe');
+      set(wb, 'Rate Outcomes', 2, 'note', { formula: '1+1', result: 2 });
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'maybe');
+    });
+    for (const problem of ['Draft Rates row 2, low has a formula', 'Draft Rates row 2: decision must be',
+      'Draft Rates row 2: is_quoting_default must be', 'Rate Outcomes row 2, note has a formula',
+      'Rate Outcomes row 2 (Atrazine 4L): outcome must be', 'Rate Outcomes row 2: reconfirm must be']) {
+      await expect(invalid).rejects.toThrow(problem);
+    }
+    const corrected = await roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'low', '1');
+      set(wb, 'Draft Rates', 2, 'decision', 'approve');
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'yes');
+      set(wb, 'Rate Outcomes', 2, 'note', 'Checked label');
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'needs_label_data');
+    });
+    expect(corrected.rates).toHaveLength(1);
+    expect(corrected.rates[0]).toMatchObject({ decision: 'approve', is_quoting_default: true, low: '1', recommended: '13.5' });
+    expect(corrected.outcomes).toEqual([expect.objectContaining({ parent_id: P1, outcome: 'needs_label_data', note: 'Checked label' })]);
+  });
+
+  it('keeps choice-cell formula errors distinct without inventing dependent semantic errors', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Draft Rates', 2, 'decision', { formula: '1+1', result: 2 });
+      set(wb, 'Draft Rates', 2, 'is_quoting_default', 'maybe');
+      set(wb, 'Rate Outcomes', 2, 'row_state', 'not JSON');
+      set(wb, 'Rate Outcomes', 2, 'outcome', 'approved');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'maybe');
+    });
+    for (const problem of ['decision has a formula', 'is_quoting_default must be', 'Rate Outcomes row 2 is damaged', 'outcome must be', 'reconfirm must be']) {
+      await expect(invalid).rejects.toThrow(problem);
+    }
+    await expect(invalid).rejects.not.toThrow('decision must be');
+    await expect(invalid).rejects.not.toThrow('Reconfirm needs');
+  });
+
+  it('reports a damaged outcome record without a dependent Reconfirm error when Reconfirm is yes', async () => {
+    const invalid = roundTrip((wb) => {
+      set(wb, 'Rate Outcomes', 2, 'row_state', 'not JSON');
+      set(wb, 'Rate Outcomes', 2, 'reconfirm', 'yes');
+    });
+    await expect(invalid).rejects.toThrow('Rate Outcomes row 2 is damaged');
+    await expect(invalid).rejects.not.toThrow('Reconfirm needs');
+  });
+
   it('reports independent semantic mistakes on one rate row, then accepts the corrected row', async () => {
     const invalid = roundTrip((wb) => {
       set(wb, 'Draft Rates', 2, 'decision', 'approved');

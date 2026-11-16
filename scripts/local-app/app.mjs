@@ -333,6 +333,9 @@ async function seedUsers(state) {
 async function seedRegistrationPrerequisite(state) {
   if (scalar('SELECT public._epa_registrations_seeded();') === 't') return;
   compose(['up', '-d', 'auth']);
+  // auth can come back on a new address while the gateway still remembers its old one (502 on user creation).
+  compose(['restart', 'gateway']);
+  sealGateway();
   try {
     await waitFor('login service for registration initialization', () => answers(`${API_URL}/auth/v1/health`));
     await seedUsers(state);

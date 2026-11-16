@@ -118,7 +118,8 @@ DECLARE
   v_types text[];
 BEGIN
   IF p IS NULL THEN RETURN true; END IF;
-  IF jsonb_typeof(p) <> 'array' OR jsonb_array_length(p) > 50 THEN RETURN false; END IF;
+  IF jsonb_typeof(p) <> 'array' THEN RETURN false; END IF;
+  IF jsonb_array_length(p) > 50 THEN RETURN false; END IF;
   FOR e IN SELECT x FROM jsonb_array_elements(p) x LOOP
     IF jsonb_typeof(e) <> 'object' THEN RETURN false; END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(e) k

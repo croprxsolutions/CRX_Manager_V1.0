@@ -76,6 +76,9 @@ function customerQuery(nextCustomer: () => typeof original | typeof newer): Reco
   return chain;
 }
 
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 vi.mock('../lib/db', async () => ({
   supabase: { from: mockFrom, rpc: mockRpc },
   // The REAL assertRpcResult, not a passthrough stub. `vi.fn((value) => value)` never
@@ -1400,6 +1403,18 @@ describe('CustomerDetail standing discount (billing plan M4b)', () => {
     mockRpc.mockResolvedValue({ data: null, error: null });
   });
   afterEach(() => { mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' }; });
+
+  it('on live (billing M4 off) the customer has no standing discount box', async () => {
+    billingM4.on = false;
+    try {
+      renderDetail();
+      expect(await screen.findByLabelText('Finance charge rate')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Standing discount')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
+  });
 
   it('an admin changes the customer\'s rate with its own Save', async () => {
     renderDetail();

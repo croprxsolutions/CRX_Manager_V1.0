@@ -1021,9 +1021,11 @@ function drawBillTo(p: Page): void {
   p.y = y + 8;
 }
 
-/** Wrapped to the width and kept to three lines (the last ends "..."), so the bill-to stays inside its window. */
-// ponytail: 6 wrapped lines per bill-to field (a real street or name wraps to 2 at most) keeps the block on page 1;
-// only an absurd value is cut, and it ends in "..." so the cut is visible.
+/**
+ * Wrapped to the width and kept to six lines per field (the last ends "..."). A real name or street wraps to two at
+ * most, so a normal address fits the envelope window; drawBillTo moves p.y past every line, so a longer block pushes
+ * the content below down instead of overlapping it. Only an absurd value is cut, visibly.
+ */
 function cappedLines(doc: JsPDFWithAutoTable, text: string, width: number, max = 6): string[] {
   const lines = doc.splitTextToSize(text, width) as string[];
   if (lines.length <= max) return lines;

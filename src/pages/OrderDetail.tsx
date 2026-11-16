@@ -829,10 +829,13 @@ export default function OrderDetail() {
         p_order_id: order.id, p_sales_tax: next, p_idempotency_key: salesTaxIdem.getKeyFor(scope),
       });
       if (error) throw error;
-      const result = assertRpcResult<{ drafts_updated?: number }>(data, 'set_order_sales_tax');
+      const result = assertRpcResult<{ drafts_updated?: number; drafts_kept?: string[] }>(data, 'set_order_sales_tax');
       salesTaxIdem.resetKeyFor(scope);
       const drafts = result.drafts_updated ?? 0;
-      if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
+      // Split drafts the save path can't edit keep their tax until the group is voided and redrafted.
+      const kept = result.drafts_kept?.length ?? 0;
+      if (kept) toast('info', `Sales tax ${next ? 'on' : 'off'}${drafts ? ` (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)` : ''}. ${kept} split draft${kept === 1 ? '' : 's'} can't be edited and keep${kept === 1 ? 's' : ''} ${kept === 1 ? 'its' : 'their'} tax until the group is voided and redrafted.`);
+      else if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
       else {
         const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
         toast('info', `Sales tax ${next ? 'on' : 'off'}. New invoices for this sale will${next ? '' : ' not'} be taxed${hasPosted ? '; posted invoices keep their tax' : ''}.`);

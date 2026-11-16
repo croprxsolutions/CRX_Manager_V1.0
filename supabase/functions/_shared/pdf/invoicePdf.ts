@@ -688,7 +688,7 @@ export async function buildInvoicePdfDataFromRow(
  * Mirrors InvoiceDetail's takesCharges (src/pages/InvoiceDetail.tsx): an invoice with no order and no delivery behind it
  * (20261021050000), or a chemical sale backed by an order or a delivery and not a blend ticket (20261108160000).
  */
-function takesChargeLines(
+export function takesChargeLines(
   type: string | null | undefined,
   row: { order_id?: string | null; delivery_id?: string | null; blend_ticket_id?: string | null } | null,
 ): boolean {

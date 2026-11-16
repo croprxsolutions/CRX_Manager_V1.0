@@ -647,14 +647,27 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 [Product Master review](../audits/2026-11-13-product-master-review.md), repair step 3).
 
 ### KI-156 — A field-application invoice books the grower-share chemical's cost in the wrong unit
-**MED · OPEN · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1) · unassigned**
+**MED · FIX IN REVIEW (branch `claude/pm-grower-share-cost`, migration `20270111130000`, not applied) · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1)**
 In `_save_field_app_invoice_impl_20260714` (latest body `20260904180000_invoice_season_follows_invoice_date.sql`), the
 `v_chem_qty_a > 0` branch (chemical included in the grower's share) adds `safe_cents_qty(v_qa_unit_cost, v_chem_qty_a)`.
 That multiplies the cost per sold unit by a quantity in the rate unit, with no conversion. Example: 16 oz/ac × 100 ac
 of a $30/gal product costs $375 but is booked as 1,600 × $30 = $48,000 in `invoices.total_cost_cents`. The customer's
 bill is right ($0 line); margin, P&L and possibly commission are wrong. The billed branch was fixed by PARKED-010
-(`field_app_priced_quantity`); this branch was not. Live-verified body; 0 such lines live yet. The split field-app path
-was not traced. Fix: convert like the billed branch, with a real-schema proof. Repair step 3 (To-Do 0.17).
+(`field_app_priced_quantity`); this branch was not. Live-verified body; 0 such lines live yet. Fix: convert like the
+billed branch, with a real-schema proof. Repair step 3 (To-Do 0.17).
+
+Fix in review: `20270111130000_grower_share_cost_in_sold_unit.sql` converts the grower-share amount into the product's
+sold unit (a manual line: its own unit) with `field_app_priced_quantity`, refuses a unit that does not convert with the
+billed line's message, stores the line in that unit and costs the stored quantity (the example books $375). The bill's
+amounts and the billed branch are unchanged; the printed grower-share line shows the converted quantity. The split field-app saver refuses grower-price fields and the generic invoice
+saver refuses to re-save these invoices, so neither has the bug. Proof:
+`node scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs`. Close when applied live.
+Found while proving (live, read-only, 2026-11-15): no field-app save path declares a below-cost context, so the below-cost
+wall (`_enforce_below_cost_line`) refuses every field-app save whose grower-share line is a costed catalog product
+(`BELOW_COST_CONTEXT_REQUIRED`; a sales rep would also hit `BELOW_COST_ADMIN_REQUIRED`). That is why live has none of
+these lines, and why the wrong cost has not reached live. Unblocking it needs a business rule (who may approve a $0
+"included in grower share" chemical line, as the blend-ticket path does: admin plus a written reason) and is not part
+of this fix; the prover declares that context to reach the cost math.
 
 ### KI-157 — Invoice PDFs print the product's current name, not the name it was sold under
 **MED · OPEN · money/documents · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-2) · unassigned**

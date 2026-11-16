@@ -352,6 +352,14 @@ scenarios.push(['a restamp of a file that was once on main (later removed) still
   eq(result.status, 1, 'exit 1');
   ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'in main history counts as on main');
 }]);
+scenarios.push(['a shallow clone: a restamp is not exempt (fail closed)', (dir) => {
+  const base = seedBase(dir);
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', sh(dir, ['commit-tree', sh(dir, ['hash-object', '-t', 'tree', '-w', '--stdin']), '-m', 'empty main'])]);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  writeFileSync(path.join(dir, '.git', 'shallow'), `${base}\n`);
+  eq(runCli(dir, base, head).status, 1, 'exit 1');
+}]);
 scenarios.push(['no origin/main: a restamp is not exempt (fail closed)', (dir) => {
   const base = seedBase(dir);
   sh(dir, ['mv', APPLIED, RESTAMPED]);

@@ -47,7 +47,7 @@
 //   while main (and live) moves past its stamp. Mason's restamp (ship.md, 2026-11-04) then moves it to a
 //   newer stamp with byte-identical SQL. That deletion is not an edit of an applied migration when the old
 //   file never appears in origin/main's history (main is what live runs; the staging job renames its ledger
-//   row, #1837). A git error while checking main counts as "on main".
+//   row, #1837). A shallow clone, or a git error while checking main, counts as "on main".
 //   Only an exact pair counts: one deleted and one added file, the same git blob, the same name after the
 //   stamp, a newer stamp, and several pairs in the same order. Without a readable origin/main nothing is
 //   exempt (fail closed). Each exemption is printed.
@@ -329,7 +329,8 @@ export function runDiffCheck({ repoRoot, base, head: headRef, log = console.log 
   const restamps = stagingOnlyRestamps({
     deleted: classified.protectedChanges.filter((c) => c.status === 'D').map((c) => c.path),
     added, blob, base: mergeBase, head, everOnMain: (relPath) => {
-      // Fail closed: no origin/main, or any git error, counts as "on main".
+      // Fail closed: a shallow clone (history may be missing), no origin/main, or any git error counts as "on main".
+      try { if (git(repoRoot, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') return true; } catch { return true; }
       const main = resolveCommit(repoRoot, 'origin/main');
       if (!main) return true;
       try { return git(repoRoot, ['log', '-1', '--format=%H', main, '--', relPath]).trim() !== ''; } catch { return true; }

@@ -214,6 +214,13 @@ test.describe('Invoice Math Verification', () => {
     if (footerCents !== null) {
       const lines = await invoiceLineAmounts(page);
       assertCentsEqual(footerCents, lines.totalCents, 2, 'Lines card total should match the sum of its lines');
+      // "Invoice total" in the lines card must be Amount due's Invoice total, not only the lines' own sum.
+      const label = ((await page.locator('section[aria-labelledby="invoice-lines-title"]')
+        .getByText(/^(Invoice|Lines) total$/).first().textContent()) ?? '').trim();
+      const invoiceTotal = await amountDueCents(page, 'Invoice total');
+      if (label === 'Invoice total' && invoiceTotal !== null) {
+        assertCentsEqual(footerCents, invoiceTotal, 2, 'Lines card Invoice total should match Amount due Invoice total');
+      }
     }
   });
 

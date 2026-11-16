@@ -3168,6 +3168,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20270108100000 (MOA-1, local candidate): admin-only ingredient group writer; replays through
   // _product_parent_replay and saves its receipt on every path. Prune once the generated types carry it.
   'set_active_ingredient_modes',
+  // 20270112100000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
+  'set_registration_adjuvants',
   // 20270104110000 (RT-3, local candidate): admin-only rate review commit; replays through _product_parent_replay
   // and saves its receipt. Prune once the generated types carry it.
   'commit_rate_review',

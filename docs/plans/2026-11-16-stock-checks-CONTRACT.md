@@ -120,8 +120,8 @@ public wrappers.
 **Targeted re-check (Astra, lock mechanism, round 2): 1 HIGH, fixed.** Two retires in one transaction: the first
 keeps the advisory lock, the second waits for a row that receiving holds while receiving waits for the advisory
 lock. No caller does this today (the app retires one row per request, and no database function calls retire), but
-the row lock is now `NOWAIT`, so retire never waits on anything and the cycle cannot form (proof case 7b). No
-further challenge round on this mechanism.
+the row lock is now `NOWAIT`, so retire never waits on anything and the cycle cannot form (proof case 7b). This
+was the plan's one targeted re-check; Luna and Sol still review the lock design in full.
 
 ## Open business decisions
 

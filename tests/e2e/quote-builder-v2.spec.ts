@@ -158,7 +158,8 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
     await customerSelect.selectOption(S.customerId);
     await waitStable(page, 1000);
 
-    // Add section header notes (textarea visible below section header)
+    // Add section header notes (the link under the section header opens the textarea)
+    await page.getByRole('button', { name: /Add a note for this section/ }).first().click();
     const headerNotesTextarea = page.locator('textarea[placeholder*="Section notes for grower"]').first();
     await expect(headerNotesTextarea).toBeVisible({ timeout: 5000 });
     await headerNotesTextarea.fill(`E2E-V2 test header note ${RUN}`);
@@ -368,10 +369,10 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
       expect((q[0] as Record<string, unknown>).is_planned).toBe(true);
     }
 
-    // Verify the checkbox renders correctly on the page
+    // Verify the switch renders correctly on the page (Details card)
     await nav(page, `/quotes/${S.quoteId}`);
     await waitStable(page);
-    const plannedCheckbox = page.getByRole('checkbox', { name: 'Planned Program' });
+    const plannedCheckbox = page.getByRole('switch', { name: /Planned program/ });
     if (await plannedCheckbox.isVisible({ timeout: 3000 }).catch(() => false)) {
       expect(await plannedCheckbox.isChecked()).toBe(true);
     }

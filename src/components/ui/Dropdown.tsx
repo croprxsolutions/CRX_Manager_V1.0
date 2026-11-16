@@ -34,6 +34,8 @@ interface DropdownProps {
   inline?: boolean;
   /** Inline filter is narrowing the list: green-tinted like an active filter chip. */
   active?: boolean;
+  /** Dense table cells: no reserved helper line under the trigger. */
+  noHelperRow?: boolean;
 }
 
 // The trigger's look per state, kept out of Dropdown for its complexity budget.
@@ -65,6 +67,7 @@ export default function Dropdown({
   className = '',
   inline = false,
   active = false,
+  noHelperRow = false,
 }: DropdownProps) {
   // RAC's Button drops aria-invalid (it only sets data-invalid on the Select root), so set it directly.
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -97,7 +100,7 @@ export default function Dropdown({
         <SelectValue className="truncate data-[placeholder]:text-gray-500" />
         <ChevronDown className={`h-4 w-4 shrink-0 ${active ? '' : 'text-gray-500'}`} aria-hidden="true" />
       </Button>
-      {!inline && (
+      {!inline && !noHelperRow && (
         <div className="min-h-5 mt-1 text-xs">
           {error ? (
             <Text slot="errorMessage" className="text-red-600">{error}</Text>

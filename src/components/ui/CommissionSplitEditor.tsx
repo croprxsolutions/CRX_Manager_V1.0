@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { supabase, assertRpcResult } from '../../lib/db';
+import Dropdown from './Dropdown';
 import type { CommissionSplit } from '../../types';
 
 // Fallback only — the live list comes from list_commission_recipients(),
@@ -23,12 +24,15 @@ interface CommissionSplitEditorProps {
   value: CommissionSplit;
   onChange: (value: CommissionSplit) => void;
   label?: string;
+  /** RAC controls ignore a disabled fieldset, so a locked form passes this too. */
+  disabled?: boolean;
 }
 
 export default function CommissionSplitEditor({
   value,
   onChange,
   label = 'Commission Split',
+  disabled,
 }: CommissionSplitEditorProps) {
   const splits = value.splits;
   const total = splits.reduce((sum, s) => sum + (s.percentage || 0), 0);
@@ -89,9 +93,6 @@ export default function CommissionSplitEditor({
     onChange({ splits: splits.filter((_, i) => i !== index) });
   };
 
-  const selectClass =
-    'flex-1 px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150';
-
   return (
     <div className="w-full">
       {label && (
@@ -99,7 +100,7 @@ export default function CommissionSplitEditor({
           {label}
         </label>
       )}
-      <div className="space-y-2">
+      <div className="space-y-1">
         {splits.map((split, i) => {
           // A stored value outside the known list (legacy data) still needs to
           // display; it stays selectable so the row isn't silently blanked.
@@ -107,24 +108,22 @@ export default function CommissionSplitEditor({
             split.recipient !== '' &&
             !recipients.some((r) => r.full_name === split.recipient);
           return (
-            <div key={i} className="flex items-center gap-2">
-              <select
-                value={split.recipient}
-                onChange={(e) => updateSplit(i, 'recipient', e.target.value)}
-                aria-label={`Recipient for split ${i + 1}`}
-                className={selectClass}
-              >
-                <option value="">Select recipient...</option>
-                {recipients.map((r) => (
-                  <option key={r.id ?? r.full_name} value={r.full_name}>
-                    {r.full_name}
-                  </option>
-                ))}
-                {isLegacy && (
-                  <option value={split.recipient}>{split.recipient}</option>
-                )}
-              </select>
-              <div className="relative w-24">
+            // items-start: the Dropdown keeps an empty helper line under its trigger.
+            <div key={i} className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <Dropdown
+                  aria-label={`Recipient for split ${i + 1}`}
+                  value={split.recipient || null}
+                  onChange={(name) => updateSplit(i, 'recipient', name)}
+                  placeholder="Select recipient..."
+                  disabled={disabled}
+                  options={[
+                    ...recipients.map((r) => ({ value: r.full_name, label: r.full_name })),
+                    ...(isLegacy ? [{ value: split.recipient, label: split.recipient }] : []),
+                  ]}
+                />
+              </div>
+              <div className="relative w-24 shrink-0">
                 <input
                   type="number"
                   value={split.percentage || ''}
@@ -134,7 +133,7 @@ export default function CommissionSplitEditor({
                   min="0"
                   max="100"
                   step="any"
-                  className="w-full px-3 py-2 pr-7 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
+                  className="w-full h-11 md:h-10 px-3 pr-7 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
               </div>
@@ -143,7 +142,7 @@ export default function CommissionSplitEditor({
                   type="button"
                   onClick={() => removeSplit(i)}
                   aria-label={`Remove split ${i + 1}`}
-                  className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  className="h-11 w-11 md:h-10 md:w-10 shrink-0 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -155,7 +154,7 @@ export default function CommissionSplitEditor({
           <button
             type="button"
             onClick={addSplit}
-            className="inline-flex items-center gap-1 text-xs font-medium text-crx-green hover:text-crx-green/80 transition-colors"
+            className="inline-flex min-h-11 md:min-h-10 items-center gap-1 text-xs font-medium text-crx-green hover:text-crx-green/80 transition-colors"
           >
             <Plus className="w-3 h-3" />
             Add Recipient

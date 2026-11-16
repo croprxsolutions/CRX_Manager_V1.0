@@ -123,10 +123,10 @@ async function fillInNewQuote() {
   fireEvent.change(customerBox, { target: { value: 'North' } });
   fireEvent.click(await screen.findByRole('option', { name: /North Farm/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Add one' }));
-  fireEvent.click(await screen.findByRole('button', { name: /Select Product/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Select product/ }));
   const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
   fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getByText('Alpha Chem'));
-  fireEvent.change(await screen.findByLabelText('Units needed'), { target: { value: '2' } });
+  fireEvent.change(await screen.findByLabelText('Quantity'), { target: { value: '2' } });
 }
 
 describe('QuoteBuilder — leaving a new quote', () => {
@@ -147,7 +147,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     const router = renderNewQuote();
     await fillInNewQuote();
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/quotes/${SAVED_ID}`);
@@ -167,14 +167,14 @@ describe('QuoteBuilder — leaving a new quote', () => {
     const router = renderNewQuote();
     await fillInNewQuote();
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
     // The page leaves for the saved quote once the save lands, so an edit made now would
     // be lost: every field, including Planned Program, is locked until then.
     expect(screen.getByPlaceholderText(/Notes visible at the top of the quote/)).toBeDisabled();
-    expect(screen.getByLabelText('Units needed')).toBeDisabled();
+    expect(screen.getByLabelText('Quantity')).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Customer' })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: /Planned Program/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /^Planned program/ })).toBeDisabled();
     releaseSave();
 
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
@@ -191,9 +191,9 @@ describe('QuoteBuilder — leaving a new quote', () => {
         : { data: null, error: null }));
     const router = renderNewQuote();
     await fillInNewQuote();
-    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /^Planned program/ }));
 
-    fireEvent.click(screen.getByText('Save Draft'));
+    fireEvent.click(screen.getByText('Save draft'));
 
     // Staying on /quotes/new with a locked form would strand the rep beside an already-saved quote.
     expect(await screen.findByText(`Saved quote page ${SAVED_ID}`)).toBeInTheDocument();
@@ -209,7 +209,7 @@ describe('QuoteBuilder — leaving a new quote', () => {
     await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'generate_quote_number')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Planned Program/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /^Planned program/ }));
     fireEvent.click(screen.getByText('Quotes list'));
 
     expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();

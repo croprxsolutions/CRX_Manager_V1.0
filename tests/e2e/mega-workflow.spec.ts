@@ -407,8 +407,8 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
       await waitForPageStable(page, 1000);
     }
 
-    // Click Add Item
-    const addItemBtn = page.getByRole('button', { name: /Add Item/i }).first();
+    // Click Add one (the empty section's first line)
+    const addItemBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
     if (await addItemBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await addItemBtn.click();
       await waitForPageStable(page, 500);
@@ -426,8 +426,8 @@ test.describe.serial('Mega Workflow (95 Steps)', () => {
       await waitForPageStable(page, 1000);
     }
 
-    // Add Item
-    const addBtn = page.getByRole('button', { name: /Add Item/i }).first();
+    // Add one (the empty section's first line)
+    const addBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
     if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await addBtn.click();
       await waitForPageStable(page, 500);

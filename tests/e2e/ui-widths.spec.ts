@@ -3,7 +3,7 @@ import { login } from './utils/auth';
 import { E2E_PREFIX, runId } from './fixtures/e2e-constants';
 
 /**
- * Width guard for the Quotes list: the page never scrolls sideways at the eight
+ * Width guard for the Quotes list and the quote builder: the page never scrolls sideways at the eight
  * widths the UI redesign supports, and a 60-character customer name stays on
  * screen in the 360 px card. Synthetic data only; the customer carries the
  * E2E prefix so globalTeardown removes it with its quote.
@@ -61,12 +61,12 @@ test.describe('Quotes list width guard', () => {
     await page.goto('/quotes/new');
     await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));
     await page.getByRole('option', { name }).click();
-    await page.getByRole('button', { name: /Add Item/i }).first().click();
+    await page.getByRole('button', { name: 'Add one' }).first().click();
     await page.getByRole('button', { name: /Select Product/i }).first().click();
     await page.getByPlaceholder('Search by name, SKU, category, or vendor...').fill(E2E_PREFIX);
     // Scoped to the product picker's result list (as quote-builder-v2.spec.ts does), not any button on the page.
     await page.getByRole('dialog').locator('.max-h-80 button').filter({ hasText: E2E_PREFIX }).first().click();
-    await page.getByLabel('Units needed').first().fill('1');
+    await page.getByLabel('Quantity', { exact: true }).first().fill('1');
     await page.getByRole('button', { name: /Save Draft/i }).first().click();
     await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 30000 });
 
@@ -84,5 +84,71 @@ test.describe('Quotes list width guard', () => {
     expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)).toBe(true);
     await expectNoSideScroll(page);
     await page.screenshot({ path: 'test-results/ui-widths/quotes-360-long-name.png', fullPage: true });
+  });
+});
+
+test.describe('Quote builder width and keyboard guard', () => {
+  test('revised quote with 2 sections: no sideways scroll at every width, menu works by keyboard', async ({ page }) => {
+    test.setTimeout(180000);
+    await login(page);
+    const name = `${E2E_PREFIX} Builder ${runId()} Width Farm`;
+
+    // Seed through the app: a customer, then a quote with two sections of one product each.
+    await page.setViewportSize({ width: 1280, height: HEIGHT });
+    await createCustomer(page, name);
+
+    await page.goto('/quotes/new');
+    await page.getByRole('combobox', { name: 'Customer' }).fill(name.slice(0, 30));
+    await page.getByRole('option', { name }).click();
+
+    const addProduct = async () => {
+      await page.getByRole('button', { name: /Select Product/i }).first().click();
+      await page.getByPlaceholder('Search by name, SKU, category, or vendor...').fill(E2E_PREFIX);
+      await page.getByRole('dialog').locator('.max-h-80 button').filter({ hasText: E2E_PREFIX }).first().click();
+      await page.getByLabel('Quantity', { exact: true }).last().fill('1');
+    };
+    await page.getByRole('button', { name: 'Add one' }).first().click();
+    await addProduct();
+    await page.getByRole('button', { name: 'Add a section' }).click();
+    await page.getByRole('button', { name: 'Add one' }).first().click();
+    await addProduct();
+    await expect(page.getByLabel('Section name')).toHaveCount(2);
+    await page.getByRole('button', { name: /Save draft/i }).first().click();
+    await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 30000 });
+
+    // Draft -> sent (Mark as Presented) -> revised (Revise quote).
+    await page.getByRole('button', { name: /Preview & send/i }).first().click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Mark as Presented' }).click();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Revise quote' }).first().click();
+    await expect(page.getByText(/revised/i).first()).toBeVisible({ timeout: 15000 });
+    const quoteUrl = page.url();
+
+    for (const width of UI_WIDTHS) {
+      await page.setViewportSize({ width, height: HEIGHT });
+      await page.goto(quoteUrl);
+      await expect(page.getByLabel('Section name')).toHaveCount(2, { timeout: 15000 });
+      await expectNoSideScroll(page);
+      await page.screenshot({ path: `test-results/ui-widths/quote-builder-${width}.png`, fullPage: true });
+    }
+
+    // Keyboard only: Tab to More actions, Enter opens, ArrowDown moves into the menu, Escape closes and returns focus.
+    await page.setViewportSize({ width: 1280, height: HEIGHT });
+    await page.goto(quoteUrl);
+    await expect(page.getByLabel('Section name')).toHaveCount(2, { timeout: 15000 });
+    const trigger = page.getByRole('button', { name: 'More actions' });
+    await expect(trigger).toBeVisible();
+    for (let i = 0; i < 60; i++) {
+      if (await trigger.evaluate((el) => el === document.activeElement)) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 });

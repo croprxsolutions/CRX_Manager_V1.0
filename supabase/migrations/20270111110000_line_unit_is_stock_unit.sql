@@ -288,7 +288,7 @@ UPDATE public.purchase_order_items l
  WHERE po.id = l.purchase_order_id AND p.id = l.product_id
    AND po.status IN ('draft', 'submitted', 'partially_received')
    AND COALESCE(l.quantity_received, 0) < COALESCE(l.quantity_ordered, 0)
-   AND COALESCE(btrim(l.unit_size), '') = '';
+   AND COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') = '';
 GET DIAGNOSTICS v_done = ROW_COUNT;
 IF v_done > 5 THEN
   RAISE EXCEPTION 'UNITS_BLANK_FILL_COUNT: % open PO lines have no unit (1 expected); check them before applying', v_done;
@@ -308,18 +308,18 @@ BEGIN
       JOIN public.products p ON p.id = l.product_id
      WHERE po.status IN ('draft', 'submitted', 'partially_received')
        AND COALESCE(l.quantity_received, 0) < COALESCE(l.quantity_ordered, 0)
-       AND (COALESCE(btrim(l.unit_size), '') = ''
+       AND (COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') = ''
             OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
     UNION ALL
     SELECT 'order line ' || l.id
       FROM public.order_items l JOIN public.orders o ON o.id = l.order_id JOIN public.products p ON p.id = l.product_id
      WHERE o.status IN ('confirmed', 'partially_fulfilled')
-       AND (COALESCE(btrim(l.unit_size), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
+       AND (COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
     UNION ALL
     SELECT 'delivery line ' || l.id
       FROM public.delivery_items l JOIN public.deliveries d ON d.id = l.delivery_id JOIN public.products p ON p.id = l.product_id
      WHERE d.status IN ('scheduled', 'in_progress')
-       AND (COALESCE(btrim(l.unit_size), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
+       AND (COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
   ) s;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270111100000 first): %', v_bad;

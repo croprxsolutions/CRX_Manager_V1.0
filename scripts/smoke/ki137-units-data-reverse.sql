@@ -40,6 +40,8 @@ BEGIN
                AND id NOT IN ('59a5c466-7e4a-46d8-a65c-55cd8397d52c', '74b7f457-b4ef-462a-a3a2-0a125a98392f'))
      OR EXISTS (SELECT 1 FROM public.delivery_items WHERE product_id IN (c_corn, c_soy, c_piks) AND unit_size IN ('Ea', 'MG')
                AND id <> 'd33b3ba5-8c72-49e5-81a1-6a60a5507c93')
+     -- The pinned Piksi delivery line still holds the 27000 MG the correction relabelled.
+     OR EXISTS (SELECT 1 FROM public.delivery_items WHERE id = 'd33b3ba5-8c72-49e5-81a1-6a60a5507c93' AND quantity IS DISTINCT FROM 27000)
      OR EXISTS (SELECT 1 FROM public.order_items WHERE id IN ('41ce7cfe-ad47-4fe3-9ace-9b694338ec34', 'c12acb4c-45ec-424e-bb13-9566ea3c73f9')
                   AND (id, quantity_delivered) NOT IN (('41ce7cfe-ad47-4fe3-9ace-9b694338ec34'::uuid, 1::numeric), ('c12acb4c-45ec-424e-bb13-9566ea3c73f9'::uuid, 0::numeric)))
      OR EXISTS (SELECT 1 FROM public.inventory_transactions WHERE product_id IN (c_corn, c_soy, c_piks) AND created_at > v_at)

@@ -532,7 +532,7 @@ function quoteCases() {
     UPDATE public.products SET product_form = 'seed', inventory_unit = 'Lb', unit_size = 'Lb' WHERE id = '${GAL}';
     SET session_replication_role = origin;
 ${line(null, 10).replace(/;$/, ' RETURNING rate_unit;')}`), 'Lb');
-  console.log('[case] 7 a quote line (any mode but units-direct) with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, a units-direct line, a count unit (Ea), and a blank-unit seed line (filled from its stock unit first) save; a dry rate unit (Lb) on a liquid product is refused');
+  console.log('[case] 7 a quote line (any mode but units-direct) with rate 10 and an unknown or missing rate unit is refused; rate 0, a known unit in any case, a units-direct line, a count unit (Ea), and a blank-unit seed line (filled from its stock unit first) save');
 }
 
 function rollbackCases() {

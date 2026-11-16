@@ -80,7 +80,9 @@ export default function SaleInvoicesCard({
                       {(inv.paidCents ?? 0) > 0 && <span className="text-xs tabular-nums text-crx-green">Paid {formatCents(inv.paidCents!)}</span>}
                       {/* Once posted: anything still owed (the whole total included) or a credit balance. Nothing when settled. */}
                       {!isDraft(inv.status) && inv.balanceCents !== 0 && (
-                        <span className={`text-xs tabular-nums ${inv.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>{formatCents(inv.balanceCents)} due</span>
+                        <span className={`text-xs tabular-nums ${inv.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>
+                          {inv.balanceCents > 0 ? `${formatCents(inv.balanceCents)} due` : `${formatCents(-inv.balanceCents)} credit`}
+                        </span>
                       )}
                       <Badge variant={invoiceStatusBadge(inv.status).variant} normalCase>{invoiceStatusBadge(inv.status).label}</Badge>
                     </span>

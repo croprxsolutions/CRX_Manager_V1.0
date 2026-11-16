@@ -107,6 +107,13 @@ describe('SaleInvoicesCard', () => {
     expect(within(screen.getByRole('link', { name: /CS-2026-0005-1/ })).queryByText(/due$/)).toBeNull();
   });
 
+  it('a credit balance reads as a credit, not an amount due', () => {
+    renderCard({ invoices: [{ ...invoices[0], status: 'posted', totalCents: -15000, balanceCents: -15000 }] });
+    const row = within(screen.getByRole('link', { name: /CS-2026-0005-1/ }));
+    expect(row.getByText('$150.00 credit')).toBeInTheDocument();
+    expect(row.queryByText(/due$/)).toBeNull();
+  });
+
   it('keeps a share to two decimals', () => {
     renderCard({ invoices: [{ ...invoices[0], sharePct: 33.333333 }] });
     expect(screen.getByText('Maple Hollow Farms · 33.33%')).toBeInTheDocument();

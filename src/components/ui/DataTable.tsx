@@ -18,6 +18,8 @@ interface DataTableProps<T> {
   columns: Column<T>[];
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** A shorter placeholder for the phone layout (needs mobileRow). The search box's accessible name stays searchPlaceholder. */
+  phoneSearchPlaceholder?: string;
   searchKeys?: string[];
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
@@ -101,12 +103,16 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
   );
 }
 
+// The phone layout may use a shorter placeholder; kept out of DataTable for its complexity budget.
+const searchPlaceholderFor = (phone: boolean, short: string | undefined, full: string) => (phone && short) || full;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function DataTable<T extends Record<string, any>>({
   data,
   columns,
   searchable,
   searchPlaceholder = 'Search...',
+  phoneSearchPlaceholder,
   searchKeys = [],
   onRowClick,
   emptyTitle = 'No data found',
@@ -168,7 +174,7 @@ export default function DataTable<T extends Record<string, any>>({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={searchPlaceholder}
+                placeholder={searchPlaceholderFor(!!phoneRow, phoneSearchPlaceholder, searchPlaceholder)}
                 aria-label={searchPlaceholder}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg
                   focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green

@@ -42,6 +42,28 @@ describe('Dropdown', () => {
     expect(screen.getByRole('button', { name: /Status/ })).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('inline mode puts the label inside the trigger and drops the helper line', () => {
+    const onChange = vi.fn();
+    const { container } = render(<Dropdown inline label="Status" value="draft" onChange={onChange} options={options} helper="Never shown" />);
+    const trigger = screen.getByRole('button', { name: /Status/ });
+    expect(trigger).toHaveTextContent('StatusDraft');
+    expect(trigger).toHaveClass('rounded-full', 'md:rounded-lg'); // a pill on phones, like the filter chips
+    expect(screen.queryByText('Never shown')).not.toBeInTheDocument();
+    expect(container.querySelector('.min-h-5')).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    expect(onChange).toHaveBeenCalledWith('sent');
+  });
+
+  it('active inline filter is green-tinted; inactive is plain', () => {
+    const { rerender } = render(<Dropdown inline label="Status" value="draft" onChange={() => {}} options={options} />);
+    expect(screen.getByRole('button', { name: /Status/ })).toHaveClass('bg-white', 'border-gray-300');
+    rerender(<Dropdown inline active label="Status" value="sent" onChange={() => {}} options={options} />);
+    const trigger = screen.getByRole('button', { name: /Status/ });
+    expect(trigger).toHaveClass('bg-crx-green-light', 'border-crx-green');
+    expect(trigger).not.toHaveClass('bg-white');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

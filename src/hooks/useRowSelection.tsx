@@ -99,6 +99,8 @@ export function createCheckboxColumn<T>(
   toggleSelect: (id: string) => void,
   getId: (row: T) => string,
   isSelectable?: (row: T) => boolean,
+  /** Accessible name for each row's checkbox, e.g. "Select Q-0001". */
+  getLabel?: (row: T) => string,
 ): Column<T> {
   return {
     key: '_select',
@@ -111,6 +113,7 @@ export function createCheckboxColumn<T>(
       return (
         <input
           type="checkbox"
+          aria-label={getLabel?.(row)}
           checked={selected.has(id)}
           onChange={(e) => {
             e.stopPropagation();

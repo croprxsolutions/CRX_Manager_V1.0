@@ -139,13 +139,13 @@ describe('Invoices list redesign', () => {
 
       fireEvent.click(within(bar()).getByRole('button', { name: 'More' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Email 1…' }));
-      const email = await screen.findByRole('dialog');
+      const email = await screen.findByRole('alertdialog');
       expect(within(email).getByText(/Email 1 posted or overdue invoice\(s\)/)).toBeInTheDocument();
       fireEvent.click(within(email).getByRole('button', { name: 'Cancel' }));
 
       fireEvent.click(within(bar()).getByRole('button', { name: 'More' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 1…' }));
-      const del = await screen.findByRole('dialog');
+      const del = await screen.findByRole('alertdialog');
       expect(within(del).getByRole('button', { name: /Delete/ })).toBeInTheDocument();
       expect(H.rpc).not.toHaveBeenCalled();
     });
@@ -196,7 +196,7 @@ describe('Invoices list redesign', () => {
     await renderList();
     tick('CS-DRAFT');
     fireEvent.click(within(bar()).getByRole('button', { name: 'Post 1 invoice…' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Post 1 invoice' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Post 1 invoice' }));
     await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('post_invoice', expect.anything()));
     fireEvent.click(within(bar()).getByRole('button', { name: 'More' }));
     expect(await screen.findByRole('menuitem', { name: 'Delete 1…' })).toHaveAttribute('data-disabled', 'true');
@@ -221,7 +221,7 @@ describe('Invoices list redesign', () => {
       await renderList();
       tick('CS-DRAFT', 'CS-UNPOSTED');
       fireEvent.click(within(bar()).getByRole('button', { name: 'Post 2 invoices…' }));
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByText('Post 2 invoices?')).toBeInTheDocument();
       expect(within(dialog).getByText('Posting locks them into AR.')).toBeInTheDocument();
       expect(within(dialog).queryByText(/selected invoice\(s\)\?/)).not.toBeInTheDocument();
@@ -240,7 +240,7 @@ describe('Invoices list redesign', () => {
       await renderList();
       tick('CS-SPLIT-1');
       fireEvent.click(within(bar()).getByRole('button', { name: 'Post 3 invoices…' }));
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByText('Post 3 invoices?')).toBeInTheDocument();
       expect(within(dialog).getByRole('button', { name: 'Post 3 invoices' })).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -251,7 +251,7 @@ describe('Invoices list redesign', () => {
       await renderList();
       tick('CS-SPLIT-1', 'CS-SPLIT-2');
       fireEvent.click(within(bar()).getByRole('button', { name: 'Post 2 invoices…' }));
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByText('Post 2 invoices?')).toBeInTheDocument();
       expect(within(dialog).getByText(
         'These include a split sale, so every invoice in that split posts together, even ones your filters hide. If one changed since you opened this list, none of its split posts and you will be told. The other invoices still post.',

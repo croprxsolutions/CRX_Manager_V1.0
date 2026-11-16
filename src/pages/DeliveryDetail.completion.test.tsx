@@ -418,7 +418,7 @@ describe('Invoices on this sale card', () => {
     await renderPage();
     await screen.findByText(emptyText);
     fireEvent.click(screen.getByRole('button', { name: 'Create invoice…' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Create an invoice for this delivery?' });
+    const dialog = await screen.findByRole('alertdialog', { name: 'Create an invoice for this delivery?' });
     expect(within(dialog).getByText('This makes a draft invoice for completed delivery DEL-1.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
   });

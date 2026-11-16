@@ -186,14 +186,14 @@ CREATE FUNCTION public._invoice_sales_tax_cents_20270109(p_invoice_id uuid)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  -- A return credit rounds on the running total of the sale's credits for that customer (earlier credits in the
-  -- reports' statuses, then this one), so a full return refunds exactly the tax billed however many credits it took.
+  -- A return credit rounds on the running total of the sale's credits for that customer (credits posted before it,
+  -- then this one), so a full return refunds exactly the tax billed however many credits it took.
   -- ponytail: each credit re-reads the earlier ones, and each of those steps through its lines (roughly cubic in
   -- one sale's credits for one customer; a handful in practice). A window over the period's credits if a sale
   -- ever carries hundreds.
   -- The sale a credit belongs to: its own order, else the order of the invoice its first credited line came from.
   WITH credits AS (
-    SELECT x.id, x.customer_id, x.created_at, x.status, x.deleted_at,
+    SELECT x.id, x.customer_id, COALESCE(x.posted_at, x.created_at) AS booked_at, x.status, x.deleted_at,
            COALESCE(x.order_id, (SELECT si.order_id
                                    FROM public.invoice_items ci
                                    JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
@@ -204,7 +204,7 @@ AS $function$
      WHERE x.invoice_type = 'credit_memo'
        AND x.customer_id = (SELECT i.customer_id FROM public.invoices i WHERE i.id = p_invoice_id)
   ), me AS (
-    SELECT c.id, c.sale_id, c.customer_id, c.created_at,
+    SELECT c.id, c.sale_id, c.customer_id, c.booked_at,
            public._credit_sales_tax_unrounded_20270109(c.id) AS unrounded
       FROM credits c WHERE c.id = p_invoice_id
   ), before AS (
@@ -213,7 +213,8 @@ AS $function$
      WHERE me.unrounded <> 0 AND me.sale_id IS NOT NULL
        AND x.id <> me.id AND x.sale_id = me.sale_id
        AND x.deleted_at IS NULL AND x.status IN ('posted', 'overdue', 'paid')
-       AND (x.created_at, x.id) < (me.created_at, me.id)
+       -- in posting order, so a credit posted later never changes an earlier month's figure
+       AND (x.booked_at, x.id) < (me.booked_at, me.id)
   )
   -- (a 'sales_tax' line exists only on a chemical sale: guard_sales_tax_line_scope_20261231 refuses it elsewhere)
   SELECT COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t

@@ -404,7 +404,15 @@ BEGIN
         END LOOP;
 
         IF v_chem_qty_a > 0 THEN
-          v_qa_unit_cost := COALESCE((v_chem->>'cost_cents')::bigint, 0);
+          -- KI-156 (Mason, 2026-11-16): a grower-share chemical's cost is ALWAYS the server cost, even for an admin:
+          -- the product's current cost per its sold unit, and 0 for a line with no product. A typed cost_cents is
+          -- ignored here (billed lines below still take an admin's cost).
+          v_qa_unit_cost := 0;
+          IF (v_chem->>'product_id') IS NOT NULL THEN
+            SELECT COALESCE(round(p.current_cost * 100)::bigint, 0) INTO v_qa_unit_cost
+              FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
+            v_qa_unit_cost := COALESCE(v_qa_unit_cost, 0);
+          END IF;
           -- KI-156: cost_cents is per the product's SOLD unit (inventory_unit); on a line with no
           -- product it is per the unit the line is entered in (unit_size, which the screen keeps
           -- equal to the rate unit). Convert the applied amount (rate unit) into that unit before
@@ -1027,7 +1035,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '78817533818590b7cc5de1cb9fec45e6', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '23cb2e59e2ce55893a723f5f53eb5338', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

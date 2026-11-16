@@ -1,3 +1,5 @@
+import { formatCents } from '../../supabase/functions/_shared/pdf/theme.ts';
+
 /**
  * money.ts — canonical money formatting for CRX Manager.
  *
@@ -28,6 +30,9 @@ const wholeDollarFormatter = new Intl.NumberFormat('en-US');
 
 /** Format an integer number of CENTS as USD. Divides by 100. Shared with send-email's PDFs (KI-98). */
 export { formatCents } from '../../supabase/functions/_shared/pdf/theme.ts';
+
+/** formatCents with a true minus sign for negatives ("−$20.00"), for on-screen money lines. */
+export const formatCentsMinus = (cents: number): string => formatCents(cents).replace('-', '\u2212');
 
 /** Format exact bigint cents without converting them through floating point. */
 export function formatExactCents(cents: bigint): string {

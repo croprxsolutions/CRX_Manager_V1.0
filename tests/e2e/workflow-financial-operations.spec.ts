@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 
 /**
  * Financial Operations E2E Gate Test
@@ -600,8 +601,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
       await waitForPage(page, 3000);
     }
 
-    // Now void it — button should be enabled on a posted invoice
-    const voidBtn = page.locator('button:has-text("Void")');
+    // Now void it — Void invoice… sits under More actions on a posted invoice
+    const voidBtn = await moreAction(page, /^Void invoice/);
     await expect(voidBtn).toBeVisible({ timeout: 10000 });
     await voidBtn.click();
     await waitForPage(page, 1000);
@@ -615,8 +616,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
     await expect(reasonInput).toBeVisible({ timeout: 3000 });
     await reasonInput.fill('E2E test — void verification');
 
-    // Click "Void Invoice" in modal
-    const confirmVoidBtn = voidModal.locator('button:has-text("Void Invoice")');
+    // Click "Void invoice" in modal
+    const confirmVoidBtn = voidModal.locator('button:has-text("Void invoice")');
     await expect(confirmVoidBtn).toBeVisible({ timeout: 5000 });
     await confirmVoidBtn.click();
     await waitForPage(page, 3000);

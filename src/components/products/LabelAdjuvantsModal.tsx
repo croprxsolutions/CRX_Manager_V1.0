@@ -20,13 +20,13 @@ const blank = (): Draft => ({ kind: 'required', ticked: [], other: '', preferred
 const toDraft = (entry: LabelAdjuvant): Draft => ({
   kind: entry.kind,
   ticked: entry.adjuvant_types.filter((t) => ADJUVANT_TYPES.includes(t)),
-  other: entry.adjuvant_types.filter((t) => !ADJUVANT_TYPES.includes(t)).join(', '),
+  other: entry.adjuvant_types.filter((t) => !ADJUVANT_TYPES.includes(t)).join('\n'),
   preferred: entry.preferred ?? '',
   when: entry.when ?? '',
   note: entry.note ?? '',
 });
-// shortcut: "Other" types are comma-separated, so a typed type cannot contain a comma; fine for label wording.
-const typesOf = (d: Draft) => [...d.ticked, ...d.other.split(',').map((t) => t.trim()).filter(Boolean)];
+// "Other" types are one per line (a type may contain commas; this editor never saves one with a line break).
+const typesOf = (d: Draft) => [...d.ticked, ...d.other.split('\n').map((t) => t.trim()).filter(Boolean)];
 const toEntry = (d: Draft): LabelAdjuvant => {
   const types = typesOf(d);
   return {
@@ -119,6 +119,8 @@ export default function LabelAdjuvantsModal({ epaRegistration, row, profileId, o
       if (!open.current) return;
       const code = codeOf(err);
       if (code === 'EPA_REGISTRATION_STALE') {
+        // The page re-reads too, so a reopened editor starts from the current version even if the read below fails.
+        onSaved();
         try {
           const fresh = (await getRegistrations([epaRegistration])).get(epaRegistration);
           if (!open.current) return;
@@ -187,8 +189,8 @@ export default function LabelAdjuvantsModal({ epaRegistration, row, profileId, o
                     ))}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <input aria-label={`Statement ${i + 1} other types`} className={fieldClass} value={d.other} maxLength={400}
-                      placeholder="Other (type it; separate several with commas)" onChange={(e) => update(i, { other: e.target.value })} />
+                    <textarea aria-label={`Statement ${i + 1} other types`} className={fieldClass} value={d.other} rows={1} maxLength={850}
+                      placeholder="Other (type it; one per line)" onChange={(e) => update(i, { other: e.target.value })} />
                     {d.kind !== 'do_not_use' && types.length > 1 && (
                       <select aria-label={`Statement ${i + 1} preferred`} className={fieldClass}
                         value={types.includes(d.preferred) ? d.preferred : ''} onChange={(e) => update(i, { preferred: e.target.value })}>

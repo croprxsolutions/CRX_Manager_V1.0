@@ -140,16 +140,30 @@ describe('LabelAdjuvantsModal', () => {
     expect(H.rpc.mock.calls[1][1].p_idempotency_key).toBe(H.rpc.mock.calls[0][1].p_idempotency_key);
   });
 
+  it('a typed type with a comma survives a reopen and save unchanged', async () => {
+    H.rpc.mockResolvedValue(receipt);
+    await openEditor(row({ label_adjuvants: [{ kind: 'required', adjuvant_types: ['COC', 'oil, methylated'] }] }));
+    fireEvent.change(screen.getByLabelText('Statement 1 note'), { target: { value: 'n' } });
+    fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'r' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('set_registration_adjuvants', expect.objectContaining({
+      p_adjuvants: [{ kind: 'required', adjuvant_types: ['COC', 'oil, methylated'], note: 'n' }],
+    })));
+  });
+
   it('stale: keeps the draft, shows their list, and saves again on the new version with a new key', async () => {
     H.rpc.mockResolvedValueOnce({ data: null, error: { message: 'EPA_REGISTRATION_STALE: EPA registration 264-849 changed since you opened it; reload and try again' } })
       .mockResolvedValueOnce(receipt);
     H.getRegistrations.mockResolvedValue(new Map([['264-849', row({ registration_version: 5, label_adjuvants: [{ kind: 'recommended', adjuvant_types: ['NIS'] }] })]]));
-    await openEditor(row());
+    const onSaved = vi.fn();
+    await openEditor(row(), onSaved);
     fireEvent.click(screen.getByRole('button', { name: 'Add a statement' }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Statement 1 types' })).getByLabelText('COC'));
     fireEvent.change(screen.getByLabelText('Why'), { target: { value: 'r' } });
     fireEvent.click(saveButton());
     expect(await screen.findByText('Just saved by someone else')).toBeTruthy();
+    // The page re-reads, so a reopened editor would start from the new version.
+    expect(onSaved).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Recommended:', { exact: false })).toBeTruthy();
     expect(within(screen.getByRole('group', { name: 'Statement 1 types' })).getByLabelText('COC')).toBeChecked();
     fireEvent.click(saveButton());

@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import PriceInput from './PriceInput';
-import { NEGATIVE_PRICE_MESSAGE, NOT_A_PRICE_MESSAGE, priceProblem } from '../../lib/priceProblem';
-import { MONEY_PRECISION_MESSAGE } from '../../lib/parseCents';
+import { NEGATIVE_PRICE_MESSAGE, NOT_A_PRICE_MESSAGE, TOO_MANY_DECIMALS_MESSAGE as MONEY_PRECISION_MESSAGE, priceProblem } from '../../lib/priceProblem';
 
 // Types like a keyboard: each key is added to whatever the box shows now.
 const typeKeys = (box: HTMLElement, keys: string) => {
@@ -15,7 +14,7 @@ function Harness({ start, onProblem = vi.fn() }: { start: number; onProblem?: (i
   const [cents, setCents] = useState(start);
   return (
     <>
-      <PriceInput cents={cents} label="Unit price for Herbicide" onCents={setCents} onProblem={onProblem} />
+      <PriceInput className="border border-gray-200 focus:ring-crx-green/20 focus:border-crx-green" cents={cents} label="Unit price for Herbicide" onCents={setCents} onProblem={onProblem} />
       <output aria-label="stored">{cents}</output>
     </>
   );
@@ -44,6 +43,7 @@ describe('PriceInput', () => {
     expect(onProblem).toHaveBeenLastCalledWith(expect.any(String), { label: 'Unit price for Herbicide', message: MONEY_PRECISION_MESSAGE });
     fireEvent.change(box, { target: { value: '33.35' } });
     expect(screen.queryByText(MONEY_PRECISION_MESSAGE)).not.toBeInTheDocument();
+    expect(box).not.toHaveAttribute('aria-invalid');
     expect(onProblem).toHaveBeenLastCalledWith(expect.any(String), null);
   });
 
@@ -66,6 +66,21 @@ describe('PriceInput', () => {
     expect(screen.getByLabelText('stored')).toHaveTextContent('1000');
   });
 
+  it('keeps the helper line in place with or without a message, so nothing below moves', () => {
+    render(<Harness start={3333} />);
+    const box = screen.getByLabelText('Unit price for Herbicide');
+    const line = box.nextElementSibling as HTMLElement;
+    expect(line).toHaveClass('min-h-5');
+    expect(line).toBeEmptyDOMElement();
+    expect(box).toHaveClass('border-gray-200');
+    typeKeys(box, '5');
+    expect(box.nextElementSibling).toBe(line);
+    expect(line).toHaveTextContent(MONEY_PRECISION_MESSAGE);
+    expect(box).toHaveAttribute('aria-describedby', line.id);
+    expect(box).toHaveClass('border-red-500');
+    expect(box).not.toHaveClass('border-gray-200');
+  });
+
   it('tells the page the problem is gone when the box goes away', () => {
     const onProblem = vi.fn();
     const { unmount } = render(<Harness start={1000} onProblem={onProblem} />);
@@ -74,7 +89,7 @@ describe('PriceInput', () => {
     expect(onProblem).toHaveBeenLastCalledWith(expect.any(String), null);
   });
 
-  it.each([['', null], ['25.50', null], ['$25', null], ['.5', null], ['1.005', MONEY_PRECISION_MESSAGE], ['-1', NEGATIVE_PRICE_MESSAGE], ['1.2.3', NOT_A_PRICE_MESSAGE], ['.', NOT_A_PRICE_MESSAGE]])('priceProblem(%j)', (text, expected) => {
+  it.each([['', null], ['25.50', null], ['$25', null], ['.5', null], ['1.005', MONEY_PRECISION_MESSAGE], ['12.345', MONEY_PRECISION_MESSAGE], ['1a', NOT_A_PRICE_MESSAGE], ['-1', NEGATIVE_PRICE_MESSAGE], ['1.2.3', NOT_A_PRICE_MESSAGE], ['.', NOT_A_PRICE_MESSAGE]])('priceProblem(%j)', (text, expected) => {
     expect(priceProblem(text)).toBe(expected);
   });
 });

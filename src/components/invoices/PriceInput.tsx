@@ -6,6 +6,7 @@ import { priceProblem } from '../../lib/priceProblem';
  * A price box you can type into freely (the repo's draft-text pattern, as on purchase orders). The typed text stays in
  * the box; a usable amount goes to the line at once; anything else shows a message under the box and the line keeps
  * its last good amount, so nothing wrong is ever stored. Leaving the box tidies a usable amount to two decimals.
+ * The box always keeps one fixed helper line under it (DESIGN.md, Inputs), so a message never moves the page.
  * `onProblem` tells the page which boxes hold a bad price, so Save can refuse until they are fixed.
  */
 export default function PriceInput({ cents, label, onCents, onProblem, className = '', testProps }: {
@@ -26,7 +27,7 @@ export default function PriceInput({ cents, label, onCents, onProblem, className
   useEffect(() => () => onProblem(id, null), [id, onProblem]);
 
   return (
-    <span className="flex min-w-0 flex-col gap-1">
+    <span className="flex min-w-0 flex-col gap-1 xl:w-fit">
       <input
         {...testProps}
         type="text"
@@ -41,9 +42,10 @@ export default function PriceInput({ cents, label, onCents, onProblem, className
           if (!priceProblem(next)) onCents(parseDollarsToCentsSigned(next.trim()) ?? 0);
         }}
         onBlur={() => { if (!problem) setText(null); }}
-        className={`${className} text-right tabular-nums${problem ? ' border-red-600 focus:border-red-600 focus:ring-red-600/20' : ''}`}
+        // Swap the border colour instead of stacking a second one: CSS order, not class order, would pick the winner.
+        className={`${problem ? className.replace('border-gray-200', 'border-red-500').replace('focus:ring-crx-green/20 focus:border-crx-green', 'focus:ring-red-500/20 focus:border-red-500') : className} text-right tabular-nums`}
       />
-      {problem && <span id={`${id}-problem`} className="text-xs text-red-700">{problem}</span>}
+      <span id={`${id}-problem`} aria-live="polite" className="min-h-5 whitespace-nowrap text-right text-xs font-medium text-red-600">{problem}</span>
     </span>
   );
 }

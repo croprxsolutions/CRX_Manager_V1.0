@@ -2692,7 +2692,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   {chargeRows.map(({ item, idx }) => (
                     <li key={idx} className="py-3">
                       {rowEditable(item) ? (
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_8rem_auto] sm:items-center">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_8rem_auto] sm:items-start">
                           <select
                             aria-label="Charge type"
                             value={item.charge_type ?? ''}

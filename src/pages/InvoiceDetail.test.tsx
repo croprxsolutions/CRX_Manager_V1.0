@@ -1821,7 +1821,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     fireEvent.change(amount, { target: { value: '-100.00' } });
 
     // The typed text stays with a message under the box; nothing is stored, so no $100.00 charge appears.
-    expect(within(row).getByText('Enter a price of $0.00 or more. Use a credit memo to give money back.')).toBeInTheDocument();
+    expect(within(row).getByText("Can't be negative")).toBeInTheDocument();
     expect(amount).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText('$100.00')).toBeNull();
   });

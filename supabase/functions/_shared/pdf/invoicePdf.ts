@@ -820,6 +820,8 @@ export function centsPerAcre(cents: number, acres: number): number | null {
   if (den === BigInt(0)) return null;
   const num = BigInt(Math.abs(cents)) * scale;
   const q = (num * BigInt(2) + den) / (den * BigInt(2));
+  // Past 2^53 − 1 cents a Number lands on a neighbouring cent, so print no price per acre rather than a wrong one.
+  if (q > BigInt(Number.MAX_SAFE_INTEGER)) return null;
   return Math.sign(cents) * Number(q);
 }
 
@@ -1020,7 +1022,9 @@ function drawBillTo(p: Page): void {
 }
 
 /** Wrapped to the width and kept to three lines (the last ends "..."), so the bill-to stays inside its window. */
-function cappedLines(doc: JsPDFWithAutoTable, text: string, width: number, max = 3): string[] {
+// ponytail: 6 wrapped lines per bill-to field (a real street or name wraps to 2 at most) keeps the block on page 1;
+// only an absurd value is cut, and it ends in "..." so the cut is visible.
+function cappedLines(doc: JsPDFWithAutoTable, text: string, width: number, max = 6): string[] {
   const lines = doc.splitTextToSize(text, width) as string[];
   if (lines.length <= max) return lines;
   let last = lines[max - 1];

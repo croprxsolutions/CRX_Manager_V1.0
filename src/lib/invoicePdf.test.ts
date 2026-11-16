@@ -1319,6 +1319,10 @@ describe('review #1873, Sol round', () => {
     expect(centsPerAcre(cents, acres)).toBe(expected);
   });
 
+  it('prints no price per acre rather than a neighbouring cent past the safe-integer range', () => {
+    expect(centsPerAcre(9007199254740991, 0.8)).toBeNull();
+  });
+
   it('Old Print prints price per acre from whole cents too', async () => {
     await generateInvoicePdf(makeInvoiceData({
       items: [makeItem({ extended_cents: 35 })], total_amount_cents: 35, balance_cents: 35, total_acres: 10,

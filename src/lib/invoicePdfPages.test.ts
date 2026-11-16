@@ -106,12 +106,21 @@ describe('invoice PDF very long values (real jsPDF)', () => {
     options: { show_shares: false, show_price_per_acre: false, show_epa_registration: true },
   };
 
-  it('caps the bill-to street at three lines, the last ending "..."', () => {
+  it('caps an absurd bill-to street at six lines, the last ending "..."', () => {
     const log: Drawn[] = [];
     drawInvoicePdf({ jsPDF: recordingPdf(log), autoTable }, base);
     const street = log.filter((d) => d.x === 69 && d.text.includes('Lot'));
-    expect(street).toHaveLength(3);
-    expect(street[2].text.endsWith('...')).toBe(true);
+    expect(street).toHaveLength(6);
+    expect(street[5].text.endsWith('...')).toBe(true);
+  });
+
+  it('prints a four-line street in full', () => {
+    const log: Drawn[] = [];
+    const street = 'Lot 12, Suite 4B, North Gravel Road past the test elevator and the grain bins, County Road 18, Rural Route 2';
+    drawInvoicePdf({ jsPDF: recordingPdf(log), autoTable }, { ...base, customer_address: street });
+    const lines = log.filter((d) => d.x === 69 && /Lot 12|Suite|Road|Route|elevator|bins/.test(d.text));
+    expect(lines.map((l) => l.text).join(' ').replace(/\s+/g, ' ')).toContain('Rural Route 2');
+    expect(lines.some((l) => l.text.endsWith('...'))).toBe(false);
   });
 
   it('moves the rest of a long fields line to the next page instead of past the footer', () => {

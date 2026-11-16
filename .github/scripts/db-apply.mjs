@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 
 const LIVE_REF = 'rhyzpcqhnizqbxphqdkr';
 const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
+const STAGING_REF = 'fsnjredpmakbmhwowjjt';
 // <14-digit stamp>_<lower_snake>. Existing files only need this shape: three applied ones carry
 // impossible times (20261022086000 = 08:60). New files must also have a real date and time (below).
 const NAME = /^(\d{14})_[a-z0-9_]+$/;
@@ -342,8 +343,11 @@ export function applyUserProblem(dbUrl) {
   return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
 }
 
+// Renaming ledger rows is for staging alone (live never renames; Sol, #1837).
+export const renameTargetProblem = (renameRestamps, expectedRef) => (renameRestamps && expectedRef !== STAGING_REF ? 'RENAME_RESTAMPS is for the staging database only' : null);
+
 function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRestamps = false }) {
-  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
+  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl) ?? renameTargetProblem(renameRestamps, expectedRef);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));

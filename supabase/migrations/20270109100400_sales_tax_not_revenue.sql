@@ -8,15 +8,11 @@
 -- Sales tax is collected for the state; it is not revenue.
 --
 -- WHAT:
---   1. _invoice_sales_tax_cents_20270109(invoice): the sales tax inside an invoice's total.
---      - A chemical sale: its 'sales_tax' line.
---      - A return credit memo: its lines carry the tax they refund inside their amounts (no tax line of their
---        own). Each credited order line is stepped through in time order, as return pricing works: billed lots
---        add cents and tax, earlier credits take theirs out at the pool's rate, and this credit takes its cents at
---        what remains (_credit_sales_tax_unrounded_20270109). Credits round on the running total of the sale's
---        credits for that customer, so a full return refunds exactly the tax billed, in one credit or many,
---        whatever mix of taxed, untaxed or re-billed lots it covers.
---      - Anything else: 0.
+--   1. _invoice_sales_tax_cents_20270109(invoice): the sales tax inside an invoice's total, its 'sales_tax' line
+--      (only a chemical sale has one). Return credit memos carry the tax they refund inside their line amounts,
+--      not on a line of their own, so they are NOT adjusted here: a taxed return still reduces revenue by the tax
+--      it refunds. Follow-up before sales tax goes live (it ships with the commission change): record each
+--      credit's tax when the return is made, and leave it out here too.
 --   2. get_monthly_summary (Month-End Close): invoices.total_amount_cents is now revenue without sales tax,
 --      so "Recognized Invoices" and "Gross Margin" (total - cost) leave tax out. Same keys, no screen code change;
 --      that figure no longer equals the invoice list's sum on taxed months (the difference is the tax).
@@ -31,7 +27,7 @@
 -- Untaxed invoices give the same numbers as before (the helper returns 0).
 --
 -- ROLLBACK (its own reviewed migration): restore get_monthly_summary and _get_bottom_line_pnl_cost_impl_20261019
--- to the bodies pinned below, drop _invoice_sales_tax_cents_20270109 and _credit_sales_tax_unrounded_20270109, and re-create the two setters without the
+-- to the bodies pinned below, drop _invoice_sales_tax_cents_20270109, and re-create the two setters without the
 -- default (CREATE OR REPLACE cannot drop a default: DROP and re-create with the same body, owner and grants).
 --
 -- ORDERING: after 20270109100300_sales_tax_rep_no_salesman (needs the 'sales_tax' line and both setters).
@@ -49,8 +45,7 @@ BEGIN
      OR (SELECT transaction_id FROM pg_temp.sales_tax_not_revenue_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'SALES_TAX_NOT_REVENUE_NOT_IN_TRANSACTION: apply this file as one transaction';
   END IF;
-  IF to_regprocedure('public._invoice_sales_tax_cents_20270109(uuid)') IS NOT NULL
-     OR to_regprocedure('public._credit_sales_tax_unrounded_20270109(uuid)') IS NOT NULL THEN
+  IF to_regprocedure('public._invoice_sales_tax_cents_20270109(uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'SALES_TAX_NOT_REVENUE_PREFLIGHT: already applied';
   END IF;
   IF to_regclass('public.invoice_sales_tax_rates') IS NULL THEN
@@ -89,138 +84,16 @@ END
 $preflight$;
 
 -- 1. The sales tax inside an invoice's total ------------------------------------------------------------------
--- The tax inside a return credit's lines, before rounding (0 for anything else). Internal.
--- Returns price an order line from what that customer was billed for it, less what earlier returns took
--- (_return_customer_line_share). So each order line is stepped through in time order: a billed lot adds its cents
--- and its tax (WITH its tax share: _standing_discount_net_cents_20261231, so both sides include tax; the lot's tax is
--- at its own invoice's tax / total, and every charge is in that tax base: _sales_tax_expected_20261231), and a credit
--- takes its cents at the remaining pool's tax / cents and removes that tax from the pool. Only lots posted before a
--- credit count for it, so a later invoice never changes an earlier credit (or an earlier month's P&L).
--- Example: 10625 (625 tax) billed and fully credited, then 10888 (888 tax) billed and credited: 625 + 888 = 1513.
-CREATE FUNCTION public._credit_sales_tax_unrounded_20270109(p_invoice_id uuid)
- RETURNS numeric
- LANGUAGE plpgsql
- STABLE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_cm record;
-  v_key record;
-  v_ev record;
-  v_rc numeric;
-  v_rt numeric;
-  v_total numeric := 0;
-BEGIN
-  SELECT i.id, i.customer_id, i.created_at, i.invoice_type INTO v_cm FROM public.invoices i WHERE i.id = p_invoice_id;
-  IF v_cm.invoice_type IS DISTINCT FROM 'credit_memo' THEN
-    RETURN 0;
-  END IF;
-  FOR v_key IN
-    SELECT src.order_item_id, min(src.invoice_id::text)::uuid AS any_source, sum(ii.extended_cents)::numeric AS cents
-      FROM public.invoice_items ii
-      JOIN public.invoice_items src ON src.id = ii.return_credit_source_item_id
-     WHERE ii.invoice_id = p_invoice_id
-     -- a credited line with no order line (a charge) is keyed by its own source invoice
-     GROUP BY src.order_item_id, CASE WHEN src.order_item_id IS NULL THEN src.invoice_id END
-  LOOP
-    IF v_key.order_item_id IS NULL THEN
-      v_total := v_total + v_key.cents * COALESCE(
-        COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
-                   WHERE t.invoice_id = v_key.any_source AND t.charge_type = 'sales_tax'), 0)::numeric
-        / NULLIF((SELECT i.total_amount_cents FROM public.invoices i WHERE i.id = v_key.any_source), 0), 0);
-      CONTINUE;
-    END IF;
-    v_rc := 0;
-    v_rt := 0;
-    FOR v_ev IN
-      SELECT 0 AS kind, COALESCE(i.posted_at, i.created_at) AS ts, b.id,
-             public._standing_discount_net_cents_20261231(b.id)::numeric AS cents,
-             public._standing_discount_net_cents_20261231(b.id)::numeric
-               * COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
-                            WHERE t.invoice_id = i.id AND t.charge_type = 'sales_tax'), 0)
-               / NULLIF(i.total_amount_cents, 0) AS tax
-        FROM public.invoice_items b
-        JOIN public.invoices i ON i.id = b.invoice_id
-       WHERE b.order_item_id = v_key.order_item_id AND b.quantity > 0 AND b.product_id IS NOT NULL
-         AND i.customer_id = v_cm.customer_id
-         AND i.invoice_type <> 'credit_memo'
-         AND i.deleted_at IS NULL
-         AND i.status IN ('posted', 'overdue', 'paid')
-      UNION ALL
-      SELECT 1, x.created_at, x.id, sum(ci.extended_cents)::numeric, NULL
-        FROM public.invoices x
-        JOIN public.invoice_items ci ON ci.invoice_id = x.id
-        JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
-       WHERE s.order_item_id = v_key.order_item_id
-         AND x.customer_id = v_cm.customer_id
-         AND x.invoice_type = 'credit_memo'
-         AND x.deleted_at IS NULL
-         AND (x.id = p_invoice_id OR x.status IN ('posted', 'overdue', 'paid'))
-       GROUP BY x.id, x.created_at
-      ORDER BY 2, 1, 3
-    LOOP
-      IF v_ev.kind = 0 THEN
-        v_rc := v_rc + v_ev.cents;
-        v_rt := v_rt + COALESCE(v_ev.tax, 0);
-      ELSIF v_ev.id = p_invoice_id THEN
-        v_total := v_total + v_key.cents * CASE WHEN v_rc <> 0 THEN v_rt / v_rc ELSE 0 END;
-        EXIT;
-      ELSE
-        -- an earlier credit (its cents are negative) takes its share of the pool's tax out with it
-        IF v_rc <> 0 THEN
-          v_rt := v_rt + v_ev.cents * v_rt / v_rc;
-        END IF;
-        v_rc := v_rc + v_ev.cents;
-      END IF;
-    END LOOP;
-  END LOOP;
-  RETURN v_total;
-END
-$function$;
-REVOKE ALL ON FUNCTION public._credit_sales_tax_unrounded_20270109(uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._credit_sales_tax_unrounded_20270109(uuid) TO service_role;
-
 CREATE FUNCTION public._invoice_sales_tax_cents_20270109(p_invoice_id uuid)
  RETURNS bigint
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  -- A return credit rounds on the running total of the sale's credits for that customer (credits posted before it,
-  -- then this one), so a full return refunds exactly the tax billed however many credits it took.
-  -- ponytail: each credit re-reads the earlier ones, and each of those steps through its lines (roughly cubic in
-  -- one sale's credits for one customer; a handful in practice). A window over the period's credits if a sale
-  -- ever carries hundreds.
-  -- The sale a credit belongs to: its own order, else the order of the invoice its first credited line came from.
-  WITH credits AS (
-    SELECT x.id, x.customer_id, COALESCE(x.posted_at, x.created_at) AS booked_at, x.status, x.deleted_at,
-           COALESCE(x.order_id, (SELECT si.order_id
-                                   FROM public.invoice_items ci
-                                   JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
-                                   JOIN public.invoices si ON si.id = s.invoice_id
-                                  WHERE ci.invoice_id = x.id
-                                  ORDER BY ci.id LIMIT 1)) AS sale_id
-      FROM public.invoices x
-     WHERE x.invoice_type = 'credit_memo'
-       AND x.customer_id = (SELECT i.customer_id FROM public.invoices i WHERE i.id = p_invoice_id)
-  ), me AS (
-    SELECT c.id, c.sale_id, c.customer_id, c.booked_at,
-           public._credit_sales_tax_unrounded_20270109(c.id) AS unrounded
-      FROM credits c WHERE c.id = p_invoice_id
-  ), before AS (
-    SELECT COALESCE(sum(public._credit_sales_tax_unrounded_20270109(x.id)), 0) AS unrounded
-      FROM credits x, me
-     WHERE me.unrounded <> 0 AND me.sale_id IS NOT NULL
-       AND x.id <> me.id AND x.sale_id = me.sale_id
-       AND x.deleted_at IS NULL AND x.status IN ('posted', 'overdue', 'paid')
-       -- in posting order, so a credit posted later never changes an earlier month's figure
-       AND (x.booked_at, x.id) < (me.booked_at, me.id)
-  )
   -- (a 'sales_tax' line exists only on a chemical sale: guard_sales_tax_line_scope_20261231 refuses it elsewhere)
-  SELECT COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
-                    WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax'), 0)::bigint
-       + COALESCE((SELECT (round(b.unrounded + me.unrounded) - round(b.unrounded))::bigint
-                     FROM me, before b WHERE me.unrounded <> 0), 0);
+  SELECT COALESCE(sum(t.extended_cents), 0)::bigint
+    FROM public.invoice_items t
+   WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax';
 $function$;
 REVOKE ALL ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) TO service_role;
@@ -500,8 +373,6 @@ BEGIN
        IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
      OR (SELECT proconfig FROM pg_proc WHERE oid = 'public._get_bottom_line_pnl_cost_impl_20261019(date,date)'::regprocedure)
        IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-     OR (SELECT proacl FROM pg_proc WHERE oid = 'public._credit_sales_tax_unrounded_20270109(uuid)'::regprocedure)
-       IS DISTINCT FROM ARRAY['postgres=X/postgres', 'service_role=X/postgres']::aclitem[]
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._invoice_sales_tax_cents_20270109(uuid)'::regprocedure)
        IS DISTINCT FROM ARRAY['postgres=X/postgres', 'service_role=X/postgres']::aclitem[] THEN
     RAISE EXCEPTION 'SALES_TAX_NOT_REVENUE_POSTFLIGHT: grants drifted';

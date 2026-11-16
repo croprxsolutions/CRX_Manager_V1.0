@@ -25,8 +25,9 @@ export function primaryAction(s: {
   }
 }
 
-export function lineNeedsRemoveConfirm(item: { product_id: string | null; units_needed: number | null }): boolean {
-  return !!item.product_id || (item.units_needed ?? 0) > 0;
+/** `edited`: any other user-editable field (notes, rate, acres, override...) holds a value. */
+export function lineNeedsRemoveConfirm(item: { product_id: string | null; units_needed: number | null; edited?: boolean }): boolean {
+  return !!item.product_id || (item.units_needed ?? 0) > 0 || !!item.edited;
 }
 
 /** Toast copy after "Use today's prices". Totals are the page's own rounded totals; only formatted here. */

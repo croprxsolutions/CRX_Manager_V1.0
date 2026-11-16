@@ -37,6 +37,10 @@ describe('lineNeedsRemoveConfirm', () => {
     expect(lineNeedsRemoveConfirm({ product_id: 'p1', units_needed: null })).toBe(true);
     expect(lineNeedsRemoveConfirm({ product_id: null, units_needed: 5 })).toBe(true);
   });
+  it('is true for a productless line with other edits', () => {
+    expect(lineNeedsRemoveConfirm({ product_id: null, units_needed: null, edited: true })).toBe(true);
+    expect(lineNeedsRemoveConfirm({ product_id: null, units_needed: null, edited: false })).toBe(false);
+  });
 });
 
 describe('todaysPricesMessage', () => {

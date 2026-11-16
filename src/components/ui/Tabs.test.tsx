@@ -137,5 +137,20 @@ describe('Tabs', () => {
       expect(windowScroll).not.toHaveBeenCalled();
       windowScroll.mockRestore();
     });
+
+    it('brings the active tab back into view when the bar shrinks without the tab changing', () => {
+      let width = 700;
+      Object.defineProperty(HTMLElement.prototype, 'offsetLeft', { configurable: true, get() { return Array.from((this as HTMLElement).parentElement?.children ?? []).indexOf(this as HTMLElement) * 200; } });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return 200; } });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get() { return width; } });
+      const barScroll = vi.fn();
+      Element.prototype.scrollTo = barScroll;
+
+      render(<Tabs tabs={tabs} activeKey="orders" onChange={() => {}} />);
+      expect(barScroll).not.toHaveBeenCalled();
+      width = 300;
+      fireEvent(window, new Event('resize'));
+      expect(barScroll).toHaveBeenCalledWith({ left: 316, behavior: 'smooth' });
+    });
   });
 });

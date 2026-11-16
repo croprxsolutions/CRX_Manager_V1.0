@@ -47,7 +47,7 @@ vi.mock('./companyInfoForPdf', () => ({ loadCompanyInfoForPdf: companyInfo.load 
 
 import { DEFAULT_COMPANY_INFO } from './companyInfo';
 import { generateInvoicePdf, downloadInvoicePdf, generateBatchInvoicePdf, groupReturnCreditDisplayItems, mapInvoicePdfItem } from './invoicePdf';
-import { INVOICE_PDF_ITEM_COLUMNS } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { centsPerAcre, INVOICE_PDF_ITEM_COLUMNS } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 companyInfo.load.mockResolvedValue(DEFAULT_COMPANY_INFO);
 import type { InvoicePdfData, InvoicePdfItem, InvoicePdfShare } from './invoicePdf';
@@ -1295,5 +1295,49 @@ describe("review #1873, Taha's answers", () => {
     vi.clearAllMocks();
     await generateInvoicePdf({ ...moneyFixtures.miscCharge, takes_charge_lines: true, items: [{ ...item, product_id: 'p-1' }], total_amount_cents: 12000, paid_amount_cents: 0, balance_cents: 12000 });
     expect(valueAfter('Products')).toBe('$120.00');
+  });
+});
+
+describe('review #1873, Sol round', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDoc.lastAutoTable = { finalY: 300 };
+    mockDoc.getNumberOfPages.mockReturnValue(1);
+  });
+
+  // MED 3: exact, from whole cents and the acreage as the decimal it prints as (BigInt, half away from zero).
+  it.each([
+    [1, 2.0000000001, 0],
+    [1, 2, 1], // exactly half a cent rounds away from zero
+    [-1, 2, -1],
+    [1005, 10, 101],
+    [35, 10, 4],
+    [-35, 10, -4],
+    [279000, 120, 2325],
+    [999999999999, 91.9, 10881392818], // 10,881,392,818.27...
+  ])('centsPerAcre(%d, %d) = %d', (cents, acres, expected) => {
+    expect(centsPerAcre(cents, acres)).toBe(expected);
+  });
+
+  it('Old Print prints price per acre from whole cents too', async () => {
+    await generateInvoicePdf(makeInvoiceData({
+      items: [makeItem({ extended_cents: 35 })], total_amount_cents: 35, balance_cents: 35, total_acres: 10,
+      options: { show_shares: false, show_price_per_acre: true, show_epa_registration: true, format: 'legacy' },
+    }));
+    expect(texts()).toContain('Price per acre: $0.04');
+  });
+
+  // MED 4: the finance charge is already in the balance (see the current layout), so Old Print shows it after BALANCE
+  // DUE as information, not as a row the balance would have to add.
+  it('Old Print shows a finance charge after BALANCE DUE, not between the total and it', async () => {
+    await generateInvoicePdf(makeInvoiceData({
+      options: { show_shares: true, show_price_per_acre: true, show_epa_registration: true, format: 'legacy' },
+      total_amount_cents: 1250, items: [makeItem({ extended_cents: 1250 })], finance_charge_cents: 1250, balance_cents: 1250,
+    }));
+    const all = texts();
+    expect(all).not.toContain('Finance Charges:');
+    expect(valueAfter('Finance charge (in balance):')).toBe('$12.50');
+    expect(all.indexOf('Finance charge (in balance):')).toBeGreaterThan(all.indexOf('BALANCE DUE:'));
+    expect(valueAfter('BALANCE DUE:')).toBe('$12.50');
   });
 });

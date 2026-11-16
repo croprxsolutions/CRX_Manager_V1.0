@@ -807,6 +807,22 @@ export async function loadInvoicePdfData(db: SupabaseClient, invoiceId: string):
 export const fmtNum = (n: number, decimals = 4) =>
   new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
 
+/**
+ * Price per acre in whole cents, exactly: the acreage is read as the decimal it prints as ("91.9"), the division is done
+ * in BigInt and rounded half away from zero, as the database's round(total / acres, 2) does. Null for no acreage.
+ */
+export function centsPerAcre(cents: number, acres: number): number | null {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(String(acres));
+  // ponytail: an exponent form (under 1e-6 or 1e21+ acres) is not a real acreage; it prints nothing.
+  if (!m || !Number.isSafeInteger(cents)) return null;
+  const scale = BigInt(10) ** BigInt((m[2] ?? '').length);
+  const den = BigInt(m[1] + (m[2] ?? ''));
+  if (den === BigInt(0)) return null;
+  const num = BigInt(Math.abs(cents)) * scale;
+  const q = (num * BigInt(2) + den) / (den * BigInt(2));
+  return Math.sign(cents) * Number(q);
+}
+
 export const fmtDate = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
@@ -977,7 +993,7 @@ function drawBillTo(p: Page): void {
   const top = p.y;
   drawLabel(doc, 'BILL TO', x, top);
   let y = top;
-  for (const line of doc.splitTextToSize(data.customer_name.toUpperCase(), contentWidth(p) / 2 - 27) as string[]) {
+  for (const line of cappedLines(doc, data.customer_name.toUpperCase(), contentWidth(p) / 2 - 27)) {
     y += 13;
     doc.text(line, x, y);
   }
@@ -986,7 +1002,7 @@ function drawBillTo(p: Page): void {
     ? [data.customer_city, [data.customer_state, data.customer_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
   for (const value of [data.customer_address, city, data.customer_phone]) {
     if (!value) continue;
-    for (const line of doc.splitTextToSize(value, contentWidth(p) / 2 - 27) as string[]) {
+    for (const line of cappedLines(doc, value, contentWidth(p) / 2 - 27)) {
       y += 13;
       doc.text(line, x, y);
     }
@@ -1001,6 +1017,15 @@ function drawBillTo(p: Page): void {
     y = Math.max(y, top + 13);
   }
   p.y = y + 8;
+}
+
+/** Wrapped to the width and kept to three lines (the last ends "..."), so the bill-to stays inside its window. */
+function cappedLines(doc: JsPDFWithAutoTable, text: string, width: number, max = 3): string[] {
+  const lines = doc.splitTextToSize(text, width) as string[];
+  if (lines.length <= max) return lines;
+  let last = lines[max - 1];
+  while (last && doc.getTextWidth(`${last}...`) > width) last = last.slice(0, -1);
+  return [...lines.slice(0, max - 1), `${last.trimEnd()}...`];
 }
 
 /** A note in a light grey box, the lead sentence bold; split across pages when long. */
@@ -1127,6 +1152,8 @@ function drawFieldContext(p: Page): void {
     if (!text) continue;
     doc.setFont('helvetica', weight);
     for (const line of doc.splitTextToSize(text, contentWidth(p)) as string[]) {
+      // Nothing is cut: a fields list longer than the page carries on to the next one.
+      if (p.y + 13 > p.bottom) newPage(p);
       p.y += 13;
       doc.text(line, Q_MARGIN_X, p.y);
     }
@@ -1164,15 +1191,13 @@ function drawFieldApplicationLayout(p: Page): void {
   drawTable(p, head, tableItems(p).map((item) => fieldApplicationRow(item, data, showEpa)), numberColumns(head.length, 5));
 
   if (opts.show_price_per_acre && data.total_acres && data.total_acres > 0) {
-    // Whole cents, rounded half away from zero as the database's round(total / acres, 2) does.
-    const perAcre = data.total_amount_cents / data.total_acres;
-    const pricePerAcreCents = Math.sign(perAcre) * Math.round(Math.abs(perAcre));
+    const pricePerAcreCents = centsPerAcre(data.total_amount_cents, data.total_acres);
     if (p.y + 18 > p.bottom) newPage(p);
     p.y += 14;
     doc.setFontSize(8.25);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...Q_MUTED);
-    doc.text(`Price per acre: ${fmt(pricePerAcreCents)}`, Q_MARGIN_X + 4.5, p.y);
+    if (pricePerAcreCents !== null) doc.text(`Price per acre: ${fmt(pricePerAcreCents)}`, Q_MARGIN_X + 4.5, p.y);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...Q_TEXT);
     doc.text(`Total ${fmt(data.total_amount_cents)}`, p.pageW - Q_MARGIN_X - 4.5, p.y, { align: 'right' });

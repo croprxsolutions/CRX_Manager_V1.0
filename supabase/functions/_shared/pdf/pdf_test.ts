@@ -73,8 +73,8 @@ const invoiceTables = () => ({
   profiles: [{ id: "rep-1", full_name: "Sam Rep" }],
   customers: [{ id: "cust-1", billing_address: "1 Farm Rd", city: "Town", state: "IL", zip: "62000", account_number: "A-1", payment_terms: "Net 30" }],
   invoice_items: [
-    { invoice_id: "inv-1", description: "Atrazine 4L", quantity: 2, unit_size: "gal", unit_price_cents: 5_000, extended_cents: 10_000, product: { product_name: "Atrazine 4L", epa_registration: "100-497", product_form: "liquid" } },
-    { invoice_id: "inv-1", description: "Surfactant", quantity: 1, unit_size: "gal", unit_price_cents: 2_345, extended_cents: 2_345, product: { product_name: "Surfactant", epa_registration: null, product_form: "liquid" } },
+    { invoice_id: "inv-1", product_id: "prod-1", description: "Atrazine 4L", quantity: 2, unit_size: "gal", unit_price_cents: 5_000, extended_cents: 10_000, product: { product_name: "Atrazine 4L", epa_registration: "100-497", product_form: "liquid" } },
+    { invoice_id: "inv-1", product_id: "prod-2", description: "Surfactant", quantity: 1, unit_size: "gal", unit_price_cents: 2_345, extended_cents: 2_345, product: { product_name: "Surfactant", epa_registration: null, product_form: "liquid" } },
   ],
   invoice_shares: [],
   app_settings: [
@@ -108,6 +108,16 @@ Deno.test("an invoice PDF is drawn from the saved invoice, and prints its saved 
   // The built-in name never heads the letterhead; the pay note names the legal payee ("Crop RX Solutions, Inc."), as the old footer did.
   assert(!text.includes("CROP RX SOLUTIONS") && !text.includes("(Crop RX Solutions)"), "PDF still prints the built-in company name");
   assert(text.includes("Make checks payable to Crop RX Solutions, Inc."), "PDF does not name the legal payee");
+  // The totals rows come from the shared invoiceBreakdown.ts (imported by invoicePdf.ts): Products = the two lines.
+  assert(text.includes("Products") && text.includes("Invoice total"), "PDF does not print the line-by-line totals");
+});
+
+// Sol on #1873: an untyped line with no product on a from-scratch sale is a charge (invoiceBreakdown.ts isChargeLine).
+Deno.test("the emailed PDF labels an untyped line with no product as a charge on a from-scratch sale", async () => {
+  const t = invoiceTables();
+  const tables = { ...t, invoice_items: t.invoice_items.map((i) => ({ ...i, product_id: null })) };
+  const text = pdfText(drawInvoicePdf({ jsPDF, autoTable }, await loadInvoicePdfData(fakeDb(tables), "inv-1")));
+  assert(text.includes("Charge") && !text.includes("Products"), "untyped lines with no product did not print as a charge");
 });
 
 // Review #1873 MED 2: the emailed PDF reads the credit applied, so its totals add up to the balance.

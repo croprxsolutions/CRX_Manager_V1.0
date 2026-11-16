@@ -1,5 +1,5 @@
-// Pure and import-free, so the Deno invoice PDF can share it with the browser app (nothing under supabase/functions
-// imports it yet; the invoice page's Amount due card does). Amounts are integer cents.
+// Pure and import-free, so the Deno invoice PDF shares it with the browser app: invoicePdf.ts (the printed and emailed
+// invoice) and the invoice page's Amount due card (via src/lib/invoiceChargeLines.ts) both use it. Amounts are integer cents.
 
 export const CHARGE_TYPE_LABELS: Readonly<Record<string, string>> = {
   freight: 'Freight',

@@ -93,3 +93,33 @@ describe('invoice PDF long values (real jsPDF)', () => {
     for (const d of companyLines) expect(d.width).toBeLessThanOrEqual(companyColumn + 0.5);
   });
 });
+
+// Sol on #1873 (MED 5): a huge value can't push the page off its bottom edge.
+describe('invoice PDF very long values (real jsPDF)', () => {
+  const huge = Array.from({ length: 40 }, (_, i) => `Lot ${i + 1} on the long gravel road past the test elevator`).join(', ');
+  const base: InvoicePdfData = {
+    invoice_number: 'INV-2026-0043', invoice_date: '2026-11-06', invoice_type: 'field_application', status: 'draft',
+    customer_name: 'Test Farm', customer_address: huge, crop_type: 'Corn', total_acres: 10,
+    field_names: Array.from({ length: 600 }, (_, i) => `Test Field Number ${i + 1}`),
+    items: [{ description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 }],
+    total_amount_cents: 1000, total_cost_cents: 0, paid_amount_cents: 0, prepay_applied_cents: 0, balance_cents: 1000,
+    options: { show_shares: false, show_price_per_acre: false, show_epa_registration: true },
+  };
+
+  it('caps the bill-to street at three lines, the last ending "..."', () => {
+    const log: Drawn[] = [];
+    drawInvoicePdf({ jsPDF: recordingPdf(log), autoTable }, base);
+    const street = log.filter((d) => d.x === 69 && d.text.includes('Lot'));
+    expect(street).toHaveLength(3);
+    expect(street[2].text.endsWith('...')).toBe(true);
+  });
+
+  it('moves the rest of a long fields line to the next page instead of past the footer', () => {
+    const log: Drawn[] = [];
+    const doc = drawInvoicePdf({ jsPDF: recordingPdf(log), autoTable }, base);
+    const fields = log.filter((d) => d.text.includes('Test Field Number'));
+    expect(fields.some((d) => d.text.includes('Test Field Number 600'))).toBe(true); // nothing is dropped
+    expect(new Set(fields.map((d) => d.page)).size).toBeGreaterThan(1);
+    for (const d of fields) expect(d.y).toBeLessThanOrEqual(doc.internal.pageSize.getHeight() - 66);
+  });
+});

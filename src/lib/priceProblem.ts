@@ -13,3 +13,13 @@ export function priceProblem(text: string): string | null {
   if (!/^\$?\d*\.?\d*$/.test(t) || !/\d/.test(t)) return NOT_A_PRICE_MESSAGE;
   return parseDollarsToCentsSigned(t) === null ? TOO_MANY_DECIMALS_MESSAGE : null;
 }
+
+/** The Save message for the first line whose price box holds a typed price that can't be saved, or null. */
+export function linePriceProblem(lines: Array<{ price_draft?: string | null; product_id: string | null; product_name: string; description: string }>): string | null {
+  for (const line of lines) {
+    const problem = line.price_draft == null ? null : priceProblem(line.price_draft);
+    // A charge line's product_name is a load-time copy, so it is named by its (editable) description.
+    if (problem) return `Price for ${(line.product_id ? line.product_name : line.description) || 'a line'}: ${problem}`;
+  }
+  return null;
+}

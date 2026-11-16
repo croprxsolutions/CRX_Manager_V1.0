@@ -29,6 +29,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
 import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import PriceInput from '../components/invoices/PriceInput';
+import { linePriceProblem } from '../lib/priceProblem';
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
@@ -70,6 +71,8 @@ import { toSentryError } from '../lib/sentryError';
 
 interface LineItem {
   id?: string;
+  // What is typed in the line's price box while it is being edited (PriceInput); never saved.
+  price_draft?: string | null;
   order_item_id?: string | null;
   product_id: string | null;
   product_name: string;
@@ -237,11 +240,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Add Product's by-id tier lookup: a single flight, bound to the invoice and customer it was
   // asked for. The ref holds the in-flight lookup's token (0 = none); switching invoices clears it.
   const addingProductRef = useRef(0);
-  // Price boxes holding a typed price that can't be saved (PriceInput), so Save can name the line instead of saving.
-  const priceProblemsRef = useRef(new Map<string, { label: string; message: string }>());
-  const notePriceProblem = useCallback((id: string, problem: { label: string; message: string } | null) => {
-    if (problem) priceProblemsRef.current.set(id, problem); else priceProblemsRef.current.delete(id);
-  }, []);
   const addProductLookupSeqRef = useRef(0);
   const [addingProduct, setAddingProduct] = useState(false);
   const invoiceCustomerIdRef = useRef<string | null>(null);
@@ -1186,8 +1184,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Save invoice
   const handleSave = async () => {
     if (addingProductRef.current) return;
-    const priceProblem = priceProblemsRef.current.values().next().value;
-    if (priceProblem) { toast('error', `${priceProblem.label}: ${priceProblem.message}`); return; }
+    // A price box holding a typed price that can't be saved: name the line instead of saving its last good price.
+    const badPrice = linePriceProblem(items);
+    if (badPrice) { toast('error', badPrice); return; }
     if (paymentTerms === 'Custom date…' && !customDueDate) {
       toast('error', 'Choose a custom due date before saving.');
       return;
@@ -2635,7 +2634,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                               label={`Unit price for ${name || 'line'}`}
                               cents={item.unit_price_cents}
                               onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
-                              onProblem={notePriceProblem}
+                              draft={item.price_draft}
+                              onDraft={(text) => updateItem(idx, 'price_draft', text)}
                               className={lineInput.replace('xl:w-24', 'xl:w-28')}
                             />
                           ) : (
@@ -2720,7 +2720,8 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                               label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
                               cents={item.unit_price_cents}
                               onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
-                              onProblem={notePriceProblem}
+                              draft={item.price_draft}
+                              onDraft={(text) => updateItem(idx, 'price_draft', text)}
                               className={chargeInput}
                             />
                           ) : (

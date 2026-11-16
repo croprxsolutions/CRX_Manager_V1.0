@@ -2546,7 +2546,30 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(box).toHaveValue('10.005');
       expect(box).toHaveAttribute('aria-invalid', 'true');
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Unit price for Herbicide')));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Price for Herbicide: 2 decimals max'));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
+    });
+
+    // Luna MED: rows are keyed by position, so the typed text lives on the line, not in the box.
+    it('removing a line with a bad typed price does not leave that text on the next line', async () => {
+      const fungicide = { ...lines[0], id: 'it-9', order_item_id: 'oi-9', product_id: 'p-9', product: { product_name: 'Fungicide' }, description: 'Fungicide', unit_price_cents: 2500, extended_cents: 5000, sort_order: 1 };
+      load(draft, [lines[0], fungicide]);
+      renderInvoiceDetail();
+      typeKeys(await screen.findByLabelText('Unit price for Herbicide'), '5');
+      fireEvent.click(screen.getByRole('button', { name: 'Remove Herbicide' }));
+      const box = await screen.findByLabelText('Unit price for Fungicide');
+      expect(box).toHaveValue('25.00');
+      expect(box).not.toHaveAttribute('aria-invalid');
+    });
+
+    it('renaming a charge keeps its bad typed price, so Save still refuses it', async () => {
+      load(draft, [...withCharges.slice(0, 2)]);
+      renderInvoiceDetail();
+      typeKeys(await screen.findByLabelText('Amount for Delivery to home farm'), '5');
+      fireEvent.change(screen.getByLabelText('Charge description'), { target: { value: 'Freight' } });
+      expect(screen.getByLabelText('Amount for Freight')).toHaveValue('45.005');
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Price for Freight: 2 decimals max'));
       expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
     });
 

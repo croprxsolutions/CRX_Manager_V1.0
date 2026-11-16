@@ -277,7 +277,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const LIVE_MD5 = '29d699a8b0698424345a78e9aac9dcd1';
 const FIX_MD5 = 'c3df537c2540a3bbc3f39ddc16c09166';
-const SAVES_MD5 = '458f68210d5587ffe7b1f2847ac136ed';
+const SAVES_MD5 = 'd14598798476461c9c98bf024af2b8ab';
 const GUARD_LIVE_MD5 = '3708388e22f081fd5b70ce8f89492aaf';
 const GUARD_SAVES_MD5 = '1c421de75f20d9244a06d29428d1f99a';
 const GUARD = "'public._enforce_below_cost_line()'::regprocedure";
@@ -287,7 +287,7 @@ const IMPL = "'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jso
 const bodyMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = ${IMPL};`);
 const acl = () => scalar(`SELECT coalesce(proacl::text, '-') FROM pg_proc WHERE oid = ${IMPL};`);
 const id = (s) => `c156c156-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), APPL = id('a3'), CUST = id('c1'), FG = id('f1'), FB = id('f2'), GAL = id('d1'), EA = id('d2'), NOINV = id('d3');
+const ADMIN = id('a1'), REP = id('a2'), APPL = id('a3'), SALE = id('e1'), CUST = id('c1'), FG = id('f1'), FB = id('f2'), GAL = id('d1'), EA = id('d2'), NOINV = id('d3');
 let keyN = 0;
 const key = () => `prover-ki156-${process.pid}-${keyN += 1}`;
 
@@ -304,6 +304,8 @@ function seed() {
       ('${GAL}', '[PROVER] KI156 Gallon chem', 'Gal', 'Gal', 'liquid', 30.00, 40.00, 25, true),
       ('${EA}', '[PROVER] KI156 Each item', 'Ea', 'Ea', 'each', 30.00, 40.00, 25, true),
       ('${NOINV}', '[PROVER] KI156 no stock unit', 'Gal', NULL, 'liquid', 30.00, 40.00, 25, true);
+    INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, total_amount_cents, total_cost_cents, created_by)
+      VALUES ('${SALE}', 'KI156-SALE-1', '${CUST}', 'chemical_sale', 'draft', '2026-11-15', 0, 0, '${ADMIN}');
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${FG}', '${CUST}', '[PROVER] KI156 grower-price field', 100, true),
       ('${FB}', '${CUST}', '[PROVER] KI156 billed field', 100, true);
@@ -484,8 +486,14 @@ async function main() {
   const manualG = save([loc(FG, 100)], [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })], ADMIN, false);
   assert.equal(costOf(manualG), 37500, `G: an admin's costed manual grower-share line saves with no context: ${manualG}`);
   refusedSave([loc(FG, 50), loc(FB, 50, 1)], [UNDER], /BELOW_COST_CONTEXT_REQUIRED/, ADMIN, false);
+  // The save rebuilds the invoice it is given: an ordinary draft (chemical sale) is refused before any line is touched.
+  for (const uid of [ADMIN, REP]) {
+    refusedProbe(`SELECT public.save_field_app_invoice('${SALE}', ${J({ invoice_date: '2026-11-15', salesman_id: uid })},
+      ${J([loc(FG, 100)])}, ${J([chem({ product_id: GAL })])}, '${uid}', NULL, '${key()}');`,
+      /FIELD_APP_INVOICE_REQUIRED: invoice .* is not a field application invoice/, uid);
+  }
   assert.equal(okProbe(`${saveSql([loc(FG, 50), loc(FB, 50, 1)], [UNDER])}\nRESET ROLE;\n${APPROVALS}`, ADMIN), '1', 'G: mixed save with a reason records only the billed line');
-  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, no approval row); an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0 still books the server cost (37500); an admin's costed manual grower-share line saves; a billed under-cost line beside a grower share is still refused, and with a reason only it is recorded`);
+  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, no approval row); an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0 still books the server cost (37500); an admin's costed manual grower-share line saves; an admin or rep passing an ordinary draft invoice is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason only it is recorded`);
   normalWall('after the follow-up');
 
   // RG: the follow-up's rollback.

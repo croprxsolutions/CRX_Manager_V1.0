@@ -22,6 +22,8 @@
   and the wall lets that line through for an active admin or sales rep, with no approval row. The wall treats the
   context as none for everything else, so every other below-cost line (a billed line under cost, a fee, an order or
   quote line) is refused or approved exactly as before; applicators and anyone else are still refused.
+  The same file makes the field-app save refuse to rebuild an existing invoice that is not a field-application
+  invoice (`FIELD_APP_INVOICE_REQUIRED`, with a plain message); it never checked the type of the invoice it rewrites.
 - Proof: `node scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs` (GROWER_SHARE_COST_UNIT_PROOF_PASS).
   Rollback: `scripts/smoke/grower-share-line-saves-reverse.sql` then `scripts/smoke/grower-share-cost-unit-reverse.sql`
   (both proven; each restores its bodies by md5).

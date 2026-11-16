@@ -76,6 +76,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'No invoice was changed. An invoice update is finishing; wait a moment, then try Save again'],
   [/^FIELD_APPLICATION_VIA_SAVE_INVOICE_NOT_ALLOWED(?::|$)/,
    'Create this field invoice from its job, blend ticket, or the Field Application screen'],
+  [/^FIELD_APP_INVOICE_REQUIRED(?::|$)/,
+   'Nothing was saved. This invoice is not a field application invoice, so it cannot be edited here. Open it from Invoices instead'],
   [/^CUSTOMER_SCOPE_DENIED\b/i,
    'You can only work with customers assigned to you'],
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.

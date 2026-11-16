@@ -12,7 +12,10 @@
 --
 -- WHAT (needs 20270111130000 first; its preflight pins that body):
 --  * _save_field_app_invoice_impl_20260714 declares the below-cost context 'field_app_grower_share' around the
---    grower-share INSERT only, and puts the previous context back right after it. Nothing else in the body changes.
+--    grower-share INSERT only, and puts the previous context back right after it. It also refuses to rebuild an
+--    existing invoice that is not a field-application invoice (FIELD_APP_INVOICE_REQUIRED): the save deletes and
+--    rewrites the lines of the invoice it is given, and never checked its type. The screen only passes field-app
+--    invoices; live has none of another type in a field-app group. Nothing else in the body changes.
 --  * _enforce_below_cost_line: a context of 'field_app_grower_share' is treated as no context for every check, so any
 --    other line (a billed line, a fee, an order line, a quote line) is judged exactly as before. Only at the point
 --    where it would refuse a below-cost line does it let through an invoice_items INSERT with unit price 0, amount 0,
@@ -147,6 +150,10 @@ BEGIN
     SELECT status, invoice_group_id INTO v_existing_status, v_existing_group_id
       FROM invoices WHERE id = p_invoice_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Invoice not found: %', p_invoice_id; END IF;
+    -- KI-156 follow-up: only a field-application invoice is rebuilt here; any other draft keeps its own lines.
+    IF (SELECT invoice_type FROM invoices WHERE id = p_invoice_id) IS DISTINCT FROM 'field_application' THEN
+      RAISE EXCEPTION 'FIELD_APP_INVOICE_REQUIRED: invoice % is not a field application invoice', p_invoice_id;
+    END IF;
     SELECT COUNT(*) INTO v_locked_count
       FROM invoices
      WHERE (id = p_invoice_id OR invoice_group_id = v_existing_group_id)
@@ -1016,7 +1023,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '458f68210d5587ffe7b1f2847ac136ed', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'd14598798476461c9c98bf024af2b8ab', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

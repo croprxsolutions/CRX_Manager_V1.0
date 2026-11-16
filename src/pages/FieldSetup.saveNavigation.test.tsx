@@ -123,7 +123,7 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
     expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('123.4 acres to bill could not be applied'));
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
 
     await screen.findByRole('button', { name: /Save Changes/ });
     expect(saveFieldCalls()).toHaveLength(1);
@@ -139,7 +139,7 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/fields/field-1'));
     expect(mockToast).toHaveBeenCalledWith('error', 'Field saved but the boundary could not be measured. Please re-draw and save.');
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 
   it('a changed retry after a lost create opens the created field and applies none of the edit', async () => {
@@ -245,7 +245,7 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     await waitFor(() => expect(saveFieldCalls()).toHaveLength(2));
     expect(saveFieldCalls()[1][1].p_field_payload).toMatchObject({ crop_type: 'corn', total_acres: 40 });
     expect(mockRpc.mock.calls.filter(([name]) => name === 'set_field_boundary')).toHaveLength(1);
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 
   it('sends the acres an override save stored', async () => {
@@ -292,7 +292,7 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     await router.navigate('/other');
     expect(router.state.location.pathname).toBe('/other');
     expect(await screen.findByText('Other page')).toBeInTheDocument();
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 
   it('keeps an edit made while the save was in flight unsaved', async () => {
@@ -322,7 +322,7 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
     });
     removeListener.mockRestore();
     await router.navigate('/other');
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/fields/field-1');
   });
 });

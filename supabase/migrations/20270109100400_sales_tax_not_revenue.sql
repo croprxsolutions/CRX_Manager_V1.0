@@ -8,17 +8,18 @@
 -- Sales tax is collected for the state; it is not revenue.
 --
 -- WHAT:
---   1. _invoice_sales_tax_cents_20270109(invoice): the sales tax inside an invoice's total.
+--   1. _invoice_sales_tax_cents_20270109(invoice): the sales tax inside an invoice's total, in exact cents (numeric).
 --      - A chemical sale: its 'sales_tax' line.
 --      - A posted return credit memo: the tax it refunds, which sits inside its line amounts (no tax line of its own),
---        worked out ONCE when it posts and stored in credit_memo_sales_tax, never recomputed. So a later invoice,
---        return or posting cannot change an earlier month's revenue. At posting, each credited order line is stepped
---        through in time order the way return pricing works (_credit_sales_tax_unrounded_20270109: billed lots add
---        cents and tax, earlier credits take theirs out at the pool's rate, this credit takes its cents at what
---        remains), rounded on the running total of that sale's frozen credits for that customer, so a full return
---        refunds exactly the tax billed, in one credit or many. Unpost, void or delete clears it; a re-post freezes
---        it again. A deferred trigger on invoices does it at commit; existing posted credits are frozen once here.
+--        worked out ONCE when it posts and stored, unrounded, in credit_memo_sales_tax; never recomputed. So a later
+--        invoice, return, posting or void cannot change another credit or an earlier month. At posting, each credited
+--        order line is stepped through in posting order the way return pricing works
+--        (_credit_sales_tax_unrounded_20270109: billed lots add cents and tax, earlier credits take theirs out at the
+--        pool's rate, this credit takes its cents at what remains). Unpost, void or delete clears it; a re-post
+--        freezes it again. A deferred trigger on invoices does it at commit; existing posted credits are frozen once.
 --      - Anything else: 0.
+--      Each report adds these up and rounds ONCE (no per-credit rounding), so a full return nets to 0 whether it
+--      took one credit or many.
 --   2. get_monthly_summary (Month-End Close): invoices.total_amount_cents is now revenue without sales tax,
 --      so "Recognized Invoices" and "Gross Margin" (total - cost) leave tax out. Same keys, no screen code change;
 --      that figure no longer equals the invoice list's sum on taxed months (the difference is the tax).
@@ -149,7 +150,7 @@ BEGIN
          AND i.deleted_at IS NULL
          AND i.status IN ('posted', 'overdue', 'paid')
       UNION ALL
-      SELECT 1, x.created_at, x.id, sum(ci.extended_cents)::numeric, NULL
+      SELECT 1, COALESCE(x.posted_at, x.created_at), x.id, sum(ci.extended_cents)::numeric, NULL
         FROM public.invoices x
         JOIN public.invoice_items ci ON ci.invoice_id = x.id
         JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
@@ -158,7 +159,7 @@ BEGIN
          AND x.invoice_type = 'credit_memo'
          AND x.deleted_at IS NULL
          AND (x.id = p_invoice_id OR x.status IN ('posted', 'overdue', 'paid'))
-       GROUP BY x.id, x.created_at
+       GROUP BY x.id, x.posted_at, x.created_at
       ORDER BY 2, 1, 3
     LOOP
       IF v_ev.kind = 0 THEN
@@ -185,29 +186,25 @@ GRANT EXECUTE ON FUNCTION public._credit_sales_tax_unrounded_20270109(uuid) TO s
 -- 2. A return credit's tax, frozen when it posts -----------------------------------------------------------------
 CREATE TABLE public.credit_memo_sales_tax (
   invoice_id uuid PRIMARY KEY REFERENCES public.invoices(id) ON DELETE CASCADE,
-  sale_id uuid,
-  customer_id uuid NOT NULL,
-  unrounded_cents numeric NOT NULL,
-  tax_cents bigint NOT NULL,
+  -- exact, not rounded: the reports add these up with the invoices' tax lines and round once per report
+  tax_cents_exact numeric NOT NULL,
   frozen_at timestamptz NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE public.credit_memo_sales_tax IS
-  'The sales tax a posted return credit memo refunds inside its line amounts (issue #1868), worked out once when it posts and never recomputed, so a later invoice or posting cannot change an earlier month''s revenue. Written only by _freeze_credit_sales_tax_20270109.';
+  'The sales tax a posted return credit memo refunds inside its line amounts (issue #1868), exact (unrounded, negative), worked out once when it posts and never recomputed, so a later invoice or posting cannot change an earlier month''s revenue. The profit reports add these up and round once. Written only by _freeze_credit_sales_tax_20270109.';
 
 ALTER TABLE public.credit_memo_sales_tax ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.credit_memo_sales_tax FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.credit_memo_sales_tax TO authenticated;
-GRANT ALL ON public.credit_memo_sales_tax TO service_role;
+GRANT SELECT ON public.credit_memo_sales_tax TO service_role;
 
 CREATE POLICY credit_memo_sales_tax_select ON public.credit_memo_sales_tax
   FOR SELECT TO authenticated
   USING (EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = credit_memo_sales_tax.invoice_id));
 
--- Freeze (or clear) one credit's tax from its current state. Posted: work it out once, rounded on the running total
--- of that sale's frozen credits for that customer (so a full return refunds exactly the tax billed, in one credit
--- or many). Unposted, voided or deleted: cleared (a re-post freezes it again). A credit with no order takes the sale
--- of the invoice its first credited line came from.
+-- Freeze (or clear) one credit's tax from its current state. Posted: work it out once, exactly. Unposted, voided or
+-- deleted: cleared (a re-post freezes it again, as of then). No rounding here, so nothing depends on other credits.
 CREATE FUNCTION public._freeze_credit_sales_tax_20270109(p_invoice_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -216,12 +213,8 @@ CREATE FUNCTION public._freeze_credit_sales_tax_20270109(p_invoice_id uuid)
 AS $function$
 DECLARE
   v_inv record;
-  v_sale uuid;
-  v_mine numeric;
-  v_prior numeric := 0;
 BEGIN
-  SELECT i.id, i.invoice_type, i.status, i.deleted_at, i.order_id, i.customer_id INTO v_inv
-    FROM public.invoices i WHERE i.id = p_invoice_id;
+  SELECT i.id, i.invoice_type, i.status, i.deleted_at INTO v_inv FROM public.invoices i WHERE i.id = p_invoice_id;
   IF NOT FOUND OR v_inv.invoice_type IS DISTINCT FROM 'credit_memo' THEN
     RETURN;
   END IF;
@@ -229,25 +222,9 @@ BEGIN
     DELETE FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id;
     RETURN;
   END IF;
-  IF EXISTS (SELECT 1 FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id) THEN
-    RETURN;  -- already frozen (posted -> overdue -> paid keeps it)
-  END IF;
-  v_sale := COALESCE(v_inv.order_id, (SELECT si.order_id
-                                        FROM public.invoice_items ci
-                                        JOIN public.invoice_items s ON s.id = ci.return_credit_source_item_id
-                                        JOIN public.invoices si ON si.id = s.invoice_id
-                                       WHERE ci.invoice_id = p_invoice_id
-                                       ORDER BY ci.id LIMIT 1));
-  -- one credit of a sale and customer at a time, so the running total never reads a half-written neighbour
-  PERFORM pg_advisory_xact_lock(hashtextextended(
-    'credit_memo_sales_tax:' || COALESCE(v_sale::text, p_invoice_id::text) || ':' || v_inv.customer_id::text, 0));
-  v_mine := public._credit_sales_tax_unrounded_20270109(p_invoice_id);
-  IF v_sale IS NOT NULL THEN
-    v_prior := COALESCE((SELECT sum(c.unrounded_cents) FROM public.credit_memo_sales_tax c
-                          WHERE c.sale_id = v_sale AND c.customer_id = v_inv.customer_id), 0);
-  END IF;
-  INSERT INTO public.credit_memo_sales_tax (invoice_id, sale_id, customer_id, unrounded_cents, tax_cents)
-  VALUES (p_invoice_id, v_sale, v_inv.customer_id, v_mine, (round(v_prior + v_mine) - round(v_prior))::bigint);
+  INSERT INTO public.credit_memo_sales_tax (invoice_id, tax_cents_exact)
+  VALUES (p_invoice_id, public._credit_sales_tax_unrounded_20270109(p_invoice_id))
+  ON CONFLICT (invoice_id) DO NOTHING;  -- already frozen (posted -> overdue -> paid keeps it)
 END
 $function$;
 REVOKE ALL ON FUNCTION public._freeze_credit_sales_tax_20270109(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -289,16 +266,17 @@ $backfill$;
 
 -- 3. The sales tax inside an invoice's total ---------------------------------------------------------------------
 CREATE FUNCTION public._invoice_sales_tax_cents_20270109(p_invoice_id uuid)
- RETURNS bigint
+ RETURNS numeric
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
+  -- exact cents: callers add these up and round once
   -- (a 'sales_tax' line exists only on a chemical sale: guard_sales_tax_line_scope_20261231 refuses it elsewhere)
   SELECT COALESCE((SELECT sum(t.extended_cents) FROM public.invoice_items t
-                    WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax'), 0)::bigint
+                    WHERE t.invoice_id = p_invoice_id AND t.charge_type = 'sales_tax'), 0)::numeric
        -- a posted return credit: the tax frozen when it posted (negative)
-       + COALESCE((SELECT c.tax_cents FROM public.credit_memo_sales_tax c WHERE c.invoice_id = p_invoice_id), 0);
+       + COALESCE((SELECT c.tax_cents_exact FROM public.credit_memo_sales_tax c WHERE c.invoice_id = p_invoice_id), 0);
 $function$;
 REVOKE ALL ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._invoice_sales_tax_cents_20270109(uuid) TO service_role;
@@ -318,7 +296,7 @@ BEGIN
     'period_end', p_period_end,
     'invoices', jsonb_build_object(
       'posted_count', (SELECT count(*) FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL),
-      'total_amount_cents', COALESCE((SELECT sum(total_amount_cents - public._invoice_sales_tax_cents_20270109(id))  /* (tax) */ FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL), 0),
+      'total_amount_cents', COALESCE((SELECT (sum(total_amount_cents) - round(sum(public._invoice_sales_tax_cents_20270109(id))))::bigint  /* (tax) */ FROM public.invoices WHERE invoice_date BETWEEN p_period_start AND p_period_end AND status IN ('posted', 'overdue', 'paid') AND deleted_at IS NULL), 0),
       'total_cost_cents', COALESCE((SELECT sum(CASE
         WHEN inv.invoice_type = 'credit_memo'
          AND EXISTS (SELECT 1 FROM public.returns r WHERE r.credit_invoice_id = inv.id)
@@ -355,7 +333,7 @@ DECLARE
   v_net_profit numeric := 0;
 BEGIN
   SELECT
-    COALESCE(SUM(i.total_amount_cents - public._invoice_sales_tax_cents_20270109(i.id)), 0) / 100.0,  -- (tax)
+    COALESCE(SUM(i.total_amount_cents) - ROUND(SUM(public._invoice_sales_tax_cents_20270109(i.id))), 0) / 100.0,  -- (tax)
     COALESCE(SUM(CASE
       WHEN i.invoice_type = 'credit_memo'
        AND EXISTS (SELECT 1 FROM public.returns r WHERE r.credit_invoice_id = i.id)

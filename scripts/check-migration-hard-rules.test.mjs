@@ -352,6 +352,18 @@ scenarios.push(['a restamp of a file that was once on main (later removed) still
   eq(result.status, 1, 'exit 1');
   ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'in main history counts as on main');
 }]);
+scenarios.push(['a file merged into main from a side branch, then dropped by the merge, still counts as on main', (dir) => {
+  write(dir, 'README.md', 'root\n');
+  const root = commitAll(dir, 'root');
+  const base = seedBase(dir); // side branch: adds APPLIED
+  sh(dir, ['checkout', '-q', '-b', 'mainline', root]);
+  sh(dir, ['merge', '-q', '-s', 'ours', '--no-edit', base]); // main takes its own tree: the file is gone again
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', sh(dir, ['rev-parse', 'HEAD'])]);
+  sh(dir, ['checkout', '-q', base]);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  eq(runCli(dir, base, head).status, 1, 'exit 1 (default history simplification would hide the side commit)');
+}]);
 scenarios.push(['a shallow clone: a restamp is not exempt (fail closed)', (dir) => {
   const base = seedBase(dir);
   sh(dir, ['update-ref', 'refs/remotes/origin/main', sh(dir, ['commit-tree', sh(dir, ['hash-object', '-t', 'tree', '-w', '--stdin']), '-m', 'empty main'])]);

@@ -333,7 +333,8 @@ export function runDiffCheck({ repoRoot, base, head: headRef, log = console.log 
       try { if (git(repoRoot, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') return true; } catch { return true; }
       const main = resolveCommit(repoRoot, 'origin/main');
       if (!main) return true;
-      try { return git(repoRoot, ['log', '-1', '--format=%H', main, '--', relPath]).trim() !== ''; } catch { return true; }
+      // --full-history: no merge simplification can hide a commit that held the file.
+      try { return git(repoRoot, ['log', '-1', '--full-history', '--format=%H', main, '--', relPath]).trim() !== ''; } catch { return true; }
     },
   });
   const restamped = new Set(restamps.map((r) => r.from));

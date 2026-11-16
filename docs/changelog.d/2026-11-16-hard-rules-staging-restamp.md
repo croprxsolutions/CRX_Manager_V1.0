@@ -13,6 +13,6 @@ live, so Mason's restamp (byte-identical SQL, newer stamp) was refused as "DELET
   an older stamp is refused as before. The staging job renames the ledger row (#1837); `db-apply.mjs
   stamp-check` applies its own restamp rules on top.
 
-**Tested:** eight new fixture scenarios (pass, on main, once on main then removed, no origin/main, shallow clone, changed
-bytes, another name, older stamp), 107 assertions. Against the real repo: #1898's restamp now passes with three exemptions printed (the old script
+**Tested:** nine new fixture scenarios (pass, on main, once on main then removed, on a main side branch dropped by its merge, no origin/main, shallow clone, changed
+bytes, another name, older stamp), 108 assertions. Against the real repo: #1898's restamp now passes with three exemptions printed (the old script
 fails it), and a restamp of live's `20270106110000_invoice_brands_rup` is still refused.

@@ -421,19 +421,10 @@ export default function DeliveryDetail() {
         setDriver(driverRes.data as Profile | null);
         if (photoSeq === photoSeqRef.current) setPhotos((photosRes.data || []) as DeliveryPhoto[]);
 
-        // Invoices linked straight to this delivery (a delivery with no order, or an invoice whose
-        // order differs). Same read-only query style and RLS as the order read below; merged by id.
-        const byDeliveryRes = await supabase
-          .from('invoices')
-          .select(RELATED_INVOICE_COLUMNS)
-          .eq('delivery_id', del.id)
-          .is('deleted_at', null);
+        // Invoices linked straight to this delivery, merged with the order's below.
+        const byDelivery = await fetchInvoicesByDelivery(del.id);
         if (isStale()) return;
-        if (byDeliveryRes.error || !byDeliveryRes.data) {
-          Sentry.captureException(byDeliveryRes.error ?? new Error('delivery invoices read returned no list'), { extra: { context: 'load_delivery_invoices_by_delivery', deliveryId: del.id } });
-          failLoad('Failed to load this delivery\'s invoices');
-          return;
-        }
+        if (!byDelivery) { failLoad('Failed to load this delivery\'s invoices'); return; }
 
         // Fetch order item context for items display
         if (del.order_id) {
@@ -514,7 +505,7 @@ export default function DeliveryDetail() {
             setOrderItemContext(ctx);
           }
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
-          setRelatedInvoices(mergeRelatedInvoices(invRes.data, byDeliveryRes.data));
+          setRelatedInvoices(mergeRelatedInvoices(invRes.data, byDelivery));
           setInvoicesLoaded(true);
 
           // Fetch sibling deliveries for transaction thread
@@ -546,7 +537,7 @@ export default function DeliveryDetail() {
           setOrderNeedsSplitBilling(false);
           setBilledOutsideCrxReason(null);
           setParentOrder(null);
-          setRelatedInvoices(mergeRelatedInvoices([], byDeliveryRes.data));
+          setRelatedInvoices(mergeRelatedInvoices([], byDelivery));
           setInvoicesLoaded(true);
           setSiblingDeliveries([]);
           setParentQuote(null);
@@ -3174,6 +3165,16 @@ interface RelatedInvoice {
 }
 
 const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)';
+
+/** Read-only, same RLS as the order read: invoices linked by delivery_id, or null (reported) when the read fails. */
+async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<string, unknown>[] | null> {
+  const { data, error } = await supabase.from('invoices').select(RELATED_INVOICE_COLUMNS).eq('delivery_id', deliveryId).is('deleted_at', null);
+  if (error || !data) {
+    Sentry.captureException(error ?? new Error('delivery invoices read returned no list'), { extra: { context: 'load_delivery_invoices_by_delivery', deliveryId } });
+    return null;
+  }
+  return data as unknown as Record<string, unknown>[];
+}
 
 /** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
 function mergeRelatedInvoices(byOrder: Record<string, unknown>[], byDelivery: Record<string, unknown>[]): RelatedInvoice[] {

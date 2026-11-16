@@ -62,7 +62,8 @@ export async function extractLabeledValue(
 
   // Get the parent element and look for the value sibling
   const parent = labelEl.locator('..');
-  const valueEl = parent.locator('.text-2xl, .text-xl, .text-lg, .font-semibold, .font-medium, .font-bold').first();
+  // .tabular-nums: the invoice page's Amount due values (Billing UI, Nov 13) carry no size or weight class.
+  const valueEl = parent.locator('.tabular-nums, .text-2xl, .text-xl, .text-lg, .font-semibold, .font-medium, .font-bold').first();
   const isValueVisible = await valueEl.isVisible({ timeout: 2000 }).catch(() => false);
 
   if (isValueVisible) {

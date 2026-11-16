@@ -60,7 +60,7 @@ function MultiDropdown({ items, basePath, label, currentId, icon, activeColor }:
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${activeColor}`}
+        className={`inline-flex min-h-11 md:min-h-0 items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${activeColor}`}
       >
         {icon}
         {items.length} {label}
@@ -73,7 +73,7 @@ function MultiDropdown({ items, basePath, label, currentId, icon, activeColor }:
               key={item.id}
               to={`${basePath}/${item.id}`}
               onClick={() => setOpen(false)}
-              className={`block px-3 py-1.5 text-sm transition-colors ${
+              className={`flex min-h-11 md:min-h-0 items-center px-3 py-1.5 text-sm transition-colors ${
                 item.id === currentId
                   ? 'text-crx-green font-semibold bg-crx-green/5'
                   : 'text-gray-700 hover:bg-gray-50'
@@ -124,7 +124,7 @@ export default function TransactionThread({
       {hasQuote ? (
         <Link
           to={`/quotes/${quoteId}`}
-          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+          className={`inline-flex min-h-11 md:min-h-0 items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
             isActive('quote') ? activeClass : inactiveClass
           }`}
         >
@@ -153,7 +153,7 @@ export default function TransactionThread({
       ) : hasOrder ? (
         <Link
           to={`/orders/${orders[0]?.id || orderId}`}
-          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+          className={`inline-flex min-h-11 md:min-h-0 items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
             isActive('order', orders[0]?.id || orderId) ? activeClass : inactiveClass
           }`}
         >
@@ -174,7 +174,7 @@ export default function TransactionThread({
         deliveries.length === 1 ? (
           <Link
             to={`/deliveries/${deliveries[0].id}`}
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+            className={`inline-flex min-h-11 md:min-h-0 items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
               isActive('delivery', deliveries[0].id) ? activeClass : inactiveClass
             }`}
           >
@@ -205,7 +205,7 @@ export default function TransactionThread({
         invoices.length === 1 ? (
           <Link
             to={`/invoices/${invoices[0].id}`}
-            className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+            className={`inline-flex min-h-11 md:min-h-0 items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium transition-colors ${
               isActive('invoice', invoices[0].id) ? activeClass : inactiveClass
             }`}
           >

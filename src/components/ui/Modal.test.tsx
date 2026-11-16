@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { Trash2 } from 'lucide-react';
 import Modal from './Modal';
 import Dropdown from './Dropdown';
 
@@ -158,5 +159,74 @@ describe('Modal', () => {
     last.focus();
     fireEvent.keyDown(last, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
+  });
+  it('returns focus to the element that opened it once it closes', async () => {
+    function Harness({ open }: { open: boolean }) {
+      return (
+        <>
+          <button type="button">Open dialog</button>
+          <Modal open={open} onClose={() => {}} title="T"><input aria-label="Name" /></Modal>
+        </>
+      );
+    }
+    const { rerender } = render(<Harness open={false} />);
+    const trigger = screen.getByRole('button', { name: 'Open dialog' });
+    trigger.focus();
+    rerender(<Harness open />);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' })));
+    rerender(<Harness open={false} />);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  describe('alert layout', () => {
+    const footer = (
+      <>
+        <button type="button">Keep quotes</button>
+        <button type="button">Delete 3 quotes</button>
+      </>
+    );
+
+    it('is an alertdialog labelled by its title and described by its message', () => {
+      render(
+        <Modal open onClose={() => {}} title="Delete 3 quotes?" size="alert" icon={Trash2} iconClassName="bg-red-50 text-red-700" footer={footer}>
+          They are removed for everyone.
+        </Modal>,
+      );
+      const dialog = screen.getByRole('alertdialog', { name: 'Delete 3 quotes?' });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(dialog).toHaveAccessibleDescription('They are removed for everyone.');
+      expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+      expect(document.querySelector('[data-modal-icon]')).toHaveClass('bg-red-50', 'text-red-700');
+    });
+
+    it('is a bottom sheet on phone and a centred card from md up', () => {
+      render(<Modal open onClose={() => {}} title="T" size="alert" footer={footer}>m</Modal>);
+      expect(document.querySelector('[data-modal-panel]')).toHaveClass('rounded-t-2xl', 'w-full', 'md:max-w-md', 'md:rounded-2xl');
+      expect(document.querySelector('[data-modal-footer]')).toHaveClass('flex-col-reverse', 'md:flex-row', 'md:justify-end', 'md:bg-cream');
+    });
+
+    it('puts initial focus on the first (safe) button', async () => {
+      render(<Modal open onClose={() => {}} title="T" size="alert" footer={footer}>m</Modal>);
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep quotes' })));
+    });
+
+    it('focuses a button marked data-autofocus first', async () => {
+      render(
+        <Modal open onClose={() => {}} title="T" size="alert" footer={<><button type="button">Discard</button><button type="button" data-autofocus>Keep editing</button></>}>m</Modal>,
+      );
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep editing' })));
+    });
+
+    it('closes on Escape and backdrop click unless closeDisabled', () => {
+      const onClose = vi.fn();
+      const { rerender } = render(<Modal open onClose={onClose} title="T" size="alert" footer={footer}>m</Modal>);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.click(document.querySelector('[aria-hidden="true"]')!);
+      expect(onClose).toHaveBeenCalledTimes(2);
+      rerender(<Modal open onClose={onClose} closeDisabled title="T" size="alert" footer={footer}>m</Modal>);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.click(document.querySelector('[aria-hidden="true"]')!);
+      expect(onClose).toHaveBeenCalledTimes(2);
+    });
   });
 });

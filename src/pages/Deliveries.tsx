@@ -1390,7 +1390,7 @@ export default function Deliveries() {
     // Still loading must not read as "no deliveries today" either.
     if (loading) {
       return (
-        <div className="-m-4 sm:-m-6 min-h-screen bg-cream">
+        <div className="-m-4 lg:-m-6 min-h-screen bg-cream">
           {driverHeader}
           <div className="space-y-3 p-4 sm:p-6">
             <SkeletonCard />
@@ -1404,7 +1404,7 @@ export default function Deliveries() {
     // A failed load must never read as "no deliveries assigned to you".
     if (loadFailed) {
       return (
-        <div className="-m-4 sm:-m-6 min-h-screen bg-cream">
+        <div className="-m-4 lg:-m-6 min-h-screen bg-cream">
           {driverHeader}
           <div className="p-4 sm:p-6">
             <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700">
@@ -1426,7 +1426,7 @@ export default function Deliveries() {
     ];
 
     return (
-      <div className="phone-touch -m-4 sm:-m-6 min-h-screen bg-cream">
+      <div className="phone-touch -m-4 lg:-m-6 min-h-screen bg-cream">
         {driverHeader}
 
         <div className="space-y-4 p-4 sm:p-6">

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import Button from '../ui/Button';
 import { creditExposure, describeCreditStatus } from '../../lib/creditLimitGuard';
 import { Sentry } from '../../lib/sentry';
 
@@ -65,13 +64,27 @@ interface TierMismatchNoteProps {
  */
 export function TierMismatchNote({ tier, assignedTier, acknowledged, onUseAssigned, onAcknowledge }: TierMismatchNoteProps) {
   return (
-    <div role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-      <p className="font-medium">This customer is assigned Tier {assignedTier}; this quote uses Tier {tier}.</p>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <Button type="button" size="sm" variant="secondary" onClick={onUseAssigned}>Use Tier {assignedTier}</Button>
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={acknowledged} onChange={(e) => onAcknowledge(e.target.checked)} />
-          Quote at Tier {tier} anyway
+    <div role="alert" className="flex flex-col gap-1 text-[13px]">
+      <p className="flex items-start gap-1.5 text-amber-800">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        This customer is assigned Tier {assignedTier}; this quote uses Tier {tier}.
+      </p>
+      <div className="flex flex-wrap items-center gap-x-4">
+        <button
+          type="button"
+          onClick={onUseAssigned}
+          className="min-h-11 md:min-h-10 rounded font-semibold text-crx-green hover:text-crx-green-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2"
+        >
+          Switch to Tier {assignedTier}
+        </button>
+        <label className="inline-flex min-h-11 md:min-h-10 items-center gap-1.5 text-secondary">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => onAcknowledge(e.target.checked)}
+            className="h-4.5 w-4.5 rounded border-gray-300 accent-crx-green"
+          />
+          Keep Tier {tier}
         </label>
       </div>
     </div>

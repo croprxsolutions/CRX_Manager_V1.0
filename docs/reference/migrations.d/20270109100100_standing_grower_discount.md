@@ -1,4 +1,6 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Billing plan M4b: `20261231110000_standing_grower_discount.sql` (SQL sha256: `c84bd553b6732631d8c01374a0aac522518167e5506782133631f8afd0bfe90f`). A standing grower discount on chemical-sale invoices: a customer's rate, taken off product lines as one computed "Standing discount" line, per payer, to the cent.
+**LOCAL CANDIDATE — NOT APPLIED.** Billing plan M4b: `20270109100100_standing_grower_discount.sql` (SQL sha256: `c84bd553b6732631d8c01374a0aac522518167e5506782133631f8afd0bfe90f`). A standing grower discount on chemical-sale invoices: a customer's rate, taken off product lines as one computed "Standing discount" line, per payer, to the cent.
+
+**Restamped 2026-11-16** from `20261231110000` to `20270109100100`, SQL byte-identical (same sha256): applied on staging under the old name, but below main's newest (`20270109100000`), so the release would have refused it (#1868). The staging job renames its ledger row (#1837); live applies it under the new name.
 
 **What it does.**
 - `customers.standing_discount_pct` (0 to 100, default 0) holds the customer's rate. Only an admin sets it (`STANDING_DISCOUNT_ADMIN_ONLY`, on every signed-in path; an anonymous request is refused even through an owner-run function; no user id passes only for a migration, the SQL editor or the service role), as with price tiers and credit limits.

@@ -19,7 +19,7 @@ interface BreakdownLine {
 
 /**
  * A charge line: a typed charge, or, on an invoice that takes charges, an older untyped line with no product.
- * The database agrees: the standing discount's base is product_id set and charge_type null (20261231110000).
+ * The database agrees: the standing discount's base is product_id set and charge_type null (20270109100100).
  */
 export function isChargeLine(line: { product_id?: string | null; charge_type?: string | null }, productlessIsCharge: boolean): boolean {
   return !!line.charge_type || (productlessIsCharge && !line.product_id);

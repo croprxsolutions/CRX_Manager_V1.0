@@ -102,6 +102,11 @@ describe('SaleInvoicesCard', () => {
     expect(within(screen.getByRole('link', { name: /CS-2026-0005-1/ })).getByText('$734.83 due')).toBeInTheDocument();
   });
 
+  it('a fully paid invoice shows no due line', () => {
+    renderCard({ invoices: [{ ...invoices[0], status: 'paid', paidCents: 73483, balanceCents: 0 }] });
+    expect(within(screen.getByRole('link', { name: /CS-2026-0005-1/ })).queryByText(/due$/)).toBeNull();
+  });
+
   it('keeps a share to two decimals', () => {
     renderCard({ invoices: [{ ...invoices[0], sharePct: 33.333333 }] });
     expect(screen.getByText('Maple Hollow Farms · 33.33%')).toBeInTheDocument();

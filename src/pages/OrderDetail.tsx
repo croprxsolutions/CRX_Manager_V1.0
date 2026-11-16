@@ -1444,7 +1444,8 @@ export default function OrderDetail() {
     salesmanName && `Sales: ${salesmanName}`,
   ].filter(Boolean).join(' · ');
   // Delivered share of the products, by value in whole cents.
-  const lineCents = (units: number, price: number) => Math.round(units * price * 100);
+  // toPrecision(12) drops binary-float noise first, so $1.005 × 1 is 101¢, not 100¢ (display only).
+  const lineCents = (units: number, price: number) => Math.round(Number((units * price * 100).toPrecision(12)));
   const orderedValue = items.reduce((sum, i) => sum + lineCents(i.total_units_needed, i.price_per_unit), 0);
   const deliveredValue = items.reduce((sum, i) => sum + lineCents(Math.min(i.quantity_delivered, i.total_units_needed), i.price_per_unit), 0);
   // "All delivered" only when every line is; a rounded percent caps at 99 while anything remains.

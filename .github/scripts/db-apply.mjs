@@ -247,7 +247,8 @@ export function migrationChanges({ toStaging, removedOrEdited, deleted, added, b
     : [];
   // ...and a restamp can't make an ordinary migration record-only either, or live would never run it (attack run, #1837).
   const stem = (f) => f.replace(/\.sql$/, '');
-  const wasShot = (f) => Object.hasOwn(oneShotsBase, stem(f)) || Object.hasOwn(oneShotsHead, stem(f));
+  // What the file was comes from the base branch only: the PR can't vouch for itself (Sol, #1837).
+  const wasShot = (f) => Object.hasOwn(oneShotsBase, stem(f));
   const problems = pairs.flatMap(({ from, to }) => {
     const isShot = Object.hasOwn(oneShotsHead, stem(to));
     if (wasShot(from) && !isShot) return [`${to}: restamps the one-shot ${stem(from)}; add ${stem(to)} to one-shot-migrations.json in this PR, or live would run it`];

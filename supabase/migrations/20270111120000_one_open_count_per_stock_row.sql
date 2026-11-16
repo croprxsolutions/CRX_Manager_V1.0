@@ -16,7 +16,11 @@
 --      never updates either table directly; saving a line (update_cycle_count_item), complete, cancel and reverse are
 --      SECURITY DEFINER RPCs. Without this, an admin's direct write could mark a completed count cancelled with no
 --      reversal, or set a line's stored variance to any number, which Complete then adds to on-hand.
--- The live grants before this file: UPDATE on both tables to authenticated (table level), restored by the rollback.
+--   5. Signed-in users may insert a count line with only the four columns the app sends (cycle_count_id, product_id,
+--      inventory_id, expected_qty); the rest take their defaults (not counted, no variance). A direct insert could
+--      otherwise arrive already counted with any variance. expected_qty is recomputed from on-hand when a line is saved.
+-- The live grants before this file: UPDATE and INSERT on both tables to authenticated (table level), restored by the
+-- rollback.
 -- NOT HERE (left open in KI-160): the three-request count creation in CycleCounts.tsx (a failed create leaves an
 -- empty open count, which Cancel clears).
 --
@@ -118,6 +122,10 @@ REVOKE UPDATE (id, count_number, warehouse, status, notes, initiated_by, started
 REVOKE UPDATE ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
 REVOKE UPDATE (id, cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, variance_pct,
   is_counted, counted_by, counted_at, notes, created_at) ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
+REVOKE INSERT ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
+REVOKE INSERT (id, cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, variance_pct,
+  is_counted, counted_by, counted_at, notes, created_at) ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
+GRANT INSERT (cycle_count_id, product_id, inventory_id, expected_qty) ON public.cycle_count_items TO authenticated;
 
 DO $postflight$
 BEGIN
@@ -135,7 +143,13 @@ BEGIN
      OR has_any_column_privilege('authenticated', 'public.cycle_counts', 'UPDATE')
      OR has_any_column_privilege('anon', 'public.cycle_counts', 'UPDATE')
      OR has_any_column_privilege('authenticated', 'public.cycle_count_items', 'UPDATE')
-     OR has_any_column_privilege('anon', 'public.cycle_count_items', 'UPDATE') THEN
+     OR has_any_column_privilege('anon', 'public.cycle_count_items', 'UPDATE')
+     OR has_any_column_privilege('anon', 'public.cycle_count_items', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.cycle_count_items', 'INSERT')
+     OR has_column_privilege('authenticated', 'public.cycle_count_items', 'variance', 'INSERT')
+     OR has_column_privilege('authenticated', 'public.cycle_count_items', 'is_counted', 'INSERT')
+     OR has_column_privilege('authenticated', 'public.cycle_count_items', 'counted_qty', 'INSERT')
+     OR NOT has_column_privilege('authenticated', 'public.cycle_count_items', 'expected_qty', 'INSERT') THEN
     RAISE EXCEPTION 'POSTFLIGHT_OPEN_COUNTS: the KI-160 guards are not all in place';
   END IF;
 END;

@@ -14,7 +14,8 @@
   and a reversed count cannot be marked completed and reversed twice); signed-in users lose direct
   UPDATE on `cycle_counts` and `cycle_count_items` (the app only uses the save-line, complete, cancel and reverse
   RPCs), so a completed count can no longer be marked cancelled without its reversal, and a line's variance is only
-  ever what the save RPC computed. Plain messages for each refusal.
+  ever what the save RPC computed; a direct line insert may set only the four columns the app sends, so no line
+  arrives already counted. Plain messages for each refusal.
 - Proof: `node scripts/smoke/prove-one-open-count-real-schema.mjs` (ONE_OPEN_COUNT_PROOF_PASS). Rollback:
   `scripts/smoke/one-open-count-reverse.sql` (proven).
 - Not in this change (left open in KI-160): the three-request count creation.

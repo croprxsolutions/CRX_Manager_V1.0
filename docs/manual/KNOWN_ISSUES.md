@@ -1044,7 +1044,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 **Part fix in review:** one in-progress count per warehouse; a stock row on only one item of any in-progress count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
-completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed. **Still open here:** the three-request creation (a failed create leaves an empty open count, which
+completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
 now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
 
 ### KI-161 — Delivery editing does not re-check the edited line against its order line

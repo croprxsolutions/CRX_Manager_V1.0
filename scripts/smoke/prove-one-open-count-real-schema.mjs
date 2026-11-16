@@ -434,12 +434,14 @@ async function main() {
   console.log('[case] P3 two concurrent claims on one stock row from two open counts: exactly one commits, the other is refused');
 
   // P4: completing still works and moves stock once; the sweep still matches. A line's variance is only set by the RPC.
+  refused('P4 admin inserts a counted line with a variance', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, is_counted)
+    VALUES ('${cc1}', '${PRODUCTS.p1}', '${inv(PRODUCTS.p1, NORTH)}', 0, 1000, 1000, true);`, 'permission denied for table cycle_count_items');
   refused('P4 admin sets a line variance directly', `UPDATE public.cycle_count_items SET variance = 20 WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`, 'permission denied for table cycle_count_items');
   save(cc1, PRODUCTS.p1, 95);
   complete(cc1);
   assert.equal(onHand(PRODUCTS.p1), 95, 'P4: counted 95 of 100 -> 95');
   assert.equal(sweepRows(), 'none', 'P4: the count left stock and history in step');
-  console.log('[case] P4 a signed-in admin cannot write a line variance directly; completing a count still works: counted 95 of 100 ends at 95, and stock still matches history');
+  console.log('[case] P4 a signed-in admin cannot insert a counted line or write a line variance directly; completing a count still works: counted 95 of 100 ends at 95, and stock still matches history');
 
   // P5: a closed count never reopens (cancelled or completed); a new count at the warehouse may start.
   refusedAsOwner('P5 reopen completed', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is completed and cannot become in_progress');

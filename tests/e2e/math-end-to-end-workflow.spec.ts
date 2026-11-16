@@ -424,9 +424,12 @@ test.describe.serial('E2E Math: Full Dollar-Tracking Workflow', () => {
       if (footerCents !== null && recalcSubtotal > 0) {
         assertCentsEqual(footerCents, allLines.totalCents, 2,
           'Lines card total should match the sum of its lines');
-        // And against Amount due itself, not only the lines it was summed from.
-        if (invoiceTotal !== null) {
-          assertCentsEqual(footerCents, invoiceTotal, 2, 'Lines card total should match Amount due Invoice total');
+        // And against Amount due itself, not only the lines it was summed from, when the card says "Invoice total"
+        // ("Lines total" means the lines differ from the saved total, e.g. unsaved edits).
+        const footerLabel = ((await page.locator('section[aria-labelledby="invoice-lines-title"]')
+          .getByText(/^(Invoice|Lines) total$/).first().textContent()) ?? '').trim();
+        if (footerLabel === 'Invoice total' && invoiceTotal !== null) {
+          assertCentsEqual(footerCents, invoiceTotal, 2, 'Lines card Invoice total should match Amount due Invoice total');
         }
       }
     }

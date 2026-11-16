@@ -105,13 +105,14 @@ describe('InvoiceAmountDue', () => {
     expect(screen.queryByText('Credit applied')).not.toBeInTheDocument();
   });
 
-  // Sol MED-4: with unsaved edits the total is the saved one, but cost and margin follow the edited lines.
-  it('says cost and margin include unsaved changes while the total is still the saved one', () => {
+  // Sol MED-4: with unsaved edits the total is the saved one, but cost and margin follow the edited lines; the
+  // database's discount and tax lines stay saved until save (Sol round 2), so the note says both.
+  it('says cost and margin include unsaved line edits and that discount and tax update on save', () => {
     const admin = { costCents: 55590, marginCents: 9070, marginPct: 14.0 };
     const { rerender } = render(<InvoiceAmountDue {...base} dirty admin={admin} />);
-    expect(screen.getByText('Cost and margin include your unsaved changes')).toBeInTheDocument();
+    expect(screen.getByText('Cost and margin include your unsaved line edits; discount and tax update when you save.')).toBeInTheDocument();
     rerender(<InvoiceAmountDue {...base} admin={admin} />);
-    expect(screen.queryByText('Cost and margin include your unsaved changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cost and margin include your unsaved line edits; discount and tax update when you save.')).not.toBeInTheDocument();
   });
 
   it('a new invoice has no Paid or Balance due yet', () => {

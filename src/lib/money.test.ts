@@ -315,8 +315,13 @@ describe('quantityTimesDollarsCents', () => {
     expect(quantityTimesDollarsCents(1, 12345678901.23)).toBe(1234567890123);
     expect(quantityTimesDollarsCents('0.3', '0.05')).toBe(2); // 1.5¢ rounds away from zero
   });
-  it('gives 0 for anything that is not a plain decimal', () => {
-    expect(quantityTimesDollarsCents('1e3', 1)).toBe(0);
+  it('reads a number in exponent form exactly', () => {
+    expect(quantityTimesDollarsCents(1e-7, 100000)).toBe(1);
+    expect(quantityTimesDollarsCents('1e3', 1)).toBe(100000);
+  });
+  it('gives 0 for text that is not a number, and NaN past the safe-integer range', () => {
     expect(quantityTimesDollarsCents(Number.NaN, 1)).toBe(0);
+    expect(quantityTimesDollarsCents('abc', 1)).toBe(0);
+    expect(quantityTimesDollarsCents('1', '90071992547409.93')).toBeNaN();
   });
 });

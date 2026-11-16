@@ -76,8 +76,7 @@ BEGIN
            WHERE status='active'
            GROUP BY ingredient_id, scheme,
              (CASE WHEN group_code COLLATE "C" ~ '^[A-Za-z0-9]+$'
-                   THEN replace(regexp_replace(regexp_replace(group_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g'),
-                                                '(^|[^0-9])0+([^0-9]|$)', E'\\1\001\\2', 'g'), chr(1), '0')
+                   THEN regexp_replace(group_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g')
                    ELSE group_code COLLATE "C" END) COLLATE "C"
           HAVING count(*) > 1) c;
   SELECT count(*), COALESCE(sum(cardinality(ids)),0), left(string_agg(parent_id::text || '/' || ingredient_id::text || '/' || scheme || ':' || array_to_string(ids, ','), '; '), 3500)
@@ -87,8 +86,7 @@ BEGIN
            WHERE status='active'
            GROUP BY parent_id, ingredient_id, scheme,
              (CASE WHEN group_code COLLATE "C" ~ '^[A-Za-z0-9]+$'
-                   THEN replace(regexp_replace(regexp_replace(group_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g'),
-                                                '(^|[^0-9])0+([^0-9]|$)', E'\\1\001\\2', 'g'), chr(1), '0')
+                   THEN regexp_replace(group_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g')
                    ELSE group_code COLLATE "C" END) COLLATE "C"
           HAVING count(*) > 1) c;
   IF v_ing_count > 0 OR v_product_count > 0 THEN
@@ -114,11 +112,11 @@ SELECT 'product', count(*)::bigint, md5(COALESCE(string_agg(to_jsonb(m)::text, E
   FROM public.product_parent_modes_of_action m;
 
 -- Comparison-only ASCII key; non-ASCII, punctuation, and whitespace-containing legacy codes remain exact.
+-- One pass suffices: a zero run before a digit is dropped, and an all-zero run backtracks to a single 0.
 CREATE FUNCTION public._moa_group_code_key(p_code text) RETURNS text
 LANGUAGE sql IMMUTABLE STRICT SET search_path = public, pg_temp AS $function$
   SELECT (CASE WHEN p_code COLLATE "C" ~ '^[A-Za-z0-9]+$'
-               THEN replace(regexp_replace(regexp_replace(p_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g'),
-                                            '(^|[^0-9])0+([^0-9]|$)', E'\\1\001\\2', 'g'), chr(1), '0')
+               THEN regexp_replace(p_code COLLATE "C", '(^|[^0-9])0+([0-9])', E'\\1\\2', 'g')
                ELSE p_code COLLATE "C" END) COLLATE "C";
 $function$;
 ALTER FUNCTION public._moa_group_code_key(text) OWNER TO postgres;

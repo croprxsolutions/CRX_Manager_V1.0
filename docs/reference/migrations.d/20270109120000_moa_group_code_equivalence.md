@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `708df3b13c19d0c64951d991d5d62422b7520fdfa1f46c65ddc85a36890f9371`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
 
 Compatibility note: an exact same-code duplicate typed in one product save previously reached the active-row lookup and raised `CHEMISTRY_ROW_EXISTS`; the candidate identifies the duplicate earlier and raises `CHEMISTRY_DUPLICATE_CHANGE`. This intentionally changes the error prefix, while keeping the same codes and refusal outcome. Current `src` has no matcher for either prefix.
 
@@ -62,7 +62,7 @@ BEGIN
   IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._apply_parent_chemistry(uuid,jsonb,text,text,text)'::regprocedure), chr(13), '')) <> '983fe84c21497b64fe328afe11ec9b01' THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: _apply_parent_chemistry body changed';
   END IF;
-  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._moa_group_code_key(text)'::regprocedure), chr(13), '')) <> 'e08977b06c92c1fa0a46a862a1ba8247' THEN
+  IF md5(replace((SELECT prosrc FROM pg_proc WHERE oid = 'public._moa_group_code_key(text)'::regprocedure), chr(13), '')) <> 'cfd63332abd9f542216b555de3015474' THEN
     RAISE EXCEPTION 'MOA_GROUP_EQUIVALENCE_ROLLBACK_REFUSED: _moa_group_code_key body changed';
   END IF;
   IF replace(pg_get_indexdef('public.active_ingredient_modes_of_action_canonical_one_active'::regclass), 'public.', '')

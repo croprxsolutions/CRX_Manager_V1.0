@@ -125,33 +125,27 @@ BEGIN
                 WHERE k NOT IN ('kind', 'adjuvant_types', 'preferred', 'when', 'note')) THEN
       RETURN false;
     END IF;
-    IF jsonb_typeof(e->'kind') IS DISTINCT FROM 'string'
-       OR e->>'kind' NOT IN ('required', 'recommended', 'do_not_use') THEN
-      RETURN false;
-    END IF;
-    IF jsonb_typeof(e->'adjuvant_types') IS DISTINCT FROM 'array'
-       OR jsonb_array_length(e->'adjuvant_types') NOT BETWEEN 1 AND 8 THEN
-      RETURN false;
-    END IF;
+    IF jsonb_typeof(e->'kind') IS DISTINCT FROM 'string' THEN RETURN false; END IF;
+    IF e->>'kind' NOT IN ('required', 'recommended', 'do_not_use') THEN RETURN false; END IF;
+    IF jsonb_typeof(e->'adjuvant_types') IS DISTINCT FROM 'array' THEN RETURN false; END IF;
+    IF jsonb_array_length(e->'adjuvant_types') NOT BETWEEN 1 AND 8 THEN RETURN false; END IF;
     v_types := ARRAY[]::text[];
     FOR t IN SELECT x FROM jsonb_array_elements(e->'adjuvant_types') x LOOP
-      IF jsonb_typeof(t) <> 'string' OR t #>> '{}' = '' OR t #>> '{}' <> btrim(t #>> '{}')
-         OR length(t #>> '{}') > 100 OR lower(t #>> '{}') = ANY (v_types) THEN
+      IF jsonb_typeof(t) <> 'string' THEN RETURN false; END IF;
+      -- non-blank, no space, tab or line break at either end (the editor trims)
+      IF t #>> '{}' !~ '^[^[:space:]](.*[^[:space:]])?$' OR length(t #>> '{}') > 100
+         OR lower(t #>> '{}') = ANY (v_types) THEN
         RETURN false;
       END IF;
       v_types := v_types || lower(t #>> '{}');
     END LOOP;
     IF e ? 'preferred' AND jsonb_typeof(e->'preferred') <> 'null' THEN
-      IF e->>'kind' = 'do_not_use' OR jsonb_typeof(e->'preferred') <> 'string'
-         OR NOT (e->'adjuvant_types' @> jsonb_build_array(e->'preferred')) THEN
-        RETURN false;
-      END IF;
+      IF e->>'kind' = 'do_not_use' OR jsonb_typeof(e->'preferred') <> 'string' THEN RETURN false; END IF;
+      IF NOT (e->'adjuvant_types' @> jsonb_build_array(e->'preferred')) THEN RETURN false; END IF;
     END IF;
     IF e ? 'when' AND jsonb_typeof(e->'when') <> 'null' THEN
-      IF jsonb_typeof(e->'when') <> 'string' OR btrim(e->>'when') = '' OR e->>'when' <> btrim(e->>'when')
-         OR length(e->>'when') > 200 THEN
-        RETURN false;
-      END IF;
+      IF jsonb_typeof(e->'when') <> 'string' THEN RETURN false; END IF;
+      IF e->>'when' !~ '^[^[:space:]](.*[^[:space:]])?$' OR length(e->>'when') > 200 THEN RETURN false; END IF;
     END IF;
     IF e ? 'note' AND jsonb_typeof(e->'note') NOT IN ('string', 'null') THEN RETURN false; END IF;
     IF length(COALESCE(e->>'note', '')) > 500 THEN RETURN false; END IF;
@@ -160,7 +154,7 @@ BEGIN
 END;
 $function$;
 ALTER FUNCTION public._epa_label_adjuvants_valid(jsonb) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._epa_label_adjuvants_valid(jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._epa_label_adjuvants_valid(jsonb) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. The adjuvant save (admins and sales reps)
@@ -191,7 +185,7 @@ BEGIN
   IF NOT public._epa_registrations_seeded() THEN
     RAISE EXCEPTION 'EPA_REGISTRATION_NOT_SEEDED: EPA registrations are not set up yet';
   END IF;
-  IF COALESCE(length(btrim(p_reason)), 0) = 0 THEN
+  IF p_reason IS NULL OR p_reason !~ '[^[:space:]]' THEN  -- tabs and line breaks are blank too
     RAISE EXCEPTION 'EPA_REGISTRATION_REASON_REQUIRED: say why this registration is changing';
   END IF;
   IF length(p_reason) > 1000 THEN
@@ -242,7 +236,7 @@ END;
 $function$;
 
 ALTER FUNCTION public.set_registration_adjuvants(text, bigint, jsonb, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.set_registration_adjuvants(text, bigint, jsonb, text, text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.set_registration_adjuvants(text, bigint, jsonb, text, text) FROM PUBLIC, anon, authenticated, service_role, metabase_ro;
 GRANT EXECUTE ON FUNCTION public.set_registration_adjuvants(text, bigint, jsonb, text, text) TO authenticated;
 
 DO $postflight$
@@ -252,6 +246,8 @@ BEGIN
   IF NOT has_function_privilege('authenticated', 'public.set_registration_adjuvants(text,bigint,jsonb,text,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.set_registration_adjuvants(text,bigint,jsonb,text,text)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public.set_registration_adjuvants(text,bigint,jsonb,text,text)', 'EXECUTE')
+     OR has_function_privilege('metabase_ro', 'public.set_registration_adjuvants(text,bigint,jsonb,text,text)', 'EXECUTE')
+     OR has_function_privilege('metabase_ro', 'public._epa_label_adjuvants_valid(jsonb)', 'EXECUTE')
      OR NOT EXISTS (SELECT 1 FROM pg_proc p
                      WHERE p.oid = 'public.set_registration_adjuvants(text,bigint,jsonb,text,text)'::regprocedure
                        AND p.prosecdef AND p.proowner = 'postgres'::regrole

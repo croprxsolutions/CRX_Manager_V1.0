@@ -389,6 +389,7 @@ function case4() {
   refused(REP, SAVE(EPA1, v, LABEL, 'x', ' '), /IDEMPOTENCY_KEY_REQUIRED/);
   refused(REP, SAVE(EPA1, v, LABEL, ' '), /EPA_REGISTRATION_REASON_REQUIRED/);
   refused(REP, SAVE(EPA1, v, LABEL, null), /EPA_REGISTRATION_REASON_REQUIRED/);
+  refused(REP, SAVE(EPA1, v, LABEL, '\t\n'), /EPA_REGISTRATION_REASON_REQUIRED/);
   refused(REP, SAVE(EPA1, v, LABEL, 'x'.repeat(1001)), /EPA_REGISTRATION_REASON_TOO_LONG/);
   refused(REP, SAVE('abc', null, LABEL), /EPA_REGISTRATION_NUMBER_INVALID/);
   refused(REP, SAVE(EPA1, v - 1, LABEL), /EPA_REGISTRATION_STALE: EPA registration 100-9001 changed since you opened it/);
@@ -402,6 +403,10 @@ function case4() {
     [{ kind: 'required', adjuvant_types: 'NIS' }],
     [{ kind: 'required', adjuvant_types: ['NIS', 'nis'] }],
     [{ kind: 'required', adjuvant_types: [' NIS'] }],
+    [{ kind: 'required', adjuvant_types: ['NIS\t'] }],
+    [{ kind: 'required', adjuvant_types: ['\n'] }],
+    [{ kind: 'required', adjuvant_types: ['MSO'], when: '\t' }],
+    [{ kind: 5, adjuvant_types: ['MSO'] }],
     [{ kind: 'required', adjuvant_types: [''] }],
     [{ kind: 'required', adjuvant_types: [5] }],
     [{ kind: 'required', adjuvant_types: ['x'.repeat(101)] }],

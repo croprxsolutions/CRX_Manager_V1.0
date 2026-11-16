@@ -56,31 +56,35 @@ export default function LabelAdjuvants({ epaRegistration, row, lookup, canEdit, 
   const [editing, setEditing] = useState(false);
   const number = normalizeEpaRegistration(epaRegistration);
   if (!number || !/^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$/.test(number)) return null;
-  if (lookup === 'checking') return null;
-  if (lookup === 'failed') return <p className="text-xs text-amber-700">Couldn&apos;t check the label; reload</p>;
-
-  // No registration stored: nothing to show; editors still get the button (the save creates it).
-  if (!row && !canEdit) return null;
-  const list = row?.label_adjuvants;
-  return (
-    <div className="text-sm">
-      {row && list === null && <p className="text-secondary">Label adjuvants: not reviewed</p>}
-      {row && list?.length === 0 && <p className="text-secondary">Label adjuvants: none on the label</p>}
-      {list && list.length > 0 && (
-        <div>
-          <p className="text-xs font-medium text-secondary">Label adjuvants</p>
-          <LabelAdjuvantLines list={list} />
-        </div>
-      )}
-      {canEdit && (
-        <button type="button" onClick={() => setEditing(true)} className="mt-0.5 text-xs font-medium text-crx-green hover:underline">
-          Edit adjuvants
-        </button>
-      )}
-      {editing && (
-        <LabelAdjuvantsModal epaRegistration={number} row={row} profileId={profileId}
-          onSaved={onSaved} onClose={() => setEditing(false)} />
-      )}
-    </div>
+  // The editor stays open while the page re-reads (after a save someone else beat), so a draft is never lost.
+  const editor = editing && (
+    <LabelAdjuvantsModal epaRegistration={number} row={row} profileId={profileId}
+      onSaved={onSaved} onClose={() => setEditing(false)} />
   );
+  const list = row?.label_adjuvants;
+  let content = null;
+  if (lookup === 'failed') content = <p className="text-xs text-amber-700">Couldn&apos;t check the label; reload</p>;
+  else if (lookup === 'done') {
+    content = (
+      <>
+        {row && list === null && <p className="text-secondary">Label adjuvants: not reviewed</p>}
+        {row && list?.length === 0 && <p className="text-secondary">Label adjuvants: none on the label</p>}
+        {list && list.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-secondary">Label adjuvants</p>
+            <LabelAdjuvantLines list={list} />
+          </div>
+        )}
+        {/* With no registration stored, editors still get the button: the save creates it. */}
+        {canEdit && (
+          <button type="button" onClick={() => setEditing(true)} className="mt-0.5 text-xs font-medium text-crx-green hover:underline">
+            Edit adjuvants
+          </button>
+        )}
+      </>
+    );
+  }
+  if (!editor && (lookup === 'checking' || (lookup === 'done' && !row && !canEdit))) return null;
+  // Same tree shape in every state, so the editor is never remounted.
+  return <div className="text-sm">{content}{editor}</div>;
 }

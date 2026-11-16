@@ -86,6 +86,15 @@ async function openEditor(r: RegistrationRow | undefined, onSaved = vi.fn()) {
 const saveButton = () => screen.getByRole('button', { name: 'Save' });
 
 describe('LabelAdjuvantsModal', () => {
+  it('the open editor (and its draft) survives the page re-reading the registrations', async () => {
+    const view = render(<LabelAdjuvants epaRegistration="264-849" row={row()} lookup="done" canEdit profileId="u1" onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit adjuvants' }));
+    fireEvent.change(await screen.findByLabelText('Why'), { target: { value: 'typed draft' } });
+    view.rerender(<LabelAdjuvants epaRegistration="264-849" row={undefined} lookup="checking" canEdit profileId="u1" onSaved={vi.fn()} />);
+    view.rerender(<LabelAdjuvants epaRegistration="264-849" row={row({ registration_version: 5 })} lookup="done" canEdit profileId="u1" onSaved={vi.fn()} />);
+    expect(screen.getByLabelText('Why')).toHaveValue('typed draft');
+  });
+
   it('saves the statement with the loaded version, a reason and a key, then re-reads', async () => {
     const onSaved = vi.fn();
     H.rpc.mockResolvedValue(receipt);

@@ -1,4 +1,5 @@
 import { toSentryError } from '../lib/sentryError';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2 } from 'lucide-react';
@@ -1100,33 +1101,36 @@ export default function SettingsPage() {
       ) : !settingsLoaded ? null : (
       <>
       <SettingsSection id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
-        <SubPart
-          title="Sales tax"
-          help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
-          dirty={isDirty('salesTax')}
-          saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
-        >
-          <Row label="Sales tax rate" htmlFor="sales-tax-rate">
-            <span className="inline-flex rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
-              <input
-                id="sales-tax-rate"
-                type="text"
-                inputMode="decimal"
-                value={salesTaxRate}
-                disabled={savingSalesTax}
-                onChange={(e) => setSalesTaxRate(e.target.value)}
-                className="h-9 min-h-11 w-24 rounded-l-lg bg-transparent px-3 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:text-gray-500 md:min-h-0"
-              />
-              <span className="flex items-center rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">%</span>
-            </span>
-            {/* What the typed rate means before it is saved: tax on $100.00, rounded to the cent as the server rounds it. */}
-            {SALES_TAX_RATE_PATTERN.test(salesTaxRate.trim()) && (
-              <p className="rounded-lg bg-cream px-3 py-1.5 text-[13px] text-secondary">
-                Example: a $100.00 taxed sale adds <strong className="font-semibold text-nav-dark">{formatCents(centsTimesQuantity(100, salesTaxRate.trim()))}</strong>
-              </p>
-            )}
-          </Row>
-        </SubPart>
+        {/* Off on live until commission ships (billingM4Enabled). */}
+        {billingM4Enabled() && (
+          <SubPart
+            title="Sales tax"
+            help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
+            dirty={isDirty('salesTax')}
+            saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
+          >
+            <Row label="Sales tax rate" htmlFor="sales-tax-rate">
+              <span className="inline-flex rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
+                <input
+                  id="sales-tax-rate"
+                  type="text"
+                  inputMode="decimal"
+                  value={salesTaxRate}
+                  disabled={savingSalesTax}
+                  onChange={(e) => setSalesTaxRate(e.target.value)}
+                  className="h-9 min-h-11 w-24 rounded-l-lg bg-transparent px-3 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:text-gray-500 md:min-h-0"
+                />
+                <span className="flex items-center rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">%</span>
+              </span>
+              {/* What the typed rate means before it is saved: tax on $100.00, rounded to the cent as the server rounds it. */}
+              {SALES_TAX_RATE_PATTERN.test(salesTaxRate.trim()) && (
+                <p className="rounded-lg bg-cream px-3 py-1.5 text-[13px] text-secondary">
+                  Example: a $100.00 taxed sale adds <strong className="font-semibold text-nav-dark">{formatCents(centsTimesQuantity(100, salesTaxRate.trim()))}</strong>
+                </p>
+              )}
+            </Row>
+          </SubPart>
+        )}
 
         {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
         <SubPart

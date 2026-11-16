@@ -7,12 +7,12 @@ live, so Mason's restamp (byte-identical SQL, newer stamp) was refused as "DELET
 (#1898, the three billing migrations).
 
 - A deleted migration is exempt only as an exact restamp pair: one added file with the same git blob, the
-  same name after the stamp and a newer stamp, several pairs in the same order, and the old file **not on
-  `origin/main`** (what live runs). Each exemption is printed (`↻ restamp of a migration not on main`).
+  same name after the stamp and a newer stamp, several pairs in the same order, and the old file **never in
+  `origin/main`'s history** (what live runs; a git error counts as on main). Each exemption is printed (`↻ restamp of a migration not on main`).
 - No readable `origin/main` means no exemption (fail closed). A file on main, changed bytes, another name or
   an older stamp is refused as before. The staging job renames the ledger row (#1837); `db-apply.mjs
   stamp-check` applies its own restamp rules on top.
 
-**Tested:** five new fixture scenarios (pass, on main, changed bytes, another name, older stamp), 103
-assertions. Against the real repo: #1898's restamp now passes with three exemptions printed (the old script
+**Tested:** seven new fixture scenarios (pass, on main, once on main then removed, no origin/main, changed
+bytes, another name, older stamp), 106 assertions. Against the real repo: #1898's restamp now passes with three exemptions printed (the old script
 fails it), and a restamp of live's `20270106110000_invoice_brands_rup` is still refused.

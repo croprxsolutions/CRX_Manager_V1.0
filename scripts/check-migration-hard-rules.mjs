@@ -46,7 +46,8 @@
 //   On staging a migration can sit below the high-water above without being live: it waits on staging
 //   while main (and live) moves past its stamp. Mason's restamp (ship.md, 2026-11-04) then moves it to a
 //   newer stamp with byte-identical SQL. That deletion is not an edit of an applied migration when the old
-//   file is not on origin/main (main is what live runs; the staging job renames its ledger row, #1837).
+//   file never appears in origin/main's history (main is what live runs; the staging job renames its ledger
+//   row, #1837). A git error while checking main counts as "on main".
 //   Only an exact pair counts: one deleted and one added file, the same git blob, the same name after the
 //   stamp, a newer stamp, and several pairs in the same order. Without a readable origin/main nothing is
 //   exempt (fail closed). Each exemption is printed.
@@ -246,17 +247,16 @@ export function parseNameStatus(raw) {
 
 /**
  * Deleted migrations that are byte-identical restamps of a file not on main.
- * deleted/added: migration paths; blob(ref, path): git blob id or null; mainRef: commit or null.
- * Returns [{ from, to }].
+ * deleted/added: migration paths; blob(ref, path): git blob id or null; everOnMain(path): true when the
+ * file appears anywhere in main's history, or when that can't be read. Returns [{ from, to }].
  */
-export function stagingOnlyRestamps({ deleted, added, blob, base, head, mainRef }) {
-  if (!mainRef) return [];
+export function stagingOnlyRestamps({ deleted, added, blob, base, head, everOnMain }) {
   const name = (p) => path.posix.basename(p);
   const slug = (p) => name(p).slice(15);
   const stamp = (p) => migrationVersion(p);
   const pairs = [];
   for (const from of deleted) {
-    if (!stamp(from) || blob(mainRef, from) !== null) continue;
+    if (!stamp(from) || everOnMain(from)) continue;
     const b = blob(base, from);
     if (!b) continue;
     const to = added.filter((a) => stamp(a) && slug(a) === slug(from) && stamp(a) > stamp(from) && blob(head, a) === b);
@@ -328,7 +328,12 @@ export function runDiffCheck({ repoRoot, base, head: headRef, log = console.log 
   const blob = (ref, relPath) => { try { return git(repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}:${relPath}`]).trim() || null; } catch { return null; } };
   const restamps = stagingOnlyRestamps({
     deleted: classified.protectedChanges.filter((c) => c.status === 'D').map((c) => c.path),
-    added, blob, base: mergeBase, head, mainRef: resolveCommit(repoRoot, 'origin/main'),
+    added, blob, base: mergeBase, head, everOnMain: (relPath) => {
+      // Fail closed: no origin/main, or any git error, counts as "on main".
+      const main = resolveCommit(repoRoot, 'origin/main');
+      if (!main) return true;
+      try { return git(repoRoot, ['log', '-1', '--format=%H', main, '--', relPath]).trim() !== ''; } catch { return true; }
+    },
   });
   const restamped = new Set(restamps.map((r) => r.from));
   const protectedChanges = classified.protectedChanges.filter((c) => !(c.status === 'D' && restamped.has(c.path)));

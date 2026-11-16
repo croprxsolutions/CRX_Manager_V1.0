@@ -339,6 +339,25 @@ scenarios.push(['a restamp of a file that is on main still fails', (dir) => {
   eq(result.status, 1, 'exit 1');
   ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'still a deletion');
 }]);
+scenarios.push(['a restamp of a file that was once on main (later removed) still fails', (dir) => {
+  const base = seedBase(dir);
+  rmSync(path.join(dir, APPLIED));
+  const removed = commitAll(dir, 'main removes it');
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', removed]);
+  sh(dir, ['checkout', '-q', base]);
+  rmSync(path.join(dir, APPLIED));
+  write(dir, RESTAMPED, GOOD);
+  const head = commitAll(dir, 'restamp');
+  const result = runCli(dir, base, head);
+  eq(result.status, 1, 'exit 1');
+  ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'in main history counts as on main');
+}]);
+scenarios.push(['no origin/main: a restamp is not exempt (fail closed)', (dir) => {
+  const base = seedBase(dir);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  eq(runCli(dir, base, head).status, 1, 'exit 1');
+}]);
 scenarios.push(['a restamp with changed bytes, another name or an older stamp still fails', (dir) => {
   eq(restampScenario(dir, { onMain: false, bytes: `${GOOD}\n-- changed\n` }).status, 1, 'changed bytes');
 }]);

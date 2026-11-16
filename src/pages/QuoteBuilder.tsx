@@ -2143,7 +2143,7 @@ export default function QuoteBuilder() {
     );
   };
 
-  // Decision 4: a line with a product or a quantity asks first; a blank line goes at once.
+  // Decision 4: a line with a product, a quantity or any other entered value asks first; an untouched line goes at once.
   const requestRemoveItem = (sectionKey: string, item: LocalItem) => {
     if (lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed, edited: hasUserEnteredItemValues(item) })) {
       setRemoveLineTarget({ sectionKey, itemKey: item._key });

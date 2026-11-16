@@ -40,7 +40,13 @@ export default function Tabs({
       else if (right > list.scrollLeft + list.clientWidth) list.scrollTo({ left: right - list.clientWidth + pad, behavior: 'smooth' });
     };
     reveal();
-    // The bar can shrink (window resize, rotate) while the same tab stays active.
+    // The bar can shrink (window resize, rotate, a sidebar opening) while the same tab stays active.
+    const list = tabListRef.current;
+    if (list && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(reveal);
+      observer.observe(list);
+      return () => observer.disconnect();
+    }
     window.addEventListener('resize', reveal);
     return () => window.removeEventListener('resize', reveal);
   }, [activeKey]);

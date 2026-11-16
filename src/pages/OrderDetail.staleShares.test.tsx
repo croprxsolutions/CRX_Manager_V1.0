@@ -48,16 +48,17 @@ vi.mock('../components/customers/CustomerSearchPicker', () => ({
 import OrderDetail from '../pages/OrderDetail';
 
 // A query answered from what was asked, when it is awaited. Deletes are recorded with their filters.
-function answerChain(table: string, answer: (calls: string[]) => { data: unknown; error: unknown; count?: number }): Record<string, unknown> {
+function answerChain(table: string, answer: (calls: string[], eqs: unknown[][]) => { data: unknown; error: unknown; count?: number }): Record<string, unknown> {
   const calls: string[] = [];
-  const eqs: unknown[] = [];
+  const eqs: unknown[][] = [];
   const self: Record<string, unknown> = {};
   for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'range', 'maybeSingle', 'single']) {
     self[m] = (...args: unknown[]) => { calls.push(m); if (m === 'eq') eqs.push(args); return self; };
   }
-  self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => (table === 'order_shares' && current === saleB && !calls.includes('delete') ? held : Promise.resolve()).then(() => {
+  // Each read is answered for the order it asked about (its eq filter), not for whatever sale is on screen when it lands.
+  self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => (table === 'order_shares' && !calls.includes('delete') && askedFor(eqs) === holdFor ? held : Promise.resolve()).then(() => {
     if (calls.includes('delete')) deletes.push([table, ...eqs]);
-    return answer(calls);
+    return answer(calls, eqs);
   }).then(ok, bad);
   return self;
 }
@@ -72,9 +73,15 @@ const saleB: Sale = { id: 'ord-b', number: 'ORD-0102', shares: [share('s-b', 'or
 let current: Sale = saleA;
 let release: () => void = () => {};
 let held: Promise<void> = Promise.resolve();
+let holdFor: string | null = null; // the order whose order_shares read is held back
+const sales = () => [saleA, saleB];
+function askedFor(eqs: unknown[][]): string | undefined {
+  return eqs.map((e) => e[1]).find((v): v is string => typeof v === 'string' && sales().some((sale) => sale.id === v));
+}
 function mockSale() {
-  mockFrom.mockImplementation((table: string) => answerChain(table, (calls) => {
-    const sale = current;
+  mockFrom.mockImplementation((table: string) => answerChain(table, (calls, eqs) => {
+    const asked = askedFor(eqs);
+    const sale = sales().find((x) => x.id === asked) ?? current;
     if (table === 'orders') {
       return { data: { id: sale.id, order_number: sale.number, status: 'confirmed', customer_id: 'cust-1', row_version: 1,
         order_date: '2026-03-15', total_price: 1000, notes: '', created_at: '2026-03-15T00:00:00Z', ...(sale.status && { status: sale.status }) }, error: null };
@@ -107,12 +114,13 @@ async function moveTo(sale: Sale) {
 }
 
 describe('Who pays across sales', () => {
-  beforeEach(() => { vi.clearAllMocks(); deletes.length = 0; });
+  beforeEach(() => { vi.clearAllMocks(); deletes.length = 0; holdFor = null; });
 
   it('while sale B is still loading its payers, the card under B shows none of sale A\'s payers and nothing is deleted', async () => {
     renderSale(saleA);
     expect(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' })).toBeInTheDocument();
     held = new Promise<void>((r) => { release = r; });
+    holdFor = saleB.id;
     await moveTo(saleB); // B's heading is on screen; its order_shares read has not answered yet
     const stale = screen.queryByRole('button', { name: 'Remove Cedar Ridge Ag' });
     const shownUnderB = !!stale;
@@ -130,6 +138,7 @@ describe('Who pays across sales', () => {
     renderSale(saleA);
     expect(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' })).toBeInTheDocument();
     held = new Promise<void>((r) => { release = r; });
+    holdFor = saleB.id;
     await moveTo(saleB);
     const stale = screen.queryByRole('button', { name: 'Remove Cedar Ridge Ag' });
     if (stale) fireEvent.click(stale);
@@ -138,5 +147,31 @@ describe('Who pays across sales', () => {
     const confirm = screen.queryByRole('button', { name: 'Remove payer' });
     if (confirm) { fireEvent.click(confirm); await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); }
     expect(deletes).toEqual([]);
+  });
+
+  it("a late reply for sale A, landing after sale B has loaded, never puts A's payers on B", async () => {
+    held = new Promise<void>((r) => { release = r; });
+    holdFor = saleA.id; // A's payers read is still out when the user moves to B
+    renderSale(saleA);
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); // A's load is waiting on its payers
+    holdFor = null;
+    await moveTo(saleB);
+    expect(await screen.findByRole('button', { name: 'Remove Birch Lane Co' })).toBeInTheDocument();
+    release(); // A's reply arrives now
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.getByRole('button', { name: 'Remove Birch Lane Co' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove Cedar Ridge Ag' })).not.toBeInTheDocument();
+  });
+
+  it('a Remove confirm left open for a payer that is no longer on the sale deletes nothing', async () => {
+    renderSale(saleA);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' }));
+    expect(await screen.findByRole('button', { name: 'Remove payer' })).toBeInTheDocument();
+    saleA.shares = []; // e.g. removed in another tab; the next read no longer has it
+    await moveTo(saleB);
+    const confirm = screen.queryByRole('button', { name: 'Remove payer' });
+    if (confirm) { fireEvent.click(confirm); await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); }
+    expect(deletes).toEqual([]);
+    saleA.shares = [share('s-a', 'ord-a', 'cust-2', 'Cedar Ridge Ag', 35)];
   });
 });

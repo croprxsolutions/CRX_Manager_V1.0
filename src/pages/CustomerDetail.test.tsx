@@ -117,8 +117,10 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 // empty recipient, and saving is blocked until it is filled. A `<div />` mock
 // hides that, so the create-route tests below need a way to fill it in.
 vi.mock('../components/ui/CommissionSplitEditor', () => ({
-  default: ({ value, onChange }: { value?: { splits?: { recipient: string; percentage: number }[] }; onChange: (v: { splits: { recipient: string; percentage: number }[] }) => void }) => (
+  default: ({ value, onChange, disabled }: { value?: { splits?: { recipient: string; percentage: number }[] }; onChange: (v: { splits: { recipient: string; percentage: number }[] }) => void; disabled?: boolean }) => (
     <input
+      // The real editor's recipient Dropdown ignores the disabled fieldset, so the page must pass `disabled`.
+      data-locked={disabled ? 'true' : 'false'}
       aria-label="commission recipient"
       value={value?.splits?.[0]?.recipient ?? ''}
       onChange={(e) => onChange({ splits: [{ recipient: e.target.value, percentage: 100 }] })}
@@ -952,6 +954,25 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(screen.getByLabelText('Price tier')).toBeEnabled();
     expect(screen.getByLabelText('Credit limit')).toBeEnabled();
     expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
+  });
+
+  it('locks the commission split editor while a save runs', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    let releaseSave!: (value: { data: unknown; error: unknown }) => void;
+    mockRpc.mockImplementation(() => new Promise((resolve) => { releaseSave = resolve; }));
+    renderDetail();
+    fireEvent.change(await screen.findByDisplayValue('Original Farm'), { target: { value: 'Edited Farm' } });
+    expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'true');
+
+    await act(async () => { releaseSave({ data: { customer_id: 'customer-1', row_version: 5 }, error: null }); });
+    await waitFor(() => expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'false'));
   });
 
   it('restores the create-form defaults on that jump, not an empty form', async () => {

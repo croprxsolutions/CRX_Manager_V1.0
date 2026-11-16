@@ -66,7 +66,7 @@ describe('WhoPaysCard', () => {
     const onRemove = vi.fn();
     render(<WhoPaysCard {...base} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Remove Cedar Ridge Ag' }));
-    const dialog = screen.getByRole('dialog', { name: 'Remove Cedar Ridge Ag?' });
+    const dialog = screen.getByRole('alertdialog', { name: 'Remove Cedar Ridge Ag?' });
     expect(within(dialog).getByText('Their 35% goes back to Maple Hollow Farms, the main customer.')).toBeInTheDocument();
     const buttons = within(dialog).getAllByRole('button').map((b) => b.textContent?.trim()).filter((t) => t === 'Keep payer' || t === 'Remove payer');
     expect(buttons).toEqual(['Keep payer', 'Remove payer']);

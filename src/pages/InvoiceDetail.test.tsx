@@ -2359,7 +2359,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
       fireEvent.change(screen.getByPlaceholderText('Customer PO #'), { target: { value: '' } });
       fireEvent.click(post);
-      expect(await screen.findByRole('dialog', { name: 'Post this invoice?' })).toBeInTheDocument();
+      expect(await screen.findByRole('alertdialog', { name: 'Post this invoice?' })).toBeInTheDocument();
     });
   }
 
@@ -2379,7 +2379,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     expect(await screen.findByText('Write-off form')).toBeInTheDocument();
     openMore();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Unpost…' }));
-    expect(await screen.findByRole('dialog', { name: 'Unpost Invoice' })).toBeInTheDocument();
+    expect(await screen.findByRole('alertdialog', { name: 'Unpost Invoice' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     openMore();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Apply credit…' }));
@@ -2420,7 +2420,7 @@ describe('InvoiceDetail — one main action per status, same actions and people 
     openMore();
     expect(menuNames()).toEqual(['Transfer to scheduling…']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Transfer to scheduling…' }));
-    expect(await screen.findByRole('dialog', { name: 'Transfer this invoice to scheduling?' })).toBeInTheDocument();
+    expect(await screen.findByRole('alertdialog', { name: 'Transfer this invoice to scheduling?' })).toBeInTheDocument();
   });
 
   describe('what this invoice bills', () => {

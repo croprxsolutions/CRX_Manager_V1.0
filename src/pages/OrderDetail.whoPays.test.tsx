@@ -112,10 +112,10 @@ describe('Who pays across sales', () => {
   it('a Remove dialog opened on one sale closes when the page moves to the next, so it cannot delete the first sale\'s payer', async () => {
     renderSale(saleA);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Cedar Ridge Ag' }));
-    expect(screen.getByRole('dialog', { name: 'Remove Cedar Ridge Ag?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Remove Cedar Ridge Ag?' })).toBeInTheDocument();
     await moveTo(saleB);
     expect(await screen.findByRole('button', { name: 'Remove Birch Lane Co' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove payer' })).not.toBeInTheDocument();
     expect(deletes).toEqual([]);
   });

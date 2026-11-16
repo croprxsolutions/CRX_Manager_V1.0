@@ -1,7 +1,8 @@
-import { useState, useMemo, useSyncExternalStore, type ReactNode } from 'react';
-import { Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { useState, useMemo, type ReactNode } from 'react';
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown } from 'lucide-react';
 import EmptyState, { LoadFailedState } from './EmptyState';
 import { applyTableSearchSort, type SortDir } from '../../lib/tableSearchSort';
+import { useIsPhone } from '../../hooks/useIsPhone';
 
 export interface Column<T> {
   key: string;
@@ -18,6 +19,8 @@ interface DataTableProps<T> {
   columns: Column<T>[];
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** A shorter placeholder for the phone layout (needs mobileRow). The search box's accessible name stays searchPlaceholder. */
+  phoneSearchPlaceholder?: string;
   searchKeys?: string[];
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
@@ -48,26 +51,14 @@ interface DataTableProps<T> {
   mobileRow?: (row: T) => ReactNode;
   /** The rows arrive already searched and sorted (a database page): show them as given. */
   serverSide?: boolean;
+  /** false: the page renders its own phone sort control (with controlled sortState), so the table shows no sort select. */
+  phoneSort?: boolean;
 }
 
-const PHONE_QUERY = '(max-width: 767px)';
-const subscribePhone = (onChange: () => void) => {
-  if (typeof window.matchMedia !== 'function') return () => {};
-  const query = window.matchMedia(PHONE_QUERY);
-  // Safari before 14 has only the older addListener/removeListener.
-  if (typeof query.addEventListener !== 'function') {
-    query.addListener(onChange);
-    return () => query.removeListener(onChange);
-  }
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-};
-// One layout at a time, so a long list is never rendered twice. No matchMedia (tests) = desktop.
-const isPhoneNow = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
-
+// One layout at a time, so a long list is never rendered twice.
 /** The phone row renderer while the screen is phone-width, and the columns its sort select offers. */
 function usePhoneLayout<T>(mobileRow: ((row: T) => ReactNode) | undefined, columns: Column<T>[]) {
-  const isPhone = useSyncExternalStore(subscribePhone, isPhoneNow, () => false);
+  const isPhone = useIsPhone();
   const phoneRow = isPhone ? mobileRow : undefined;
   return { phoneRow, sortableColumns: phoneRow ? columns.filter((col) => col.sortable) : [] };
 }
@@ -82,6 +73,7 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
 }) {
   if (columns.length === 0) return null;
   return (
+    <div className="relative">
     <select
       value={sortKey ? `${sortKey}:${sortDir}` : ''}
       onChange={(e) => {
@@ -89,7 +81,7 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
         onChange(key ? { key, dir: dir as SortDir } : { key: null, dir: 'asc' });
       }}
       aria-label="Sort by"
-      className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
+      className="w-full h-11 pl-3 pr-10 text-base text-nav-dark bg-white border border-gray-300 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
     >
       <option value="">Sort: as listed</option>
       {columns.flatMap((col) => {
@@ -100,8 +92,15 @@ function PhoneSortSelect<T extends Record<string, any>>({ columns, sortKey, sort
         ];
       })}
     </select>
+    <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+    </div>
   );
 }
+
+// The phone layout may use a shorter placeholder; kept out of DataTable for its complexity budget.
+const searchPlaceholderFor = (phone: boolean, short: string | undefined, full: string) => (phone && short) || full;
+// false: the page draws its own phone sort control, so the table offers no sort columns.
+const phoneSortColumnsFor = <C,>(phoneSort: boolean, columns: C[]): C[] => (phoneSort ? columns : []);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function DataTable<T extends Record<string, any>>({
@@ -109,6 +108,7 @@ export default function DataTable<T extends Record<string, any>>({
   columns,
   searchable,
   searchPlaceholder = 'Search...',
+  phoneSearchPlaceholder,
   searchKeys = [],
   onRowClick,
   emptyTitle = 'No data found',
@@ -125,8 +125,10 @@ export default function DataTable<T extends Record<string, any>>({
   onSortChange,
   mobileRow,
   serverSide,
+  phoneSort = true,
 }: DataTableProps<T>) {
-  const { phoneRow, sortableColumns } = usePhoneLayout(mobileRow, columns);
+  const { phoneRow, sortableColumns: phoneSortColumns } = usePhoneLayout(mobileRow, columns);
+  const sortableColumns = phoneSortColumnsFor(phoneSort, phoneSortColumns);
   // Internal fallback state — used only when the caller doesn't control it.
   const [searchInner, setSearchInner] = useState('');
   const [sortKeyInner, setSortKeyInner] = useState<string | null>(null);
@@ -172,7 +174,7 @@ export default function DataTable<T extends Record<string, any>>({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={searchPlaceholder}
+                placeholder={searchPlaceholderFor(!!phoneRow, phoneSearchPlaceholder, searchPlaceholder)}
                 aria-label={searchPlaceholder}
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg
                   focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green

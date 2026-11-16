@@ -441,6 +441,9 @@ export default function OrderDetail() {
     setConflictDialogOpen(false);
     setEditRowVersion(null);
     loadedDraftRef.current = { items: [], rowVersion: null };
+    // A payer picked on one sale must not be one click from being added to the next.
+    setNewShareCustomerId('');
+    setNewShareCustomerName('');
   }, [id]);
 
   // Kept apart from the reset above: fetchOrder is also rebuilt when the signed-in role
@@ -1005,7 +1008,10 @@ export default function OrderDetail() {
     }
     // The picked customer's name, kept from the search picker.
     const farmName = newShareCustomerName;
-    if (!farmName) return false;
+    if (!farmName) {
+      toast('error', 'That customer has no farm name, so it cannot be added as a payer. Add the name on the customer first.');
+      return false;
+    }
 
     setSavingShares(true);
     let saved = false;
@@ -1360,9 +1366,6 @@ export default function OrderDetail() {
   const splitLock = billSplitLock(invoices, deliveries);
   const sharesLocked = !!splitLock;
   const linesWithOwnSplit = new Set(lineShares.map((ls) => ls.order_item_id));
-  // Each card payer's live amount, the main customer with whatever is left, as the split writer bills it.
-  const cardLive = cardLiveCents(items, linesWithOwnSplit,
-    shares.map((sh) => ({ customer_id: sh.customer_id, pct: sh.split_percentage })), order?.customer_id ?? '');
   // The split editors follow the lock, not the delivery status: a split the database refused to bill stays open.
   const canEditSplit = canEditBillSplit(role, order?.status);
   // Why Who pays is locked, in the card's words, linking the delivery or invoice that locks it.
@@ -1382,6 +1385,8 @@ export default function OrderDetail() {
   })();
 
   const canPostInvoices = role === 'admin' || role === 'sales_rep';
+  // A fully delivered sale split by field, not yet billed: Create split invoices bills it (see the button below).
+  const splitInvoicesReady = hasAllocations && order.status === 'fulfilled' && !hasActiveInvoice && !hasPendingDelivery;
   // Who each invoice bills, and the payer's share of the card when every line follows it.
   const payerName = (customerId: string) =>
     (customerId === order.customer_id ? customer?.farm_name : undefined)
@@ -1394,15 +1399,27 @@ export default function OrderDetail() {
     return Math.round(own.reduce((a, p) => a + p, left) * 100) / 100;
   };
   const showSharePct = shares.length > 0 && linesWithOwnSplit.size === 0 && !hasAllocations;
+  // The card bills a split group as it is only while the group was made from it: no share on the card is newer than
+  // the group's invoices, and the group bills exactly the card's payers. Shares are only added or removed, never
+  // edited, so a split that moved since leaves one of those marks; the row then shows no share rather than today's.
+  const cardPayers = new Set([...shares.map((sh) => sh.customer_id),
+    ...(sharesLeft(shares.map((sh) => sh.split_percentage)) > 0 ? [order.customer_id] : [])]);
+  const billedAtCard = (groupId: string) => {
+    const group = invoices.filter((i) => i.invoice_group_id === groupId);
+    const billedAt = Math.min(...group.map((i) => Date.parse(i.created_at)));
+    const payers = new Set(group.map((i) => i.customer_id));
+    return shares.every((sh) => Date.parse(sh.created_at) <= billedAt)
+      && payers.size === cardPayers.size && [...payers].every((c) => cardPayers.has(c));
+  };
   const saleInvoices = invoices.map((inv) => ({
     id: inv.id,
     number: inv.invoice_number,
     payerName: payerName(inv.customer_id),
-    sharePct: showSharePct && inv.invoice_group_id ? cardSharePct(inv.customer_id) : undefined,
+    sharePct: showSharePct && inv.invoice_group_id && billedAtCard(inv.invoice_group_id) ? cardSharePct(inv.customer_id) : undefined,
     status: inv.status,
-    total: inv.total_amount_cents / 100,
-    balance: inv.balance_cents / 100,
-    paid: ((inv.paid_amount_cents || 0) + (inv.prepay_applied_cents || 0)) / 100,
+    totalCents: inv.total_amount_cents,
+    balanceCents: inv.balance_cents,
+    paidCents: (inv.paid_amount_cents || 0) + (inv.prepay_applied_cents || 0),
     typeLabel: inv.invoice_type && inv.invoice_type !== 'chemical_sale'
       ? inv.invoice_type.charAt(0).toUpperCase() + inv.invoice_type.slice(1).replace(/_/g, ' ')
       : undefined,
@@ -1413,7 +1430,8 @@ export default function OrderDetail() {
   const draftCount = owingInvoices.filter((inv) => inv.status === 'draft' || inv.status === 'unposted').length;
   const invCount = owingInvoices.length;
   const balanceNote = invCount === 0 ? undefined : `${invCount} invoice${invCount === 1 ? '' : 's'}, ${
-    draftCount === 0 ? (invCount === 1 ? 'posted' : 'all posted')
+    draftCount === 0 ? (invCount === 1 ? statusLabel(owingInvoices[0].status).toLowerCase()
+      : owingInvoices.every((inv) => inv.status === 'paid') ? 'all paid' : 'all posted')
       : draftCount === invCount ? (invCount === 1 ? 'a draft' : invCount === 2 ? 'both drafts' : 'all drafts')
         : `${draftCount} draft${draftCount === 1 ? '' : 's'}`}`;
   const canSetSalesTax = (isAdmin || (role === 'sales_rep' && order.salesman_id === profile?.id))
@@ -1425,9 +1443,10 @@ export default function OrderDetail() {
     `Ordered ${new Date(order.order_date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`,
     salesmanName && `Sales: ${salesmanName}`,
   ].filter(Boolean).join(' · ');
-  // Delivered share of the products, by dollar value.
-  const orderedValue = items.reduce((sum, i) => sum + i.total_units_needed * i.price_per_unit, 0);
-  const deliveredValue = items.reduce((sum, i) => sum + Math.min(i.quantity_delivered, i.total_units_needed) * i.price_per_unit, 0);
+  // Delivered share of the products, by value in whole cents.
+  const lineCents = (units: number, price: number) => Math.round(units * price * 100);
+  const orderedValue = items.reduce((sum, i) => sum + lineCents(i.total_units_needed, i.price_per_unit), 0);
+  const deliveredValue = items.reduce((sum, i) => sum + lineCents(Math.min(i.quantity_delivered, i.total_units_needed), i.price_per_unit), 0);
   // "All delivered" only when every line is; a rounded percent caps at 99 while anything remains.
   const allDelivered = items.every((i) => i.quantity_delivered >= i.total_units_needed);
   const deliveredPct = orderedValue > 0 ? (allDelivered ? 100 : Math.min(99, Math.round((deliveredValue / orderedValue) * 100))) : null;
@@ -1549,7 +1568,7 @@ export default function OrderDetail() {
                   fulfilled allocated order whose split group was later VOIDED (flag already cleared,
                   hasActiveInvoice now false) can be RE-billed here — Codex R2 P2. The
                   needs_split_billing flag remains as the Orders-list queue badge/filter. */}
-              {hasAllocations && order.status === 'fulfilled' && !hasActiveInvoice && !hasPendingDelivery && (<span className="inline-flex items-center">
+              {splitInvoicesReady && (<span className="inline-flex items-center">
                 <Button
                   variant="secondary"
                   className="min-h-11 md:min-h-0"
@@ -1709,28 +1728,29 @@ export default function OrderDetail() {
             canPost={canPostInvoices}
             onPostAll={handlePostAllDrafts}
             posting={postingAll}
-            emptyText={isAdmin ? undefined : 'No invoices you can view on this sale.'}
+            emptyText={splitInvoicesReady ? 'No invoices yet. This sale is split by field, so bill it with Create split invoices.'
+              : isAdmin ? undefined : 'No invoices you can view on this sale.'}
           />
 
           {/* Who pays (the Bill Split card) */}
           {(shares.length > 0 || lineShares.length > 0 || canEditSplit) && (
             <WhoPaysCard
+              // Keyed by sale, as the invoices card is: a Remove dialog opened on one sale must not delete on the next.
+              // Its own key: siblings with the same key would be mixed up.
+              key={`who-pays-${order.id}`}
+              mainCustomerId={order.customer_id}
               mainCustomerName={customer?.farm_name || 'The main customer'}
-              // Live, not the amount saved when the share was added: it follows price edits and line splits.
-              // A share held by the main customer folds into the main row in cardLive, so it is worked out from its percent.
-              shares={shares.map((sh) => ({
-                id: sh.id,
-                customerName: sh.customer_name,
-                pct: sh.split_percentage,
-                amount: sh.customer_id === order.customer_id ? undefined : (cardLive.get(sh.customer_id) ?? 0) / 100,
-              }))}
-              productsTotal={[...cardLive.values()].reduce((a, c) => a + c, 0) / 100}
+              shares={shares.map((sh) => ({ id: sh.id, customerId: sh.customer_id, customerName: sh.customer_name, pct: sh.split_percentage }))}
+              // Live, not the amount saved when the share was added: it follows price edits and line splits, and the
+              // preview of a new payer is billed line by line the same way.
+              liveCents={(card) => cardLiveCents(items, linesWithOwnSplit, card, order.customer_id)}
               lock={splitLockNote}
               fieldSplitBills={hasAllocations}
               canEdit={canEditSplit}
               saving={savingShares}
               onAdd={handleAddShare}
               onRemove={(shareId) => void handleRemoveShare(shareId)}
+              clearPick={() => { setNewShareCustomerId(''); setNewShareCustomerName(''); }}
               picked={newShareCustomerId ? { id: newShareCustomerId, name: newShareCustomerName } : null}
               someLinesOwnSplit={linesWithOwnSplit.size > 0}
               customerPicker={
@@ -1773,7 +1793,8 @@ export default function OrderDetail() {
                   to the sale's draft invoices; posted ones keep their tax. */}
               <Switch
                 label="Charge sales tax"
-                description={`${salesTaxRate ? `${salesTaxRate}%, set` : 'Set'} in Settings › Billing. Posted invoices keep the tax they had.`}
+                // Settings is admin-only, so only an admin is pointed there.
+                description={`${isAdmin ? `${salesTaxRate ? `${salesTaxRate}%, set` : 'Set'} in Settings › Billing.` : salesTaxRate ? `${salesTaxRate}%.` : ''} Posted invoices keep the tax they had.`.trim()}
                 isSelected={!!order.sales_tax}
                 isDisabled={savingSalesTax || !canSetSalesTax}
                 onChange={() => void handleToggleSalesTax()}

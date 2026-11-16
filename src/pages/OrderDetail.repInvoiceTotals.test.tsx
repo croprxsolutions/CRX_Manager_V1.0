@@ -217,4 +217,14 @@ describe('OrderDetail sales tax box (billing plan M4a)', () => {
     renderWith('sales_rep', []);
     expect(await screen.findByRole('switch', { name: /Charge sales tax/ })).toBeDisabled();
   });
+
+  // Settings is admin-only, so only an admin is pointed there.
+  it.each([
+    ['admin', 'Set in Settings › Billing. Posted invoices keep the tax they had.'],
+    ['sales_rep', 'Posted invoices keep the tax they had.'],
+  ])('the %s reads: %s', async (role, text) => {
+    renderWith(role, []);
+    await screen.findByRole('switch', { name: /Charge sales tax/ });
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
 });

@@ -5,7 +5,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import Modal from '../ui/Modal';
 import Badge from '../ui/Badge';
-import { formatUSD as fmt } from '../../lib/money';
+import { formatCents } from '../../lib/money';
 import { formatSharePct, invoiceStatusBadge } from '../../lib/statusLabel';
 
 export type SaleInvoice = {
@@ -14,12 +14,12 @@ export type SaleInvoice = {
   payerName: string;
   sharePct?: number;
   status: string;
-  total: number;
-  balance: number;
+  totalCents: number;
+  balanceCents: number;
   /** Shown when the invoice is not a plain sale, e.g. "Credit memo". */
   typeLabel?: string;
   /** Paid so far, prepay included. */
-  paid?: number;
+  paidCents?: number;
 };
 
 interface Props {
@@ -34,8 +34,8 @@ interface Props {
 const isDraft = (s: string) => s === 'draft' || s === 'unposted';
 /** The sale's billed total in whole cents: voided and cancelled invoices bill nothing. */
 // eslint-disable-next-line react-refresh/only-export-components
-export const activeTotalCents = (invoices: { status: string; total: number }[]) =>
-  invoices.filter((i) => i.status !== 'voided' && i.status !== 'cancelled').reduce((sum, i) => sum + Math.round(i.total * 100), 0);
+export const activeTotalCents = (invoices: { status: string; totalCents: number }[]) =>
+  invoices.filter((i) => i.status !== 'voided' && i.status !== 'cancelled').reduce((sum, i) => sum + i.totalCents, 0);
 
 /** The sale's invoices, one row per invoice and payer, with a checked "post the drafts" action. */
 export default function SaleInvoicesCard({
@@ -76,10 +76,11 @@ export default function SaleInvoicesCard({
                       )}
                     </span>
                     <span className="flex flex-none flex-col items-end gap-1">
-                      <strong className="tabular-nums text-nav-dark">{fmt(inv.total)}</strong>
-                      {(inv.paid ?? 0) > 0 && <span className="text-xs tabular-nums text-crx-green">Paid {fmt(inv.paid!)}</span>}
-                      {!isDraft(inv.status) && inv.balance !== inv.total && (
-                        <span className={`text-xs tabular-nums ${inv.balance > 0 ? 'text-red-600' : 'text-crx-green'}`}>{fmt(inv.balance)} due</span>
+                      <strong className="tabular-nums text-nav-dark">{formatCents(inv.totalCents)}</strong>
+                      {(inv.paidCents ?? 0) > 0 && <span className="text-xs tabular-nums text-crx-green">Paid {formatCents(inv.paidCents!)}</span>}
+                      {/* Once posted: anything still owed, the whole total included, or what moved since it was billed. */}
+                      {!isDraft(inv.status) && (inv.balanceCents > 0 || inv.balanceCents !== inv.totalCents) && (
+                        <span className={`text-xs tabular-nums ${inv.balanceCents > 0 ? 'text-red-600' : 'text-crx-green'}`}>{formatCents(inv.balanceCents)} due</span>
                       )}
                       <Badge variant={invoiceStatusBadge(inv.status).variant} normalCase>{invoiceStatusBadge(inv.status).label}</Badge>
                     </span>
@@ -91,7 +92,7 @@ export default function SaleInvoicesCard({
             {invoices.length > 1 && (
               <div className="mx-5 flex justify-between border-t border-gray-100 py-4 font-semibold text-nav-dark">
                 <span>Total</span>
-                <span className="tabular-nums">{fmt(activeTotalCents(invoices) / 100)}</span>
+                <span className="tabular-nums">{formatCents(activeTotalCents(invoices))}</span>
               </div>
             )}
           </>
@@ -118,7 +119,7 @@ export default function SaleInvoicesCard({
             <li key={d.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
               <span className="font-medium text-nav-dark">{d.number}</span>
               <span className="min-w-0 flex-1 break-words text-secondary">{d.payerName}</span>
-              <span className="tabular-nums font-medium text-nav-dark">{fmt(d.total)}</span>
+              <span className="tabular-nums font-medium text-nav-dark">{formatCents(d.totalCents)}</span>
             </li>
           ))}
         </ul>

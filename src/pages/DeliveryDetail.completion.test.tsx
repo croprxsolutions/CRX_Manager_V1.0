@@ -423,6 +423,38 @@ describe('Invoices on this sale card', () => {
     expect(within(dialog).getByRole('button', { name: 'Create invoice' })).toBeInTheDocument();
   });
 
+  // Review MED 1: an invoice linked by delivery_id on a delivery with no order was never found.
+  it('finds an invoice linked by delivery_id on a delivery with no order (no false "No invoice yet")', async () => {
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', order_id: null }];
+    tables.data.invoices = [INVOICE_ROWS[0]];
+    await renderPage();
+    expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveAttribute('href', '/invoices/inv-1');
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create invoice…' })).not.toBeInTheDocument();
+    expect(mockFrom).toHaveBeenCalledWith('invoices');
+  });
+
+  // Review MED 2: until the invoice reads return, neither the empty text nor Create invoice shows.
+  it('shows neither "No invoice yet" nor Create invoice… while the invoice read is still pending', async () => {
+    useCompletedDeliveryOnOrder([]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table) as { then: (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => unknown };
+      if (table !== 'invoices') return chain;
+      const realThen = chain.then;
+      chain.then = (ok, bad) => gate.then(() => realThen(ok, bad));
+      return chain;
+    });
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('invoices'));
+    expect(screen.queryByText(emptyText)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create invoice…' })).not.toBeInTheDocument();
+    release();
+    await screen.findByText(emptyText);
+    expect(screen.getByRole('button', { name: 'Create invoice…' })).toBeInTheDocument();
+  });
+
   // Attack LOW-3: drivers cannot read invoices (RLS) and FieldStop tells them billing is not their job.
   it('a driver on a completed delivery sees no Invoices on this sale card, even with invoices on the sale', async () => {
     setRole('driver');

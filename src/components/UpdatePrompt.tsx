@@ -12,15 +12,6 @@ import { useEffect, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { RefreshCw } from 'lucide-react';
 
-// "Later" hides the notice for this browser session only; storage can be blocked (private mode).
-const LATER_KEY = 'crx-update-later';
-function laterChosen(): boolean {
-  try { return sessionStorage.getItem(LATER_KEY) !== null; } catch { return false; }
-}
-function rememberLater() {
-  try { sessionStorage.setItem(LATER_KEY, '1'); } catch { /* hidden until the page reloads */ }
-}
-
 export default function UpdatePrompt() {
   const [visible, setVisible] = useState(false);
 
@@ -36,14 +27,15 @@ export default function UpdatePrompt() {
     },
   });
 
+  // "Later" lives in component state only: a reload brings the notice back, so a waiting worker is never forgotten.
   useEffect(() => {
-    if (needRefresh && !laterChosen()) setVisible(true);
+    if (needRefresh) setVisible(true);
   }, [needRefresh]);
 
   if (!visible) return null;
 
   // Below md it sits above the bottom nav, and above a page's fixed action bar when there is one
-  // (the bar publishes --page-bar-h, see usePageBarHeight), so it never covers Post and the like.
+  // (the bar publishes --page-bar-h, see publishPageBarHeight), so it never covers Post and the like.
 
   return (
     <div
@@ -58,7 +50,7 @@ export default function UpdatePrompt() {
       </span>
       <button
         type="button"
-        onClick={() => { rememberLater(); setVisible(false); }}
+        onClick={() => setVisible(false)}
         className="min-h-11 shrink-0 rounded-lg px-3 text-[13px] font-medium text-white hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/60 md:min-h-9"
       >
         Later

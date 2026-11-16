@@ -47,7 +47,7 @@ import { formatCentsMinus } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
-import { activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
+import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
 import { ProductOptionDetails, productOptionLabel, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { addDeliveryEditItem, removeDeliveryEditItem, type AvailableDeliveryEditItem, type DeliveryEditItem } from '../lib/deliveryEditItems';
@@ -275,6 +275,8 @@ export default function DeliveryDetail() {
 
   // Related invoices (cross-link via shared order)
   const [relatedInvoices, setRelatedInvoices] = useState<RelatedInvoice[]>([]);
+  // False until this delivery's invoice reads return: the card says Loading, never "No invoice yet".
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
 
   // H5: true when the server's ORDER_NEEDS_SPLIT_BILLING guard would refuse a
   // single backfilled invoice for this delivery's order. Defaults to false and
@@ -299,6 +301,7 @@ export default function DeliveryDetail() {
     setRemainders([]);
     setParentOrder(null);
     setRelatedInvoices([]);
+    setInvoicesLoaded(false);
     setSiblingDeliveries([]);
     setParentQuote(null);
   }, [id]);
@@ -327,8 +330,10 @@ export default function DeliveryDetail() {
   // A delivery recorded without proof is signed with the fixed office text, never a customer's name.
   const completionSignedBy = completionEvidence === 'no_proof' ? NO_PROOF_SIGNER : signedBy;
   // Mirrors the server's per-delivery coverage guard (U2 #34).
+  // An invoice linked by delivery_id also covers it (a delivery with no order has no order_id to match).
   const hasActiveRelatedInvoice = delivery != null && relatedInvoices.some((invoice) =>
     activeInvoiceCoversDelivery(invoice, delivery.id, delivery.order_id)
+    || (invoice.delivery_id === delivery.id && activeInvoiceCountsTowardBilling(invoice))
   );
   // RPC is admin-only (finding #78's backfill twin); sales_reps bill jobs, not stray deliveries.
   // H5: also mirror the server's ORDER_NEEDS_SPLIT_BILLING refusal via the shared
@@ -416,6 +421,20 @@ export default function DeliveryDetail() {
         setDriver(driverRes.data as Profile | null);
         if (photoSeq === photoSeqRef.current) setPhotos((photosRes.data || []) as DeliveryPhoto[]);
 
+        // Invoices linked straight to this delivery (a delivery with no order, or an invoice whose
+        // order differs). Same read-only query style and RLS as the order read below; merged by id.
+        const byDeliveryRes = await supabase
+          .from('invoices')
+          .select(RELATED_INVOICE_COLUMNS)
+          .eq('delivery_id', del.id)
+          .is('deleted_at', null);
+        if (isStale()) return;
+        if (byDeliveryRes.error || !byDeliveryRes.data) {
+          Sentry.captureException(byDeliveryRes.error ?? new Error('delivery invoices read returned no list'), { extra: { context: 'load_delivery_invoices_by_delivery', deliveryId: del.id } });
+          failLoad('Failed to load this delivery\'s invoices');
+          return;
+        }
+
         // Fetch order item context for items display
         if (del.order_id) {
           // H5: does the server's split-billing guard cover this order? Read via
@@ -435,7 +454,7 @@ export default function DeliveryDetail() {
               .maybeSingle(),
             supabase
               .from('invoices')
-              .select('id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)')
+              .select(RELATED_INVOICE_COLUMNS)
               .eq('order_id', del.order_id)
               .is('deleted_at', null)
               .order('invoice_date', { ascending: false }),
@@ -495,7 +514,8 @@ export default function DeliveryDetail() {
             setOrderItemContext(ctx);
           }
           setParentOrder(orderRes.data as { id: string; order_number: string } | null);
-          setRelatedInvoices(invRes.data.map(toRelatedInvoice));
+          setRelatedInvoices(mergeRelatedInvoices(invRes.data, byDeliveryRes.data));
+          setInvoicesLoaded(true);
 
           // Fetch sibling deliveries for transaction thread
           const { data: sibDels } = await supabase
@@ -526,7 +546,8 @@ export default function DeliveryDetail() {
           setOrderNeedsSplitBilling(false);
           setBilledOutsideCrxReason(null);
           setParentOrder(null);
-          setRelatedInvoices([]);
+          setRelatedInvoices(mergeRelatedInvoices([], byDeliveryRes.data));
+          setInvoicesLoaded(true);
           setSiblingDeliveries([]);
           setParentQuote(null);
         }
@@ -2536,7 +2557,8 @@ export default function DeliveryDetail() {
         <DeliveryInvoicesCard
           invoices={relatedInvoices}
           deliveryId={delivery.id}
-          unbilled={delivery.status === 'completed' && !hasActiveRelatedInvoice ? {
+          loading={!invoicesLoaded}
+          unbilled={delivery.status === 'completed' && invoicesLoaded && !hasActiveRelatedInvoice ? {
             isAdmin,
             billedOutsideCrxReason,
             createInvoice: canCreateInvoice ? 'offer' : splitBillingBlocksInvoice ? 'split' : null,
@@ -3151,6 +3173,18 @@ interface RelatedInvoice {
   bill_to: string | null;
 }
 
+const RELATED_INVOICE_COLUMNS = 'id, invoice_number, invoice_date, status, total_amount_cents, order_id, delivery_id, invoice_type, deleted_at, customer:customers!invoices_customer_id_fkey(farm_name)';
+
+/** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
+function mergeRelatedInvoices(byOrder: Record<string, unknown>[], byDelivery: Record<string, unknown>[]): RelatedInvoice[] {
+  const byId = new Map<string, RelatedInvoice>();
+  for (const row of [...byOrder, ...byDelivery]) {
+    const inv = toRelatedInvoice(row);
+    if (!byId.has(inv.id)) byId.set(inv.id, inv);
+  }
+  return [...byId.values()].sort((a, b) => b.invoice_date.localeCompare(a.invoice_date));
+}
+
 /** One row of the related-invoices read, with the invoice's customer as "Bill to". */
 function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
   return {
@@ -3172,9 +3206,10 @@ function toRelatedInvoice(inv: Record<string, unknown>): RelatedInvoice {
  * delivery's own invoices carry a "This delivery" tag. Once completed it never disappears: with
  * nothing billing this delivery it says so (see UnbilledNote).
  */
-function DeliveryInvoicesCard({ invoices, deliveryId, unbilled }: {
+function DeliveryInvoicesCard({ invoices, deliveryId, loading, unbilled }: {
   invoices: RelatedInvoice[];
   deliveryId: string;
+  loading: boolean;
   unbilled: UnbilledNoteProps | null;
 }) {
   return (
@@ -3190,6 +3225,7 @@ function DeliveryInvoicesCard({ invoices, deliveryId, unbilled }: {
             </ul>
           </>
         )}
+        {loading && <p role="status" className="text-sm text-secondary">Loading invoices…</p>}
         {unbilled && <div className={invoices.length > 0 ? 'mt-3' : ''}><UnbilledNote {...unbilled} /></div>}
       </div>
     </SectionCard>

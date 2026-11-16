@@ -18,7 +18,9 @@
 --        refunds exactly the tax billed, in one credit or many; a void puts its cents and tax back in the pool for a
 --        future return; every month adds up. A deferred trigger freezes at commit; leaving posted clears at once (a
 --        re-post freezes afresh); existing posted credits are frozen once here, in posting order.
---      - Anything else: 0.
+--      - Anything else: 0. A credit memo typed by hand (not from a return) has no link to what it refunds, so its
+--        full amount reduces revenue, as today (Taha 2026-11-16; Mason asked on #1868 whether office credits ever
+--        include tax; if so, a follow-up gives hand credits their own tax line).
 --   2. get_monthly_summary (Month-End Close): invoices.total_amount_cents is now revenue without sales tax,
 --      so "Recognized Invoices" and "Gross Margin" (total - cost) leave tax out. Same keys, no screen code change;
 --      that figure no longer equals the invoice list's sum on taxed months (the difference is the tax).

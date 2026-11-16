@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for the quote pricing work (pricing plan slices 1, 2 and 5; To-Do 1.2, 1.3, 0.5).
+ * HISTORICAL CANDIDATE-ERA PROOF ONLY for quote pricing (pricing plan slices 1, 2 and 5; To-Do 1.2, 1.3, 0.5).
  *
  * Builds the checked-in 2026-07-27 production schema baseline in a network-disabled Supabase
- * PostgreSQL 17 container, replays every ordered post-baseline migration up to the candidate
+ * PostgreSQL 17 container, replays only the ordered prefix before the candidate
  * 20261027040000_quote_sent_price_lock (the same skips as the other real-schema provers), seeds an
  * admin, two sales reps, a driver, a product with a cost and a sent quote, then runs each rolled-back
  * chain as ONE statement (a chain passes only when it ends in its own SMOKE_PASS_ROLLBACK error):
@@ -11,19 +11,21 @@
  *     one order at the sent price and marks the quote accepted in the same call (KI-12); an accepted
  *     save keeps the sent price (the lock); a cost rise above the sent price needs an admin's reason
  *     and is recorded as a below-cost approval.
- *   - smoke-quote-sent-price-lock.sql: the lock itself (To-Do 1.2), every case in its header.
+ *   - fixtures/quote-sent-price-lock-candidate-era.sql: frozen at the candidate-era smoke revision,
+ *     preserving all original sent-price-lock assertions without later rule assumptions.
  * Steps:
  *   1. BEFORE: both chains fail at their first lock step (the accepted save re-prices; V1 records no
- *      line id), and every regression chain below ends with its listed outcome.
+ *      line id), and every regression chain below ends with its listed historical outcome.
  *   2. AUTOCOMMIT: run statement by statement (psql -f, no -1) the candidate stops at its preflight.
  *   3. MUTATIONS: the candidate with one safeguard removed (and its postflight dropped so the chain,
  *      not the postflight, has to notice) is applied inside a transaction that never commits; the
  *      lock chain fails at that safeguard's own step.
  *   4. The candidate applies and prints POSTFLIGHT_OK; a second apply is refused by its preflight.
- *   5. AFTER: both chains pass, and every regression chain ends with that same listed outcome.
+ *   5. AFTER: both candidate chains pass, and every in-scope regression chain ends with its same historical outcome.
  *
  * Run: node scripts/smoke/prove-quote-pricing-real-schema.mjs   (needs Docker)
- * Prints QUOTE_PRICING_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Prints QUOTE_PRICING_HISTORICAL_PROOF_PASS on success; --chemical-sales omits only fixture-marked job cases.
+ * CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -34,11 +36,16 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = `crx-quote-pricing-${process.pid}-${Date.now().toString(36)}`;
+const ARGS = process.argv.slice(2);
+assert.ok(ARGS.length === 0 || (ARGS.length === 1 && ARGS[0] === '--chemical-sales'),
+  `usage: node scripts/smoke/prove-quote-pricing-real-schema.mjs [--chemical-sales]; unknown args: ${ARGS.join(' ')}`);
+const CHEMICAL_SALES = ARGS.includes('--chemical-sales');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
+const HISTORICAL_QUOTE_LOCK = path.join(SMOKE, 'fixtures', 'quote-sent-price-lock-candidate-era.sql');
 const CANDIDATE = path.join(MIGRATIONS, '20261027040000_quote_sent_price_lock.sql');
 const CHAINS = {
   'smoke-convert-sent-quote-in-one-step.sql': 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote',
@@ -54,12 +61,15 @@ const REGRESSION = {
   'smoke-draw-down-quote-intent-binding.sql': 'PASS',
   'smoke-save-quote-drawn-guard.sql': 'PASS',
   'smoke-job_from_quote_activity_feed_fix.sql': 'PASS',
-  'smoke-save-quote-customer-row-version.sql': 'PASS',
-  // Its fixture product has no cost, so the later cost-basis rule refuses its re-convert before
-  // and after the candidate alike (a fixture gap older than this work).
-  'smoke-revert-quote-escape-hatch.sql': 'ERROR:  COST_BASIS_REQUIRED:<uuid>',
+  // This separately authored current-schema smoke depends on 20261105160000, which is after this
+  // candidate. On the historical prefix it must report the absent version gate, unchanged before
+  // and after; the fresh full-replay sales profile owns current-schema verification.
+  'smoke-save-quote-customer-row-version.sql': 'ERROR:  SMOKE_FAIL: save_quote marked a draft sent with no version',
+  // The fixture now uses governed product pricing and is expected to pass on the historical prefix.
+  'smoke-revert-quote-escape-hatch.sql': 'PASS',
   'smoke-quotes-rep-own-name.sql': 'PASS',
 };
+const CHEMICAL_SALES_EXCLUDED_REGRESSION = new Set(['smoke-job_from_quote_activity_feed_fix.sql']);
 // Each safeguard removed in turn, and the lock chain step that must notice.
 const MUTATIONS = [
   ['convert gate', `  ) THEN
@@ -110,6 +120,7 @@ const MUTATIONS = [
     'SMOKE_FAIL: (I) an id-less version with a repeated product converted'],
   ['untrusted version', '  IF v_trusted_at IS NULL THEN', '  IF false THEN', 'SMOKE_FAIL: (J) an untrusted version converted'],
 ];
+const CHEMICAL_SALES_EXCLUDED_MUTATIONS = new Set(['job gate']);
 const USERS = {
   ADMIN: '7c500000-0000-4000-8000-0000000000a1',
   REP: '7c500000-0000-4000-8000-0000000000b1',
@@ -131,6 +142,27 @@ const LEDGER_ONLY = new Set([
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
 ]);
 const QUOTE_TOUCH = /\b(quote|quotes|quote_items|quote_versions)\b/i;
+const SUFFIX_MATCH = /_save_quote_below_cost_impl_20260810|_create_quote_version_owner_impl|_restore_quote_version_owner_impl|_convert_quote_to_order_below_cost_impl_20260810|_draw_down_quote_intent_impl_20260819|create_job_from_quote_section/;
+const EXPECTED_SUFFIX_MATCHES = new Set([
+  '20261027080400_any_rep_converts_booking.sql',
+  '20261029100000_booking_season_end_expiry.sql',
+  '20261029110000_booking_over_draw.sql',
+  '20261029120000_booking_price_override.sql',
+  '20261101100000_quote_price_trail_and_expiry_grant.sql',
+  '20261104130000_any_rep_changes_booked_prices.sql',
+  '20261104190000_job_invoice_lines_keep_job_unit.sql',
+  '20261106110000_draw_quantity_whole_hundredths.sql',
+  '20261114200000_bind_records_replay_receipts_batch4d.sql',
+  '20261120100000_field_invoice_due_date_follows_owner_terms.sql',
+  '20261123110000_bind_ops_replay_receipts_batch4e.sql',
+  '20261204100000_ki18_batch1_chicago_today.sql',
+  '20261204120000_job_lines_keep_epa_number.sql',
+  '20270103140000_dry_product_fluid_ounce_guard.sql',
+]);
+const JOB_CASE_START = '-- BEGIN CHEMICAL-SALES-EXCLUDED: JOB SCHEDULING CASES F/G';
+const JOB_CASE_END = '-- END CHEMICAL-SALES-EXCLUDED: JOB SCHEDULING CASES F/G';
+const FULL_SCOPE_RESULT = "SMOKE_PASS_ROLLBACK sent-price lock: A,K keep 7.50; B re-sent at 8.75; C rewound to 7.50; D,E,G,I,J,N,O refused; E rewound with its customer; M drew 7.50; F scheduled its draft price; H paired by product; L follows the catalog";
+const CHEMICAL_SCOPE_RESULT = "SMOKE_PASS_ROLLBACK sent-price lock: A,K keep 7.50; B re-sent at 8.75; C rewound to 7.50; D,E,I,J,N,O refused; E rewound with its customer; M drew 7.50; H paired by product; L follows the catalog; F/G job scheduling excluded";
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -199,11 +231,9 @@ function plan() {
   }
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  // A later file that re-emits one of the candidate's functions would undo it.
-  for (const file of all.slice(at + 1)) {
-    assert.ok(!/_save_quote_below_cost_impl_20260810|_create_quote_version_owner_impl|_restore_quote_version_owner_impl|_convert_quote_to_order_below_cost_impl_20260810|_draw_down_quote_intent_impl_20260819|create_job_from_quote_section/.test(lf(file)),
-      `${path.basename(file)} sorts after the candidate and touches a function it re-emits; re-think this proof`);
-  }
+  const suffixMatches = all.slice(at + 1).filter((file) => SUFFIX_MATCH.test(lf(file))).map((file) => path.basename(file));
+  assert.deepEqual(new Set(suffixMatches), EXPECTED_SUFFIX_MATCHES,
+    `historical suffix match inventory changed; review the suffix intentionally: ${suffixMatches.join(', ')}`);
   return all.slice(0, at);
 }
 function buildContainer() {
@@ -278,10 +308,25 @@ function seed() {
 // never-committed transaction. Returns the first error line psql printed.
 function runChain(file, prefix = '') {
   const name = `chain-${path.basename(file)}`;
-  stageText(name, `${prefix}${lf(path.join(SMOKE, file))}`);
+  const source = file === 'smoke-quote-sent-price-lock.sql' ? HISTORICAL_QUOTE_LOCK : path.join(SMOKE, file);
+  stageText(name, `${prefix}${scopedChain(file, lf(source))}`);
   const r = docker([...psqlArgs(), '-f', `/tmp/${name}`], { allowFailure: true });
   const output = `${r.stdout}\n${r.stderr}`;
   return output.split(/\r?\n/).find((line) => /ERROR:/.test(line)) ?? `NO ERROR (exit ${r.status}):\n${output.trim()}`;
+}
+function chemicalSalesChain(text) {
+  assert.equal(text.split(JOB_CASE_START).length - 1, 1, 'chemical-sales scope requires exactly one job-case start marker');
+  assert.equal(text.split(JOB_CASE_END).length - 1, 1, 'chemical-sales scope requires exactly one job-case end marker');
+  const start = text.indexOf(JOB_CASE_START);
+  const end = text.indexOf(JOB_CASE_END);
+  assert.ok(end > start, 'job-case end marker must follow its start marker');
+  const withoutJobs = text.slice(0, start) + text.slice(end + JOB_CASE_END.length);
+  assert.equal(withoutJobs.split(FULL_SCOPE_RESULT).length - 1, 1,
+    'chemical-sales scope requires exactly one full-scope result description');
+  return withoutJobs.replace(FULL_SCOPE_RESULT, CHEMICAL_SCOPE_RESULT);
+}
+function scopedChain(file, text) {
+  return CHEMICAL_SALES && file === 'smoke-quote-sent-price-lock.sql' ? chemicalSalesChain(text) : text;
 }
 // Comparable outcome of a regression chain: PASS, or its error with ids and random suffixes masked.
 function outcome(line) {
@@ -307,7 +352,8 @@ try {
     assert.ok(line.includes(expected), `BEFORE: ${chain} should fail with "${expected}", got: ${line}`);
     console.log(`[prover] BEFORE ${chain}: fails as expected (${expected})`);
   }
-  for (const [chain, expected] of Object.entries(REGRESSION)) {
+  const regressions = Object.entries(REGRESSION).filter(([chain]) => !CHEMICAL_SALES || !CHEMICAL_SALES_EXCLUDED_REGRESSION.has(chain));
+  for (const [chain, expected] of regressions) {
     const result = outcome(runChain(chain));
     assert.equal(result, expected, `BEFORE: ${chain} should end "${expected}", got "${result}"`);
     console.log(`[prover] BEFORE ${chain}: ${result}`);
@@ -322,7 +368,8 @@ try {
 
   // 3. MUTATIONS: each safeguard removed, inside a transaction that never commits.
   const mutationBase = withoutPostflight(candidate);
-  for (const [label, find, replace, expected] of MUTATIONS) {
+  const mutations = MUTATIONS.filter(([label]) => !CHEMICAL_SALES || !CHEMICAL_SALES_EXCLUDED_MUTATIONS.has(label));
+  for (const [label, find, replace, expected] of mutations) {
     assert.equal(mutationBase.split(find).length - 1, 1, `mutation "${label}": anchor not found exactly once`);
     const mutated = mutationBase.replace(find, () => replace);
     const line = runChain('smoke-quote-sent-price-lock.sql', `BEGIN;\n${mutated}\n`);
@@ -346,12 +393,12 @@ try {
     assert.ok(line.includes('SMOKE_PASS_ROLLBACK'), `AFTER: ${chain} did not pass: ${line}`);
     console.log(`[prover] AFTER ${chain}: ${line.replace(/^.*ERROR:\s*/, '')}`);
   }
-  for (const [chain, expected] of Object.entries(REGRESSION)) {
+  for (const [chain, expected] of regressions) {
     const result = outcome(runChain(chain));
     assert.equal(result, expected, `AFTER: ${chain} changed from "${expected}" to "${result}"`);
     console.log(`[prover] AFTER ${chain}: unchanged (${result})`);
   }
-  console.log('QUOTE_PRICING_PROOF_PASS');
+  console.log(CHEMICAL_SALES ? 'QUOTE_PRICING_CHEMICAL_SALES_PROOF_PASS' : 'QUOTE_PRICING_HISTORICAL_PROOF_PASS');
 } finally {
   if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true });
   else console.log(`[prover] kept container ${NAME}`);

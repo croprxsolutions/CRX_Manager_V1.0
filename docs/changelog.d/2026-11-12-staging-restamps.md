@@ -18,8 +18,9 @@ staging job would have run the SQL a second time under the new name.
   Live never renames.
 - **Drift check:** unchanged. After the rename there is no row without a file.
 
-First use: M4b `20261231110000` and M4a `20261231120000`, already applied on staging, sit below migrations
-already live, so they are restamped above live's newest before the first release.
+First use: M4b `20261231110000`, M4a `20261231120000` and the sales-tax rep fix `20270103190000`, already
+applied on staging, sit below main's newest (`20270109100000`), so they are restamped to `20270109100100`,
+`20270109100200` and `20270109100300` (#1868).
 
 **Tested:** unit tests (27), plus an end-to-end run against a throwaway Postgres 17 (Docker):
 - apply, restamp, apply: the row was renamed and the table created once;
@@ -27,3 +28,25 @@ already live, so they are restamped above live's newest before the first release
 - with `RENAME_RESTAMPS` off: refused loudly; with changed bytes: STOPPED before anything ran, ledger untouched;
 - the stamp check on real git history: a restamp passes; edited bytes, another name, an older stamp or a
   plain delete are refused.
+
+### 2026-11-16 - fixes from Mason's review and Sol's second opinion
+
+- **HIGH (Mason): no restamp exemption into `main`, or for a file already on `main`.** The stamp check treats
+  a delete plus an add as a restamp only on a PR into `staging`, and only when the deleted file isn't on
+  `main` (`migrationChanges`). A live migration's delete is refused as before.
+- **BLOCKER (Sol): a restamped one-shot stays a one-shot.** Restamping a file named in
+  `one-shot-migrations.json` is refused unless the new name is listed too, so live never runs it.
+- **HIGH (Sol): the staging rename comes from git, not ledger likeness alone.** A row is renamed only if git
+  shows its old file deleted from `staging`'s history holding the same bytes (the job now checks out the
+  full history). A fileless row that was never a file in the repo blocks instead of being silently renamed.
+- **Anything unclean blocks:** a new file holding the exact SQL of any ledger row (a copy, or a new slug), and
+  a backward restamp (MED 1 and 2).
+- **Smaller:** the `changed` computation is a pure, tested function (MED 4); deleted files are read at the
+  merge-base and added ones at HEAD (LOW 1); all restamps commit in one transaction (LOW 2); the stop
+  message says how to fix a row holding no SQL (LOW 4); several restamps must keep their order (LOW 6).
+  LOW 5 (newer than `main`'s newest) was already on `staging`. Docs (MED 3) landed with #1838.
+
+**Tested:** unit tests (29); the stamp check on real git history (the three billing restamps into `staging`
+pass, a restamp of main's `20270109100000` is refused); and a throwaway Postgres 17: apply, restamp, apply
+renamed both rows in one transaction with drift 0 and nothing left to run, and a fileless row that was
+never in git plus the same bytes under a newer stamp stopped the run with the ledger untouched.

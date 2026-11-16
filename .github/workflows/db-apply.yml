@@ -80,6 +80,7 @@ jobs:
       - if: steps.on.outputs.yes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # a restamp is renamed only when git shows the old file deleted with the same bytes
           persist-credentials: false
       - if: steps.on.outputs.yes
         run: node .github/scripts/db-apply.mjs apply

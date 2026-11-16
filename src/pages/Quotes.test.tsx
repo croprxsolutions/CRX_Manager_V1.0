@@ -125,6 +125,15 @@ describe('Quotes list', () => {
     expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
   });
 
+  it('select-all after a search selects only the rows the search shows', async () => {
+    H.tables.quotes = [quote(1, 'draft'), quote(2, 'sent'), quote(3, 'revised')];
+    at('/quotes');
+    await screen.findByText('Q-TEST-1');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search by quote number, customer or product' }), { target: { value: 'Q-TEST-2' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all quotes' }));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+  });
+
   it('Clear appears only when a filter is active', async () => {
     H.tables.quotes = [quote(1, 'draft', { is_planned: true }), quote(2, 'sent')];
     at('/quotes');

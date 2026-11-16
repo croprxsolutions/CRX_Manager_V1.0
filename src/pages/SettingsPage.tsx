@@ -545,7 +545,7 @@ export default function SettingsPage() {
     setSavingDefaults(false);
   };
 
-  // The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20261231120000).
+  // The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20270109100200).
   const saveSalesTax = async () => {
     const rate = salesTaxRate.trim();
     if (!/^[0-9]{1,2}(\.[0-9]{1,3})?$/.test(rate)) {

@@ -29,14 +29,26 @@ export default function Tabs({
   // Keeps the active tab inside the tab bar. It moves only the bar sideways: never the page, and
   // not on a re-render that leaves the active tab alone (callers often pass a fresh `tabs` array).
   useEffect(() => {
+    const reveal = () => {
+      const list = tabListRef.current;
+      const tab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (!list || !tab || typeof list.scrollTo !== 'function') return;
+      const pad = 16;
+      const left = tab.offsetLeft;
+      const right = left + tab.offsetWidth;
+      if (left < list.scrollLeft) list.scrollTo({ left: Math.max(0, left - pad), behavior: 'smooth' });
+      else if (right > list.scrollLeft + list.clientWidth) list.scrollTo({ left: right - list.clientWidth + pad, behavior: 'smooth' });
+    };
+    reveal();
+    // The bar can shrink (window resize, rotate, a sidebar opening) while the same tab stays active.
     const list = tabListRef.current;
-    const tab = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    if (!list || !tab || typeof list.scrollTo !== 'function') return;
-    const pad = 16;
-    const left = tab.offsetLeft;
-    const right = left + tab.offsetWidth;
-    if (left < list.scrollLeft) list.scrollTo({ left: Math.max(0, left - pad), behavior: 'smooth' });
-    else if (right > list.scrollLeft + list.clientWidth) list.scrollTo({ left: right - list.clientWidth + pad, behavior: 'smooth' });
+    if (list && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(reveal);
+      observer.observe(list);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', reveal);
+    return () => window.removeEventListener('resize', reveal);
   }, [activeKey]);
 
   const selectTab = (index: number) => {

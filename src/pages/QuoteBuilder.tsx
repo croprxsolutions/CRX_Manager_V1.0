@@ -2191,9 +2191,9 @@ export default function QuoteBuilder() {
     );
   };
 
-  // Decision 4: a line with a product or a quantity asks first; a blank line goes at once.
+  // Decision 4: a line with a product, a quantity or any other entered value asks first; an untouched line goes at once.
   const requestRemoveItem = (sectionKey: string, item: LocalItem) => {
-    if (lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed })) {
+    if (lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed, edited: hasUserEnteredItemValues(item) })) {
       setRemoveLineTarget({ sectionKey, itemKey: item._key });
     } else {
       removeItem(sectionKey, item._key);
@@ -5182,7 +5182,7 @@ export default function QuoteBuilder() {
                 { id: 'note', label: item.notes ? 'Edit note' : 'Add note', onAction: () => setEditingLineNote(item._key) },
                 {
                   id: 'remove',
-                  label: lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed }) ? 'Remove line…' : 'Remove line',
+                  label: lineNeedsRemoveConfirm({ product_id: item.product_id || null, units_needed: item.total_units_needed, edited: hasUserEnteredItemValues(item) }) ? 'Remove line…' : 'Remove line',
                   icon: <Trash2 className="w-4 h-4" />,
                   danger: true,
                   onAction: () => requestRemoveItem(sec._key, item),

@@ -69,7 +69,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   applicator: 'Applicator',
 };
 
-// The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20261231120000).
+// The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20270109100200).
 const SALES_TAX_RATE_PATTERN = /^[0-9]{1,2}(\.[0-9]{1,3})?$/;
 
 const FIELD_CLASS =

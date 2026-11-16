@@ -382,13 +382,18 @@ BEGIN
         v_qa_unit      text;       -- KI-156: unit the grower-share line's cost is per
         v_qa_qty       numeric;    -- KI-156: grower-share applied qty converted into v_qa_unit
         v_prev_op      text;       -- KI-156: below-cost context to restore after the grower-share line
+        v_srv_cost     bigint;     -- KI-156: product current cost (cents per sold unit), read with its unit
       BEGIN
         v_rate := COALESCE((v_chem->>'rate_per_acre')::numeric, 0);
 
         IF (v_chem->>'product_id') IS NOT NULL THEN
-          SELECT p.product_form::text, COALESCE(v_epa, p.epa_registration), COALESCE(v_vendor, p.vendor), p.inventory_unit
-            INTO v_form, v_epa, v_vendor, v_inv_unit
-            FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
+          -- KI-156: read the sold unit and the current cost together, locked, so a grower-share line never pairs a
+          -- quantity in one unit with a cost per another (the below-cost wall locks the same row at the insert).
+          SELECT p.product_form::text, COALESCE(v_epa, p.epa_registration), COALESCE(v_vendor, p.vendor), p.inventory_unit,
+                 round(p.current_cost * 100)::bigint
+            INTO v_form, v_epa, v_vendor, v_inv_unit, v_srv_cost
+            FROM products p WHERE p.id = (v_chem->>'product_id')::uuid
+           FOR SHARE;
         END IF;
 
         FOR v_share_row IN
@@ -407,13 +412,7 @@ BEGIN
           -- KI-156 (Mason, 2026-11-16): a grower-share chemical's cost is ALWAYS the server cost, even for an admin:
           -- the product's current cost per its sold unit, and 0 for a line with no product. A typed cost_cents is
           -- ignored here (billed lines below still take an admin's cost).
-          v_qa_unit_cost := 0;
-          IF (v_chem->>'product_id') IS NOT NULL THEN
-            SELECT COALESCE(round(p.current_cost * 100)::bigint, 0) INTO v_qa_unit_cost
-              FROM products p WHERE p.id = (v_chem->>'product_id')::uuid
-             FOR SHARE;  -- the cost booked is the cost the below-cost wall checks at the insert
-            v_qa_unit_cost := COALESCE(v_qa_unit_cost, 0);
-          END IF;
+          v_qa_unit_cost := CASE WHEN (v_chem->>'product_id') IS NOT NULL THEN COALESCE(v_srv_cost, 0) ELSE 0 END;
           -- KI-156: cost_cents is per the product's SOLD unit (inventory_unit); on a line with no
           -- product it is per the unit the line is entered in (unit_size, which the screen keeps
           -- equal to the rate unit). Convert the applied amount (rate unit) into that unit before
@@ -1036,7 +1035,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '000acd5b48e1babe2c2174cbe6f67951', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'e439630f97142a45928b93820df714d0', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

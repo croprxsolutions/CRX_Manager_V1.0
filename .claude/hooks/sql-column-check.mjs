@@ -88,7 +88,7 @@ function newerMigrations(migrationsDir, highWater) {
   } catch { return []; }
 }
 
-// One newer migration file both names this table (ALTER TABLE or a view of
+// One statement in a newer migration both names this table (ALTER TABLE or a view of
 // that name) and adds/renames to this column, or names the column in that view.
 export function addedSinceRegistry(newerFiles, table, column) {
   const col = `"?${column}"?\\b`;

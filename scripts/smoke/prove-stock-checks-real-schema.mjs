@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for 20270113100000_stock_checks_negative_onorder_chicago.sql (repair step 5, part 1:
- * KI-139, KI-141, KI-162). Builds the checked-in baseline plus every post-baseline migration on this checkout
+ * KI-139, KI-141, KI-162, C-13). Builds the checked-in baseline plus every post-baseline migration on this checkout
  * (the candidate included, so its preflight and postflight ran) in a network-disabled PostgreSQL container
  * (scripts/smoke/undo-paths/harness.mjs), seeds test rows, and calls the PUBLIC wrappers as the signed-in user:
  *   1. reconcile fixes a row at -10 (row and ledger change); a same-key retry returns the first answer; a new
@@ -9,6 +9,8 @@
  *   2. reconcile refuses a row at 0 and a row at +5, and NaN / Infinity, changing nothing;
  *   3. retire deletes a row with nothing on order, and refuses one with 4 on order (row kept);
  *   4. a sales rep is refused by both;
+ *   4b. C-13: a manual increase partly fixes a row below zero (-10 +5 = -5); a decrease ending below zero is
+ *      still refused (-1 on -5, -6 on +5, -11 on +10);
  *   5. while another session holds the on-order recompute lock, retire is refused at once (no wait, no
  *      deadlock) and changes nothing; after that session commits, the same retire succeeds;
  *   5b. while another session holds the row itself (e.g. receiving into it), retire is refused at once too,
@@ -35,7 +37,7 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const P = '7c7a0000-0000-4000-8000-00000013';
 const id = (n) => `${P}${n.toString(16).padStart(4, '0')}`;
 // Products / inventory rows: neg -10, zero 0, pos +5, free (retire ok), onord (4 on order), lock (retire under lock).
-const ROWS = { neg: [1, -10, 0], zero: [2, 0, 0], pos: [3, 5, 0], free: [4, 7, 0], onord: [5, 3, 4], lock: [6, 2, 0], rowlk: [7, 1, 0] };
+const ROWS = { neg: [1, -10, 0], zero: [2, 0, 0], pos: [3, 5, 0], free: [4, 7, 0], onord: [5, 3, 4], lock: [6, 2, 0], rowlk: [7, 1, 0], part: [8, -10, 0], ten: [9, 10, 0] };
 const prod = (k) => id(0xd000 + ROWS[k][0]);
 const inv = (k) => id(0xa000 + ROWS[k][0]);
 const { admin: ADMIN, rep: REP } = USERS;
@@ -61,6 +63,7 @@ SET session_replication_role = origin;` });
 const row = (k) => `(SELECT COALESCE((SELECT quantity_available::text || '/' || quantity_on_order::text FROM public.inventory WHERE id = '${inv(k)}'), 'gone'))`;
 const ledger = (k) => `(SELECT count(*) FROM public.inventory_transactions WHERE product_id = '${prod(k)}')`;
 const reconcile = (k, qty, key) => `public.reconcile_negative_inventory('${inv(k)}', ${qty}, '[SC] counted', '${ADMIN}', '${key}')`;
+const adjust = (k, delta, key) => `public.adjust_inventory('${inv(k)}', ${delta}, '[SC] partial', '${ADMIN}', '${key}')`;
 const retire = (k, key, who = ADMIN) => `public.retire_inventory_item('${inv(k)}', '${who}', '${key}')`;
 const show = (label, got) => { console.log(`[stock-checks] ${label}: ${got}`); return got; };
 
@@ -106,6 +109,21 @@ try {
     ${refuse(`r := ${retire('free', 'sc-rep-2', REP)};`)}
     v := t2 || '|' || t || '|unchanged=' || (${row('neg')} = '-10/0') || (${row('free')} = '7/0');`));
   assert.equal(c4, 'ok|Admin access required to reconcile inventory|Admin access required to retire an inventory item|unchanged=truetrue');
+
+  // 4b. C-13: an increase partly fixes a row below zero (-10 +5 -> -5); a decrease that ends below zero is still
+  //     refused, from below zero and from above it; a second increase brings it to +1.
+  const c4b = show('adjust toward zero', attempt(ADMIN, `
+    n := ${ledger('part')};
+    ${asUser(`r := ${adjust('part', 5, 'sc-adj-1')};`)} f1 := ${row('part')};
+    ${refuse(`r2 := ${adjust('part', -1, 'sc-adj-2')};`)} t2 := t;
+    ${refuse(`r2 := ${adjust('pos', -6, 'sc-adj-3')};`)} f2 := t;
+    ${refuse(`r2 := ${adjust('ten', -11, 'sc-adj-5')};`)}
+    ${asUser(`r3 := ${adjust('part', 6, 'sc-adj-4')};`)}
+    v := f1 || '|new=' || (r->>'new_quantity') || '|' || t2 || '|' || f2 || '|' || t || '|then=' || ${row('part')}
+      || '|pos=' || ${row('pos')} || '|ten=' || ${row('ten')} || '|ledger+' || (${ledger('part')} - n);`));
+  const neg = (cur, d, res) => `Adjustment would result in negative inventory \\(current: ${cur}(\\.0+)?, delta: ${d}, result: ${res}(\\.0+)?\\)`;
+  assert.match(c4b, new RegExp(`^ok\\|-5(\\.0+)?/0\\|new=-5(\\.0+)?\\|${neg(-5, -1, -6)}\\|${neg(5, -6, -1)}\\|${neg(10, -11, -1)}`
+    + `\\|then=1(\\.0+)?/0\\|pos=5(\\.0+)?/0\\|ten=10(\\.0+)?/0\\|ledger\\+2$`));
 
   // 5. Another session holds the on-order recompute lock: retire is refused at once and changes nothing; once that
   //    session commits, the same call (a fresh probe) succeeds.

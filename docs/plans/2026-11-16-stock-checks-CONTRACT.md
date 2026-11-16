@@ -1,7 +1,7 @@
 # Stock checks (repair step 5, part 1): behavior contract
 
-Read at `origin/staging` 0f79a2355 and live (read-only) on 2026-11-16. Covers KI-139, KI-141, KI-162. C-13 is a
-business decision (end of file) and is not built here.
+Read at `origin/staging` 0f79a2355 and live (read-only) on 2026-11-16. Covers KI-139, KI-141, KI-162 and C-13
+(Mason decided "toward zero" on 2026-11-16; end of file).
 
 ## 1. Outcome and authority
 
@@ -12,9 +12,11 @@ business decision (end of file) and is not built here.
 - **KI-162.** The Receiving Log's From/To date filter uses the Central (America/Chicago) business day, not UTC:
   `received_at >= From 00:00 Chicago` and `< (To + 1 day) 00:00 Chicago` on the `timestamptz` column (index kept). Today a
   receipt after about 6-7 PM Central files under the next day.
+- **C-13.** A manual adjustment (`adjust_inventory`) accepts any increase, so a row below zero can be partly fixed
+  (+5 on -10 gives -5). A decrease still may not end below zero. Only the one negative-result check changes.
 
 Smallest change: one migration, `20270113100000_stock_checks_negative_onorder_chicago.sql`, that runs
-`CREATE OR REPLACE` on three existing functions with one added check or one changed expression each. There are no
+`CREATE OR REPLACE` on four existing functions with one added check or one changed expression each. There are no
 new tables, columns, grants, flags or screens. Files touched: the migration, its real-schema prover
 `scripts/smoke/prove-stock-checks-real-schema.mjs`, `scripts/db-invariant-sweeps/allowlist.json` (get_receiving_log
 re-key), a ledger record, and `docs/manual/KNOWN_ISSUES.md`.
@@ -71,9 +73,10 @@ bodies plus unchanged owner, ACL, config, security mode, return type, volatility
 | `_reconcile_negative_inventory_replay_impl_20261015(uuid,numeric,text,uuid,text)` | `f74d57e251dba616fa18376f6c65955a` |
 | `_retire_inventory_item_replay_impl_20261015(uuid,uuid,text)` | `e3a007fd59454bcc53c879c391ae6c3c` |
 | `get_receiving_log(integer,integer,text,text,uuid,date,date)` | `e9ca68d79929a513433eb6359a44268c` |
+| `adjust_inventory(uuid,numeric,text,uuid,text)` | `22f1f7d0bd190ce74efb5ad3a8379677` |
 
-Recovery: re-emit the three prior bodies (from this file's preflight sources: `20261016140000` and
-`20261113110000`) in a new migration.
+Recovery: re-emit the four prior bodies (from this file's preflight sources: `20261016140000`,
+`20261113110000` and `20260911120000`) in a new migration.
 
 ## 4. Proof cases
 
@@ -91,6 +94,8 @@ public wrappers.
 7b. When retire runs while another session holds the row itself, it is refused at once with the try-again message
    and nothing changes; afterwards the same call succeeds.
 8. When reconcile is sent `NaN` or `Infinity`, it is refused.
+8b. (C-13) When an admin adjusts a row at -10 by +5, it becomes -5 with one ledger row; -1 on -5, -6 on +5 and -11 on +10
+   are refused; +6 on -5 gives +1.
 9. When a receipt is saved at 2026-11-02 01:30 UTC (Nov 1, 7:30 PM Central), filtering From/To = Nov 1 includes it
    and Nov 2 excludes it.
 10. A second apply is refused by the preflight. Owner and grants are unchanged (postflight).
@@ -125,11 +130,13 @@ was the plan's one targeted re-check; Luna and Sol still review the lock design 
 
 ## Open business decisions
 
-**C-13 (not built here).** `adjust_inventory` refuses any result below zero, so a row at -10 cannot be partly fixed
-with +5; it must jump to 0 or above.
+**C-13: decided (a), built here.** Mason, 2026-11-16: "Yes, toward zero". `adjust_inventory` refused any result below
+zero, so a row at -10 could not be partly fixed with +5; it had to jump to 0 or above.
 - Options:
   - (a) Allow an adjustment that moves a negative row toward zero without going further negative (+5 on -10
     gives -5).
   - (b) Keep it as it is.
 - Consequence: (a) lets staff record a real partial delivery against a shortage; (b) forces a guessed jump to 0.
-- **Recommendation: (a).** Waiting on Mason.
+- **Recommendation: (a).** Chosen. The rule as built: refuse only when the result is below zero AND the change is a
+  decrease. The screens already only warn (never block) on a below-zero result, so no screen change. A same-key
+  retry still replays first, and the role, actor and receipt checks are untouched.

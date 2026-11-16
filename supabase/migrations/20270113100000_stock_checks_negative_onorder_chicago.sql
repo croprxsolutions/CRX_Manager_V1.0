@@ -1,4 +1,4 @@
--- Repair step 5, part 1 (KI-139, KI-141, KI-162): three stock and receiving checks.
+-- Repair step 5, part 1 (KI-139, KI-141, KI-162, C-13): four stock and receiving checks.
 --
 -- KI-139: "Reconcile negative inventory" could set ANY row to any number of 0 or more with no count behind it.
 --         It now refuses a row whose on-hand is not below zero.
@@ -8,6 +8,8 @@
 --         never waits on a lock (row NOWAIT, advisory try-lock): if either is held it asks to try again.
 -- KI-162: the Receiving Log's From/To filter compared the UTC date (the database runs in UTC), so a receipt
 --         after about 6-7 PM Central filed under the next day. It now compares the America/Chicago date.
+-- C-13:   a manual adjustment could not partly fix stock below zero (+5 on -10 was refused). An increase is
+--         now never refused; a decrease still may not end below zero (Mason, 2026-11-16).
 --
 -- CREATE OR REPLACE keeps each function's OID, owner, grants, SECURITY DEFINER, search_path, arguments and
 -- return type. The public retire/reconcile wrappers (20261016140000) are unchanged: they still bind the
@@ -28,7 +30,8 @@ SELECT p.oid AS fn_oid, p.oid::regprocedure::text AS sig, pg_get_userbyid(p.proo
  WHERE p.oid IN (
    to_regprocedure('public._reconcile_negative_inventory_replay_impl_20261015(uuid,numeric,text,uuid,text)'),
    to_regprocedure('public._retire_inventory_item_replay_impl_20261015(uuid,uuid,text)'),
-   to_regprocedure('public.get_receiving_log(integer,integer,text,text,uuid,date,date)')
+   to_regprocedure('public.get_receiving_log(integer,integer,text,text,uuid,date,date)'),
+   to_regprocedure('public.adjust_inventory(uuid,numeric,text,uuid,text)')
  );
 
 DO $preflight$
@@ -36,11 +39,12 @@ DECLARE
   v_expected constant jsonb := jsonb_build_object(
     '_reconcile_negative_inventory_replay_impl_20261015(uuid,numeric,text,uuid,text)', 'f74d57e251dba616fa18376f6c65955a',
     '_retire_inventory_item_replay_impl_20261015(uuid,uuid,text)', 'e3a007fd59454bcc53c879c391ae6c3c',
-    'get_receiving_log(integer,integer,text,text,uuid,date,date)', 'e9ca68d79929a513433eb6359a44268c');
+    'get_receiving_log(integer,integer,text,text,uuid,date,date)', 'e9ca68d79929a513433eb6359a44268c',
+    'adjust_inventory(uuid,numeric,text,uuid,text)', '22f1f7d0bd190ce74efb5ad3a8379677');
   v_row record;
 BEGIN
-  IF (SELECT count(*) FROM pg_temp.stock_checks_step5_attrs) <> 3 THEN
-    RAISE EXCEPTION 'PREFLIGHT_FAIL: one of the three functions is missing';
+  IF (SELECT count(*) FROM pg_temp.stock_checks_step5_attrs) <> 4 THEN
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: one of the four functions is missing';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_temp.stock_checks_step5_attrs WHERE transaction_id IS DISTINCT FROM pg_current_xact_id()::text) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 or the apply script)';
@@ -297,12 +301,144 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.adjust_inventory(
+  p_inventory_id uuid,
+  p_delta numeric,
+  p_reason text,
+  p_performed_by uuid,
+  p_idempotency_key text DEFAULT NULL::text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $adjust$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_fingerprint text;
+  v_replay jsonb;
+  v_inv record;
+  v_new_qty numeric;
+  v_result jsonb;
+BEGIN
+  -- Who is calling. All of this runs BEFORE any receipt is looked at, so
+  -- holding someone else's key is not enough to read their result.
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'AUTH_REQUIRED: Authentication required';
+  END IF;
+  -- The caller may name itself or nothing.
+  IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must be the signed-in user';
+  END IF;
+  -- NULL-safe and active-only: a missing or deactivated profile is refused.
+  IF NOT EXISTS (
+    SELECT 1
+      FROM public.profiles
+     WHERE id = v_actor
+       AND role = 'admin'
+       AND is_active = true
+  ) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: Only active admins can adjust inventory';
+  END IF;
+
+  -- Every adjustment gets a receipt a retry can find. Blank, whitespace-only
+  -- or non-printable keys are refused before any work.
+  IF p_idempotency_key IS NULL
+     OR p_idempotency_key !~ '[^[:space:]]'
+     OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: adjust_inventory requires p_idempotency_key';
+  END IF;
+
+  -- numeric accepts NaN and +/-Infinity. NaN sorts above every number, so it
+  -- would pass the negative-stock check below and be written into
+  -- quantity_available, which has no CHECK constraint.
+  IF p_delta IS NULL
+     OR p_delta IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric) THEN
+    RAISE EXCEPTION 'INVALID_ADJUSTMENT_QUANTITY: the adjustment must be a finite number';
+  END IF;
+  IF p_delta = 0 THEN
+    RAISE EXCEPTION 'Adjustment quantity cannot be zero';
+  END IF;
+
+  -- Everything that shapes the adjustment. p_performed_by is left out: the
+  -- guard above constrains it to {NULL, actor} and the ledger row is stamped
+  -- from auth.uid(), so it cannot change the outcome. That omission DEPENDS on
+  -- the ACTOR_MISMATCH guard; if it is ever relaxed, p_performed_by must join
+  -- the fingerprint. trim_scale makes 5 and 5.0 the same request.
+  v_fingerprint := encode(extensions.digest(convert_to(jsonb_build_object(
+    'actor_id', v_actor,
+    'inventory_id', p_inventory_id,
+    'delta', trim_scale(p_delta),
+    'reason', p_reason
+  )::text, 'UTF8'), 'sha256'), 'hex');
+
+  -- Takes pg_advisory_xact_lock on the key for the rest of this transaction:
+  -- a racing same-key call waits here, then replays. Replays only a receipt
+  -- bound to THIS actor and THIS request.
+  v_replay := public.check_idempotency_intent(
+    p_idempotency_key, 'adjust_inventory', v_actor, v_fingerprint
+  );
+  IF v_replay IS NOT NULL THEN
+    IF jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+    END IF;
+    RETURN v_replay -> 'result';
+  END IF;
+
+  -- The adjustment itself, unchanged from the live body.
+  SELECT * INTO v_inv FROM public.inventory WHERE id = p_inventory_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Inventory record not found';
+  END IF;
+
+  v_new_qty := v_inv.quantity_available + p_delta;
+
+  -- C-13: an increase is never refused, so stock below zero can be partly corrected (+5 on -10 gives -5).
+  -- A decrease still may not end below zero.
+  IF v_new_qty < 0 AND p_delta < 0 THEN
+    RAISE EXCEPTION 'Adjustment would result in negative inventory (current: %, delta: %, result: %)',
+      v_inv.quantity_available, p_delta, v_new_qty;
+  END IF;
+
+  UPDATE public.inventory SET
+    quantity_available = v_new_qty,
+    updated_at = now()
+  WHERE id = p_inventory_id;
+
+  INSERT INTO public.inventory_transactions (
+    product_id, transaction_type, quantity,
+    to_location, performed_by, notes
+  ) VALUES (
+    v_inv.product_id, 'adjusted', p_delta,
+    v_inv.location, v_actor,
+    COALESCE(NULLIF(TRIM(p_reason), ''), 'Manual adjustment of ' || p_delta || ' units')
+  );
+
+  v_result := jsonb_build_object(
+    'status', 'adjusted',
+    'new_quantity', v_new_qty,
+    'product_id', v_inv.product_id
+  );
+
+  -- The receipt, bound to the actor and the request. No row can exist for this
+  -- key here: check_idempotency_intent returned NULL under the advisory lock.
+  INSERT INTO public.idempotency_keys (
+    idempotency_key, operation, result, request_actor_id, request_fingerprint
+  ) VALUES (
+    p_idempotency_key, 'adjust_inventory', v_result, v_actor, v_fingerprint
+  );
+
+  RETURN v_result;
+END;
+$adjust$;
+
 DO $postflight$
 DECLARE
   v_expected constant jsonb := jsonb_build_object(
     '_reconcile_negative_inventory_replay_impl_20261015(uuid,numeric,text,uuid,text)', 'fb4c3b85be436807323414ca682efd2f',
     '_retire_inventory_item_replay_impl_20261015(uuid,uuid,text)', 'fc41034894f87724c8060e4d92eb4a6a',
-    'get_receiving_log(integer,integer,text,text,uuid,date,date)', '2bed0e8df93e81ddbee37a3afe56e9b2');
+    'get_receiving_log(integer,integer,text,text,uuid,date,date)', '2bed0e8df93e81ddbee37a3afe56e9b2',
+    'adjust_inventory(uuid,numeric,text,uuid,text)', 'f004ee94ab89552797fb34d3f581248d');
   v_fn record;
   v_seen integer := 0;
 BEGIN
@@ -330,9 +466,9 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_FAIL: % is not the expected body/attributes (md5 %)', v_fn.sig, v_fn.body_md5;
     END IF;
   END LOOP;
-  IF v_seen <> 3 THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: expected 3 functions, saw %', v_seen;
+  IF v_seen <> 4 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: expected 4 functions, saw %', v_seen;
   END IF;
-  RAISE NOTICE 'POSTFLIGHT_OK: reconcile refuses rows not below zero, retire refuses open on-order, Receiving Log uses the Chicago date';
+  RAISE NOTICE 'POSTFLIGHT_OK: reconcile refuses rows not below zero, retire refuses open on-order, Receiving Log uses the Chicago date, an increase can partly fix stock below zero';
 END;
 $postflight$;

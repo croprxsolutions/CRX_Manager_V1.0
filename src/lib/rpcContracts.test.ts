@@ -3286,6 +3286,9 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _epa_registration_event: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_insert: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
   _epa_registration_update: 'internal REG-1 helper (20261231200000): called only by the keyed registration writers after their own replay check; every API-role EXECUTE is revoked',
+  // 20270109100400 (#1868 sales tax not revenue, local candidate): private helper and trigger function. Prune once applied.
+  _freeze_credit_sales_tax_20270109: 'internal #1868 helper (20270109100400): called only by its deferred trigger and the one-time backfill; writes one row per posted return credit (skips one already frozen) or clears it when the credit leaves posted; every API-role EXECUTE is revoked',
+  trg_freeze_credit_sales_tax_20270109: '#1868 trigger function (20270109100400): deferred constraint trigger on invoices for credit memos, calls _freeze_credit_sales_tax_20270109 at commit; never an RPC, every API-role EXECUTE is revoked',
   // 20270106110000 (Brand PR B part B-1b, local candidate): private helpers. Prune once applied and the types carry them.
   _delivery_brand_event_recopy: 'B-1b trigger function (20270106110000): deferred constraint trigger on delivery_brand_events, re-copies brand snapshots onto open draft invoices when the writing transaction commits; runs only as a trigger, every API-role EXECUTE is revoked',
   _invoice_brand_recopy: 'internal B-1b helper (20270106110000): called only by the recopy trigger and the one-time backfill; rewrites only the derived brand snapshot on open drafts; every API-role EXECUTE is revoked',

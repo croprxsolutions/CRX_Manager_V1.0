@@ -14,7 +14,7 @@
  *   P1  a second open count at one warehouse is refused; another warehouse may open its own.
  *   P2  a stock row already on an open count is refused on another count, twice on one count, twice in one statement
  *       and as a move; an unrelated line edit saves.
- *   P3  two concurrent claims on one stock row from two open counts: exactly one commits.
+ *   P3  wrong-warehouse and wrong-product rows refused; two concurrent claims on one stock row: exactly one commits.
  *   P4  completing a count still works and stock still matches history.
  *   P5  a completed or cancelled count cannot be reopened, nor a cancelled one marked completed; a new count may start.
  *   P6  reversing a completed count still works; the reversed count cannot be re-completed and reversed twice.
@@ -421,17 +421,22 @@ async function main() {
   assert.equal(scalar(`SELECT notes FROM public.cycle_count_items WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`), 'shelf 3', 'P2: an unrelated edit (owner) saves');
   console.log('[case] P2 a stock row already on an open count is refused on another count, twice on one count, twice in one statement, and as a move (trigger, as owner); a move onto another count and a repeatable-read claim are refused; a signed-in admin cannot move a line directly; an unrelated owner edit of the line saves');
 
-  // P3: two concurrent claims on one row (North's p2 row, on no open item yet) from two open counts: exactly one wins.
+  // P3: two concurrent claims on one row (North's p2 row, on no open item yet) on the North count: exactly one wins.
+  // A stock row from another warehouse, or for another product, is refused.
   raw(`INSERT INTO public.warehouses (name, is_active) SELECT 'South Barn', true WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'South Barn');`);
   assert.equal(asAdmin(`INSERT INTO public.cycle_counts (count_number, warehouse, status) VALUES (public.next_cycle_count_number(), 'South Barn', 'in_progress');`, { commit: true }), '');
   const ccS = openCount('South Barn');
-  const { a, b } = await concurrentClaims(ccN, ccS, inv(PRODUCTS.p2, NORTH), PRODUCTS.p2);
+  refused('P3 another warehouse', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${ccS}', '${PRODUCTS.r1}', '${inv(PRODUCTS.r1, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_WRONG_PLACE');
+  refused('P3 another product', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${ccN}', '${PRODUCTS.p1}', '${inv(PRODUCTS.r1, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_WRONG_PLACE');
+  const { a, b } = await concurrentClaims(ccN, ccN, inv(PRODUCTS.p2, NORTH), PRODUCTS.p2);
   assert.equal([a.code, b.code].filter((c) => c === 0).length, 1, `P3: exactly one claim commits\nA: ${a.out}\nB: ${b.out}`);
   assert.match(a.code === 0 ? b.out : a.out, /CYCLE_COUNT_ROW_ALREADY_OPEN/);
   assert.equal(scalar(`SELECT count(*) FROM public.cycle_count_items i JOIN public.cycle_counts c ON c.id = i.cycle_count_id
     WHERE i.inventory_id = '${inv(PRODUCTS.p2, NORTH)}' AND c.status = 'in_progress';`), '1');
   cancel(ccS);
-  console.log('[case] P3 two concurrent claims on one stock row from two open counts: exactly one commits, the other is refused');
+  console.log('[case] P3 a stock row from another warehouse or for another product is refused; two concurrent claims on one stock row: exactly one commits, the other is refused');
 
   // P4: completing still works and moves stock once; the sweep still matches. A line's variance is only set by the RPC.
   refused('P4 admin inserts a counted line with a variance', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, is_counted)

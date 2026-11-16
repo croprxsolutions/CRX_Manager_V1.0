@@ -9,7 +9,8 @@
 -- WHAT:
 --   1. One in-progress count per warehouse (partial unique index).
 --   2. A stock row may sit on only one item of any in-progress count (trigger on cycle_count_items, serialized by a
---      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one).
+--      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one), and only on a
+--      line for its own product at the count's warehouse (Complete adjusts that row).
 --   3. A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (trigger on
 --      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen.
 --   4. Signed-in users lose direct UPDATE on cycle_counts and cycle_count_items (table and every column). The app
@@ -83,6 +84,12 @@ BEGIN
   IF FOUND THEN
     RAISE EXCEPTION 'CYCLE_COUNT_ROW_ALREADY_OPEN: This stock row is already on open count %; finish or cancel that count first.',
       COALESCE(v_other, '(no number)') USING ERRCODE = 'check_violation';
+  END IF;
+  -- Complete adjusts the line's stock row, so it must be this line's product at this count's warehouse.
+  IF NOT EXISTS (SELECT 1 FROM public.inventory i JOIN public.cycle_counts c ON c.id = NEW.cycle_count_id
+                  WHERE i.id = NEW.inventory_id AND i.product_id = NEW.product_id AND i.location = c.warehouse) THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_ROW_WRONG_PLACE: This stock row is not this product at this count''s warehouse.'
+      USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;

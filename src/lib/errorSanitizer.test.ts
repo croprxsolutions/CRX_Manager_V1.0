@@ -68,6 +68,7 @@ describe('sanitizeError', () => {
   // The RAISE texts and index of 20270111120000_one_open_count_per_stock_row.sql (KI-160).
   it.each([
     ['CYCLE_COUNT_ROW_ALREADY_OPEN', 'This stock row is already on open count CC-0018; finish or cancel that count first.'],
+    ['CYCLE_COUNT_ROW_WRONG_PLACE', "This stock row is not this product at this count's warehouse."],
     ['CYCLE_COUNT_REOPEN_FORBIDDEN', 'Count CC-0017 is cancelled and cannot become in_progress; a count only moves forward. Start a new count instead.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);

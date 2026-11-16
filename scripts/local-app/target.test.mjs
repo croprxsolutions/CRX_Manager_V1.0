@@ -10,6 +10,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, Refused,
+  IS_SALES_GAUNTLET, PROJECT,
   assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings,
   denyInsideCheckout,
 } from './target.mjs';
@@ -48,6 +49,43 @@ const goodState = () => ({
   LOCAL_SERVICE_KEY: localKey('service_role'),
   LOCAL_TEST_EMAIL: 'admin@crx-local-app.test',
   LOCAL_TEST_PASSWORD: '0123456789abcdef01234567',
+  ...(IS_SALES_GAUNTLET ? {
+    LOCAL_REP_EMAIL: 'rep@crx-sales-gauntlet.test', LOCAL_REP_PASSWORD: '0123456789abcdef01234567',
+    LOCAL_OTHER_REP_EMAIL: 'other-rep@crx-sales-gauntlet.test', LOCAL_OTHER_REP_PASSWORD: 'abcdef0123456789abcdef01',
+  } : {}),
+});
+
+describe('isolated sales profile', () => {
+  it('selects only the fixed task ports, issuer and private state folder', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import * as target from ${JSON.stringify(new URL('./target.mjs', import.meta.url).href)};
+      console.log(JSON.stringify([target.PROJECT, target.APP_PORT, target.API_PORT, target.DB_PORT, target.ISSUER, target.STATE_FOLDER]));
+    `], { encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'sales-gauntlet' } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), ['crx-sales-gauntlet', 5209, 54821, 54822, 'crx-sales-gauntlet', '.state/sales-gauntlet']);
+  });
+  it('refuses a state file from the other profile', () => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import { readFileSync } from 'node:fs';
+      import { assertLocalState, Refused } from ${JSON.stringify(new URL('./target.mjs', import.meta.url).href)};
+      assert.throws(() => assertLocalState(JSON.parse(readFileSync(0, 'utf8'))), Refused);
+    `], { encoding: 'utf8', input: JSON.stringify(goodState()), env: { ...process.env, CRX_LOCAL_APP_PROFILE: IS_SALES_GAUNTLET ? '' : 'sales-gauntlet' } });
+    assert.equal(result.status, 0, result.stderr);
+  });
+  it('refuses unknown profiles before a command runs', () => {
+    const result = spawnSync(process.execPath, [APP, 'rebuild'], { encoding: 'utf8', env: { ...process.env, CRX_LOCAL_APP_PROFILE: 'typo' } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unknown local test profile/);
+  });
+  it('refuses an unsupported profile flag before a command runs', () => {
+    const result = spawnSync(process.execPath, [APP, 'rebuild', '--profile', 'sales-gauntlet'], { encoding: 'utf8' });
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /Unsupported test-app arguments/);
+  });
+  it('reserves every port in both profiles', () => {
+    for (const port of [5199, 54721, 54722, 5209, 54821, 54822]) assert.throws(() => assertExtraAppPort(String(port)), Refused);
+  });
 });
 
 function viteModule(env) {
@@ -223,11 +261,13 @@ describe('every command refuses before it changes anything', () => {
       assert.equal(result.status, 0, 'These tests need Docker running.');
       return result.stdout;
     };
-    const ids = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project=crx-local-app']).trim();
-    const label = ['--filter', 'label=com.docker.compose.project=crx-local-app', '--format', '{{.Name}}'];
-    const others = ['volume', 'network'].map((kind) => docker([kind, 'ls', ...label])).join();
-    if (!ids) return others;
-    return others + docker(['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)]);
+    return [...new Set(['crx-local-app', PROJECT])].map((project) => {
+      const filter = `label=com.docker.compose.project=${project}`;
+      const ids = docker(['ps', '-aq', '--filter', filter]).trim();
+      const label = ['--filter', filter, '--format', '{{.Name}}'];
+      const others = ['volume', 'network'].map((kind) => docker([kind, 'ls', ...label])).join();
+      return others + (ids ? docker(['inspect', '-f', '{{.Id}} {{.State.Status}} {{.State.StartedAt}}', ...ids.split(/\s+/)]) : '');
+    }).join();
   };
 
   function refused(command, { state = goodState(), env = {} }) {

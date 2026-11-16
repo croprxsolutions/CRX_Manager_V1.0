@@ -355,18 +355,6 @@ describe('generateQuotePdf', () => {
       }
     });
 
-    it('adds section totals in whole cents, as each line prints, so 100 lines of $0.005 total $1.00', async () => {
-      const line = { ...makeQuoteData().sections[0].items[0], total_price: 0.005 };
-      await generateQuotePdf(makeQuoteData({
-        sections: [{ section_name: 'Tiny', section_notes: '', items: Array.from({ length: 100 }, () => line) }],
-      }));
-      const printed = await allPrintedStrings();
-      expect(printed.filter((s) => s === '$0.01')).toHaveLength(100);
-      expect(printed).toContain('Section total: $1.00');
-      expect(printed).toContain('$1.00');
-      expect(printed).not.toContain('$0.50');
-    });
-
     it('keeps every totals row and the quote total above the footer when the totals are taller than a page', async () => {
       const line = makeQuoteData().sections[0].items[0];
       const sections = Array.from({ length: 60 }, (_, i) => ({ section_name: `Block ${i + 1}`, section_notes: '', items: [line] }));

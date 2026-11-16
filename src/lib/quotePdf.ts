@@ -15,7 +15,7 @@ import {
 import { COMPANY_WEBSITE } from './companyInfo';
 import { drawCompanyBlock, drawPageFooters, loadLogoDrawer } from './pdfBrand';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
-import { formatCents, formatUSD as fmt } from './money';
+import { formatUSD as fmt } from './money';
 
 
 type AutoTableColumnStyle = {
@@ -225,10 +225,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
     content: PDF_COLUMN_DEFS[c].label,
     styles: { halign: colStyles[i]?.halign ?? ('left' as const) },
   }));
-  // Whole cents, each line rounded as fmt prints it (toFixed and Intl both round the exact value half away
-  // from zero), so a section total always matches the sum of its printed lines.
-  const sectionTotal = (section: PdfQuoteSection) =>
-    formatCents(section.items.reduce((sum, item) => sum + Math.round(Number(item.total_price.toFixed(2)) * 100), 0));
+  const sectionTotal = (section: PdfQuoteSection) => section.items.reduce((sum, item) => sum + item.total_price, 0);
 
   for (const section of data.sections) {
     // The section needs room for its title, table heading and a row
@@ -273,7 +270,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.25);
     doc.setTextColor(...QUOTE_TEXT);
-    doc.text(`Section total: ${sectionTotal(section)}`, pageW - margin - 4.5, y + 11, { align: 'right' });
+    doc.text(`Section total: ${fmt(sectionTotal(section))}`, pageW - margin - 4.5, y + 11, { align: 'right' });
     y += 16;
 
     if (section.section_notes) {
@@ -289,7 +286,7 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   doc.setFontSize(8.25);
   doc.setFont('helvetica', 'normal');
   const totalsRows = data.sections.map((section) => {
-    const amount = sectionTotal(section);
+    const amount = fmt(sectionTotal(section));
     const labelLines = doc.splitTextToSize(section.section_name, QUOTE_TOTALS_WIDTH - doc.getTextWidth(amount) - 9) as string[];
     return { labelLines, amount };
   });

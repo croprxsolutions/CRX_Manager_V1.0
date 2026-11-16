@@ -81,6 +81,21 @@ describe('PriceInput', () => {
     expect(box).not.toHaveClass('border-gray-200');
   });
 
+  it('drops a half-typed price when the box is reused for another line (rows are keyed by position)', () => {
+    const onProblem = vi.fn();
+    const props = { onCents: vi.fn(), onProblem };
+    const { rerender } = render(<PriceInput {...props} cents={3333} label="Unit price for Herbicide" />);
+    const box = screen.getByRole('textbox');
+    fireEvent.change(box, { target: { value: '12.345' } });
+    expect(box).toHaveValue('12.345');
+    rerender(<PriceInput {...props} cents={2500} label="Unit price for Fungicide" />);
+    expect(screen.getByRole('textbox')).toHaveValue('25.00');
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-invalid');
+    expect(onProblem).toHaveBeenLastCalledWith(expect.any(String), null);
+    rerender(<PriceInput {...props} cents={3333} label="Unit price for Herbicide" />);
+    expect(screen.getByRole('textbox')).toHaveValue('33.33');
+  });
+
   it('tells the page the problem is gone when the box goes away', () => {
     const onProblem = vi.fn();
     const { unmount } = render(<Harness start={1000} onProblem={onProblem} />);

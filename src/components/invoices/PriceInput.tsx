@@ -18,7 +18,12 @@ export default function PriceInput({ cents, label, onCents, onProblem, className
   testProps?: Record<string, string | number>;
 }) {
   const id = useId();
-  const [text, setText] = useState<string | null>(null);
+  // The typed text, tied to the line it was typed for (its price and label then). Rows are keyed by position, so after
+  // a row is removed or another invoice opens this box can show a different line: then the old text is dropped.
+  const [draft, setDraft] = useState<{ text: string; cents: number; label: string } | null>(null);
+  const stale = draft !== null && (draft.cents !== cents || draft.label !== label);
+  if (stale) setDraft(null);
+  const text = stale ? null : draft?.text ?? null;
   const problem = text === null ? null : priceProblem(text);
 
   useEffect(() => {
@@ -38,10 +43,12 @@ export default function PriceInput({ cents, label, onCents, onProblem, className
         value={text ?? (cents / 100).toFixed(2)}
         onChange={(e) => {
           const next = e.target.value;
-          setText(next);
-          if (!priceProblem(next)) onCents(parseDollarsToCentsSigned(next.trim()) ?? 0);
+          // A usable amount goes to the line at once; a bad one leaves the line at its last good price.
+          const nextCents = priceProblem(next) ? cents : parseDollarsToCentsSigned(next.trim()) ?? 0;
+          setDraft({ text: next, cents: nextCents, label });
+          if (nextCents !== cents) onCents(nextCents);
         }}
-        onBlur={() => { if (!problem) setText(null); }}
+        onBlur={() => { if (!problem) setDraft(null); }}
         // Swap the border colour instead of stacking a second one: CSS order, not class order, would pick the winner.
         className={`${problem ? className.replace('border-gray-200', 'border-red-500').replace('focus:ring-crx-green/20 focus:border-crx-green', 'focus:ring-red-500/20 focus:border-red-500') : className} text-right tabular-nums`}
       />

@@ -18,7 +18,7 @@ const base: BelowCostApprovalDetail = {
 
 function renderWith(detail: BelowCostApprovalDetail) {
   render(<BelowCostApprovalModal open detail={detail} onCancel={vi.fn()} onConfirm={vi.fn()} />);
-  return screen.getByRole('dialog', { name: 'Approve below-cost price' });
+  return screen.getByRole('dialog', { name: 'Approve a below-cost price?' });
 }
 
 describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', () => {
@@ -80,5 +80,14 @@ describe('BelowCostApprovalModal — blend-ticket $0 lines (20261021070000)', ()
       'Atrazine 4L — cost $5.00 per unit (quoted at $0 on one share, included in a grower-share per-acre price on another)',
       'Roundup — cost $7.00 per unit (included in a grower-share per-acre price)',
     ]);
+  });
+
+  it('has a green go-ahead that needs a reason, and a Go back button', () => {
+    const dialog = renderWith({ ...base, zero_line_product_names: ['Atrazine 4L'] });
+    const approve = within(dialog).getByRole('button', { name: 'Approve and Retry' });
+    expect(approve).toBeDisabled();
+    expect(approve.className).toContain('bg-crx-green');
+    expect(approve.className).not.toMatch(/bg-red-/);
+    expect(within(dialog).getByRole('button', { name: 'Go back' })).toBeEnabled();
   });
 });

@@ -74,7 +74,8 @@ writeFileSync(registryPath, JSON.stringify({ _meta: { generated_at: "2026-11-12"
 writeFileSync(path.join(migDir, "20261101000000_old.sql"), "alter table products add column default_rate_unit text;");
 writeFileSync(path.join(migDir, "20261113000000_new.sql"), "alter table order_items add column quantity numeric;\n-- mentions price_per_acre in passing\nupdate products set rate_unit = 'oz';");
 // Adds the column to a DIFFERENT table: must not excuse products.unit_cost.
-writeFileSync(path.join(migDir, "20261114000000_other.sql"), "alter table orders add column unit_cost bigint;");
+writeFileSync(path.join(migDir, "20261114000000_other.sql"),
+  "alter table products add column sku_extra text;\nalter table orders add column unit_cost bigint;");
 
 function run(query, toolName = "mcp__supabase__execute_sql") {
   const r = spawnSync(process.execPath, [path.join(hooksDir, "sql-column-check.mjs")], {

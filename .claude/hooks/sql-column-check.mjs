@@ -96,8 +96,8 @@ export function addedSinceRegistry(newerFiles, table, column) {
   const alters = new RegExp(`\\balter\\s+table\\s+(?:if\\s+exists\\s+)?(?:only\\s+)?${tbl}`);
   const adds = new RegExp(`\\badd\\s+(?:column\\s+)?(?:if\\s+not\\s+exists\\s+)?${col}|\\brename\\s+column\\s+\\S+\\s+to\\s+${col}`);
   const view = new RegExp(`\\bview\\s+(?:if\\s+not\\s+exists\\s+)?${tbl}`);
-  return newerFiles.some((sql) => (alters.test(sql) && adds.test(sql)) ||
-    (view.test(sql) && new RegExp(`\\b${column}\\b`).test(sql)));
+  return newerFiles.some((file) => file.split(";").some((stmt) => (alters.test(stmt) && adds.test(stmt)) ||
+    (view.test(stmt) && new RegExp(`\\b${column}\\b`).test(stmt))));
 }
 
 function main() {

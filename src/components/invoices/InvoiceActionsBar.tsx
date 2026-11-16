@@ -2,6 +2,7 @@ import { useId, useSyncExternalStore, type ComponentProps, type ReactNode } from
 import { Check, DollarSign, Mail, Printer, Receipt, RotateCcw, Send, X } from 'lucide-react';
 import Button from '../ui/Button';
 import ActionMenu, { type ActionMenuItem } from '../ui/ActionMenu';
+import { publishPageBarHeight } from '../../lib/pageBar';
 
 export interface InvoiceAction {
   onClick: () => void;
@@ -99,7 +100,7 @@ export default function InvoiceActionsBar(props: Props) {
 
   if (!main && !print && !email && more.length === 0) return null;
   return (
-    <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap gap-2 border-t border-gray-200 bg-white/95 p-3 backdrop-blur md:static md:z-auto md:shrink-0 md:justify-end md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+    <div ref={publishPageBarHeight} className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap gap-2 border-t border-gray-200 bg-white/95 p-3 backdrop-blur md:static md:z-auto md:shrink-0 md:justify-end md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
       {save && btn(save, 'Save changes', <Check className="h-4 w-4" />, main === 'save' ? { variant: 'primary', className: primary } : {})}
       {print && btn(print, 'Print…', <Printer className="h-4 w-4" />)}
       {email && !isPhone && btn(email, 'Email', <Mail className="h-4 w-4" />)}

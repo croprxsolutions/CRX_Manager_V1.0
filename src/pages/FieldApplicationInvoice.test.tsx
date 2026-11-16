@@ -212,10 +212,10 @@ describe('FieldApplicationInvoice — unsaved navigation', () => {
 
     await renderPage();
 
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(screen.getByRole('alertdialog', { name: 'Leave without saving?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(mockBlockerReset).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(mockBlockerProceed).toHaveBeenCalledOnce();
   });
 });
@@ -850,14 +850,14 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(await screen.findByText('North 80')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('Printed at top of invoice'), { target: { value: 'OLD INVOICE NOTES' } });
     fireEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
-    expect(await screen.findByRole('dialog', { name: 'Delete Invoice' })).toBeInTheDocument();
+    expect(await screen.findByRole('alertdialog', { name: 'Delete Invoice' })).toBeInTheDocument();
 
     mockUseParams.mockReturnValue({ id: undefined });
     await act(async () => page.rerender(<FieldApplicationInvoiceRoute />));
     expect(screen.getByText('New Field Application Invoice')).toBeInTheDocument();
     expect(screen.queryByText('North 80')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Printed at top of invoice')).toHaveValue('');
-    expect(screen.queryByRole('dialog', { name: 'Delete Invoice' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog', { name: 'Delete Invoice' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Post$/i })).not.toBeInTheDocument();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
     expect(mockRpc).toHaveBeenCalledWith('save_field_app_invoice', expect.objectContaining({
@@ -996,8 +996,8 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     mockUseUnsavedChanges.mockReturnValue({ state: 'blocked', reset: mockBlockerReset, proceed: mockBlockerProceed });
     await renderPage();
     expect(screen.getByRole('status')).toHaveTextContent('Loading invoice');
-    expect(screen.getByRole('alertdialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Stay/i }));
+    expect(screen.getByRole('alertdialog', { name: 'Leave without saving?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(mockBlockerReset).toHaveBeenCalled();
   });
 

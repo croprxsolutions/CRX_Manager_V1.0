@@ -53,13 +53,13 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
     }
 
     // Find column indices by header keywords
-    // Quote columns: #, Product, Price/Unit, Cost, Sug.Rate, ActualRate, Unit, Acres, Oz/Acre, $/Acre, UnitsNeeded, Total, Profit, Margin, (delete)
+    // Quote columns: #, Product, Rate, Acres, Quantity, Price, $/acre, Total, Cost · margin (admin), (actions)
     const colProduct = headerTexts.findIndex((h) => h.includes('product'));
-    const colPriceUnit = headerTexts.findIndex((h) => h.includes('price') && h.includes('unit'));
-    const colUnitsNeeded = headerTexts.findIndex((h) => h.includes('units') && h.includes('need'));
-    const colTotal = headerTexts.findIndex((h) => h === 'total' || h.includes('total') && !h.includes('units'));
-    const colProfit = headerTexts.findIndex((h) => h.includes('profit'));
-    const colMargin = headerTexts.findIndex((h) => h.includes('margin'));
+    const colPriceUnit = headerTexts.findIndex((h) => h === 'price');
+    const colUnitsNeeded = headerTexts.findIndex((h) => h === 'quantity');
+    const colTotal = headerTexts.findIndex((h) => h === 'total');
+    // One admin cell: "$6.00 / today $8.00 · up" then "$8.00 · 40.0%" (profit · margin).
+    const colCostMargin = headerTexts.findIndex((h) => h.includes('margin'));
 
     const bodyRows = table.locator('tbody tr');
     const rowCount = await bodyRows.count();
@@ -73,13 +73,15 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
         ? ((await cells.nth(colProduct).textContent()) ?? '').trim()
         : '';
 
-      const pricePerUnit = colPriceUnit >= 0
-        ? parseDollars((await cells.nth(colPriceUnit).textContent()) ?? '') / 100
-        : 0;
+      // Price and Quantity are <input type="number"> boxes: read their values, not the cell text
+      // (which holds hints such as "Sent at $X").
+      const pricePerUnit = await (async (): Promise<number> => {
+        if (colPriceUnit < 0) return 0;
+        const inputEl = cells.nth(colPriceUnit).locator('input[aria-label="Price per unit"]');
+        if ((await inputEl.count()) === 0) return 0;
+        return parseFloat(await inputEl.inputValue()) || 0;
+      })();
 
-      // "Units Needed" column renders an <input type="number"> element, not plain text.
-      // textContent() on the td returns '' because the value lives in the input DOM attribute.
-      // We must call inputValue() on the input element to get the displayed number.
       const totalUnitsNeeded = await (async (): Promise<number> => {
         if (colUnitsNeeded < 0) return 0;
         const inputEl = cells.nth(colUnitsNeeded).locator('input');
@@ -93,14 +95,15 @@ async function extractQuoteLineItems(page: Page): Promise<QuoteLineItem[]> {
         ? parseDollars((await cells.nth(colTotal).textContent()) ?? '') / 100
         : 0;
 
-      const profit = colProfit >= 0
-        ? parseDollars((await cells.nth(colProfit).textContent()) ?? '') / 100
-        : 0;
-
+      let profit = 0;
       let margin = 0;
-      if (colMargin >= 0) {
-        const marginText = ((await cells.nth(colMargin).textContent()) ?? '').trim();
-        margin = parseFloat(marginText.replace(/[^0-9.-]/g, '')) || 0;
+      if (colCostMargin >= 0) {
+        const costText = ((await cells.nth(colCostMargin).textContent()) ?? '').trim();
+        const profitMargin = costText.match(/(-?\$[\d,]+\.\d{2}) · (-?[\d.]+)%$/);
+        if (profitMargin) {
+          profit = parseDollars(profitMargin[1]) / 100;
+          margin = parseFloat(profitMargin[2]) || 0;
+        }
       }
 
       if (pricePerUnit > 0 || totalPrice > 0) {
@@ -118,45 +121,25 @@ async function getQuoteSummaryTotals(
 ): Promise<{ totalPrice: number; totalCost: number; totalProfit: number; marginPct: number }> {
   const result = { totalPrice: 0, totalCost: 0, totalProfit: 0, marginPct: 0 };
 
-  const labels = [
-    { key: 'totalPrice', text: 'Total Price' },
-    { key: 'totalCost', text: 'Total Cost' },
-    { key: 'totalProfit', text: 'Total Profit' },
-  ];
+  // The quote builder's summary strip: <section aria-label="Summary"> with dt label / dd value pairs.
+  // "Total cost" and "Profit · margin" show only to admins outside Customer view.
+  const summary = page.getByRole('region', { name: 'Summary' });
+  const figure = async (label: string): Promise<string | null> => {
+    const dd = summary.locator(`dt:text-is("${label}") + dd`).first();
+    const visible = await dd.isVisible({ timeout: 3000 }).catch(() => false);
+    return visible ? ((await dd.textContent()) ?? '').trim() : null;
+  };
 
-  for (const { key, text } of labels) {
-    const el = page.locator(`text=${text}`).first();
-    const visible = await el.isVisible({ timeout: 3000 }).catch(() => false);
-    if (visible) {
-      const parent = el.locator('..');
-      const valEl = parent.locator('.font-mono, .font-medium, .font-semibold').first();
-      const valVisible = await valEl.isVisible({ timeout: 2000 }).catch(() => false);
-      if (valVisible) {
-        const val = parseDollars(await valEl.textContent());
-        (result as Record<string, number>)[key] = val / 100; // dollars
-      }
-    }
-  }
-
-  // Margin
-  // IMPORTANT: 'text=X, text=Y' is NOT valid Playwright syntax — commas are not "or" for text=.
-  // QuoteBuilder uses "Overall Margin" as the label in the totals card.
-  // DO NOT add a plain 'text=Margin' fallback — it matches the "Margin" column header in the
-  // line-items <table> (which appears earlier in DOM order). The <th> parent is a <tr> with no
-  // .font-mono child, causing parent traversal to return nothing and marginPct to stay 0.
-  const marginEl = page
-    .locator('text=Overall Margin')
-    .or(page.locator('text=Avg Margin'))
-    .first();
-  const marginVisible = await marginEl.isVisible({ timeout: 3000 }).catch(() => false);
-  if (marginVisible) {
-    const parent = marginEl.locator('..');
-    const valEl = parent.locator('.font-mono, .font-medium').first();
-    const valVisible = await valEl.isVisible({ timeout: 2000 }).catch(() => false);
-    if (valVisible) {
-      const valText = ((await valEl.textContent()) ?? '').trim();
-      result.marginPct = parseFloat(valText.replace(/[^0-9.-]/g, '')) || 0;
-    }
+  const total = await figure('Quote total');
+  if (total !== null) result.totalPrice = parseDollars(total) / 100; // dollars
+  const cost = await figure('Total cost');
+  if (cost !== null) result.totalCost = parseDollars(cost) / 100;
+  // One cell holds both: "$1,234.56 · 17.7%".
+  const profitMargin = await figure('Profit · margin');
+  if (profitMargin !== null) {
+    const [profitText, marginText = ''] = profitMargin.split('·');
+    result.totalProfit = parseDollars(profitText) / 100;
+    result.marginPct = parseFloat(marginText.replace(/[^0-9.-]/g, '')) || 0;
   }
 
   return result;

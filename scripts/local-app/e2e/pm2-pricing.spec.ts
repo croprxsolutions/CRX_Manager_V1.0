@@ -120,14 +120,14 @@ test('moving between products keeps Stay and Leave honest', async ({ page }) => 
 
   await page.getByLabel('SKU').fill('UNSAVED-SKU');
   await page.goBack();
-  await page.getByRole('button', { name: 'Stay' }).click();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
   await expect(page.getByLabel(/product name/i)).toHaveValue(second);
   await expect(page.getByLabel('SKU')).toHaveValue('UNSAVED-SKU');
 
   await page.goBack();
-  await page.getByRole('button', { name: 'Leave' }).click();
+  await page.getByRole('button', { name: 'Discard changes' }).click();
   await expect(page.getByLabel(/product name/i)).toHaveValue(first);
   await expect(page.getByLabel('SKU')).toHaveValue('');
   await page.goto('/products');
-  await expect(page.getByRole('button', { name: 'Stay' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Keep editing' })).toHaveCount(0);
 });

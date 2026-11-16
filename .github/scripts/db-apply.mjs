@@ -244,10 +244,15 @@ export function migrationChanges({ toStaging, removedOrEdited, deleted, added, b
   const pairs = toStaging
     ? restampPairs({ deleted: deleted.filter((f) => !onMain(f)), added, blob: (f) => (deleted.includes(f) ? baseBlob(f) : headBlob(f)) })
     : [];
+  // ...and a restamp can't make an ordinary migration record-only either, or live would never run it (attack run, #1837).
   const stem = (f) => f.replace(/\.sql$/, '');
-  const problems = pairs
-    .filter(({ from, to }) => (Object.hasOwn(oneShotsBase, stem(from)) || Object.hasOwn(oneShotsHead, stem(from))) && !Object.hasOwn(oneShotsHead, stem(to)))
-    .map(({ from, to }) => `${to}: restamps the one-shot ${stem(from)}; add ${stem(to)} to one-shot-migrations.json in this PR, or live would run it`);
+  const wasShot = (f) => Object.hasOwn(oneShotsBase, stem(f)) || Object.hasOwn(oneShotsHead, stem(f));
+  const problems = pairs.flatMap(({ from, to }) => {
+    const isShot = Object.hasOwn(oneShotsHead, stem(to));
+    if (wasShot(from) && !isShot) return [`${to}: restamps the one-shot ${stem(from)}; add ${stem(to)} to one-shot-migrations.json in this PR, or live would run it`];
+    if (!wasShot(from) && isShot) return [`${to}: restamps the ordinary migration ${stem(from)} into a one-shot; a restamp keeps what the file is, or live would only record it`];
+    return [];
+  });
   const restamped = new Set(pairs.map((p) => p.from));
   return { changed: removedOrEdited.filter((f) => !restamped.has(f)), problems };
 }
@@ -369,11 +374,13 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
     .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
   // Staging only: a restamped file's old name already ran here, so its row is renamed, not run again.
   const postFiles = renameRestamps ? new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))])) : null;
-  // sha256 of a migration file as git last deleted it from HEAD's history, or null (needs full history).
+  // sha256 of a migration file as this branch held it just before it left (needs full history), or null.
+  // Staging's own first-parent line: the PR's merge commit, diffed against staging, so an edit on the PR
+  // branch before the delete, or a restamp made inside a merge, still reads what staging ran (attack run, #1837).
   const deleted = (stem) => {
     const p = `supabase/migrations/${stem}.sql`;
     try {
-      const c = execFileSync('git', ['log', '-1', '--format=%H', '--diff-filter=D', 'HEAD', '--', p], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const c = execFileSync('git', ['log', '-1', '--first-parent', '-m', '--format=%H', '--diff-filter=D', 'HEAD', '--', p], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
       return c ? sha256(execFileSync('git', ['show', `${c}^:${p}`], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] })) : null;
     } catch { return null; }
   };

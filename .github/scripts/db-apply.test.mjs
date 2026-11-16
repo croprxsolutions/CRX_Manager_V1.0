@@ -303,6 +303,7 @@ test('migrationChanges: a restamp is no edit only into staging, for a file not o
   const shot = { ...base, toStaging: true, onMain: () => false, oneShotsBase: { '20261231110000_m4b': 'why' } };
   assert.match(migrationChanges({ ...shot, oneShotsHead: { '20261231110000_m4b': 'why' } }).problems[0], /restamps the one-shot 20261231110000_m4b/);
   assert.deepEqual(migrationChanges({ ...shot, oneShotsHead: { '20261231110000_m4b': 'why', '20270109100100_m4b': 'why' } }).problems, [], 'new name listed too: fine');
+  assert.match(migrationChanges({ ...base, toStaging: true, onMain: () => false, oneShotsHead: { '20270109100100_m4b': 'why' } }).problems[0], /into a one-shot/, 'an ordinary file restamped into a one-shot is refused (attack run)');
 });
 
 test('renameTargetProblem: ledger rows are renamed on staging only (Sol, #1837)', () => {

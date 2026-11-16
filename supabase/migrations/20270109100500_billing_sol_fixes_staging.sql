@@ -183,6 +183,19 @@ ALTER TABLE public.invoice_standing_discount_rates ADD COLUMN drafted_rate_pct n
 COMMENT ON COLUMN public.invoice_standing_discount_rates.drafted_rate_pct IS
   'The rate this draft was drafted at, kept when the office first overrides it (set_invoice_standing_discount), so "the customer''s rate" can put it back. NULL: never overridden, or overridden before this column existed.';
 
+-- Overrides made before this column existed: their drafted rate is the rate the first override replaced, which
+-- set_invoice_standing_discount wrote to financial_audit_log (old_values.rate_pct) (Sol MED). A first override of a
+-- draft with no row logged NULL, and stays NULL (see below).
+UPDATE public.invoice_standing_discount_rates r
+   SET drafted_rate_pct = a.rate_pct
+  FROM (SELECT DISTINCT ON (l.entity_id) l.entity_id, (l.old_values ->> 'rate_pct')::numeric AS rate_pct
+          FROM public.financial_audit_log l
+         WHERE l.entity_type = 'invoice' AND l.operation_type = 'invoice_updated'
+           AND l.description LIKE 'Standing discount rate set to%'
+         ORDER BY l.entity_id, l.created_at, l.id) a
+ WHERE a.entity_id = r.invoice_id AND r.set_by IS NOT NULL AND r.drafted_rate_pct IS NULL
+   AND a.rate_pct IS NOT NULL;
+
 -- 4. (D, E) The two setters, changes marked (D) and (E) ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.set_invoice_standing_discount(p_invoice_id uuid, p_pct numeric, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -242,8 +255,9 @@ BEGIN
     END IF;
   ELSE
     -- (E) the first override keeps the drafted rate it replaces, so "the customer's rate" can bring it back
-    -- (E) a draft with no row yet was drafted at the customer's rate (what the recompute records), so that is the
-    -- drafted rate an override replaces (Luna HIGH)
+    -- (E) a draft with no row yet: the recompute records the customer's rate the first time it runs (at the draft's
+    -- creation), so a draft lacks a row only if one was deleted. Until a row exists its discount follows the
+    -- customer's rate (_standing_discount_expected_20261231), so that rate is the one an override replaces.
     INSERT INTO invoice_standing_discount_rates (invoice_id, rate_pct, set_by, set_at, drafted_rate_pct)
     VALUES (v_inv.id, p_pct, v_actor, now(),
             COALESCE((SELECT c.standing_discount_pct FROM customers c WHERE c.id = v_inv.customer_id), 0))

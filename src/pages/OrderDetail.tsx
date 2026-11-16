@@ -833,7 +833,9 @@ export default function OrderDetail() {
       const result = assertRpcResult<{ drafts_updated?: number; drafts_kept?: string[] }>(data, 'set_order_sales_tax');
       salesTaxIdem.resetKeyFor(scope);
       const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
-      const [kind, message] = salesTaxToast(next, result.drafts_updated ?? 0, result.drafts_kept?.length ?? 0, hasPosted);
+      // name the kept split drafts so the office knows which group to void and redraft
+      const kept = (result.drafts_kept ?? []).map((id) => invoices.find((inv) => inv.id === id)?.invoice_number ?? 'one draft');
+      const [kind, message] = salesTaxToast(next, result.drafts_updated ?? 0, kept, hasPosted);
       toast(kind, message);
       await fetchOrder();
     } catch (err: unknown) {
